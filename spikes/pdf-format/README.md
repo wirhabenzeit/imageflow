@@ -65,6 +65,7 @@ node export.mjs            # HTML test documents → out/*.pdf, out/*.jpg
   4. Bundle static fonts and fail or warn on fallback glyphs and Type 3 fonts.
 - Template authoring constraints follow from this: a transparency budget per print profile, static fonts only, and no reliance on system fonts.
 - The text-flow spike can proceed in the same Chrome setup.
+- [print-format-sketch.md](print-format-sketch.md) sketches how a template could declare the print format so that these steps are driven by data.
 
 ## Not tested
 
