@@ -329,7 +329,7 @@ The platform should:
 1. Map compatible typed boxes and parameter values using explicit declarations where available.
 2. Ask for mapping where roles are ambiguous; matching names alone do not establish meaning.
 3. Retain unused photos, Markdown, metadata, and unmapped state.
-4. Report broken text-flow links, required missing values, and overflow.
+4. Report invalid text-box ordering, unresolved Markdown assignments, required missing values, and overflow.
 5. Validate new geometry and crops without rewriting source content.
 
 Photo and Markdown box types provide basic compatibility. Exact migration rules for template-specific parameters remain open. A calendar period should survive when an explicit compatible mapping exists; arbitrary parameter names cannot guarantee that.
