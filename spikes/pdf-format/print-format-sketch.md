@@ -4,7 +4,7 @@ Status: proposal derived from this spike. It shows how a template could declare 
 
 ## Where the format lives
 
-Decision for v1: the template declares one or more named **formats**, and the project selects one. Everything below is resolved from that selection. A template designed for a square book can list WhiteWall 29 cm and Saal 30 cm side by side, while a template that only makes sense at one size lists one.
+Decision for v1: the template declares exactly **one** format (`format: {…}`); a book for another printer or size uses another template. The examples below show several formats side by side to illustrate the declaration across printers; allowing several per template, with the project selecting one, is a later extension that keeps the same `PrintFormat` shape.
 
 Layout uses trim-relative CSS variables supplied by the platform, so the same spread design adapts to 290 or 294 mm without per-format code.
 
