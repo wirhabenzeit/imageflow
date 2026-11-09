@@ -96,6 +96,8 @@ Pass criteria:
 
 ## Phase 3: rendering decision record
 
+Status: decided in [decisions/0001-rendering.md](decisions/0001-rendering.md): HTML/CSS templates, Chromium export inside Electron, Swift renderer retired. Further v1 decisions are in [v1-decisions.md](v1-decisions.md).
+
 Based on Phases 1 and 2, record:
 
 - What a template outputs: DOM/CSS, or a primitive tree.
