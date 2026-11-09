@@ -1,6 +1,6 @@
 # Template API (v1 draft)
 
-Status: draft for review. Defines what a template declares, what it receives when rendering, which components and CSS the platform provides, and what the platform validates. It implements the decisions in [v1-decisions.md](v1-decisions.md); names and shapes are proposals.
+Status: accepted as the v1 baseline, 2026-11-09. Defines what a template declares, what it receives when rendering, which components and CSS the platform provides, and what the platform validates. It implements the decisions in [v1-decisions.md](v1-decisions.md); names may still change during implementation, and the open points at the end are settled while building.
 
 ## Package
 

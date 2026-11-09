@@ -47,7 +47,7 @@ Choose two or three fonts that templates bundle, with licences permitting PDF em
 
 ## Phase 1: Chromium PDF spike (static content)
 
-Status: format experiments done with synthetic test pages (`spikes/pdf-format`, draft PR #2). Chromium output is viable for all three print targets with profile-driven post-processing: exact page boxes, sRGB conversion and resolution limits, transparency handling per target, and static fonts only (variable fonts and fallback glyphs become Type 3). PR #2 also sketches how a template declares its print formats. Pending: uploads to the printers' checks, real photographs, a printed proof, and Blurb's black-text question.
+Status: format experiments done with synthetic test pages (`spikes/pdf-format`, draft PR #2). Chromium output is viable for all three print targets with profile-driven post-processing: exact page boxes, sRGB conversion and resolution limits, transparency handling per target, and static fonts only (variable fonts and fallback glyphs become Type 3). PR #2 also sketches how a template declares its print formats. A spike PDF passed a print service's upload check (manual test). Pending before the first order: real photographs, a printed proof, and Blurb's black-text question if Blurb is used.
 
 Rebuild the existing demo spreads (photo and story, gallery, panorama, title) as HTML/CSS pages without text flow. Export them through headless Chromium (for example Playwright `page.pdf`) at the exact page size including bleed.
 

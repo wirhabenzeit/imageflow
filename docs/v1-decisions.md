@@ -58,7 +58,8 @@ MyBook/
 - **Template switching:** boxes and parameters with the same identifier and type map automatically; everything else is kept in `project.json` and reported, not migrated.
 - **Deferred:** clicking to select, on-canvas crop, multi-column text boxes, several print formats per template, shared printer-format registry, images and tables in Markdown, mixed photo/text boxes, sandboxed third-party templates.
 
-## Still to do before implementation planning
+## Readiness
 
-- Review [template-api.md](template-api.md) (draft).
-- Upload the spike PDFs to the WhiteWall and Saal upload checks (needs accounts).
+- [template-api.md](template-api.md) is accepted as the v1 baseline.
+- A Chromium-generated spike PDF passed a print service's upload check (manual test, 2026-11-09).
+- Before the first real order: real photographs through the export and a printed proof.
