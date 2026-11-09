@@ -100,7 +100,7 @@ Done when: the spike's property tests pass against the production engine, and ed
 - Export the whole book: render all spreads at full resolution with originals, wait for fonts and images, `printToPDF`.
 - Delivery per format: single pages (render each spread once and present its left and right halves as separate pages with bleed on the outside edge) or spreads.
 - Post-processing: exact page boxes; checks for page count rule, Type 3 or unbundled fonts, transparency against the format's policy, photo resolution, file size. Errors block the export with a list of affected spreads.
-- Raster delivery (`capturePage` at 300 dpi via zoom factor) only if the starter format requires it.
+- Raster delivery (`capturePage` at 300 dpi) and transparency flattening are not needed for the WhiteWall starter format and stay out of v1; export fails with a clear message if a template's format requires them.
 - Progress and cancel for long exports.
 
 Done when: the starter project exports a PDF that passes the format checks, and a real book of about 50 spreads with real photos exports in an acceptable time.
@@ -124,7 +124,7 @@ Done when: the starter project exports a PDF that passes the format checks, and 
 
 | When | Decision | Proposal |
 | --- | --- | --- |
-| M1 | Format of the starter template | WhiteWall Gallery Square 29 × 29 cm on photo paper: PDF delivery, sRGB, transparency allowed, so no raster or flattening path is needed in v1. Saal 30 × 30 cm would add raster delivery. |
+| M1 | Format of the starter template | **Decided:** WhiteWall Gallery Square 29 × 29 cm on photo paper (layflat): PDF delivery, sRGB, transparency allowed, so no raster or flattening path is needed in v1. |
 | M1 | How template bundles access `react` and `imageflow` | Host exposes them as globals that esbuild maps the externals to; no import maps. |
 | M1 | Schema validation for `project.json` and template declarations | A small runtime validator (for example Valibot or Zod) shared by main and renderer. |
 | M2 | `p.*` helpers: plain objects or schema-library backed | Plain objects with TypeScript inference; validation implemented in the platform. |
