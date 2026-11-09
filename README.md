@@ -26,3 +26,18 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173), or the address printed by V
 Each PDF page has an 846 × 846 pt trim area and 9 pt bleed on top, bottom, and outside. The prototype emits a standard Quartz PDF. PDF/X and printer color requirements need separate validation.
 
 Run `npm run build` to type-check, bundle the app, and produce the standalone preview. Run `npm run preview` to serve the built app with the local export endpoint.
+
+## Build the macOS app
+
+On a Mac with Node.js 22.12 or newer and the Xcode Command Line Tools, run:
+
+```sh
+npm ci
+npm run package:mac
+```
+
+Open `out/ImageFlow-darwin-arm64/ImageFlow.app` on Apple Silicon or `out/ImageFlow-darwin-x64/ImageFlow.app` on Intel. The build targets the architecture of the Node.js process and produces an ad-hoc-signed app for local use.
+
+- **File → Import Photos…** (⌘O) or **Import Folder…** (⇧⌘O) adds JPEGs to the filmstrip.
+- **View → Toggle Preview** (⇧⌘P) switches between the preview and editor.
+- **File → Export PDF…** (⇧⌘E) opens a macOS Save dialog and renders the book with the bundled Swift exporter. The installed app runs offline.

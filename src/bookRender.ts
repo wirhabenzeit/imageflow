@@ -1,5 +1,6 @@
 import { imageRect, layouts, photoCrop, textLines, textStyles } from './book';
 import type { Alignment, Assets, Rect, Spread, StyleId } from './book';
+import { isDesktop } from './desktop';
 
 export type PhotoLayer = {
   type: 'photo';
@@ -94,6 +95,7 @@ export async function exportBook(spreads: Spread[], assets: Assets) {
     const result = await response.json().catch(() => null);
     throw new Error(result?.error ?? 'Start the local server to export a PDF.');
   }
+  if (isDesktop()) return response.status !== 204;
 
   const url = URL.createObjectURL(await response.blob());
   const link = document.createElement('a');
@@ -103,4 +105,5 @@ export async function exportBook(spreads: Spread[], assets: Assets) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return true;
 }

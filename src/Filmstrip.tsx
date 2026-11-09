@@ -1,7 +1,6 @@
-import { memo, useRef } from 'react';
-import type { ChangeEvent } from 'react';
+import { memo } from 'react';
 import type { Assets } from './book';
-import { jpegAccept, photoDragType } from './photo';
+import { photoDragType } from './photo';
 
 export type ImportProgress = { finished: number; total: number };
 
@@ -11,7 +10,9 @@ export const Filmstrip = memo(function Filmstrip({
   selected,
   progress,
   canPlace,
-  importFiles,
+  importDisabled,
+  choosePhotos,
+  chooseFolder,
   selectPhoto,
   dragPhoto,
 }: {
@@ -20,20 +21,14 @@ export const Filmstrip = memo(function Filmstrip({
   selected: string | null;
   progress: ImportProgress | null;
   canPlace: boolean;
-  importFiles: (files: File[]) => void;
+  importDisabled: boolean;
+  choosePhotos: () => void;
+  chooseFolder: () => void;
   selectPhoto: (id: string) => void;
   dragPhoto: (id: string | null) => void;
 }) {
-  const filesInput = useRef<HTMLInputElement>(null);
-  const folderInput = useRef<HTMLInputElement>(null);
   const photos = Object.entries(assets);
   const used = photos.filter(([id]) => usage.has(id)).length;
-
-  function pick(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.currentTarget.files ?? []);
-    event.currentTarget.value = '';
-    if (files.length) importFiles(files);
-  }
 
   return (
     <section className="filmstrip" aria-label="Photo filmstrip">
@@ -49,16 +44,8 @@ export const Filmstrip = memo(function Filmstrip({
             'Drag a photo onto a frame, or select a photo and then a frame.'}
         </p>
         <div className="filmstrip-actions">
-          <input ref={filesInput} type="file" accept={jpegAccept} multiple hidden aria-label="Choose photos" onChange={pick} />
-          <input ref={folderInput} type="file" multiple hidden aria-label="Choose a photo folder" onChange={pick} />
-          <button className="button ghost" type="button" disabled={!!progress} onClick={() => filesInput.current?.click()}>Add photos</button>
-          <button className="button ghost" type="button" disabled={!!progress} onClick={() => {
-            const input = folderInput.current;
-            if (input) {
-              input.webkitdirectory = true;
-              input.click();
-            }
-          }}>Import folder</button>
+          <button className="button ghost" type="button" disabled={importDisabled} onClick={choosePhotos}>Add photos</button>
+          <button className="button ghost" type="button" disabled={importDisabled} onClick={chooseFolder}>Import folder</button>
         </div>
       </div>
       <ul className="filmstrip-track">

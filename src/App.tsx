@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { layouts, pageLabel, photoCrop, photoUsage, textStyles } from './book';
 import type { Alignment, Assets, LayoutId, Spread, StyleId } from './book';
 import { exportBook, layoutSpread } from './bookRender';
 import { demoAssets, demoSpreads } from './demo';
+import { desktopCommandEvent, isDesktop } from './desktop';
+import type { DesktopCommand } from './desktop';
 import { Filmstrip } from './Filmstrip';
 import type { ImportProgress } from './Filmstrip';
 import { jpegAccept, preparePhoto } from './photo';
@@ -47,9 +49,12 @@ export function App() {
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState('');
   const uploadInput = useRef<HTMLInputElement>(null);
+  const filesInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
   const urls = useRef(new Set<string>());
   const imported = useRef(new Map<string, string>());
   const importing = useRef(false);
+  const exportingBook = useRef(false);
 
   useEffect(() => {
     const owned = urls.current;
@@ -152,7 +157,7 @@ export function App() {
   }
 
   const importPhotos = useCallback(async (files: File[], target?: { spreadId: string; frameId: string }) => {
-    if (importing.current || !files.length) return;
+    if (importing.current || exportingBook.current || !files.length) return;
     importing.current = true;
     setNotice('');
     setImportProgress({ finished: 0, total: files.length });
@@ -206,32 +211,74 @@ export function App() {
     }
   }, [assignPhoto]);
 
-  const importFiles = useCallback((files: File[]) => { void importPhotos(files); }, [importPhotos]);
   const pickPhoto = useCallback((id: string) => {
     setPickedPhoto((current) => current === id ? null : id);
   }, []);
 
+  const choosePhotos = useCallback(() => {
+    if (!importing.current && !exportingBook.current) filesInput.current?.click();
+  }, []);
+
+  const chooseFolder = useCallback(() => {
+    const input = folderInput.current;
+    if (!input || importing.current || exportingBook.current) return;
+    input.webkitdirectory = true;
+    input.click();
+  }, []);
+
+  function togglePreview() {
+    setPreview((current) => !current);
+  }
+
   async function download() {
+    if (importing.current || exportingBook.current) return;
     setNotice('');
     if (standalone) {
       setNotice('Open the studio through the local server to export a PDF.');
       return;
     }
+    exportingBook.current = true;
     setExporting(true);
     try {
-      await exportBook(spreads, assets);
-      setNotice('Book PDF exported.');
+      if (await exportBook(spreads, assets)) setNotice('Book PDF exported.');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'The book PDF could not be exported.');
     } finally {
+      exportingBook.current = false;
       setExporting(false);
     }
+  }
+
+  const onDesktopCommand = useEffectEvent((command: DesktopCommand) => {
+    switch (command) {
+      case 'import-photos': choosePhotos(); break;
+      case 'import-folder': chooseFolder(); break;
+      case 'preview': togglePreview(); break;
+      case 'export-pdf': void download(); break;
+    }
+  });
+
+  useEffect(() => {
+    if (!isDesktop()) return;
+    const handle = (event: Event) => onDesktopCommand((event as CustomEvent<DesktopCommand>).detail);
+    window.addEventListener(desktopCommandEvent, handle);
+    return () => window.removeEventListener(desktopCommandEvent, handle);
+  }, []);
+
+  function readSelection(input: HTMLInputElement) {
+    const files = Array.from(input.files ?? []);
+    input.value = '';
+    void importPhotos(files);
   }
 
   return (
     <main className={`editor${preview ? ' preview-mode' : ''}`} onKeyDown={(event) => {
       if (event.key === 'Escape') setPickedPhoto(null);
     }}>
+      <input ref={filesInput} type="file" accept={jpegAccept} multiple hidden aria-label="Choose photos"
+        onChange={(event) => readSelection(event.currentTarget)} />
+      <input ref={folderInput} type="file" multiple hidden aria-label="Choose a photo folder"
+        onChange={(event) => readSelection(event.currentTarget)} />
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark"><Icon name="book" /></div>
@@ -242,7 +289,7 @@ export function App() {
         </div>
         <div className="top-actions">
           <span className="draft"><i /> Sample book</span>
-          <button className="button ghost" type="button" aria-pressed={preview} onClick={() => setPreview(!preview)}>{preview ? 'Back to editor' : 'Preview'}</button>
+          <button className="button ghost" type="button" aria-pressed={preview} onClick={togglePreview}>{preview ? 'Back to editor' : 'Preview'}</button>
           <button className="button primary" type="button" onClick={download} disabled={exporting || !!importProgress}>
             <Icon name="arrow" /> {exporting ? 'Exporting…' : 'Export PDF'}
           </button>
@@ -372,7 +419,7 @@ export function App() {
                       event.currentTarget.value = '';
                       if (file) void importPhotos([file], { spreadId: activeId, frameId: frame.id });
                     }} />
-                    <button className="button ghost full" type="button" disabled={!!importProgress} onClick={() => uploadInput.current?.click()}>
+                    <button className="button ghost full" type="button" disabled={exporting || !!importProgress} onClick={() => uploadInput.current?.click()}>
                       {importProgress ? 'Importing…' : asset ? 'Replace photo' : 'Choose JPEG'}
                     </button>
                     {photo && asset && crop && (
@@ -408,7 +455,9 @@ export function App() {
           selected={pickedPhoto}
           progress={importProgress}
           canPlace={canPlacePhoto}
-          importFiles={importFiles}
+          importDisabled={exporting || !!importProgress}
+          choosePhotos={choosePhotos}
+          chooseFolder={chooseFolder}
           selectPhoto={pickPhoto}
           dragPhoto={setDraggedPhoto}
         />
