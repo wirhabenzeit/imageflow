@@ -34,6 +34,7 @@ MyBook/
 - The app bundles `template/` on load (esbuild) and reloads on change.
 - **Trust:** opening a project executes its template code. v1 assumes you only open projects you trust; there is no sandbox for template code beyond the renderer's.
 - Rendering and Markdown CSS are the template's job, within the platform-owned rules in [template-api.md](template-api.md).
+- **Styling:** inline React `style` objects for layout and parameter-driven values, plus one plain CSS file per template for `@font-face`, Markdown typography, and shared rules (native CSS nesting is available). No Tailwind or CSS-in-JS library in v1; because the platform checks styles on the rendered result, another authoring approach can be added later without changing the contract.
 - **One print format per template** (trim, bleed, safe area, delivery unit, output constraints), declared in the template. A book for another printer or size uses another template (typically a copy with a different format). Several formats per template are a possible later extension; the declaration keeps the same shape so that extension only adds to it.
 
 ## Editing

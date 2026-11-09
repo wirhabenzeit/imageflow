@@ -9,7 +9,7 @@ A template is the `template/` folder of a project:
 ```
 template/
   index.tsx        default export: defineTemplate({...})
-  styles.css       imported from index.tsx; includes @font-face rules
+  styles.css       imported from index.tsx: @font-face rules, Markdown typography, shared rules
   fonts/           static font files (WOFF2, TTF, OTF)
   assets/          optional SVG or raster artwork used by the design
   spreads/         optional: one file per spread definition
@@ -164,6 +164,26 @@ Rules:
 - An empty box keeps its area in edit mode so it can receive drops. In export, it renders nothing; templates choose between keeping the space and collapsing it through CSS (`[data-empty]`).
 
 ## CSS contract
+
+### Authoring
+
+Templates style with inline React `style` objects (positions, sizes, and anything driven by parameters) and one plain CSS file (`styles.css`, plus optional imports) for fonts, Markdown typography, and rules shared across spreads. Native CSS nesting may be used. No CSS preprocessor, Tailwind, or CSS-in-JS library is part of the v1 build.
+
+```tsx
+<h1 style={{ position: 'absolute', left: mm(30), top: mm(40), color: params.accent }}>{params.heading}</h1>
+<MarkdownBox id="body" className="editorial" style={{ position: 'absolute', left: '55%', top: mm(30), width: mm(110), height: mm(230) }} />
+```
+
+```css
+.editorial {
+  font: 10.5pt/1.45 'Source Serif 4';
+  p { margin: 0; }
+  p + p { text-indent: 1.2em; }
+  h2 { font: 400 9pt Inter; letter-spacing: .12em; text-transform: uppercase; }
+}
+```
+
+The platform validates the rendered result (computed styles and the exported PDF), so its checks do not depend on how styles were written.
 
 ### Geometry variables
 
