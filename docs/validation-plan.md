@@ -18,7 +18,7 @@ That question cannot be answered in the abstract. "Sufficient" means sufficient 
 
 ## Phase 0: inputs
 
-Status: specification collected for Blurb Large Square in [print-target-blurb.md](print-target-blurb.md). Pending: confirming paper type, cover type, and the proposed physical book model decisions listed there.
+Status: specifications collected for Blurb, WhiteWall, and Saal Digital square books in [print-targets.md](print-targets.md), together with a proposed book profile and font shortlist. Pending: choosing the primary target and cover scope.
 
 ### Target printer
 
@@ -56,7 +56,12 @@ Evaluate:
 - **Fonts.** Embedded and subset, without fallback glyphs.
 - **Effects.** Whether intended template effects (shadows, blend modes, SVG artwork, gradients) appear in the PDF as in preview.
 - **Compliance.** If the printer requires PDF/X, whether post-conversion produces a file that passes preflight.
-- **Blurb specifics.** Individual 855 × 864 pt pages with bleed on the outside edge only; Blurb uploader preflight on the RGB PDF; body text printing acceptably without 100% K black, or a CMYK post-processing step that maps black text to pure K; whether static and variable fonts embed as outline fonts rather than Type 3.
+- **Print-target specifics** (see [print-targets.md](print-targets.md)):
+  - Export from one spread model to both single pages with bleed on three sides (Blurb, WhiteWall) and whole spreads (Saal).
+  - Whether Chromium output contains transparency, and whether flattening (for example with Ghostscript) or 300-dpi JPEG spreads satisfy Saal.
+  - Whether the RGB PDF passes Blurb preflight and WhiteWall's dimension check.
+  - For Blurb, whether body text prints acceptably without 100% K black, or needs a CMYK step mapping black text to pure K.
+  - Whether static and variable fonts embed as outline fonts rather than Type 3.
 - **Preview agreement.** Rasterize the PDF and compare it with screenshots of the same pages rendered in the editor.
 - **Physical proof.** Order one printed proof from the chosen printer.
 
