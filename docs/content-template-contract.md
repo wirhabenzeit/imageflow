@@ -528,6 +528,7 @@ Acceptance scenarios:
 - How does the editor explain derived flow order and resolve invalid assignments?
 - What explicit mechanism, if any, should later allow independent repetition of the same Markdown source?
 - What are the later policies for automatic continuation pages and paragraph layout?
+- Should a text box support multiple columns, with column count and gap as element parameters? (Deferred; see Deferred alternatives.)
 - Which rendering primitives are sufficient for calendars and other generated components?
 
 ### Compatibility and extensibility
@@ -542,5 +543,7 @@ Acceptance scenarios:
 ## Deferred alternatives
 
 Earlier exploration considered editorial figures, general semantic content schemas, and universal photo-or-text regions. Those remain possible extensions, but are not part of this baseline. The current proposal favors two native content types, typed boxes, and template-declared scoped parameters to keep the editor and ownership model understandable.
+
+Multi-column text boxes are deferred but should remain possible: a Markdown box could declare a column count and gap, as a template default or a user-editable element parameter, and continuation would then run through each column of a box before moving to the next box in the flow order. A fragmenter that uses the browser's column layout to find breaks supports this directly (see the text-flow spike); a measure-and-split fragmenter would need to treat each column as a separate frame.
 
 Agent-assisted template authoring remains a goal. An MCP interface can expose declarations, validation, preview rendering, and diagnostics after the underlying contract is established.
