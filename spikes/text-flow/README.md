@@ -59,6 +59,22 @@ With `hyphens: auto`, Chrome on macOS hyphenated English and German text in a 45
 - The last line of a split justified paragraph is justified (`text-align-last: justify` on `.split`) so the paragraph reads as continuing; a continued paragraph drops its first-line indent.
 - Per-box template CSS works naturally: the continuation takes the next box's font size and alignment.
 
+## Style changes and reflow
+
+Reflow is not automatic in the browser: after a flow, each box holds its own fragment of the DOM. If template CSS changes afterwards, Chrome re-lays out each fragment inside its box but does not move text between boxes, so boxes clip or leave gaps.
+
+The flow is a pure function of the Markdown source, the box geometry, and the applied CSS. The platform therefore keeps the unsplit HTML, treats fragments as disposable output, and reruns the flow whenever an input changes: a Markdown edit, a template or template-version change, a parameter value that affects styling, box geometry, spread order, or fonts finishing loading. At about 20 ms for a whole book, rerunning from the first affected box (or the whole chain) after every such change is affordable.
+
+Template CSS can change anything that affects how text looks or how much space it takes (fonts, sizes, line height, margins, indents, alignment, hyphenation), because the flow measures the real layout. Some CSS must be owned or restricted by the platform:
+
+- Multi-column properties on the box, which the columns strategy uses to find breaks.
+- The `.split` / `.cont` continuation classes and their rules.
+- `overflow-wrap` on Markdown boxes and room for list markers.
+- CSS counters for list numbering, which the `start` correction does not continue.
+- Transitions and animations, which would be measured mid-change.
+
+Not yet tested: changing CSS after a completed flow and reflowing. Each run in this spike started from scratch with fixed CSS.
+
 ## Decisions this informs
 
 - **Fragmentation approach**: the columns strategy plus JavaScript rules (widow lookahead, keep-with-next, overflow guard) is the simpler and more robust base, and covers multi-column boxes.
