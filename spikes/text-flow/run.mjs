@@ -3,11 +3,15 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { chromium } from 'playwright-core';
+import { createRequire } from 'node:module';
+import { chromium, _electron } from 'playwright-core';
+
+// ENGINE=electron runs the same harness inside Electron (see ../electron/main.cjs).
+const engine = process.env.ENGINE ?? 'chrome';
 import { markdownToHtml } from './markdown.mjs';
 
 const root = new URL('./', import.meta.url);
-const out = new URL('out/', root);
+const out = new URL(engine === 'electron' ? 'out-electron/' : 'out/', root);
 await mkdir(out, { recursive: true });
 const corpus = await readFile(new URL('corpus.md', root), 'utf8');
 const strategies = ['measure', 'columns'];
@@ -70,8 +74,23 @@ const sourceHtml = markdownToHtml(corpus);
 // The scenario uses the corpus twice so that every box, including the two-column and justified ones, receives text.
 const scenarioHtml = markdownToHtml(`${corpus}\n\n${corpus.replace('# North of the Arctic Circle', '# Part two')}`);
 
-const browser = await chromium.launch({ channel: 'chrome' });
-const tab = await browser.newPage({ viewport: { width: 2300, height: 1200 } });
+let browser;
+let electronApp;
+let tab;
+if (engine === 'electron') {
+  const electronDir = new URL('../electron/', root);
+  const electronPath = createRequire(new URL('package.json', electronDir))('electron');
+  electronApp = await _electron.launch({
+    executablePath: electronPath,
+    args: [new URL('main.cjs', electronDir).pathname],
+    env: { ...process.env, SPIKE_TASK: 'flow' },
+  });
+  tab = await electronApp.firstWindow();
+  console.log('engine electron', JSON.stringify(await electronApp.evaluate(() => ({ electron: globalThis.versions.electron, chrome: globalThis.versions.chrome }))));
+} else {
+  browser = await chromium.launch({ channel: 'chrome' });
+  tab = await browser.newPage({ viewport: { width: 2300, height: 1200 } });
+}
 
 async function open(name, body, extraClass) {
   const file = new URL(`${name}.html`, out);
@@ -138,13 +157,14 @@ for (const strategy of strategies) {
   const run = await flow(scenarioHtml, ids, strategy);
   const checks = await check(scenarioHtml, ids);
   const domLines = await tab.evaluate((ids) => Object.fromEntries(ids.map((id) => [id, Flow.lines(document.getElementById(id))])), ids);
-  await tab.screenshot({ path: new URL(`scenario-${strategy}.png`, out).pathname, fullPage: true });
+  await tab.screenshot({ path: new URL(`scenario-${strategy}.png`, out).pathname, fullPage: true }).catch((error) => console.log('screenshot skipped:', error.message.split('\n')[0]));
 
   // Print the flowed DOM as-is (no re-flow) to PDF and compare lines per box.
   await tab.evaluate(() => document.body.classList.add('print'));
   await tab.addStyleTag({ content: '@page { size: 588mm 294mm; margin: 0 } body { background: none }' });
   const pdf = new URL(`scenario-${strategy}.pdf`, out).pathname;
-  await tab.pdf({ path: pdf, preferCSSPageSize: true, printBackground: true });
+  if (engine === 'electron') await electronApp.evaluate((_, file) => globalThis.printWindow(file), pdf);
+  else await tab.pdf({ path: pdf, preferCSSPageSize: true, printBackground: true });
   const boxRects = await tab.evaluate((ids) => ids.map((id) => {
     const el = document.getElementById(id);
     const spread = el.parentElement;
@@ -279,4 +299,4 @@ report.hyphenation = await tab.evaluate(() => Object.fromEntries(['en', 'de'].ma
 console.log('hyphenation:', JSON.stringify(report.hyphenation));
 
 await writeFile(new URL('report.json', out), JSON.stringify(report, null, 2));
-await browser.close();
+await (engine === 'electron' ? electronApp.close() : browser.close());
