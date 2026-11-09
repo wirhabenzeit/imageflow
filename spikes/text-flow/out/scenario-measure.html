@@ -1,0 +1,37 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><style>
+@font-face { font-family: 'Source Serif 4'; font-weight: 400; src: url(../node_modules/@fontsource/source-serif-4/files/source-serif-4-latin-400-normal.woff2); }
+@font-face { font-family: 'Source Serif 4'; font-weight: 700; src: url(../node_modules/@fontsource/source-serif-4/files/source-serif-4-latin-700-normal.woff2); }
+@font-face { font-family: 'Source Serif 4'; font-style: italic; src: url(../node_modules/@fontsource/source-serif-4/files/source-serif-4-latin-400-italic.woff2); }
+@font-face { font-family: 'Inter'; font-weight: 400; src: url(../node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2); }
+html, body { margin: 0; }
+body { background: #ddd; }
+.spread { position: relative; width: 588mm; height: 294mm; background: #f6f2e8; break-after: page; overflow: hidden; }
+.box { position: absolute; overflow: hidden; outline: 0.2mm dashed #c9b; }
+.print .box { outline: none; }
+
+/* Template CSS for Markdown boxes. */
+.editorial { font: 10.5pt/1.45 'Source Serif 4'; color: #222; column-gap: 6mm; overflow-wrap: break-word; }
+.editorial.small { font-size: 9pt; }
+.editorial.justify { text-align: justify; }
+.editorial.justify p.split { text-align-last: justify; }
+.editorial p { margin: 0; orphans: 2; widows: 2; }
+.editorial p + p, .editorial p.cont + p { text-indent: 1.2em; }
+.editorial p.cont { text-indent: 0; }
+.editorial h1 { font-size: 20pt; line-height: 1.15; margin: 0 0 4mm; font-weight: 700; break-after: avoid; }
+.editorial h2 { font: 400 9pt 'Inter'; letter-spacing: .12em; text-transform: uppercase; margin: 5mm 0 2mm; break-after: avoid; }
+.editorial h3 { font-size: 11pt; font-style: italic; font-weight: 400; margin: 4mm 0 1mm; break-after: avoid; }
+.editorial > :first-child { margin-top: 0; }
+.editorial ul, .editorial ol { margin: 1.5mm 0; padding-left: 1.3em; }
+.editorial li { orphans: 2; widows: 2; }
+.editorial li.cont { list-style: none; }
+.editorial blockquote { margin: 3mm 0 3mm 1.2em; font-style: italic; }
+.editorial a { color: #2c5070; overflow-wrap: anywhere; }
+.editorial.hyphenate { hyphens: auto; }
+</style>
+<script src="../flow.js"></script></head><body class=""><div class="spread"><div id="a" class="box editorial " 
+  style="left:30mm;top:40mm;width:110mm;height:150mm"></div><div id="b" class="box editorial " 
+  style="left:324mm;top:30mm;width:120mm;height:234mm"></div><div id="c" class="box editorial small" 
+  style="left:454mm;top:30mm;width:104mm;height:234mm"></div></div><div class="spread"><div id="d" class="box editorial small" 
+  style="left:30mm;top:30mm;width:70mm;height:234mm"></div><div id="e" class="box editorial " data-columns="2"
+  style="left:324mm;top:30mm;width:234mm;height:120mm"></div><div id="f" class="box editorial justify" 
+  style="left:324mm;top:170mm;width:234mm;height:94mm"></div></div></body></html>

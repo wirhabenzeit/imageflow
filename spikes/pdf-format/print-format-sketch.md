@@ -4,7 +4,7 @@ Status: proposal derived from this spike. It shows how a template could declare 
 
 ## Where the format lives
 
-The template declares one or more named **formats**. The project selects one; everything below is resolved from that selection. A template designed for a square book can therefore list WhiteWall 29 cm and Saal 30 cm side by side, while a template that only makes sense at one size lists one.
+Decision for v1: the template declares one or more named **formats**, and the project selects one. Everything below is resolved from that selection. A template designed for a square book can list WhiteWall 29 cm and Saal 30 cm side by side, while a template that only makes sense at one size lists one.
 
 Layout uses trim-relative CSS variables supplied by the platform, so the same spread design adapts to 290 or 294 mm without per-format code.
 
@@ -194,7 +194,7 @@ The page content box is the trim; bleed is added outside it by the platform. A f
 
 ## Open points
 
-- Whether formats belong to templates (as sketched) or to a project-level profile that templates opt into. Declaring them in the template keeps a template self-contained; a shared registry avoids copying printer data into every template. Both can coexist: templates reference formats by id from a platform registry and may define their own.
+- Later extension: a shared platform registry of printer formats that templates reference by id, to avoid copying printer data into every template. In v1, formats live in the template.
 - How the cover template consumes `CoverFormat`, in particular the spine table and page-count dependency.
 - Whether `transparency: "flatten"` should flatten per page (Ghostscript) or rasterize the whole book for consistency.
 - Saal's derived 294 mm trim needs confirmation from its template.
