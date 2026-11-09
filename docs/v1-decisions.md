@@ -10,7 +10,7 @@ HTML/CSS templates, exported by Chromium. See [decisions/0001-rendering.md](deci
 
 - **Electron app for macOS**, building on the draft in [wirhabenzeit/imageflow#4](https://github.com/wirhabenzeit/imageflow/pull/4): sandboxed renderer, `imageflow://` protocol with a content security policy, native menus, save dialogs.
 - **Export inside Electron.** `webContents.printToPDF` in a hidden window replaces the Swift renderer and the layout upload in #4; `capturePage` produces raster spreads where a format requires JPEG delivery. Post-processing runs in the main process: pdf-lib for page boxes, a native image library (for example sharp) for sRGB conversion, Ghostscript only if a format requires flattening.
-- **Re-validate in Electron.** The spikes ran on Chrome 156; Electron 45 ships an older Chromium. Before building on them, rerun `spikes/pdf-format` and `spikes/text-flow` inside Electron.
+- **Validated in Electron** (PR #5): Electron 45.2.3 bundles Chromium 156, the same version the spikes used. PDFs and flowed layouts from `printToPDF` are pixel-identical to the Chrome results, and an offscreen window with a zoom factor of 300/96 captures raster spreads at the exact required pixel size.
 
 ## Project folder
 
@@ -60,5 +60,4 @@ MyBook/
 ## Still to do before implementation planning
 
 - Review [template-api.md](template-api.md) (draft).
-- Rerun the two spikes inside Electron.
 - Upload the spike PDFs to the WhiteWall and Saal upload checks (needs accounts).
