@@ -12,7 +12,7 @@ The proposed baseline is:
 - A lightweight project photo index with editable metadata, including captions.
 - Template-declared parameters at document, page/spread, and element scopes.
 - Two distinct content-box types: photo boxes and Markdown text boxes. Mixed boxes are deferred.
-- Platform-managed text continuation between text boxes, including across pages.
+- Platform-managed text continuation: assigning the same Markdown source to multiple text boxes continues it in deterministic order, including across pages.
 - Parameterized generated elements, such as calendars, without adding native content types.
 - Project-owned content and saved parameter values; template-owned declarations and defaults.
 
@@ -25,7 +25,7 @@ There is no separate editorial figure or placement object in this baseline. Cont
 | Content | Defines photo/Markdown capabilities and reference semantics | Reads assigned content through those capabilities | Owns files, photo index, metadata, and Markdown |
 | Parameters | Validates types, resolves defaults, generates controls | Declares stable keys, scopes, labels, types, defaults, constraints | Saves user values at each instance scope |
 | Boxes | Provides typed photo/text primitives and assignment editing | Declares identifiers, type, geometry, styling, optionality | Saves content assignments and photo crop adjustments |
-| Text flow | Parses supported Markdown, lays out continuations, reports overflow | Defines text geometry/style and optional default flow order | Saves Markdown references and explicit flow connections |
+| Text flow | Parses supported Markdown, lays out continuations, reports overflow | Defines text geometry/style and optional default flow order | Saves Markdown assignments; flow order derives from assignments and template order |
 | Generated elements | Provides supported drawing and interaction primitives | Implements components, such as a calendar | Saves component parameter values |
 | Output | Produces inspectable resolved pages for preview/export | Expands design into supported primitives | Supplies content and configuration |
 | Persistence | Defines format, validation, and reference handling | Declares compatible API/package version | Records template versions and durable instance state |
@@ -129,7 +129,7 @@ This example omits geometry and styling. Parameter schemas are illustrative.
 
 A photo box cannot receive Markdown in the first version. Changing a four-photo spread into a composition containing text means selecting or authoring a different template composition, rather than changing one box's type dynamically.
 
-Typed boxes keep element popovers coherent: a photo box can expose caption visibility and platform crop controls; a text box exposes Markdown assignment and platform continuation controls. Flow links and crop values are platform-defined project state, not arbitrary custom variables a template must reinvent.
+Typed boxes keep element popovers coherent: a photo box can expose caption visibility and platform crop controls; a text box exposes Markdown assignment and platform continuation controls. Derived flow ordering and saved crop values are platform-defined concerns, not arbitrary custom variables a template must reinvent.
 
 The template may expose additional element parameters, but they should be meaningful for that element's fixed role. Parameter-dependent alternate content types are deferred.
 
@@ -159,38 +159,100 @@ Clicking `photoB` opens its parameter popover. Editing its caption text changes 
 
 Missing caption text produces no caption artwork even if visibility is enabled. It must not display a placeholder in exported output.
 
-## Text continuation
+## Markdown rendering and text continuation
 
-The platform understands text flow. The template provides text boxes, their styling, and optional default ordering within a page/spread. The project saves the actual document assignment and connections across instantiated boxes.
+### User-facing continuation rule
 
-One possible representation is:
+Assigning the same Markdown source to multiple text boxes means that the text continues through them. Users do not need to create a separate flow object or manually link each box.
 
-```ts
-const flow = {
-  markdownId: "intro",
-  boxes: [
-    { spreadId: "spread-1", elementId: "bodyLeft" },
-    { spreadId: "spread-1", elementId: "bodyRight" },
-    { spreadId: "spread-2", elementId: "body" },
-  ],
-};
+Order is deterministic: project page/spread order first, then an explicit template-declared text-box order within each page/spread. Visual position alone is insufficient. For spreads, that declared order may cross the neighboring page boundary.
+
+The project saves Markdown assignments; the platform derives the ordered flow from those assignments and template declarations. A derived flow may be cached internally but is not a separate authoritative user-managed connection list.
+
+Initially, the same source always means continuation. Independently repeating an entire source is deferred. A template with multiple text boxes must supply an unambiguous order; missing or duplicate ordering is a validation error.
+
+### Rendering ownership
+
+The platform parses the supported Markdown dialect into a consistent document structure and renders its content. The template supplies scoped CSS for supported elements such as paragraphs, headings, emphasis, links, and lists.
+
+Illustrative authoring interface:
+
+```tsx
+<MarkdownBox id="body" className="editorial-text" />
 ```
 
-An ordered list or linked-box representation can work; there must be one authoritative order. A flow is project composition data referencing a Markdown document, not a third native content type.
+The template can style `.editorial-text p`, `.editorial-text h2`, and other supported elements. The platform supplies assigned content and manages fragmentation. Templates do not replace the Markdown parser or arbitrarily transform the source structure in the initial contract.
 
-The engine computes which source range fits in each box and continues from that position. Source text is never persisted as separate fragments per box.
+Markdown determines structure; template CSS determines appearance; the platform owns rendering, measurement, and continuation. Box dimensions and flow-relevant styles must be measurable and deterministic. Style scoping and the allowed CSS subset need specification.
 
-Initial behavior:
+### Browser-assisted layout
 
-- Pages/spreads and continuation connections are explicit.
-- Templates can suggest local defaults; saved project connections are authoritative.
-- Invalid references, conflicting box assignments, and invalid flow structures are diagnosed.
-- Remaining text produces visible overflow diagnostics.
-- Automatic creation of continuation pages is deferred.
+The browser can handle font shaping, line wrapping, and inline/paragraph layout inside a box. It does not automatically continue content through arbitrary separate boxes.
 
-The editor should let users inspect and connect text boxes using consistent platform controls. Templates should not implement their own competing text-flow mechanisms.
+Breakpoints depend on the actual box geometry and applied styles. They are derived layout results, never intrinsic properties of the Markdown source.
 
-Preview and export need an authoritative text measurement/shaping strategy. Passing browser-selected line breaks to CoreText helps but does not guarantee identical font metrics. Markdown parsing, shaping, continuation positions, hyphenation, and paragraph rules need a focused implementation design.
+A candidate algorithm is:
+
+1. Parse the source into a structure retaining stable source positions.
+2. Render candidate content using the box's actual CSS and dimensions.
+3. Wait for required fonts and any supported intrinsic-size content.
+4. Use DOM measurements, potentially including text Range rectangles, to locate a valid fitting boundary.
+5. Fragment at a supported paragraph or line boundary and continue the remainder in the next box, using that box's styles.
+6. Report source content remaining after the final box as overflow.
+
+This is a hypothesis to prototype, not a validated algorithm. Splitting changes DOM structure and can change margins, selectors, and layout, so measuring and then cutting once is not sufficient in every case. The implementation must verify the resulting fragments and converge reliably.
+
+A style, font, geometry, source, or box-order change invalidates affected layout. Reflow proceeds from the earliest affected box onward. Markdown source remains unchanged.
+
+### Complexity and initial limits
+
+Reliable fragmentation is a substantial engineering task and an architectural risk. Measurement avoids building a typography engine from scratch, but does not solve structural splitting.
+
+Difficult cases include preserving inline emphasis/links, continuing paragraphs and lists, list numbering, margin behavior, headings kept with following text, widow/orphan rules, and CSS whose behavior changes after fragmentation.
+
+A first version should target rectangular boxes, paragraphs/headings, basic inline formatting, and a documented set of styles. Lists need explicit continuation tests before being promised. Tables, raw HTML, embedded photos, floats, columns, and arbitrary CSS should not be assumed supported.
+
+Pages/spreads are explicit. Automatic continuation-page creation is deferred.
+
+## Browser versus native PDF export
+
+Preferred direction to investigate: React templates rendered through a controlled browser engine, with browser-generated PDF. This is provisional until text flow and intended printer requirements are tested.
+
+React describes the template; the browser performs layout and PDF rendering. A controlled Chromium export process should wait for fonts/content, apply explicit page dimensions and print styles, use original-resolution photos, and render the already resolved text fragments.
+
+Export should not intentionally repaginate the story independently. Identical preview/export fragments still require verification: browser versions, print CSS, font availability, and page sizing can affect output.
+
+| Approach | Benefits | Constraints |
+| --- | --- | --- |
+| Browser layout and PDF | One rendering engine; broad HTML/CSS/SVG support; fewer preview/export translation rules | Arbitrary linked-box flow still needs implementation; printer-specific PDF requirements need validation |
+| Shared primitives with native PDF | Direct control over PDF geometry and page boxes; existing prototype foundation | CSS/effects must be restricted or reproduced; typography can differ between engines |
+| Browser PDF plus post-processing | May address specific PDF packaging requirements | Does not automatically solve color management, font issues, or PDF/X compliance |
+
+Browser PDF may be suitable for photobook workflows accepting ordinary RGB PDFs. Validated PDF/X, particular CMYK profiles, exact TrimBox/BleedBox requirements, and other prepress constraints can require additional tooling or native export. Requirements should come from the actual printer.
+
+The existing Swift exporter provides useful control over page geometry and PDF boxes, but should not be treated as an arbitrary React/CSS renderer. Supporting unrestricted browser effects in a second renderer creates significant maintenance work.
+
+No final export architecture is selected by this document. Preserve the existing implementation until a browser experiment supplies evidence for replacement or a hybrid approach.
+
+## Early technical prototype: text flow and export
+
+Text flow should be tested before committing to a public rendering API.
+
+Build a focused experiment with one Markdown source assigned to three differently sized and styled text boxes across pages. Include headings, paragraph splits, emphasis/links, and representative lists. Exercise font and size changes, captioned photos, a calendar, and selected visual effects.
+
+Compare an appropriate existing pagination library with a small browser-measurement implementation. A library must be evaluated for arbitrary frame sequences, rather than assumed suitable because it paginates conventional pages.
+
+Evaluate:
+
+- Deterministic continuation with no omitted or duplicated source text.
+- Preservation of inline structure and defined paragraph/list semantics.
+- Stable reflow after font loading and changes in styles or geometry.
+- Overflow behavior and useful diagnostics for unsupported content.
+- Interactive layout performance on representative document sizes.
+- Preview/PDF agreement for line breaks, crops, typography, effects, and page geometry.
+- Output against an intended printer's specifications, including resolution and PDF boxes.
+
+Use the results to choose a flow implementation, initial Markdown/CSS limits, and browser/native export strategy. This is exploratory validation, not an implementation milestone already completed.
 
 ## Parameterized components: calendar
 
@@ -234,7 +296,7 @@ The platform supplies consistent interactions:
 - Select an element by its stable identity.
 - Open a popover generated from its declared parameter schema.
 - Show native content assignment controls appropriate to the fixed box type.
-- Show crop controls for photo boxes and continuation controls for text boxes.
+- Show crop controls for photo boxes and Markdown assignment/continuation information for text boxes.
 - Edit project photo metadata or Markdown using platform operations.
 - Select page/spread and document settings at their corresponding scopes.
 
@@ -252,7 +314,7 @@ The saved project needs to contain or reference:
 - Template package identities and pinned versions.
 - Ordered page/spread instances and their definition identifiers.
 - Document, page/spread, and element parameter values.
-- Typed content assignments, crop adjustments, and text-flow connections.
+- Typed content assignments, crop adjustments, and Markdown assignments that determine continuation.
 
 Stable instance and element identifiers let the editor preserve selections and saved values across rerenders. File paths locate content; they should not be the sole identity mechanism.
 
@@ -290,7 +352,7 @@ This document does not implement those changes. Browser/native export fidelity a
 
 ## Initial implementation and acceptance scenarios
 
-A useful first slice is a saved project with photo metadata, Markdown references, one typed photo/text template, three parameter scopes, and explicit cross-page text continuation. Add a four-photo spread and a parameterized calendar to exercise the contract.
+A useful first slice is a saved project with photo metadata, Markdown references, one typed photo/text template, three parameter scopes, and assignment-based cross-page text continuation. Add a four-photo spread and a parameterized calendar to exercise the contract.
 
 Acceptance scenarios:
 
@@ -327,9 +389,9 @@ Acceptance scenarios:
 ### Text flow and rendering
 
 - Which layout/shaping engine can produce reliable preview and export output?
-- How are Markdown continuation positions represented across blocks and inline formatting?
-- How does the editor connect boxes and resolve conflicting assignments?
-- Is repeated independent rendering of the same Markdown document supported initially?
+- How are Markdown continuation positions represented across blocks and inline formatting, with fragmentation that preserves source coverage?
+- How does the editor explain derived flow order and resolve invalid assignments?
+- What explicit mechanism, if any, should later allow independent repetition of the same Markdown source?
 - What are the later policies for automatic continuation pages and paragraph layout?
 - Which rendering primitives are sufficient for calendars and other generated components?
 
