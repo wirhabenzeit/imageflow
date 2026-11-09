@@ -1,282 +1,349 @@
-# Content–template contract
+# Platform, template, and project contract
 
-Status: proposal for discussion. This document describes a possible architecture, not an implemented API or a set of final decisions. TypeScript and JSX examples are illustrative.
+Status: proposed baseline for discussion. This document defines responsibilities and illustrative interfaces, not an implemented API. Exact serialization and rendering APIs remain open.
 
-## Purpose
+## Goals and baseline
 
-Imageflow should let users work visually with photographs and text while templates define page design. Templates should be simple to author in code, potentially with a coding agent, and interchangeable where their content requirements are compatible.
+Imageflow separates reusable project content from programmable page design. Users assign photos and Markdown documents visually; templates define their presentation and expose small, understandable parameter controls.
 
-The contract must accommodate:
+The proposed baseline is:
 
-- Photo layouts with associated captions and standalone text.
-- A continuous story flowing through linked text frames, including frames on later pages.
-- Optional regions that accept a photograph, body text, or no content.
-- Parameterized components, such as a calendar with a selected month and year.
-- Explicit handling of content that cannot be displayed after a template switch.
+- Two native content types: photos and Markdown documents.
+- A lightweight project photo index with editable metadata, including captions.
+- Template-declared parameters at document, page/spread, and element scopes.
+- Two distinct content-box types: photo boxes and Markdown text boxes. Mixed boxes are deferred.
+- Platform-managed text continuation between text boxes, including across pages.
+- Parameterized generated elements, such as calendars, without adding native content types.
+- Project-owned content and saved parameter values; template-owned declarations and defaults.
 
-The central question is how much publishing meaning belongs in the contract. A contract consisting only of images and strings loses relationships; an exhaustive publishing model restricts future uses.
+There is no separate editorial figure or placement object in this baseline. Content assignments, crop state, and parameter values are saved as project instance state rather than introduced as additional user-facing entities.
 
-## Current prototype
+## Responsibility contract
 
-In `src/book.ts`, layouts declare photo and text frames. A spread stores content keyed by frame identifiers such as `photo1` and `caption2`. Switching layouts changes the layout identifier and retains those maps.
+| Concern | Platform | Template | Project |
+| --- | --- | --- | --- |
+| Content | Defines photo/Markdown capabilities and reference semantics | Reads assigned content through those capabilities | Owns files, photo index, metadata, and Markdown |
+| Parameters | Validates types, resolves defaults, generates controls | Declares stable keys, scopes, labels, types, defaults, constraints | Saves user values at each instance scope |
+| Boxes | Provides typed photo/text primitives and assignment editing | Declares identifiers, type, geometry, styling, optionality | Saves content assignments and photo crop adjustments |
+| Text flow | Parses supported Markdown, lays out continuations, reports overflow | Defines text geometry/style and optional default flow order | Saves Markdown references and explicit flow connections |
+| Generated elements | Provides supported drawing and interaction primitives | Implements components, such as a calendar | Saves component parameter values |
+| Output | Produces inspectable resolved pages for preview/export | Expands design into supported primitives | Supplies content and configuration |
+| Persistence | Defines format, validation, and reference handling | Declares compatible API/package version | Records template versions and durable instance state |
 
-This preserves values, but identifier reuse does not guarantee equivalent meaning: a caption may describe a spread in one template and a particular photo in another. Text is currently broken into lines independently for each frame, with excess text reported as overflow.
+A template declaring a variable does not own its user-supplied value. Definitions belong to the template; values belong to the project using it.
 
-`src/bookRender.ts` resolves content and frame geometry into layers consumed by the SVG editor and Swift PDF exporter. This intermediate representation is worth preserving and extending.
+## Native content
 
-## Proposed separation
+### Photos and the photo index
 
-Content records what the user wants to communicate. Templates describe how it can appear. Bindings connect the two.
-
-| Layer | Responsibility | Examples |
-| --- | --- | --- |
-| Content | Meaningful material independent of a particular layout | Stories, photographs, editorial captions, dates |
-| Template | Accepted inputs and presentation rules | Geometry, typography, component definitions, default flow order |
-| Binding | Assignment of document content to template inputs | A figure assigned to a photo region; a story assigned to a flow |
-| Presentation state | Adjustments for a particular composition | Crop, zoom, explicitly permitted style overrides |
-| Resolved layout | Derived output for preview and export | Positioned images, laid-out text fragments, diagnostics |
-
-These are conceptual boundaries, not necessarily separate files or services.
-
-A template declaring an input does not own the supplied value. A calendar component declares a month/year parameter schema; the selected month/year belongs to the document instance. Template defaults can initialize missing values but should not silently replace saved values during switching.
-
-Themes can supply shared typography, colors, and defaults; templates define compositions. Whether these ship as separate packages remains open.
-
-## Assets, figures, and captions
-
-An asset represents a source file and its intrinsic metadata:
+Photos remain ordinary source files. A project index associates each with a stable identifier and editable publication metadata:
 
 ```ts
-type ImageAsset = {
+type ProjectPhoto = {
   id: string;
-  source: string; // Portable project reference; storage format remains open.
-  width: number;
-  height: number;
-  metadata?: {
-    title?: string;
-    description?: string;
-    credit?: string;
-  };
-};
-```
-
-An editorial figure represents a photograph as used in the publication:
-
-```ts
-type Figure = {
-  id: string;
-  image: AssetRef;
-  caption?: TextRef;
-  credit?: TextRef;
+  path: string;
+  title?: string;
+  caption?: string;
+  credit?: string;
   altText?: string;
 };
 ```
 
-Reference types here denote stable document identifiers; their concrete encoding is undecided.
+The index is a sidecar to the files, not an inference from nearby text. Stable identifiers are recommended so renaming a file updates its path without breaking assignments. The exact index format is open.
 
-Proposed default: a caption belongs to an editorial figure rather than its image file or its template frame. A travel book and an exhibition catalogue can use the same image asset with different captions. Asset metadata may initialize a caption, but copying from metadata should be an explicit operation with clear subsequent editing behavior.
+Imported embedded metadata may initialize fields. How explicit edits override imported metadata, and whether later imports refresh untouched fields, needs a defined policy.
 
-Multiple placements can reference one figure when its caption should stay synchronized. Separate figures can reference the same asset when their editorial treatment differs. Duplication semantics must be visible to the user.
+Caption text belongs to the project photo. The template decides whether and how it is displayed. Changing templates must not rewrite or delete the caption.
 
-A caption is ordinary text with an explicit relationship to a figure. It does not require a separate text-rendering engine. A template may display, omit, or reposition it:
+Initially, a project photo has one caption shared by all its uses. Whether to support contextual caption overrides or multiple records referencing one source file is deferred. Neither is required to introduce a new content type now.
 
-```tsx
-<PhotoFrame source={inputs.figure.image} {...photoBounds} />
-<TextFrame source={inputs.figure.caption} style="caption" {...captionBounds} />
-```
+### Markdown documents
 
-Standalone text remains supported. Text placed near an image is not automatically its caption.
-
-### Alternatives still under consideration
-
-| Approach | Benefit | Cost |
-| --- | --- | --- |
-| Caption only in asset metadata | Simple reuse and import | Conflates source description with publication-specific copy |
-| Caption as an unrelated text field | Maximum placement freedom | Association is lost during reordering and template switching |
-| Caption linked to an editorial figure | Preserves meaning while reusing assets | Adds a concept and requires clear reference/copy behavior |
-
-The figure approach is a recommendation for discussion, not a requirement already accepted.
-
-## Small primitives, extensible schemas
-
-The core contract should support asset references, text/story references, scalar values, records, lists, and optional values. Reusable schemas compose these into concepts such as Figure, PhotoStory, and CalendarPage.
-
-The layout engine should not need special knowledge of every publishing concept. It must understand structure, references, validation, and supported rendering primitives. Schema packages can express domain relationships.
-
-For example:
+Markdown files hold continuous text independently of boxes:
 
 ```ts
-type CalendarPageInputs = {
-  period: { year: number; month: number };
-  figure?: FigureRef;
+type ProjectMarkdown = {
+  id: string;
+  path: string;
 };
 ```
 
-A calendar component declares validation and inspector controls for these inputs. Its implementation expands them into text, lines, and rectangles. The document stores the chosen period. Locale and first weekday may be document preferences with defaults; fonts and cell borders are template styling.
+Assigning a document references the source rather than copying it into a box. Layout fragments are derived; edits affect the Markdown source.
 
-Changing a calendar template should preserve the calendar period where compatible. This is one reason that parameter names and types alone may be insufficient: shared schema identity and meaning also matter.
+The platform must specify a supported Markdown dialect. Paragraphs, headings, emphasis, links, and lists are candidates for the initial subset. Tables, raw HTML, and embedded photos need explicit decisions; arbitrary browser HTML is not implied.
 
-## Stories and linked text frames
+Markdown documents are the source of flowing stories. No separate persisted story content type is required.
 
-Continuous text belongs to a story, not to individual frames. The complete story is stored once, initially as plain paragraphs or eventually as structured rich text.
+## Three parameter scopes
 
-A template exposes text regions and may declare a default flow order within a page or spread. Document bindings connect instantiated regions, including across page boundaries:
+| Scope | Meaning | Example | Editor location |
+| --- | --- | --- | --- |
+| Document | Shared across the project's use of a template | Show page numbers | Document settings |
+| Page/spread instance | Varies between compositions using the same definition | Calendar month/year | Selected page/spread settings |
+| Element instance | Local to one identifiable element | Show this photo's caption | Element popover |
+
+Page and spread are alternatives at the same scope level, not two additional levels. A spread can represent neighboring pages, with known page boundaries and a shared coordinate system.
+
+A template package may provide multiple page/spread definitions. Shared document settings should have one declaration per package; page/spread and element values are resolved for the selected instances.
+
+Supported parameter types should include plain text, booleans, integers, floating-point numbers, dates, and simple schema-defined objects. Values should be serializable; functions and arbitrary executable objects are not parameter values. Date encoding, nullability, and object limits remain open.
+
+Each parameter declaration needs a stable key, label, type, default or required status, and optional validation constraints. The platform generates basic controls from declarations.
+
+### Defaults and sharing
+
+Scope identifies where a value is stored. It does not automatically make unrelated parameters inherit from each other.
+
+For example, four photo elements may each declare a `showCaption` boolean. Their instance values are independent. A document-level caption default could be added later, with explicit inheritance semantics, but is not necessary for the initial contract.
+
+Templates may read document, enclosing page/spread, and local element values. Precedence and defaults must be explicit rather than based on coincidentally matching names.
+
+Defaults fill absent values. They do not silently replace saved values when reloading or switching templates.
+
+## Typed content boxes
+
+A photo box accepts a photo reference. A text box accepts Markdown through an assignment or text flow. Either may be empty if the template allows it.
+
+```ts
+const elements = {
+  photoA: {
+    kind: "photoBox",
+    parameters: {
+      showCaption: {
+        type: "boolean",
+        label: "Show caption",
+        default: true,
+      },
+    },
+  },
+  body: {
+    kind: "textBox",
+  },
+  calendar: {
+    kind: "generated",
+  },
+};
+```
+
+This example omits geometry and styling. Parameter schemas are illustrative.
+
+A photo box cannot receive Markdown in the first version. Changing a four-photo spread into a composition containing text means selecting or authoring a different template composition, rather than changing one box's type dynamically.
+
+Typed boxes keep element popovers coherent: a photo box can expose caption visibility and platform crop controls; a text box exposes Markdown assignment and platform continuation controls. Flow links and crop values are platform-defined project state, not arbitrary custom variables a template must reinvent.
+
+The template may expose additional element parameters, but they should be meaningful for that element's fixed role. Parameter-dependent alternate content types are deferred.
+
+An empty box retains its declared type. Its empty-state behavior is defined by the template: preserve space, hide artwork, or use a supported alternate composition. Editor drop targets may still be shown while empty.
+
+## Concrete example: four-photo spread
+
+The template declares four stable photo-box identifiers: `photoA` through `photoD`. Each declares its own `showCaption` boolean. The project assigns photos and stores independent values:
+
+```ts
+const spread = {
+  id: "spread-1",
+  definitionId: "four-photos",
+  parameterValues: {},
+  elements: {
+    photoA: { photoId: "photo-01", parameterValues: { showCaption: true } },
+    photoB: { photoId: "photo-02", parameterValues: { showCaption: false } },
+    photoC: { photoId: "photo-03", parameterValues: { showCaption: true } },
+    photoD: { photoId: "photo-04", parameterValues: { showCaption: false } },
+  },
+};
+```
+
+This is an example of saved instance state, not a commitment to this file format. Repeated parameter keys are scoped by element identity, so four unrelated spread-level names are unnecessary.
+
+Clicking `photoB` opens its parameter popover. Editing its caption text changes the project photo metadata; toggling caption visibility changes only this element instance. Using the same photo elsewhere can display its shared caption independently.
+
+Missing caption text produces no caption artwork even if visibility is enabled. It must not display a placeholder in exported output.
+
+## Text continuation
+
+The platform understands text flow. The template provides text boxes, their styling, and optional default ordering within a page/spread. The project saves the actual document assignment and connections across instantiated boxes.
+
+One possible representation is:
 
 ```ts
 const flow = {
-  storyId: "introduction",
-  regions: [
-    { pageId: "page-1", regionId: "body" },
-    { pageId: "page-2", regionId: "body" },
+  markdownId: "intro",
+  boxes: [
+    { spreadId: "spread-1", elementId: "bodyLeft" },
+    { spreadId: "spread-1", elementId: "bodyRight" },
+    { spreadId: "spread-2", elementId: "body" },
   ],
 };
 ```
 
-An ordered list is one possible encoding; linked frames are another. The persisted representation should have one authoritative flow order.
+An ordered list or linked-box representation can work; there must be one authoritative order. A flow is project composition data referencing a Markdown document, not a third native content type.
 
-The layout engine computes the text range displayed in each region and the continuation position. Those fragments are derived output and must not become independent copies of the story.
+The engine computes which source range fits in each box and continues from that position. Source text is never persisted as separate fragments per box.
 
-For the initial implementation:
+Initial behavior:
 
-- Pages and continuation links are explicit.
-- Remaining text yields an overflow diagnostic.
-- Invalid references, duplicate region assignments, and invalid flow structures are diagnosed.
+- Pages/spreads and continuation connections are explicit.
+- Templates can suggest local defaults; saved project connections are authoritative.
+- Invalid references, conflicting box assignments, and invalid flow structures are diagnosed.
+- Remaining text produces visible overflow diagnostics.
 - Automatic creation of continuation pages is deferred.
 
-Automatic pagination would require policies for selecting continuation templates, handling headings and images, and terminating layout.
+The editor should let users inspect and connect text boxes using consistent platform controls. Templates should not implement their own competing text-flow mechanisms.
 
-Text measurement and shaping need an authoritative strategy shared by preview and export. The prototype passes browser-calculated lines to CoreText, but browser and native font metrics can still diverge. Rich text, hyphenation, paragraph rules, and widow/orphan handling remain separate design work.
+Preview and export need an authoritative text measurement/shaping strategy. Passing browser-selected line breaks to CoreText helps but does not guarantee identical font metrics. Markdown parsing, shaping, continuation positions, hyphenation, and paragraph rules need a focused implementation design.
 
-## Flexible and specialized regions
+## Parameterized components: calendar
 
-Templates may expose a constrained choice:
+A calendar is generated template artwork, not native project content. Its template declares page/spread parameters such as:
 
 ```ts
-{
-  id: "main",
-  accepts: ["figure", "story"],
-  optional: true
-}
+const parameters = {
+  year: { type: "integer", default: 2026 },
+  month: { type: "integer", minimum: 1, maximum: 12, default: 1 },
+};
 ```
 
-The template defines presentation for each accepted type. A figure may expand into an image/caption arrangement; a story may fill the region with flowing text. Some regions remain specialized, such as a running header or calendarium.
+The component reads the resolved values and produces text, lines, and rectangles. A neighboring photo box uses the normal native photo assignment mechanism.
 
-Assigning a story to a region creates or selects a story reference. Linking another text region continues that story rather than copying its contents.
+Month/year belong to this page/spread instance's saved values. They are not inferred from page order or reset when the template rerenders. Locale and first weekday may be additional parameters.
 
-Empty-region behavior must be explicit: preserve space, hide the region, or select an alternate composition. Accepting multiple content types does not imply automatic arbitrary reflow.
+A component could instead declare element-scoped parameters when appropriate, for example if several independent calendars appear on one spread. The template chooses the declaration scope; the platform handles persistence and editing uniformly.
 
-A flexible region also needs stable editing identities for its expanded child frames so that selections and presentation adjustments survive recomputation.
+## Template-to-platform interface
 
-## Template switching
+A template package needs to declare:
 
-The proposed promise is: switching preserves content and explains what needs adaptation. It does not guarantee an unchanged composition or that every template can show all content.
+1. Package identity, version, and supported platform contract version.
+2. Document parameter schema.
+3. Available page/spread definitions, dimensions, and page boundaries.
+4. Page/spread and element parameter schemas.
+5. Stable element identities and fixed photo/text box types.
+6. Geometry, styling, generated artwork, and optional default text-flow order.
+7. Optional compatibility hints or explicit mappings for template changes.
 
-Switching should produce a reviewable mapping result:
+Rendering receives resolved parameters and project content references through a platform-provided context. It returns inspectable primitives carrying element identities so the editor can map clicks to settings and assignments.
 
-1. Compatible inputs mapped directly.
-2. Ambiguous inputs requiring a mapping choice.
-3. Retained content that will not be displayed.
-4. Spatial problems such as text overflow or poor image resolution.
+React is a possible authoring interface. A React component alone is insufficient unless its output exposes these editing and rendering contracts. Initially, components should compose supported layout/vector primitives rather than arbitrary DOM/CSS. Exact React syntax remains open.
 
-Field-name equality alone is insufficient. Compatibility should use declared schemas, versions, and explicit mappings. Required inputs and collection cardinality must be checked.
+Templates request project changes through platform operations rather than directly mutating files. The platform validates and persists edits, supports undo/redo, and rerenders affected output.
 
-Content that is omitted must remain accessible in the document. Existing flow bindings must be remapped or reported as unresolved; a switch must not silently truncate a story or reconnect it to unrelated text.
+## Editor interaction contract
 
-Crop and zoom belong to placements. A figure or asset may provide a reusable focal-point preference, but different frame proportions can require different crops. Whether old template-specific adjustments are restored when switching back is open.
+The platform supplies consistent interactions:
 
-## React and the rendering boundary
+- Select an element by its stable identity.
+- Open a popover generated from its declared parameter schema.
+- Show native content assignment controls appropriate to the fixed box type.
+- Show crop controls for photo boxes and continuation controls for text boxes.
+- Edit project photo metadata or Markdown using platform operations.
+- Select page/spread and document settings at their corresponding scopes.
 
-React or plain TypeScript functions can author templates. The saved content model and validation contract should remain independent of React.
+Templates supply labels, defaults, constraints, and visual design. A custom component such as a calendar gets basic controls from its schema without implementing a settings UI.
 
-Recommended initial boundary: components produce inspectable layout primitives with geometry, content bindings, stable identities, and editing capabilities. The layout engine resolves those primitives into pages and diagnostics for preview and export.
+A freeform custom React inspector is not required initially. Whether to allow richer custom controls later remains open.
 
-```text
-Document content + template instance bindings + presentation state
-                              |
-                 Template/component expansion
-                              |
-                 Layout and text-flow engine
-                              |
-                 Resolved pages + diagnostics
-                              |
-                       Editor / PDF export
-```
+## Project-to-platform interface
 
-Extensible computation does not require unrestricted DOM/CSS rendering. Calendars and many charts can be expressed through a bounded vector vocabulary.
+The saved project needs to contain or reference:
 
-Arbitrary React DOM/CSS would substantially expand export and inspection requirements. Support for it should be a deliberate later decision. Template code execution also requires a clear trust boundary before third-party packages are supported.
+- A project format version.
+- Photo files and their metadata index.
+- Markdown files and stable references.
+- Template package identities and pinned versions.
+- Ordered page/spread instances and their definition identifiers.
+- Document, page/spread, and element parameter values.
+- Typed content assignments, crop adjustments, and text-flow connections.
 
-## Agent-assisted authoring
+Stable instance and element identifiers let the editor preserve selections and saved values across rerenders. File paths locate content; they should not be the sole identity mechanism.
 
-The first workflow can use normal code-editing tools to create template files. An MCP interface can later expose:
+Resolved geometry and text fragments are caches/output, not authoritative project content.
 
-- Template contracts, schemas, and supported primitives.
-- Validation of bindings, geometry, and text flows.
-- Preview rendering against representative sample content.
-- Screenshots and diagnostics for iterative correction.
+## Template switching and evolution
 
-The feedback loop matters more than the transport. Generated templates should pass the same validation as manually authored templates.
+Switching preserves source content and reports what needs adaptation. It does not guarantee every layout can display everything.
 
-## Proposed first implementation slice
+The platform should:
 
-1. Define stable content references and a versioned, durable project representation.
-2. Add stories and explicit cross-page flow with fixed pages and overflow reporting.
-3. Model an editorial figure with optional caption; keep standalone text available.
-4. Declare template input schemas and explicit bindings.
-5. Demonstrate three compatible templates switching without content loss.
-6. Add a parameterized calendar component as an extensibility test.
+1. Map compatible typed boxes and parameter values using explicit declarations where available.
+2. Ask for mapping where roles are ambiguous; matching names alone do not establish meaning.
+3. Retain unused photos, Markdown, metadata, and unmapped state.
+4. Report broken text-flow links, required missing values, and overflow.
+5. Validate new geometry and crops without rewriting source content.
 
-The order is tentative; persistence and text-layout feasibility should be explored before committing to a public template API.
+Photo and Markdown box types provide basic compatibility. Exact migration rules for template-specific parameters remain open. A calendar period should survive when an explicit compatible mapping exists; arbitrary parameter names cannot guarantee that.
+
+Whether prior template-specific settings are restored when switching back is open. Template package upgrades also need migrations rather than silently reinterpreting saved values.
+
+## Relationship to the prototype
+
+The current prototype already separates frame geometry from spread photo/text maps and resolves them into shared SVG/PDF layers. Preserve that intermediate rendering approach.
+
+The proposed contract changes:
+
+- Inline frame-owned text becomes references to Markdown documents.
+- Project photo records acquire explicit editable metadata.
+- Hardcoded layout definitions become declarative template interfaces.
+- Settings are declared at three scopes and stored per project instance.
+- Text layout becomes a flow across boxes rather than independent truncation per frame.
+
+This document does not implement those changes. Browser/native export fidelity and a portable project format still require validation.
+
+## Initial implementation and acceptance scenarios
+
+A useful first slice is a saved project with photo metadata, Markdown references, one typed photo/text template, three parameter scopes, and explicit cross-page text continuation. Add a four-photo spread and a parameterized calendar to exercise the contract.
 
 Acceptance scenarios:
 
-- One story flows across two pages; resizing a frame redistributes text without changing stored content.
-- Two figures share an image asset but have different captions.
-- A shared figure displayed twice updates both captions when edited.
-- Switching to a template with fewer regions retains unplaced figures and undisplayed text.
-- A broken flow mapping is reported rather than silently dropping text.
-- A calendar keeps its selected month/year when changing compatible templates.
-- Preview and exported PDF are compared for text breaks, crops, and geometry using representative fonts and content.
+- Four photo boxes independently show or hide their captions.
+- The same project photo appears twice with shared caption text and independent visibility/crops.
+- A text box never offers photo-only parameters or accepts a photo assignment.
+- Clicking a calendar element or selecting its spread exposes the parameters at the declared scope.
+- Two calendar instances using the same definition retain different months.
+- One Markdown file flows through boxes on successive pages; resizing redistributes text without changing the source.
+- Switching to fewer boxes retains all source content and reports unresolved flow or assignments.
+- Saving and reopening preserves metadata, assignments, parameters, crops, and flow.
+- Preview and PDF are compared for text continuation, captions, crops, and page geometry.
 
 ## Open questions
 
-### Content and editorial identity
+### Content and persistence
 
-- Should importing a photo create only an asset, or also a default figure?
-- Should adding the same photo twice reuse a figure or create independent editorial figures?
-- Should captions be inline text values, references to ordinary stories, or a restricted text type? Which formatting and flow behavior is appropriate?
-- Is a reusable focal point asset-level metadata, figure-level editorial preference, or both with an explicit override order?
-- How should photo lists preserve ordering and caption association across layouts?
+- Which photo-index format best supports manual editing, portability, and stable identity?
+- What is the override policy between imported metadata and project edits?
+- Are per-use caption overrides needed, or is one caption per project photo sufficient?
+- Which Markdown dialect is supported, especially for tables, embedded images, and raw HTML?
+- How are external file edits and moved/missing files detected and reconciled?
+- What does the project bundle contain, and how are template packages/fonts pinned?
 
-### Schemas and compatibility
+### Parameters and editor
 
-- Which schemas ship with the core, and can projects define their own?
-- How are schemas identified, versioned, and migrated?
-- Should bindings target schema paths, stable field identifiers, semantic roles, or a combination?
-- What constitutes automatic compatibility, and when must the user review a mapping?
-- How should templates express accepted list sizes, optional fields, and alternative compositions?
+- What exact serializable schema represents types, dates, constraints, and defaults?
+- Is explicit default inheritance needed initially?
+- Should document settings apply to one active template package or several packages used together?
+- How do generated elements declare click targets and stable identities?
+- Are schema-generated controls sufficient before custom inspectors are considered?
+- When a parameter changes geometry, how are now-invalid crop or flow settings surfaced?
 
-### Text flow
+### Text flow and rendering
 
-- What story representation is needed initially: plain text, paragraphs, or rich-text nodes?
-- How does the user create, inspect, and repair cross-page flow links?
-- Can one story participate in multiple independent flows, and if so, with what meaning?
-- Which engine can provide reliable text measurement/shaping for both preview and PDF?
-- What are the eventual policies for automatic continuation pages and paragraph layout?
+- Which layout/shaping engine can produce reliable preview and export output?
+- How are Markdown continuation positions represented across blocks and inline formatting?
+- How does the editor connect boxes and resolve conflicting assignments?
+- Is repeated independent rendering of the same Markdown document supported initially?
+- What are the later policies for automatic continuation pages and paragraph layout?
+- Which rendering primitives are sufficient for calendars and other generated components?
 
-### Presentation and component extensibility
+### Compatibility and extensibility
 
-- What is the minimum useful set of layout and drawing primitives?
-- Should templates primarily be plain TypeScript, React components, or support both?
-- Where is the boundary between theme, template, and component package?
-- Which user overrides are allowed, and how are they scoped and restored across switches?
-- How are third-party template dependencies, fonts, and execution permissions handled?
-- Are unrestricted HTML/CSS components needed, or is vector composition sufficient?
+- How are template contract versions and project migrations handled?
+- What mapping declarations make switches predictable without rebuilding a general publishing schema system?
+- When should a switch require review rather than be applied immediately?
+- Should template-specific state be restored when switching back?
+- When, if ever, are mixed photo/Markdown boxes worth introducing?
+- What execution boundary is required for third-party React templates?
 
-### Persistence and interaction
+## Deferred alternatives
 
-- What portable format stores content, assets, schemas, template versions, and bindings?
-- What happens if a required template or component package is unavailable?
-- How are shared-reference edits distinguished from edits to independent copies?
-- How does the editor present retained but currently unplaced content?
-- Should incompatible template switches be blocked, previewed, or applied with unresolved bindings?
+Earlier exploration considered editorial figures, general semantic content schemas, and universal photo-or-text regions. Those remain possible extensions, but are not part of this baseline. The current proposal favors two native content types, typed boxes, and template-declared scoped parameters to keep the editor and ownership model understandable.
+
+Agent-assisted template authoring remains a goal. An MCP interface can expose declarations, validation, preview rendering, and diagnostics after the underlying contract is established.
