@@ -293,7 +293,7 @@ A template package needs to declare:
 
 1. Package identity, version, and supported platform contract version.
 2. Document parameter schema.
-3. Available page/spread definitions, dimensions, and page boundaries.
+3. Available page/spread definitions, dimensions, and page boundaries, including the print formats the template supports (trim, bleed, safe area, delivery unit, output constraints; see [print-targets.md](print-targets.md)). In v1, print formats are declared in the template and the project selects one.
 4. Page/spread and element parameter schemas.
 5. Stable element identities and fixed photo/text box types.
 6. Geometry, styling, generated artwork, and optional default text-flow order.

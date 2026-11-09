@@ -153,9 +153,9 @@ Use static font files for the spikes. Whether Chromium embeds variable fonts as 
 
 ## Book profile
 
-All three services fit one project-level book profile. Templates design in trim-relative units and are validated against the profile; they do not hard-code a printer's geometry.
+Decision for v1: the template declares its print formats. A template lists one or more named formats (for example a WhiteWall 29 cm and a Saal 30 cm variant), and the project selects one. A shared, platform-level registry of printer formats that templates reference is a possible later extension. Templates still lay out in trim-relative units, so one design can serve several formats.
 
-A profile declares:
+All three services fit the same format declaration, which contains:
 
 - **Trim size** in physical units (mm or pt; values are not integral in points for WhiteWall and Saal).
 - **Bleed** per edge, including none at the binding edge for single-page delivery.
@@ -175,7 +175,7 @@ A profile declares:
 
 ## Open decisions
 
-1. **Primary target.** Proposed: WhiteWall Gallery Square on photo paper (lowest export risk, 29 cm), or Saal Professional Line 30 × 30 (true 30 cm, transparency or JPG question). Keep at least one other service as a second profile so the profile abstraction stays honest.
+1. **Primary target.** No longer blocking: formats are declared per template, so the printer is chosen per template and project. For testing, at least two formats (for example WhiteWall and Saal) should be exercised so the declaration stays printer-independent.
 2. **Cover scope for the first book**, given that cover construction differs most between services.
 3. **Page-count step**: design the editor for even page counts and validate the step per profile.
 

@@ -18,7 +18,7 @@ That question cannot be answered in the abstract. "Sufficient" means sufficient 
 
 ## Phase 0: inputs
 
-Status: specifications collected for Blurb, WhiteWall, and Saal Digital square books in [print-targets.md](print-targets.md), together with a proposed book profile and font shortlist. Pending: choosing the primary target and cover scope.
+Status: specifications collected for Blurb, WhiteWall, and Saal Digital square books in [print-targets.md](print-targets.md), together with a book profile and font shortlist. Decided for v1: print formats are declared in the template, so no single primary target is needed. Pending: cover scope.
 
 ### Target printer
 
