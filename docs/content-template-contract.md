@@ -304,6 +304,124 @@ Templates supply labels, defaults, constraints, and visual design. A custom comp
 
 A freeform custom React inspector is not required initially. Whether to allow richer custom controls later remains open.
 
+## Illustrative TypeScript declaration format
+
+This is a proposed API shape, not an implemented or finalized SDK. Imageflow could publish a small versioned TypeScript API with runtime validation. A template entry point can contain both declarations and React rendering, or import components from other files; no separate JSON registry is required.
+
+Keep content boxes separate from ordinary variables:
+
+- `parameters` declares editable scalar/object values at its enclosing scope.
+- `boxes` declares typed places accepting references to project content.
+- `render` supplies the design using those declared boxes.
+- Generated `elements` can declare local parameters without becoming native content boxes.
+
+React props are implementation details; the explicit declaration is the editor/persistence contract. The editor does not infer input types by inspecting arbitrary JSX or register the same input twice.
+
+```tsx
+import {
+  defineTemplate,
+  PhotoBox,
+  MarkdownBox,
+} from "imageflow";
+
+export default defineTemplate({
+  id: "photo-journal",
+  version: "0.1.0",
+  contractVersion: 1,
+
+  // Document scope
+  parameters: {
+    showPageNumbers: {
+      type: "boolean",
+      label: "Show page numbers",
+      default: true,
+    },
+  },
+
+  spreads: {
+    story: {
+      size: { width: 420, height: 210, unit: "mm" },
+      pageBoundary: { axis: "x", position: 210 },
+
+      // Page/spread instance scope
+      parameters: {
+        background: {
+          type: "string",
+          label: "Background color",
+          default: "#ffffff",
+        },
+      },
+
+      boxes: {
+        hero: {
+          type: "photo",
+          label: "Main photograph",
+
+          // Element instance scope
+          parameters: {
+            showCaption: {
+              type: "boolean",
+              label: "Show caption",
+              default: true,
+            },
+          },
+        },
+
+        body: {
+          type: "markdown",
+          label: "Article",
+          flowOrder: 1,
+        },
+      },
+
+      render: ({ parameters, documentParameters }) => (
+        <div
+          className="story-spread"
+          style={{ background: parameters.background }}
+        >
+          <PhotoBox id="hero" className="hero" />
+          <MarkdownBox id="body" className="editorial-text" />
+          {documentParameters.showPageNumbers && (
+            <div className="page-number-decoration">
+              {/* Platform-provided page numbering would be used here. */}
+            </div>
+          )}
+        </div>
+      ),
+    },
+  },
+});
+```
+
+The example omits geometry CSS and the caption-rendering interface. CSS would position the boxes and style platform-rendered Markdown. `showCaption` is a declared user value, not automatically executable behavior: the template must consume it through a caption primitive or an explicit render context. The final API must specify how to access box-local parameters and assigned photo metadata without giving templates direct project mutation access.
+
+`PhotoBox` and `MarkdownBox` resolve project assignments using their declared stable identifiers. Element identifiers are scoped to a page/spread definition; the project instance identifier distinguishes repeated uses. A component such as a calendar can use spread parameters or declare a generated element's parameters through the same schema mechanism.
+
+A corresponding project instance could save:
+
+```ts
+const instance = {
+  id: "spread-01",
+  definitionId: "story",
+  parameterValues: { background: "#f6f2e8" },
+  elements: {
+    hero: {
+      photoId: "photo-01",
+      parameterValues: { showCaption: true },
+    },
+    body: {
+      markdownId: "introduction",
+    },
+  },
+};
+```
+
+Template package/version references and document parameter values belong to the enclosing project configuration. Projects save references and values, not JSX. A photo picker is derived from a photo-box declaration, a Markdown picker from a Markdown-box declaration, and ordinary controls from parameter schemas.
+
+Formal validation should check package/contract versions, stable identifiers, parameter types and constraints, page/spread dimensions and boundaries, fixed box types, and unambiguous text-flow ordering. Runtime checks should also verify rendered box identifiers, conflicting/duplicate instances, and required declared boxes. Exact optional/conditional rendering rules remain open.
+
+Open API decisions include the caption primitive, generated-element declaration syntax, scoped parameter access, geometry/style restrictions, and how TypeScript inference connects declarations to render contexts. This example does not settle browser-versus-native export or imply unrestricted DOM/CSS support.
+
 ## Project-to-platform interface
 
 The saved project needs to contain or reference:
