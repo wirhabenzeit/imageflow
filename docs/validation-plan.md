@@ -47,6 +47,8 @@ Choose two or three fonts that templates bundle, with licences permitting PDF em
 
 ## Phase 1: Chromium PDF spike (static content)
 
+Status: format experiments done with synthetic test pages (`spikes/pdf-format`, draft PR #2). Chromium output is viable for all three print targets with profile-driven post-processing: exact page boxes, sRGB conversion and resolution limits, transparency handling per target, and static fonts only (variable fonts and fallback glyphs become Type 3). PR #2 also sketches how a template declares its print formats. Pending: uploads to the printers' checks, real photographs, a printed proof, and Blurb's black-text question.
+
 Rebuild the existing demo spreads (photo and story, gallery, panorama, title) as HTML/CSS pages without text flow. Export them through headless Chromium (for example Playwright `page.pdf`) at the exact page size including bleed.
 
 Evaluate:
@@ -73,13 +75,15 @@ Outcomes:
 
 ## Phase 2: text-flow spike
 
+Status: done for the CommonMark subset (`spikes/text-flow`, draft PR #3). Chrome's multi-column fragmentation as break finder, plus JavaScript rules for orphans, widows with lookahead into the next box, and keep-with-next, passed 360 random box chains with no lost text, clipping, or numbering errors. Preview and PDF line breaks were identical, and a 15,000-word book flows in about 20 ms. Typst was dropped as a reference: it flows across pages and columns, not arbitrary linked boxes. Open: hyphenation consistency across machines, reflow after template style changes, images and tables in Markdown, editing interactions.
+
 In the Phase 1 setup, flow one Markdown source through at least three boxes of different sizes and styles across spreads, using the source rule from the contract (same source means continuation; order by spread, then template-declared box order).
 
 Candidates:
 
 - A small DOM-measurement fragmenter (paragraph and line splitting using Range rectangles).
 - An existing pagination library, evaluated for arbitrary frame sequences rather than conventional pages (Paged.js is the obvious candidate to examine).
-- Typst as a reference outside the browser model, limited to about a day. It renders both SVG and PDF from one engine, at the cost of templates no longer being React/CSS.
+- ~~Typst as a reference outside the browser model.~~ Dropped: Typst flows text across pages and columns, not through arbitrary linked boxes.
 
 Pass criteria:
 
