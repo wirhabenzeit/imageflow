@@ -16,7 +16,7 @@ HTML/CSS templates, exported by Chromium. See [decisions/0001-rendering.md](deci
 
 ```
 MyBook/
-  project.json     spreads in order, assignments, crops, parameter values, selected print format
+  project.json     spreads in order, assignments, crops, parameter values
   photos.json      photo index: stable id → photos/<file>, caption, title, credit, alt text
   photos/          original photo files, copied in on import
   texts/           Markdown files, edited in any editor
@@ -34,7 +34,7 @@ MyBook/
 - The app bundles `template/` on load (esbuild) and reloads on change.
 - **Trust:** opening a project executes its template code. v1 assumes you only open projects you trust; there is no sandbox for template code beyond the renderer's.
 - Rendering and Markdown CSS are the template's job, within the platform-owned rules in [template-api.md](template-api.md).
-- Print formats (trim, bleed, safe area, delivery unit, output constraints) are declared in the template; the project selects one.
+- **One print format per template** (trim, bleed, safe area, delivery unit, output constraints), declared in the template. A book for another printer or size uses another template (typically a copy with a different format). Several formats per template are a possible later extension; the declaration keeps the same shape so that extension only adds to it.
 
 ## Editing
 
@@ -55,7 +55,7 @@ MyBook/
 - **No covers** in v1; covers are made in the printer's own tools.
 - **Parameter types:** boolean, integer, number, string (single- and multi-line), enum, colour, date. No objects, no inheritance between scopes.
 - **Template switching:** boxes and parameters with the same identifier and type map automatically; everything else is kept in `project.json` and reported, not migrated.
-- **Deferred:** clicking to select, on-canvas crop, multi-column text boxes, shared printer-format registry, images and tables in Markdown, mixed photo/text boxes, sandboxed third-party templates.
+- **Deferred:** clicking to select, on-canvas crop, multi-column text boxes, several print formats per template, shared printer-format registry, images and tables in Markdown, mixed photo/text boxes, sandboxed third-party templates.
 
 ## Still to do before implementation planning
 

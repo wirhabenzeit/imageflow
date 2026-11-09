@@ -153,7 +153,7 @@ Use static font files for the spikes. Whether Chromium embeds variable fonts as 
 
 ## Book profile
 
-Decision for v1: the template declares its print formats. A template lists one or more named formats (for example a WhiteWall 29 cm and a Saal 30 cm variant), and the project selects one. A shared, platform-level registry of printer formats that templates reference is a possible later extension. Templates still lay out in trim-relative units, so one design can serve several formats.
+Decision for v1: each template declares exactly one print format. A book for another printer or size uses another template, typically a copy with a different format. Several formats per template and a shared, platform-level registry of printer formats are possible later extensions.
 
 All three services fit the same format declaration, which contains:
 
@@ -175,7 +175,7 @@ All three services fit the same format declaration, which contains:
 
 ## Open decisions
 
-1. **Primary target.** No longer blocking: formats are declared per template, so the printer is chosen per template and project. For testing, at least two formats (for example WhiteWall and Saal) should be exercised so the declaration stays printer-independent.
+1. **Primary target.** No longer blocking: each template declares its one format, so the printer is chosen with the template. For testing, at least two formats (for example WhiteWall and Saal) should be exercised so the declaration stays printer-independent.
 2. **Cover scope for the first book**, given that cover construction differs most between services.
 3. **Page-count step**: design the editor for even page counts and validate the step per profile.
 

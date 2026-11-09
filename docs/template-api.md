@@ -28,11 +28,12 @@ export default defineTemplate({
   version: '0.1.0',
   contract: 1,
 
-  formats: {
-    'whitewall-gallery-square': { /* PrintFormat, see below */ },
-    'saal-professional-30': { /* … */ },
+  // Exactly one print format in v1, see below.
+  format: {
+    label: 'Saal Digital Professional Line 30 × 30 cm',
+    trim: { width: mm(294), height: mm(294) },
+    /* bleed, safe, structure, output … */
   },
-  defaultFormat: 'saal-professional-30',
 
   // Document scope
   parameters: {
@@ -114,9 +115,11 @@ Scopes: `parameters` at template level (document), on a spread definition (sprea
 - `elements` declares generated artwork (calendar, ornaments with options) that has parameters but no assigned content.
 - Identifiers are stable keys: renaming one is a breaking change for projects using the template.
 
-### Print formats
+### Print format
 
-Each entry in `formats` is a `PrintFormat` as sketched in `spikes/pdf-format/print-format-sketch.md` (PR #2): trim, bleed per edge, safe insets, structure (`delivery: 'pages' | 'spreads'`, `ends: 'single-pages' | 'inside-covers'`, page-count rule), and output constraints (container, colour space, transparency policy, resolution range, raster size, font rules, minimum text size). The project selects one format; the platform resolves it into concrete geometry once.
+`format` is a single `PrintFormat` as sketched in `spikes/pdf-format/print-format-sketch.md` (PR #2): trim, bleed per edge, safe insets, structure (`delivery: 'pages' | 'spreads'`, `ends: 'single-pages' | 'inside-covers'`, page-count rule), and output constraints (container, colour space, transparency policy, resolution range, raster size, font rules, minimum text size). The platform resolves it into concrete geometry once.
+
+v1 allows exactly one format per template; a book for another printer or size uses another template. Allowing several named formats later would turn `format` into a map plus a project-level selection, without changing the `PrintFormat` shape.
 
 ### Spread spans
 
@@ -137,7 +140,7 @@ type RenderContext = {
   }>;
   elements: Record<ElementId, { params: ElementParams }>;
   page: { left?: number; right?: number };  // page numbers of this spread
-  format: ResolvedFormat;                   // trim, bleed, safe area in mm, selected format id
+  format: ResolvedFormat;                   // trim, bleed, safe area in mm
   mode: 'edit' | 'export';
 };
 ```
@@ -188,7 +191,7 @@ Not allowed in Markdown boxes: CSS counters for list numbering, `float`, `positi
 ### Fonts and output
 
 - Fonts are declared with `@font-face` in template CSS, from files in `template/fonts/`. Static files only; system fonts are not allowed. Export fails if the PDF contains Type 3 fonts or fonts not shipped with the template.
-- Effects that create transparency (opacity, `rgba()` fills, shadows, blend modes, filters, gradients, rounded clipping) are allowed; whether they pass depends on the selected format's transparency policy, checked at export.
+- Effects that create transparency (opacity, `rgba()` fills, shadows, blend modes, filters, gradients, rounded clipping) are allowed; whether they pass depends on the format's transparency policy, checked at export.
 - Text below the format's minimum size and text outside the safe area are reported in edit mode.
 
 ## Validation
@@ -197,7 +200,7 @@ When the template is loaded:
 
 - `id`, `version`, `contract` present; contract version supported.
 - Unique, stable identifiers for spreads, boxes, elements, and parameters; valid parameter defaults.
-- Valid print formats; at least one.
+- A valid print format.
 - Unique `flowOrder` among Markdown boxes of a spread.
 
 When a spread renders:
@@ -228,7 +231,7 @@ A spread instance in `project.json`:
 }
 ```
 
-The project also stores the selected format id, the document parameter values, the template `id` and `version` it was last opened with, and the text id → path mapping. Photo metadata lives in `photos.json`.
+The project also stores the document parameter values, the template `id` and `version` it was last opened with, and the text id → path mapping. Photo metadata lives in `photos.json`.
 
 ## Open points
 
