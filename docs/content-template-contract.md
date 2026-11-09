@@ -1,6 +1,6 @@
 # Platform, template, and project contract
 
-Status: proposed baseline for discussion. This document defines responsibilities and illustrative interfaces, not an implemented API. Exact serialization and rendering APIs remain open.
+Status: proposed baseline for discussion. This document defines responsibilities and illustrative interfaces, not an implemented API. Exact serialization and rendering APIs remain open. [validation-plan.md](validation-plan.md) orders the open points and the experiments needed to resolve them.
 
 ## Goals and baseline
 
@@ -13,6 +13,7 @@ The proposed baseline is:
 - Template-declared parameters at document, page/spread, and element scopes.
 - Two distinct content-box types: photo boxes and Markdown text boxes. Mixed boxes are deferred.
 - Platform-managed text continuation: assigning the same Markdown source to multiple text boxes continues it in deterministic order, including across pages.
+- Short per-instance text, such as titles and labels, as template string parameters rather than Markdown documents.
 - Parameterized generated elements, such as calendars, without adding native content types.
 - Project-owned content and saved parameter values; template-owned declarations and defaults.
 
@@ -86,7 +87,7 @@ Page and spread are alternatives at the same scope level, not two additional lev
 
 A template package may provide multiple page/spread definitions. Shared document settings should have one declaration per package; page/spread and element values are resolved for the selected instances.
 
-Supported parameter types should include plain text, booleans, integers, floating-point numbers, dates, and simple schema-defined objects. Values should be serializable; functions and arbitrary executable objects are not parameter values. Date encoding, nullability, and object limits remain open.
+Supported parameter types should include single- and multi-line plain text, booleans, integers, floating-point numbers, dates, and simple schema-defined objects. Values should be serializable; functions and arbitrary executable objects are not parameter values. Date encoding, nullability, and object limits remain open.
 
 Each parameter declaration needs a stable key, label, type, default or required status, and optional validation constraints. The platform generates basic controls from declarations.
 
@@ -134,6 +135,21 @@ Typed boxes keep element popovers coherent: a photo box can expose caption visib
 The template may expose additional element parameters, but they should be meaningful for that element's fixed role. Parameter-dependent alternate content types are deferred.
 
 An empty box retains its declared type. Its empty-state behavior is defined by the template: preserve space, hide artwork, or use a supported alternate composition. Editor drop targets may still be shown while empty.
+
+### Short text as string parameters
+
+Titles, chapter labels, subtitles, and similar short text are not Markdown boxes. A template declares them as string parameters at the appropriate scope, typically page/spread or element, and renders the value in its design. A multi-line string preserves explicit line breaks, as in a two-line heading.
+
+```ts
+const parameters = {
+  heading: { type: "string", multiline: true, label: "Heading", default: "" },
+  eyebrow: { type: "string", label: "Chapter label", default: "" },
+};
+```
+
+The template marks where each string is rendered so the editor can map a click on the canvas to the parameter and edit it in place, in addition to the generated settings control. The platform measures rendered string parameters against their declared area and reports overflow in the same way as for Markdown boxes. String parameters do not flow or continue; formatting within them is limited to what the template applies.
+
+The value belongs to the project instance like any other parameter value. Template switching maps it only through explicit compatible declarations.
 
 ## Concrete example: four-photo spread
 
@@ -477,6 +493,7 @@ Acceptance scenarios:
 - Four photo boxes independently show or hide their captions.
 - The same project photo appears twice with shared caption text and independent visibility/crops.
 - A text box never offers photo-only parameters or accepts a photo assignment.
+- A two-line spread heading is edited in place on the canvas, stored as a string parameter value, and reported when it no longer fits.
 - Clicking a calendar element or selecting its spread exposes the parameters at the declared scope.
 - Two calendar instances using the same definition retain different months.
 - One Markdown file flows through boxes on successive pages; resizing redistributes text without changing the source.
