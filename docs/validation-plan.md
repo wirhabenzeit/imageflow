@@ -18,6 +18,8 @@ That question cannot be answered in the abstract. "Sufficient" means sufficient 
 
 ## Phase 0: inputs
 
+Status: specification collected for Blurb Large Square in [print-target-blurb.md](print-target-blurb.md). Pending: confirming paper type, cover type, and the proposed physical book model decisions listed there.
+
 ### Target printer
 
 Choose one concrete printer for the first book and collect its specification:
@@ -54,6 +56,7 @@ Evaluate:
 - **Fonts.** Embedded and subset, without fallback glyphs.
 - **Effects.** Whether intended template effects (shadows, blend modes, SVG artwork, gradients) appear in the PDF as in preview.
 - **Compliance.** If the printer requires PDF/X, whether post-conversion produces a file that passes preflight.
+- **Blurb specifics.** Individual 855 × 864 pt pages with bleed on the outside edge only; Blurb uploader preflight on the RGB PDF; body text printing acceptably without 100% K black, or a CMYK post-processing step that maps black text to pure K; whether static and variable fonts embed as outline fonts rather than Type 3.
 - **Preview agreement.** Rasterize the PDF and compare it with screenshots of the same pages rendered in the editor.
 - **Physical proof.** Order one printed proof from the chosen printer.
 
