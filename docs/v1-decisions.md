@@ -63,3 +63,4 @@ MyBook/
 - [template-api.md](template-api.md) is accepted as the v1 baseline.
 - A Chromium-generated spike PDF passed a print service's upload check (manual test, 2026-11-09).
 - Before the first real order: real photographs through the export and a printed proof.
+- Implementation is planned in [v1-implementation-plan.md](v1-implementation-plan.md).
