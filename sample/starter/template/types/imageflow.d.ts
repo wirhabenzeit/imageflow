@@ -86,7 +86,31 @@ export const p: {
 // Declarations
 
 export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parameters?: Parameters; flowOrder?: number };
-export type ElementDeclaration = { label: string; parameters?: Parameters };
+/**
+ * Props of a template-supplied element editor. `values` holds all of the element's parameters with the draft
+ * applied; `set` changes the editor's own parameters in the draft. ImageFlow validates and saves the draft when
+ * the user clicks Done (or calls `commit`), as one undoable edit; `cancel` discards it.
+ */
+export type ElementEditorProps = {
+  values: Values;
+  set(changes: Values): void;
+  document: Values;
+  format: ResolvedFormat;
+  readOnly: boolean;
+  commit(): void;
+  cancel(): void;
+};
+/**
+ * An element's own editor for some of its parameters, shown in ImageFlow's editor dialog. It runs in a sandboxed
+ * frame with the template's CSS; generated controls remain for the element's other parameters.
+ */
+export type ElementEditor = {
+  label?: string;
+  parameters: readonly string[];
+  component(props: ElementEditorProps): ImageFlowNode;
+  presentation?: 'dialog';
+};
+export type ElementDeclaration = { label: string; parameters?: Parameters; editor?: ElementEditor };
 export type SpreadDeclaration = {
   label: string;
   /** `left` or `right` for a single page at the start or end of the book. Default `spread`. */

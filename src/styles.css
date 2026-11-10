@@ -306,3 +306,17 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 
 .inspector .box-photo-info select.box-photo-pick { margin-top: 3px; padding: 3px 6px; font-size: 12px; }
 .layout-note { margin: 4px 0 6px; font-size: 11px; color: var(--muted); }
+
+/* Template-supplied element editors */
+.element-editor { padding: 0; border: 0; border-radius: 12px; background: #fcfbf6; color: #26251e; box-shadow: 0 24px 80px #0007;
+  width: min(560px, 90vw); font: 14px/1.5 system-ui, sans-serif; }
+.element-editor::backdrop { background: #1d1c1855; }
+.ee-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #dcd9d0; }
+.ee-header h2 { margin: 0; font-size: 15px; }
+.element-editor-frame { display: block; width: 100%; border: 0; background: #fcfbf6; }
+.ee-status { margin: 0; padding: 8px 16px; font-size: 12px; }
+.ee-footer { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid #dcd9d0; }
+.ee-footer .muted { flex: 1; font-size: 11px; }
+.element-editor button { min-height: 30px; padding: 4px 12px; border: 1px solid #cbc7bc; border-radius: 6px; background: #fcfbf6; font: inherit; cursor: pointer; }
+.element-editor button.primary { background: var(--accent, #225343); color: #fff; border-color: var(--accent, #225343); }
+.element-editor button:disabled { opacity: .5; cursor: default; }

@@ -56,24 +56,167 @@ try {
   await sub.waitFor({ state: 'detached' });
   assert.notEqual((await read()).spreads[0].params.subtitle, 'discard me');
   
-  // Calendar: month picker + week start in one popover
+  // Calendar: the popover keeps generated controls for parameters the template's editor does not own (week
+  // start) and offers the template-supplied calendar editor for month and marked days (#15).
   await w.getByRole('button', { name: 'Calendar spread 14–15', exact: true }).click();
   at = await center('[data-spread="march"] [data-element="grid"]');
   await w.mouse.click(at.x, at.y);
-  const cal = w.getByRole('dialog', { name: 'Edit Month, Week starts' });
+  const cal = w.getByRole('dialog', { name: 'Edit Week starts' });
   await cal.waitFor();
-  await cal.locator('input[type="month"]').fill('2027-08');
-  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Month updated');
-  assert.equal((await read()).spreads[7].elements.grid.params.month, '2027-08-01');
-  await ready();
-  assert.match(await frame.locator('[data-spread="march"] [data-element="grid"] h3').textContent(), /August 2027/);
+  assert.equal(await cal.locator('input[type="month"]').count(), 0);
   await cal.getByRole('radio', { name: 'Sunday' }).click();
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Week starts updated');
   assert.equal((await read()).spreads[7].elements.grid.params.firstWeekday, 'sunday');
-  assert.ok(await cal.isVisible());
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
   assert.equal((await read()).spreads[7].elements.grid?.params?.firstWeekday ?? 'monday', 'monday');
+
+  // The editor proposes a draft; Done saves month and marks together as one edit, and one Undo reverts both.
+  await ready();
+  at = await center('[data-spread="march"] [data-element="grid"]');
+  await w.mouse.click(at.x, at.y);
+  await w.getByRole('dialog', { name: 'Edit Week starts' }).getByRole('button', { name: 'Edit calendar…' }).click();
+  const editorDialog = w.getByRole('dialog', { name: 'Edit calendar' });
+  await editorDialog.waitFor();
+  const calendarEditor = w.frameLocator('iframe.element-editor-frame');
+  await calendarEditor.getByRole('button', { name: 'Next month' }).click();
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
+  assert.equal((await read()).spreads[7].elements.grid.params.month, '2027-03-01');
+  await editorDialog.getByRole('button', { name: 'Done' }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Calendar grid updated');
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-04-01', marked: '14' });
+  await ready();
+  assert.match(await frame.locator('[data-spread="march"] [data-element="grid"] h3').textContent(), /April 2027/);
+  assert.equal(await frame.locator('[data-spread="march"] [data-element="grid"] .marked').textContent(), '14');
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
+
+  // Double-click opens the editor directly; Escape inside it discards the draft.
+  await ready();
+  at = await center('[data-spread="march"] [data-element="grid"]');
+  await w.mouse.dblclick(at.x, at.y);
+  await editorDialog.waitFor();
+  await calendarEditor.getByRole('button', { name: '3', exact: true }).click();
+  await calendarEditor.getByRole('button', { name: '3', exact: true }).press('Escape');
+  await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
+  await w.locator('.toolbar .brand').click();
+  await w.waitForFunction(() => !document.querySelector('.edit-popover'));
+
+  // Editor review cases (#15). Helpers: click an application menu item; wait for the book to render anew.
+  const menu = (label) => app.evaluate(({ Menu }, label) => {
+    const find = (items) => {
+      for (const item of items) {
+        if (item.label === label) return item;
+        const inner = item.submenu && find(item.submenu.items);
+        if (inner) return inner;
+      }
+    };
+    find(Menu.getApplicationMenu().items).click();
+  }, label);
+  const rerendered = async (change) => {
+    const old = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+    await change();
+    await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, old, { timeout: 30000 });
+  };
+  // Waits until the editor reported ready (or failed) and its frame took its content height, so clicks do not land
+  // while the frame is still growing.
+  const openCalendarEditor = async ({ sized = true } = {}) => {
+    at = await center('[data-spread="march"] [data-element="grid"]');
+    await w.mouse.dblclick(at.x, at.y);
+    await editorDialog.waitFor();
+    await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
+    if (sized) await w.waitForFunction(() => document.querySelector('iframe.element-editor-frame')?.style.height !== '240px');
+  };
+  const closeEditor = async () => {
+    await editorDialog.getByRole('button', { name: 'Cancel' }).click();
+    await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+  };
+
+  // Newer values arriving while the editor is open (here Reload after an external edit) make its draft stale:
+  // the dialog says so and neither Done nor ⌘↩ overwrites them.
+  const beforeExternal = await readFile(join(project, 'project.json'), 'utf8');
+  await openCalendarEditor();
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).waitFor();
+  const external = JSON.parse(beforeExternal);
+  external.spreads[7].elements.grid.params.month = '2028-05-01';
+  await writeFile(join(project, 'project.json'), JSON.stringify(external, null, 2));
+  await rerendered(() => menu('Reload Project'));
+  await editorDialog.getByRole('alert').filter({ hasText: 'changed while this editor was open' }).waitFor();
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
+  assert.equal(await editorDialog.getByRole('button', { name: 'Done' }).isDisabled(), true);
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).press('Meta+Enter');
+  await w.waitForTimeout(300);
+  assert.ok(await editorDialog.isVisible());
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2028-05-01' });
+  await closeEditor();
+  await writeFile(join(project, 'project.json'), beforeExternal);
+  await rerendered(() => menu('Reload Project'));
+
+  // The same holds when only the template changes what the editor shows: a calendar without a saved month uses the
+  // template default, and a new default makes the open draft stale too.
+  const templateFile = join(project, 'template', 'index.tsx');
+  const templateSource = await readFile(templateFile, 'utf8');
+  const unsaved = JSON.parse(beforeExternal);
+  delete unsaved.spreads[7].elements.grid.params.month;
+  await writeFile(join(project, 'project.json'), JSON.stringify(unsaved, null, 2));
+  await rerendered(() => menu('Reload Project'));
+  await openCalendarEditor();
+  assert.match(await calendarEditor.locator('h3').textContent(), /January 2027/);
+  const defaultMonth = "default: '2027-01-01', precision: 'month'";
+  assert.ok(templateSource.includes(defaultMonth));
+  await rerendered(() => writeFile(templateFile, templateSource.replace(defaultMonth, "default: '2028-01-01', precision: 'month'")));
+  await editorDialog.getByRole('alert').filter({ hasText: 'changed while this editor was open' }).waitFor({ timeout: 30000 });
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
+  assert.equal(await editorDialog.getByRole('button', { name: 'Done' }).isDisabled(), true);
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).press('Meta+Enter');
+  await w.waitForTimeout(300);
+  assert.ok(await editorDialog.isVisible());
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, {});
+  await closeEditor();
+  await rerendered(() => writeFile(templateFile, templateSource));
+  await writeFile(join(project, 'project.json'), beforeExternal);
+  await rerendered(() => menu('Reload Project'));
+
+  // set() followed directly by commit() saves the values just set, not the previous render's.
+  const withEditor = (code) => templateSource.replace(
+    'function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {',
+    'function CalendarEditor({ values, set, readOnly, commit }: ElementEditorProps) {\n' + code);
+  const jump = `  const jump = <button type="button" onClick={() => { set({ month: '2027-04-01', marked: '9' }); commit(); }}>Jump to April</button>;
+  const explode = <button type="button" onClick={() => { throw new Error('handler exploded'); }}>Explode</button>;`;
+  await rerendered(() => writeFile(templateFile, withEditor(jump).replace(
+    '<div className="calendar-editor-nav">', '<div className="calendar-editor-nav">{jump}{explode}')));
+  await openCalendarEditor();
+  await calendarEditor.getByRole('button', { name: 'Jump to April' }).click();
+  await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+  for (let start = Date.now(); (await read()).spreads[7].elements.grid.params.month !== '2027-04-01' && Date.now() - start < 10000;) {
+    await w.waitForTimeout(50);
+  }
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-04-01', marked: '9' });
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  await ready();
+
+  // An editor that throws in an event handler reports it, and the dialog only offers Cancel.
+  await openCalendarEditor();
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
+  await calendarEditor.getByRole('button', { name: 'Explode' }).click();
+  await editorDialog.getByRole('alert').filter({ hasText: 'The editor stopped working: handler exploded' }).waitFor();
+  assert.equal(await editorDialog.getByRole('button', { name: 'Done' }).isDisabled(), true);
+  await closeEditor();
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
+
+  // An editor that throws while rendering is reported instead of leaving a blank dialog.
+  await rerendered(() => writeFile(templateFile, withEditor("  if (values.month) throw new Error('render exploded');")));
+  await openCalendarEditor({ sized: false });
+  await editorDialog.getByRole('alert').filter({ hasText: 'The editor stopped working: render exploded' }).waitFor();
+  assert.equal(await editorDialog.getByText('Loading the editor…').count(), 0);
+  assert.equal(await editorDialog.getByRole('button', { name: 'Done' }).isDisabled(), true);
+  await closeEditor();
+  await rerendered(() => writeFile(templateFile, templateSource));
+  await w.locator('.toolbar .brand').click();
+  await w.waitForFunction(() => !document.querySelector('.edit-popover'));
 
   // Clicking a text box edits its own options (columns) plus the body size the template marks it with.
   at = await center('[data-spread="arriving"] [data-box="body"]');

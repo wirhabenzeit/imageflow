@@ -8,9 +8,9 @@ import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } 
 import { cssMM, pageSequence, resolveFormat, toMillimeters } from './format';
 import type { PrintSide, ResolvedFormat } from './format';
 import { parseDocument } from './project';
-import type { RenderProject, SpreadState } from './project';
+import type { RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
-import { parameterWarnings } from './parameters';
+import { parameterWarnings, resolveParams } from './parameters';
 import { flow } from './text-flow';
 import { chooseFormat, runtime, setTemplateAssets, SpreadView, templateInfo, templateSchema } from './template';
 import type { FlowPosition, Template } from './template';
@@ -310,6 +310,76 @@ function photoLoader(root: HTMLElement, visible: () => { top: number; bottom: nu
   };
 }
 
+// Runs a template-supplied element editor. The component edits a draft of the editor's parameters; the frame
+// reports the draft, its height, and commit or cancel to the app, which validates and saves. The frame never
+// changes project data itself.
+function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, elementId: string, readOnly: boolean) {
+  const spread = book.project.spreads.find(({ id }) => id === spreadId);
+  const element = spread && template.spreads[spread.definition]?.elements[elementId];
+  const editor = element?.editor;
+  if (!spread || !element || !editor) throw new Error('This element has no editor.');
+  const saved = resolveParams(element.parameters, spread.elements[elementId]?.params ?? {});
+  const document = resolveParams(template.parameters, book.project.params);
+  const format = resolveFormat(template.format);
+  const claimed = (values: Values) => Object.fromEntries(editor.parameters.map((key) => [key, values[key]]));
+  root.className = 'if-editor';
+
+  // The draft lives outside React so set() followed directly by commit() sends the newest values, before React
+  // has rendered them. Every message is posted in order, and commit carries the draft as well.
+  let draft: Values = saved;
+  let changed = false;
+  let failed = false;
+  const fail = (error: unknown) => {
+    if (failed) return;
+    failed = true;
+    const reason = error instanceof Error ? error.message : String(error);
+    post({ state: 'error', message: 'The editor stopped working: ' + reason });
+  };
+  const commit = () => { if (!failed) post({ type: 'editor-commit', values: changed ? claimed(draft) : {} }); };
+  const cancel = () => post({ type: 'editor-cancel' });
+  let update: ((values: Values) => void) | undefined;
+  const set = (changes: Values) => {
+    if (readOnly || failed) return;
+    const allowed = Object.entries(changes).filter(([key]) => editor.parameters.includes(key));
+    if (!allowed.length) return;
+    draft = { ...draft, ...Object.fromEntries(allowed) };
+    changed = true;
+    post({ type: 'editor-draft', values: claimed(draft) });
+    update?.(draft);
+  };
+
+  function Host() {
+    const [values, setValues] = React.useState<Values>(draft);
+    React.useEffect(() => {
+      update = setValues;
+      // Effects run only once the component has mounted without throwing.
+      post({ type: 'editor-ready' });
+      return () => { update = undefined; };
+    }, []);
+    return React.createElement(editor!.component, { values, set, document, format, readOnly, commit, cancel });
+  }
+
+  // Errors from the component's event handlers and async work do not reach React's error handling.
+  window.addEventListener('error', (event) => {
+    // Browsers report a benign layout notice through the same event.
+    if (!event.error && /^ResizeObserver loop/.test(event.message)) return;
+    fail(event.error ?? event.message);
+  });
+  window.addEventListener('unhandledrejection', (event) => fail(event.reason));
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancel();
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      commit();
+    }
+  });
+  new ResizeObserver(() => post({ type: 'editor-size', height: Math.ceil(root.getBoundingClientRect().height) })).observe(root);
+  const react = createRoot(root, { onUncaughtError: fail, onCaughtError: fail });
+  flushSync(() => react.render(React.createElement(Host)));
+}
+
 export async function startRender(root: HTMLElement) {
   let info: TemplateInfo | undefined;
   // The editor reports which part of the book frame is on screen. Listen before anything slow happens and ask
@@ -339,6 +409,10 @@ export async function startRender(root: HTMLElement) {
     if (template.id !== book.project.template.id) throw new Error('The template ID does not match project.json.');
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
+    if (book.mode === 'edit' && query.get('view') === 'editor') {
+      renderEditor(root, book, template, query.get('spread') ?? '', query.get('element') ?? '', query.has('readonly'));
+      return;
+    }
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
     const { chains, positions } = textAssignments(book, template);

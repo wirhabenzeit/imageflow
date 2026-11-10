@@ -37,7 +37,21 @@ function editTarget(book: RenderProject, prefix: string, parameters: Parameters 
 }
 
 export type FlowPosition = { part: number; parts: number; title?: string };
-const elements = z.record(identifier, z.object({ label: z.string().min(1), parameters: parametersSchema })).default({});
+// An element may supply its own editor for some of its parameters. The component runs in a sandboxed frame
+// and edits a draft; ImageFlow owns the dialog, validation, saving and Undo.
+export type ElementEditorProps = {
+  values: Values; set: (changes: Values) => void; document: Values; format: ResolvedFormat;
+  readOnly: boolean; commit: () => void; cancel: () => void;
+};
+const elementEditor = z.object({
+  label: z.string().min(1).optional(),
+  parameters: z.array(identifier).min(1),
+  component: z.custom<(props: ElementEditorProps) => ReactNode>((value) => typeof value === 'function', 'Expected an editor component.'),
+  presentation: z.literal('dialog').default('dialog'),
+});
+const elements = z.record(identifier, z.object({ label: z.string().min(1), parameters: parametersSchema, editor: elementEditor.optional() })
+  .refine(({ parameters, editor }) => !editor || editor.parameters.every((key) => Object.hasOwn(parameters, key)),
+    'An element editor can only edit parameters its element declares.')).default({});
 const box = z.object({
   type: z.enum(['photo', 'markdown']), label: z.string().min(1), parameters: parametersSchema, flowOrder: z.int().positive().optional(),
 });
@@ -97,7 +111,13 @@ export function templateInfo(template: Template): TemplateInfo {
   return {
     format: template.format, formatId: template.formatId, formats: template.formatChoices,
     version: template.version, parameters: template.parameters,
-    spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, ...info }]) => [id, info])),
+    // Functions (render, editor components) stay in the render frame; the editor gets plain declarations.
+    spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, elements, ...info }]) => [id, {
+      ...info,
+      elements: Object.fromEntries(Object.entries(elements).map(([key, { editor, ...element }]) => [key, {
+        ...element, ...(editor ? { editor: { label: editor.label, parameters: editor.parameters, presentation: editor.presentation } } : {}),
+      }])),
+    }])),
   };
 }
 

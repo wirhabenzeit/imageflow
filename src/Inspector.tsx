@@ -62,12 +62,12 @@ function CheckList({ check, checking, spread, select }: {
 
 // Shows either the selected spread or the selected source, never both.
 export function Inspector({ summary, spread, source, template, render, usage, edit, importText, highlight, issues, check, checking,
-  select, inspectSource, quickLook, focus, targets = [], adjustCrop }: {
+  select, inspectSource, quickLook, focus, targets = [], adjustCrop, openEditor }: {
   summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string) => void; importText: (box: string) => void;
   highlight: (id?: string) => void; issues: string; check?: BookCheck; checking: boolean; select: (spread: string) => void;
   inspectSource: (source: SourceRef) => void; quickLook: () => void; focus?: { box: string; at: number };
-  targets?: BookGeometry['targets']; adjustCrop: (box: string) => void;
+  targets?: BookGeometry['targets']; adjustCrop: (box: string) => void; openEditor: (element: string) => void;
 }) {
   const sections = useRef(new Map<string, HTMLElement>());
   const [flash, setFlash] = useState<string>();
@@ -236,7 +236,12 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
           ref={(element) => { if (element) sections.current.set(id, element); else sections.current.delete(id); }}
           className={flash === id ? 'flash' : undefined}>
           <summary>{element.label}</summary>
-          <Fields schema={element.parameters} values={spread.elements[id]?.params ?? {}} update={(key, value) => changeSpread((item) => {
+          {element.editor && <div className="box-actions">
+            <button type="button" onClick={() => openEditor(id)}>{(element.editor.label ?? 'Open editor') + '…'}</button>
+          </div>}
+          {/* Parameters a template-supplied editor owns are edited there, not with generated controls. */}
+          <Fields schema={Object.fromEntries(Object.entries(element.parameters).filter(([key]) => !element.editor?.parameters.includes(key)))}
+            values={spread.elements[id]?.params ?? {}} update={(key, value) => changeSpread((item) => {
             item.elements[id] ??= { params: {} };
             item.elements[id].params[key] = value;
           })} />

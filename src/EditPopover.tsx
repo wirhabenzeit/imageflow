@@ -20,7 +20,10 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
   const panel = useRef<HTMLDivElement>(null);
   const [drafts, setDrafts] = useState<Record<string, Value>>({});
   const [placement, setPlacement] = useState<{ left: number; top: number }>();
-  const targets = edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((target): target is EditTarget => !!target);
+  // Parameters owned by a template-supplied element editor are edited there; the popover offers it as an action.
+  const editors = template.spreads[spread.definition]?.elements ?? {};
+  const targets = edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((target): target is EditTarget =>
+    !!target && !(target.scope === 'element' && editors[target.owner!]?.editor?.parameters.includes(target.key)));
 
   function apply(changes: Record<string, Value>) {
     const valid = targets.filter(({ path, param }) => path in changes && isParameterValue(param, changes[path]) &&
@@ -100,7 +103,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
     if (!owner || !layout) return undefined;
     return (owner.scope === 'element' ? layout.elements : layout.boxes)[owner.owner!]?.label;
   }
-  if (!targets.length) return null;
+  if (!targets.length && !actions) return null;
   const heading: ReactNode = targets.length === 1
     ? <>{targets[0].param.label}{scopeLabel[targets[0].scope] && <span className="muted"> · {scopeLabel[targets[0].scope]}</span>}</>
     : ownerLabel() ?? 'Edit';
