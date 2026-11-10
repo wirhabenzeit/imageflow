@@ -54,3 +54,9 @@
 .calendar-editor .days button:hover { border-color: #9bb3a3; }
 .calendar-editor .days button.marked { background: #243b30; color: #fff; font-weight: 600; }
 .calendar-editor .days button:focus-visible { outline: 2px solid #243b30; outline-offset: 1px; }
+
+/* Route inset on panoramas: a GPX track without a basemap. */
+.route-map { display: grid; place-items: center; border-radius: 2mm; background: #fffc; }
+.route-map svg { width: 100%; height: 100%; }
+.route-map polyline { fill: none; stroke: var(--ink, #243b30); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.route-map.empty { border: .3mm dashed #fff; background: #0003; color: #fff; font: 500 8pt/1.3 "Field Sans"; text-align: center; padding: 3mm; }

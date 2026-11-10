@@ -20,12 +20,13 @@ MyBook/
   photos.json      photo index: stable id → photos/<file>, caption, title, credit, alt text
   photos/          original photo files, copied in on import
   texts/           Markdown files, edited in any editor
+  files/           files for file parameters (such as GPX tracks), copied in when chosen
   template/        the template's code: TSX, CSS, fonts, assets
   .imageflow/      disposable cache: previews, thumbnails, sRGB copies, bundled template
 ```
 
-- Photos and texts have stable identifiers. `photos.json` maps photo ids to paths; `project.json` maps text ids to paths. Renaming a file outside the app only requires fixing that mapping; missing files are reported, not dropped.
-- The app watches the folder. A changed `.md` file reflows its text; a changed template file rebuilds the template and re-renders.
+- Photos, texts and files have stable identifiers. `photos.json` maps photo ids to paths; `project.json` maps text and file ids to paths. Renaming a file outside the app only requires fixing that mapping; missing files are reported, not dropped.
+- The app watches the folder. A changed `.md` file reflows its text; a changed file in `files/` is read again; a changed template file rebuilds the template and re-renders.
 - Everything except `.imageflow/` is authoritative and human-readable, so a project folder can be versioned with git.
 
 ## Templates
@@ -55,7 +56,7 @@ MyBook/
 ## Scope
 
 - **No covers** in v1; covers are made in the printer's own tools.
-- **Parameter types:** boolean, integer, number, string (single- and multi-line), enum, colour, date. No objects, no inheritance between scopes.
+- **Parameter types:** boolean, integer, number, string (single- and multi-line), enum, colour, date, file (#16: a project file such as a GPX track, read by the template as text). No objects, no inheritance between scopes.
 - **Template switching:** boxes and parameters with the same identifier and type map automatically; everything else is kept in `project.json` and reported, not migrated.
 - **Deferred:** clicking to select, on-canvas crop, multi-column text boxes, arbitrary page dimensions within declared limits, shared printer-format registry, images and tables in Markdown, mixed photo/text boxes, sandboxed third-party templates.
 

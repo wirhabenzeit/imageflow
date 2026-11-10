@@ -105,8 +105,9 @@ export default defineTemplate({
 | `p.enum` | one of `options` | `default`, `options` (values), `labels` |
 | `p.color` | `#rrggbb` | `default` |
 | `p.date` | ISO date `YYYY-MM-DD` | `default`, `min`, `max`, `precision` (`day` or `month`) |
+| `p.file` | file ID, or `''` when none is assigned | `accept` (lowercase extensions such as `'.gpx'`); see File parameters |
 
-Every parameter has a `label` and a `default`; a saved value outside the constraints is reported and replaced by the default for rendering, but kept in `project.json`.
+Every parameter has a `label` and a `default` (`p.file` supplies `''`); a saved value outside the constraints is reported and replaced by the default for rendering, but kept in `project.json`.
 
 Scopes: `parameters` at template level (document), on a spread definition (spread instance), on a box or element (element instance). Values are stored in `project.json` at the matching scope. There is no inheritance between scopes.
 
@@ -199,7 +200,27 @@ elements: { grid: {
 - **Draft and commit:** `set()` takes effect immediately, so `set({ ... }); commit()` in one handler saves those changes; `values` catches up on the next render.
 - **Changes from elsewhere:** if what the editor works on changes while it is open (a saved value after Reload or Undo, or a template edit that changes a default or a declaration of the parameters it handles), the dialog says so and refuses to save; the user reopens the editor on the current values.
 - **Failures:** if the component throws while rendering, in an event handler or in async work, the dialog shows the error and offers only Cancel. The editor counts as loaded once the component has mounted.
-- **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors that need external resources (map tiles, GPX files) depend on #16; the starter's calendar editor is the reference example.
+- **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors can read files of file parameters with `file()`; remote resources such as map tiles are not available. The starter's calendar editor is the reference example.
+
+### File parameters
+
+A parameter can refer to a file the user adds to the project, for input that is not photos or Markdown, such as a GPX track for a map:
+
+```tsx
+import { file, p } from 'imageflow';
+
+elements: { route: { label: 'Route map', parameters: { track: p.file({ label: 'GPX track', accept: ['.gpx'] }) } } },
+render: (ctx) => {
+  const track = file(ctx.elements.route.params.track);   // { name, extension, text } or undefined
+  …
+},
+```
+
+- **Choosing:** the generated control lists the project's files with an accepted extension, offers **Choose…** to add one, and **None** to clear the assignment. Adding a file copies it into `files/` and registers it in `project.json`; assigning it is a normal edit. Undo removes the assignment and keeps the file; clearing never deletes a file.
+- **Value:** the file's ID in the project's `files` registry, or `''`. Paths in the registry are relative to the project, so moving the project folder keeps its files.
+- **Content:** `file(id)` returns the file's name, extension and UTF-8 text, read when the project loads (files are limited to 20 MB). Preview and export render from the same text. It returns `undefined` when nothing is assigned or the assigned file cannot be read.
+- **Diagnostics:** ImageFlow reports an assigned file that is no longer registered, missing or unreadable, or whose extension is not in `accept`, as a Book check error for that element, which blocks print export. An unassigned file parameter is valid. The template parses the content; if it cannot, it should render without it and mark a node with `data-issue="…"`, which the Book check reports as a warning for that spread (a hidden node works in export).
+- **Example:** the starter's Panorama layout has a Route map element that draws an assigned GPX track as a line in an inset (`sample/starter/files/senja-road.gpx`). It has no basemap: remote map styles and tiles would make export depend on the network, and are not part of the contract.
 
 ## Platform components
 
@@ -280,6 +301,7 @@ When the template is loaded:
 When a spread renders:
 
 - Every declared box rendered once; no undeclared box or element ids.
+- Assigned files of file parameters exist, are readable, and have an accepted extension; `data-issue` marks reported by the template.
 - No rendered content extends beyond the spread's bleed (Markdown overflow is handled by the flow and reported as unplaced text).
 
 At export:
@@ -305,7 +327,7 @@ A spread instance in `project.json`:
 }
 ```
 
-The project also stores the document parameter values, the template `id` and `version` it was last opened with, and the text id → path mapping. Photo metadata lives in `photos.json`.
+The project also stores the document parameter values, the template `id` and `version` it was last opened with, the text id → path mapping, and the file id → path mapping for file parameters (`files`). Photo metadata lives in `photos.json`.
 
 ## Authoring and compatibility details
 

@@ -7,6 +7,7 @@ import { revealIn } from './reveal';
 import { EditPopover } from './EditPopover';
 import { CropEditor } from './CropEditor';
 import { ElementEditorDialog } from './ElementEditor';
+import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementOf } from './spread';
 import type { Placement } from './spread';
 import { assignmentCounts, newSpread, sourceUsage } from './editing';
@@ -200,6 +201,28 @@ export function App() {
       setNotice('Imported ' + result.value.imported.length + (result.value.imported.length === 1 ? ' file' : ' files'));
     });
   }
+
+  // Adds a file for a file parameter to the project's registry and resolves to its ID; the caller assigns it as
+  // a normal edit, so Undo removes the assignment and keeps the file.
+  function importParameterFile(accept: string[]) {
+    return new Promise<string | undefined>((resolve) => enqueue(async () => {
+      try {
+        const before = current.current;
+        if (!api || !before || before.readOnly) return resolve(undefined);
+        setBusy('Importing file…');
+        const result = await api.importFiles(before.id, { kind: 'file', accept });
+        if ('error' in result) throw new Error(result.error);
+        if (!result.value) return resolve(undefined);
+        adopt(result.value.summary);
+        resolve(result.value.imported[0]);
+      } catch (error) {
+        resolve(undefined);
+        throw error;
+      }
+    }));
+  }
+  // importParameterFile only reads refs, the preload API and state setters, so it may be kept from the first render.
+  const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, importFile: importParameterFile }), [summary?.project.files]);
 
   function act(command: Command) {
     if (command === 'undo' || command === 'redo') return undo(command);
@@ -541,7 +564,7 @@ export function App() {
   const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
   const pagesLabel = (i: number) => (pageLabels[i].includes('–') ? 'Pages ' : 'Page ') + pageLabels[i];
 
-  return <div className="studio">
+  return <ProjectFilesContext.Provider value={projectFiles}><div className="studio">
     <header className="toolbar">
       <div className="toolbar-actions">
         <div className="brand"><span className="brand-icon" aria-hidden="true">◫</span> ImageFlow</div>
@@ -741,5 +764,5 @@ export function App() {
     <footer className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
       {issue || busy || notice || (summary ? 'Project preview · Proof export' : 'ImageFlow for macOS')}
     </footer>
-  </div>;
+  </div></ProjectFilesContext.Provider>;
 }

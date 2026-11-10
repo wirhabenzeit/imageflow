@@ -1,10 +1,36 @@
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { Values } from './project';
 import type { Parameter, Parameters } from './parameters';
 import { isParameterValue } from './parameters';
+import { fileName } from './source-items';
 
 type Value = Values[string];
+
+// The project's files (ID → path in files/) for file parameters, and how to add one. Provided by the editor shell.
+export const ProjectFilesContext = createContext<{
+  files: Record<string, string>; importFile?: (accept: string[]) => Promise<string | undefined>;
+}>({ files: {} });
+
+// Chooses among the project's files with an accepted extension, adds a new one, or clears the assignment.
+function FileControl({ param, value, apply, autoFocus }: {
+  param: Extract<Parameter, { type: 'file' }>; value: string; apply: (value: Value) => void; autoFocus: boolean;
+}) {
+  const { files, importFile } = useContext(ProjectFilesContext);
+  const accepted = Object.entries(files).filter(([, path]) => param.accept.some((ext) => path.toLowerCase().endsWith(ext)));
+  const missing = !!value && !Object.hasOwn(files, value);
+  return <div className="pc-row pc-file">
+    <select aria-label={param.label} value={value} data-autofocus={autoFocus || undefined} onChange={(event) => apply(event.target.value)}>
+      <option value="">None</option>
+      {missing && <option value={value}>Missing file</option>}
+      {value && !missing && !accepted.some(([id]) => id === value) && <option value={value}>{fileName(files[value])}</option>}
+      {accepted.map(([id, path]) => <option key={id} value={id}>{fileName(path)}</option>)}
+    </select>
+    {importFile && <button type="button" onClick={() => {
+      void importFile(param.accept).then((id) => { if (id) apply(id); });
+    }}>Choose…</button>}
+  </div>;
+}
 
 // One control per parameter type, shared by the Inspector and the click-to-edit popover so a parameter looks and
 // behaves the same in both. Discrete choices call `apply` at once. Typed values stay in `draft` until the caller
@@ -40,6 +66,7 @@ export function ParamControl({ param, value, draft, setDraft, apply, autoFocus =
         onClick={() => apply(option)}>{param.labels?.[option] ?? option}</button>)}
     </div>;
   }
+  if (param.type === 'file') return <FileControl param={param} value={String(shown)} apply={apply} autoFocus={autoFocus} />;
   if (param.type === 'date') {
     const month = param.precision === 'month';
     return <input type={month ? 'month' : 'date'} aria-label={param.label} data-autofocus={focusMark}

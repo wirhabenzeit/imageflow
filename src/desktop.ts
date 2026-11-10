@@ -23,7 +23,10 @@ export type ProjectSummary = ProjectFiles & {
   texts: Record<string, string>;
 };
 export type Result<T> = { value: T } | { error: string };
-export type ImportRequest = { kind: 'photo' | 'markdown'; paths?: string[]; folder?: boolean; target?: { spread: string; box: string } };
+// `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions.
+export type ImportRequest = {
+  kind: 'photo' | 'markdown' | 'file'; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string };
+};
 
 export type DesktopApi = {
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;

@@ -171,7 +171,7 @@ function watchProject(book: OpenProject) {
   }
   try {
     watcher = watch(folder, { recursive: true }, (_event, file) => {
-      if (!file || !/^(template|texts|photos)\//.test(file) || file.endsWith('.DS_Store')) return;
+      if (!file || !/^(template|texts|photos|files)\//.test(file) || file.endsWith('.DS_Store')) return;
       observedChanges.add(file);
       clearTimeout(reloadTimer);
       reloadTimer = setTimeout(reload, 220);
@@ -254,17 +254,23 @@ function currentBook(id: string) {
 async function importFiles(owner: BrowserWindow, id: string, request: ImportRequest) {
   const book = currentBook(id);
   if (book.readOnly) throw new Error('Create a project to import files.');
-  if (request.kind !== 'photo' && request.kind !== 'markdown') throw new Error('Unknown import type.');
+  if (request.kind !== 'photo' && request.kind !== 'markdown' && request.kind !== 'file') throw new Error('Unknown import type.');
+  if (request.kind === 'file' && (!Array.isArray(request.accept) || !request.accept.length ||
+      !request.accept.every((ext) => typeof ext === 'string' && /^\.[a-z0-9]{1,10}$/.test(ext)) || request.folder)) {
+    throw new Error('Invalid file import.');
+  }
   if (request.target && (!identifier.safeParse(request.target.box).success || !identifier.safeParse(request.target.spread).success)) {
     throw new Error('Invalid import target.');
   }
   let paths = request.paths;
   if (!paths) {
     const photo = request.kind === 'photo';
+    const file = request.kind === 'file';
+    const extensions = photo ? [...photoExtensions] : file ? request.accept! : ['.md'];
     const choice = await dialog.showOpenDialog(owner, {
-      title: photo ? 'Import Photos' : 'Import Markdown',
-      properties: request.folder ? ['openDirectory'] : ['openFile', 'multiSelections'],
-      filters: [{ name: photo ? 'Photos' : 'Markdown', extensions: photo ? [...photoExtensions].map((ext) => ext.slice(1)) : ['md'] }],
+      title: photo ? 'Import Photos' : file ? 'Choose File' : 'Import Markdown',
+      properties: request.folder ? ['openDirectory'] : file ? ['openFile'] : ['openFile', 'multiSelections'],
+      filters: [{ name: photo ? 'Photos' : file ? request.accept!.join(', ') : 'Markdown', extensions: extensions.map((ext) => ext.slice(1)) }],
     });
     if (choice.canceled) return null;
     paths = choice.filePaths;
