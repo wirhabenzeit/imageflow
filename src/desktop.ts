@@ -43,7 +43,9 @@ export type SpreadDefinition = {
   boxes: Record<string, BoxDefinition>; elements: Record<string, { label: string; parameters: Parameters }>;
 };
 export type TemplateInfo = {
-  version: string; format: PrintFormat; parameters: Parameters; spreads: Record<string, SpreadDefinition>;
+  version: string; parameters: Parameters; spreads: Record<string, SpreadDefinition>;
+  // The format in use, its ID, and the labels of all formats the template offers.
+  format: PrintFormat; formatId: string; formats: Record<string, string>;
 };
 export type BoxLocation = { id: string; type: 'photo' | 'markdown'; x: number; y: number; width: number; height: number };
 // The editor shows the whole book in two frames: the scrolling spread view and the sidebar thumbnails.

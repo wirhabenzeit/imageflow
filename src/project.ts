@@ -27,6 +27,8 @@ export const projectSchema = z.object({
   schemaVersion: z.literal(1),
   title: label,
   template: z.object({ id: identifier, version: label }),
+  // The template format chosen in Book settings; templates with one format ignore it.
+  format: identifier.optional(),
   params: values,
   texts: z.record(identifier, z.string()).default({}),
   spreads: z.array(spreadContent.extend({

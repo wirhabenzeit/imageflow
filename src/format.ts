@@ -6,7 +6,7 @@ const insets = z.object({ top: length, bottom: length, outside: length, binding:
 const resolution = z.object({ minimum: z.number().positive(), target: z.number().positive(), maximum: z.number().positive() })
   .refine(({ minimum, target, maximum }) => minimum <= target && target <= maximum, 'Resolution must satisfy minimum ≤ target ≤ maximum.');
 
-export const formatSchema = z.object({
+const declaredFormat = z.object({
   label: z.string().trim().min(1),
   trim: z.object({ width: positiveLength, height: positiveLength }),
   bleed: insets,
@@ -49,7 +49,9 @@ function resolveInsets(inset: PrintFormat['bleed']) {
   };
 }
 
-export function resolveFormat(format: PrintFormat) {
+// Page geometry the template can declare but print and the editor cannot use. Checked when the template loads,
+// so a broken format is reported as a template problem rather than when a book first switches to it.
+function geometry(format: z.infer<typeof declaredFormat>) {
   const trim = { width: toMillimeters(format.trim.width), height: toMillimeters(format.trim.height) };
   const bleed = resolveInsets(format.bleed);
   const safe = resolveInsets(format.safe);
@@ -57,14 +59,23 @@ export function resolveFormat(format: PrintFormat) {
   const spreadWidth = (trim.width + bleed.outside) * 2;
   const outputWidth = format.structure.delivery === 'pages' ? pageWidth : spreadWidth;
   const height = trim.height + bleed.top + bleed.bottom;
-  if (outputWidth < 10 || height < 10 || outputWidth > 1000 || height > 1000) {
-    throw new Error('PDF dimensions must be between 10 and 1000 mm on each edge.');
-  }
-  if (bleed.binding > trim.width + bleed.outside) throw new Error('Binding bleed exceeds the facing page.');
-  if (safe.outside + safe.binding >= trim.width || safe.top + safe.bottom >= trim.height) {
-    throw new Error('Template safe insets leave no space inside the trim.');
-  }
-  return { trim, bleed, safe, pageWidth, spreadWidth, outputWidth, height, resolution: format.output.resolution };
+  const problem = outputWidth < 10 || height < 10 || outputWidth > 1000 || height > 1000
+    ? 'PDF dimensions must be between 10 and 1000 mm on each edge.'
+    : bleed.binding > trim.width + bleed.outside ? 'Binding bleed exceeds the facing page.'
+    : safe.outside + safe.binding >= trim.width || safe.top + safe.bottom >= trim.height ? 'Template safe insets leave no space inside the trim.'
+    : undefined;
+  return { problem, resolved: { trim, bleed, safe, pageWidth, spreadWidth, outputWidth, height, resolution: format.output.resolution } };
+}
+
+export const formatSchema = declaredFormat.superRefine((format, context) => {
+  const { problem } = geometry(format);
+  if (problem) context.addIssue({ code: 'custom', message: problem });
+});
+
+export function resolveFormat(format: PrintFormat) {
+  const { problem, resolved } = geometry(format);
+  if (problem) throw new Error(problem);
+  return resolved;
 }
 
 export function pageSequence(spans: Span[], format: PrintFormat) {

@@ -16,10 +16,20 @@ import { QuickLook, Sources } from './Sources';
 import { photoMime, sourceList, textMime } from './source-items';
 import type { SourceKind, SourceRef } from './source-items';
 import { pageSequence, resolveFormat } from './format';
+import type { ResolvedFormat } from './format';
 import type { ProjectFiles } from './project';
 
-function Guides({ sheet, template }: { sheet: Rect; template: TemplateInfo }) {
-  const { trim, bleed, safe, spreadWidth, height } = resolveFormat(template.format);
+// The editor shell must survive a template whose format cannot be resolved; the render reports why.
+function formatOf(template?: TemplateInfo) {
+  try {
+    return template && resolveFormat(template.format);
+  } catch {
+    return undefined;
+  }
+}
+
+function Guides({ sheet, format }: { sheet: Rect; format: ResolvedFormat }) {
+  const { trim, bleed, safe, spreadWidth, height } = format;
   const x = sheet.width / spreadWidth;
   const y = sheet.height / height;
   return <div className="guides" aria-hidden="true" style={{ left: sheet.x, top: sheet.y, width: sheet.width, height: sheet.height }}>
@@ -507,7 +517,11 @@ export function App() {
   // While an edit re-renders, export stays available from the last finished render; a failed render disables it.
   const canExport = (render ?? lastReady)?.state === 'ready' && !busy;
   const counts = summary ? assignmentCounts(summary.project) : {};
-  const format = template && resolveFormat(template.format);
+  const format = formatOf(template);
+  // A saved format the template's named formats no longer include; the Book check reports it and print export is
+  // blocked. A template with one fixed format offers no choices and ignores the saved one.
+  const missingFormat = !!template && Object.keys(template.formats).length > 0 && !!summary?.project.format &&
+    !Object.hasOwn(template.formats, summary.project.format);
   const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
   const pagesLabel = (i: number) => (pageLabels[i].includes('–') ? 'Pages ' : 'Page ') + pageLabels[i];
 
@@ -540,6 +554,14 @@ export function App() {
         {summary && <details className="document-settings">
           <summary>Book settings</summary>
           <fieldset disabled={!writable}>
+            {template && (Object.keys(template.formats).length > 1 || missingFormat) && <label className="field">Format
+              <select value={missingFormat ? summary.project.format : template.formatId} onChange={(event) => {
+                const format = event.target.value;
+                edit(({ project }) => { project.format = format; }, 'Format changed to ' + template.formats[format]);
+              }}>
+                {missingFormat && <option value={summary.project.format} disabled>{summary.project.format} (not in the template)</option>}
+                {Object.entries(template.formats).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+              </select></label>}
             <label className="field">Book title<input key={summary.project.title} defaultValue={summary.project.title}
               onBlur={(event) => {
                 const title = event.target.value.trim();
@@ -638,7 +660,7 @@ export function App() {
                 left: hoveredSheet.x, top: hoveredSheet.y, width: hoveredSheet.width, height: hoveredSheet.height }} />}
               {selectedSheet && <div className="sheet-selection" aria-hidden="true" style={{
                 left: selectedSheet.x, top: selectedSheet.y, width: selectedSheet.width, height: selectedSheet.height }} />}
-              {showGuides && template && geometry?.sheets.map((sheet) => <Guides key={sheet.spread} sheet={sheet} template={template} />)}
+              {showGuides && format && geometry?.sheets.map((sheet) => <Guides key={sheet.spread} sheet={sheet} format={format} />)}
               {activeBox && <div className="box-highlight" aria-hidden="true" style={{
                 left: activeBox.x, top: activeBox.y, width: activeBox.width, height: activeBox.height,
               }} />}
