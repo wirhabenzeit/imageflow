@@ -30,6 +30,8 @@ const sessions = new Map<string, { book: OpenProject; mode: RenderProject['mode'
 // proxies those requests, so origins, IPC checks, and frame messaging match the built app.
 const devServer = app.isPackaged ? undefined : process.env.IMAGEFLOW_DEV_SERVER;
 const devState = devServer ? process.env.IMAGEFLOW_DEV_STATE : undefined;
+// In dev mode the samples come from the repository, so New Project uses the starter as it is now.
+const devSample = devServer ? process.env.IMAGEFLOW_DEV_SAMPLE : undefined;
 const csp = devServer
   ? "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' " +
     devServer + ' ' + devServer.replace(/^http/, 'ws') + "; img-src 'self' data:"
@@ -187,6 +189,7 @@ function watchProject(book: OpenProject) {
 
 function sampleFolder(starter = false) {
   const name = starter ? 'starter' : 'whitewall';
+  if (devSample) return join(devSample, name);
   return app.isPackaged ? join(process.resourcesPath, 'sample', name) : join(app.getAppPath(), 'sample', name);
 }
 
