@@ -126,6 +126,8 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   /** Book page numbers of this spread's pages. */
   page: { left?: number; right?: number };
   format: ResolvedFormat;
+  /** The chosen key of `formats`, or `'default'` for a template with a single `format`. */
+  formatId: string;
   mode: 'edit' | 'export';
   /**
    * Marks the node that shows these parameters, so clicking it in the editor opens them for editing:
@@ -142,6 +144,7 @@ export type UntypedRenderContext = {
   elements: Record<string, { params: Values }>;
   page: { left?: number; right?: number };
   format: ResolvedFormat;
+  formatId: string;
   mode: 'edit' | 'export';
   edit(...paths: string[]): EditMarker;
 };
@@ -151,7 +154,14 @@ export type TemplateDeclaration = {
   id: string;
   version: string;
   contract: 1;
-  format: PrintFormat;
+  /**
+   * Declare one `format`, or several named `formats` the user chooses between in Book settings (`defaultFormat`,
+   * else the first, is used until they do). Layouts adapt through `ctx.format`, `ctx.formatId`, and the
+   * `--trim-*`, `--bleed-*` and `--safe-*` CSS variables of `<Spread>`.
+   */
+  format?: PrintFormat;
+  formats?: Record<string, PrintFormat>;
+  defaultFormat?: string;
   parameters?: Parameters;
   spreads: Record<string, SpreadDefinition>;
 };

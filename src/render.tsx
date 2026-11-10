@@ -12,7 +12,7 @@ import type { RenderProject, SpreadState } from './project';
 import { markdownToHtml } from './markdown';
 import { parameterWarnings } from './parameters';
 import { flow } from './text-flow';
-import { runtime, setTemplateAssets, SpreadView, templateInfo, templateSchema } from './template';
+import { chooseFormat, runtime, setTemplateAssets, SpreadView, templateInfo, templateSchema } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath, switchDefinition } from './editing';
 import './render.css';
@@ -333,7 +333,8 @@ export async function startRender(root: HTMLElement) {
     setTemplateAssets(book.template.assets);
     Object.assign(globalThis, { ImageFlowRuntime: runtime, ImageFlowReact: React, ImageFlowJSX: jsx });
     const [module] = await Promise.all([import(/* @vite-ignore */ book.template.script), loadStyles(book.template.css)]);
-    const template = parseDocument(templateSchema, module.default, 'Template');
+    // The project's format choice is resolved first; everything below works with that one format.
+    const template = chooseFormat(parseDocument(templateSchema, module.default, 'Template'), book.project.format);
     info = templateInfo(template);
     if (template.id !== book.project.template.id) throw new Error('The template ID does not match project.json.');
     const format = resolveFormat(template.format);
@@ -375,6 +376,9 @@ export async function startRender(root: HTMLElement) {
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
     const warnings = [...book.problems, ...parameterWarnings(template.parameters, book.project.params, 'Document')].map(message);
+    if (template.unknownChoice) {
+      warnings.push(message('The template has no format ' + book.project.format + '; ' + template.format.label + ' is used.'));
+    }
     const errors = sequence.issues.map(message);
     for (const [i, result] of decoded.entries()) {
       if (result.status === 'rejected') errors.push(message('Could not decode photo ' + (images[i].alt || images[i].closest('[data-box]')?.getAttribute('data-box')) + '.'));

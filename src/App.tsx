@@ -540,6 +540,13 @@ export function App() {
         {summary && <details className="document-settings">
           <summary>Book settings</summary>
           <fieldset disabled={!writable}>
+            {template && Object.keys(template.formats).length > 1 && <label className="field">Format
+              <select value={template.formatId} onChange={(event) => {
+                const format = event.target.value;
+                edit(({ project }) => { project.format = format; }, 'Format changed to ' + template.formats[format]);
+              }}>
+                {Object.entries(template.formats).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+              </select></label>}
             <label className="field">Book title<input key={summary.project.title} defaultValue={summary.project.title}
               onBlur={(event) => {
                 const title = event.target.value.trim();

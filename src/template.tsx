@@ -21,6 +21,8 @@ export type RenderContext = {
   elements: Record<string, { params: Values }>;
   page: { left?: number; right?: number };
   format: ResolvedFormat;
+  // The chosen named format, or 'default' for a template with a single format.
+  formatId: string;
   mode: RenderProject['mode'];
   // Marks a rendered node as the place where these parameters are edited; spread the result onto the node.
   edit: (...paths: string[]) => EditMarker;
@@ -52,17 +54,35 @@ const definition = z.object({
   return order.length < 2 || (!order.includes(undefined) && new Set(order).size === order.length);
 }, 'Markdown boxes need unique flowOrder values.');
 
+// A template declares one print format, or several named formats the user chooses between in Book settings.
 export const templateSchema = z.object({
   id: identifier,
   version: z.string().min(1),
   contract: z.literal(1),
-  format: formatSchema,
+  format: formatSchema.optional(),
+  formats: z.record(identifier, formatSchema).optional(),
+  defaultFormat: identifier.optional(),
   parameters: parametersSchema,
   spreads: z.record(identifier, definition).refine((spreads) => Object.keys(spreads).length > 0, 'Declare a spread.'),
-});
-export type Template = z.infer<typeof templateSchema>;
+}).refine(({ format, formats }) => !format !== !formats, 'Declare either format or formats.')
+  .refine(({ formats }) => !formats || Object.keys(formats).length > 0, 'Declare at least one format.')
+  .refine(({ formats, defaultFormat }) => !defaultFormat || (!!formats && Object.hasOwn(formats, defaultFormat)),
+    'defaultFormat must name one of the formats.');
+export type DeclaredTemplate = z.infer<typeof templateSchema>;
+// A template with its format resolved for one project: the project's choice, else the default, else the first.
+export type Template = Omit<DeclaredTemplate, 'format'> & { format: PrintFormat; formatId: string; formatChoices: Record<string, string> };
+export function chooseFormat(template: DeclaredTemplate, chosen?: string): Template & { unknownChoice: boolean } {
+  const formats: Record<string, PrintFormat> = template.formats ?? { default: template.format! };
+  const known = !!chosen && Object.hasOwn(formats, chosen);
+  const formatId = known ? chosen : template.defaultFormat ?? Object.keys(formats)[0];
+  return {
+    ...template, format: formats[formatId], formatId, unknownChoice: !!chosen && !known,
+    formatChoices: Object.fromEntries(Object.entries(formats).map(([id, format]) => [id, format.label])),
+  };
+}
 export type TemplateDeclaration = {
-  id: string; version: string; contract: 1; format: PrintFormat; parameters?: Parameters;
+  id: string; version: string; contract: 1; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
+  parameters?: Parameters;
   spreads: Record<string, Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | 'elements'> & {
     span?: Span; parameters?: Parameters;
     boxes?: Record<string, Omit<BoxDefinition, 'parameters'> & { parameters?: Parameters }>;
@@ -74,7 +94,8 @@ export const defineTemplate = <T extends TemplateDeclaration>(template: T) => te
 
 export function templateInfo(template: Template): TemplateInfo {
   return {
-    format: template.format, version: template.version, parameters: template.parameters,
+    format: template.format, formatId: template.formatId, formats: template.formatChoices,
+    version: template.version, parameters: template.parameters,
     spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, ...info }]) => [id, info])),
   };
 }
@@ -227,7 +248,7 @@ export function SpreadView({ book, template, format, spread, page, positions, re
   const content = definition.render({
     params: resolveParams(definition.parameters, spread.params),
     document: resolveParams(template.parameters, book.project.params),
-    boxes, elements, page, format, mode: book.mode,
+    boxes, elements, page, format, formatId: template.formatId, mode: book.mode,
     edit: (...paths) => book.mode === 'edit' && paths.length ? { 'data-edit': paths.join(' ') } : {},
   });
   return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, lazyPhotos }}>{content}</SpreadData.Provider>;

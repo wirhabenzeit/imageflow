@@ -2,21 +2,45 @@ import { asset, defineTemplate, spreadFor, p, mm, pt, Spread, PhotoBox, Markdown
 import type { CSSProperties, ImageFlowNode, Photo, RenderContext } from 'imageflow';
 import './styles.css';
 
-// Page geometry in millimetres from the trim edge of the left or right page. Negative values and sizes past
-// the trim reach into the 3 mm bleed; WhiteWall's layflat binding has no bleed at the gutter.
-const bleed = 3;
+// Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page. They
+// scale with the chosen format: horizontal values with the trim width, vertical values with the trim height.
 const page = 290;
 const margin = 30;
+const bleed = 3;
 const inset = mm(5);
+const across = (value: number) => 'calc(var(--trim-width) * ' + value / page + ')';
+const down = (value: number) => 'calc(var(--trim-height) * ' + value / page + ')';
 
 function left(x: number, y: number, width: number, height: number): CSSProperties {
-  return { position: 'absolute', left: x + 'mm', top: y + 'mm', width: width + 'mm', height: height + 'mm' };
+  return { position: 'absolute', left: across(x), top: down(y), width: across(width), height: down(height) };
 }
 function right(x: number, y: number, width: number, height: number): CSSProperties {
-  return { ...left(x, y, width, height), left: 'calc(var(--trim-width) + ' + x + 'mm)' };
+  return { ...left(x, y, width, height), left: 'calc(var(--trim-width) + ' + across(x) + ')' };
 }
-const fullLeft = left(-bleed, -bleed, page + bleed, page + 2 * bleed);
-const fullRight = right(0, -bleed, page + bleed, page + 2 * bleed);
+// Full-bleed photos reach into the bleed on the outside, top and bottom. WhiteWall's layflat binding has no
+// bleed at the gutter.
+const fullHeight = { top: 'calc(-1 * var(--bleed-top))', height: 'calc(var(--trim-height) + var(--bleed-top) + var(--bleed-bottom))' };
+const fullLeft: CSSProperties = { position: 'absolute', ...fullHeight,
+  left: 'calc(-1 * var(--bleed-outside))', width: 'calc(var(--trim-width) + var(--bleed-outside))' };
+const fullRight: CSSProperties = { ...fullLeft, left: 'var(--trim-width)' };
+const fullSpread: CSSProperties = { ...fullLeft, width: 'calc(2 * var(--trim-width) + 2 * var(--bleed-outside))' };
+
+// One print format per size; they share bleed, safe area, page count and output rules.
+function bookFormat(label: string, width: number, height: number) {
+  return {
+    label,
+    trim: { width: mm(width), height: mm(height) },
+    bleed: { top: mm(bleed), bottom: mm(bleed), outside: mm(bleed), binding: mm(0) },
+    safe: { top: inset, bottom: inset, outside: inset, binding: inset },
+    structure: { delivery: 'pages', ends: 'single-pages', pageCount: { min: 28, max: 112, step: 4 } },
+    output: {
+      container: 'pdf', colorSpace: 'sRGB', transparency: 'allow',
+      resolution: { minimum: 180, target: 250, maximum: 300 }, minimumTextSize: pt(8),
+      fonts: { allowType3: false, allowSystemFonts: false },
+      maximumFileSize: { pages: 500_000_000 },
+    },
+  } as const;
+}
 
 const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90 });
 const textSize = p.number({ label: 'Body size', default: 11, min: 8, max: 16, step: .5, unit: 'pt' });
@@ -77,26 +101,18 @@ export default defineTemplate({
   id: 'imageflow-starter',
   version: '0.2.0',
   contract: 1,
-  format: {
-    label: 'WhiteWall Gallery Square · 29 × 29 cm',
-    trim: { width: mm(page), height: mm(page) },
-    bleed: { top: mm(bleed), bottom: mm(bleed), outside: mm(bleed), binding: mm(0) },
-    safe: { top: inset, bottom: inset, outside: inset, binding: inset },
-    structure: { delivery: 'pages', ends: 'single-pages', pageCount: { min: 28, max: 112, step: 4 } },
-    output: {
-      container: 'pdf', colorSpace: 'sRGB', transparency: 'allow',
-      resolution: { minimum: 180, target: 250, maximum: 300 }, minimumTextSize: pt(8),
-      fonts: { allowType3: false, allowSystemFonts: false },
-      maximumFileSize: { pages: 500_000_000 },
-    },
+  formats: {
+    square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
+    landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
   },
+  defaultFormat: 'square',
   parameters: documentParameters,
   spreads: {
     title: spread({
       label: 'Title page', span: 'right',
       parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow' }) },
       render: (ctx) => <Paper context={ctx}>
-        <img alt="" className="compass" src={asset('compass.svg')} style={right(margin, 60, 14, 14)} />
+        <img alt="" className="compass" src={asset('compass.svg')} style={{ ...right(margin, 60, 14, 14), objectFit: 'contain' }} />
         <h1 {...ctx.edit('heading')} style={right(margin, 120, page - 2 * margin, 110)}>{ctx.params.heading}</h1>
         <p {...ctx.edit('subtitle')} className="subtitle" style={right(margin, 238, page - 2 * margin, 20)}>{ctx.params.subtitle}</p>
       </Paper>,
@@ -117,7 +133,7 @@ export default defineTemplate({
       label: 'Panorama',
       boxes: { hero: photo('Panorama photo') },
       render: (ctx) => <Paper context={ctx} bled={{ left: true, right: true }}>
-        <PhotoBox id="hero" style={left(-bleed, -bleed, 2 * page + 2 * bleed, page + 2 * bleed)} />
+        <PhotoBox id="hero" style={fullSpread} />
         <Caption box={ctx.boxes.hero} className="caption overlay" style={left(margin, 268, 2 * page - 2 * margin, 10)} />
       </Paper>,
     }),

@@ -30,7 +30,7 @@ export default defineTemplate({
   version: '0.1.0',
   contract: 1,
 
-  // Exactly one print format in v1, see below.
+  // One print format, or several named `formats` the user chooses between; see below.
   format: {
     label: 'Saal Digital Professional Line 30 × 30 cm',
     trim: { width: mm(294), height: mm(294) },
@@ -121,7 +121,21 @@ Scopes: `parameters` at template level (document), on a spread definition (sprea
 
 `format` is a single `PrintFormat` as sketched in `spikes/pdf-format/print-format-sketch.md` (PR #2): trim, bleed per edge, safe insets, structure (`delivery: 'pages' | 'spreads'`, `ends: 'single-pages' | 'inside-covers'`, page-count rule), and output constraints (container, colour space, transparency policy, resolution range, raster size, font rules, minimum text size). The platform resolves it into concrete geometry once.
 
-v1 allows exactly one format per template; a book for another printer or size uses another template. Allowing several named formats later would turn `format` into a map plus a project-level selection, without changing the `PrintFormat` shape.
+A template declares either one `format` or several named `formats`, which the user chooses between under **Book settings → Format**:
+
+```tsx
+formats: {
+  square: bookFormat('Square · 29 × 29 cm', 290, 290),
+  landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
+},
+defaultFormat: 'square',   // optional; otherwise the first format
+```
+
+Each entry is a complete `PrintFormat`, so presets may differ in bleed, safe area, page-count rules and output limits, not only in trim. The choice is stored as `format` in `project.json`; a project without it, or naming a format the template no longer has, uses the default (the latter with a Book check warning). One format applies to the whole book.
+
+Changing the format re-renders the book: assignments, crops and text sources stay, while text flow, photo resolution and print checks are recomputed. Layouts adapt through `ctx.format` (resolved millimetres), `ctx.formatId` (the chosen key, or `'default'` for a single `format`), and the `--trim-*`, `--bleed-*` and `--safe-*` CSS variables of `<Spread>`. The starter template draws its layouts on a 290 × 290 design page and scales positions with the trim size; full-bleed boxes use the bleed variables directly.
+
+Arbitrary dimensions within declared limits, rather than named presets, are not supported yet.
 
 ### Spread spans
 
@@ -142,7 +156,8 @@ type RenderContext = {
   }>;
   elements: Record<ElementId, { params: ElementParams }>;
   page: { left?: number; right?: number };  // page numbers of this spread
-  format: ResolvedFormat;                   // trim, bleed, safe area in mm
+  format: ResolvedFormat;                   // trim, bleed, safe area in mm, for the chosen format
+  formatId: string;                         // the chosen key of `formats`, or 'default'
   mode: 'edit' | 'export';
   edit(...paths: EditPath[]): { 'data-edit'?: string };  // marks a node for click-to-edit
 };

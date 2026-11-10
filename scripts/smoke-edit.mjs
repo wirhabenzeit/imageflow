@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import electron from 'electron';
 import { fileURLToPath } from 'node:url';
+import { PDFDocument } from 'pdf-lib';
 import { _electron } from 'playwright-core';
 
 // Click-to-edit: nodes marked with ctx.edit() open a popover that edits their parameters in place.
@@ -237,6 +238,34 @@ try {
   await saved('Edit undone');
   await ready();
   await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
+
+  // #17: a template with several formats; switching re-renders at the new size and exports at it; Undo returns.
+  await w.getByText('Book settings', { exact: true }).click();
+  let previous = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  await w.getByRole('combobox', { name: 'Format' }).selectOption('landscape');
+  await saved('Format changed to Landscape · 32 × 24 cm');
+  await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, previous);
+  assert.equal((await read()).format, 'landscape');
+  const landscape = await frame.locator('body').evaluate(() => window.imageflowRenderStatus);
+  assert.equal(landscape.template.formatId, 'landscape');
+  assert.deepEqual(landscape.errors, []);
+  const sheetBox = await frame.locator('.if-sheet').first().boundingBox();
+  assert.ok(Math.abs(sheetBox.width / sheetBox.height - (323 * 2) / 246) < 0.01);
+  const printed = join(work, 'landscape.pdf');
+  await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, printed);
+  await w.getByRole('button', { name: 'Export print PDF', exact: true }).click();
+  await w.waitForFunction(() => /^Print PDF saved/.test(document.querySelector('.status')?.textContent ?? '') ||
+    document.querySelector('.status-error'), null, { timeout: 90000 });
+  assert.match(await statusText(), /^Print PDF saved/);
+  const points = (millimetres) => millimetres * 72 / 25.4;
+  const firstPage = (await PDFDocument.load(await readFile(printed))).getPage(0).getMediaBox();
+  assert.ok(Math.abs(firstPage.width - points(323)) < 0.5 && Math.abs(firstPage.height - points(246)) < 0.5, JSON.stringify(firstPage));
+  previous = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await saved('Edit undone');
+  await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, previous);
+  assert.equal((await read()).format, undefined);
+  assert.equal((await frame.locator('body').evaluate(() => window.imageflowRenderStatus)).template.formatId, 'square');
   console.log('ImageFlow click-to-edit passed.');
 } finally {
   await app.close();
