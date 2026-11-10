@@ -1,5 +1,5 @@
 import { asset, defineTemplate, spreadFor, p, mm, pt, Spread, PhotoBox, MarkdownBox, Element } from 'imageflow';
-import type { CSSProperties, ImageFlowNode, Photo, RenderContext } from 'imageflow';
+import type { CSSProperties, ElementEditorProps, ImageFlowNode, Photo, RenderContext } from 'imageflow';
 import './styles.css';
 
 // Page geometry in millimetres from the trim edge of the left or right page. Negative values and sizes past
@@ -55,7 +55,12 @@ function Caption({ box, style, className = 'caption' }: {
   return box.params.caption && box.photo?.caption ? <p className={className} style={style}>{box.photo.caption}</p> : null;
 }
 
-function CalendarGrid({ date, firstWeekday }: { date: string; firstWeekday: 'monday' | 'sunday' }) {
+// Marked days are stored as a comma-separated list of day numbers, such as "3,14".
+const markedDays = (value: string) => new Set(value.split(',').map(Number).filter((day) => day > 0));
+
+function CalendarGrid({ date, firstWeekday, marked = '', toggle }: {
+  date: string; firstWeekday: 'monday' | 'sunday'; marked?: string; toggle?: (day: number) => void;
+}) {
   const month = new Date(date + 'T00:00:00Z');
   month.setUTCDate(1);
   const first = firstWeekday === 'monday' ? 1 : 0;
@@ -68,9 +73,41 @@ function CalendarGrid({ date, firstWeekday }: { date: string; firstWeekday: 'mon
     <h3>{new Intl.DateTimeFormat('en', { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(month)}</h3>
     <div className="days">
       {weekdays.map((_, i) => <strong key={i}>{weekdays[(i + first) % 7]}</strong>)}
-      {Array.from({ length: count + offset }, (_, i) => <span key={i}>{i < offset ? '' : i + 1 - offset}</span>)}
+      {Array.from({ length: count + offset }, (_, i) => {
+        const day = i + 1 - offset;
+        if (i < offset) return <span key={i} />;
+        const isMarked = markedDays(marked).has(day);
+        return toggle
+          ? <button key={i} type="button" className={isMarked ? 'marked' : undefined} aria-pressed={isMarked} onClick={() => toggle(day)}>{day}</button>
+          : <span key={i} className={isMarked ? 'marked' : undefined}>{day}</span>;
+      })}
     </div>
   </>;
+}
+
+// The calendar's own editor: step through months and click days to mark them. It runs in ImageFlow's editor
+// dialog and only proposes values; ImageFlow validates and saves them when the user clicks Done.
+function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {
+  const month = String(values.month);
+  const shift = (step: number) => {
+    const date = new Date(month + 'T00:00:00Z');
+    date.setUTCMonth(date.getUTCMonth() + step, 1);
+    set({ month: date.toISOString().slice(0, 10), marked: '' });
+  };
+  const toggle = (day: number) => {
+    const days = markedDays(String(values.marked));
+    if (!days.delete(day)) days.add(day);
+    set({ marked: [...days].sort((a, b) => a - b).join(',') });
+  };
+  return <div className="calendar-editor">
+    <div className="calendar-editor-nav">
+      <button type="button" aria-label="Previous month" disabled={readOnly} onClick={() => shift(-1)}>‹</button>
+      <button type="button" aria-label="Next month" disabled={readOnly} onClick={() => shift(1)}>›</button>
+      <span>{readOnly ? '' : 'Click days to mark them. Changing the month clears the marks.'}</span>
+    </div>
+    <CalendarGrid date={month} firstWeekday={values.firstWeekday === 'sunday' ? 'sunday' : 'monday'} marked={String(values.marked)}
+      toggle={readOnly ? undefined : toggle} />
+  </div>;
 }
 
 export default defineTemplate({
@@ -167,14 +204,20 @@ export default defineTemplate({
     calendar: spread({
       label: 'Calendar spread',
       boxes: { hero: photo('Calendar photo') },
-      elements: { grid: { label: 'Calendar grid', parameters: {
-        month: p.date({ label: 'Month', default: '2027-01-01', precision: 'month' }),
-        firstWeekday: p.enum({ label: 'Week starts', default: 'monday', options: ['monday', 'sunday'], labels: { monday: 'Monday', sunday: 'Sunday' } }),
-      } } },
+      elements: { grid: {
+        label: 'Calendar grid',
+        parameters: {
+          month: p.date({ label: 'Month', default: '2027-01-01', precision: 'month' }),
+          firstWeekday: p.enum({ label: 'Week starts', default: 'monday', options: ['monday', 'sunday'], labels: { monday: 'Monday', sunday: 'Sunday' } }),
+          marked: p.string({ label: 'Marked days', default: '', maxLength: 200 }),
+        },
+        editor: { label: 'Edit calendar', parameters: ['month', 'marked'], component: CalendarEditor },
+      } },
       render: (ctx) => <Paper context={ctx} bled={{ left: true }}>
         <PhotoBox id="hero" style={fullLeft} />
         <Element id="grid" className="calendar-grid" style={right(40, 70, 210, 170)}>
-          <CalendarGrid date={ctx.elements.grid.params.month} firstWeekday={ctx.elements.grid.params.firstWeekday} />
+          <CalendarGrid date={ctx.elements.grid.params.month} firstWeekday={ctx.elements.grid.params.firstWeekday}
+            marked={ctx.elements.grid.params.marked} />
         </Element>
       </Paper>,
     }),

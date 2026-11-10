@@ -37,10 +37,15 @@ export type DesktopApi = {
   onProgress(listener: (stage: string) => void): () => void;
 };
 
+// `editor` describes a template-supplied editor for some of the element's parameters (the component itself
+// stays in the render frame).
+export type ElementDefinition = {
+  label: string; parameters: Parameters; editor?: { label?: string; parameters: string[]; presentation: 'dialog' };
+};
 export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; parameters: Parameters; flowOrder?: number };
 export type SpreadDefinition = {
   label: string; span: Span; parameters: Parameters;
-  boxes: Record<string, BoxDefinition>; elements: Record<string, { label: string; parameters: Parameters }>;
+  boxes: Record<string, BoxDefinition>; elements: Record<string, ElementDefinition>;
 };
 export type TemplateInfo = {
   version: string; format: PrintFormat; parameters: Parameters; spreads: Record<string, SpreadDefinition>;

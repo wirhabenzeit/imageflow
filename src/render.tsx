@@ -8,9 +8,9 @@ import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } 
 import { cssMM, pageSequence, resolveFormat, toMillimeters } from './format';
 import type { PrintSide, ResolvedFormat } from './format';
 import { parseDocument } from './project';
-import type { RenderProject, SpreadState } from './project';
+import type { RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
-import { parameterWarnings } from './parameters';
+import { parameterWarnings, resolveParams } from './parameters';
 import { flow } from './text-flow';
 import { runtime, setTemplateAssets, SpreadView, templateInfo, templateSchema } from './template';
 import type { FlowPosition, Template } from './template';
@@ -310,6 +310,53 @@ function photoLoader(root: HTMLElement, visible: () => { top: number; bottom: nu
   };
 }
 
+// Runs a template-supplied element editor. The component edits a draft of the editor's parameters; the frame
+// reports the draft, its height, and commit or cancel to the app, which validates and saves. The frame never
+// changes project data itself.
+function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, elementId: string, readOnly: boolean) {
+  const spread = book.project.spreads.find(({ id }) => id === spreadId);
+  const element = spread && template.spreads[spread.definition]?.elements[elementId];
+  const editor = element?.editor;
+  if (!spread || !element || !editor) throw new Error('This element has no editor.');
+  const saved = resolveParams(element.parameters, spread.elements[elementId]?.params ?? {});
+  const document = resolveParams(template.parameters, book.project.params);
+  const format = resolveFormat(template.format);
+  const claimed = (values: Values) => Object.fromEntries(editor.parameters.map((key) => [key, values[key]]));
+  root.className = 'if-editor';
+
+  function Host() {
+    const [values, setValues] = React.useState<Values>(saved);
+    const changed = React.useRef(false);
+    React.useEffect(() => {
+      if (changed.current) post({ type: 'editor-draft', values: claimed(values) });
+    }, [values]);
+    const set = (changes: Values) => {
+      if (readOnly) return;
+      const allowed = Object.entries(changes).filter(([key]) => editor!.parameters.includes(key));
+      if (!allowed.length) return;
+      changed.current = true;
+      setValues((previous) => ({ ...previous, ...Object.fromEntries(allowed) }));
+    };
+    return React.createElement(editor!.component, {
+      values, set, document, format, readOnly,
+      commit: () => post({ type: 'editor-commit' }), cancel: () => post({ type: 'editor-cancel' }),
+    });
+  }
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      post({ type: 'editor-cancel' });
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      post({ type: 'editor-commit' });
+    }
+  });
+  new ResizeObserver(() => post({ type: 'editor-size', height: Math.ceil(root.getBoundingClientRect().height) })).observe(root);
+  createRoot(root).render(React.createElement(Host));
+  post({ type: 'editor-ready' });
+}
+
 export async function startRender(root: HTMLElement) {
   let info: TemplateInfo | undefined;
   // The editor reports which part of the book frame is on screen. Listen before anything slow happens and ask
@@ -338,6 +385,10 @@ export async function startRender(root: HTMLElement) {
     if (template.id !== book.project.template.id) throw new Error('The template ID does not match project.json.');
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
+    if (book.mode === 'edit' && query.get('view') === 'editor') {
+      renderEditor(root, book, template, query.get('spread') ?? '', query.get('element') ?? '', query.has('readonly'));
+      return;
+    }
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
     const { chains, positions } = textAssignments(book, template);

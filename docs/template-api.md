@@ -161,6 +161,27 @@ Paths name a spread parameter (`heading`), a document parameter (`document.paper
 
 Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths, image data, or Markdown source, and they cannot change project data.
 
+
+### Element editors
+
+An element can supply its own editor for parameters that generated controls handle poorly, such as marking days in a calendar or panning a map:
+
+```tsx
+function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {
+  // Render any UI; call set({ ... }) to change the draft. The editor previews the draft itself.
+}
+
+elements: { grid: {
+  label: 'Calendar grid',
+  parameters: { month, firstWeekday, marked },
+  editor: { label: 'Edit calendar', parameters: ['month', 'marked'], component: CalendarEditor },
+} },
+```
+
+- **Opening it:** double-clicking the element opens the editor in a dialog, and so does the editor's button in the element's popover and Inspector section. Parameters the editor lists are edited only there; the element's other parameters keep their generated controls.
+- **Sandbox:** the component runs in a frame on the render origin with the template's CSS, like the book previews. It receives `values` (all of the element's parameters, with the draft applied), `set(changes)`, `document`, `format`, `readOnly`, `commit()` and `cancel()`. It cannot change project data itself.
+- **What ImageFlow owns:** the dialog, Cancel and Done, Escape and ⌘↩, focus, read-only mode, validation against the parameter schema, and saving. One editing session is one undoable edit; Cancel leaves the saved values unchanged.
+- **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors that need external resources (map tiles, GPX files) depend on #16; the starter's calendar editor is the reference example.
 ## Platform components
 
 | Component | Purpose |
@@ -168,7 +189,7 @@ Templates read photo metadata (for captions) and page numbers through the contex
 | `<Spread>` | Root of every spread. Sizes the spread to two trims plus bleed, sets geometry CSS variables, and handles page halves. |
 | `<PhotoBox id>` | Renders the assigned photo with its crop (the photo always covers the box; the saved crop picks the visible region), using a preview-size image in the editor and a rendition capped at the format maximum resolution in export (300 ppi when omitted). Its element is the box's geometry and drop zone. Users adjust the crop in the editor's crop mode; templates do not handle it. |
 | `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. |
-| `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked. |
+| `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked; an element can supply its own editor (see Element editors). |
 | `asset(path)` | Resolves a file in `template/assets/` for use in `src` or CSS. |
 
 Rules:

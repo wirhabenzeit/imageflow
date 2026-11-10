@@ -98,3 +98,7 @@ html:has(.if-book), html:has(.if-book) body { overflow: hidden; }
 /* Book view photos load near the screen; until then the box shows a neutral fill and no broken image. */
 .if-preview .if-photo img:not([src]) { visibility: hidden; }
 .if-preview .if-photo:has(> img:not([src])) { background: #e9e5dc; }
+
+/* Template-supplied element editors run in their own frame inside an editor dialog. */
+html:has(.if-editor), html:has(.if-editor) body { background: #fcfbf6; }
+.if-editor { padding: 16px 18px; font: 14px/1.4 system-ui, sans-serif; color: #26251e; }

@@ -6,6 +6,7 @@ import { BookFrame } from './BookFrame';
 import { revealIn } from './reveal';
 import { EditPopover } from './EditPopover';
 import { CropEditor } from './CropEditor';
+import { ElementEditorDialog } from './ElementEditor';
 import { centered, getCrop, placementOf } from './spread';
 import type { Placement } from './spread';
 import { assignmentCounts, newSpread, sourceUsage } from './editing';
@@ -63,6 +64,8 @@ export function App() {
   // Crop mode for one photo box. After a commit, `settling` holds the project id the edit started from; the
   // overlay stays until the book has re-rendered, so the frame does not flash back to the old crop.
   const [cropping, setCropping] = useState<{ spread: string; box: string; settling?: string }>();
+  // A template-supplied element editor that is open.
+  const [elementEditor, setElementEditor] = useState<{ spread: string; element: string }>();
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const [dropTarget, setDropTarget] = useState<string>();
@@ -362,7 +365,8 @@ export function App() {
     const area = (rect: Rect) => rect.width * rect.height;
     const target = wanted ? undefined : geometry.targets.filter((rect) => inside(rect))
       .sort((a, b) => area(a) - area(b))[0];
-    return { sheet, box, target: target && (!box || area(target) <= area(box)) ? target : undefined };
+    const element = wanted ? undefined : geometry.boxes.findLast((rect) => rect.type === 'element' && inside(rect));
+    return { sheet, box, element, target: target && (!box || area(target) <= area(box)) ? target : undefined };
   }
   const targetKey = (target: { spread: string; edits: string[] }) => target.spread + '|' + target.edits.join(' ');
   const closeEditor = useCallback(() => setEditing(undefined), []);
@@ -378,6 +382,7 @@ export function App() {
   const editTarget = editing && geometry?.targets.find((target) => targetKey(target) === editing.key);
   const editSpread = editing && spreads.find(({ id }) => id === editing.spread);
   const editOwner = editTarget && /^boxes\.([^.]+)\./.exec(editTarget.edits[0])?.[1];
+  const editElement = editTarget?.edits.map((path) => /^elements\.([^.]+)\./.exec(path)?.[1]).find(Boolean);
   const editPhotoBox = editOwner && geometry?.boxes.some(({ spread, id, type }) => spread === editing.spread && id === editOwner && type === 'photo')
     ? editOwner : undefined;
 
@@ -392,6 +397,17 @@ export function App() {
     if (!state?.photo || !summary?.photos[state.photo] || !summary.photoSizes[state.photo]) return 'Add a photo to this box first.';
     if (!frame) return 'The book is still rendering.';
     if (!frame.upright) return 'The template rotates or mirrors this frame; use the crop values in the Inspector.';
+  }
+  function editorOf(spread: string, element: string) {
+    const state = spreads.find(({ id }) => id === spread);
+    return state && template?.spreads[state.definition]?.elements[element]?.editor;
+  }
+  function openElementEditor(spread: string, element: string) {
+    if (!editorOf(spread, element)) return false;
+    setEditing(undefined);
+    select(spread, false);
+    setElementEditor({ spread, element });
+    return true;
   }
   function startCrop(spread: string, box: string) {
     const blocked = cropBlocked(spread, box);
@@ -610,12 +626,14 @@ export function App() {
                 if (box) setFocusBox({ box: box.id, at: Date.now() });
               }}
               onDoubleClick={(event) => {
-                const { box } = locate(event);
+                const { box, element } = locate(event);
                 // Double-clicking a photo means crop mode; if that is not possible, the status line says why.
                 if (box?.type === 'photo') {
                   startCrop(box.spread, box.id);
                   return;
                 }
+                // Double-clicking an element with a template-supplied editor opens it.
+                if (element && openElementEditor(element.spread, element.id)) return;
                 const source = box && boxSource(box.spread, box.id);
                 if (source) setQuick(source);
               }}
@@ -658,7 +676,10 @@ export function App() {
                 project={summary.project} spread={editSpread} template={template} edits={editTarget.edits} anchor={editTarget}
                 bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={!writable} edit={edit} close={closeEditor} step={stepEditor}
                 actions={editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)
-                  ? <button type="button" onClick={() => startCrop(editing.spread, editPhotoBox)}>Adjust crop…</button> : undefined} />}
+                  ? <button type="button" onClick={() => startCrop(editing.spread, editPhotoBox)}>Adjust crop…</button>
+                  : editElement && editorOf(editing.spread, editElement)
+                    ? <button type="button" onClick={() => openElementEditor(editing.spread, editElement)}>
+                      {(editorOf(editing.spread, editElement)!.label ?? 'Open editor') + '…'}</button> : undefined} />}
             </div>}
             {!summary && <div className="welcome">
               <span className="welcome-icon" aria-hidden="true">◫</span>
@@ -685,9 +706,14 @@ export function App() {
         usage={usage} inspectSource={choose} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
         adjustCrop={(box) => { reveal(spread.id); startCrop(spread.id, box); }}
+        openEditor={(element) => openElementEditor(spread.id, element)}
         edit={edit} highlight={setHighlight} issues={issue} check={check} checking={!checkCurrent} select={select}
         importText={(box) => importFiles({ kind: 'markdown', target: { spread: spread.id, box } })} />}
     </div>
+    {summary && template && elementEditor && spreads.some(({ id }) => id === elementEditor.spread) &&
+      <ElementEditorDialog key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
+        spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={!writable}
+        edit={edit} close={() => setElementEditor(undefined)} />}
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     <footer className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>

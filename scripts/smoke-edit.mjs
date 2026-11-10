@@ -55,24 +55,53 @@ try {
   await sub.waitFor({ state: 'detached' });
   assert.notEqual((await read()).spreads[0].params.subtitle, 'discard me');
   
-  // Calendar: month picker + week start in one popover
+  // Calendar: the popover keeps generated controls for parameters the template's editor does not own (week
+  // start) and offers the template-supplied calendar editor for month and marked days (#15).
   await w.getByRole('button', { name: 'Calendar spread 14–15', exact: true }).click();
   at = await center('[data-spread="march"] [data-element="grid"]');
   await w.mouse.click(at.x, at.y);
-  const cal = w.getByRole('dialog', { name: 'Edit Month, Week starts' });
+  const cal = w.getByRole('dialog', { name: 'Edit Week starts' });
   await cal.waitFor();
-  await cal.locator('input[type="month"]').fill('2027-08');
-  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Month updated');
-  assert.equal((await read()).spreads[7].elements.grid.params.month, '2027-08-01');
-  await ready();
-  assert.match(await frame.locator('[data-spread="march"] [data-element="grid"] h3').textContent(), /August 2027/);
+  assert.equal(await cal.locator('input[type="month"]').count(), 0);
   await cal.getByRole('radio', { name: 'Sunday' }).click();
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Week starts updated');
   assert.equal((await read()).spreads[7].elements.grid.params.firstWeekday, 'sunday');
-  assert.ok(await cal.isVisible());
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
   assert.equal((await read()).spreads[7].elements.grid?.params?.firstWeekday ?? 'monday', 'monday');
+
+  // The editor proposes a draft; Done saves month and marks together as one edit, and one Undo reverts both.
+  await ready();
+  at = await center('[data-spread="march"] [data-element="grid"]');
+  await w.mouse.click(at.x, at.y);
+  await w.getByRole('dialog', { name: 'Edit Week starts' }).getByRole('button', { name: 'Edit calendar…' }).click();
+  const editorDialog = w.getByRole('dialog', { name: 'Edit calendar' });
+  await editorDialog.waitFor();
+  const calendarEditor = w.frameLocator('iframe.element-editor-frame');
+  await calendarEditor.getByRole('button', { name: 'Next month' }).click();
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
+  assert.equal((await read()).spreads[7].elements.grid.params.month, '2027-03-01');
+  await editorDialog.getByRole('button', { name: 'Done' }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Calendar grid updated');
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-04-01', marked: '14' });
+  await ready();
+  assert.match(await frame.locator('[data-spread="march"] [data-element="grid"] h3').textContent(), /April 2027/);
+  assert.equal(await frame.locator('[data-spread="march"] [data-element="grid"] .marked').textContent(), '14');
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
+
+  // Double-click opens the editor directly; Escape inside it discards the draft.
+  await ready();
+  at = await center('[data-spread="march"] [data-element="grid"]');
+  await w.mouse.dblclick(at.x, at.y);
+  await editorDialog.waitFor();
+  await calendarEditor.getByRole('button', { name: '3', exact: true }).click();
+  await calendarEditor.getByRole('button', { name: '3', exact: true }).press('Escape');
+  await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
+  await w.locator('.toolbar .brand').click();
+  await w.waitForFunction(() => !document.querySelector('.edit-popover'));
 
   // Clicking a text box edits its own options (columns) plus the body size the template marks it with.
   at = await center('[data-spread="arriving"] [data-box="body"]');

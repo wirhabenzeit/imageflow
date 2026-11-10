@@ -41,3 +41,16 @@
 .field-book .calendar-grid h3 { margin-bottom: 12mm; }
 .field-book .days { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 6mm; }
 .field-book .days strong { font-weight: 500; }
+.field-book .days .marked { color: var(--ink); font-weight: 600; text-decoration: underline; text-underline-offset: .2em; }
+
+/* The calendar's editor, shown in ImageFlow's editor dialog */
+.calendar-editor { font-family: "Field Sans", system-ui, sans-serif; }
+.calendar-editor h3 { font: 600 18px/1.2 "Field Serif", Georgia, serif; margin: 0 0 12px; }
+.calendar-editor-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 12px; color: #655f55; }
+.calendar-editor-nav button { width: 28px; height: 28px; border: 1px solid #cbc7bc; border-radius: 6px; background: #fff; font-size: 16px; cursor: pointer; }
+.calendar-editor .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; font-size: 13px; }
+.calendar-editor .days strong { font-weight: 600; color: #655f55; padding: 4px 0; }
+.calendar-editor .days button { height: 32px; border: 1px solid transparent; border-radius: 6px; background: #f1eee6; font: inherit; cursor: pointer; }
+.calendar-editor .days button:hover { border-color: #9bb3a3; }
+.calendar-editor .days button.marked { background: #243b30; color: #fff; font-weight: 600; }
+.calendar-editor .days button:focus-visible { outline: 2px solid #243b30; outline-offset: 1px; }
