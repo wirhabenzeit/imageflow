@@ -266,6 +266,32 @@ try {
   await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, previous);
   assert.equal((await read()).format, undefined);
   assert.equal((await frame.locator('body').evaluate(() => window.imageflowRenderStatus)).template.formatId, 'square');
+
+  // A preset with impossible geometry is a template error at load, and the editor stays usable around it.
+  const templateFile = join(project, 'template', 'index.tsx');
+  const templateSource = await readFile(templateFile, 'utf8');
+  await writeFile(templateFile, templateSource.replace('  formats: {', "  formats: {\n    huge: bookFormat('Huge', 1200, 290),"));
+  await w.waitForFunction(() => /PDF dimensions must be between 10 and 1000 mm/.test(document.querySelector('.status-error')?.textContent ?? ''), null, { timeout: 30000 });
+  assert.ok(await w.locator('.document-settings').isVisible(), 'the sidebar survives a template format error');
+  assert.ok(await w.getByRole('button', { name: 'Undo', exact: true }).isVisible());
+  await writeFile(templateFile, templateSource);
+  await w.waitForFunction(() => !document.querySelector('.status-error'), null, { timeout: 30000 });
+  await ready();
+
+  // A saved format the template no longer offers: previewed in the default, but an error that blocks print export.
+  previous = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  await writeFile(join(project, 'project.json'), JSON.stringify({ ...await read(), format: 'retired' }, null, 2));
+  await w.getByRole('button', { name: 'Reload', exact: true }).click();
+  await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, previous);
+  const retired = await frame.locator('body').evaluate(() => window.imageflowRenderStatus);
+  assert.equal(retired.template.formatId, 'square');
+  assert.match(retired.errors.map(({ message }) => message).join('\n'), /no longer offers the format retired/);
+  assert.equal(await w.getByRole('combobox', { name: 'Format' }).inputValue(), 'retired');
+  await w.getByRole('combobox', { name: 'Format' }).selectOption('square');
+  await saved('Format changed to WhiteWall Gallery Square · 29 × 29 cm');
+  await ready();
+  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
+  assert.equal((await read()).format, 'square');
   console.log('ImageFlow click-to-edit passed.');
 } finally {
   await app.close();

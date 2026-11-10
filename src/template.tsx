@@ -72,12 +72,13 @@ export type DeclaredTemplate = z.infer<typeof templateSchema>;
 // A template with its format resolved for one project: the project's choice, else the default, else the first.
 export type Template = Omit<DeclaredTemplate, 'format'> & { format: PrintFormat; formatId: string; formatChoices: Record<string, string> };
 export function chooseFormat(template: DeclaredTemplate, chosen?: string): Template & { unknownChoice: boolean } {
-  const formats: Record<string, PrintFormat> = template.formats ?? { default: template.format! };
-  const known = !!chosen && Object.hasOwn(formats, chosen);
-  const formatId = known ? chosen : template.defaultFormat ?? Object.keys(formats)[0];
+  // A template with a single format ignores the project's choice and offers none.
+  if (!template.formats) return { ...template, format: template.format!, formatId: 'default', unknownChoice: false, formatChoices: {} };
+  const known = !!chosen && Object.hasOwn(template.formats, chosen);
+  const formatId = known ? chosen : template.defaultFormat ?? Object.keys(template.formats)[0];
   return {
-    ...template, format: formats[formatId], formatId, unknownChoice: !!chosen && !known,
-    formatChoices: Object.fromEntries(Object.entries(formats).map(([id, format]) => [id, format.label])),
+    ...template, format: template.formats[formatId], formatId, unknownChoice: !!chosen && !known,
+    formatChoices: Object.fromEntries(Object.entries(template.formats).map(([id, format]) => [id, format.label])),
   };
 }
 export type TemplateDeclaration = {

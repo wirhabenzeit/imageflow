@@ -376,10 +376,12 @@ export async function startRender(root: HTMLElement) {
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
     const warnings = [...book.problems, ...parameterWarnings(template.parameters, book.project.params, 'Document')].map(message);
-    if (template.unknownChoice) {
-      warnings.push(message('The template has no format ' + book.project.format + '; ' + template.format.label + ' is used.'));
-    }
     const errors = sequence.issues.map(message);
+    // The preview falls back to the default format, but printing at a size nobody chose is blocked.
+    if (template.unknownChoice) {
+      errors.push(message('The template no longer offers the format ' + book.project.format + ' saved with this book. The preview uses ' +
+        template.format.label + '; choose a format in Book settings.'));
+    }
     for (const [i, result] of decoded.entries()) {
       if (result.status === 'rejected') errors.push(message('Could not decode photo ' + (images[i].alt || images[i].closest('[data-box]')?.getAttribute('data-box')) + '.'));
     }
