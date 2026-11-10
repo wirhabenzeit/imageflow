@@ -287,8 +287,41 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   publish({ state: 'ready', template: info, pages: sequence.count, units: [], errors: [], warnings: [], flow: {} });
 }
 
+// Loads the photos of spreads within a screen of the visible range and unloads those more than three screens
+// away, so memory and the work per edit follow what is on screen rather than the length of the book.
+function photoLoader(root: HTMLElement, visible: () => { top: number; bottom: number } | undefined) {
+  const containers = [...root.querySelectorAll<HTMLElement>('.if-spread-container')];
+  return () => {
+    const range = visible() ?? { top: 0, bottom: screen.height };
+    const height = Math.max(1, range.bottom - range.top);
+    const loading: HTMLImageElement[] = [];
+    for (const container of containers) {
+      const { top, bottom } = container.getBoundingClientRect();
+      const near = bottom > range.top - height && top < range.bottom + height;
+      const far = bottom < range.top - 3 * height || top > range.bottom + 3 * height;
+      for (const img of container.querySelectorAll<HTMLImageElement>('img[data-src]')) {
+        if (near && !img.getAttribute('src')) {
+          img.src = img.dataset.src!;
+          loading.push(img);
+        } else if (far && img.getAttribute('src')) img.removeAttribute('src');
+      }
+    }
+    return loading;
+  };
+}
+
 export async function startRender(root: HTMLElement) {
   let info: TemplateInfo | undefined;
+  // The editor reports which part of the book frame is on screen. Listen before anything slow happens and ask
+  // once, because the editor's first report may otherwise arrive before this script runs.
+  let onScreen: { top: number; bottom: number } | undefined;
+  let onScreenChange: (() => void) | undefined;
+  window.addEventListener('message', (event) => {
+    if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'viewport') return;
+    onScreen = { top: Number(event.data.top), bottom: Number(event.data.bottom) };
+    onScreenChange?.();
+  });
+  if (window.parent !== window) post({ type: 'viewport-request' });
   try {
     const response = await fetch(location.pathname + '/data');
     if (!response.ok) throw new Error('Could not load the project. Reload and try again.');
@@ -314,6 +347,7 @@ export async function startRender(root: HTMLElement) {
     if (edit && view !== 'book') {
       for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
     }
+    const lazy = edit && view === 'book';
     if (edit && view === 'layouts') {
       await renderLayouts(root, book, template, info, query.get('spread') ?? '');
       return;
@@ -332,11 +366,11 @@ export async function startRender(root: HTMLElement) {
     flushSync(() => react.render(visible.map(({ spread, i }) => (
       <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} key={spread.id}>
         <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
-          page={sequence.spreads[i].page} renderPhotos />
+          page={sequence.spreads[i].page} renderPhotos lazyPhotos={lazy} />
       </div>
     ))));
     if (renderError) throw renderError;
-    const images = [...root.querySelectorAll('img')];
+    const images = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
@@ -370,6 +404,13 @@ export async function startRender(root: HTMLElement) {
     }
     const sheets = [...layouts.values()].map(({ sheet }) => sheet);
     if (edit) layoutBook(root, [...layouts].map(([spread, { sheet }]) => ({ spread, sheet })), view);
+    if (lazy) {
+      const load = photoLoader(root, () => onScreen);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      onScreenChange = () => { timer ??= setTimeout(() => { timer = undefined; load(); }, 16); };
+      // Report ready once the photos on screen are decoded, so swapping in this frame shows them.
+      await Promise.allSettled(load().map((img) => img.decode()));
+    }
     else {
       makePrintPages(root, sheets, sequence, format);
       await Promise.allSettled([...document.querySelectorAll<HTMLImageElement>('.if-print-page img')].map((img) => img.decode()));

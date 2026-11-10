@@ -167,6 +167,19 @@ try {
   await settled(restored);
   at = await center('[data-spread="arriving"] [data-box="hero"]');
 
+  // #11: the book view loads photos near the screen only; scrolling to the end loads the photos there.
+  await w.locator('main.canvas').evaluate((el) => el.scrollTo(0, 0));
+  const lastPhoto = frame.locator('[data-spread="twilight"] [data-box="hero"] img');
+  assert.equal(await lastPhoto.getAttribute('src'), null);
+  await w.locator('main.canvas').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await lastPhoto.and(frame.locator('img[src]')).waitFor({ state: 'attached' });
+  assert.ok(await lastPhoto.evaluate((img) => img.decode().then(() => img.naturalWidth > 0)));
+  await w.locator('main.canvas').evaluate((el) => el.scrollTo(0, 0));
+  // Every sidebar thumbnail loads.
+  await w.frameLocator('iframe.book-frame-thumbs[data-current]').locator('body').evaluate(() =>
+    Promise.all([...document.images].map((img) => img.decode())).then(() =>
+      [...document.images].every((img) => img.complete && img.naturalWidth > 0)));
+
   const statusText = () => w.locator('.status').textContent();
   const saved = (text) => w.waitForFunction((text) => document.querySelector('.status')?.textContent === text, text);
   const thumb = (name) => w.getByRole('button', { name, exact: true }).click();

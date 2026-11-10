@@ -94,3 +94,7 @@ html:has(.if-book), html:has(.if-book) body { overflow: hidden; }
 .if-markdown .cont { text-indent: 0; }
 .if-markdown li.cont { list-style-type: none; }
 .if-spread > .bleed { position: absolute; inset: calc(-1 * var(--bleed-top)) calc(-1 * var(--bleed-outside)) calc(-1 * var(--bleed-bottom)); }
+
+/* Book view photos load near the screen; until then the box shows a neutral fill and no broken image. */
+.if-preview .if-photo img:not([src]) { visibility: hidden; }
+.if-preview .if-photo:has(> img:not([src])) { background: #e9e5dc; }

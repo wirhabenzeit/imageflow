@@ -81,7 +81,7 @@ export function templateInfo(template: Template): TemplateInfo {
 
 const SpreadData = createContext<{
   book: RenderProject; spread: SpreadState; format: ResolvedFormat; renderPhotos: boolean;
-  definition: Template['spreads'][string];
+  definition: Template['spreads'][string]; lazyPhotos: boolean;
 } | null>(null);
 
 function useSpread() {
@@ -120,7 +120,7 @@ function exportSource(photo: Photo & { src: string }, cssWidth: number, format: 
 }
 
 export function PhotoBox({ id, className, style, 'data-edit': marked }: Styling & EditMarker & { id: string }) {
-  const { spread, book, format, renderPhotos, definition } = useSpread();
+  const { spread, book, format, renderPhotos, definition, lazyPhotos } = useSpread();
   const box = spread.boxes[id];
   const photo = box?.photo ? book.photos[box.photo] : undefined;
   const placement = box?.crop ?? centered;
@@ -157,7 +157,8 @@ export function PhotoBox({ id, className, style, 'data-edit': marked }: Styling 
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
       className={['if-photo', className].filter(Boolean).join(' ')} style={style}>
       {photo && renderPhotos &&
-        <img ref={image} src={book.mode === 'edit' ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
+        <img ref={image} src={book.mode === 'edit' && !lazyPhotos ? photo.src : undefined}
+          data-src={lazyPhotos ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
       {!photo && book.mode === 'edit' && <span className="if-placeholder">{box?.photo ? 'Missing photo' : 'Drop a photo'}</span>}
     </div>
   );
@@ -202,9 +203,10 @@ export const spreadFor = (_document: Parameters) => <T,>(definition: T) => defin
 
 export const runtime = { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset };
 
-export function SpreadView({ book, template, format, spread, page, positions, renderPhotos }: {
+// `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
+export function SpreadView({ book, template, format, spread, page, positions, renderPhotos, lazyPhotos = false }: {
   book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState;
-  page: RenderContext['page']; positions: Record<string, FlowPosition>; renderPhotos: boolean;
+  page: RenderContext['page']; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
 }) {
   const definition = template.spreads[spread.definition];
   if (!definition) throw new Error('Spread ' + spread.id + ' uses an unknown definition: ' + spread.definition + '.');
@@ -228,5 +230,5 @@ export function SpreadView({ book, template, format, spread, page, positions, re
     boxes, elements, page, format, mode: book.mode,
     edit: (...paths) => book.mode === 'edit' && paths.length ? { 'data-edit': paths.join(' ') } : {},
   });
-  return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition }}>{content}</SpreadData.Provider>;
+  return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, lazyPhotos }}>{content}</SpreadData.Provider>;
 }
