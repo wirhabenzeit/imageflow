@@ -54,22 +54,37 @@ body { margin: 0; }
 .crop-controls > button { grid-column: 1 / -1; justify-self: start; }
 
 /* Book check: the whole-book render runs in an invisible frame; its findings are listed in the inspector. */
-.book-check-list { font-size: 12px; overflow-wrap: anywhere; }
-.book-check-list summary { color: var(--muted); }
-.book-check-list ul { padding-left: 17px; max-height: 260px; overflow: auto; }
-.book-check-list li { margin: 4px 0; }
-.book-check-list .issue-error { color: #7c2720; }
-.book-check-list .issue-warning { color: #6b5212; }
-.book-check-list .issue-current { font-weight: 600; }
-.book-check-stale ul { opacity: .6; }
-.book-check-list button.link { all: unset; cursor: pointer; text-decoration: underline; }
-.book-check-list button.link:focus-visible { outline: 2px solid var(--accent); }
+/* Book check: an indicator at the right of the status bar; its list opens above the bar */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.book-check-list { position: relative; flex: none; margin-right: 16px; font-size: 12px; }
+.studio .book-check-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 0; height: 20px; padding: 0 7px 0 3px;
+  border: 0; border-radius: 10px; background: transparent; font: inherit; font-weight: 650; font-variant-numeric: tabular-nums; cursor: pointer; }
+.book-check-icon { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; font-size: 10px; font-weight: 800; color: #fff; }
+.book-check-error .book-check-toggle { color: #7c2720; background: #f6d6d0; }
+.book-check-error .book-check-icon { background: #b3392c; }
+.book-check-warning .book-check-toggle { color: #6b5212; background: #f5e8c6; }
+.book-check-warning .book-check-icon { background: #a77c14; }
+.studio .book-check-clean .book-check-toggle { cursor: default; padding: 0 3px; }
+.book-check-clean .book-check-icon { color: var(--muted); background: transparent; font-size: 11px; }
+.book-check-stale .book-check-toggle { opacity: .55; }
+.book-check-panel { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 30; width: min(420px, 70vw); padding: 10px 12px;
+  border: 1px solid #d3cfc4; border-radius: 9px; background: #fcfbf6; box-shadow: 0 10px 30px #0003; overflow-wrap: anywhere; }
+.book-check-heading { margin: 0 0 6px; font-weight: 650; color: var(--muted); }
+.book-check-panel ul { margin: 0; padding-left: 17px; max-height: 300px; overflow: auto; }
+.book-check-panel li { margin: 4px 0; }
+.book-check-panel .issue-error { color: #7c2720; }
+.book-check-panel .issue-warning { color: #6b5212; }
+.book-check-panel .issue-current { font-weight: 600; }
+.book-check-stale .book-check-panel ul { opacity: .6; }
+.book-check-panel button.link { all: unset; cursor: pointer; text-decoration: underline; }
+.book-check-panel button.link:focus-visible { outline: 2px solid var(--accent); }
 .issue-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 .issue-dot.issue-error { background: #b3382c; }
 .issue-dot.issue-warning { background: #c99a1e; }
 
 /* Layout */
-.status { padding: 6px 24px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--edge); max-height: 65px; overflow: auto; }
+.status-bar { display: flex; align-items: center; border-top: 1px solid var(--edge); }
+.status { flex: 1; min-width: 0; padding: 6px 24px; font-size: 12px; color: var(--muted); max-height: 65px; overflow: auto; }
 .status-error { color: #7c2720; overflow-wrap: anywhere; }
 .workspace { display: grid; grid-template-columns: 232px minmax(0, 1fr) 276px; min-height: 0; }
 .welcome-workspace { grid-template-columns: 232px minmax(0, 1fr); }

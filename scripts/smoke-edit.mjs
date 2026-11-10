@@ -66,7 +66,17 @@ try {
   const editorReady = async ({ sized = true } = {}) => {
     await editorDialog.waitFor();
     await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
-    if (sized) await w.waitForFunction(() => document.querySelector('iframe.element-editor-frame')?.style.height !== '240px');
+    if (!sized) return;
+    // The dialog is centred, so it moves while the frame still grows; wait until its height has settled.
+    await w.waitForFunction(() => {
+      const frame = document.querySelector('iframe.element-editor-frame');
+      const state = (window.__frameHeights ??= []);
+      state.push(frame?.style.height);
+      if (state.length > 4) state.shift();
+      const settled = state.length === 4 && state.every((height) => height && height !== '240px' && height === state[0]);
+      if (settled) window.__frameHeights = [];
+      return settled;
+    }, null, { polling: 100 });
   };
   await ready();
   at = await center('[data-spread="march"] [data-element="grid"]');
@@ -410,21 +420,28 @@ try {
   await w.getByRole('button', { name: 'Delete', exact: true }).click();
   await saved('Saved');
   await ready();
-  await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
+  await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
+  // The Book check is an indicator in the status bar, not part of the Inspector; clicking it lists the issues.
+  assert.equal(await w.locator('.inspector .book-check-list').count(), 0);
+  assert.deepEqual(await w.locator('.status-bar .book-check-toggle > [aria-hidden]').allTextContents(), ['!', '1']);
+  await w.locator('.book-check-toggle').click();
+  assert.match(await w.getByRole('dialog', { name: 'Book check' }).textContent(), /Page count is 26/);
+  await w.keyboard.press('Escape');
+  await w.getByRole('dialog', { name: 'Book check' }).waitFor({ state: 'detached' });
   const pdf = join(work, 'proof.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, pdf);
   await w.getByRole('button', { name: 'Export proof PDF', exact: true }).click();
   await w.waitForFunction(() => /^Proof PDF saved/.test(document.querySelector('.status')?.textContent ?? '') ||
     document.querySelector('.status-error'), null, { timeout: 60000 });
   assert.match(await statusText(), /^Proof PDF saved\. 1 error/);
-  assert.match(await w.locator('.book-check-list summary').textContent(), /Book check · 1 error/);
+  assert.match(await w.locator('.book-check-toggle').textContent(), /Book check · 1 error/);
   await w.getByRole('button', { name: 'Export print PDF', exact: true }).click();
   await w.locator('.status-error').waitFor({ timeout: 60000 });
   assert.match(await statusText(), /Page count is 26/);
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await saved('Edit undone');
   await ready();
-  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
+  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
 
   // #17: a template with several formats; switching re-renders at the new size and exports at it; Undo returns.
   await w.getByText('Book settings', { exact: true }).click();
@@ -477,7 +494,7 @@ try {
   await w.getByRole('combobox', { name: 'Format' }).selectOption('square');
   await saved('Format changed to WhiteWall Gallery Square · 29 × 29 cm');
   await ready();
-  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
+  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
   assert.equal((await read()).format, 'square');
 
   // A template converted to one fixed format ignores the saved choice and shows no Format picker.

@@ -40,7 +40,16 @@ try {
   const editorReady = async () => {
     await routeDialog.waitFor();
     await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
-    await w.waitForFunction(() => document.querySelector('iframe.element-editor-frame')?.style.height !== '240px');
+    // The dialog is centred, so it moves while the frame still grows; wait until its height has settled.
+    await w.waitForFunction(() => {
+      const frame = document.querySelector('iframe.element-editor-frame');
+      const state = (window.__frameHeights ??= []);
+      state.push(frame?.style.height);
+      if (state.length > 4) state.shift();
+      const settled = state.length === 4 && state.every((height) => height && height !== '240px' && height === state[0]);
+      if (settled) window.__frameHeights = [];
+      return settled;
+    }, null, { polling: 100 });
   };
   // Clicking the inset opens its Frame route editor; the GPX track is in the Inspector's Route map section, which
   // the click scrolls to. Returns that section, with the editor closed.

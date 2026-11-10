@@ -97,35 +97,12 @@ function KeptContent({ summary, spread, template, kept, label, settings, writabl
   </details>;
 }
 
-export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[] };
-
-function CheckList({ check, checking, spread, select }: {
-  check?: BookCheck; checking: boolean; spread: string; select: (spread: string) => void;
-}) {
-  const items = [
-    ...(check?.errors ?? []).map((issue) => ({ issue, level: 'error' })),
-    ...(check?.warnings ?? []).map((issue) => ({ issue, level: 'warning' })),
-  ];
-  const count = (n: number, word: string) => n + ' ' + word + (n === 1 ? '' : 's');
-  const label = !check ? 'Checking book…' : !items.length ? 'No issues' :
-    [check.errors.length && count(check.errors.length, 'error'), check.warnings.length && count(check.warnings.length, 'warning')]
-      .filter(Boolean).join(' · ');
-  return <details className={'book-check-list' + (checking ? ' book-check-stale' : '')} open={!!check?.errors.length || undefined}>
-    <summary>Book check · {label}{check && checking ? ' · updating…' : ''}</summary>
-    {items.length > 0 && <ul>{items.map(({ issue, level }, i) => <li key={i} className={'issue-' + level +
-      (issue.spread === spread ? ' issue-current' : '')}>
-      {issue.spread && issue.where ? <button type="button" className="link" onClick={() => select(issue.spread!)}>{issue.where}</button> : null}
-      {issue.spread && issue.where ? ' · ' : ''}{issue.message}
-    </li>)}</ul>}
-  </details>;
-}
-
 // Shows either the selected spread or the selected source, never both.
-export function Inspector({ summary, spread, source, template, render, usage, edit, importText, highlight, issues, check, checking,
+export function Inspector({ summary, spread, source, template, render, usage, edit, importText, highlight, issues,
   select, inspectSource, quickLook, focus, targets = [], adjustCrop, openEditor, place }: {
   summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void; importText: (box: string) => void;
-  highlight: (id?: string) => void; issues: string; check?: BookCheck; checking: boolean; select: (spread: string) => void;
+  highlight: (id?: string) => void; issues: string; select: (spread: string) => void;
   inspectSource: (source: SourceRef) => void; quickLook: () => void; focus?: { box: string; at: number };
   targets?: BookGeometry['targets']; adjustCrop: (box: string) => void; openEditor: (element: string) => void;
   place: (from: string, to: string) => void;
@@ -193,7 +170,6 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   const header = <>
     <p className="eyebrow">Inspector</p>
     {issues && <div className="inspection-issues" role="alert">{issues}</div>}
-    <CheckList check={check} checking={checking} spread={source ? '' : spread.id} select={select} />
   </>;
   if (source) {
     return <aside className="inspector" aria-label="Inspector">

@@ -14,7 +14,9 @@ import { assignmentCounts, newSpread, sourceUsage } from './editing';
 import { moveContent, swapContent } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
-import type { BookCheck, Edit } from './Inspector';
+import type { Edit } from './Inspector';
+import { BookCheckIndicator } from './BookCheck';
+import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
 import { keptMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
 import type { SourceKind, SourceRef } from './source-items';
@@ -901,7 +903,7 @@ export function App() {
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
         adjustCrop={(box) => { reveal(spread.id); startCrop(spread.id, box); }}
         openEditor={(element) => openElementEditor(spread.id, element)} place={(from, to) => place(spread.id, from, to)}
-        edit={edit} highlight={setHighlight} issues={issue} check={check} checking={!checkCurrent} select={select}
+        edit={edit} highlight={setHighlight} issues={issue} select={select}
         importText={(box) => importFiles({ kind: 'markdown', target: { spread: spread.id, box } })} />}
     </div>
     {summary && template && elementEditor && spreads.some(({ id }) => id === elementEditor.spread) &&
@@ -910,8 +912,11 @@ export function App() {
         edit={edit} close={() => setElementEditor(undefined)} />}
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
-    <footer className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
-      {issue || busy || notice || (summary ? 'Project preview · Proof export' : 'ImageFlow for macOS')}
+    <footer className="status-bar">
+      <span className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
+        {issue || busy || notice || (summary ? 'Project preview · Proof export' : 'ImageFlow for macOS')}
+      </span>
+      {summary && <BookCheckIndicator check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}
     </footer>
   </div></ProjectFilesContext.Provider>;
 }
