@@ -31,6 +31,8 @@ export const projectSchema = z.object({
   format: identifier.optional(),
   params: values,
   texts: z.record(identifier, z.string()).default({}),
+  // Files for file parameters (such as GPX tracks), by ID, as paths inside files/.
+  files: z.record(identifier, z.string()).default({}),
   spreads: z.array(spreadContent.extend({
     id: identifier,
     definition: identifier,
@@ -52,11 +54,15 @@ export type BoxState = z.infer<typeof box>;
 export type Values = z.infer<typeof values>;
 export type PhotoIndex = z.infer<typeof photoIndexSchema>;
 export type Photo = Omit<PhotoIndex[string], 'path'> & Dimensions;
+// A file the template reads through `file(id)`. Files are read as UTF-8 text.
+export type ProjectFile = { name: string; extension: string; text?: string; problem?: string };
 export type ProjectFiles = { project: Project; photoIndex: PhotoIndex };
 export type RenderProject = {
   project: Project;
   photos: Record<string, Photo & { src: string }>;
   texts: Record<string, string>;
+  // Registered files with their text, or why they could not be read.
+  files: Record<string, ProjectFile>;
   problems: string[];
   template: { script: string; css?: string; assets: Record<string, string> };
   mode: 'edit' | 'export';

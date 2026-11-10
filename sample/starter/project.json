@@ -11,6 +11,9 @@
     "notebook": "texts/notebook.md",
     "return": "texts/return.md"
   },
+  "files": {
+    "senja-road": "files/senja-road.gpx"
+  },
   "spreads": [
     {
       "id": "title",
@@ -162,6 +165,13 @@
           "photo": "cottage",
           "params": {
             "caption": true
+          }
+        }
+      },
+      "elements": {
+        "route": {
+          "params": {
+            "track": "senja-road"
           }
         }
       }

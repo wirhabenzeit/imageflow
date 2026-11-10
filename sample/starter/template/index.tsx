@@ -1,4 +1,4 @@
-import { asset, defineTemplate, spreadFor, p, mm, pt, Spread, PhotoBox, MarkdownBox, Element } from 'imageflow';
+import { asset, defineTemplate, file, spreadFor, p, mm, pt, Spread, PhotoBox, MarkdownBox, Element } from 'imageflow';
 import type { CSSProperties, ElementEditorProps, ImageFlowNode, Photo, RenderContext } from 'imageflow';
 import './styles.css';
 
@@ -77,6 +77,44 @@ function Caption({ box, style, className = 'caption' }: {
   box: { params: { caption: boolean }; photo: Photo | null }; style: CSSProperties; className?: string;
 }) {
   return box.params.caption && box.photo?.caption ? <p className={className} style={style}>{box.photo.caption}</p> : null;
+}
+
+// Track points of a GPX file as [longitude, latitude]. ImageFlow only checks the extension; the content is ours.
+function gpxPoints(text: string) {
+  const xml = new DOMParser().parseFromString(text, 'application/xml');
+  if (xml.querySelector('parsererror')) throw new Error('is not valid GPX');
+  const points = Array.from(xml.querySelectorAll('trkpt, rtept')).map((node) => [Number(node.getAttribute('lon')), Number(node.getAttribute('lat'))]);
+  if (points.length < 2 || points.some((point) => point.some((value) => !Number.isFinite(value)))) throw new Error('has no track');
+  return points;
+}
+
+// An optional route inset: the track of the assigned GPX file, drawn without a basemap. Without a file it is an
+// empty frame in the editor (so it can be clicked) and nothing in the printed book.
+function RouteMap({ track, mode, style }: { track: string; mode: Context['mode']; style: CSSProperties }) {
+  const source = file(track);
+  let line = '';
+  let problem = '';
+  if (source) {
+    try {
+      const points = gpxPoints(source.text);
+      const scale = Math.cos(points.reduce((sum, [, lat]) => sum + lat, 0) / points.length * Math.PI / 180);
+      const xs = points.map(([lon]) => lon * scale);
+      const ys = points.map(([, lat]) => -lat);
+      const [minX, minY] = [Math.min(...xs), Math.min(...ys)];
+      const size = Math.max(Math.max(...xs) - minX, Math.max(...ys) - minY) || 1;
+      const offset = [(size - (Math.max(...xs) - minX)) / 2, (size - (Math.max(...ys) - minY)) / 2];
+      line = xs.map((x, i) => ((x - minX + offset[0]) / size * 90 + 5).toFixed(2) + ',' + ((ys[i] - minY + offset[1]) / size * 90 + 5).toFixed(2)).join(' ');
+    } catch (error) {
+      problem = source.name + ' ' + (error instanceof Error ? error.message : 'could not be read') + '; the route is left out.';
+    }
+  }
+  // The printed book leaves an unavailable route out, but still reports why.
+  if (!line && mode !== 'edit') return problem ? <span hidden data-issue={problem} /> : null;
+  return <Element id="route" className={line ? 'route-map' : 'route-map empty'} style={style}>
+    {line
+      ? <svg viewBox="0 0 100 100" aria-label="Route"><polyline points={line} /></svg>
+      : <span data-issue={problem || undefined}>{problem ? 'Route unavailable' : 'Route map: add a GPX track'}</span>}
+  </Element>;
 }
 
 // Marked days are stored as a comma-separated list of day numbers, such as "3,14".
@@ -169,8 +207,10 @@ export default defineTemplate({
     panorama: spread({
       label: 'Panorama',
       boxes: { hero: photo('Panorama photo') },
+      elements: { route: { label: 'Route map', parameters: { track: p.file({ label: 'GPX track', accept: ['.gpx'] }) } } },
       render: (ctx) => <Paper context={ctx} bled={{ left: true, right: true }}>
         <PhotoBox id="hero" style={fullSpread} />
+        <RouteMap track={ctx.elements.route.params.track} mode={ctx.mode} style={right(page - margin - 60, margin, 60, 60)} />
         <Caption box={ctx.boxes.hero} className="caption overlay" style={left(margin, 268, 2 * page - 2 * margin, 10)} />
       </Paper>,
     }),

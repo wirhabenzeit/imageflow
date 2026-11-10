@@ -61,7 +61,13 @@ export type EnumParameter = Common & { type: 'enum'; default: string; options: r
 export type ColorParameter = Common & { type: 'color'; default: string };
 /** An ISO date such as `2027-03-01`. With `precision: 'month'` the editor picks a month and stores its first day. */
 export type DateParameter = Common & { type: 'date'; default: string; min?: string; max?: string; precision?: 'day' | 'month' };
-export type Parameter = BooleanParameter | StringParameter | IntegerParameter | NumberParameter | EnumParameter | ColorParameter | DateParameter;
+/**
+ * A file the user adds to the project, such as a GPX track. The value is the file's ID, or `''` when none is assigned;
+ * read the content with `file(id)`. `accept` lists lowercase extensions such as `'.gpx'`.
+ */
+export type FileParameter = Common & { type: 'file'; default: ''; accept: readonly string[] };
+export type Parameter = BooleanParameter | StringParameter | IntegerParameter | NumberParameter | EnumParameter | ColorParameter | DateParameter |
+  FileParameter;
 export type Parameters = Record<string, Parameter>;
 
 export type ParameterValue<P> =
@@ -81,6 +87,7 @@ export const p: {
     Common & { options: readonly T[]; default: T; labels?: Partial<Record<T, string>>; type: 'enum' };
   color<const O extends Options<ColorParameter>>(options: O): O & { type: 'color' };
   date<const O extends Options<DateParameter>>(options: O): O & { type: 'date' };
+  file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: O): O & { type: 'file'; default: '' };
 };
 
 // Declarations
@@ -242,3 +249,9 @@ export function MarkdownBox(props: Styling & EditMarker & { id: string; columns?
 export function Element(props: Styling & EditMarker & { id: string; children?: ImageFlowNode }): ImageFlowElement;
 /** URL of a file in `template/assets/`. */
 export function asset(path: string): string;
+/**
+ * The content of a file parameter's value, read as UTF-8 text before rendering, so preview and export see the same
+ * input. Undefined when no file is assigned, or when the assigned file is missing or unreadable; ImageFlow reports the
+ * latter in the Book check. Parse the text yourself and mark problems on a rendered node with `data-issue="…"`.
+ */
+export function file(id: string): { name: string; extension: string; text: string } | undefined;

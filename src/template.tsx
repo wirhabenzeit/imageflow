@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { cssMM, formatSchema, inch, mm, pt } from './format';
 import type { PrintFormat, ResolvedFormat, Span } from './format';
 import { identifier } from './project';
-import type { Photo, RenderProject, SpreadState, Values } from './project';
+import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
 import { centered, getCrop } from './spread';
 import { p, parametersSchema, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
@@ -243,7 +243,19 @@ export function asset(path: string) {
 // spread's parameters, boxes, and elements, and types its render context with the given document parameters.
 export const spreadFor = (_document: Parameters) => <T,>(definition: T) => definition;
 
-export const runtime = { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset };
+// The project's files for file parameters, read by `file(id)` during render.
+let files: Record<string, ProjectFile> = {};
+export function setTemplateFiles(next: Record<string, ProjectFile>) {
+  files = next;
+}
+// The content of a file parameter's value, or undefined when none is assigned or the file cannot be read (the Book
+// check reports the latter). Templates parse it themselves and mark problems with `data-issue` on a rendered node.
+export function file(id: string): { name: string; extension: string; text: string } | undefined {
+  const found = id && Object.hasOwn(files, id) ? files[id] : undefined;
+  return found?.text === undefined ? undefined : { name: found.name, extension: found.extension, text: found.text };
+}
+
+export const runtime = { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset, file };
 
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
 export function SpreadView({ book, template, format, spread, page, positions, renderPhotos, lazyPhotos = false }: {

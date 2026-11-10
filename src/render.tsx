@@ -11,8 +11,9 @@ import { parseDocument } from './project';
 import type { RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
 import { parameterWarnings, resolveParams } from './parameters';
+import type { Parameters } from './parameters';
 import { flow } from './text-flow';
-import { chooseFormat, runtime, setTemplateAssets, SpreadView, templateInfo, templateSchema } from './template';
+import { chooseFormat, runtime, setTemplateAssets, setTemplateFiles, SpreadView, templateInfo, templateSchema } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath, switchDefinition } from './editing';
 import './render.css';
@@ -60,6 +61,24 @@ function textAssignments(book: RenderProject, template: Template) {
   return { chains, positions };
 }
 
+// Assigned files that are gone, unreadable, or of a type the parameter does not accept. An unassigned file
+// parameter is valid; the template renders without it.
+function fileErrors(book: RenderProject, schema: Parameters, values: Values, scope: string) {
+  return Object.entries(schema).flatMap(([id, param]) => {
+    const value = values[id];
+    if (param.type !== 'file' || typeof value !== 'string' || !value) return [];
+    const where = scope + ' · ' + param.label + ': ';
+    const path = book.project.files[value];
+    const found = book.files[value];
+    if (!path || !found) return [where + 'the assigned file is no longer in the project. Choose it again.'];
+    if (found.problem) return [where + found.problem];
+    if (!param.accept.includes(found.extension)) {
+      return [where + found.name + ' is not a ' + param.accept.join(' or ') + ' file. Choose another file.'];
+    }
+    return [];
+  });
+}
+
 function validateSpread(container: HTMLElement, spread: SpreadState, template: Template, where: string, warnings: Issue[], errors: Issue[]) {
   const sheet = container.firstElementChild;
   if (!(sheet instanceof HTMLElement) || !sheet.matches('.if-sheet') || container.childElementCount !== 1) {
@@ -84,6 +103,8 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
   for (const [id, state] of Object.entries(spread.elements)) {
     warn(parameterWarnings(definition.elements[id]?.parameters ?? {}, state.params, definition.elements[id]?.label ?? id));
   }
+  // Templates report problems with their input, such as a file they cannot parse, on the node concerned.
+  warn([...sheet.querySelectorAll<HTMLElement>('[data-issue]')].map((node) => node.dataset.issue!).filter(Boolean));
   const unknown = new Set([...sheet.querySelectorAll<HTMLElement>('[data-edit]')]
     .flatMap((node) => node.dataset.edit!.split(' ').filter(Boolean))
     .filter((path) => !resolveEditPath(template, spread.definition, path)));
@@ -401,6 +422,7 @@ export async function startRender(root: HTMLElement) {
     base.href = new URL('./', book.template.script).href;
     document.head.append(base);
     setTemplateAssets(book.template.assets);
+    setTemplateFiles(book.files);
     Object.assign(globalThis, { ImageFlowRuntime: runtime, ImageFlowReact: React, ImageFlowJSX: jsx });
     const [module] = await Promise.all([import(/* @vite-ignore */ book.template.script), loadStyles(book.template.css)]);
     // The project's format choice is resolved first; everything below works with that one format.
@@ -455,6 +477,18 @@ export async function startRender(root: HTMLElement) {
     if (template.unknownChoice) {
       errors.push(message('The template no longer offers the format ' + book.project.format + ' saved with this book. The preview uses ' +
         template.format.label + '; choose a format in Book settings.'));
+    }
+    errors.push(...fileErrors(book, template.parameters, book.project.params, 'Document').map(message));
+    for (const spread of spreads) {
+      const definition = template.spreads[spread.definition];
+      if (!definition) continue;
+      const scoped = [
+        ...fileErrors(book, definition.parameters, spread.params, 'Layout'),
+        ...Object.entries(definition.boxes).flatMap(([id, box]) => fileErrors(book, box.parameters, spread.boxes[id]?.params ?? {}, box.label)),
+        ...Object.entries(definition.elements).flatMap(([id, element]) =>
+          fileErrors(book, element.parameters, spread.elements[id]?.params ?? {}, element.label)),
+      ];
+      errors.push(...scoped.map((text) => located(spread.id, text)));
     }
     for (const [i, result] of decoded.entries()) {
       if (result.status === 'rejected') errors.push(message('Could not decode photo ' + (images[i].alt || images[i].closest('[data-box]')?.getAttribute('data-box')) + '.'));

@@ -4,7 +4,7 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Loader } from 'esbuild';
 import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
-import type { PhotoIndex, Project, ProjectFiles, RenderProject } from '../src/project';
+import type { PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
 import type { ImportRequest, ProjectSummary } from '../src/desktop';
 import { photoDetails, photoExtensions } from './photos';
@@ -48,7 +48,7 @@ async function readJson(root: string, name: string) {
 }
 
 const hostModules = new Map([
-  ['imageflow', 'export const { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset } = globalThis.ImageFlowRuntime;'],
+  ['imageflow', 'export const { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset, file } = globalThis.ImageFlowRuntime;'],
   ['react', 'export default globalThis.ImageFlowReact; export const { createElement, Fragment, Children } = globalThis.ImageFlowReact;'],
   ['react/jsx-runtime', 'export const { jsx, jsxs, Fragment } = globalThis.ImageFlowJSX;'],
 ]);
@@ -141,8 +141,12 @@ async function cacheFolder(folder: string, fallback: string) {
 type TemplateAssets = Awaited<ReturnType<typeof bundleTemplate>>;
 export type OpenProject = ProjectFiles & {
   folder: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
-  texts: Record<string, string>; problems: string[]; readOnly: boolean;
+  texts: Record<string, string>; files: Record<string, ProjectFile>; problems: string[]; readOnly: boolean;
 };
+
+// Files for file parameters are read whole into the render data, so preview and export use the same input.
+export const maximumFileSize = 20 * 1024 * 1024;
+const fileName = (path: string) => basename(path).replace(/^fl-[0-9a-f-]{12}-/, '');
 
 export async function loadProject(path: string, fallback: string, readOnly = false): Promise<OpenProject> {
   const folder = await realpath(path);
@@ -153,9 +157,22 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   return readContent({ folder, assets, cache, readOnly, project, photoIndex });
 }
 
-async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'problems'>): Promise<OpenProject> {
+async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>): Promise<OpenProject> {
   const photos = new Map<string, ProjectPhoto>();
   const texts: Record<string, string> = {};
+  // A file that cannot be read is reported where a parameter uses it, so unused files raise nothing.
+  const files: Record<string, ProjectFile> = {};
+  const readFiles = Promise.all(Object.entries(book.project.files).map(async ([id, path]) => {
+    const file: ProjectFile = { name: fileName(path), extension: extname(path).toLowerCase() };
+    files[id] = file;
+    try {
+      const actual = await containedPath(book.folder, path, 'files');
+      if ((await stat(actual)).size > maximumFileSize) throw new Error(path + ' is larger than 20 MB.');
+      file.text = await readFile(actual, 'utf8');
+    } catch (error) {
+      file.problem = error instanceof Error ? error.message : String(error);
+    }
+  }));
   const problems: string[] = [];
   const entries = Object.entries(book.photoIndex);
   const readTexts = Promise.all(Object.entries(book.project.texts).map(async ([id, path]) => {
@@ -176,8 +193,8 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'problem
       }
     }));
   }
-  await readTexts;
-  return { ...book, photos, texts, problems: problems.sort() };
+  await Promise.all([readTexts, readFiles]);
+  return { ...book, photos, texts, files, problems: problems.sort() };
 }
 
 function json(value: unknown) {
@@ -229,8 +246,9 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   const photoIndex: PhotoIndex = structuredClone(book.photoIndex);
   const imported: string[] = [];
   const copied: string[] = [];
-  const folder = request.kind === 'photo' ? 'photos' : 'texts';
-  const extensions = request.kind === 'photo' ? photoExtensions : new Set(['.md']);
+  const folder = request.kind === 'photo' ? 'photos' : request.kind === 'file' ? 'files' : 'texts';
+  const extensions = request.kind === 'photo' ? photoExtensions : request.kind === 'file' ? new Set(request.accept) : new Set(['.md']);
+  const registry = request.kind === 'file' ? project.files : project.texts;
   const targetFolder = join(book.folder, folder);
   await mkdir(targetFolder, { recursive: true });
   if (await realpath(targetFolder) !== targetFolder) throw new Error(folder + '/ must be a folder inside the project.');
@@ -240,25 +258,26 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       if (!info.isFile() || !extensions.has(extname(file).toLowerCase())) continue;
       if (request.kind === 'photo') await photoDetails(file);
       if (request.kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
+      if (request.kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
       const previous = request.kind === 'photo'
         ? Object.entries(photoIndex).find(([, photo]) => join(book.folder, photo.path) === file)?.[0]
-        : Object.entries(project.texts).find(([, path]) => join(book.folder, path) === file)?.[0];
+        : Object.entries(registry).find(([, path]) => join(book.folder, path) === file)?.[0];
       if (previous) {
         imported.push(previous);
         continue;
       }
-      const id = (request.kind === 'photo' ? 'ph-' : 'tx-') + randomUUID().slice(0, 12);
+      const id = { photo: 'ph-', markdown: 'tx-', file: 'fl-' }[request.kind] + randomUUID().slice(0, 12);
       const name = basename(file).replace(/[^\p{L}\p{N} ._-]/gu, '-');
       const relativePath = folder + '/' + id + '-' + name;
       const path = join(book.folder, relativePath);
       await copyFile(file, path, constants.COPYFILE_EXCL);
       copied.push(path);
       if (request.kind === 'photo') photoIndex[id] = { path: relativePath, title: basename(file, extname(file)) };
-      else project.texts[id] = relativePath;
+      else registry[id] = relativePath;
       imported.push(id);
     }
     if (!imported.length) throw new Error('No supported files were selected.');
-    if (request.target) {
+    if (request.target && request.kind !== 'file') {
       const spread = project.spreads.find(({ id }) => id === request.target?.spread);
       if (!spread) throw new Error('The selected spread no longer exists.');
       const id = request.target.box;
@@ -295,6 +314,7 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
       return [id, { width, height, caption, title, credit, altText, src: base + '/photo/' + id }];
     })),
     texts: book.texts,
+    files: book.files,
     problems: book.problems,
     template: {
       script: base + '/template/template.js',

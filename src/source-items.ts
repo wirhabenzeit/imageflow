@@ -7,7 +7,7 @@ export type SourceKind = 'photo' | 'text';
 export type SourceRef = { kind: SourceKind; id: string };
 
 // Imported files are stored as "<id>-<name>"; show the original name.
-export const fileName = (path: string) => (path.split('/').pop() ?? path).replace(/^(?:ph|tx)-[a-f0-9]{12}-/, '');
+export const fileName = (path: string) => (path.split('/').pop() ?? path).replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');
 export const words = (source: string) => source.split(/\s+/).filter(Boolean).length;
 
 export function excerpt(source: string) {
