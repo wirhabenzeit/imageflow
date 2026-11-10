@@ -1,6 +1,6 @@
-# Template API (v1 draft)
+# Template API (contract 1)
 
-Status: accepted as the v1 baseline, 2026-11-09. Defines what a template declares, what it receives when rendering, which components and CSS the platform provides, and what the platform validates. It implements the decisions in [v1-decisions.md](v1-decisions.md); names may still change during implementation, and the open points at the end are settled while building.
+Status: implemented reference for the v1 runtime, including UI PR #7. The executable schemas in `src/template.tsx`, `src/parameters.ts`, `src/format.ts`, and `src/project.ts` govern validation. The authoring declarations are in `sample/starter/template/types/imageflow.d.ts`; the complete working example is `sample/starter/template/index.tsx`. Historical proposals are not alternative supported APIs.
 
 ## Package
 
@@ -15,9 +15,11 @@ template/
   spreads/         optional: one file per spread definition
 ```
 
-The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided by the host and must not be bundled. Relative imports, CSS imports, and asset imports inside `template/` are allowed; anything else (network, Node modules, `fetch`, timers) is not.
+The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided by the host and must not be bundled. Relative imports, CSS imports, and asset imports inside `template/` are allowed; other package imports are not supported. Templates must render deterministically without fetching data, timers, state, or effects. This is an authoring requirement, not a guarantee that arbitrary template JavaScript is safe; open only projects you trust.
 
 ## Declaration
+
+The following sketch illustrates the scopes; `MonthGrid` and the abbreviated format are placeholders. Use the starter template for a complete compilable package.
 
 ```tsx
 import { defineTemplate, p, mm, Spread, PhotoBox, MarkdownBox, Element } from 'imageflow';
@@ -92,7 +94,7 @@ export default defineTemplate({
 
 ### Parameters
 
-`p.*` helpers create plain, serializable schema objects; the editor generates sidebar controls from them, and TypeScript infers the types of `params` in `render`.
+`p.*` helpers create plain, serializable schema objects; the editor generates sidebar controls from them, and `spreadFor(documentParameters)` supplies inferred render-context types. `defineTemplate` alone uses a broad context.
 
 | Helper | Value | Options |
 | --- | --- | --- |
@@ -102,7 +104,7 @@ export default defineTemplate({
 | `p.string` | `string` | `default`, `multiline`, `maxLength`, `placeholder` |
 | `p.enum` | one of `options` | `default`, `options` (values), `labels` |
 | `p.color` | `#rrggbb` | `default` |
-| `p.date` | ISO date `YYYY-MM-DD` | `default`, `min`, `max` |
+| `p.date` | ISO date `YYYY-MM-DD` | `default`, `min`, `max`, `precision` (`day` or `month`) |
 
 Every parameter has a `label` and a `default`; a saved value outside the constraints is reported and replaced by the default for rendering, but kept in `project.json`.
 
@@ -164,7 +166,7 @@ Templates read photo metadata (for captions) and page numbers through the contex
 | Component | Purpose |
 | --- | --- |
 | `<Spread>` | Root of every spread. Sizes the spread to two trims plus bleed, sets geometry CSS variables, and handles page halves. |
-| `<PhotoBox id>` | Renders the assigned photo with its crop (`object-fit: cover` plus the saved crop), using a preview-size image in the editor and the original in export. Its element is the box's geometry and drop zone. |
+| `<PhotoBox id>` | Renders the assigned photo with its crop (`object-fit: cover` plus the saved crop), using a preview-size image in the editor and a rendition capped at the format maximum resolution in export (300 ppi when omitted). Its element is the box's geometry and drop zone. |
 | `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. |
 | `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked. |
 | `asset(path)` | Resolves a file in `template/assets/` for use in `src` or CSS. |
@@ -173,7 +175,7 @@ Rules:
 
 - Each declared box is rendered exactly once through its component; each declared element at most once.
 - Boxes and elements are positioned and sized by template CSS on the component's element (`className`, `style`).
-- An empty box keeps its area in edit mode so it can receive drops. In export, it renders nothing; templates choose between keeping the space and collapsing it through CSS (`[data-empty]`).
+- An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted; templates can style `[data-empty]`.
 
 ## CSS contract
 
@@ -182,8 +184,8 @@ Rules:
 Templates style with inline React `style` objects (positions, sizes, and anything driven by parameters) and one plain CSS file (`styles.css`, plus optional imports) for fonts, Markdown typography, and rules shared across spreads. Native CSS nesting may be used. No CSS preprocessor, Tailwind, or CSS-in-JS library is part of the v1 build.
 
 ```tsx
-<h1 style={{ position: 'absolute', left: mm(30), top: mm(40), color: params.accent }}>{params.heading}</h1>
-<MarkdownBox id="body" className="editorial" style={{ position: 'absolute', left: '55%', top: mm(30), width: mm(110), height: mm(230) }} />
+<h1 style={{ position: 'absolute', left: '30mm', top: '40mm', color: params.accent }}>{params.heading}</h1>
+<MarkdownBox id="body" className="editorial" style={{ position: 'absolute', left: '55%', top: '30mm', width: '110mm', height: '230mm' }} />
 ```
 
 ```css
@@ -244,7 +246,7 @@ At export:
 
 - The format's checks: page count rule, transparency policy, fonts, resolution of each placed photo, file size.
 
-Errors in edit mode appear in the sidebar and do not block editing; errors at export block the export.
+Errors in edit mode appear in Book check. Print export blocks on render errors and PDF preflight failures. Proof export permits reported layout errors, but still requires a successful render and correct PDF page count and dimensions. Warnings do not block print export.
 
 ## Stored project data
 
@@ -265,10 +267,43 @@ A spread instance in `project.json`:
 
 The project also stores the document parameter values, the template `id` and `version` it was last opened with, and the text id → path mapping. Photo metadata lives in `photos.json`.
 
-## Open points
+## Authoring and compatibility details
 
-- How page numbers, running heads, or other per-page elements outside spreads are expressed (a `page.left`/`page.right` context is proposed; a page-level component may be cleaner).
-- Whether `p.*` helpers should be backed by a schema library (for example Zod or Valibot) or stay plain objects.
-- How a template declares example content for its starter project (sample photos and texts for new projects).
-- TypeScript inference from declarations to `render` context types; the shapes above assume it is achievable with `defineTemplate` generics.
-- Crop model: keep the prototype's `centerX`/`centerY`/`zoom`, or store a crop rectangle.
+Use the project’s `template/tsconfig.json` and bundled `types/` to check templates without installing host packages. Run `npx tsc -p sample/starter/template` in this repository. For inferred parameter and edit-path types:
+
+```tsx
+const documentParameters = { accent: p.color({ label: 'Accent', default: '#223344' }) };
+const spread = spreadFor(documentParameters);
+const story = spread({
+  label: 'Story',
+  parameters: { heading: p.string({ label: 'Heading', default: '' }) },
+  render: (ctx) => <Spread>
+    <h1 {...ctx.edit('heading')} style={{ color: ctx.document.accent }}>
+      {ctx.params.heading}
+    </h1>
+  </Spread>,
+});
+// Use parameters: documentParameters and spreads: { story } in defineTemplate.
+```
+
+Import `spreadFor` alongside the other helpers. `mm`, `pt`, and `inch` produce structured lengths for the print-format declaration; use CSS strings such as `'30mm'` in React styles. They are not CSS values.
+
+`MarkdownBox` accepts `columns` (default 1, rounded and clamped to 1–6). Use `style={{ columnGap: '5mm' }}` for the gap. Text continues down each column, then through the next assigned box in spread/flow order. Expose a box parameter and pass its resolved value to `columns` if users should control it. Column layout remains platform-owned; avoid overriding its flow machinery with CSS.
+
+Numeric `step` is a control increment, not a runtime divisibility constraint. Month precision changes the picker; it writes `YYYY-MM-01`, but existing valid ISO dates are not normalized. Use first-of-month defaults and bounds for month parameters.
+
+Identifiers start with a letter or digit, then contain letters, digits, underscores or hyphens; reserved Object prototype names are rejected. Dots separate edit-path scopes and cannot occur in identifiers. PhotoBox, MarkdownBox and Element automatically expose their declared parameters; explicit edit marks add parameters. Ordinary nodes need `ctx.edit`. Export omits edit marks. Avoid overlapping targets or marking several nodes with the identical path list: the current editor identifies targets by spread and path list.
+
+### Persistence and evolution
+
+`project.json` has `schemaVersion: 1`, `title`, `template: { id, version }`, document `params`, `texts` (ID → relative path), and ordered `spreads`. Each spread has `id`, `definition`, `params`, `boxes`, `elements`, and an optional `archive` of prior layout state. The example above shows one spread, not a complete project. Photo metadata is keyed by stable photo ID in `photos.json`; dimensions are derived from image files. Crop centers are normalized 0–1; zoom is 1–20.
+
+Layout switching archives the previous layout. Same-ID parameters with the same parameter type carry forward; same-ID boxes carry assignments only when their content type matches. Saved target-layout state is restored, then compatible current state takes precedence. This is structural matching, not semantic mapping. Constraints are checked on rendering; invalid saved values remain stored and render using defaults. Sources remain in the project even when no active box uses them.
+
+New projects copy the starter template. Updating the app does not replace existing project templates. Contract 1 supports the additive edit marks, month picker and columns API, but an older app is not guaranteed to understand newer additions. Keep the app and authoring declarations aligned. Renaming an ID or moving a parameter between scopes requires an explicit project-data migration; there is no automatic migration framework. PR #7 moves the starter calendar month to `elements.grid.params.month`; replacing only the template in an older project does not migrate that saved value.
+
+### Preview limitations
+
+The editor renders the whole book for the canvas and again for thumbnails. Layout choices render independently and restart Markdown from the beginning; they are composition previews, not previews of the actual continuation fragment. Review the main book and exported proof for final flow. Large-book latency and memory use need separate measurement.
+
+The API is the in-process `imageflow` template module. There is no documented public REST or automation API. Desktop IPC and frame messages in `src/desktop.ts` are internal implementation details.
