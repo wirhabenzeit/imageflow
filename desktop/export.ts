@@ -5,7 +5,8 @@ import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream } from
 import type { PDFObject } from 'pdf-lib';
 import { formatSchema, pdfPoints, resolveFormat } from '../src/format';
 import { parseDocument } from '../src/project';
-import type { ExportMode, RenderStatus } from '../src/desktop';
+import { issueText } from '../src/desktop';
+import type { ExportMode, Issue, RenderStatus } from '../src/desktop';
 
 const name = PDFName.of;
 
@@ -77,7 +78,7 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
       })
     `);
     if (status.state === 'error') throw new Error(status.message);
-    if (mode === 'print' && status.errors.length) throw new Error(status.errors.join('\n'));
+    if (mode === 'print' && status.errors.length) throw new Error(status.errors.map(issueText).join('\n'));
     const format = parseDocument(formatSchema, status.template.format, 'Print format');
     const { outputWidth, height, trim, bleed } = resolveFormat(format);
     progress('Printing PDF…');
@@ -91,7 +92,7 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
     const heightPt = pdfPoints(height);
     const issues = new Set<string>();
     for (const [index, page] of pdf.getPages().entries()) {
-      const { side, spread } = status.units[index];
+      const { side, where } = status.units[index];
       const actual = page.getMediaBox();
       if (Math.abs(actual.width - widthPt) > 0.5 || Math.abs(actual.height - heightPt) > 0.5) {
         throw new Error('Chromium produced an unexpected size on PDF page ' + (index + 1) + '.');
@@ -103,7 +104,7 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
       page.setTrimBox(pdfPoints(leftBleed), pdfPoints(bleed.bottom), pdfPoints(trim.width * (side === 'spread' ? 2 : 1)), pdfPoints(trim.height));
       if (mode === 'print') {
         for (const issue of preflightPage(page.node, page.node.Resources(), fontNames, format.output.transparency === 'forbid')) {
-          issues.add('Spread ' + spread + ' · ' + issue + '.');
+          issues.add(where + ' · ' + issue[0].toUpperCase() + issue.slice(1) + '.');
         }
       }
     }
@@ -111,8 +112,10 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
     signal.throwIfAborted();
     const bytes = await pdf.save();
     const limit = format.output.maximumFileSize?.pages;
-    if (mode === 'print' && limit && bytes.length > limit) throw new Error('The PDF exceeds the format’s file size limit.');
-    return bytes;
+    if (mode === 'print' && limit && bytes.length > limit) {
+      throw new Error('The PDF is ' + Math.ceil(bytes.length / 1e6) + ' MB; the format allows ' + Math.floor(limit / 1e6) + ' MB.');
+    }
+    return { bytes, warnings: status.warnings satisfies Issue[] };
   } finally {
     signal.removeEventListener('abort', destroy);
     destroy();

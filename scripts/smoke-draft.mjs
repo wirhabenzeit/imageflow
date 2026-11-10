@@ -22,22 +22,22 @@ try {
   const window = await app.firstWindow();
   window.setDefaultTimeout(15000);
   const button = (name) => window.getByRole('button', { name, exact: true });
-  const preview = () => window.frameLocator('iframe');
+  const preview = () => window.frameLocator('iframe:not(.book-check)');
   const status = () => window.locator('.status').textContent();
   const chooseSave = (filePath) => app.evaluate(({ dialog }, filePath) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath });
   }, filePath);
   async function ready() {
-    await window.waitForFunction(() => document.querySelector('iframe') &&
+    await window.waitForFunction(() => document.querySelector('iframe:not(.book-check)') &&
       (!document.querySelector('.preview-message') || document.querySelector('.status-error')));
     const value = await preview().locator('body').evaluate(() => window.imageflowRenderStatus);
     assert.equal(value?.state, 'ready', value?.message ?? await status());
     return value;
   }
   async function changed(action) {
-    const before = await window.locator('iframe').getAttribute('src');
+    const before = await window.locator('iframe:not(.book-check)').getAttribute('src');
     await action();
-    await window.waitForFunction((url) => document.querySelector('iframe')?.getAttribute('src') !== url ||
+    await window.waitForFunction((url) => document.querySelector('iframe:not(.book-check)')?.getAttribute('src') !== url ||
       document.querySelector('.status-error'), before);
     return ready();
   }
@@ -73,6 +73,12 @@ try {
   assert.equal(starter.pages, 28);
   assert.deepEqual(starter.flow['turning:body'], { part: 2, parts: 3, title: 'arrival.md' });
   assert.equal((await read()).title, 'Draft Photobook');
+  await window.waitForFunction(() => /Book check · (No issues|\d)/.test(document.querySelector('.book-check-list summary')?.textContent ?? '') &&
+    !document.querySelector('.book-check-stale'));
+  const bookCheck = await window.frameLocator('iframe.book-check').locator('body').evaluate(() => window.imageflowRenderStatus);
+  assert.equal(bookCheck?.state, 'ready');
+  assert.deepEqual(bookCheck.errors, []);
+  assert.deepEqual(bookCheck.warnings, [], bookCheck.warnings.map(({ where, message }) => where + ' · ' + message).join('\n'));
 
   await chooseSave(pdf);
   await button('Export print PDF').click();

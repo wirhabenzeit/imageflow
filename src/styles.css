@@ -95,3 +95,19 @@ body { margin: 0; }
 .box-highlight { border: 2px solid #e7b347; background: #efc97633; }
 .guides-toggle { position: absolute; top: 10px; right: 10px; border-radius: 4px; background: #fcfbf6; padding: 2px 5px; font-size: 12px; }
 .status { max-height: 65px; overflow: auto; }
+
+/* Book check: the whole-book render runs in an invisible frame; its findings are listed in the inspector. */
+.canvas iframe.book-check { opacity: 0; pointer-events: none; }
+.book-check-list { font-size: 12px; overflow-wrap: anywhere; }
+.book-check-list summary { color: var(--muted); }
+.book-check-list ul { padding-left: 17px; max-height: 260px; overflow: auto; }
+.book-check-list li { margin: 4px 0; }
+.book-check-list .issue-error { color: #7c2720; }
+.book-check-list .issue-warning { color: #6b5212; }
+.book-check-list .issue-current { font-weight: 600; }
+.book-check-stale ul { opacity: .6; }
+.book-check-list button.link { all: unset; cursor: pointer; text-decoration: underline; }
+.book-check-list button.link:focus-visible { outline: 2px solid var(--accent); }
+.issue-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.issue-dot.issue-error { background: #b3382c; }
+.issue-dot.issue-warning { background: #c99a1e; }

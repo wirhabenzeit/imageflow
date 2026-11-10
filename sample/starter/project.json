@@ -3,7 +3,7 @@
   "title": "Along the coast",
   "template": {
     "id": "imageflow-starter",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "params": {},
   "texts": {
@@ -39,12 +39,13 @@
     {
       "id": "headlands",
       "definition": "panorama",
-      "params": {
-        "heading": "Headlands"
-      },
+      "params": {},
       "boxes": {
         "hero": {
-          "photo": "shore"
+          "photo": "shore",
+          "params": {
+            "caption": true
+          }
         }
       }
     },
@@ -88,14 +89,20 @@
       "id": "water",
       "definition": "pair",
       "params": {
-        "heading": "Either side of the water"
+        "framed": false
       },
       "boxes": {
         "hero": {
-          "photo": "shore"
+          "photo": "shore",
+          "params": {
+            "caption": false
+          }
         },
         "second": {
-          "photo": "light"
+          "photo": "light",
+          "params": {
+            "caption": false
+          }
         }
       }
     },
@@ -144,12 +151,13 @@
     {
       "id": "road",
       "definition": "panorama",
-      "params": {
-        "heading": "The road home"
-      },
+      "params": {},
       "boxes": {
         "hero": {
-          "photo": "cottage"
+          "photo": "cottage",
+          "params": {
+            "caption": true
+          }
         }
       }
     },
@@ -190,14 +198,20 @@
       "id": "twilight",
       "definition": "pair",
       "params": {
-        "heading": "Twilight"
+        "framed": true
       },
       "boxes": {
         "hero": {
-          "photo": "segla"
+          "photo": "segla",
+          "params": {
+            "caption": true
+          }
         },
         "second": {
-          "photo": "light"
+          "photo": "light",
+          "params": {
+            "caption": true
+          }
         }
       }
     },

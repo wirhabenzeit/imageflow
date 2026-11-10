@@ -26,11 +26,13 @@ export async function photoDetails(original: string) {
 
 const pending = new Map<string, Promise<string>>();
 
-export async function photoFile(photo: ProjectPhoto, rendition: Rendition) {
+// Export renditions are resampled to `width` pixels when the placement needs fewer pixels than the original has.
+export async function photoFile(photo: ProjectPhoto, rendition: Rendition, width?: number) {
   if (await realpath(photo.original) !== photo.original) throw new Error('The original photo moved. Reload the project.');
-  if (rendition === 'export' && photo.passthrough) return photo.original;
+  const resample = rendition === 'export' && width !== undefined && width < photo.width ? width : undefined;
+  if (rendition === 'export' && !resample && photo.passthrough) return photo.original;
   const extension = photo.alpha ? '.png' : '.jpg';
-  const path = join(photo.cache, photo.key + '-' + rendition + extension);
+  const path = join(photo.cache, photo.key + '-' + rendition + (resample ? '-' + resample : '') + extension);
   if (pending.has(path)) return pending.get(path)!;
   const work = (async () => {
     try {
@@ -44,8 +46,10 @@ export async function photoFile(photo: ProjectPhoto, rendition: Rendition) {
         if (rendition !== 'export') {
           const size = rendition === 'thumb' ? 240 : 1400;
           image.resize({ width: size, height: size, fit: 'inside', withoutEnlargement: true });
+        } else if (resample) {
+          image.resize({ width: resample, kernel: 'lanczos3' });
         }
-        if (photo.alpha) image.png(); else image.jpeg({ quality: rendition === 'export' ? 98 : 86 });
+        if (photo.alpha) image.png(); else image.jpeg({ quality: rendition === 'export' ? 95 : 86, chromaSubsampling: rendition === 'export' ? '4:4:4' : '4:2:0' });
         const candidate = join(staging, 'photo' + extension);
         await image.toFile(candidate);
         await rename(candidate, path);

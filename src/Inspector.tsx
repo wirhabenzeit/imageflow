@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
+import type { Issue, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
 import type { ProjectFiles, SpreadState, Values } from './project';
 import type { Parameter, Parameters } from './parameters';
 import { isParameterValue } from './parameters';
@@ -51,10 +51,33 @@ function Fields({ schema, values, update }: { schema: Parameters; values: Values
   });
 }
 
-export function Inspector({ summary, spread, template, render, photo, edit, importText, highlight, issues }: {
+export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[] };
+
+function CheckList({ check, checking, spread, select }: {
+  check?: BookCheck; checking: boolean; spread: string; select: (spread: string) => void;
+}) {
+  const items = [
+    ...(check?.errors ?? []).map((issue) => ({ issue, level: 'error' })),
+    ...(check?.warnings ?? []).map((issue) => ({ issue, level: 'warning' })),
+  ];
+  const count = (n: number, word: string) => n + ' ' + word + (n === 1 ? '' : 's');
+  const label = !check ? 'Checking book…' : !items.length ? 'No issues' :
+    [check.errors.length && count(check.errors.length, 'error'), check.warnings.length && count(check.warnings.length, 'warning')]
+      .filter(Boolean).join(' · ');
+  return <details className={'book-check-list' + (checking ? ' book-check-stale' : '')} open={!!check?.errors.length || undefined}>
+    <summary>Book check · {label}{check && checking ? ' · updating…' : ''}</summary>
+    {items.length > 0 && <ul>{items.map(({ issue, level }, i) => <li key={i} className={'issue-' + level +
+      (issue.spread === spread ? ' issue-current' : '')}>
+      {issue.spread && issue.where ? <button type="button" className="link" onClick={() => select(issue.spread!)}>{issue.where}</button> : null}
+      {issue.spread && issue.where ? ' · ' : ''}{issue.message}
+    </li>)}</ul>}
+  </details>;
+}
+
+export function Inspector({ summary, spread, template, render, photo, edit, importText, highlight, issues, check, checking, select }: {
   summary: ProjectSummary; spread: SpreadState; template?: TemplateInfo; render?: RenderStatus;
   photo?: string; edit: (change: Edit, notice?: string) => void; importText: (box: string) => void;
-  highlight: (id?: string) => void; issues: string;
+  highlight: (id?: string) => void; issues: string; check?: BookCheck; checking: boolean; select: (spread: string) => void;
 }) {
   const definition = template?.spreads[spread.definition];
   function changeSpread(update: (spread: SpreadState) => void, notice?: string) {
@@ -65,15 +88,11 @@ export function Inspector({ summary, spread, template, render, photo, edit, impo
   }
   const writable = !summary.readOnly;
   const archived = Object.keys(spread.archive);
-  const problems = render?.state === 'ready' ? [...render.errors, ...render.warnings] : [];
   const selectedPhoto = photo ? summary.photoIndex[photo] : undefined;
   return <aside className="inspector" aria-label="Inspector">
     <p className="eyebrow">Inspector</p>
     {issues && <div className="inspection-issues" role="alert">{issues}</div>}
-    {problems.length > 0 && <details className="inspection-issues">
-      <summary>Preflight · {problems.length} {problems.length === 1 ? 'item' : 'items'}</summary>
-      <ul>{problems.map((problem, i) => <li key={i}>{problem}</li>)}</ul>
-    </details>}
+    <CheckList check={check} checking={checking} spread={spread.id} select={select} />
     <fieldset disabled={!writable}>
       <details open><summary>Document</summary>
         <label className="field">Book title<input key={summary.project.title} defaultValue={summary.project.title}

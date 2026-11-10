@@ -64,7 +64,7 @@ export function resolveFormat(format: PrintFormat) {
   if (safe.outside + safe.binding >= trim.width || safe.top + safe.bottom >= trim.height) {
     throw new Error('Template safe insets leave no space inside the trim.');
   }
-  return { trim, bleed, safe, pageWidth, spreadWidth, outputWidth, height };
+  return { trim, bleed, safe, pageWidth, spreadWidth, outputWidth, height, resolution: format.output.resolution };
 }
 
 export function pageSequence(spans: Span[], format: PrintFormat) {

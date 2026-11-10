@@ -48,7 +48,7 @@ async function readJson(root: string, name: string) {
 }
 
 const hostModules = new Map([
-  ['imageflow', 'export const { defineTemplate, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset } = globalThis.ImageFlowRuntime;'],
+  ['imageflow', 'export const { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset } = globalThis.ImageFlowRuntime;'],
   ['react', 'export default globalThis.ImageFlowReact; export const { createElement, Fragment, Children } = globalThis.ImageFlowReact;'],
   ['react/jsx-runtime', 'export const { jsx, jsxs, Fragment } = globalThis.ImageFlowJSX;'],
 ]);
@@ -72,6 +72,8 @@ async function bundleTemplate(folder: string) {
       write: false,
       format: 'esm',
       jsx: 'automatic',
+      // The template's tsconfig.json is for code editors; bundling must not depend on it.
+      tsconfigRaw: {},
       loader,
       logLevel: 'silent',
       plugins: [{

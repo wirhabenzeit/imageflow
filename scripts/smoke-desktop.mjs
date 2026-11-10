@@ -79,7 +79,7 @@ try {
   await expectStatus('Project preview · Proof export');
   const exportButton = window.getByRole('button', { name: 'Export proof PDF' });
   await exportButton.and(window.locator(':enabled')).waitFor();
-  const previewLines = await window.frameLocator('iframe').locator('[data-box="story"]').evaluate((box) => {
+  const previewLines = await window.frameLocator('iframe:not(.book-check)').locator('[data-box="story"]').evaluate((box) => {
     const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
     const lines = new Map();
     while (walker.nextNode()) {

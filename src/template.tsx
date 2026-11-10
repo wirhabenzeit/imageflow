@@ -99,8 +99,17 @@ export function Spread({ className, style, children }: Styling & { children?: Re
   );
 }
 
+// Pixel width the export needs for a photo drawn `cssWidth` CSS pixels wide (uncropped), capped at the format's
+// maximum resolution. Rounded up to 16 px so nearby placements share a cached rendition.
+const exportCap = 300;
+function exportSource(photo: Photo & { src: string }, cssWidth: number, format: ResolvedFormat) {
+  const ppi = format.resolution?.maximum ?? exportCap;
+  const width = Math.ceil(cssWidth / 96 * ppi / 16) * 16;
+  return width < photo.width ? photo.src + '/' + width : photo.src;
+}
+
 export function PhotoBox({ id, className, style }: Styling & { id: string }) {
-  const { spread, book, renderPhotos } = useSpread();
+  const { spread, book, format, renderPhotos } = useSpread();
   const box = spread.boxes[id];
   const photo = box?.photo ? book.photos[box.photo] : undefined;
   const placement = box?.crop ?? centered;
@@ -120,6 +129,7 @@ export function PhotoBox({ id, className, style }: Styling & { id: string }) {
       const crop = getCrop(photo, placement, w / h);
       element.dataset.ppi = String(Math.min(photo.width * crop.width / w, photo.height * crop.height / h) * 96);
       if (!img) return;
+      if (book.mode !== 'edit' && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format);
       img.style.width = 100 / crop.width + '%';
       img.style.height = 100 / crop.height + '%';
       img.style.left = -100 * crop.x / crop.width + '%';
@@ -134,7 +144,8 @@ export function PhotoBox({ id, className, style }: Styling & { id: string }) {
   return (
     <div ref={frame} data-box={id} data-box-type="photo" data-empty={photo ? undefined : ''}
       className={['if-photo', className].filter(Boolean).join(' ')} style={style}>
-      {photo && renderPhotos && <img ref={image} src={photo.src} alt={photo.altText ?? photo.title ?? ''} />}
+      {photo && renderPhotos &&
+        <img ref={image} src={book.mode === 'edit' ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
       {!photo && book.mode === 'edit' && <span className="if-placeholder">{box?.photo ? 'Missing photo' : 'Drop a photo'}</span>}
     </div>
   );
@@ -166,7 +177,11 @@ export function asset(path: string) {
   return url;
 }
 
-export const runtime = { defineTemplate, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset };
+// Returns an identity helper for spread declarations. It exists for TypeScript: `spread({...})` infers each
+// spread's parameters, boxes, and elements, and types its render context with the given document parameters.
+export const spreadFor = (_document: Parameters) => <T,>(definition: T) => definition;
+
+export const runtime = { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset };
 
 export function SpreadView({ book, template, format, spread, page, positions, renderPhotos }: {
   book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState;

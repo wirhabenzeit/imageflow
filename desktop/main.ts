@@ -65,12 +65,13 @@ async function serve(request: Request) {
     const bytes = session.book.assets.files.get(asset);
     if (bytes) return response(bytes, assetTypes[extname(asset).toLowerCase()] ?? 'application/octet-stream');
   }
-  const photoMatch = /^(photo|thumb)\/([\w-]+)$/.exec(resource);
+  const photoMatch = /^(photo|thumb)\/([\w-]+)(?:\/([1-9]\d{0,5}))?$/.exec(resource);
   if (photoMatch) {
-    const [, kind, photoId] = photoMatch;
+    const [, kind, photoId, size] = photoMatch;
     const photo = session.book.photos.get(photoId);
     const rendition = kind === 'thumb' ? 'thumb' : session.mode === 'edit' ? 'preview' : 'export';
-    if (photo) return net.fetch(pathToFileURL(await photoFile(photo, rendition)).href);
+    const width = size && rendition === 'export' ? Number(size) : undefined;
+    if (photo) return net.fetch(pathToFileURL(await photoFile(photo, rendition, width)).href);
   }
   return new Response(null, { status: 404 });
 }
@@ -264,7 +265,7 @@ async function exportBook(owner: BrowserWindow, projectId: string, mode: ExportM
     title: proof ? 'Export Proof PDF' : 'Export Print PDF', defaultPath: join(app.getPath('documents'), fileName),
     filters: [{ name: 'PDF', extensions: ['pdf'] }],
   });
-  if (canceled || !filePath || owner.isDestroyed()) return false;
+  if (canceled || !filePath || owner.isDestroyed()) return null;
   const id = randomUUID();
   const job = new AbortController();
   exportJob = job;
@@ -272,12 +273,12 @@ async function exportBook(owner: BrowserWindow, projectId: string, mode: ExportM
   const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
   try {
     const fonts = mode === 'print' ? bundledFontNames(book.assets.files) : [];
-    const bytes = await printBook(renderOrigin + '/render/' + id, mode, fonts, job.signal, progress);
+    const { bytes, warnings } = await printBook(renderOrigin + '/render/' + id, mode, fonts, job.signal, progress);
     progress('Saving PDF…');
     await saveProof(filePath, bytes, job.signal);
-    return true;
+    return { warnings };
   } catch (error) {
-    if (job.signal.aborted) return false;
+    if (job.signal.aborted) return null;
     throw error;
   } finally {
     exportJob = undefined;

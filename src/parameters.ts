@@ -56,6 +56,7 @@ export function resolveParams(schema: Parameters, values: Values) {
 export function parameterWarnings(schema: Parameters, values: Values, scope: string) {
   return Object.entries(values).flatMap(([id, value]) => {
     const param = schema[id];
-    return !param || !isParameterValue(param, value) ? [scope + ' · ' + id + ' has a saved value outside the current schema.'] : [];
+    if (!param) return [scope + ' · ' + id + ' is saved but no longer declared by the template.'];
+    return isParameterValue(param, value) ? [] : [scope + ' · ' + param.label + ' has a saved value the template no longer allows; the default is used.'];
   });
 }

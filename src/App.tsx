@@ -1,10 +1,10 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import { renderOrigin } from './desktop';
-import type { BoxLocation, Command, ImportRequest, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
+import type { BoxLocation, Command, ImportRequest, Issue, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
 import { assignmentCounts, newSpread } from './editing';
 import { Inspector } from './Inspector';
-import type { Edit } from './Inspector';
+import type { BookCheck, Edit } from './Inspector';
 import { pageSequence, resolveFormat } from './format';
 import type { ProjectFiles } from './project';
 
@@ -46,6 +46,10 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const preview = useRef<HTMLIFrameElement>(null);
+  // The book check renders the whole book in a hidden frame after the preview is ready, once per project revision.
+  const checkFrame = useRef<HTMLIFrameElement>(null);
+  const [checkId, setCheckId] = useState<string>();
+  const [check, setCheck] = useState<BookCheck>();
   const queue = useRef(Promise.resolve());
   const history = useRef<{ past: ProjectFiles[]; future: ProjectFiles[] }>({ past: [], future: [] });
   const spreads = summary?.project.spreads ?? [];
@@ -153,7 +157,11 @@ export function App() {
         setExporting(true);
         const result = await api.exportBook(before.id, command === 'print' ? 'print' : 'proof');
         if ('error' in result) throw new Error(result.error);
-        if (result.value) setNotice(command === 'print' ? 'Print PDF saved.' : 'Proof PDF saved.');
+        if (!result.value) return;
+        const count = result.value.warnings.length;
+        setNotice((command === 'print' ? 'Print PDF saved.' : 'Proof PDF saved.') +
+          (count ? ' ' + count + (count === 1 ? ' warning' : ' warnings') + ' in Book check.' : ''));
+        if (before.id === current.current?.id) setCheck({ id: before.id, errors: [], warnings: result.value.warnings });
         return;
       }
       setBusy(command === 'new' ? 'Creating project…' : 'Opening project…');
@@ -181,7 +189,15 @@ export function App() {
 
   useEffect(() => {
     function receive(event: MessageEvent<RenderStatus | Geometry>) {
-      if (event.origin !== renderOrigin || event.source !== preview.current?.contentWindow || !event.data) return;
+      if (event.origin !== renderOrigin || !event.data) return;
+      const checked = checkFrame.current;
+      if (checked && event.source === checked.contentWindow && 'state' in event.data) {
+        const id = checked.dataset.project!;
+        setCheck(event.data.state === 'ready' ? { id, errors: event.data.errors, warnings: event.data.warnings } :
+          { id, errors: [{ message: event.data.message }], warnings: [] });
+        return;
+      }
+      if (event.source !== preview.current?.contentWindow) return;
       if ('type' in event.data && event.data.type === 'geometry') setGeometry(event.data);
       else if ('state' in event.data) {
         setRender(event.data);
@@ -191,6 +207,15 @@ export function App() {
     window.addEventListener('message', receive);
     return () => window.removeEventListener('message', receive);
   }, []);
+
+  useEffect(() => {
+    if (summary && render && checkId !== summary.id) setCheckId(summary.id);
+  }, [summary, render, checkId]);
+  const checkCurrent = !!check && check.id === summary?.id;
+  const spreadIssues = new Map<string, 'error' | 'warning'>();
+  for (const [level, list] of [['warning', check?.warnings ?? []], ['error', check?.errors ?? []]] as const) {
+    for (const { spread } of list as Issue[]) if (spread) spreadIssues.set(spread, level);
+  }
 
   function move(offset: number) {
     if (!spread) return;
@@ -293,8 +318,11 @@ export function App() {
             {spreads.map(({ id, definition }, i) => {
               const pages = sequence?.spreads[i].page;
               const range = pages?.left && pages?.right ? pages.left + '–' + pages.right : pages?.left ?? pages?.right;
+              const level = spreadIssues.get(id);
               return <li key={id}><button aria-current={index === i ? 'page' : undefined} disabled={!!busy} onClick={() => select(id)}>
-                <span>{template?.spreads[definition]?.label ?? 'Spread ' + (i + 1)}</span><span className="muted">{range}</span>
+                <span>{template?.spreads[definition]?.label ?? 'Spread ' + (i + 1)}</span>
+                <span className="muted">{level && <span className={'issue-dot issue-' + level}
+                  title={level === 'error' ? 'Has errors' : 'Has warnings'} aria-label={level === 'error' ? 'Has errors' : 'Has warnings'} />}{range}</span>
               </button></li>;
             })}
           </ol>
@@ -313,6 +341,8 @@ export function App() {
         }} onDragLeave={() => setDropHighlight(undefined)} onDrop={drop}>
           {summary && <iframe key={summary.id + ':' + index} ref={preview} title={'Spread ' + (index + 1) + ' preview'}
             src={renderOrigin + '/render/' + summary.id + '?spread=' + index} />}
+          {checkId && <iframe key={checkId} ref={checkFrame} className="book-check" data-project={checkId} title="Book check"
+            aria-hidden="true" tabIndex={-1} src={renderOrigin + '/render/' + checkId + '?check'} />}
           {!summary && <div className="welcome">
             <span className="welcome-icon" aria-hidden="true">◫</span>
             <h2>See your book take shape</h2>
@@ -359,7 +389,7 @@ export function App() {
         </section>}
       </div>
       {summary && spread && <Inspector summary={summary} spread={spread} template={template} render={render} photo={photo}
-        edit={edit} highlight={setHighlight} issues={issue}
+        edit={edit} highlight={setHighlight} issues={issue} check={check} checking={!checkCurrent} select={select}
         importText={(box) => importFiles({ kind: 'markdown', target: { spread: spread.id, box } })} />}
     </div>
     <footer className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
