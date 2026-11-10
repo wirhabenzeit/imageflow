@@ -324,37 +324,60 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   const claimed = (values: Values) => Object.fromEntries(editor.parameters.map((key) => [key, values[key]]));
   root.className = 'if-editor';
 
+  // The draft lives outside React so set() followed directly by commit() sends the newest values, before React
+  // has rendered them. Every message is posted in order, and commit carries the draft as well.
+  let draft: Values = saved;
+  let changed = false;
+  let failed = false;
+  const fail = (error: unknown) => {
+    if (failed) return;
+    failed = true;
+    const reason = error instanceof Error ? error.message : String(error);
+    post({ state: 'error', message: 'The editor stopped working: ' + reason });
+  };
+  const commit = () => { if (!failed) post({ type: 'editor-commit', values: changed ? claimed(draft) : {} }); };
+  const cancel = () => post({ type: 'editor-cancel' });
+  let update: ((values: Values) => void) | undefined;
+  const set = (changes: Values) => {
+    if (readOnly || failed) return;
+    const allowed = Object.entries(changes).filter(([key]) => editor.parameters.includes(key));
+    if (!allowed.length) return;
+    draft = { ...draft, ...Object.fromEntries(allowed) };
+    changed = true;
+    post({ type: 'editor-draft', values: claimed(draft) });
+    update?.(draft);
+  };
+
   function Host() {
-    const [values, setValues] = React.useState<Values>(saved);
-    const changed = React.useRef(false);
+    const [values, setValues] = React.useState<Values>(draft);
     React.useEffect(() => {
-      if (changed.current) post({ type: 'editor-draft', values: claimed(values) });
-    }, [values]);
-    const set = (changes: Values) => {
-      if (readOnly) return;
-      const allowed = Object.entries(changes).filter(([key]) => editor!.parameters.includes(key));
-      if (!allowed.length) return;
-      changed.current = true;
-      setValues((previous) => ({ ...previous, ...Object.fromEntries(allowed) }));
-    };
-    return React.createElement(editor!.component, {
-      values, set, document, format, readOnly,
-      commit: () => post({ type: 'editor-commit' }), cancel: () => post({ type: 'editor-cancel' }),
-    });
+      update = setValues;
+      // Effects run only once the component has mounted without throwing.
+      post({ type: 'editor-ready' });
+      return () => { update = undefined; };
+    }, []);
+    return React.createElement(editor!.component, { values, set, document, format, readOnly, commit, cancel });
   }
 
+  // Errors from the component's event handlers and async work do not reach React's error handling.
+  window.addEventListener('error', (event) => {
+    // Browsers report a benign layout notice through the same event.
+    if (!event.error && /^ResizeObserver loop/.test(event.message)) return;
+    fail(event.error ?? event.message);
+  });
+  window.addEventListener('unhandledrejection', (event) => fail(event.reason));
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      post({ type: 'editor-cancel' });
+      cancel();
     } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
-      post({ type: 'editor-commit' });
+      commit();
     }
   });
   new ResizeObserver(() => post({ type: 'editor-size', height: Math.ceil(root.getBoundingClientRect().height) })).observe(root);
-  createRoot(root).render(React.createElement(Host));
-  post({ type: 'editor-ready' });
+  const react = createRoot(root, { onUncaughtError: fail, onCaughtError: fail });
+  flushSync(() => react.render(React.createElement(Host)));
 }
 
 export async function startRender(root: HTMLElement) {

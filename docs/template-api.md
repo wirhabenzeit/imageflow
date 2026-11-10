@@ -181,7 +181,11 @@ elements: { grid: {
 - **Opening it:** double-clicking the element opens the editor in a dialog, and so does the editor's button in the element's popover and Inspector section. Parameters the editor lists are edited only there; the element's other parameters keep their generated controls.
 - **Sandbox:** the component runs in a frame on the render origin with the template's CSS, like the book previews. It receives `values` (all of the element's parameters, with the draft applied), `set(changes)`, `document`, `format`, `readOnly`, `commit()` and `cancel()`. It cannot change project data itself.
 - **What ImageFlow owns:** the dialog, Cancel and Done, Escape and ⌘↩, focus, read-only mode, validation against the parameter schema, and saving. One editing session is one undoable edit; Cancel leaves the saved values unchanged.
+- **Draft and commit:** `set()` takes effect immediately, so `set({ ... }); commit()` in one handler saves those changes; `values` catches up on the next render.
+- **Changes from elsewhere:** if the parameters the editor handles change while it is open (Reload after an external edit, Undo from the menu), the dialog says so and refuses to save; the user reopens the editor on the current values.
+- **Failures:** if the component throws while rendering, in an event handler or in async work, the dialog shows the error and offers only Cancel. The editor counts as loaded once the component has mounted.
 - **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors that need external resources (map tiles, GPX files) depend on #16; the starter's calendar editor is the reference example.
+
 ## Platform components
 
 | Component | Purpose |
