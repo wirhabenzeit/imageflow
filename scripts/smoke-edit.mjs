@@ -124,6 +124,10 @@ try {
   await lastPhoto.and(frame.locator('img[src]')).waitFor({ state: 'attached' });
   assert.ok(await lastPhoto.evaluate((img) => img.decode().then(() => img.naturalWidth > 0)));
   await w.locator('main.canvas').evaluate((el) => el.scrollTo(0, 0));
+  // Thumbnails swap in once the visible ones are decoded, but every thumbnail still loads.
+  await w.frameLocator('iframe.book-frame-thumbs[data-current]').locator('body').evaluate(() =>
+    Promise.all([...document.images].map((img) => img.decode())).then(() =>
+      [...document.images].every((img) => img.complete && img.naturalWidth > 0)));
 
   const statusText = () => w.locator('.status').textContent();
   const saved = (text) => w.waitForFunction((text) => document.querySelector('.status')?.textContent === text, text);
