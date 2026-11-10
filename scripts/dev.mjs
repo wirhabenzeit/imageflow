@@ -38,10 +38,11 @@ console.log('Vite dev server on ' + devServer);
 
 await stageDesktop({ dev: true, destination: desktop });
 
-// The project Electron opens on start and after each restart.
-const devState = join(root, '.build', 'dev-project.json');
-const starter = join(root, 'sample', 'starter');
+// The project Electron opens on start and after each restart. Fresh mode keeps its own record, so the project you
+// open yourself (dev-project.json) is still the one `--last` reopens.
 const keepLast = process.argv.includes('--last');
+const devState = join(root, '.build', keepLast ? 'dev-project.json' : 'dev-fresh-project.json');
+const starter = join(root, 'sample', 'starter');
 await mkdir(join(tmpdir(), 'imageflow-dev'), { recursive: true });
 const scratch = await realpath(join(tmpdir(), 'imageflow-dev'));
 let fresh;
