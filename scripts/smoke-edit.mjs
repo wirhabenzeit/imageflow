@@ -153,9 +153,32 @@ try {
   await writeFile(join(project, 'project.json'), beforeExternal);
   await rerendered(() => menu('Reload Project'));
 
-  // set() followed directly by commit() saves the values just set, not the previous render's.
+  // The same holds when only the template changes what the editor shows: a calendar without a saved month uses the
+  // template default, and a new default makes the open draft stale too.
   const templateFile = join(project, 'template', 'index.tsx');
   const templateSource = await readFile(templateFile, 'utf8');
+  const unsaved = JSON.parse(beforeExternal);
+  delete unsaved.spreads[7].elements.grid.params.month;
+  await writeFile(join(project, 'project.json'), JSON.stringify(unsaved, null, 2));
+  await rerendered(() => menu('Reload Project'));
+  await openCalendarEditor();
+  assert.match(await calendarEditor.locator('h3').textContent(), /January 2027/);
+  const defaultMonth = "default: '2027-01-01', precision: 'month'";
+  assert.ok(templateSource.includes(defaultMonth));
+  await rerendered(() => writeFile(templateFile, templateSource.replace(defaultMonth, "default: '2028-01-01', precision: 'month'")));
+  await editorDialog.getByRole('alert').filter({ hasText: 'changed while this editor was open' }).waitFor({ timeout: 30000 });
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
+  assert.equal(await editorDialog.getByRole('button', { name: 'Done' }).isDisabled(), true);
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).press('Meta+Enter');
+  await w.waitForTimeout(300);
+  assert.ok(await editorDialog.isVisible());
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, {});
+  await closeEditor();
+  await rerendered(() => writeFile(templateFile, templateSource));
+  await writeFile(join(project, 'project.json'), beforeExternal);
+  await rerendered(() => menu('Reload Project'));
+
+  // set() followed directly by commit() saves the values just set, not the previous render's.
   const withEditor = (code) => templateSource.replace(
     'function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {',
     'function CalendarEditor({ values, set, readOnly, commit }: ElementEditorProps) {\n' + code);

@@ -2,16 +2,22 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { TemplateInfo } from './desktop';
 import type { Edit } from './Inspector';
-import { isParameterValue } from './parameters';
+import { isParameterValue, resolveParams } from './parameters';
 import type { SpreadState, Values } from './project';
 
 type EditorMessage =
   | { type: 'editor-ready' } | { type: 'editor-draft'; values: Values } | { type: 'editor-size'; height: number }
   | { type: 'editor-commit'; values: Values } | { type: 'editor-cancel' } | { state: 'error'; message: string };
 
-// The saved values an editor works on, to tell whether they changed while it was open.
-const savedValues = (spread: SpreadState, element: string, keys: string[]) =>
-  JSON.stringify([spread.definition, keys.map((key) => spread.elements[element]?.params[key] ?? null)]);
+// What an editor works on: for each parameter it handles, the declaration and the resolved value (the saved value,
+// else the template default). Comparing this tells whether a draft was based on values that have since changed,
+// whether through project data or through the template (a new default, a changed declaration).
+function editingContext(template: TemplateInfo, spread: SpreadState, element: string) {
+  const definition = template.spreads[spread.definition]?.elements[element];
+  const keys = definition?.editor?.parameters ?? [];
+  const resolved = resolveParams(definition?.parameters ?? {}, spread.elements[element]?.params ?? {});
+  return JSON.stringify([spread.definition, keys.map((key) => [key, definition?.parameters[key] ?? null, resolved[key] ?? null])]);
+}
 
 // Hosts a template-supplied element editor. The template's component runs in a frame on the render origin and
 // can only report a draft; this dialog owns Cancel/Done, focus, read-only mode, validation, and saving the draft
@@ -29,10 +35,10 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const [failed, setFailed] = useState(false);
-  // The editor opened on these saved values. If they change while it is open (Reload, Undo, another window),
-  // its draft is based on stale data and saving it would silently overwrite the newer values.
-  const [opened] = useState(() => savedValues(spread, element, editor?.parameters ?? []));
-  const stale = savedValues(spread, element, editor?.parameters ?? []) !== opened;
+  // The editor opened on this context. If it changes while the editor is open (Reload, Undo, a template edit),
+  // the draft is based on stale data and saving it would silently overwrite the newer values.
+  const [opened] = useState(() => editingContext(template, spread, element));
+  const stale = editingContext(template, spread, element) !== opened;
   // The frame keeps the project state it opened with; saving starts a new render elsewhere, not here.
   const [source] = useState(() => renderOrigin + '/render/' + project + '?view=editor&spread=' + encodeURIComponent(spread.id) +
     '&element=' + encodeURIComponent(element) + (readOnly ? '&readonly' : ''));
