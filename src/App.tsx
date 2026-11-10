@@ -518,8 +518,10 @@ export function App() {
   const canExport = (render ?? lastReady)?.state === 'ready' && !busy;
   const counts = summary ? assignmentCounts(summary.project) : {};
   const format = formatOf(template);
-  // A saved format the template no longer offers; the Book check reports it and print export is blocked.
-  const missingFormat = !!template && !!summary?.project.format && !Object.hasOwn(template.formats, summary.project.format);
+  // A saved format the template's named formats no longer include; the Book check reports it and print export is
+  // blocked. A template with one fixed format offers no choices and ignores the saved one.
+  const missingFormat = !!template && Object.keys(template.formats).length > 0 && !!summary?.project.format &&
+    !Object.hasOwn(template.formats, summary.project.format);
   const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
   const pagesLabel = (i: number) => (pageLabels[i].includes('–') ? 'Pages ' : 'Page ') + pageLabels[i];
 

@@ -292,6 +292,29 @@ try {
   await ready();
   await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
   assert.equal((await read()).format, 'square');
+
+  // A template converted to one fixed format ignores the saved choice and shows no Format picker.
+  await w.getByRole('combobox', { name: 'Format' }).selectOption('landscape');
+  await saved('Format changed to Landscape · 32 × 24 cm');
+  await ready();
+  const named = `  formats: {
+    square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
+    landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
+  },
+  defaultFormat: 'square',`;
+  assert.ok(formatsSource.includes(named));
+  previous = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  await writeFile(formatsFile, formatsSource.replace(named, "  format: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),"));
+  await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, previous, { timeout: 30000 });
+  const fixed = await frame.locator('body').evaluate(() => window.imageflowRenderStatus);
+  assert.equal(fixed.template.formatId, 'default');
+  assert.deepEqual(fixed.errors, []);
+  assert.equal(await w.getByRole('combobox', { name: 'Format' }).count(), 0);
+  assert.equal((await read()).format, 'landscape');
+  previous = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  await writeFile(formatsFile, formatsSource);
+  await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, previous, { timeout: 30000 });
+  assert.equal(await w.getByRole('combobox', { name: 'Format' }).inputValue(), 'landscape');
   console.log('ImageFlow click-to-edit passed.');
 } finally {
   await app.close();
