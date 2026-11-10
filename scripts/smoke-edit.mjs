@@ -268,13 +268,13 @@ try {
   assert.equal((await frame.locator('body').evaluate(() => window.imageflowRenderStatus)).template.formatId, 'square');
 
   // A preset with impossible geometry is a template error at load, and the editor stays usable around it.
-  const templateFile = join(project, 'template', 'index.tsx');
-  const templateSource = await readFile(templateFile, 'utf8');
-  await writeFile(templateFile, templateSource.replace('  formats: {', "  formats: {\n    huge: bookFormat('Huge', 1200, 290),"));
+  const formatsFile = join(project, 'template', 'index.tsx');
+  const formatsSource = await readFile(formatsFile, 'utf8');
+  await writeFile(formatsFile, formatsSource.replace('  formats: {', "  formats: {\n    huge: bookFormat('Huge', 1200, 290),"));
   await w.waitForFunction(() => /PDF dimensions must be between 10 and 1000 mm/.test(document.querySelector('.status-error')?.textContent ?? ''), null, { timeout: 30000 });
   assert.ok(await w.locator('.document-settings').isVisible(), 'the sidebar survives a template format error');
   assert.ok(await w.getByRole('button', { name: 'Undo', exact: true }).isVisible());
-  await writeFile(templateFile, templateSource);
+  await writeFile(formatsFile, formatsSource);
   await w.waitForFunction(() => !document.querySelector('.status-error'), null, { timeout: 30000 });
   await ready();
 
