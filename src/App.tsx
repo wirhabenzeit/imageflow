@@ -8,7 +8,7 @@ import { EditPopover } from './EditPopover';
 import { CropEditor } from './CropEditor';
 import { ElementEditorDialog } from './ElementEditor';
 import { ProjectFilesContext } from './Fields';
-import { centered, getCrop, placementOf } from './spread';
+import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
 import { assignmentCounts, newSpread, sourceUsage } from './editing';
 import { Fields } from './Fields';
@@ -74,7 +74,8 @@ export function App() {
   const [editing, setEditing] = useState<{ spread: string; key: string }>();
   // Crop mode for one photo box. After a commit, `settling` holds the project id the edit started from; the
   // overlay stays until the book has re-rendered, so the frame does not flash back to the old crop.
-  const [cropping, setCropping] = useState<{ spread: string; box: string; settling?: string }>();
+  // `layout` is the spread's layout when crop mode opened: each layout has its own crop.
+  const [cropping, setCropping] = useState<{ spread: string; box: string; layout: string; settling?: string }>();
   // A template-supplied element editor that is open.
   const [elementEditor, setElementEditor] = useState<{ spread: string; element: string }>();
   const [showGuides, setShowGuides] = useState(false);
@@ -141,7 +142,8 @@ export function App() {
     });
   }
 
-  function edit(change: Edit, notice?: string, selected?: string) {
+  // `notice` may be a function, read after the change ran, for notices that describe what the change found.
+  function edit(change: Edit, notice?: string | (() => string), selected?: string) {
     enqueue(async () => {
       const before = current.current;
       if (!api || !before || before.readOnly) return;
@@ -155,7 +157,7 @@ export function App() {
       history.current.past.push({ project: before.project, photoIndex: before.photoIndex });
       history.current.future = [];
       adopt(result.value, false, selected);
-      setNotice(notice ?? 'Saved');
+      setNotice((typeof notice === 'function' ? notice() : notice) ?? 'Saved');
     });
   }
 
@@ -424,6 +426,7 @@ export function App() {
   const cropSheet = cropping && geometry?.sheets.find(({ spread }) => spread === cropping.spread);
   const cropState = cropping && spreads.find(({ id }) => id === cropping.spread)?.boxes[cropping.box];
   const cropPhoto = cropState?.photo;
+  const cropPlacement = cropping && placementIn(cropState, cropping.layout);
   function cropBlocked(spread: string, box: string) {
     const state = spreads.find(({ id }) => id === spread)?.boxes[box];
     const frame = geometry?.boxes.find((rect) => rect.spread === spread && rect.id === box);
@@ -448,9 +451,11 @@ export function App() {
       setNotice(blocked);
       return false;
     }
+    const layout = spreads.find(({ id }) => id === spread)?.definition;
+    if (!layout) return false;
     setEditing(undefined);
     select(spread, false);
-    setCropping({ spread, box });
+    setCropping({ spread, box, layout });
     return true;
   }
   function commitCrop(placement: Placement) {
@@ -458,19 +463,20 @@ export function App() {
     const size = summary.photoSizes[cropPhoto];
     const aspect = cropFrame.width / cropFrame.height;
     const normal = (value: Placement) => JSON.stringify(placementOf(getCrop(size, value, aspect), value.zoom));
-    if (normal(placement) === normal(cropState?.crop ?? centered)) {
+    if (normal(placement) === normal(cropPlacement ?? centered)) {
       setCropping(undefined);
       return;
     }
     const fits = normal(placement) === normal(centered);
-    const { spread, box } = cropping;
+    const { spread, box, layout } = cropping;
     edit(({ project }) => {
-      const state = project.spreads.find(({ id }) => id === spread)?.boxes[box];
-      if (!state?.photo) return;
-      if (fits) delete state.crop;
-      else state.crop = placement;
+      const state = project.spreads.find(({ id }) => id === spread);
+      const target = state?.boxes[box];
+      // Crop mode closes when the layout changes; never save a crop into a layout it was not made for.
+      if (!target?.photo || state?.definition !== layout) return;
+      setPlacement(target, layout, fits ? centered : placement);
     }, 'Crop updated');
-    setCropping({ spread, box, settling: summary.id });
+    setCropping({ spread, box, layout, settling: summary.id });
   }
   // If the save fails, there is no re-render to wait for.
   useEffect(() => {
@@ -478,6 +484,18 @@ export function App() {
     const timer = setTimeout(() => setCropping(undefined), 4000);
     return () => clearTimeout(timer);
   }, [cropping?.settling]);
+
+  // Changing a spread's layout (including by Undo) ends crop mode and closes the edit popover on that spread, so
+  // neither saves into a layout it was not opened for. Element editors notice through their own stale check.
+  const layouts = useRef(new Map<string, string>());
+  useEffect(() => {
+    const changed = new Set(spreads.filter(({ id, definition }) => layouts.current.has(id) && layouts.current.get(id) !== definition)
+      .map(({ id }) => id));
+    layouts.current = new Map(spreads.map(({ id, definition }) => [id, definition]));
+    if (!changed.size) return;
+    setCropping((crop) => crop && changed.has(crop.spread) ? undefined : crop);
+    setEditing((open) => open && changed.has(open.spread) ? undefined : open);
+  }, [spreads]);
 
   function drop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
@@ -545,8 +563,8 @@ export function App() {
     thumbList.current?.querySelector<HTMLElement>('[data-spread="' + CSS.escape(next.id) + '"]')?.focus();
   }
 
-  const usage = useMemo(() => summary ? sourceUsage(summary.project, pageLabels) : { photo: {}, text: {} },
-    [summary, pageLabels.join()]);
+  const usage = useMemo(() => summary ? sourceUsage(summary.project, pageLabels, template?.spreads) : { photo: {}, text: {} },
+    [summary, template, pageLabels.join()]);
   const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id }) => spread + ':' + id === dropTarget) :
     highlight ? geometry?.boxes.find(({ spread: owner, id }) => owner === spread?.id && id === highlight) : undefined;
   const spreadSelected = !selectedSource;
@@ -555,7 +573,7 @@ export function App() {
   const issue = error || (render?.state === 'error' ? render.message : '');
   // While an edit re-renders, export stays available from the last finished render; a failed render disables it.
   const canExport = (render ?? lastReady)?.state === 'ready' && !busy;
-  const counts = summary ? assignmentCounts(summary.project) : {};
+  const counts = summary ? assignmentCounts(summary.project, template?.spreads) : {};
   const format = formatOf(template);
   // A saved format the template's named formats no longer include; the Book check reports it and print export is
   // blocked. A template with one fixed format offers no choices and ignores the saved one.
@@ -713,7 +731,7 @@ export function App() {
                 style={{ left: target.x - 4, top: target.y - 3, width: target.width + 8, height: target.height + 6 }} />)}
               {cropping && cropFrame && cropPhoto && summary && <CropEditor key={cropping.spread + ':' + cropping.box}
                 frame={cropFrame} photo={summary.photoSizes[cropPhoto]} src={renderOrigin + '/render/' + summary.id + '/photo/' + cropPhoto}
-                placement={cropState?.crop} settling={!!cropping.settling}
+                placement={cropPlacement} settling={!!cropping.settling}
                 inchesPerPixel={format && cropSheet ? format.spreadWidth / cropSheet.width / 25.4 : undefined}
                 resolution={template?.format.output.resolution} commit={commitCrop} cancel={() => setCropping(undefined)}
                 toolbarHost={canvasWrap.current} />}

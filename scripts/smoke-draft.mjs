@@ -132,7 +132,7 @@ try {
   assert.equal(await preview().locator('[data-spread="arriving"] [data-box="body"]').evaluate((el) => getComputedStyle(el).color), 'rgb(12, 40, 80)');
 
   await saveState(() => window.getByRole('radio', { name: 'Panorama', exact: true }).click(), (data) =>
-    data.spreads[1].definition === 'panorama' && data.spreads[1].boxes.hero.photo === photoId && data.spreads[1].archive.story.boxes.body.text === textId);
+    data.spreads[1].definition === 'panorama' && data.spreads[1].boxes.hero.photo === photoId && data.spreads[1].boxes.body.text === textId);
   await saveState(() => window.getByRole('radio', { name: 'Photo and story', exact: true }).click(), (data) =>
     data.spreads[1].boxes.body.text === textId);
 

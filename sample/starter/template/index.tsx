@@ -279,8 +279,9 @@ export default defineTemplate({
     }),
     closing: spread({
       label: 'Closing page', span: 'left',
-      parameters: { heading: p.string({ label: 'Closing line', default: 'Until next time' }) },
-      render: (ctx) => <Paper context={ctx}><h2 {...ctx.edit('heading')} style={left(margin, 120, page - 2 * margin, 60)}>{ctx.params.heading}</h2></Paper>,
+      // Not `heading`: an ID means the same thing in every layout, and a closing line is not a spread heading.
+      parameters: { closingLine: p.string({ label: 'Closing line', default: 'Until next time' }) },
+      render: (ctx) => <Paper context={ctx}><h2 {...ctx.edit('closingLine')} style={left(margin, 120, page - 2 * margin, 60)}>{ctx.params.closingLine}</h2></Paper>,
     }),
   },
 });

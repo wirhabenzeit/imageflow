@@ -66,6 +66,6 @@ export function parameterWarnings(schema: Parameters, values: Values, scope: str
   return Object.entries(values).flatMap(([id, value]) => {
     const param = schema[id];
     if (!param) return [scope + ' · ' + id + ' is saved but no longer declared by the template.'];
-    return isParameterValue(param, value) ? [] : [scope + ' · ' + param.label + ' has a saved value the template no longer allows; the default is used.'];
+    return isParameterValue(param, value) ? [] : [scope + ' · ' + param.label + ' has a saved value the template does not allow here; the default is used.'];
   });
 }

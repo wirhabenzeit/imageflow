@@ -5,7 +5,8 @@ import { cssMM, formatSchema, inch, mm, pt } from './format';
 import type { PrintFormat, ResolvedFormat, Span } from './format';
 import { identifier } from './project';
 import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
-import { centered, getCrop } from './spread';
+import { getCrop, placementIn } from './spread';
+import { declarationConflicts } from './layouts';
 import { p, parametersSchema, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import type { BoxDefinition, SpreadDefinition, TemplateInfo } from './desktop';
@@ -77,7 +78,11 @@ export const templateSchema = z.object({
   formats: z.record(identifier, formatSchema).optional(),
   defaultFormat: identifier.optional(),
   parameters: parametersSchema,
-  spreads: z.record(identifier, definition).refine((spreads) => Object.keys(spreads).length > 0, 'Declare a spread.'),
+  spreads: z.record(identifier, definition).refine((spreads) => Object.keys(spreads).length > 0, 'Declare a spread.')
+    // An ID means the same box or parameter in every layout, so switching layouts can carry its content.
+    .superRefine((spreads, context) => {
+      for (const message of declarationConflicts(spreads)) context.addIssue({ code: 'custom', message });
+    }),
 }).refine(({ format, formats }) => !format !== !formats, 'Declare either format or formats.')
   .refine(({ formats }) => !formats || Object.keys(formats).length > 0, 'Declare at least one format.')
   .refine(({ formats, defaultFormat }) => !defaultFormat || (!!formats && Object.hasOwn(formats, defaultFormat)),
@@ -165,7 +170,7 @@ export function PhotoBox({ id, className, style, 'data-edit': marked }: Styling 
   const { spread, book, format, renderPhotos, definition, lazyPhotos } = useSpread();
   const box = spread.boxes[id];
   const photo = box?.photo ? book.photos[box.photo] : undefined;
-  const placement = box?.crop ?? centered;
+  const placement = placementIn(box, spread.definition);
   const frame = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
 
@@ -192,7 +197,7 @@ export function PhotoBox({ id, className, style, 'data-edit': marked }: Styling 
     cropPhoto();
     observer.observe(element);
     return () => observer.disconnect();
-  }, [photo, placement, renderPhotos]);
+  }, [photo, placement.centerX, placement.centerY, placement.zoom, renderPhotos]);
 
   return (
     <div ref={frame} data-box={id} data-box-type="photo" data-empty={photo ? undefined : ''}

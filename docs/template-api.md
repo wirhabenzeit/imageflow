@@ -142,6 +142,26 @@ Arbitrary dimensions within declared limits, rather than named presets, are not 
 
 Spread definitions render two facing pages by default. For formats with `ends: 'single-pages'`, a definition can declare `span: 'right'` (usable as the first page) or `span: 'left'` (usable as the last page); the inactive half is shown as an inside cover and not exported. Formats with `ends: 'inside-covers'` use full spreads throughout.
 
+### Switching layouts
+
+A spread can switch to any layout of the template with the same page footprint: a full spread to another full spread, a single left or right page to another of the same side. Changing between a spread and a single page changes the book's pagination and is not offered as a layout switch.
+
+**An ID is the identity.** A box, element or parameter ID means the same thing in every layout that declares it, within its scope: spread parameters, the boxes of a spread and each box's parameters, the elements of a spread and each element's parameters. The spread keeps one state for all its layouts, keyed by these IDs; the layout decides which of it is shown. Templates need no extra declarations, roles or migration code for this.
+
+- **Same ID, same type.** A box ID has the same box type (photo or Markdown) in every layout, and a parameter ID has the same parameter type in every layout within its scope. A template that breaks this fails to load with an error naming both layouts. Labels, defaults and constraints (`min`/`max`, `step`, `maxLength`, `multiline`, enum `options`, date `precision`, file `accept`) may differ, so a layout can offer fewer columns or a shorter title than another.
+- **Different meaning, different ID.** Reusing an ID shares its value. The starter's closing page declares `closingLine` rather than `heading`, because a closing line is not the spread heading. Differently named boxes are never matched automatically, and box order plays no part: a two-photo layout shows the boxes whose IDs it declares.
+- **Content.** Photo and Markdown assignments show in every layout with a box of that ID. Content a layout has no box for stays on the spread, is listed in the Inspector as *Saved outside this layout*, and shows again in any layout that has the box. Switching never deletes content, and sources stay in the project.
+- **Latest edit wins.** There is one value per ID, so an edit made in any layout is what every later layout sees. Replacing a photo in one layout replaces it for all of them; an older assignment cannot come back by switching. Removing a photo or text is a real edit; visiting a layout without that box is not.
+- **Parameters.** Spread, box and element parameter values follow the same rule. A value the current layout does not declare stays stored and returns with a layout that does. Values are stored only once set, so a layout whose parameter was never set shows its own default.
+- **Rejected values.** When a stored value fails the target layout's constraints (for example a 120-character title where the layout allows 60, or a column count it does not offer), the value is kept unchanged, the layout uses its default, the switch says so, and the Book check warns. Setting the field in that layout replaces the value.
+- **Crops.** A crop belongs to the layout it was set in, because frames differ. Returning to a layout restores its crop. A layout without its own crop fills its frame around the centre of the crop set last (the *focus*), clamped to the frame. Assigning another photo to a box starts over: no crop of the previous photo applies to it. Resetting a crop, or setting a centred fill, clears the focus.
+- **Text flow.** Continuation is recomputed for the whole book after a switch, from the Markdown boxes each spread now shows.
+- **Element editors.** Custom element editors never store their own state; their parameters follow the rules above.
+
+Selecting a layout is one edit: Undo restores the previous layout with everything it showed. Pointing at a layout in the picker shows what switching would do, for example *2 photos carried over · 2 photos kept outside this layout · text will reflow*. An open crop mode or edit popover on the spread closes when its layout changes, and an open element editor reports that its values changed, so nothing is saved into a layout it was not opened for.
+
+State that no layout of the template declares (after the template drops a box, element or parameter) stays in `project.json` and is reported in the Book check rather than removed.
+
 ## Render function
 
 `render(context)` is called per spread instance and must be a pure function of its input: no state, effects, timers, randomness, or data fetching.
@@ -297,6 +317,7 @@ When the template is loaded:
 - Unique, stable identifiers for spreads, boxes, elements, and parameters; valid parameter defaults.
 - A valid print format.
 - Unique `flowOrder` among Markdown boxes of a spread.
+- A box ID has one box type, and a parameter ID one parameter type within its scope, across all layouts (see [Switching layouts](#switching-layouts)).
 
 When a spread renders:
 
@@ -320,12 +341,20 @@ A spread instance in `project.json`:
   "definition": "story",
   "params": { "heading": "At the water’s\nedge", "eyebrow": "01 / ARRIVAL" },
   "boxes": {
-    "hero": { "photo": "ph-2c91", "crop": { "centerX": 0.5, "centerY": 0.45, "zoom": 1.1 }, "params": { "showCaption": true } },
-    "body": { "text": "tx-arrival" }
+    "hero": {
+      "photo": "ph-2c91",
+      "crops": { "story": { "centerX": 0.5, "centerY": 0.45, "zoom": 1.1 } },
+      "focus": { "centerX": 0.5, "centerY": 0.45 },
+      "params": { "showCaption": true }
+    },
+    "body": { "text": "tx-arrival" },
+    "second": { "photo": "ph-81d0" }
   },
   "elements": {}
 }
 ```
+
+`second` is content a `grid` layout showed; the `story` layout has no `second` box, so it is kept for the next layout that has one. `crops` holds one crop per layout ID; `focus` is the centre of the crop set last.
 
 The project also stores the document parameter values, the template `id` and `version` it was last opened with, the text id → path mapping, and the file id → path mapping for file parameters (`files`). Photo metadata lives in `photos.json`.
 
@@ -360,9 +389,7 @@ Identifiers start with a letter or digit, then contain letters, digits, undersco
 
 ### Persistence and evolution
 
-`project.json` has `schemaVersion: 1`, `title`, `template: { id, version }`, document `params`, `texts` (ID → relative path), and ordered `spreads`. Each spread has `id`, `definition`, `params`, `boxes`, `elements`, and an optional `archive` of prior layout state. The example above shows one spread, not a complete project. Photo metadata is keyed by stable photo ID in `photos.json`; dimensions are derived from image files. Crop centers are normalized 0–1; zoom is 1–20.
-
-Layout switching archives the previous layout. Same-ID parameters with the same parameter type carry forward; same-ID boxes carry assignments only when their content type matches. Saved target-layout state is restored, then compatible current state takes precedence. This is structural matching, not semantic mapping. Constraints are checked on rendering; invalid saved values remain stored and render using defaults. Sources remain in the project even when no active box uses them.
+`project.json` has `schemaVersion: 1`, `title`, `template: { id, version }`, document `params`, `texts` (ID → relative path), and ordered `spreads`. Each spread has `id`, `definition` (its current layout), and one `params`, `boxes` and `elements` state shared by all its layouts; see [Switching layouts](#switching-layouts). The example above shows one spread, not a complete project. Photo metadata is keyed by stable photo ID in `photos.json`; dimensions are derived from image files. Crop centers are normalized 0–1; zoom is 1–20. Constraints are checked on rendering; invalid saved values remain stored and render using defaults. Sources remain in the project even when no box uses them.
 
 New projects copy the starter template. Updating the app does not replace existing project templates. Contract 1 supports the additive edit marks, month picker and columns API, but an older app is not guaranteed to understand newer additions. Keep the app and authoring declarations aligned. Renaming an ID or moving a parameter between scopes requires an explicit project-data migration; there is no automatic migration framework. PR #7 moves the starter calendar month to `elements.grid.params.month`; replacing only the template in an older project does not migrate that saved value.
 

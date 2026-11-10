@@ -6,9 +6,9 @@ import { revealIn } from './reveal';
 import type { ProjectFiles, SpreadState, Values } from './project';
 import type { Parameter, Parameters } from './parameters';
 import { isParameterValue } from './parameters';
-import { centered } from './spread';
-import type { Placement } from './spread';
-import { readEdit, resolveEditPath, switchDefinition, writeEdit } from './editing';
+import { centered, placementIn, setPlacement } from './spread';
+import { readEdit, resolveEditPath, writeEdit } from './editing';
+import { describeLayoutChange, keptOutside, layoutChoices, planLayoutChange, switchLayout } from './layouts';
 import type { EditTarget } from './editing';
 import type { SourceUsage } from './editing';
 import { SourceInspector } from './SourceInspector';
@@ -16,25 +16,36 @@ import type { SourceRef } from './source-items';
 
 export type Edit = (files: ProjectFiles) => void;
 
-// Shows the spread in every layout of the template, rendered by the template itself.
+// Shows the spread in each layout it can switch to, rendered by the template itself. Pointing at a layout says what
+// switching would carry over, keep and fall back on.
 function LayoutPicker({ summary, spread, template, choose }: {
   summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; choose: (definition: string) => void;
 }) {
   const [geometry, setGeometry] = useState<BookGeometry>();
-  return <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout"
-    style={{ height: geometry?.height }}>
-    {Object.entries(template.spreads).map(([id, item]) => {
-      const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
-      return <button key={id} type="button" role="radio" aria-checked={id === spread.definition} aria-label={item.label}
-        title={item.label + (item.span === 'spread' ? '' : ' · single ' + item.span + ' page')} className="layout-option"
-        style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
-        onClick={() => { if (id !== spread.definition) choose(id); }}>
-        <span className="layout-option-label">{item.label}</span>
-      </button>;
-    })}
-    <BookFrame project={summary.id} view="layouts" query={'spread=' + encodeURIComponent(spread.id)} title="Layout previews"
-      onGeometry={setGeometry} />
-  </div>;
+  const [pointed, setPointed] = useState<string>();
+  const choices = layoutChoices(template.spreads, spread.definition);
+  const describe = (id: string) => id === spread.definition ? 'Current layout' : describeLayoutChange(planLayoutChange(spread, id, template.spreads));
+  const shown = pointed && choices.includes(pointed) ? pointed : undefined;
+  return <>
+    <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout"
+      aria-describedby="layout-consequence" style={{ height: geometry?.height }} onMouseLeave={() => setPointed(undefined)}>
+      {choices.map((id) => {
+        const item = template.spreads[id];
+        const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
+        return <button key={id} type="button" role="radio" aria-checked={id === spread.definition} aria-label={item.label}
+          title={item.label + (item.span === 'spread' ? '' : ' · single ' + item.span + ' page')} className="layout-option"
+          style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
+          onMouseEnter={() => setPointed(id)} onFocus={() => setPointed(id)} onBlur={() => setPointed(undefined)}
+          onClick={() => { if (id !== spread.definition) choose(id); }}>
+          <span className="layout-option-label">{item.label}</span>
+        </button>;
+      })}
+      <BookFrame project={summary.id} view="layouts" query={'spread=' + encodeURIComponent(spread.id)} title="Layout previews"
+        onGeometry={setGeometry} />
+    </div>
+    <p id="layout-consequence" className="layout-consequence muted" aria-live="polite">
+      {shown ? template.spreads[shown].label + ' · ' + describe(shown) : '\u00a0'}</p>
+  </>;
 }
 
 export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[] };
@@ -64,7 +75,7 @@ function CheckList({ check, checking, spread, select }: {
 export function Inspector({ summary, spread, source, template, render, usage, edit, importText, highlight, issues, check, checking,
   select, inspectSource, quickLook, focus, targets = [], adjustCrop, openEditor }: {
   summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
-  edit: (change: Edit, notice?: string) => void; importText: (box: string) => void;
+  edit: (change: Edit, notice?: string | (() => string)) => void; importText: (box: string) => void;
   highlight: (id?: string) => void; issues: string; check?: BookCheck; checking: boolean; select: (spread: string) => void;
   inspectSource: (source: SourceRef) => void; quickLook: () => void; focus?: { box: string; at: number };
   targets?: BookGeometry['targets']; adjustCrop: (box: string) => void; openEditor: (element: string) => void;
@@ -84,14 +95,21 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     return () => clearTimeout(timer);
   }, [focus, source]);
   const definition = template?.spreads[spread.definition];
-  function changeSpread(update: (spread: SpreadState) => void, notice?: string) {
+  function changeSpread(update: (spread: SpreadState) => void, notice?: string | (() => string)) {
     edit(({ project }) => {
       const current = project.spreads.find(({ id }) => id === spread.id);
       if (current) update(current);
     }, notice);
   }
   const writable = !summary.readOnly;
-  const archived = Object.keys(spread.archive);
+  // Content the spread keeps for other layouts; switching back, or to another layout with these boxes, shows it.
+  const kept = template ? keptOutside(spread, template.spreads) : [];
+  const keptLabel = [
+    ['photo', 'photo', 'photos'], ['text', 'text', 'texts'],
+  ].map(([kind, one, many]) => {
+    const n = kept.filter((item) => item.kind === kind).length;
+    return n ? n + ' ' + (n === 1 ? one : many) : '';
+  }).filter(Boolean).join(', ');
   // Options a template attaches to a box or element with ctx.edit() appear in that box's or element's section,
   // matching the popover you get by clicking it. Spread options claimed this way leave the Spread section.
   const attached = new Map<string, EditTarget[]>();
@@ -139,15 +157,21 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
       {template && <details open><summary>Spread</summary>
         <p className="field-label">Layout{definition ? ' · ' + definition.label : ''}</p>
         {!definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
-        <LayoutPicker summary={summary} spread={spread} template={template} choose={(next) =>
-          changeSpread((item) => switchDefinition(item, next, template), 'Layout changed. Previous settings are stored with the spread.')} />
+        <LayoutPicker summary={summary} spread={spread} template={template} choose={(next) => {
+          // Planned against the project the switch applies to, which may be newer than this render.
+          let consequence = '';
+          changeSpread((item) => {
+            consequence = describeLayoutChange(planLayoutChange(item, next, template.spreads));
+            switchLayout(item, next, template.spreads);
+          }, () => template.spreads[next].label + ' · ' + consequence);
+        }} />
         {continued.length > 0 && <p className="layout-note" role="note">
           Previews start text from the beginning; this spread shows {continued.map(({ title, part, parts }) =>
             (title ?? 'text') + ' part ' + part + ' of ' + parts).join(', ')}.</p>}
         {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
         {definition && <Fields key={spread.id} schema={spreadParameters} values={spread.params}
           update={(id, value) => changeSpread((item) => { item.params[id] = value; })} />}
-        {archived.length > 0 && <p className="muted">Stored layouts · {archived.map((id) => template.spreads[id]?.label ?? id).join(', ')}</p>}
+        {keptLabel && <p className="muted">Saved outside this layout · {keptLabel}</p>}
       </details>}
       {Object.entries(definition?.boxes ?? {}).map(([id, box]) => {
         const state = spread.boxes[id];
@@ -155,6 +179,10 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
         const assigned = photoBox ? state?.photo : state?.text;
         const choices: [string, string | undefined][] = Object.entries(summary.project.texts).map(([id, path]) => [id, path.split('/').pop()]);
         const position = render?.state === 'ready' ? render.flow[spread.id + ':' + id] : undefined;
+        // The crop this layout shows: its own, or a fill around the focus of a crop set in another layout.
+        const placement = placementIn(state, spread.definition);
+        const ownCrop = !!state?.crops && Object.hasOwn(state.crops, spread.definition);
+        const moved = placement.zoom !== 1 || placement.centerX !== centered.centerX || placement.centerY !== centered.centerY;
         return <details key={spread.id + ':' + id} open onMouseEnter={() => highlight(id)} onMouseLeave={() => highlight()}
           ref={(element) => { if (element) sections.current.set(id, element); else sections.current.delete(id); }}
           className={flash === id ? 'flash' : undefined}>
@@ -205,21 +233,22 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
           </div>}
           {position && <p className="muted">Flow {position.part} of {position.parts}</p>}
           {photoBox && assigned && <div className="crop-controls">
-            <p className="muted">{state?.crop && state.crop.zoom !== 1 ? 'Zoomed ' + state.crop.zoom.toFixed(1) + '×' : 'Fills the frame'}
-              {state?.crop ? ' · moved' : ''}</p>
+            <p className="muted">{placement.zoom !== 1 ? 'Zoomed ' + placement.zoom.toFixed(1) + '×' : 'Fills the frame'}
+              {moved ? ' · moved' : ''}{moved && !ownCrop ? ' · from another layout' : ''}</p>
             <div className="box-actions">
               <button type="button" onClick={() => adjustCrop(id)} title="Or double-click the photo">Adjust crop…</button>
-              {state?.crop && <button type="button" onClick={() => changeSpread((item) => { if (item.boxes[id]) delete item.boxes[id].crop; },
-                'Crop reset')}>Reset crop</button>}
+              {moved && <button type="button" onClick={() => changeSpread((item) => {
+                if (item.boxes[id]?.photo) setPlacement(item.boxes[id], item.definition, centered);
+              }, 'Crop reset')}>Reset crop</button>}
             </div>
             <details className="crop-values"><summary>Crop values</summary>
               {([['centerX', 'Horizontal'], ['centerY', 'Vertical'], ['zoom', 'Zoom']] as const).map(([key, label]) =>
                 <Field key={key}
                   param={{ type: 'number', label, default: centered[key], min: key === 'zoom' ? 1 : 0, max: key === 'zoom' ? 20 : 1, step: .01 }}
-                  value={(state?.crop ?? centered)[key]}
+                  value={placement[key]}
                   change={(value) => changeSpread((item) => {
                     const box = item.boxes[id];
-                    if (box?.photo) box.crop = { ...(box.crop ?? centered), [key]: value } as Placement;
+                    if (box?.photo) setPlacement(box, item.definition, { ...placementIn(box, item.definition), [key]: value });
                   })} />,
               )}
             </details>

@@ -254,7 +254,7 @@
       "id": "closing",
       "definition": "closing",
       "params": {
-        "heading": "Until next time"
+        "closingLine": "Until next time"
       },
       "boxes": {}
     }
