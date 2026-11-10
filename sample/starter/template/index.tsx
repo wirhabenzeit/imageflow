@@ -44,9 +44,12 @@ function bookFormat(label: string, width: number, height: number) {
 
 const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90 });
 const textSize = p.number({ label: 'Body size', default: 11, min: 8, max: 16, step: .5, unit: 'pt' });
-const photo = (label: string) => ({
-  type: 'photo' as const,
-  label,
+const photo = (label: string) => ({ type: 'photo' as const, label });
+// For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
+// control for every declared parameter. The value is shared by every layout with this box, so it returns when the
+// spread switches back to a layout that draws captions.
+const captioned = (label: string) => ({
+  ...photo(label),
   parameters: { caption: p.boolean({ label: 'Show caption', default: false }) },
 });
 const columns = p.enum({ label: 'Columns', default: '1', options: ['1', '2', '3'], labels: { 1: 'Full width', 2: '2 columns', 3: '3 columns' } });
@@ -195,7 +198,7 @@ export default defineTemplate({
     story: spread({
       label: 'Photo and story',
       parameters: { heading, textSize },
-      boxes: { hero: photo('Main photo'), body: body('Story') },
+      boxes: { hero: captioned('Main photo'), body: body('Story') },
       render: (ctx) => <Paper context={ctx} bled={{ left: true }}>
         <PhotoBox id="hero" style={fullLeft} />
         <h2 {...ctx.edit('heading')} style={right(margin, 40, page - 2 * margin, 44)}>{ctx.params.heading}</h2>
@@ -206,7 +209,7 @@ export default defineTemplate({
     }),
     panorama: spread({
       label: 'Panorama',
-      boxes: { hero: photo('Panorama photo') },
+      boxes: { hero: captioned('Panorama photo') },
       elements: { route: { label: 'Route map', parameters: { track: p.file({ label: 'GPX track', accept: ['.gpx'] }) } } },
       render: (ctx) => <Paper context={ctx} bled={{ left: true, right: true }}>
         <PhotoBox id="hero" style={fullSpread} />
@@ -230,7 +233,7 @@ export default defineTemplate({
     pair: spread({
       label: 'Two photos',
       parameters: { framed: p.boolean({ label: 'White frame', default: false }) },
-      boxes: { hero: photo('Left photo'), second: photo('Right photo') },
+      boxes: { hero: captioned('Left photo'), second: captioned('Right photo') },
       render: (ctx) => {
         const framed = ctx.params.framed;
         return <Paper context={ctx} bled={{ left: !framed, right: !framed }}>
