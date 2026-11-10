@@ -221,7 +221,7 @@ elements: { grid: {
 - **Draft and commit:** `set()` takes effect immediately, so `set({ ... }); commit()` in one handler saves those changes; `values` catches up on the next render.
 - **Changes from elsewhere:** if what the editor works on changes while it is open (a saved value after Reload or Undo, or a template edit that changes a default or a declaration of the parameters it handles), the dialog says so and refuses to save; the user reopens the editor on the current values.
 - **Failures:** if the component throws while rendering, in an event handler or in async work, the dialog shows the error and offers only Cancel. The editor counts as loaded once the component has mounted.
-- **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors can read files of file parameters with `file()`; remote resources such as map tiles are not available. The starter's calendar editor is the reference example.
+- **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors can read files of file parameters with `file()`; remote resources such as map tiles are not available. The starter has two reference examples: the calendar editor (month and marked days) and the route map's **Frame route** editor, which keeps the viewport as three ordinary number parameters (`centerX`, `centerY`, `zoom`) and edits them together by dragging, scrolling, buttons or arrow keys. It draws only the GPX track, without a basemap, so export stays offline.
 
 ### File parameters
 

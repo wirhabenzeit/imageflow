@@ -91,22 +91,43 @@ function gpxPoints(text: string) {
   return points;
 }
 
-// An optional route inset: the track of the assigned GPX file, drawn without a basemap. Without a file it is an
-// empty frame in the editor (so it can be clicked) and nothing in the printed book.
-function RouteMap({ track, mode, style }: { track: string; mode: Context['mode']; style: CSSProperties }) {
+// The track as an SVG polyline in a 100 × 100 square (5 units of margin), north up, longitude scaled by latitude.
+function routeLine(text: string) {
+  const points = gpxPoints(text);
+  const scale = Math.cos(points.reduce((sum, [, lat]) => sum + lat, 0) / points.length * Math.PI / 180);
+  const xs = points.map(([lon]) => lon * scale);
+  const ys = points.map(([, lat]) => -lat);
+  const [minX, minY] = [Math.min(...xs), Math.min(...ys)];
+  const size = Math.max(Math.max(...xs) - minX, Math.max(...ys) - minY) || 1;
+  const offset = [(size - (Math.max(...xs) - minX)) / 2, (size - (Math.max(...ys) - minY)) / 2];
+  return xs.map((x, i) => ((x - minX + offset[0]) / size * 90 + 5).toFixed(2) + ',' + ((ys[i] - minY + offset[1]) / size * 90 + 5).toFixed(2)).join(' ');
+}
+
+// The part of the route square the inset shows: `zoom` 1 is the whole route, centred on (centerX, centerY) in 0–1.
+// The window is kept inside the square, so the centre is clamped the same way everywhere.
+type Viewport = { centerX: number; centerY: number; zoom: number };
+const maxRouteZoom = 8;
+function routeWindow({ centerX, centerY, zoom }: Viewport) {
+  const z = Math.min(maxRouteZoom, Math.max(1, zoom));
+  const size = 1 / z;
+  const clamp = (value: number) => Math.min(1 - size / 2, Math.max(size / 2, value));
+  const round = (value: number) => Math.round(value * 10000) / 10000;
+  return { centerX: round(clamp(centerX)), centerY: round(clamp(centerY)), zoom: round(z), size };
+}
+const viewBox = (viewport: Viewport) => {
+  const { centerX, centerY, size } = routeWindow(viewport);
+  return [(centerX - size / 2) * 100, (centerY - size / 2) * 100, size * 100, size * 100].map((value) => value.toFixed(3)).join(' ');
+};
+
+// An optional route inset: the track of the assigned GPX file, drawn without a basemap and framed by its viewport.
+// Without a file it is an empty frame in the editor (so it can be clicked) and nothing in the printed book.
+function RouteMap({ track, viewport, mode, style }: { track: string; viewport: Viewport; mode: Context['mode']; style: CSSProperties }) {
   const source = file(track);
   let line = '';
   let problem = '';
   if (source) {
     try {
-      const points = gpxPoints(source.text);
-      const scale = Math.cos(points.reduce((sum, [, lat]) => sum + lat, 0) / points.length * Math.PI / 180);
-      const xs = points.map(([lon]) => lon * scale);
-      const ys = points.map(([, lat]) => -lat);
-      const [minX, minY] = [Math.min(...xs), Math.min(...ys)];
-      const size = Math.max(Math.max(...xs) - minX, Math.max(...ys) - minY) || 1;
-      const offset = [(size - (Math.max(...xs) - minX)) / 2, (size - (Math.max(...ys) - minY)) / 2];
-      line = xs.map((x, i) => ((x - minX + offset[0]) / size * 90 + 5).toFixed(2) + ',' + ((ys[i] - minY + offset[1]) / size * 90 + 5).toFixed(2)).join(' ');
+      line = routeLine(source.text);
     } catch (error) {
       problem = source.name + ' ' + (error instanceof Error ? error.message : 'could not be read') + '; the route is left out.';
     }
@@ -115,9 +136,67 @@ function RouteMap({ track, mode, style }: { track: string; mode: Context['mode']
   if (!line && mode !== 'edit') return problem ? <span hidden data-issue={problem} /> : null;
   return <Element id="route" className={line ? 'route-map' : 'route-map empty'} style={style}>
     {line
-      ? <svg viewBox="0 0 100 100" aria-label="Route"><polyline points={line} /></svg>
+      ? <svg viewBox={viewBox(viewport)} aria-label="Route"><polyline points={line} /></svg>
       : <span data-issue={problem || undefined}>{problem ? 'Route unavailable' : 'Route map: add a GPX track'}</span>}
   </Element>;
+}
+
+// The route map's own editor: drag to move, scroll or use the buttons to zoom, so the inset can show part of the
+// route. It edits the three viewport parameters together; the GPX track keeps its generated control.
+let routeDrag: { x: number; y: number; start: Viewport; width: number } | undefined;
+function RouteEditor({ values, set, readOnly }: ElementEditorProps) {
+  const viewport = routeWindow({ centerX: Number(values.centerX), centerY: Number(values.centerY), zoom: Number(values.zoom) });
+  const source = file(String(values.track));
+  let line = '';
+  let problem = source ? '' : 'Choose a GPX track for the route map first.';
+  if (source) {
+    try {
+      line = routeLine(source.text);
+    } catch (error) {
+      problem = source.name + ' ' + (error instanceof Error ? error.message : 'could not be read') + '.';
+    }
+  }
+  const move = (next: Viewport) => {
+    const { centerX, centerY, zoom } = routeWindow(next);
+    set({ centerX, centerY, zoom });
+  };
+  const zoomBy = (factor: number) => move({ ...viewport, zoom: viewport.zoom * factor });
+  const pan = (dx: number, dy: number) => move({ ...viewport, centerX: viewport.centerX + dx * viewport.size, centerY: viewport.centerY + dy * viewport.size });
+  if (!line) return <div className="route-editor"><p className="route-editor-note">{problem}</p></div>;
+  const editable = !readOnly;
+  return <div className="route-editor">
+    <div className="route-editor-nav">
+      <button type="button" aria-label="Zoom out" disabled={!editable || viewport.zoom <= 1} onClick={() => zoomBy(1 / 1.5)}>−</button>
+      <button type="button" aria-label="Zoom in" disabled={!editable || viewport.zoom >= maxRouteZoom} onClick={() => zoomBy(1.5)}>+</button>
+      <button type="button" disabled={!editable || viewport.zoom === 1} onClick={() => move({ centerX: .5, centerY: .5, zoom: 1 })}>Whole route</button>
+      <span>{editable ? 'Drag to move, scroll to zoom. Arrow keys move too.' : ''}</span>
+    </div>
+    <div className="route-editor-frame" role="application" aria-label="Route viewport" tabIndex={editable ? 0 : -1}
+      onPointerDown={(event: PointerEvent) => {
+        const frame = event.currentTarget as HTMLElement;
+        if (!editable) return;
+        frame.setPointerCapture(event.pointerId);
+        routeDrag = { x: event.clientX, y: event.clientY, start: viewport, width: frame.clientWidth };
+      }}
+      onPointerMove={(event: PointerEvent) => {
+        if (!routeDrag) return;
+        const size = routeWindow(routeDrag.start).size;
+        move({ ...routeDrag.start, centerX: routeDrag.start.centerX - (event.clientX - routeDrag.x) / routeDrag.width * size,
+          centerY: routeDrag.start.centerY - (event.clientY - routeDrag.y) / routeDrag.width * size });
+      }}
+      onPointerUp={() => { routeDrag = undefined; }} onPointerCancel={() => { routeDrag = undefined; }}
+      onWheel={(event: WheelEvent) => { if (editable) zoomBy(Math.exp(-event.deltaY * .002)); }}
+      onKeyDown={(event: KeyboardEvent) => {
+        const steps: Record<string, [number, number]> = { ArrowLeft: [-.1, 0], ArrowRight: [.1, 0], ArrowUp: [0, -.1], ArrowDown: [0, .1] };
+        const step = Object.hasOwn(steps, event.key) ? steps[event.key] : undefined;
+        if (!editable || !step) return;
+        event.preventDefault();
+        pan(step[0], step[1]);
+      }}>
+      <svg viewBox={viewBox(viewport)} aria-hidden="true"><polyline points={line} /></svg>
+    </div>
+    <p className="route-editor-note">{viewport.zoom === 1 ? 'Shows the whole route.' : 'Zoom ' + viewport.zoom.toFixed(1) + '×'}</p>
+  </div>;
 }
 
 // Marked days are stored as a comma-separated list of day numbers, such as "3,14".
@@ -177,7 +256,7 @@ function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.2.0',
+  version: '0.3.0',
   contract: 1,
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
@@ -210,10 +289,20 @@ export default defineTemplate({
     panorama: spread({
       label: 'Panorama',
       boxes: { hero: captioned('Panorama photo') },
-      elements: { route: { label: 'Route map', parameters: { track: p.file({ label: 'GPX track', accept: ['.gpx'] }) } } },
+      elements: { route: {
+        label: 'Route map',
+        parameters: {
+          track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
+          centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01 }),
+          centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01 }),
+          zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1 }),
+        },
+        editor: { label: 'Frame route', parameters: ['centerX', 'centerY', 'zoom'], component: RouteEditor },
+      } },
       render: (ctx) => <Paper context={ctx} bled={{ left: true, right: true }}>
         <PhotoBox id="hero" style={fullSpread} />
-        <RouteMap track={ctx.elements.route.params.track} mode={ctx.mode} style={right(page - margin - 60, margin, 60, 60)} />
+        <RouteMap track={ctx.elements.route.params.track} viewport={ctx.elements.route.params} mode={ctx.mode}
+          style={right(page - margin - 60, margin, 60, 60)} />
         <Caption box={ctx.boxes.hero} className="caption overlay" style={left(margin, 268, 2 * page - 2 * margin, 10)} />
       </Paper>,
     }),

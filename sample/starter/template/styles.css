@@ -58,5 +58,18 @@
 /* Route inset on panoramas: a GPX track without a basemap. */
 .route-map { display: grid; place-items: center; border-radius: 2mm; background: #fffc; }
 .route-map svg { width: 100%; height: 100%; }
-.route-map polyline { fill: none; stroke: var(--ink, #243b30); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+/* The stroke keeps its width when the viewport zooms into the route. */
+.route-map polyline, .route-editor polyline { fill: none; stroke: var(--ink, #243b30); stroke-width: .9mm; stroke-linejoin: round;
+  stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.route-editor { font-family: "Field Sans", system-ui, sans-serif; }
+.route-editor-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 12px; color: #655f55; }
+.route-editor-nav button { min-width: 28px; height: 28px; padding: 0 8px; border: 1px solid #cbc7bc; border-radius: 6px; background: #fff;
+  font: inherit; font-size: 14px; cursor: pointer; }
+.route-editor-frame { width: min(100%, 320px); aspect-ratio: 1; margin: 0 auto; border: 1px solid #cbc7bc; border-radius: 6px;
+  background: #f1eee6; cursor: grab; touch-action: none; overflow: hidden; }
+.route-editor-frame:active { cursor: grabbing; }
+.route-editor-frame:focus-visible { outline: 2px solid #243b30; outline-offset: 2px; }
+.route-editor-frame svg { display: block; width: 100%; height: 100%; }
+.route-editor-frame polyline { stroke-width: 3px; }
+.route-editor-note { margin: 8px 0 0; font-size: 12px; color: #655f55; text-align: center; }
 .route-map.empty { border: .3mm dashed #fff; background: #0003; color: #fff; font: 500 8pt/1.3 "Field Sans"; text-align: center; padding: 3mm; }
