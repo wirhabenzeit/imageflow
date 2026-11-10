@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import electron from 'electron';
 import { fileURLToPath } from 'node:url';
@@ -116,6 +116,57 @@ try {
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
   assert.equal((await read()).spreads[1].boxes.hero.crop, undefined);
 
+  // Focused toolbar controls handle their own keys: Enter on Cancel cancels, arrows on the slider zoom.
+  const toolbar = w.locator('.crop-toolbar');
+  await w.mouse.dblclick(at.x, at.y);
+  await w.locator('.crop-editor').waitFor();
+  await w.mouse.wheel(0, -300);
+  await toolbar.getByRole('button', { name: 'Cancel' }).focus();
+  await w.keyboard.press('Enter');
+  await w.waitForFunction(() => !document.querySelector('.crop-editor'));
+  assert.equal((await read()).spreads[1].boxes.hero.crop, undefined);
+  await w.mouse.dblclick(at.x, at.y);
+  await w.locator('.crop-editor').waitFor();
+  const zoomBefore = await toolbar.getByRole('slider', { name: 'Zoom' }).inputValue();
+  await toolbar.getByRole('slider', { name: 'Zoom' }).focus();
+  await w.keyboard.press('ArrowRight');
+  await w.keyboard.press('ArrowRight');
+  assert.ok(Number(await toolbar.getByRole('slider', { name: 'Zoom' }).inputValue()) > Number(zoomBefore));
+  await w.keyboard.press('Escape');
+  await w.waitForFunction(() => !document.querySelector('.crop-editor'));
+  assert.equal((await read()).spreads[1].boxes.hero.crop, undefined);
+
+  // A frame the template rotates (here 180°, which keeps its size) is not offered crop mode.
+  // A template file change can reload the project more than once; wait until the book frame has stayed the same.
+  async function settled(before) {
+    let src = before;
+    for (let stable = 0; stable < 4;) {
+      await w.waitForTimeout(200);
+      const now = await w.evaluate(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]')?.getAttribute('src'));
+      if (now && now !== before && now === src) stable++;
+      else stable = 0;
+      src = now;
+    }
+  }
+  const css = join(project, 'template/styles.css');
+  const originalCss = await readFile(css, 'utf8');
+  for (const rule of ['transform: rotate(180deg)', 'rotate: 180deg', 'scale: -1 1']) {
+    const before = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+    await writeFile(css, originalCss + '\n.if-spread-container[data-spread="arriving"] [data-box="hero"] { ' + rule + '; }\n');
+    await settled(before);
+    at = await center('[data-spread="arriving"] [data-box="hero"]');
+    await w.mouse.dblclick(at.x, at.y);
+    await w.waitForFunction(() => /rotates or mirrors/.test(document.querySelector('.status')?.textContent ?? ''));
+    assert.equal(await w.locator('.crop-editor').count(), 0, rule);
+    // The double-click's first click opened the photo's popover; close it so it doesn't cover the next attempt.
+    await w.locator('.toolbar .brand').click();
+    await w.waitForFunction(() => !document.querySelector('.edit-popover'));
+  }
+  const restored = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  await writeFile(css, originalCss);
+  await settled(restored);
+  at = await center('[data-spread="arriving"] [data-box="hero"]');
+
   // #11: the book view loads photos near the screen only; scrolling to the end loads the photos there.
   await w.locator('main.canvas').evaluate((el) => el.scrollTo(0, 0));
   const lastPhoto = frame.locator('[data-spread="twilight"] [data-box="hero"] img');
@@ -124,7 +175,7 @@ try {
   await lastPhoto.and(frame.locator('img[src]')).waitFor({ state: 'attached' });
   assert.ok(await lastPhoto.evaluate((img) => img.decode().then(() => img.naturalWidth > 0)));
   await w.locator('main.canvas').evaluate((el) => el.scrollTo(0, 0));
-  // Thumbnails swap in once the visible ones are decoded, but every thumbnail still loads.
+  // Every sidebar thumbnail loads.
   await w.frameLocator('iframe.book-frame-thumbs[data-current]').locator('body').evaluate(() =>
     Promise.all([...document.images].map((img) => img.decode())).then(() =>
       [...document.images].every((img) => img.complete && img.naturalWidth > 0)));

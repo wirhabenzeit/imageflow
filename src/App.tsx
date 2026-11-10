@@ -391,7 +391,7 @@ export function App() {
     const frame = geometry?.boxes.find((rect) => rect.spread === spread && rect.id === box);
     if (!state?.photo || !summary?.photos[state.photo] || !summary.photoSizes[state.photo]) return 'Add a photo to this box first.';
     if (!frame) return 'The book is still rendering.';
-    if (!frame.upright) return 'This frame is rotated by the template; use the crop values in the Inspector.';
+    if (!frame.upright) return 'The template rotates or mirrors this frame; use the crop values in the Inspector.';
   }
   function startCrop(spread: string, box: string) {
     const blocked = cropBlocked(spread, box);
@@ -611,7 +611,11 @@ export function App() {
               }}
               onDoubleClick={(event) => {
                 const { box } = locate(event);
-                if (box?.type === 'photo' && startCrop(box.spread, box.id)) return;
+                // Double-clicking a photo means crop mode; if that is not possible, the status line says why.
+                if (box?.type === 'photo') {
+                  startCrop(box.spread, box.id);
+                  return;
+                }
                 const source = box && boxSource(box.spread, box.id);
                 if (source) setQuick(source);
               }}
