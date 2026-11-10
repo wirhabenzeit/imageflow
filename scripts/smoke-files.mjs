@@ -55,6 +55,43 @@ try {
   assert.equal((await status()).errors.length + (await status()).warnings.length, 0);
   assert.equal(await frame.locator('[data-spread="headlands"] [data-element="route"]').getAttribute('class'), 'route-map empty');
 
+  // The route map's own editor frames part of the route: zoom and move, then Done saves the viewport as one edit.
+  const viewBox = () => frame.locator(route + ' svg').getAttribute('viewBox');
+  assert.equal(await viewBox(), '0.000 0.000 100.000 100.000');
+  // Clicking the inset opens its popover; the editor owns the viewport, so the popover offers it as a button.
+  await (await openRoute()).getByRole('button', { name: 'Frame route…' }).click();
+  const routeDialog = w.getByRole('dialog', { name: 'Frame route' });
+  await routeDialog.waitFor();
+  await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
+  await w.waitForFunction(() => document.querySelector('iframe.element-editor-frame')?.style.height !== '240px');
+  const routeEditor = w.frameLocator('iframe.element-editor-frame');
+  const note = (text) => routeEditor.locator('.route-editor-note', { hasText: text }).waitFor();
+  await routeEditor.getByRole('button', { name: 'Zoom in' }).click();
+  await note('Zoom 1.5×');
+  await routeEditor.getByRole('button', { name: 'Zoom in' }).click();
+  await note('Zoom 2.3×');
+  await routeEditor.getByRole('application', { name: 'Route viewport' }).press('ArrowRight');
+  await routeEditor.locator('svg[viewBox="32.218 27.778 44.444 44.444"]').waitFor();
+  await rerendered(() => routeDialog.getByRole('button', { name: 'Done' }).click());
+  await saved('Route map updated');
+  const framed = (await read()).spreads.find(({ id }) => id === 'road').elements.route.params;
+  assert.deepEqual(framed, { track: 'senja-road', centerX: 0.5444, centerY: 0.5, zoom: 2.25 });
+  assert.equal(await viewBox(), '32.218 27.778 44.444 44.444');
+  await rerendered(() => w.getByRole('button', { name: 'Undo', exact: true }).click());
+  assert.equal(await viewBox(), '0.000 0.000 100.000 100.000');
+  // Without a track the editor says what is missing.
+  const empty = frame.locator('[data-spread="headlands"] [data-element="route"]');
+  await empty.scrollIntoViewIfNeeded();
+  await w.waitForTimeout(200);
+  const emptyBox = await empty.boundingBox();
+  // Double-clicking the inset, which lies over the panorama photo, opens its editor rather than crop mode.
+  await w.mouse.dblclick(emptyBox.x + emptyBox.width / 2, emptyBox.y + emptyBox.height / 2);
+  await routeDialog.waitFor();
+  assert.equal(await w.locator('.crop-editor').count(), 0);
+  await routeEditor.getByText('Choose a GPX track for the route map first.').waitFor();
+  await routeDialog.getByRole('button', { name: 'Cancel' }).click();
+  await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+
   // Clearing is a valid state: no route, no issue. Undo restores the assignment.
   let popover = await openRoute();
   assert.equal(await popover.getByRole('combobox', { name: 'GPX track' }).inputValue(), 'senja-road');

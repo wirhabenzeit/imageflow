@@ -8,7 +8,8 @@ import type { Parameter, Parameters } from './parameters';
 import { isParameterValue } from './parameters';
 import { centered, placementIn, setPlacement } from './spread';
 import { readEdit, resolveEditPath, writeEdit } from './editing';
-import { describeLayoutChange, keptOutside, layoutChoices, planLayoutChange, switchLayout } from './layouts';
+import { boxLabel, describeLayoutChange, discardContent, keptElements, keptOutside, layoutChoices, planLayoutChange, switchLayout } from './layouts';
+import { keptMime, photoMime, sourceTitle, textMime } from './source-items';
 import type { EditTarget } from './editing';
 import type { SourceUsage } from './editing';
 import { SourceInspector } from './SourceInspector';
@@ -48,6 +49,54 @@ function LayoutPicker({ summary, spread, template, choose }: {
   </>;
 }
 
+// Content the spread keeps for other layouts. Placing an item moves it into a box of this layout (swapping with what
+// is there); dragging it onto a box does the same. Discard removes it from the spread; the source stays.
+function KeptContent({ summary, spread, template, kept, label, settings, writable, place, discard }: {
+  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; kept: ReturnType<typeof keptOutside>; label: string;
+  settings: string[]; writable: boolean; place: (from: string, to: string) => void; discard: (box: string, name: string) => void;
+}) {
+  const layout = template.spreads[spread.definition];
+  const elementName = (id: string) => Object.values(template.spreads).find((item) => Object.hasOwn(item.elements, id))?.elements[id].label ?? id;
+  return <details open className="kept-content">
+    <summary>Saved outside this layout{label ? ' · ' + label : ''}</summary>
+    {kept.length > 0 && <p className="muted">Layouts with these boxes show them again. Drag one onto a box, or place it:</p>}
+    <ul className="kept-list">
+      {kept.map((item) => {
+        const name = sourceTitle(summary, item.kind, item.source);
+        const from = boxLabel(template.spreads, item.id);
+        const targets = Object.entries(layout?.boxes ?? {}).filter(([, box]) => (box.type === 'photo') === (item.kind === 'photo'));
+        const occupant = (id: string) => {
+          const box = spread.boxes[id];
+          const source = item.kind === 'photo' ? box?.photo : box?.text;
+          return source && sourceTitle(summary, item.kind, source);
+        };
+        return <li key={item.id} className="kept-item" draggable={writable} onDragStart={(event) => {
+          event.dataTransfer.setData(item.kind === 'photo' ? photoMime : textMime, item.source);
+          event.dataTransfer.setData(keptMime, JSON.stringify({ spread: spread.id, box: item.id }));
+        }}>
+          {item.kind === 'photo' && summary.photos[item.source]
+            ? <img className="kept-thumb" src={summary.photos[item.source]} alt="" draggable={false} />
+            : <span className="kept-thumb kept-thumb-empty">{item.kind === 'photo' ? 'Missing' : 'Text'}</span>}
+          <div className="kept-info">
+            <span className="kept-name">{name}</span>
+            <span className="muted">{from ? from.box + ' · ' + from.layout : 'Box ' + item.id}</span>
+            <div className="kept-actions">
+              <select aria-label={'Place ' + name + ' in'} value="" disabled={!targets.length}
+                onChange={(event) => { if (event.target.value) place(item.id, event.target.value); }}>
+                <option value="">{targets.length ? 'Place in…' : 'No ' + (item.kind === 'photo' ? 'photo' : 'text') + ' box in this layout'}</option>
+                {targets.map(([id, box]) => <option key={id} value={id}>
+                  {box.label + (occupant(id) ? ' · swap with ' + occupant(id) : '')}</option>)}
+              </select>
+              <button type="button" className="link" aria-label={'Discard ' + name} onClick={() => discard(item.id, name)}>Discard</button>
+            </div>
+          </div>
+        </li>;
+      })}
+    </ul>
+    {settings.length > 0 && <p className="muted">Settings kept for {settings.map(elementName).join(', ')}.</p>}
+  </details>;
+}
+
 export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[] };
 
 function CheckList({ check, checking, spread, select }: {
@@ -73,12 +122,13 @@ function CheckList({ check, checking, spread, select }: {
 
 // Shows either the selected spread or the selected source, never both.
 export function Inspector({ summary, spread, source, template, render, usage, edit, importText, highlight, issues, check, checking,
-  select, inspectSource, quickLook, focus, targets = [], adjustCrop, openEditor }: {
+  select, inspectSource, quickLook, focus, targets = [], adjustCrop, openEditor, place }: {
   summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void; importText: (box: string) => void;
   highlight: (id?: string) => void; issues: string; check?: BookCheck; checking: boolean; select: (spread: string) => void;
   inspectSource: (source: SourceRef) => void; quickLook: () => void; focus?: { box: string; at: number };
   targets?: BookGeometry['targets']; adjustCrop: (box: string) => void; openEditor: (element: string) => void;
+  place: (from: string, to: string) => void;
 }) {
   const sections = useRef(new Map<string, HTMLElement>());
   const [flash, setFlash] = useState<string>();
@@ -110,6 +160,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     const n = kept.filter((item) => item.kind === kind).length;
     return n ? n + ' ' + (n === 1 ? one : many) : '';
   }).filter(Boolean).join(', ');
+  const keptSettings = template ? keptElements(spread, template.spreads) : [];
   // Options a template attaches to a box or element with ctx.edit() appear in that box's or element's section,
   // matching the popover you get by clicking it. Spread options claimed this way leave the Spread section.
   const attached = new Map<string, EditTarget[]>();
@@ -171,8 +222,10 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
         {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
         {definition && <Fields key={spread.id} schema={spreadParameters} values={spread.params}
           update={(id, value) => changeSpread((item) => { item.params[id] = value; })} />}
-        {keptLabel && <p className="muted">Saved outside this layout · {keptLabel}</p>}
       </details>}
+      {template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={spread} template={template}
+        kept={kept} label={keptLabel} settings={keptSettings} writable={writable} place={place}
+        discard={(box, name) => changeSpread((item) => discardContent(item, box), name + ' removed from this spread')} />}
       {Object.entries(definition?.boxes ?? {}).map(([id, box]) => {
         const state = spread.boxes[id];
         const photoBox = box.type === 'photo';

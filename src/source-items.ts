@@ -3,6 +3,9 @@ import type { ProjectSummary } from './desktop';
 // Source helpers live outside Sources.tsx so React fast refresh can treat that file as components only.
 export const photoMime = 'application/x-imageflow-photo';
 export const textMime = 'application/x-imageflow-text';
+// Content a spread keeps outside its layout, dragged from the Inspector: `{ spread, box }` as JSON. The drag also
+// carries the photo or text ID, so dropping it on another spread places another use of the source.
+export const keptMime = 'application/x-imageflow-kept';
 export type SourceKind = 'photo' | 'text';
 export type SourceRef = { kind: SourceKind; id: string };
 
@@ -24,3 +27,9 @@ export function sourceList(summary: ProjectSummary, kind: SourceKind) {
     : Object.entries(summary.project.texts).map(([id, path]) => ({ id, title: fileName(path), path }));
 }
 
+
+// The name shown for a photo or Markdown source.
+export function sourceTitle(summary: ProjectSummary, kind: SourceKind, id: string) {
+  if (kind === 'photo') return summary.photoIndex[id]?.title || (summary.photoIndex[id] ? fileName(summary.photoIndex[id].path) : id);
+  return summary.project.texts[id] ? fileName(summary.project.texts[id]) : id;
+}

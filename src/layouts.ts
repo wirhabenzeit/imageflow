@@ -170,3 +170,42 @@ export function declaredInTemplate(layouts: Layouts) {
     param: (scope: string, id: string) => params.has(scope + '\0' + id),
   };
 }
+
+type BoxState = SpreadState['boxes'][string];
+// A box's content: the assignment and the crop focus. Box parameters belong to the box ID and stay put; per-layout
+// crops were made for this box's frames, so they do not travel with the content.
+function content(box: BoxState | undefined): Partial<BoxState> {
+  if (!box?.photo && !box?.text) return {};
+  return box.photo ? { photo: box.photo, ...(box.focus ? { focus: box.focus } : {}) } : { text: box.text };
+}
+
+// Moves kept content into box `to`. Content already there moves to `from`, so nothing is lost: the two swap.
+// Returns what was swapped out, if anything. The moved content is no longer kept, so it cannot come back twice.
+export function moveContent(spread: SpreadState, from: string, to: string) {
+  if (from === to) return;
+  const moving = content(spread.boxes[from]);
+  if (!moving.photo && !moving.text) throw new Error('There is no content saved for box ' + from + '.');
+  const displaced = content(spread.boxes[to]);
+  spread.boxes[to] = { params: spread.boxes[to]?.params ?? {}, ...moving };
+  spread.boxes[from] = { params: spread.boxes[from]?.params ?? {}, ...displaced };
+  return displaced.photo ?? displaced.text;
+}
+
+// Removes kept content from the spread; the source stays in the project.
+export function discardContent(spread: SpreadState, id: string) {
+  const box = spread.boxes[id];
+  if (box) spread.boxes[id] = { params: box.params };
+}
+
+// Element settings the spread keeps for other layouts, by element ID.
+export function keptElements(spread: SpreadState, layouts: Layouts) {
+  const layout = own(layouts, spread.definition);
+  return Object.entries(spread.elements).filter(([id, element]) => Object.keys(element.params).length && !(layout && own(layout.elements, id)))
+    .map(([id]) => id);
+}
+
+// A readable name for a box ID: its label in the first layout that declares it.
+export function boxLabel(layouts: Layouts, id: string) {
+  const layout = Object.values(layouts).find((item) => own(item.boxes, id));
+  return layout ? { box: layout.boxes[id].label, layout: layout.label } : undefined;
+}

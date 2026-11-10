@@ -11,11 +11,12 @@ import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
 import { assignmentCounts, newSpread, sourceUsage } from './editing';
+import { moveContent } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { BookCheck, Edit } from './Inspector';
 import { QuickLook, Sources } from './Sources';
-import { photoMime, sourceList, textMime } from './source-items';
+import { keptMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
 import type { SourceKind, SourceRef } from './source-items';
 import { pageSequence, resolveFormat } from './format';
 import type { ResolvedFormat } from './format';
@@ -386,6 +387,24 @@ export function App() {
     });
   }
 
+  // Moves content a spread keeps outside its layout into one of its boxes; content already there is kept instead.
+  function place(spread: string, from: string, to: string) {
+    if (!summary || !template) return;
+    const state = spreads.find(({ id }) => id === spread);
+    const moving = state?.boxes[from];
+    const label = state && template.spreads[state.definition]?.boxes[to]?.label;
+    if (!moving || !label) return;
+    const kind = moving.photo ? 'photo' : 'text';
+    let swapped: string | undefined;
+    edit(({ project }) => {
+      const current = project.spreads.find(({ id }) => id === spread);
+      if (current) swapped = moveContent(current, from, to);
+    }, () => sourceTitle(summary, kind, (moving.photo ?? moving.text)!) + ' placed in ' + label +
+      (swapped ? '; ' + sourceTitle(summary, kind, swapped) + ' is saved outside this layout' : ''));
+    // The Inspector scrolls to the box that received it.
+    setFocusBox({ box: to, at: Date.now() });
+  }
+
   // Finds the spread and box under a pointer. The label strip above each spread belongs to the spread.
   function locate(event: { clientX: number; clientY: number }, types?: readonly string[]) {
     const bounds = stage.current?.getBoundingClientRect();
@@ -401,7 +420,10 @@ export function App() {
     const target = wanted ? undefined : geometry.targets.filter((rect) => inside(rect))
       .sort((a, b) => area(a) - area(b))[0];
     const element = wanted ? undefined : geometry.boxes.findLast((rect) => rect.type === 'element' && inside(rect));
-    return { sheet, box, element, target: target && (!box || area(target) <= area(box)) ? target : undefined };
+    // The box or element drawn on top: geometry lists them in document order, so a later one covers an earlier
+    // one (an inset map over a full-bleed photo). Templates that reorder with z-index are not accounted for.
+    const top = wanted ? box : geometry.boxes.findLast((rect) => inside(rect));
+    return { sheet, box, element, top, target: target && (!box || area(target) <= area(box)) ? target : undefined };
   }
   const targetKey = (target: { spread: string; edits: string[] }) => target.spread + '|' + target.edits.join(' ');
   const closeEditor = useCallback(() => setEditing(undefined), []);
@@ -502,6 +524,16 @@ export function App() {
     setDropTarget(undefined);
     if (!api || !writable || busy || !summary) return;
     const { box } = locate(event);
+    // Kept content dropped on its own spread moves; dropped on another spread it is another use of its source.
+    const kept = event.dataTransfer.getData(keptMime);
+    if (kept && box && box.type !== 'element') {
+      const origin = JSON.parse(kept) as { spread: string; box: string };
+      if (origin.spread === box.spread) {
+        place(origin.spread, origin.box, box.id);
+        select(box.spread, false);
+        return;
+      }
+    }
     const photoId = event.dataTransfer.getData(photoMime);
     const textId = event.dataTransfer.getData(textMime);
     if (photoId || textId) {
@@ -682,22 +714,27 @@ export function App() {
               style={{ height: geometry?.height, cursor: hoveredTarget ? 'pointer' : undefined,
                 '--aspect': format ? format.spreadWidth / format.height : undefined } as CSSProperties}
               onClick={(event) => {
-                const { sheet, box, target } = locate(event);
+                const { sheet, top, target } = locate(event);
                 if (!sheet) return;
                 select(sheet, false);
                 if (target) setEditing({ spread: target.spread, key: targetKey(target) });
-                if (box) setFocusBox({ box: box.id, at: Date.now() });
+                if (top) setFocusBox({ box: top.id, at: Date.now() });
               }}
               onDoubleClick={(event) => {
-                const { box, element } = locate(event);
+                // Acts on what is drawn on top, so an element over a photo opens its editor rather than crop mode.
+                const { top } = locate(event);
+                if (!top) return;
                 // Double-clicking a photo means crop mode; if that is not possible, the status line says why.
-                if (box?.type === 'photo') {
-                  startCrop(box.spread, box.id);
+                if (top.type === 'photo') {
+                  startCrop(top.spread, top.id);
                   return;
                 }
                 // Double-clicking an element with a template-supplied editor opens it.
-                if (element && openElementEditor(element.spread, element.id)) return;
-                const source = box && boxSource(box.spread, box.id);
+                if (top.type === 'element') {
+                  openElementEditor(top.spread, top.id);
+                  return;
+                }
+                const source = boxSource(top.spread, top.id);
                 if (source) setQuick(source);
               }}
               onMouseMove={(event) => {
@@ -769,7 +806,7 @@ export function App() {
         usage={usage} inspectSource={choose} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
         adjustCrop={(box) => { reveal(spread.id); startCrop(spread.id, box); }}
-        openEditor={(element) => openElementEditor(spread.id, element)}
+        openEditor={(element) => openElementEditor(spread.id, element)} place={(from, to) => place(spread.id, from, to)}
         edit={edit} highlight={setHighlight} issues={issue} check={check} checking={!checkCurrent} select={select}
         importText={(box) => importFiles({ kind: 'markdown', target: { spread: spread.id, box } })} />}
     </div>
