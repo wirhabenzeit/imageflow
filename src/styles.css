@@ -306,6 +306,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 
 .inspector .box-photo-info select.box-photo-pick { margin-top: 3px; padding: 3px 6px; font-size: 12px; }
 .layout-note { margin: 4px 0 6px; font-size: 11px; color: var(--muted); }
+/* What switching to the pointed-at layout would do; reserves its line so the panel does not shift. */
+.layout-consequence { margin: 2px 0 6px; min-height: 1.4em; font-size: 11px; line-height: 1.4; }
 
 /* Template-supplied element editors */
 .element-editor { padding: 0; border: 0; border-radius: 12px; background: #fcfbf6; color: #26251e; box-shadow: 0 24px 80px #0007;

@@ -78,6 +78,9 @@ try {
   await w.getByRole('dialog', { name: 'Edit Week starts' }).getByRole('button', { name: 'Edit calendar…' }).click();
   const editorDialog = w.getByRole('dialog', { name: 'Edit calendar' });
   await editorDialog.waitFor();
+  // Clicks before the editor has loaded and sized itself can be lost; wait as openCalendarEditor does.
+  await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
+  await w.waitForFunction(() => document.querySelector('iframe.element-editor-frame')?.style.height !== '240px');
   const calendarEditor = w.frameLocator('iframe.element-editor-frame');
   await calendarEditor.getByRole('button', { name: 'Next month' }).click();
   await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
@@ -248,17 +251,20 @@ try {
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Crop updated');
   await ready();
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
-  const crop = (await read()).spreads[1].boxes.hero.crop;
+  // The crop belongs to the spread's current layout; its centre is the focus other layouts fill around.
+  const { crops, focus } = (await read()).spreads[1].boxes.hero;
+  const crop = crops.story;
   assert.ok(crop.centerX > 0.5 && crop.zoom > 1, JSON.stringify(crop));
+  assert.deepEqual(focus, { centerX: crop.centerX, centerY: crop.centerY });
   await w.mouse.dblclick(at.x, at.y);
   await w.locator('.crop-editor').waitFor();
   await w.mouse.wheel(0, -400);
   await w.keyboard.press('Escape');
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
-  assert.deepEqual((await read()).spreads[1].boxes.hero.crop, crop);
+  assert.deepEqual((await read()).spreads[1].boxes.hero.crops, { story: crop });
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
-  assert.equal((await read()).spreads[1].boxes.hero.crop, undefined);
+  assert.equal((await read()).spreads[1].boxes.hero.crops, undefined);
 
   // Focused toolbar controls handle their own keys: Enter on Cancel cancels, arrows on the slider zoom.
   const toolbar = w.locator('.crop-toolbar');
@@ -268,7 +274,7 @@ try {
   await toolbar.getByRole('button', { name: 'Cancel' }).focus();
   await w.keyboard.press('Enter');
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
-  assert.equal((await read()).spreads[1].boxes.hero.crop, undefined);
+  assert.equal((await read()).spreads[1].boxes.hero.crops, undefined);
   await w.mouse.dblclick(at.x, at.y);
   await w.locator('.crop-editor').waitFor();
   const zoomBefore = await toolbar.getByRole('slider', { name: 'Zoom' }).inputValue();
@@ -278,7 +284,7 @@ try {
   assert.ok(Number(await toolbar.getByRole('slider', { name: 'Zoom' }).inputValue()) > Number(zoomBefore));
   await w.keyboard.press('Escape');
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
-  assert.equal((await read()).spreads[1].boxes.hero.crop, undefined);
+  assert.equal((await read()).spreads[1].boxes.hero.crops, undefined);
 
   // A frame the template rotates (here 180°, which keeps its size) is not offered crop mode.
   // A template file change can reload the project more than once; wait until the book frame has stayed the same.

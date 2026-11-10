@@ -24,3 +24,26 @@ export function placementOf(crop: Crop, zoom: number): Placement {
   return { centerX: round(crop.x + crop.width / 2), centerY: round(crop.y + crop.height / 2), zoom: round(zoom) };
 }
 export const maxZoom = 20;
+
+type Cropped = { crops?: Record<string, Placement>; focus?: { centerX: number; centerY: number } };
+
+// The crop a photo box shows in a layout: the layout's own, else a fill around the focus, else a centred fill.
+export function placementIn(box: Cropped | undefined, layout: string): Placement {
+  const own = box?.crops && Object.hasOwn(box.crops, layout) ? box.crops[layout] : undefined;
+  return own ?? (box?.focus ? { ...box.focus, zoom: 1 } : centered);
+}
+
+// Sets a layout's crop; its centre becomes the focus other layouts without a crop fill around. A centred fill
+// stores nothing: the layout falls back to it, and so do the others.
+export function setPlacement(box: Cropped, layout: string, placement: Placement) {
+  const { centerX, centerY, zoom } = placement;
+  const crops = { ...box.crops };
+  delete crops[layout];
+  if (centerX === .5 && centerY === .5 && zoom === 1) delete box.focus;
+  else {
+    crops[layout] = placement;
+    box.focus = { centerX, centerY };
+  }
+  if (Object.keys(crops).length) box.crops = crops;
+  else delete box.crops;
+}

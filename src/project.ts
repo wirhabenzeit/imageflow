@@ -5,23 +5,20 @@ export const identifier = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/, 'Use l
   .refine((id) => !Object.hasOwn(Object.prototype, id), 'This identifier is reserved.');
 const label = z.string().trim().min(1);
 export const values = z.record(identifier, z.union([z.string(), z.boolean(), z.number()])).default({});
-const crop = z.object({
-  centerX: z.number().min(0).max(1),
-  centerY: z.number().min(0).max(1),
-  zoom: z.number().min(1).max(20),
-});
+const unit = z.number().min(0).max(1);
+const crop = z.object({ centerX: unit, centerY: unit, zoom: z.number().min(1).max(20) });
+// A box's content is shared by every layout that declares a box with its ID; layouts without that box keep it on the
+// spread. Crops depend on the frame, so each layout has its own. A layout without one fills its frame around
+// `focus`, the centre of the crop set last.
 const box = z.object({
   photo: identifier.optional(),
   text: identifier.optional(),
-  crop: crop.optional(),
+  crops: z.record(identifier, crop).optional(),
+  focus: z.object({ centerX: unit, centerY: unit }).optional(),
   params: values,
-}).refine(({ photo, text, crop }) => !(photo && text) && (!crop || !!photo), 'A box holds one assignment, and only photos have a crop.');
+}).refine(({ photo, text, crops, focus }) => !(photo && text) && (!(crops || focus) || !!photo),
+  'A box holds one assignment, and only photos have a crop.');
 
-const spreadContent = z.object({
-  params: values,
-  boxes: z.record(identifier, box).default({}),
-  elements: z.record(identifier, z.object({ params: values })).default({}),
-});
 
 export const projectSchema = z.object({
   schemaVersion: z.literal(1),
@@ -33,10 +30,13 @@ export const projectSchema = z.object({
   texts: z.record(identifier, z.string()).default({}),
   // Files for file parameters (such as GPX tracks), by ID, as paths inside files/.
   files: z.record(identifier, z.string()).default({}),
-  spreads: z.array(spreadContent.extend({
+  // Each spread keeps one state for all its layouts: `definition` picks which boxes and elements are shown.
+  spreads: z.array(z.object({
     id: identifier,
     definition: identifier,
-    archive: z.record(identifier, spreadContent).default({}),
+    params: values,
+    boxes: z.record(identifier, box).default({}),
+    elements: z.record(identifier, z.object({ params: values })).default({}),
   })).min(1).refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
 });
 

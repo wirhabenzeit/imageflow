@@ -1,50 +1,24 @@
-import type { SpreadDefinition, TemplateInfo } from './desktop';
 import type { Project, SpreadState, Values } from './project';
 import { isParameterValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
+import { shownBoxes } from './layouts';
+import type { Layouts } from './layouts';
 
 export function newSpread(definition: string): SpreadState {
-  return { id: crypto.randomUUID(), definition, params: {}, boxes: {}, elements: {}, archive: {} };
+  return { id: crypto.randomUUID(), definition, params: {}, boxes: {}, elements: {} };
 }
 
-function matching(values: Values, before: Parameters, after: Parameters) {
-  return Object.fromEntries(Object.entries(values).filter(([id]) => before[id]?.type === after[id]?.type && after[id]));
+// The boxes a spread shows. Without the template (still loading), every assigned box counts.
+function shown(spread: SpreadState, layouts?: Layouts) {
+  const ids = layouts ? new Set(shownBoxes(spread, Object.hasOwn(layouts, spread.definition) ? layouts[spread.definition] : undefined)) : undefined;
+  return Object.entries(spread.boxes).filter(([id]) => !ids || ids.has(id)).map(([, box]) => box);
 }
 
-export function switchDefinition(spread: SpreadState, definition: string, template: TemplateInfo) {
-  if (definition === spread.definition) return;
-  const old: SpreadDefinition | undefined = template.spreads[spread.definition];
-  const next = template.spreads[definition];
-  const { params, boxes, elements } = spread;
-  spread.archive[spread.definition] = { params, boxes, elements };
-  const saved = spread.archive[definition];
-  spread.definition = definition;
-  spread.params = { ...saved?.params, ...matching(params, old?.parameters ?? {}, next.parameters) };
-  spread.boxes = { ...saved?.boxes };
-  spread.elements = { ...saved?.elements };
-  for (const [id, target] of Object.entries(next.boxes)) {
-    const source = old?.boxes[id];
-    const state = boxes[id];
-    if (source?.type !== target.type || !state) continue;
-    spread.boxes[id] = {
-      ...state, params: { ...spread.boxes[id]?.params, ...matching(state.params, source.parameters, target.parameters) },
-    };
-  }
-  for (const [id, target] of Object.entries(next.elements)) {
-    const source = old?.elements[id];
-    const state = elements[id];
-    if (!source || !state) continue;
-    spread.elements[id] = {
-      params: { ...spread.elements[id]?.params, ...matching(state.params, source.parameters, target.parameters) },
-    };
-  }
-  delete spread.archive[definition];
-}
-
-export function assignmentCounts(project: Project) {
+// How often each photo is shown in the book. Content kept outside a spread's current layout does not count.
+export function assignmentCounts(project: Project, layouts?: Layouts) {
   const counts: Record<string, number> = {};
   for (const spread of project.spreads) {
-    for (const { photo } of Object.values(spread.boxes)) {
+    for (const { photo } of shown(spread, layouts)) {
       if (photo) counts[photo] = (counts[photo] ?? 0) + 1;
     }
   }
@@ -54,10 +28,10 @@ export function assignmentCounts(project: Project) {
 export type SourceUsage = Record<'photo' | 'text', Record<string, { spread: string; pages: string }[]>>;
 
 // Lists the spreads that show each photo and Markdown source. `pages` holds a readable page range per spread.
-export function sourceUsage(project: Project, pages: string[]) {
+export function sourceUsage(project: Project, pages: string[], layouts?: Layouts) {
   const usage: SourceUsage = { photo: {}, text: {} };
   project.spreads.forEach((spread, i) => {
-    for (const box of Object.values(spread.boxes)) {
+    for (const box of shown(spread, layouts)) {
       for (const [kind, id] of [['photo', box.photo], ['text', box.text]] as const) {
         if (!id) continue;
         const list = usage[kind][id] ??= [];

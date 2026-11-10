@@ -11,7 +11,8 @@
     "start": "npm run build && node scripts/stage-desktop.mjs && electron .build/desktop",
     "build": "tsc --noEmit && tsc -p sample/starter/template && vite build",
     "package:mac": "npm run build && node scripts/package-mac.mjs",
-    "test:desktop": "npm run build && node scripts/stage-desktop.mjs && node scripts/smoke-desktop.mjs && node scripts/smoke-draft.mjs && node scripts/smoke-edit.mjs && node scripts/smoke-files.mjs"
+    "test:unit": "node scripts/test-unit.mjs",
+    "test:desktop": "npm run build && node scripts/test-unit.mjs && node scripts/stage-desktop.mjs && node scripts/smoke-desktop.mjs && node scripts/smoke-draft.mjs && node scripts/smoke-edit.mjs && node scripts/smoke-files.mjs && node scripts/smoke-layouts.mjs"
   },
   "dependencies": {
     "mdast-util-from-markdown": "2.0.2",

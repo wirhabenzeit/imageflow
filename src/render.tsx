@@ -15,7 +15,8 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { chooseFormat, runtime, setTemplateAssets, setTemplateFiles, SpreadView, templateInfo, templateSchema } from './template';
 import type { FlowPosition, Template } from './template';
-import { resolveEditPath, switchDefinition } from './editing';
+import { resolveEditPath } from './editing';
+import { declaredInTemplate, layoutChoices } from './layouts';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -91,17 +92,31 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
   const resolution = template.format.output.resolution;
   const issue = (message: string): Issue => ({ message, spread: spread.id, where });
   const warn = (messages: string[]) => warnings.push(...messages.map(issue));
-  warn(parameterWarnings(definition.parameters, spread.params, 'Layout'));
+  // State the current layout does not show stays with the spread for other layouts; only state that no layout of
+  // the template declares is reported.
+  const declared = declaredInTemplate(template.spreads);
+  const undeclared = (scope: string, parameters: Parameters, values: Values) =>
+    Object.fromEntries(Object.entries(values).filter(([id]) => Object.hasOwn(parameters, id) || !declared.param(scope, id)));
+  warn(parameterWarnings(definition.parameters, undeclared('', definition.parameters, spread.params), 'Layout'));
   for (const [id, state] of Object.entries(spread.boxes)) {
-    const box = definition.boxes[id];
-    if (!box || (state.photo && box.type !== 'photo') || (state.text && box.type !== 'markdown')) {
-      warn(['Content saved for box ' + id + ' has no matching box in this layout.']);
+    const box = Object.hasOwn(definition.boxes, id) ? definition.boxes[id] : undefined;
+    const kind = state.photo ? 'photo' : state.text ? 'text' : undefined;
+    if (kind && !declared.box(id, kind)) {
+      warn(['Content saved for box ' + id + ' fits no box of this template.']);
       continue;
     }
-    warn(parameterWarnings(box.parameters, state.params, box.label));
+    if (box && kind && (kind === 'photo') !== (box.type === 'photo')) continue;
+    const parameters = box?.parameters ?? {};
+    warn(parameterWarnings(parameters, undeclared('box ' + id, parameters, state.params), box?.label ?? 'Box ' + id));
   }
   for (const [id, state] of Object.entries(spread.elements)) {
-    warn(parameterWarnings(definition.elements[id]?.parameters ?? {}, state.params, definition.elements[id]?.label ?? id));
+    const element = Object.hasOwn(definition.elements, id) ? definition.elements[id] : undefined;
+    if (!element && !declared.element(id)) {
+      warn(['Settings saved for element ' + id + ' fit no element of this template.']);
+      continue;
+    }
+    const parameters = element?.parameters ?? {};
+    warn(parameterWarnings(parameters, undeclared('element ' + id, parameters, state.params), element?.label ?? id));
   }
   // Templates report problems with their input, such as a file they cannot parse, on the node concerned.
   warn([...sheet.querySelectorAll<HTMLElement>('[data-issue]')].map((node) => node.dataset.issue!).filter(Boolean));
@@ -276,11 +291,10 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   if (index < 0) throw new Error('Spread does not exist.');
   const format = resolveFormat(template.format);
   const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
-  const previews = Object.entries(template.spreads).map(([definition, { span }]) => {
-    const spread = structuredClone(spreads[index]);
-    switchDefinition(spread, definition, info);
-    return { definition, span, spread: { ...spread, id: definition } };
-  });
+  // A preview is the spread itself in another layout: switching only changes which of its content is shown.
+  const previews = layoutChoices(template.spreads, spreads[index].definition).map((definition) => ({
+    definition, span: template.spreads[definition].span, spread: { ...spreads[index], definition, id: definition },
+  }));
   root.className = 'if-preview';
   let renderError: unknown;
   const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
