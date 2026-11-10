@@ -54,22 +54,37 @@ body { margin: 0; }
 .crop-controls > button { grid-column: 1 / -1; justify-self: start; }
 
 /* Book check: the whole-book render runs in an invisible frame; its findings are listed in the inspector. */
-.book-check-list { font-size: 12px; overflow-wrap: anywhere; }
-.book-check-list summary { color: var(--muted); }
-.book-check-list ul { padding-left: 17px; max-height: 260px; overflow: auto; }
-.book-check-list li { margin: 4px 0; }
-.book-check-list .issue-error { color: #7c2720; }
-.book-check-list .issue-warning { color: #6b5212; }
-.book-check-list .issue-current { font-weight: 600; }
-.book-check-stale ul { opacity: .6; }
-.book-check-list button.link { all: unset; cursor: pointer; text-decoration: underline; }
-.book-check-list button.link:focus-visible { outline: 2px solid var(--accent); }
+/* Book check: an indicator at the right of the status bar; its list opens above the bar */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.book-check-list { position: relative; flex: none; margin-right: 16px; font-size: 12px; }
+.studio .book-check-toggle { display: inline-flex; align-items: center; gap: 4px; min-height: 0; height: 20px; padding: 0 7px 0 3px;
+  border: 0; border-radius: 10px; background: transparent; font: inherit; font-weight: 650; font-variant-numeric: tabular-nums; cursor: pointer; }
+.book-check-icon { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; font-size: 10px; font-weight: 800; color: #fff; }
+.book-check-error .book-check-toggle { color: #7c2720; background: #f6d6d0; }
+.book-check-error .book-check-icon { background: #b3392c; }
+.book-check-warning .book-check-toggle { color: #6b5212; background: #f5e8c6; }
+.book-check-warning .book-check-icon { background: #a77c14; }
+.studio .book-check-clean .book-check-toggle { cursor: default; padding: 0 3px; }
+.book-check-clean .book-check-icon { color: var(--muted); background: transparent; font-size: 11px; }
+.book-check-stale .book-check-toggle { opacity: .55; }
+.book-check-panel { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 30; width: min(420px, 70vw); padding: 10px 12px;
+  border: 1px solid #d3cfc4; border-radius: 9px; background: #fcfbf6; box-shadow: 0 10px 30px #0003; overflow-wrap: anywhere; }
+.book-check-heading { margin: 0 0 6px; font-weight: 650; color: var(--muted); }
+.book-check-panel ul { margin: 0; padding-left: 17px; max-height: 300px; overflow: auto; }
+.book-check-panel li { margin: 4px 0; }
+.book-check-panel .issue-error { color: #7c2720; }
+.book-check-panel .issue-warning { color: #6b5212; }
+.book-check-panel .issue-current { font-weight: 600; }
+.book-check-stale .book-check-panel ul { opacity: .6; }
+.book-check-panel button.link { all: unset; cursor: pointer; text-decoration: underline; }
+.book-check-panel button.link:focus-visible { outline: 2px solid var(--accent); }
 .issue-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 .issue-dot.issue-error { background: #b3382c; }
 .issue-dot.issue-warning { background: #c99a1e; }
 
 /* Layout */
-.status { padding: 6px 24px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--edge); max-height: 65px; overflow: auto; }
+.status-bar { display: flex; align-items: center; border-top: 1px solid var(--edge); }
+.status { flex: 1; min-width: 0; padding: 6px 24px; font-size: 12px; color: var(--muted); max-height: 65px; overflow: auto; }
 .status-error { color: #7c2720; overflow-wrap: anywhere; }
 .workspace { display: grid; grid-template-columns: 232px minmax(0, 1fr) 276px; min-height: 0; }
 .welcome-workspace { grid-template-columns: 232px minmax(0, 1fr); }
@@ -109,7 +124,10 @@ body { margin: 0; }
 
 /* Book frames: one iframe per render, absolutely placed; the parent sets heights from reported geometry. */
 .book-frame { position: absolute; left: 0; top: 0; width: 100%; height: 0; border: 0; pointer-events: none; background: transparent; }
-.book-frame-pending { opacity: 0; }
+/* A frame rendering the next edit waits behind the current one. Not opacity 0: Chromium skips painting a fully
+   transparent frame, so it would paint only when revealed and flash blank for a moment. At 1% it is painted
+   while it waits and appears complete. */
+.book-frame-pending { opacity: .01; }
 
 /* Canvas: the whole book in one scrolling column */
 .canvas-wrap { position: relative; min-height: 0; }
@@ -289,13 +307,13 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .box-photo-info button.link { all: unset; justify-self: start; cursor: pointer; text-decoration: underline; color: var(--accent); font-size: 12px; margin-top: 2px; }
 .box-photo-info button.link:focus-visible { outline: 2px solid var(--accent); }
 
-/* Crop mode: the whole photo over its frame, dimmed outside it */
+/* A selected photo: outlined; while dragging or pinching, the whole photo shows over its frame, dimmed outside it */
 .crop-editor { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
-.crop-surface { position: absolute; pointer-events: auto; cursor: grab; touch-action: none; }
-.crop-surface:active { cursor: grabbing; }
-.crop-ghost { position: absolute; left: 0; top: 0; opacity: .28; box-shadow: 0 0 0 1px #fff8, 0 8px 30px #0005; user-select: none; }
-.crop-window { position: absolute; overflow: hidden; pointer-events: none; outline: 2px solid var(--accent); outline-offset: 0;
-  box-shadow: 0 0 0 4000px #00000014; }
+.crop-ghost { position: absolute; opacity: .28; box-shadow: 0 0 0 1px #fff8, 0 8px 30px #0005; user-select: none; pointer-events: none; }
+.crop-window { position: absolute; overflow: hidden; pointer-events: auto; cursor: grab; touch-action: none;
+  outline: 2px solid var(--accent); outline-offset: 0; }
+.crop-editor.active .crop-window { cursor: grabbing; box-shadow: 0 0 0 4000px #00000014; }
+.crop-editor.settling .crop-window { pointer-events: none; }
 .crop-window img { position: absolute; max-width: none; user-select: none; }
 .crop-editor.settling .crop-window { outline-color: transparent; box-shadow: none; }
 .crop-toolbar { position: absolute; left: 50%; bottom: 16px; z-index: 7; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 5px 7px;
@@ -304,6 +322,11 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .studio .crop-toolbar button { min-height: 26px; padding: 2px 9px; font-size: 12px; }
 .studio .crop-toolbar button[aria-label^="Zoom"] { width: 26px; padding: 0; font-size: 15px; }
 .crop-toolbar input[type="range"] { width: 110px; accent-color: var(--accent); }
+.crop-params { display: flex; align-items: center; gap: 10px; padding-left: 4px; border-left: 1px solid #d3cfc4; }
+.crop-params .pc-switch { margin: 0; }
+/* A placed photo being moved to another box */
+.photo-move-ghost { position: fixed; z-index: 20; width: 72px; height: 72px; object-fit: cover; transform: translate(-50%, -50%);
+  border-radius: 6px; box-shadow: 0 8px 24px #0005; opacity: .9; pointer-events: none; }
 .crop-zoom { min-width: 34px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .crop-ppi { padding: 1px 6px; border-radius: 4px; background: #e1ede3; color: #225343; font-weight: 650; font-variant-numeric: tabular-nums; }
 .crop-ppi.fair { background: #f5e8c6; color: #6b5212; }

@@ -159,7 +159,7 @@ A spread can switch to any layout of the template with the same page footprint: 
 - **Text flow.** Continuation is recomputed for the whole book after a switch, from the Markdown boxes each spread now shows.
 - **Element editors.** Custom element editors never store their own state; their parameters follow the rules above.
 
-Selecting a layout is one edit: Undo restores the previous layout with everything it showed. Pointing at a layout in the picker shows what switching would do, for example *2 photos carried over · 2 photos kept outside this layout · text will reflow*. An open crop mode or edit popover on the spread closes when its layout changes, and an open element editor reports that its values changed, so nothing is saved into a layout it was not opened for.
+Selecting a layout is one edit: Undo restores the previous layout with everything it showed. Pointing at a layout in the picker shows what switching would do, for example *2 photos carried over · 2 photos kept outside this layout · text will reflow*. A selected photo or open edit popover on the spread closes when its layout changes, and an open element editor reports that its values changed, so nothing is saved into a layout it was not opened for.
 
 State that no layout of the template declares (after the template drops a box, element or parameter) stays in `project.json` and is reported in the Book check rather than removed.
 
@@ -215,7 +215,7 @@ elements: { grid: {
 } },
 ```
 
-- **Opening it:** double-clicking the element opens the editor in a dialog, and so does the editor's button in the element's popover and Inspector section. Parameters the editor lists are edited only there; the element's other parameters keep their generated controls.
+- **Opening it:** clicking the element opens the editor in a dialog, and so does the editor's button in the element's Inspector section. Parameters the editor lists are edited only there; the element's other parameters keep their generated controls in the Inspector, which the click scrolls to.
 - **Sandbox:** the component runs in a frame on the render origin with the template's CSS, like the book previews. It receives `values` (all of the element's parameters, with the draft applied), `set(changes)`, `document`, `format`, `readOnly`, `commit()` and `cancel()`. It cannot change project data itself.
 - **What ImageFlow owns:** the dialog, Cancel and Done, Escape and ⌘↩, focus, read-only mode, validation against the parameter schema, and saving. One editing session is one undoable edit; Cancel leaves the saved values unchanged.
 - **Draft and commit:** `set()` takes effect immediately, so `set({ ... }); commit()` in one handler saves those changes; `values` catches up on the next render.
@@ -248,7 +248,7 @@ render: (ctx) => {
 | Component | Purpose |
 | --- | --- |
 | `<Spread>` | Root of every spread. Sizes the spread to two trims plus bleed, sets geometry CSS variables, and handles page halves. |
-| `<PhotoBox id>` | Renders the assigned photo with its crop (the photo always covers the box; the saved crop picks the visible region), using a preview-size image in the editor and a rendition capped at the format maximum resolution in export (300 ppi when omitted). Its element is the box's geometry and drop zone. Users adjust the crop in the editor's crop mode; templates do not handle it. |
+| `<PhotoBox id>` | Renders the assigned photo with its crop (the photo always covers the box; the saved crop picks the visible region), using a preview-size image in the editor and a rendition capped at the format maximum resolution in export (300 ppi when omitted). Its element is the box's geometry and drop zone. Users select the photo in the editor and drag and pinch it; templates do not handle the crop. |
 | `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. |
 | `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked; an element can supply its own editor (see Element editors). |
 | `asset(path)` | Resolves a file in `template/assets/` for use in `src` or CSS. |
@@ -384,7 +384,7 @@ Import `spreadFor` alongside the other helpers. `mm`, `pt`, and `inch` produce s
 
 Numeric `step` is a control increment, not a runtime divisibility constraint. Month precision changes the picker; it writes `YYYY-MM-01`, but existing valid ISO dates are not normalized. Use first-of-month defaults and bounds for month parameters.
 
-Crop mode draws the photo over the box's on-screen rectangle, so it assumes the box is upright. If template CSS rotates or skews a `PhotoBox` (or an ancestor inside the spread), the editor offers only the numeric crop values for it.
+Adjusting a selected photo draws it over the box's on-screen rectangle, so it assumes the box is upright. If template CSS rotates or skews a `PhotoBox` (or an ancestor inside the spread), the editor offers only the numeric crop values for it. Clicks act on the box or element drawn on top, in document order; content stacked with `z-index` is not accounted for.
 
 Identifiers start with a letter or digit, then contain letters, digits, underscores or hyphens; reserved Object prototype names are rejected. Dots separate edit-path scopes and cannot occur in identifiers. PhotoBox, MarkdownBox and Element automatically expose their declared parameters; explicit edit marks add parameters. Ordinary nodes need `ctx.edit`. Export omits edit marks. Avoid overlapping targets or marking several nodes with the identical path list: the current editor identifies targets by spread and path list.
 

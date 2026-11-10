@@ -74,7 +74,7 @@ try {
   assert.equal(starter.pages, 28);
   assert.deepEqual(starter.flow['turning:body'], { part: 2, parts: 3, title: 'arrival.md' });
   assert.equal((await read()).title, 'Draft Photobook');
-  await window.waitForFunction(() => /Book check · (No issues|\d)/.test(document.querySelector('.book-check-list summary')?.textContent ?? '') &&
+  await window.waitForFunction(() => /Book check · (No issues|\d)/.test(document.querySelector('.book-check-toggle')?.textContent ?? '') &&
     !document.querySelector('.book-check-stale'));
   const bookCheck = await preview().locator('body').evaluate(() => window.imageflowRenderStatus);
   assert.equal(bookCheck?.state, 'ready');

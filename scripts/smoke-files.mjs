@@ -35,18 +35,33 @@ try {
   const route = '[data-spread="road"] [data-element="route"]';
   const trackLine = () => frame.locator(route + ' polyline').count();
   const messages = async (kind) => (await status())[kind].map(({ message }) => message).join('\n');
+  const routeDialog = w.getByRole('dialog', { name: 'Frame route' });
+  const routeEditor = w.frameLocator('iframe.element-editor-frame');
+  const editorReady = async () => {
+    await routeDialog.waitFor();
+    await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
+    // The dialog is centred, so it moves while the frame still grows; wait until its height has settled.
+    await w.waitForFunction(() => {
+      const frame = document.querySelector('iframe.element-editor-frame');
+      const state = (window.__frameHeights ??= []);
+      state.push(frame?.style.height);
+      if (state.length > 4) state.shift();
+      const settled = state.length === 4 && state.every((height) => height && height !== '240px' && height === state[0]);
+      if (settled) window.__frameHeights = [];
+      return settled;
+    }, null, { polling: 100 });
+  };
+  // Clicking the inset opens its Frame route editor; the GPX track is in the Inspector's Route map section, which
+  // the click scrolls to. Returns that section, with the editor closed.
   const openRoute = async () => {
     await frame.locator(route).scrollIntoViewIfNeeded();
     await w.waitForTimeout(200);
     const box = await frame.locator(route).boundingBox();
     await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    const popover = w.getByRole('dialog', { name: 'Edit GPX track' });
-    await popover.waitFor();
-    return popover;
-  };
-  const closePopover = async () => {
-    await w.locator('.toolbar .brand').click();
-    await w.waitForFunction(() => !document.querySelector('.edit-popover'));
+    await routeDialog.waitFor();
+    await routeDialog.getByRole('button', { name: 'Cancel' }).click();
+    await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+    return w.locator('.inspector details').filter({ has: w.locator(':scope > summary', { hasText: /^Route map$/ }) });
   };
 
   await rerendered(() => w.getByRole('button', { name: 'New project…', exact: true }).click());
@@ -58,13 +73,12 @@ try {
   // The route map's own editor frames part of the route: zoom and move, then Done saves the viewport as one edit.
   const viewBox = () => frame.locator(route + ' svg').getAttribute('viewBox');
   assert.equal(await viewBox(), '0.000 0.000 100.000 100.000');
-  // Clicking the inset opens its popover; the editor owns the viewport, so the popover offers it as a button.
-  await (await openRoute()).getByRole('button', { name: 'Frame route…' }).click();
-  const routeDialog = w.getByRole('dialog', { name: 'Frame route' });
-  await routeDialog.waitFor();
-  await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
-  await w.waitForFunction(() => document.querySelector('iframe.element-editor-frame')?.style.height !== '240px');
-  const routeEditor = w.frameLocator('iframe.element-editor-frame');
+  // Clicking the inset opens its editor directly.
+  await frame.locator(route).scrollIntoViewIfNeeded();
+  await w.waitForTimeout(200);
+  const inset = await frame.locator(route).boundingBox();
+  await w.mouse.click(inset.x + inset.width / 2, inset.y + inset.height / 2);
+  await editorReady();
   const note = (text) => routeEditor.locator('.route-editor-note', { hasText: text }).waitFor();
   await routeEditor.getByRole('button', { name: 'Zoom in' }).click();
   await note('Zoom 1.5×');
@@ -84,8 +98,9 @@ try {
   await empty.scrollIntoViewIfNeeded();
   await w.waitForTimeout(200);
   const emptyBox = await empty.boundingBox();
-  // Double-clicking the inset, which lies over the panorama photo, opens its editor rather than crop mode.
-  await w.mouse.dblclick(emptyBox.x + emptyBox.width / 2, emptyBox.y + emptyBox.height / 2);
+  // The inset lies over the panorama photo: what is drawn on top decides, so the click opens its editor rather
+  // than selecting the photo.
+  await w.mouse.click(emptyBox.x + emptyBox.width / 2, emptyBox.y + emptyBox.height / 2);
   await routeDialog.waitFor();
   assert.equal(await w.locator('.crop-editor').count(), 0);
   await routeEditor.getByText('Choose a GPX track for the route map first.').waitFor();
@@ -93,14 +108,13 @@ try {
   await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
 
   // Clearing is a valid state: no route, no issue. Undo restores the assignment.
-  let popover = await openRoute();
-  assert.equal(await popover.getByRole('combobox', { name: 'GPX track' }).inputValue(), 'senja-road');
-  await rerendered(() => popover.getByRole('combobox', { name: 'GPX track' }).selectOption(''));
+  let section = await openRoute();
+  assert.equal(await section.getByRole('combobox', { name: 'GPX track' }).inputValue(), 'senja-road');
+  await rerendered(() => section.getByRole('combobox', { name: 'GPX track' }).selectOption(''));
   await saved('GPX track updated');
   assert.equal((await read()).spreads.find(({ id }) => id === 'road').elements.route.params.track, '');
   assert.equal(await trackLine(), 0);
   assert.equal((await status()).errors.length, 0);
-  await closePopover();
   await rerendered(() => w.getByRole('button', { name: 'Undo', exact: true }).click());
   assert.equal(await trackLine(), 1);
 
@@ -109,8 +123,8 @@ try {
   const broken = join(work, 'Broken ride.gpx');
   await writeFile(broken, '<gpx><trk><trkseg><trkpt lat="69.2"');
   await openDialog([broken]);
-  popover = await openRoute();
-  await rerendered(() => popover.getByRole('button', { name: 'Choose…' }).click());
+  section = await openRoute();
+  await rerendered(() => section.getByRole('button', { name: 'Choose…' }).click());
   await saved('GPX track updated');
   const afterImport = await read();
   const imported = afterImport.spreads.find(({ id }) => id === 'road').elements.route.params.track;
@@ -120,10 +134,9 @@ try {
   assert.equal(await trackLine(), 0);
   assert.match(await messages('warnings'), /Broken ride\.gpx is not valid GPX; the route is left out\./);
   assert.equal((await status()).errors.length, 0);
-  assert.deepEqual((await popover.getByRole('combobox', { name: 'GPX track' }).locator('option').allTextContents()).sort(),
+  assert.deepEqual((await section.getByRole('combobox', { name: 'GPX track' }).locator('option').allTextContents()).sort(),
     ['Broken ride.gpx', 'None', 'senja-road.gpx']);
   // Undo removes the assignment but keeps the registered file, so it can be chosen again.
-  await closePopover();
   await rerendered(() => w.getByRole('button', { name: 'Undo', exact: true }).click());
   assert.equal(await trackLine(), 1);
   assert.equal((await read()).files[imported], afterImport.files[imported]);

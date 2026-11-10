@@ -56,16 +56,38 @@ try {
   await sub.waitFor({ state: 'detached' });
   assert.notEqual((await read()).spreads[0].params.subtitle, 'discard me');
   
-  // Calendar: the popover keeps generated controls for parameters the template's editor does not own (week
-  // start) and offers the template-supplied calendar editor for month and marked days (#15).
+  // Calendar: clicking the element opens its template-supplied editor (#15); its other parameter (week start) keeps
+  // its generated control in the Inspector, which the click scrolls to.
   await w.getByRole('button', { name: 'Calendar spread 14–15', exact: true }).click();
+  const editorDialog = w.getByRole('dialog', { name: 'Edit calendar' });
+  const calendarEditor = w.frameLocator('iframe.element-editor-frame');
+  // Waits until the editor reported ready (or failed) and its frame took its content height, so clicks do not land
+  // while the frame is still growing.
+  const editorReady = async ({ sized = true } = {}) => {
+    await editorDialog.waitFor();
+    await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
+    if (!sized) return;
+    // The dialog is centred, so it moves while the frame still grows; wait until its height has settled.
+    await w.waitForFunction(() => {
+      const frame = document.querySelector('iframe.element-editor-frame');
+      const state = (window.__frameHeights ??= []);
+      state.push(frame?.style.height);
+      if (state.length > 4) state.shift();
+      const settled = state.length === 4 && state.every((height) => height && height !== '240px' && height === state[0]);
+      if (settled) window.__frameHeights = [];
+      return settled;
+    }, null, { polling: 100 });
+  };
+  await ready();
   at = await center('[data-spread="march"] [data-element="grid"]');
   await w.mouse.click(at.x, at.y);
-  const cal = w.getByRole('dialog', { name: 'Edit Week starts' });
-  await cal.waitFor();
-  assert.equal(await cal.locator('input[type="month"]').count(), 0);
-  await cal.getByRole('radio', { name: 'Sunday' }).click();
-  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Week starts updated');
+  await editorReady();
+  assert.equal(await w.locator('.edit-popover').count(), 0);
+  await editorDialog.getByRole('button', { name: 'Cancel' }).click();
+  await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+  const gridSection = w.locator('.inspector details').filter({ has: w.locator(':scope > summary', { hasText: /^Calendar grid$/ }) });
+  await gridSection.getByRole('radio', { name: 'Sunday' }).click();
+  for (let i = 0; i < 50 && (await read()).spreads[7].elements.grid?.params?.firstWeekday !== 'sunday'; i++) await w.waitForTimeout(100);
   assert.equal((await read()).spreads[7].elements.grid.params.firstWeekday, 'sunday');
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
@@ -75,13 +97,7 @@ try {
   await ready();
   at = await center('[data-spread="march"] [data-element="grid"]');
   await w.mouse.click(at.x, at.y);
-  await w.getByRole('dialog', { name: 'Edit Week starts' }).getByRole('button', { name: 'Edit calendar…' }).click();
-  const editorDialog = w.getByRole('dialog', { name: 'Edit calendar' });
-  await editorDialog.waitFor();
-  // Clicks before the editor has loaded and sized itself can be lost; wait as openCalendarEditor does.
-  await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
-  await w.waitForFunction(() => document.querySelector('iframe.element-editor-frame')?.style.height !== '240px');
-  const calendarEditor = w.frameLocator('iframe.element-editor-frame');
+  await editorReady();
   await calendarEditor.getByRole('button', { name: 'Next month' }).click();
   await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
   assert.equal((await read()).spreads[7].elements.grid.params.month, '2027-03-01');
@@ -95,11 +111,11 @@ try {
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
   assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
 
-  // Double-click opens the editor directly; Escape inside it discards the draft.
+  // A double-click (out of habit) opens it too and does not close it again; Escape inside it discards the draft.
   await ready();
   at = await center('[data-spread="march"] [data-element="grid"]');
   await w.mouse.dblclick(at.x, at.y);
-  await editorDialog.waitFor();
+  await editorReady();
   await calendarEditor.getByRole('button', { name: '3', exact: true }).click();
   await calendarEditor.getByRole('button', { name: '3', exact: true }).press('Escape');
   await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
@@ -127,10 +143,8 @@ try {
   // while the frame is still growing.
   const openCalendarEditor = async ({ sized = true } = {}) => {
     at = await center('[data-spread="march"] [data-element="grid"]');
-    await w.mouse.dblclick(at.x, at.y);
-    await editorDialog.waitFor();
-    await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
-    if (sized) await w.waitForFunction(() => document.querySelector('iframe.element-editor-frame')?.style.height !== '240px');
+    await w.mouse.click(at.x, at.y);
+    await editorReady({ sized });
   };
   const closeEditor = async () => {
     await editorDialog.getByRole('button', { name: 'Cancel' }).click();
@@ -237,54 +251,88 @@ try {
   assert.deepEqual(flowed.errors, []);
   assert.deepEqual(flowed.flow['arriving:body'], { part: 1, parts: 3, title: 'arrival.md' });
 
-  // Crop mode: double-click a photo, drag and zoom it, commit as one edit; Esc discards; Undo removes it.
+  // A click selects a photo. Dragging the selected photo pans it and pinching zooms it; each gesture saves itself as
+  // an undoable edit. Plain scrolling scrolls the book. Escape deselects.
+  const hero = () => read().then((data) => data.spreads[1].boxes.hero);
+  const until = async (check) => { for (let i = 0; i < 50 && !(await check()); i++) await w.waitForTimeout(100); assert.ok(await check()); };
   at = await center('[data-spread="arriving"] [data-box="hero"]');
-  await w.mouse.dblclick(at.x, at.y);
+  await w.mouse.click(at.x, at.y);
   await w.locator('.crop-editor').waitFor();
+  assert.equal(await w.locator('.edit-popover').count(), 0);
   await w.mouse.move(at.x, at.y);
   await w.mouse.down();
   await w.mouse.move(at.x - 120, at.y, { steps: 8 });
   await w.mouse.up();
-  await w.mouse.wheel(0, -240);
-  assert.match(await w.locator('.crop-ppi').textContent(), /^\d+ ppi$/);
-  await w.keyboard.press('Enter');
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Crop updated');
-  await ready();
-  await w.waitForFunction(() => !document.querySelector('.crop-editor'));
+  await until(async () => (await hero()).crops?.story?.zoom === 1);
+  assert.ok(await w.locator('.crop-editor').isVisible(), 'the photo stays selected');
+  const zoomLabel = () => w.locator('.crop-zoom').textContent();
+  await w.mouse.wheel(0, -240);
+  await w.waitForTimeout(600);
+  assert.equal(await zoomLabel(), '1.0×', 'plain scrolling does not zoom');
+  // Pinch arrives as ctrl-wheel over the photo; the plain scroll may have moved it.
+  const pinchAt = await center('[data-spread="arriving"] [data-box="hero"]');
+  await w.mouse.move(pinchAt.x, pinchAt.y);
+  await w.keyboard.down('Control');
+  await w.mouse.wheel(0, -60);
+  await w.keyboard.up('Control');
+  await until(async () => (await hero()).crops?.story?.zoom > 1);
+  assert.match(await w.locator('.crop-ppi').textContent(), /^\d+ ppi$/);
   // The crop belongs to the spread's current layout; its centre is the focus other layouts fill around.
-  const { crops, focus } = (await read()).spreads[1].boxes.hero;
+  const { crops, focus } = await hero();
   const crop = crops.story;
   assert.ok(crop.centerX > 0.5 && crop.zoom > 1, JSON.stringify(crop));
   assert.deepEqual(focus, { centerX: crop.centerX, centerY: crop.centerY });
-  await w.mouse.dblclick(at.x, at.y);
-  await w.locator('.crop-editor').waitFor();
-  await w.mouse.wheel(0, -400);
   await w.keyboard.press('Escape');
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
-  assert.deepEqual((await read()).spreads[1].boxes.hero.crops, { story: crop });
+  assert.deepEqual((await hero()).crops, { story: crop });
+  // Each gesture is one Undo step: first the pinch, then the drag.
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
-  assert.equal((await read()).spreads[1].boxes.hero.crops, undefined);
+  assert.equal((await hero()).crops.story.zoom, 1);
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await until(async () => (await hero()).crops === undefined);
 
-  // Focused toolbar controls handle their own keys: Enter on Cancel cancels, arrows on the slider zoom.
+  // The toolbar zooms with its slider, saved when the key is released, and holds the box's own parameters.
   const toolbar = w.locator('.crop-toolbar');
-  await w.mouse.dblclick(at.x, at.y);
+  await ready();
+  await w.mouse.click(at.x, at.y);
   await w.locator('.crop-editor').waitFor();
-  await w.mouse.wheel(0, -300);
-  await toolbar.getByRole('button', { name: 'Cancel' }).focus();
-  await w.keyboard.press('Enter');
-  await w.waitForFunction(() => !document.querySelector('.crop-editor'));
-  assert.equal((await read()).spreads[1].boxes.hero.crops, undefined);
-  await w.mouse.dblclick(at.x, at.y);
-  await w.locator('.crop-editor').waitFor();
-  const zoomBefore = await toolbar.getByRole('slider', { name: 'Zoom' }).inputValue();
   await toolbar.getByRole('slider', { name: 'Zoom' }).focus();
   await w.keyboard.press('ArrowRight');
   await w.keyboard.press('ArrowRight');
-  assert.ok(Number(await toolbar.getByRole('slider', { name: 'Zoom' }).inputValue()) > Number(zoomBefore));
+  await until(async () => (await hero()).crops?.story?.zoom > 1);
+  await toolbar.getByRole('checkbox', { name: 'Show caption' }).check();
+  await until(async () => (await hero()).params.caption === true);
+  await toolbar.getByRole('slider', { name: 'Zoom' }).focus();
   await w.keyboard.press('Escape');
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
-  assert.equal((await read()).spreads[1].boxes.hero.crops, undefined);
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await until(async () => (await hero()).crops === undefined && !(await hero()).params.caption);
+
+  // Dragging a photo that is not selected moves it: onto another photo box the two swap, as one edit.
+  await ready();
+  await w.getByRole('button', { name: 'Two photos 10–11', exact: true }).click();
+  const left = await center('[data-spread="water"] [data-box="hero"]');
+  const right = await center('[data-spread="water"] [data-box="second"]');
+  const pair = async () => (await read()).spreads.find(({ id }) => id === 'water').boxes;
+  const before = await pair();
+  await w.mouse.move(left.x, left.y);
+  await w.mouse.down();
+  await w.mouse.move(right.x, right.y, { steps: 10 });
+  await w.locator('.photo-move-ghost').waitFor();
+  await w.mouse.up();
+  await w.waitForFunction(() => / swapped$/.test(document.querySelector('.status')?.textContent ?? ''));
+  const after = await pair();
+  assert.equal(after.hero.photo, before.second.photo);
+  assert.equal(after.second.photo, before.hero.photo);
+  assert.equal(await w.locator('.crop-editor').count(), 0, 'a move does not select');
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await until(async () => (await pair()).hero.photo === before.hero.photo);
+  await ready();
+  at = await center('[data-spread="arriving"] [data-box="hero"]');
 
   // A frame the template rotates (here 180°, which keeps its size) is not offered crop mode.
   // A template file change can reload the project more than once; wait until the book frame has stayed the same.
@@ -305,10 +353,10 @@ try {
     await writeFile(css, originalCss + '\n.if-spread-container[data-spread="arriving"] [data-box="hero"] { ' + rule + '; }\n');
     await settled(before);
     at = await center('[data-spread="arriving"] [data-box="hero"]');
-    await w.mouse.dblclick(at.x, at.y);
+    await w.mouse.click(at.x, at.y);
     await w.waitForFunction(() => /rotates or mirrors/.test(document.querySelector('.status')?.textContent ?? ''));
     assert.equal(await w.locator('.crop-editor').count(), 0, rule);
-    // The double-click's first click opened the photo's popover; close it so it doesn't cover the next attempt.
+    // The click opened the photo's popover instead; close it so it doesn't cover the next attempt.
     await w.locator('.toolbar .brand').click();
     await w.waitForFunction(() => !document.querySelector('.edit-popover'));
   }
@@ -372,21 +420,28 @@ try {
   await w.getByRole('button', { name: 'Delete', exact: true }).click();
   await saved('Saved');
   await ready();
-  await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
+  await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
+  // The Book check is an indicator in the status bar, not part of the Inspector; clicking it lists the issues.
+  assert.equal(await w.locator('.inspector .book-check-list').count(), 0);
+  assert.deepEqual(await w.locator('.status-bar .book-check-toggle > [aria-hidden]').allTextContents(), ['!', '1']);
+  await w.locator('.book-check-toggle').click();
+  assert.match(await w.getByRole('dialog', { name: 'Book check' }).textContent(), /Page count is 26/);
+  await w.keyboard.press('Escape');
+  await w.getByRole('dialog', { name: 'Book check' }).waitFor({ state: 'detached' });
   const pdf = join(work, 'proof.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, pdf);
   await w.getByRole('button', { name: 'Export proof PDF', exact: true }).click();
   await w.waitForFunction(() => /^Proof PDF saved/.test(document.querySelector('.status')?.textContent ?? '') ||
     document.querySelector('.status-error'), null, { timeout: 60000 });
   assert.match(await statusText(), /^Proof PDF saved\. 1 error/);
-  assert.match(await w.locator('.book-check-list summary').textContent(), /Book check · 1 error/);
+  assert.match(await w.locator('.book-check-toggle').textContent(), /Book check · 1 error/);
   await w.getByRole('button', { name: 'Export print PDF', exact: true }).click();
   await w.locator('.status-error').waitFor({ timeout: 60000 });
   assert.match(await statusText(), /Page count is 26/);
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await saved('Edit undone');
   await ready();
-  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
+  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
 
   // #17: a template with several formats; switching re-renders at the new size and exports at it; Undo returns.
   await w.getByText('Book settings', { exact: true }).click();
@@ -439,7 +494,7 @@ try {
   await w.getByRole('combobox', { name: 'Format' }).selectOption('square');
   await saved('Format changed to WhiteWall Gallery Square · 29 × 29 cm');
   await ready();
-  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
+  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
   assert.equal((await read()).format, 'square');
 
   // A template converted to one fixed format ignores the saved choice and shows no Format picker.

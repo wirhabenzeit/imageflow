@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { declarationConflicts, describeLayoutChange, discardContent, keptElements, keptOutside, layoutChoices, moveContent, planLayoutChange, switchLayout } from '../src/layouts';
+import { declarationConflicts, describeLayoutChange, discardContent, keptElements, keptOutside, layoutChoices, moveContent, swapContent, planLayoutChange, switchLayout } from '../src/layouts';
 import type { Layout, Layouts } from '../src/layouts';
 import { p } from '../src/parameters';
 import type { Parameters } from '../src/parameters';
@@ -161,4 +161,15 @@ test('element settings of other layouts are listed as kept', () => {
   const spread = gridSpread();
   spread.elements = { calendar: { params: { month: '2027-03-01' } }, empty: { params: {} } };
   assert.deepEqual(keptElements(spread, layouts), ['calendar']);
+});
+
+test('a placed photo moves to a box on another spread; the two swap, or the source box empties', () => {
+  const a = gridSpread();
+  const b: SpreadState = { id: 's2', definition: 'pair', params: {}, elements: {}, boxes: { hero: { photo: 'p9', params: { caption: true } } } };
+  setPlacement(a.boxes.hero, 'grid', { centerX: .2, centerY: .4, zoom: 2 });
+  assert.equal(swapContent(a, 'hero', b, 'hero'), 'p9');
+  assert.deepEqual(b.boxes.hero, { params: { caption: true }, photo: 'p1', focus: { centerX: .2, centerY: .4 } });
+  assert.deepEqual(a.boxes.hero, { params: {}, photo: 'p9' });
+  assert.equal(swapContent(a, 'second', b, 'second'), undefined);
+  assert.deepEqual([a.boxes.second, b.boxes.second], [{ params: {} }, { params: {}, photo: 'p2' }]);
 });
