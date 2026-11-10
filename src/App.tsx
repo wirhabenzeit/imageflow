@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
-import { bookLayout } from './desktop';
+import { bookLayout, renderOrigin } from './desktop';
 import type { BookGeometry, Command, ImportRequest, Issue, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { BookFrame } from './BookFrame';
 import { revealIn } from './reveal';
 import { EditPopover } from './EditPopover';
+import { CropEditor } from './CropEditor';
+import { centered, getCrop, placementOf } from './spread';
+import type { Placement } from './spread';
 import { assignmentCounts, newSpread, sourceUsage } from './editing';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
@@ -57,6 +60,9 @@ export function App() {
   const [hovered, setHovered] = useState<string>();
   const [hoveredTarget, setHoveredTarget] = useState<string>();
   const [editing, setEditing] = useState<{ spread: string; key: string }>();
+  // Crop mode for one photo box. After a commit, `settling` holds the project id the edit started from; the
+  // overlay stays until the book has re-rendered, so the frame does not flash back to the old crop.
+  const [cropping, setCropping] = useState<{ spread: string; box: string; settling?: string }>();
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const [dropTarget, setDropTarget] = useState<string>();
@@ -71,6 +77,7 @@ export function App() {
   const [error, setError] = useState('');
   const [check, setCheck] = useState<BookCheck>();
   const canvas = useRef<HTMLElement>(null);
+  const canvasWrap = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const thumbList = useRef<HTMLDivElement>(null);
   const pendingReveal = useRef<string>(undefined);
@@ -94,6 +101,7 @@ export function App() {
       setSelectedSource(undefined);
       setQuick(undefined);
       setLastReady(undefined);
+      setCropping(undefined);
       setEditing(undefined);
       canvas.current?.scrollTo({ top: 0 });
     }
@@ -233,6 +241,7 @@ export function App() {
     if (id !== current.current?.id) return;
     setRender(status);
     if (status.state === 'ready') setLastReady(status);
+    setCropping((previous) => previous?.settling && previous.settling !== id ? undefined : previous);
     if (status.template) setTemplate(status.template);
     setCheck(status.state === 'ready' ? { id, errors: status.errors, warnings: status.warnings } :
       { id, errors: [{ message: status.message }], warnings: [] });
@@ -347,6 +356,58 @@ export function App() {
   }
   const editTarget = editing && geometry?.targets.find((target) => targetKey(target) === editing.key);
   const editSpread = editing && spreads.find(({ id }) => id === editing.spread);
+  const editOwner = editTarget && /^boxes\.([^.]+)\./.exec(editTarget.edits[0])?.[1];
+  const editPhotoBox = editOwner && geometry?.boxes.some(({ spread, id, type }) => spread === editing.spread && id === editOwner && type === 'photo')
+    ? editOwner : undefined;
+
+  // Crop mode: the frame comes from the rendered book, the photo size and crop from the project.
+  const cropFrame = cropping && geometry?.boxes.find(({ spread, id }) => spread === cropping.spread && id === cropping.box);
+  const cropSheet = cropping && geometry?.sheets.find(({ spread }) => spread === cropping.spread);
+  const cropState = cropping && spreads.find(({ id }) => id === cropping.spread)?.boxes[cropping.box];
+  const cropPhoto = cropState?.photo;
+  function cropBlocked(spread: string, box: string) {
+    const state = spreads.find(({ id }) => id === spread)?.boxes[box];
+    const frame = geometry?.boxes.find((rect) => rect.spread === spread && rect.id === box);
+    if (!state?.photo || !summary?.photos[state.photo] || !summary.photoSizes[state.photo]) return 'Add a photo to this box first.';
+    if (!frame) return 'The book is still rendering.';
+    if (!frame.upright) return 'This frame is rotated by the template; use the crop values in the Inspector.';
+  }
+  function startCrop(spread: string, box: string) {
+    const blocked = cropBlocked(spread, box);
+    if (blocked) {
+      setNotice(blocked);
+      return false;
+    }
+    setEditing(undefined);
+    select(spread, false);
+    setCropping({ spread, box });
+    return true;
+  }
+  function commitCrop(placement: Placement) {
+    if (!cropping || cropping.settling || !cropFrame || !cropPhoto || !summary) return;
+    const size = summary.photoSizes[cropPhoto];
+    const aspect = cropFrame.width / cropFrame.height;
+    const normal = (value: Placement) => JSON.stringify(placementOf(getCrop(size, value, aspect), value.zoom));
+    if (normal(placement) === normal(cropState?.crop ?? centered)) {
+      setCropping(undefined);
+      return;
+    }
+    const fits = normal(placement) === normal(centered);
+    const { spread, box } = cropping;
+    edit(({ project }) => {
+      const state = project.spreads.find(({ id }) => id === spread)?.boxes[box];
+      if (!state?.photo) return;
+      if (fits) delete state.crop;
+      else state.crop = placement;
+    }, 'Crop updated');
+    setCropping({ spread, box, settling: summary.id });
+  }
+  // If the save fails, there is no re-render to wait for.
+  useEffect(() => {
+    if (!cropping?.settling) return;
+    const timer = setTimeout(() => setCropping(undefined), 4000);
+    return () => clearTimeout(timer);
+  }, [cropping?.settling]);
 
   function drop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
@@ -509,7 +570,7 @@ export function App() {
         </>}
       </aside>
       <div className="workspace-center">
-        <div className="canvas-wrap">
+        <div ref={canvasWrap} className="canvas-wrap">
           <main ref={canvas} className="canvas" aria-label="Book preview" onScroll={measureView}
             onDragOver={(event) => {
               if (!writable || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime)) return;
@@ -529,6 +590,7 @@ export function App() {
               }}
               onDoubleClick={(event) => {
                 const { box } = locate(event);
+                if (box?.type === 'photo' && startCrop(box.spread, box.id)) return;
                 const source = box && boxSource(box.spread, box.id);
                 if (source) setQuick(source);
               }}
@@ -556,13 +618,21 @@ export function App() {
               }} />}
               {geometry?.targets.filter((target) => {
                 const key = targetKey(target);
-                return key === hoveredTarget || key === editing?.key;
+                return !cropping && (key === hoveredTarget || key === editing?.key);
               }).map((target) => <div key={targetKey(target)} aria-hidden="true"
                 className={'edit-target' + (targetKey(target) === editing?.key ? ' active' : '')}
                 style={{ left: target.x - 4, top: target.y - 3, width: target.width + 8, height: target.height + 6 }} />)}
+              {cropping && cropFrame && cropPhoto && summary && <CropEditor key={cropping.spread + ':' + cropping.box}
+                frame={cropFrame} photo={summary.photoSizes[cropPhoto]} src={renderOrigin + '/render/' + summary.id + '/photo/' + cropPhoto}
+                placement={cropState?.crop} settling={!!cropping.settling}
+                inchesPerPixel={format && cropSheet ? format.spreadWidth / cropSheet.width / 25.4 : undefined}
+                resolution={template?.format.output.resolution} commit={commitCrop} cancel={() => setCropping(undefined)}
+                toolbarHost={canvasWrap.current} />}
               {editing && editTarget && editSpread && template && summary && <EditPopover key={editing.key}
                 project={summary.project} spread={editSpread} template={template} edits={editTarget.edits} anchor={editTarget}
-                bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={!writable} edit={edit} close={closeEditor} step={stepEditor} />}
+                bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={!writable} edit={edit} close={closeEditor} step={stepEditor}
+                actions={editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)
+                  ? <button type="button" onClick={() => startCrop(editing.spread, editPhotoBox)}>Adjust crop…</button> : undefined} />}
             </div>}
             {!summary && <div className="welcome">
               <span className="welcome-icon" aria-hidden="true">◫</span>
@@ -588,6 +658,7 @@ export function App() {
       {summary && spread && <Inspector summary={summary} spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} inspectSource={choose} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
+        adjustCrop={(box) => { reveal(spread.id); startCrop(spread.id, box); }}
         edit={edit} highlight={setHighlight} issues={issue} check={check} checking={!checkCurrent} select={select}
         importText={(box) => importFiles({ kind: 'markdown', target: { spread: spread.id, box } })} />}
     </div>

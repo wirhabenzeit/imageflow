@@ -172,10 +172,17 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     const geometry: BookGeometry = {
       type: 'geometry', height: Math.ceil(root.getBoundingClientRect().height),
       sheets: sheets.map(({ spread, sheet }) => ({ spread, ...relative(sheet) })),
-      boxes: sheets.flatMap(({ spread, sheet }) => [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].map((box) => ({
-        spread, id: (box.dataset.box ?? box.dataset.element)!,
-        type: (box.dataset.boxType ?? 'element') as BookGeometry['boxes'][number]['type'], ...relative(box),
-      }))),
+      boxes: sheets.flatMap(({ spread, sheet }) => {
+        const scale = Number(sheet.style.getPropertyValue('--if-zoom')) || 1;
+        return [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].map((box) => {
+          const rect = relative(box);
+          const upright = Math.abs(rect.width - box.offsetWidth * scale) < 1.5 && Math.abs(rect.height - box.offsetHeight * scale) < 1.5;
+          return {
+            spread, id: (box.dataset.box ?? box.dataset.element)!, upright,
+            type: (box.dataset.boxType ?? 'element') as BookGeometry['boxes'][number]['type'], ...rect,
+          };
+        });
+      }),
       targets: sheets.flatMap(({ spread, sheet }) => [...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
         spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node),
       }))),

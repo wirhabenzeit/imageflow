@@ -166,7 +166,7 @@ Templates read photo metadata (for captions) and page numbers through the contex
 | Component | Purpose |
 | --- | --- |
 | `<Spread>` | Root of every spread. Sizes the spread to two trims plus bleed, sets geometry CSS variables, and handles page halves. |
-| `<PhotoBox id>` | Renders the assigned photo with its crop (`object-fit: cover` plus the saved crop), using a preview-size image in the editor and a rendition capped at the format maximum resolution in export (300 ppi when omitted). Its element is the box's geometry and drop zone. |
+| `<PhotoBox id>` | Renders the assigned photo with its crop (the photo always covers the box; the saved crop picks the visible region), using a preview-size image in the editor and a rendition capped at the format maximum resolution in export (300 ppi when omitted). Its element is the box's geometry and drop zone. Users adjust the crop in the editor's crop mode; templates do not handle it. |
 | `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. |
 | `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked. |
 | `asset(path)` | Resolves a file in `template/assets/` for use in `src` or CSS. |
@@ -291,6 +291,8 @@ Import `spreadFor` alongside the other helpers. `mm`, `pt`, and `inch` produce s
 `MarkdownBox` accepts `columns` (default 1, rounded and clamped to 1–6). Use `style={{ columnGap: '5mm' }}` for the gap. Text continues down each column, then through the next assigned box in spread/flow order. Expose a box parameter and pass its resolved value to `columns` if users should control it. Column layout remains platform-owned; avoid overriding its flow machinery with CSS.
 
 Numeric `step` is a control increment, not a runtime divisibility constraint. Month precision changes the picker; it writes `YYYY-MM-01`, but existing valid ISO dates are not normalized. Use first-of-month defaults and bounds for month parameters.
+
+Crop mode draws the photo over the box's on-screen rectangle, so it assumes the box is upright. If template CSS rotates or skews a `PhotoBox` (or an ancestor inside the spread), the editor offers only the numeric crop values for it.
 
 Identifiers start with a letter or digit, then contain letters, digits, underscores or hyphens; reserved Object prototype names are rejected. Dots separate edit-path scopes and cannot occur in identifiers. PhotoBox, MarkdownBox and Element automatically expose their declared parameters; explicit edit marks add parameters. Ordinary nodes need `ctx.edit`. Export omits edit marks. Avoid overlapping targets or marking several nodes with the identical path list: the current editor identifies targets by spread and path list.
 

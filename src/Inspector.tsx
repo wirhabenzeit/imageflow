@@ -62,12 +62,12 @@ function CheckList({ check, checking, spread, select }: {
 
 // Shows either the selected spread or the selected source, never both.
 export function Inspector({ summary, spread, source, template, render, usage, edit, importText, highlight, issues, check, checking,
-  select, inspectSource, quickLook, focus, targets = [] }: {
+  select, inspectSource, quickLook, focus, targets = [], adjustCrop }: {
   summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string) => void; importText: (box: string) => void;
   highlight: (id?: string) => void; issues: string; check?: BookCheck; checking: boolean; select: (spread: string) => void;
   inspectSource: (source: SourceRef) => void; quickLook: () => void; focus?: { box: string; at: number };
-  targets?: BookGeometry['targets'];
+  targets?: BookGeometry['targets']; adjustCrop: (box: string) => void;
 }) {
   const sections = useRef(new Map<string, HTMLElement>());
   const [flash, setFlash] = useState<string>();
@@ -182,16 +182,24 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
           </div>}
           {position && <p className="muted">Flow {position.part} of {position.parts}</p>}
           {photoBox && assigned && <div className="crop-controls">
-            {([['centerX', 'Horizontal'], ['centerY', 'Vertical'], ['zoom', 'Zoom']] as const).map(([key, label]) =>
-              <Field key={key + ':' + (state?.crop ?? centered)[key]}
-                param={{ type: 'number', label, default: centered[key], min: key === 'zoom' ? 1 : 0, max: key === 'zoom' ? 20 : 1, step: .05 }}
-                value={(state?.crop ?? centered)[key]}
-                change={(value) => changeSpread((item) => {
-                  const box = item.boxes[id];
-                  if (box?.photo) box.crop = { ...(box.crop ?? centered), [key]: value } as Placement;
-                })} />,
-            )}
-            <button onClick={() => changeSpread((item) => { if (item.boxes[id]) delete item.boxes[id].crop; })}>Reset crop</button>
+            <p className="muted">{state?.crop && state.crop.zoom !== 1 ? 'Zoomed ' + state.crop.zoom.toFixed(1) + '×' : 'Fills the frame'}
+              {state?.crop ? ' · moved' : ''}</p>
+            <div className="box-actions">
+              <button type="button" onClick={() => adjustCrop(id)} title="Or double-click the photo">Adjust crop…</button>
+              {state?.crop && <button type="button" onClick={() => changeSpread((item) => { if (item.boxes[id]) delete item.boxes[id].crop; },
+                'Crop reset')}>Reset crop</button>}
+            </div>
+            <details className="crop-values"><summary>Crop values</summary>
+              {([['centerX', 'Horizontal'], ['centerY', 'Vertical'], ['zoom', 'Zoom']] as const).map(([key, label]) =>
+                <Field key={key + ':' + (state?.crop ?? centered)[key]}
+                  param={{ type: 'number', label, default: centered[key], min: key === 'zoom' ? 1 : 0, max: key === 'zoom' ? 20 : 1, step: .01 }}
+                  value={(state?.crop ?? centered)[key]}
+                  change={(value) => changeSpread((item) => {
+                    const box = item.boxes[id];
+                    if (box?.photo) box.crop = { ...(box.crop ?? centered), [key]: value } as Placement;
+                  })} />,
+              )}
+            </details>
           </div>}
           <Fields schema={box.parameters} values={state?.params ?? {}} update={(key, value) => changeSpread((item) => {
             item.boxes[id] ??= { params: {} };

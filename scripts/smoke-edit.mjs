@@ -89,6 +89,32 @@ try {
   const flowed = await frame.locator('body').evaluate(() => window.imageflowRenderStatus);
   assert.deepEqual(flowed.errors, []);
   assert.deepEqual(flowed.flow['arriving:body'], { part: 1, parts: 3, title: 'arrival.md' });
+
+  // Crop mode: double-click a photo, drag and zoom it, commit as one edit; Esc discards; Undo removes it.
+  at = await center('[data-spread="arriving"] [data-box="hero"]');
+  await w.mouse.dblclick(at.x, at.y);
+  await w.locator('.crop-editor').waitFor();
+  await w.mouse.move(at.x, at.y);
+  await w.mouse.down();
+  await w.mouse.move(at.x - 120, at.y, { steps: 8 });
+  await w.mouse.up();
+  await w.mouse.wheel(0, -240);
+  assert.match(await w.locator('.crop-ppi').textContent(), /^\d+ ppi$/);
+  await w.keyboard.press('Enter');
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Crop updated');
+  await ready();
+  await w.waitForFunction(() => !document.querySelector('.crop-editor'));
+  const crop = (await read()).spreads[1].boxes.hero.crop;
+  assert.ok(crop.centerX > 0.5 && crop.zoom > 1, JSON.stringify(crop));
+  await w.mouse.dblclick(at.x, at.y);
+  await w.locator('.crop-editor').waitFor();
+  await w.mouse.wheel(0, -400);
+  await w.keyboard.press('Escape');
+  await w.waitForFunction(() => !document.querySelector('.crop-editor'));
+  assert.deepEqual((await read()).spreads[1].boxes.hero.crop, crop);
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  assert.equal((await read()).spreads[1].boxes.hero.crop, undefined);
   console.log('ImageFlow click-to-edit passed.');
 } finally {
   await app.close();

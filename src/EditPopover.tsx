@@ -12,9 +12,10 @@ type Value = Values[string];
 const scopeLabel = { spread: '', document: 'Book', element: '', box: '' } as const;
 
 // Opens over a node the template marked with `ctx.edit(...)`, and edits those parameters in place.
-export function EditPopover({ project, spread, template, edits, anchor, bounds, readOnly, edit, close, step }: {
+export function EditPopover({ project, spread, template, edits, anchor, bounds, readOnly, edit, close, step, actions }: {
   project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; anchor: Rect; bounds: { width: number };
   readOnly: boolean; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
+  actions?: ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const [drafts, setDrafts] = useState<Record<string, Value>>({});
@@ -119,6 +120,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
           apply={(value) => apply({ [target.path]: value })} />
       </div>)}
     </fieldset>
+    {actions && !readOnly && <div className="ep-actions">{actions}</div>}
     {readOnly && <p className="ep-hint muted">Sample projects are read-only.</p>}
   </div>;
 }

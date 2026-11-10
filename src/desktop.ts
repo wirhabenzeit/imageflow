@@ -59,7 +59,8 @@ export type Rect = { x: number; y: number; width: number; height: number };
 export type BookGeometry = {
   type: 'geometry'; height: number;
   sheets: (Rect & { spread: string })[];
-  boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element' })[];
+  // `upright` is false when template CSS rotates or skews the box, so its rectangle is only a bounding box.
+  boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean })[];
   // Nodes a template marked with `ctx.edit(...)`, and elements with parameters.
   targets: (Rect & { spread: string; edits: string[] })[];
 };
