@@ -203,7 +203,6 @@ export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel
         commit();
       }}>Fit</button>
       {children}
-      <span className="crop-hint">Drag to move · pinch to zoom</span>
       <button type="button" className="primary" onClick={finish}>Done</button>
     </div>, toolbarHost)}
   </div>;

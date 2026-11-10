@@ -109,7 +109,10 @@ body { margin: 0; }
 
 /* Book frames: one iframe per render, absolutely placed; the parent sets heights from reported geometry. */
 .book-frame { position: absolute; left: 0; top: 0; width: 100%; height: 0; border: 0; pointer-events: none; background: transparent; }
-.book-frame-pending { opacity: 0; }
+/* A frame rendering the next edit waits behind the current one. Not opacity 0: Chromium skips painting a fully
+   transparent frame, so it would paint only when revealed and flash blank for a moment. At 1% it is painted
+   while it waits and appears complete. */
+.book-frame-pending { opacity: .01; }
 
 /* Canvas: the whole book in one scrolling column */
 .canvas-wrap { position: relative; min-height: 0; }
@@ -306,7 +309,6 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .crop-toolbar input[type="range"] { width: 110px; accent-color: var(--accent); }
 .crop-params { display: flex; align-items: center; gap: 10px; padding-left: 4px; border-left: 1px solid #d3cfc4; }
 .crop-params .pc-switch { margin: 0; }
-.crop-hint { color: var(--muted); padding: 0 4px; }
 /* A placed photo being moved to another box */
 .photo-move-ghost { position: fixed; z-index: 20; width: 72px; height: 72px; object-fit: cover; transform: translate(-50%, -50%);
   border-radius: 6px; box-shadow: 0 8px 24px #0005; opacity: .9; pointer-events: none; }
