@@ -6,7 +6,8 @@ import { centered, getCrop, maxZoom, placementOf } from './spread';
 import type { Dimensions, Placement } from './spread';
 
 // A selected photo. Dragging it moves the photo inside its frame; pinching (or ctrl-scrolling) and the toolbar zoom
-// it. While a gesture runs, the whole photo shows over the frame, dimmed outside it, so it is instant. Each gesture
+// it. While it is selected, the whole photo shows faded around the frame, so you see what can be brought in; it
+// lets clicks through to neighbouring boxes. While a gesture runs, the rest of the book dims as well. Each gesture
 // is saved when it ends, as its own undoable edit; there is nothing to confirm. Plain scrolling keeps scrolling the
 // book. The toolbar sits at the bottom of the visible canvas, because the frame may extend past the visible area.
 export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel, resolution, settling, save, close, toolbarHost, children }: {
@@ -179,7 +180,7 @@ export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel
   };
   return <div className={'crop-editor' + (settling ? ' settling' : '') + (active ? ' active' : '')}
     onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
-    {active && !settling && <img className="crop-ghost" src={src} alt="" draggable={false} style={{ left, top, ...image }} />}
+    {!settling && <img className="crop-ghost" src={src} alt="" draggable={false} style={{ left, top, ...image }} />}
     <div ref={window_} className="crop-window" style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height }}
       onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}>
       <img src={src} alt="" draggable={false} style={{ left: left - frame.x, top: top - frame.y, ...image }} />
