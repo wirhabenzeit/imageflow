@@ -111,6 +111,44 @@ try {
   assert.deepEqual(await settlements(), state);
   assert.deepEqual((await status()).errors, []);
 
+  // Kept content: Place in… moves it into an empty box, or swaps with what a box shows; it never appears twice.
+  const title = async (photo) => JSON.parse(await readFile(join(project, 'photos.json'), 'utf8'))[photo].title;
+  const replacedTitle = await title(replacement);
+  await rerendered(() => layout('Two photos').click());
+  const keptNames = () => w.locator('.kept-content .kept-name').allTextContents();
+  assert.deepEqual(await keptNames(), ['Cottage', 'Evening light']);
+  await rerendered(() => w.getByRole('combobox', { name: 'Place Cottage in' }).selectOption('second'));
+  assert.equal(await statusLine(), 'Cottage placed in Right photo');
+  state = await settlements();
+  assert.deepEqual(state.boxes.second, { params: {}, photo: 'cottage', focus: { centerX: 0.5, centerY: 0.5 } });
+  assert.deepEqual(state.boxes.third, { params: {} });
+  assert.deepEqual(await keptNames(), ['Evening light']);
+  const swap = w.getByRole('combobox', { name: 'Place Evening light in' });
+  assert.deepEqual(await swap.locator('option').allTextContents(),
+    ['Place in…', 'Left photo · swap with ' + replacedTitle, 'Right photo · swap with Cottage']);
+  await rerendered(() => swap.selectOption('hero'));
+  assert.equal(await statusLine(), 'Evening light placed in Left photo; ' + replacedTitle + ' is saved outside this layout');
+  assert.deepEqual(await keptNames(), [replacedTitle]);
+
+  // Dragging a kept item onto a box of its spread moves it the same way.
+  const target = await frame.locator('[data-spread="settlements"] [data-box="second"]').boundingBox();
+  await rerendered(() => w.evaluate(({ x, y }) => {
+    const data = new DataTransfer();
+    document.querySelector('.kept-item').dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: data }));
+    document.querySelector('main').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: data }));
+  }, { x: target.x + target.width / 2, y: target.y + target.height / 2 }));
+  assert.equal(await statusLine(), replacedTitle + ' placed in Right photo; Cottage is saved outside this layout');
+  assert.equal((await settlements()).boxes.second.photo, replacement);
+  assert.deepEqual(await keptNames(), ['Cottage']);
+
+  // Discard removes kept content from the spread (the source stays); Undo brings it back.
+  await rerendered(() => w.getByRole('button', { name: 'Discard Cottage' }).click());
+  assert.equal(await statusLine(), 'Cottage removed from this spread');
+  assert.equal(await w.locator('.kept-content').count(), 0);
+  assert.ok(JSON.parse(await readFile(join(project, 'photos.json'), 'utf8')).cottage);
+  await rerendered(() => button('Undo').click());
+  assert.deepEqual(await keptNames(), ['Cottage']);
+
   // An ID with two parameter types is a template error naming both layouts.
   const templateFile = join(project, 'template', 'index.tsx');
   const templateSource = await readFile(templateFile, 'utf8');

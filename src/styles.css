@@ -274,6 +274,15 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .box-photo { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: start; margin: 8px 0; }
 .studio .box-photo-thumb { display: block; width: 64px; height: 64px; padding: 0; min-height: 0; border: 1px solid #cbc7bc; border-radius: 5px; overflow: hidden; cursor: pointer; }
 .box-photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Content a spread keeps outside its current layout */
+.kept-list { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 8px; }
+.kept-item { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 10px; align-items: start; cursor: grab; }
+.kept-thumb { width: 48px; height: 48px; object-fit: cover; border: 1px solid #cbc7bc; border-radius: 5px; display: block; }
+.kept-thumb-empty { display: grid; place-items: center; border-style: dashed; font-size: 11px; color: var(--muted); }
+.kept-info { display: grid; gap: 2px; min-width: 0; }
+.kept-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kept-actions { display: flex; gap: 10px; align-items: center; margin-top: 2px; }
+.kept-actions select { min-width: 0; flex: 1; }
 .box-photo-empty { display: grid; place-items: center; width: 64px; height: 64px; border: 1px dashed #b5b0a4; border-radius: 5px; font-size: 11px; color: var(--muted); }
 .box-photo-info { display: grid; gap: 1px; font-size: 12px; min-width: 0; }
 .box-photo-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

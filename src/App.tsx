@@ -11,11 +11,12 @@ import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
 import { assignmentCounts, newSpread, sourceUsage } from './editing';
+import { moveContent } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { BookCheck, Edit } from './Inspector';
 import { QuickLook, Sources } from './Sources';
-import { photoMime, sourceList, textMime } from './source-items';
+import { keptMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
 import type { SourceKind, SourceRef } from './source-items';
 import { pageSequence, resolveFormat } from './format';
 import type { ResolvedFormat } from './format';
@@ -386,6 +387,24 @@ export function App() {
     });
   }
 
+  // Moves content a spread keeps outside its layout into one of its boxes; content already there is kept instead.
+  function place(spread: string, from: string, to: string) {
+    if (!summary || !template) return;
+    const state = spreads.find(({ id }) => id === spread);
+    const moving = state?.boxes[from];
+    const label = state && template.spreads[state.definition]?.boxes[to]?.label;
+    if (!moving || !label) return;
+    const kind = moving.photo ? 'photo' : 'text';
+    let swapped: string | undefined;
+    edit(({ project }) => {
+      const current = project.spreads.find(({ id }) => id === spread);
+      if (current) swapped = moveContent(current, from, to);
+    }, () => sourceTitle(summary, kind, (moving.photo ?? moving.text)!) + ' placed in ' + label +
+      (swapped ? '; ' + sourceTitle(summary, kind, swapped) + ' is saved outside this layout' : ''));
+    // The Inspector scrolls to the box that received it.
+    setFocusBox({ box: to, at: Date.now() });
+  }
+
   // Finds the spread and box under a pointer. The label strip above each spread belongs to the spread.
   function locate(event: { clientX: number; clientY: number }, types?: readonly string[]) {
     const bounds = stage.current?.getBoundingClientRect();
@@ -502,6 +521,16 @@ export function App() {
     setDropTarget(undefined);
     if (!api || !writable || busy || !summary) return;
     const { box } = locate(event);
+    // Kept content dropped on its own spread moves; dropped on another spread it is another use of its source.
+    const kept = event.dataTransfer.getData(keptMime);
+    if (kept && box && box.type !== 'element') {
+      const origin = JSON.parse(kept) as { spread: string; box: string };
+      if (origin.spread === box.spread) {
+        place(origin.spread, origin.box, box.id);
+        select(box.spread, false);
+        return;
+      }
+    }
     const photoId = event.dataTransfer.getData(photoMime);
     const textId = event.dataTransfer.getData(textMime);
     if (photoId || textId) {
@@ -769,7 +798,7 @@ export function App() {
         usage={usage} inspectSource={choose} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
         adjustCrop={(box) => { reveal(spread.id); startCrop(spread.id, box); }}
-        openEditor={(element) => openElementEditor(spread.id, element)}
+        openEditor={(element) => openElementEditor(spread.id, element)} place={(from, to) => place(spread.id, from, to)}
         edit={edit} highlight={setHighlight} issues={issue} check={check} checking={!checkCurrent} select={select}
         importText={(box) => importFiles({ kind: 'markdown', target: { spread: spread.id, box } })} />}
     </div>

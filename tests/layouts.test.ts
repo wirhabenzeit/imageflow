@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { declarationConflicts, describeLayoutChange, keptOutside, layoutChoices, planLayoutChange, switchLayout } from '../src/layouts';
+import { declarationConflicts, describeLayoutChange, discardContent, keptElements, keptOutside, layoutChoices, moveContent, planLayoutChange, switchLayout } from '../src/layouts';
 import type { Layout, Layouts } from '../src/layouts';
 import { p } from '../src/parameters';
 import type { Parameters } from '../src/parameters';
@@ -128,4 +128,37 @@ test('an ID keeps its box type and parameter type across layouts; constraints ma
     'Parameter caption of box hero is a boolean in A but a string in C. A parameter keeps its type in every layout; use a different ID for a different parameter.',
     'Parameter month of element grid is a date in A but a string in C. A parameter keeps its type in every layout; use a different ID for a different parameter.',
   ]);
+});
+
+test('placing kept content moves it, swapping with what the box shows; it does not come back twice', () => {
+  const spread = gridSpread();
+  spread.boxes.hero.params = { caption: true };
+  setPlacement(spread.boxes.third, 'grid', { centerX: .2, centerY: .3, zoom: 2 });
+  go(spread, 'pair');
+  // Place the kept lower-left photo in the left box: the photo there is kept in its place.
+  assert.equal(moveContent(spread, 'third', 'hero'), 'p1');
+  assert.deepEqual(spread.boxes.hero, { params: { caption: true }, photo: 'p3', focus: { centerX: .2, centerY: .3 } });
+  assert.deepEqual(spread.boxes.third, { params: {}, photo: 'p1' });
+  // Into an empty box: a move, not a copy.
+  spread.boxes.second = { params: {} };
+  moveContent(spread, 'fourth', 'second');
+  assert.deepEqual(keptOutside(spread, layouts).map(({ id, source }) => [id, source]), [['third', 'p1']]);
+  go(spread, 'grid');
+  assert.deepEqual(photos(spread), { hero: 'p3', second: 'p4', third: 'p1', fourth: undefined });
+  assert.throws(() => moveContent(spread, 'fourth', 'hero'), /no content saved for box fourth/);
+});
+
+test('discarding kept content removes it from the spread only', () => {
+  const spread = gridSpread();
+  go(spread, 'pair');
+  discardContent(spread, 'third');
+  assert.deepEqual(keptOutside(spread, layouts).map(({ id }) => id), ['fourth']);
+  go(spread, 'grid');
+  assert.equal(spread.boxes.third.photo, undefined);
+});
+
+test('element settings of other layouts are listed as kept', () => {
+  const spread = gridSpread();
+  spread.elements = { calendar: { params: { month: '2027-03-01' } }, empty: { params: {} } };
+  assert.deepEqual(keptElements(spread, layouts), ['calendar']);
 });
