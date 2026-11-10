@@ -18,27 +18,28 @@ try {
   app = await _electron.launch({
     executablePath: packaged ? join(root, 'out', 'ImageFlow-darwin-' + process.arch, 'ImageFlow.app', 'Contents/MacOS/ImageFlow') : electron,
     args: [...(packaged ? [] : [join(root, '.build/desktop')]), '--user-data-dir=' + join(work, 'profile')],
+    env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' },
   });
   const window = await app.firstWindow();
   window.setDefaultTimeout(15000);
   const button = (name) => window.getByRole('button', { name, exact: true });
-  const preview = () => window.frameLocator('iframe:not(.book-check)');
+  const frame = 'iframe.book-frame-book[data-current]';
+  const preview = () => window.frameLocator(frame);
   const status = () => window.locator('.status').textContent();
   const chooseSave = (filePath) => app.evaluate(({ dialog }, filePath) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath });
   }, filePath);
   async function ready() {
-    await window.waitForFunction(() => document.querySelector('iframe:not(.book-check)') &&
-      (!document.querySelector('.preview-message') || document.querySelector('.status-error')));
+    await window.waitForFunction((frame) => document.querySelector(frame + '[data-ready]') || document.querySelector('.status-error'), frame);
     const value = await preview().locator('body').evaluate(() => window.imageflowRenderStatus);
     assert.equal(value?.state, 'ready', value?.message ?? await status());
     return value;
   }
   async function changed(action) {
-    const before = await window.locator('iframe:not(.book-check)').getAttribute('src');
+    const before = await window.locator(frame).getAttribute('src');
     await action();
-    await window.waitForFunction((url) => document.querySelector('iframe:not(.book-check)')?.getAttribute('src') !== url ||
-      document.querySelector('.status-error'), before);
+    await window.waitForFunction(({ frame, url }) => document.querySelector(frame)?.getAttribute('src') !== url ||
+      document.querySelector('.status-error'), { frame, url: before });
     return ready();
   }
   async function saveState(action, expected) {
@@ -46,7 +47,7 @@ try {
     assert.ok(expected(await read()));
   }
   async function dropFile(file, selector) {
-    const bounds = await preview().locator('.if-fit ' + selector).boundingBox();
+    const bounds = await preview().locator('[data-spread="arriving"] ' + selector).boundingBox();
     assert.ok(bounds);
     await window.evaluate(() => {
       if (document.querySelector('#fixture-file')) return;
@@ -75,7 +76,7 @@ try {
   assert.equal((await read()).title, 'Draft Photobook');
   await window.waitForFunction(() => /Book check · (No issues|\d)/.test(document.querySelector('.book-check-list summary')?.textContent ?? '') &&
     !document.querySelector('.book-check-stale'));
-  const bookCheck = await window.frameLocator('iframe.book-check').locator('body').evaluate(() => window.imageflowRenderStatus);
+  const bookCheck = await preview().locator('body').evaluate(() => window.imageflowRenderStatus);
   assert.equal(bookCheck?.state, 'ready');
   assert.deepEqual(bookCheck.errors, []);
   assert.deepEqual(bookCheck.warnings, [], bookCheck.warnings.map(({ where, message }) => where + ' · ' + message).join('\n'));
@@ -89,13 +90,15 @@ try {
   assert.equal(pages[0].getTrimBox().x, 0);
   assert.ok(pages.at(-1).getTrimBox().x > 0);
 
+  await window.getByText('Book settings', { exact: true }).click();
   const title = window.getByLabel('Book title');
   await saveState(async () => { await title.fill('My first book'); await title.blur(); }, (data) => data.title === 'My first book');
   await saveState(() => button('Undo').click(), (data) => data.title === 'Draft Photobook');
   await saveState(() => button('Redo').click(), (data) => data.title === 'My first book');
   await saveState(() => window.getByLabel('Page numbers').uncheck(), (data) => data.params.showPageNumbers === false);
 
-  await changed(() => window.getByRole('button', { name: 'Photo and story 2–3' }).click());
+  await window.getByRole('button', { name: 'Photo and story 2–3' }).click();
+  await window.locator('[data-spread="arriving"][aria-current="page"]').waitFor();
   const photo = join(root, 'sample/starter/photos/shore.jpg');
   const markdown = join(work, 'drop.md');
   await writeFile(markdown, 'A small story imported through the canvas.\n');
@@ -103,6 +106,10 @@ try {
   const photoId = (await read()).spreads[1].boxes.hero.photo;
   assert.match(photoId, /^ph-/);
   assert.ok((await read('photos.json'))[photoId]);
+  // Selecting a source shows its Inspector instead of the spread's.
+  await window.locator('.source-item[data-id="' + photoId + '"]').click();
+  await window.locator('.source-inspector').waitFor();
+  assert.equal(await window.getByRole('radiogroup', { name: 'Layout' }).count(), 0);
   const caption = window.getByLabel('Caption', { exact: true });
   await changed(async () => { await caption.fill('Imported coast'); await caption.blur(); });
   assert.equal((await read('photos.json'))[photoId].caption, 'Imported coast');
@@ -111,22 +118,22 @@ try {
   await changed(() => dropFile(markdown, '[data-box="body"]'));
   const textId = (await read()).spreads[1].boxes.body.text;
   assert.match(textId, /^tx-/);
-  assert.match(await preview().locator('.if-fit [data-box="body"]').textContent(), /imported through the canvas/);
+  assert.match(await preview().locator('[data-spread="arriving"] [data-box="body"]').textContent(), /imported through the canvas/);
   await changed(async () => {
     const file = (await read()).texts[textId];
     await writeFile(join(project, file), 'The file was edited outside ImageFlow.\n');
   });
-  assert.match(await preview().locator('.if-fit [data-box="body"]').textContent(), /edited outside ImageFlow/);
+  assert.match(await preview().locator('[data-spread="arriving"] [data-box="body"]').textContent(), /edited outside ImageFlow/);
   await changed(async () => {
     const path = join(project, 'template/styles.css');
     const css = await readFile(path, 'utf8');
     await writeFile(path, css + '\n.field-book .reading { color: rgb(12, 40, 80); }\n');
   });
-  assert.equal(await preview().locator('.if-fit [data-box="body"]').evaluate((el) => getComputedStyle(el).color), 'rgb(12, 40, 80)');
+  assert.equal(await preview().locator('[data-spread="arriving"] [data-box="body"]').evaluate((el) => getComputedStyle(el).color), 'rgb(12, 40, 80)');
 
-  await saveState(() => window.getByLabel('Layout', { exact: true }).selectOption('panorama'), (data) =>
+  await saveState(() => window.getByRole('radio', { name: 'Panorama', exact: true }).click(), (data) =>
     data.spreads[1].definition === 'panorama' && data.spreads[1].boxes.hero.photo === photoId && data.spreads[1].archive.story.boxes.body.text === textId);
-  await saveState(() => window.getByLabel('Layout', { exact: true }).selectOption('story'), (data) =>
+  await saveState(() => window.getByRole('radio', { name: 'Photo and story', exact: true }).click(), (data) =>
     data.spreads[1].boxes.body.text === textId);
 
   await saveState(() => button('Duplicate').click(), (data) => data.spreads.length === 16);

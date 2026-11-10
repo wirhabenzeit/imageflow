@@ -1,6 +1,8 @@
 # Platform, template, and project contract
 
-Status: proposed baseline for discussion. This document defines responsibilities and illustrative interfaces, not an implemented API. Exact serialization and rendering APIs remain open. [validation-plan.md](validation-plan.md) orders the open points and the experiments needed to resolve them. Decisions for the first version are in [v1-decisions.md](v1-decisions.md), the rendering decision in [decisions/0001-rendering.md](decisions/0001-rendering.md), and the template API draft in [template-api.md](template-api.md).
+Status: historical design proposal, superseded for implementation by [Template API (contract 1)](template-api.md) and [v1 decisions](v1-decisions.md). Do not copy the illustrative interfaces below into current templates. Current code uses `contract`, `definition`, and `params`; supports one format per template, React/Chromium rendering, and multi-column Markdown boxes.
+
+Original proposal follows. Status: proposed baseline for discussion. This document defines responsibilities and illustrative interfaces, not an implemented API. Exact serialization and rendering APIs remain open. [validation-plan.md](validation-plan.md) orders the open points and the experiments needed to resolve them. Decisions for the first version are in [v1-decisions.md](v1-decisions.md), the rendering decision in [decisions/0001-rendering.md](decisions/0001-rendering.md), and the template API draft in [template-api.md](template-api.md).
 
 ## Goals and baseline
 

@@ -16,3 +16,11 @@ export function getCrop(photo: Dimensions, placement: Placement, frameAspect: nu
     height,
   };
 }
+
+// The placement that shows `crop`, with its centre clamped the way getCrop clamps it. Values are rounded so
+// project.json stays readable.
+export function placementOf(crop: Crop, zoom: number): Placement {
+  const round = (value: number) => Math.round(value * 10000) / 10000;
+  return { centerX: round(crop.x + crop.width / 2), centerY: round(crop.y + crop.height / 2), zoom: round(zoom) };
+}
+export const maxZoom = 20;

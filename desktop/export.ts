@@ -115,7 +115,8 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
     if (mode === 'print' && limit && bytes.length > limit) {
       throw new Error('The PDF is ' + Math.ceil(bytes.length / 1e6) + ' MB; the format allows ' + Math.floor(limit / 1e6) + ' MB.');
     }
-    return { bytes, warnings: status.warnings satisfies Issue[] };
+    // Proof export proceeds despite layout errors; return them so the editor's Book check keeps showing them.
+    return { bytes, warnings: status.warnings satisfies Issue[], errors: status.errors satisfies Issue[] };
   } finally {
     signal.removeEventListener('abort', destroy);
     destroy();

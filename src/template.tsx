@@ -22,7 +22,17 @@ export type RenderContext = {
   page: { left?: number; right?: number };
   format: ResolvedFormat;
   mode: RenderProject['mode'];
+  // Marks a rendered node as the place where these parameters are edited; spread the result onto the node.
+  edit: (...paths: string[]) => EditMarker;
 };
+export type EditMarker = { 'data-edit'?: string };
+
+// In the editor, boxes and elements are edit targets for their own parameters, followed by any they are marked with.
+function editTarget(book: RenderProject, prefix: string, parameters: Parameters | undefined, marked?: string) {
+  if (book.mode !== 'edit') return undefined;
+  const edits = [...Object.keys(parameters ?? {}).map((key) => prefix + key), ...(marked?.split(' ').filter(Boolean) ?? [])];
+  return edits.length ? [...new Set(edits)].join(' ') : undefined;
+}
 
 export type FlowPosition = { part: number; parts: number; title?: string };
 const elements = z.record(identifier, z.object({ label: z.string().min(1), parameters: parametersSchema })).default({});
@@ -71,6 +81,7 @@ export function templateInfo(template: Template): TemplateInfo {
 
 const SpreadData = createContext<{
   book: RenderProject; spread: SpreadState; format: ResolvedFormat; renderPhotos: boolean;
+  definition: Template['spreads'][string];
 } | null>(null);
 
 function useSpread() {
@@ -108,8 +119,8 @@ function exportSource(photo: Photo & { src: string }, cssWidth: number, format: 
   return width < photo.width ? photo.src + '/' + width : photo.src;
 }
 
-export function PhotoBox({ id, className, style }: Styling & { id: string }) {
-  const { spread, book, format, renderPhotos } = useSpread();
+export function PhotoBox({ id, className, style, 'data-edit': marked }: Styling & EditMarker & { id: string }) {
+  const { spread, book, format, renderPhotos, definition } = useSpread();
   const box = spread.boxes[id];
   const photo = box?.photo ? book.photos[box.photo] : undefined;
   const placement = box?.crop ?? centered;
@@ -143,6 +154,7 @@ export function PhotoBox({ id, className, style }: Styling & { id: string }) {
 
   return (
     <div ref={frame} data-box={id} data-box-type="photo" data-empty={photo ? undefined : ''}
+      data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
       className={['if-photo', className].filter(Boolean).join(' ')} style={style}>
       {photo && renderPhotos &&
         <img ref={image} src={book.mode === 'edit' ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
@@ -151,11 +163,15 @@ export function PhotoBox({ id, className, style }: Styling & { id: string }) {
   );
 }
 
-export function MarkdownBox({ id, className, style }: Styling & { id: string }) {
-  const { spread, book } = useSpread();
+// `columns` splits the box into that many columns; text flows down each column before moving to the next box.
+export function MarkdownBox({ id, className, style, columns = 1, 'data-edit': marked }: Styling & EditMarker & { id: string; columns?: number }) {
+  const { spread, book, definition } = useSpread();
   const text = spread.boxes[id]?.text;
+  const count = Math.max(1, Math.min(6, Math.round(Number(columns)) || 1));
   return (
-    <div data-box={id} data-box-type="markdown" data-empty={text !== undefined && book.texts[text] !== undefined ? undefined : ''}
+    <div data-box={id} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
+      data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
+      data-empty={text !== undefined && book.texts[text] !== undefined ? undefined : ''}
       className={['if-markdown', className].filter(Boolean).join(' ')} style={style}>
       {book.mode === 'edit' && (!text || book.texts[text] === undefined) &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
@@ -163,8 +179,11 @@ export function MarkdownBox({ id, className, style }: Styling & { id: string }) 
   );
 }
 
-export function Element({ id, className, style, children }: Styling & { id: string; children?: ReactNode }) {
-  return <div data-element={id} className={className} style={style}>{children}</div>;
+// In the editor an element is also an edit target for its own parameters and any it is marked with.
+export function Element({ id, className, style, children, 'data-edit': marked }: Styling & EditMarker & { id: string; children?: ReactNode }) {
+  const { book, definition } = useSpread();
+  return <div data-element={id} data-edit={editTarget(book, 'elements.' + id + '.', definition.elements[id]?.parameters, marked)}
+    className={className} style={style}>{children}</div>;
 }
 
 let assets: Record<string, string> = {};
@@ -207,6 +226,7 @@ export function SpreadView({ book, template, format, spread, page, positions, re
     params: resolveParams(definition.parameters, spread.params),
     document: resolveParams(template.parameters, book.project.params),
     boxes, elements, page, format, mode: book.mode,
+    edit: (...paths) => book.mode === 'edit' && paths.length ? { 'data-edit': paths.join(' ') } : {},
   });
-  return <SpreadData.Provider value={{ book, spread, format, renderPhotos }}>{content}</SpreadData.Provider>;
+  return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition }}>{content}</SpreadData.Provider>;
 }

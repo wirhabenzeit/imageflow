@@ -14,11 +14,19 @@ const photoDependencies = [
   'sharp', 'semver', 'detect-libc', '@img/colour', '@img/sharp-' + platformTag, '@img/sharp-libvips-' + platformTag,
 ];
 
-export async function stageDesktop({ packaged = false, destination = desktop } = {}) {
+// esbuild options for the main process and preload; scripts/dev.mjs rebuilds them in watch mode.
+export const mainBuild = (destination = desktop) => ({
+  entryPoints: [join(root, 'desktop', 'main.ts'), join(root, 'desktop', 'preload.ts')],
+  outdir: destination, outExtension: { '.js': '.cjs' }, bundle: true,
+  platform: 'node', format: 'cjs', external: ['electron', 'esbuild', 'sharp'],
+});
+
+// `dev` stages without the Vite build; the editor then comes from the Vite dev server.
+export async function stageDesktop({ packaged = false, dev = false, destination = desktop } = {}) {
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
   await Promise.all([
-    cp(join(root, 'dist'), join(destination, 'dist'), { recursive: true }),
+    dev ? Promise.resolve() : cp(join(root, 'dist'), join(destination, 'dist'), { recursive: true }),
     cp(join(root, 'node_modules', 'esbuild'), join(destination, 'node_modules', 'esbuild'), { recursive: true }),
     ...photoDependencies.map((name) => cp(join(root, 'node_modules', name), join(destination, 'node_modules', name), { recursive: true })),
     packaged ? Promise.resolve() : cp(sample, join(destination, 'sample'), {
@@ -28,11 +36,7 @@ export async function stageDesktop({ packaged = false, destination = desktop } =
     writeFile(join(destination, 'package.json'), JSON.stringify({
       name: 'imageflow', productName: 'ImageFlow', version: metadata.version, main: 'main.cjs',
     })),
-    build({
-      entryPoints: [join(root, 'desktop', 'main.ts'), join(root, 'desktop', 'preload.ts')],
-      outdir: destination, outExtension: { '.js': '.cjs' }, bundle: true,
-      platform: 'node', format: 'cjs', external: ['electron', 'esbuild', 'sharp'],
-    }),
+    build(mainBuild(destination)),
   ]);
 }
 

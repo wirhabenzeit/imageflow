@@ -29,7 +29,7 @@
 .field-book h2 { font: 600 34pt/1.08 "Field Serif"; letter-spacing: -.025em; white-space: pre-line; }
 .field-book h3 { font: 600 24pt/1.2 "Field Serif"; }
 .field-book .subtitle { font-size: 15pt; }
-.field-book .reading { font: 400 11pt/1.45 "Field Serif"; }
+.field-book .reading { font: 400 11pt/1.45 "Field Serif"; column-gap: 6mm; }
 .field-book .reading h2 { font: 500 10pt/1.3 "Field Sans"; letter-spacing: .04em; text-transform: uppercase; margin: 0 0 3mm; }
 .field-book .reading p { margin: 0 0 .65em; }
 .field-book .reading strong { font-weight: 600; }

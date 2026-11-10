@@ -3,7 +3,8 @@ import * as jsx from 'react/jsx-runtime';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { editorURL } from './desktop';
-import type { Issue, RenderStatus, TemplateInfo } from './desktop';
+import { bookLayout } from './desktop';
+import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { cssMM, pageSequence, resolveFormat, toMillimeters } from './format';
 import type { PrintSide, ResolvedFormat } from './format';
 import { parseDocument } from './project';
@@ -13,6 +14,7 @@ import { parameterWarnings } from './parameters';
 import { flow } from './text-flow';
 import { runtime, setTemplateAssets, SpreadView, templateInfo, templateSchema } from './template';
 import type { FlowPosition, Template } from './template';
+import { resolveEditPath, switchDefinition } from './editing';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -82,6 +84,10 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
   for (const [id, state] of Object.entries(spread.elements)) {
     warn(parameterWarnings(definition.elements[id]?.parameters ?? {}, state.params, definition.elements[id]?.label ?? id));
   }
+  const unknown = new Set([...sheet.querySelectorAll<HTMLElement>('[data-edit]')]
+    .flatMap((node) => node.dataset.edit!.split(' ').filter(Boolean))
+    .filter((path) => !resolveEditPath(template, spread.definition, path)));
+  if (unknown.size) warn(['The layout marks unknown parameters as editable: ' + [...unknown].join(', ') + '.']);
   const boxes = new Map<string, HTMLElement>();
   for (const box of sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')) {
     const id = box.dataset.box ?? box.dataset.element!;
@@ -140,28 +146,67 @@ function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: nu
   return { small, outside };
 }
 
-function previewSheet(sheet: HTMLElement, viewport: HTMLElement, span: string) {
-  function fit() {
-    const gutter = 36;
-    const scale = Math.max(0.01, Math.min(
-      (viewport.clientWidth - gutter) / sheet.offsetWidth,
-      (viewport.clientHeight - gutter) / sheet.offsetHeight, 1,
-    ));
-    sheet.style.setProperty('--if-zoom', String(scale));
-    const rect = (node: Element) => {
-      const { x, y, width, height } = node.getBoundingClientRect();
-      return { x, y, width, height };
-    };
-    post({
-      type: 'geometry', sheet: rect(sheet), span,
-      boxes: [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].map((box) => ({
-        id: box.dataset.box ?? box.dataset.element, type: box.dataset.boxType ?? 'element', ...rect(box),
-      })),
-    });
+// True when nothing between the box and its sheet rotates, skews or mirrors it, so its on-screen rectangle is the
+// box itself. Crop mode draws the photo over that rectangle. The sheet's own preview scaling is not checked.
+function upright(box: HTMLElement, sheet: HTMLElement) {
+  for (let node: HTMLElement | null = box; node && node !== sheet; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (style.transform !== 'none') {
+      const matrix = new DOMMatrixReadOnly(style.transform);
+      if (!matrix.is2D || Math.abs(matrix.b) > 1e-6 || Math.abs(matrix.c) > 1e-6 || matrix.a <= 0 || matrix.d <= 0) return false;
+    }
+    if (style.rotate && style.rotate !== 'none' && !/^0(deg|rad|grad|turn)?$/.test(style.rotate)) return false;
+    if (style.scale && style.scale !== 'none' && style.scale.split(/\s+/).some((value) => parseFloat(value) < 0)) return false;
   }
-  sheet.classList.add('if-fit');
+  return true;
+}
+
+// Stacks every sheet in a column, scaled to the frame width, and reports where sheets and boxes landed.
+function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView) {
+  const { pad, gap, columns = 1, columnGap = 0 } = bookLayout[view];
+  root.style.setProperty('--if-pad', pad + 'px');
+  root.style.setProperty('--if-gap', gap + 'px');
+  root.style.setProperty('--if-columns', String(columns));
+  root.style.setProperty('--if-column-gap', columnGap + 'px');
+  const relative = (node: Element): Rect => {
+    const { x, y, width, height } = node.getBoundingClientRect();
+    return { x: x + scrollX, y: y + scrollY, width, height };
+  };
+  let width = -1;
+  function fit() {
+    if (root.clientWidth === width) return;
+    width = root.clientWidth;
+    for (const { sheet } of sheets) {
+      const column = (width - pad * 2 - columnGap * (columns - 1)) / columns;
+      const scale = Math.max(0.01, Math.min(column / sheet.offsetWidth, 1));
+      const slot = sheet.parentElement!;
+      slot.style.width = sheet.offsetWidth * scale + 'px';
+      slot.style.height = sheet.offsetHeight * scale + 'px';
+      sheet.style.setProperty('--if-zoom', String(scale));
+    }
+    const geometry: BookGeometry = {
+      type: 'geometry', height: Math.ceil(root.getBoundingClientRect().height),
+      sheets: sheets.map(({ spread, sheet }) => ({ spread, ...relative(sheet) })),
+      boxes: sheets.flatMap(({ spread, sheet }) => {
+        const scale = Number(sheet.style.getPropertyValue('--if-zoom')) || 1;
+        return [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].map((box) => {
+          const rect = relative(box);
+          const sized = Math.abs(rect.width - box.offsetWidth * scale) < 1.5 && Math.abs(rect.height - box.offsetHeight * scale) < 1.5;
+          return {
+            spread, id: (box.dataset.box ?? box.dataset.element)!, upright: sized && upright(box, sheet),
+            type: (box.dataset.boxType ?? 'element') as BookGeometry['boxes'][number]['type'], ...rect,
+          };
+        });
+      }),
+      targets: sheets.flatMap(({ spread, sheet }) => [...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
+        spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node),
+      }))),
+    };
+    post(geometry);
+  }
+  root.classList.add('if-book', 'if-view-' + view);
   fit();
-  new ResizeObserver(fit).observe(viewport);
+  new ResizeObserver(fit).observe(root);
 }
 
 function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat) {
@@ -187,6 +232,61 @@ function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: Retu
   document.body.append(pages);
 }
 
+// Waits for fonts and photos so measurements and text flow see final metrics.
+async function settle(images: HTMLImageElement[]) {
+  const [, decoded] = await Promise.all([
+    Promise.all([...document.fonts].map((font) => font.load())),
+    Promise.allSettled(images.map((img) => img.decode())),
+  ]);
+  await document.fonts.ready;
+  // Hidden frames may not get animation frames; the timeout keeps the render from stalling.
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    setTimeout(resolve, 100);
+  });
+  return decoded;
+}
+
+// Renders one spread in every layout of the template, carrying its content over the way switching layouts does.
+// Markdown boxes show their source from the beginning; the previews are for choosing a layout, not for proofing.
+async function renderLayouts(root: HTMLElement, book: RenderProject, template: Template, info: TemplateInfo, spreadId: string) {
+  const { spreads } = book.project;
+  const index = spreads.findIndex(({ id }) => id === spreadId);
+  if (index < 0) throw new Error('Spread does not exist.');
+  const format = resolveFormat(template.format);
+  const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
+  const previews = Object.entries(template.spreads).map(([definition, { span }]) => {
+    const spread = structuredClone(spreads[index]);
+    switchDefinition(spread, definition, info);
+    return { definition, span, spread: { ...spread, id: definition } };
+  });
+  root.className = 'if-preview';
+  let renderError: unknown;
+  const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
+  flushSync(() => react.render(previews.map(({ definition, span, spread }) => (
+    <div className="if-spread-container" data-span={span} data-spread={definition} key={definition}>
+      <SpreadView book={book} spread={spread} template={template} format={format} positions={{}}
+        page={sequence.spreads[index].page} renderPhotos />
+    </div>
+  ))));
+  if (renderError) throw renderError;
+  await settle([...root.querySelectorAll('img')]);
+  const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
+  const sheets = previews.map(({ definition, spread }, n) => {
+    const { sheet, boxes } = validateSpread(containers[n], spread, template, definition, [], []);
+    const sources = new Map<string, HTMLElement[]>();
+    const order = Object.entries(template.spreads[definition].boxes).sort(([, a], [, b]) => (a.flowOrder ?? 1) - (b.flowOrder ?? 1));
+    for (const [box] of order) {
+      const source = spread.boxes[box]?.text;
+      if (source && book.texts[source] !== undefined && boxes.has(box)) sources.set(source, [...sources.get(source) ?? [], boxes.get(box)!]);
+    }
+    for (const [source, targets] of sources) flow.run(markdownToHtml(book.texts[source]), targets, 'columns');
+    return { spread: definition, sheet };
+  });
+  layoutBook(root, sheets, 'layouts');
+  publish({ state: 'ready', template: info, pages: sequence.count, units: [], errors: [], warnings: [], flow: {} });
+}
+
 export async function startRender(root: HTMLElement) {
   let info: TemplateInfo | undefined;
   try {
@@ -205,19 +305,21 @@ export async function startRender(root: HTMLElement) {
     if (template.id !== book.project.template.id) throw new Error('The template ID does not match project.json.');
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
-    const index = Number(query.get('spread') ?? '0');
     const { spreads } = book.project;
-    if (!Number.isSafeInteger(index) || index < 0 || index >= spreads.length) throw new Error('Spread does not exist.');
     const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
     const { chains, positions } = textAssignments(book, template);
     const edit = book.mode === 'edit';
-    // The book check renders every spread hidden and without photos, to report issues for the whole book.
-    const check = edit && query.has('check');
-    const whole = !edit || check;
-    const selected = spreads[index].id;
-    const activeChains = [...chains].filter(([, chain]) => whole || chain.some(({ spread }) => spread === selected));
-    const measured = new Set([selected, ...activeChains.flatMap(([, chain]) => chain.map(({ spread }) => spread))]);
-    const visible = spreads.map((spread, i) => ({ spread, i })).filter(({ spread }) => whole || measured.has(spread.id));
+    // The editor renders the whole book twice: as scrolling spreads and as sidebar thumbnails.
+    const view: BookView = query.get('view') === 'thumbs' ? 'thumbs' : query.get('view') === 'layouts' ? 'layouts' : 'book';
+    if (edit && view !== 'book') {
+      for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
+    }
+    if (edit && view === 'layouts') {
+      await renderLayouts(root, book, template, info, query.get('spread') ?? '');
+      return;
+    }
+    const activeChains = [...chains];
+    const visible = spreads.map((spread, i) => ({ spread, i }));
     const where = spreads.map((spread, i) => {
       const { left, right } = sequence.spreads[i].page;
       const pages = left && right ? 'Pages ' + left + '–' + right : 'Page ' + (left ?? right);
@@ -228,24 +330,14 @@ export async function startRender(root: HTMLElement) {
     let renderError: unknown;
     const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
     flushSync(() => react.render(visible.map(({ spread, i }) => (
-      <div className={edit && (check || i !== index) ? 'if-spread-container if-measure' : 'if-spread-container'}
-        data-span={sequence.spreads[i].span} key={spread.id}>
+      <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} key={spread.id}>
         <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
-          page={sequence.spreads[i].page} renderPhotos={!edit || (!check && i === index)} />
+          page={sequence.spreads[i].page} renderPhotos />
       </div>
     ))));
     if (renderError) throw renderError;
     const images = [...root.querySelectorAll('img')];
-    const [_, decoded] = await Promise.all([
-      Promise.all([...document.fonts].map((font) => font.load())),
-      Promise.allSettled(images.map((img) => img.decode())),
-    ]);
-    await document.fonts.ready;
-    // Hidden frames may not get animation frames; the timeout keeps the book check from stalling.
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-      setTimeout(resolve, 100);
-    });
+    const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
     const warnings = [...book.problems, ...parameterWarnings(template.parameters, book.project.params, 'Document')].map(message);
@@ -277,8 +369,7 @@ export async function startRender(root: HTMLElement) {
       if (typography.outside) warnings.push(located(spread, 'Text extends outside the safe area.'));
     }
     const sheets = [...layouts.values()].map(({ sheet }) => sheet);
-    if (edit && !check) previewSheet(layouts.get(selected)!.sheet, root, sequence.spreads[index].span);
-    else if (check) root.hidden = true;
+    if (edit) layoutBook(root, [...layouts].map(([spread, { sheet }]) => ({ spread, sheet })), view);
     else {
       makePrintPages(root, sheets, sequence, format);
       await Promise.allSettled([...document.querySelectorAll<HTMLImageElement>('.if-print-page img')].map((img) => img.decode()));

@@ -26,7 +26,14 @@ const observedChanges = new Set<string>();
 const importedWrites = new Map<string, string>();
 let cache: string;
 const sessions = new Map<string, { book: OpenProject; mode: RenderProject['mode'] }>();
-const csp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data:";
+// `npm run dev` serves the editor and render pages from a Vite dev server for hot reloading. The custom protocol
+// proxies those requests, so origins, IPC checks, and frame messaging match the built app.
+const devServer = app.isPackaged ? undefined : process.env.IMAGEFLOW_DEV_SERVER;
+const devState = devServer ? process.env.IMAGEFLOW_DEV_STATE : undefined;
+const csp = devServer
+  ? "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' " +
+    devServer + ' ' + devServer.replace(/^http/, 'ws') + "; img-src 'self' data:"
+  : "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data:";
 if (app.isPackaged) process.env.ESBUILD_BINARY_PATH = join(process.resourcesPath, 'esbuild');
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 
@@ -38,24 +45,32 @@ function response(bytes: Uint8Array, type: string, headers?: Record<string, stri
   return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': type, ...headers } });
 }
 
+async function pageHtml(dist: string) {
+  if (!devServer) return readFile(join(dist, 'index.html'));
+  const page = await net.fetch(devServer + '/');
+  if (!page.ok) throw new Error('The Vite dev server did not return the editor page.');
+  return new Uint8Array(await page.arrayBuffer());
+}
+
 async function serve(request: Request) {
   if (request.method !== 'GET') return new Response(null, { status: 405 });
   const { host, pathname } = new URL(request.url);
   if (host !== 'editor' && host !== 'render') return new Response(null, { status: 404 });
   const dist = join(app.getAppPath(), 'dist');
-  if (/^\/assets\/[\w.-]+\.[a-z0-9]+$/i.test(pathname)) return net.fetch(pathToFileURL(join(dist, pathname)).href);
+  if (!devServer && /^\/assets\/[\w.-]+\.[a-z0-9]+$/i.test(pathname)) return net.fetch(pathToFileURL(join(dist, pathname)).href);
   if (host === 'editor' && pathname === '/') {
-    return response(await readFile(join(dist, 'index.html')), 'text/html; charset=utf-8', {
+    return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigin + "; frame-ancestors 'none'; base-uri 'none'",
     });
   }
   const match = host === 'render' ? viewPath.exec(pathname) : null;
+  if (!match && devServer) return net.fetch(devServer + pathname + new URL(request.url).search);
   if (!match) return new Response(null, { status: 404 });
   const [, id, resource] = match;
   const session = sessions.get(id);
   if (!session) return new Response(null, { status: 404 });
   if (!resource) {
-    return response(await readFile(join(dist, 'index.html')), 'text/html; charset=utf-8', {
+    return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': csp + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });
   }
@@ -214,7 +229,21 @@ async function openProject(owner: BrowserWindow, action: OpenAction): Promise<Pr
   if (!book || owner.isDestroyed()) return null;
   const summary = activate(book);
   watchProject(book);
+  if (devState) await writeFile(devState, JSON.stringify({ folder: book.folder, readOnly: book.readOnly })).catch(() => {});
   return summary;
+}
+
+// In dev mode the main process restarts when its code changes; reopen the project that was open before.
+async function restoreDevProject() {
+  if (!devState) return;
+  try {
+    const { folder, readOnly } = JSON.parse(await readFile(devState, 'utf8')) as { folder: string; readOnly: boolean };
+    const book = await loadProject(folder, cache, readOnly);
+    activate(book);
+    watchProject(book);
+  } catch {
+    // Nothing to restore, or the project moved.
+  }
 }
 
 function currentBook(id: string) {
@@ -273,10 +302,10 @@ async function exportBook(owner: BrowserWindow, projectId: string, mode: ExportM
   const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
   try {
     const fonts = mode === 'print' ? bundledFontNames(book.assets.files) : [];
-    const { bytes, warnings } = await printBook(renderOrigin + '/render/' + id, mode, fonts, job.signal, progress);
+    const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id, mode, fonts, job.signal, progress);
     progress('Saving PDF…');
     await saveProof(filePath, bytes, job.signal);
-    return { warnings };
+    return { warnings, errors };
   } catch (error) {
     if (job.signal.aborted) return null;
     throw error;
@@ -291,10 +320,13 @@ function menuCommand(label: string, accelerator: string | undefined, command: Co
 }
 
 function createWindow() {
+  // Automated checks set IMAGEFLOW_HIDE_WINDOW so test runs do not flash windows on screen.
+  const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
   const editor = new BrowserWindow({
-    width: 1520, height: 950, minWidth: 940, minHeight: 650,
+    width: 1520, height: 950, minWidth: 940, minHeight: 650, show: !hidden,
     webPreferences: {
       sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'),
+      backgroundThrottling: !hidden,
     },
   });
   window = editor;
@@ -360,6 +392,7 @@ void app.whenReady().then(async () => {
     ] },
     { role: 'windowMenu' },
   ]));
+  await restoreDevProject();
   createWindow();
   app.on('activate', () => { if (!window) createWindow(); });
 });
