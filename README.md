@@ -11,6 +11,8 @@ npm ci
 npm run dev
 ```
 
+`npm run dev` starts a Vite dev server and opens the app with hot reloading. Changes to editor and render CSS apply in place, React components refresh without losing the open project, and main-process changes restart Electron and reopen the project. Template, Markdown, and photo changes in the project folder reload as before. `npm start` runs the production build instead.
+
 - Choose **New project…** to create an editable copy of the starter book. **Try the Senja sample** opens a read-only two-page proof example.
 - Add, duplicate, reorder, or delete spreads from the left panel. Select a layout and edit its settings in the Inspector. Changes save to the project folder. Use **Undo** and **Redo** for edits made during the session.
 - Import JPEG, PNG, and WebP photos with the File menu, or drop them onto the photo strip or a photo box. Assign photos from the strip or Inspector. The Inspector also exposes crop controls and photo metadata.

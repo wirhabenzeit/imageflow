@@ -25,7 +25,8 @@ const photo = (label: string) => ({
   label,
   parameters: { caption: p.boolean({ label: 'Show caption', default: false }) },
 });
-const body = (label: string, flowOrder = 1) => ({ type: 'markdown' as const, label, flowOrder });
+const columns = p.enum({ label: 'Columns', default: '1', options: ['1', '2', '3'], labels: { 1: 'Full width', 2: '2 columns', 3: '3 columns' } });
+const body = (label: string, flowOrder = 1) => ({ type: 'markdown' as const, label, flowOrder, parameters: { columns } });
 
 const documentParameters = {
   showPageNumbers: p.boolean({ label: 'Page numbers', default: true }),
@@ -96,8 +97,8 @@ export default defineTemplate({
       parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow' }) },
       render: (ctx) => <Paper context={ctx}>
         <img alt="" className="compass" src={asset('compass.svg')} style={right(margin, 60, 14, 14)} />
-        <h1 style={right(margin, 120, page - 2 * margin, 110)}>{ctx.params.heading}</h1>
-        <p className="subtitle" style={right(margin, 238, page - 2 * margin, 20)}>{ctx.params.subtitle}</p>
+        <h1 {...ctx.edit('heading')} style={right(margin, 120, page - 2 * margin, 110)}>{ctx.params.heading}</h1>
+        <p {...ctx.edit('subtitle')} className="subtitle" style={right(margin, 238, page - 2 * margin, 20)}>{ctx.params.subtitle}</p>
       </Paper>,
     }),
     story: spread({
@@ -106,8 +107,9 @@ export default defineTemplate({
       boxes: { hero: photo('Main photo'), body: body('Story') },
       render: (ctx) => <Paper context={ctx} bled={{ left: true }}>
         <PhotoBox id="hero" style={fullLeft} />
-        <h2 style={right(margin, 40, page - 2 * margin, 44)}>{ctx.params.heading}</h2>
-        <MarkdownBox id="body" className="reading" style={{ ...right(margin, 100, 150, 150), fontSize: ctx.params.textSize + 'pt' }} />
+        <h2 {...ctx.edit('heading')} style={right(margin, 40, page - 2 * margin, 44)}>{ctx.params.heading}</h2>
+        <MarkdownBox id="body" {...ctx.edit('textSize')} className="reading" columns={Number(ctx.boxes.body.params.columns)}
+          style={{ ...right(margin, 100, 150, 150), fontSize: ctx.params.textSize + 'pt' }} />
         <Caption box={ctx.boxes.hero} style={right(margin, 262, 150, 10)} />
       </Paper>,
     }),
@@ -126,7 +128,7 @@ export default defineTemplate({
       render: (ctx) => {
         const cell = (page - 2 * 20 - ctx.params.gutter) / 2;
         return <Paper context={ctx}>
-          <h2 style={left(margin, 196, page - 2 * margin, 64)}>{ctx.params.heading}</h2>
+          <h2 {...ctx.edit('heading')} style={left(margin, 196, page - 2 * margin, 64)}>{ctx.params.heading}</h2>
           {(['hero', 'second', 'third', 'fourth'] as const).map((id, i) => <PhotoBox id={id} key={id}
             style={right(20 + (i % 2) * (cell + ctx.params.gutter), 20 + Math.floor(i / 2) * (cell + ctx.params.gutter), cell, cell)} />)}
         </Paper>;
@@ -155,30 +157,31 @@ export default defineTemplate({
       render: (ctx) => {
         const size = { fontSize: ctx.params.textSize + 'pt' };
         return <Paper context={ctx}>
-          <h2 style={left(40, 40, 210, 44)}>{ctx.params.heading}</h2>
-          <MarkdownBox id="body" className="reading" style={{ ...left(70, 100, 170, 160), ...size }} />
-          <MarkdownBox id="continuation" className="reading" style={{ ...right(50, 40, 170, 220), ...size }} />
+          <h2 {...ctx.edit('heading')} style={left(40, 40, 210, 44)}>{ctx.params.heading}</h2>
+          <MarkdownBox id="body" {...ctx.edit('textSize')} className="reading" columns={Number(ctx.boxes.body.params.columns)} style={{ ...left(70, 100, 170, 160), ...size }} />
+          <MarkdownBox id="continuation" {...ctx.edit('textSize')} className="reading" columns={Number(ctx.boxes.continuation.params.columns)}
+            style={{ ...right(50, 40, 170, 220), ...size }} />
         </Paper>;
       },
     }),
     calendar: spread({
       label: 'Calendar spread',
-      parameters: { month: p.date({ label: 'Month', default: '2027-01-01' }) },
       boxes: { hero: photo('Calendar photo') },
       elements: { grid: { label: 'Calendar grid', parameters: {
+        month: p.date({ label: 'Month', default: '2027-01-01', precision: 'month' }),
         firstWeekday: p.enum({ label: 'Week starts', default: 'monday', options: ['monday', 'sunday'], labels: { monday: 'Monday', sunday: 'Sunday' } }),
       } } },
       render: (ctx) => <Paper context={ctx} bled={{ left: true }}>
         <PhotoBox id="hero" style={fullLeft} />
         <Element id="grid" className="calendar-grid" style={right(40, 70, 210, 170)}>
-          <CalendarGrid date={ctx.params.month} firstWeekday={ctx.elements.grid.params.firstWeekday} />
+          <CalendarGrid date={ctx.elements.grid.params.month} firstWeekday={ctx.elements.grid.params.firstWeekday} />
         </Element>
       </Paper>,
     }),
     closing: spread({
       label: 'Closing page', span: 'left',
       parameters: { heading: p.string({ label: 'Closing line', default: 'Until next time' }) },
-      render: (ctx) => <Paper context={ctx}><h2 style={left(margin, 120, page - 2 * margin, 60)}>{ctx.params.heading}</h2></Paper>,
+      render: (ctx) => <Paper context={ctx}><h2 {...ctx.edit('heading')} style={left(margin, 120, page - 2 * margin, 60)}>{ctx.params.heading}</h2></Paper>,
     }),
   },
 });

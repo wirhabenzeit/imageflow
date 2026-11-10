@@ -1,33 +1,45 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import type { DragEvent } from 'react';
-import { renderOrigin } from './desktop';
-import type { BoxLocation, Command, ImportRequest, Issue, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
-import { assignmentCounts, newSpread } from './editing';
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
+import { bookLayout } from './desktop';
+import type { BookGeometry, Command, ImportRequest, Issue, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
+import { BookFrame } from './BookFrame';
+import { revealIn } from './reveal';
+import { EditPopover } from './EditPopover';
+import { assignmentCounts, newSpread, sourceUsage } from './editing';
+import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { BookCheck, Edit } from './Inspector';
+import { QuickLook, Sources } from './Sources';
+import { photoMime, sourceList, textMime } from './source-items';
+import type { SourceKind, SourceRef } from './source-items';
 import { pageSequence, resolveFormat } from './format';
 import type { ProjectFiles } from './project';
 
-type Rect = Omit<BoxLocation, 'id' | 'type'>;
-type Geometry = { type: 'geometry'; sheet: Rect; boxes: (Omit<BoxLocation, 'type'> & { type: BoxLocation['type'] | 'element' })[] };
-const photoMime = 'application/x-imageflow-photo';
-
-function Guides({ geometry, template }: { geometry: Geometry; template: TemplateInfo }) {
-  const { sheet } = geometry;
+function Guides({ sheet, template }: { sheet: Rect; template: TemplateInfo }) {
   const { trim, bleed, safe, spreadWidth, height } = resolveFormat(template.format);
   const x = sheet.width / spreadWidth;
   const y = sheet.height / height;
-  return <div className="guides" aria-hidden="true">
-    <div className="trim-guide" style={{ left: sheet.x + bleed.outside * x, top: sheet.y + bleed.top * y,
-      width: trim.width * 2 * x, height: trim.height * y }} />
-    <div className="gutter-guide" style={{ left: sheet.x + sheet.width / 2, top: sheet.y, height: sheet.height }} />
+  return <div className="guides" aria-hidden="true" style={{ left: sheet.x, top: sheet.y, width: sheet.width, height: sheet.height }}>
+    <div className="trim-guide" style={{ left: bleed.outside * x, top: bleed.top * y, width: trim.width * 2 * x, height: trim.height * y }} />
+    <div className="gutter-guide" style={{ left: sheet.width / 2, top: 0, height: sheet.height }} />
     {[0, 1].map((half) => <div className="safe-guide" key={half} style={{
-      left: sheet.x + (bleed.outside + half * trim.width + (half ? safe.binding : safe.outside)) * x,
-      top: sheet.y + (bleed.top + safe.top) * y,
+      left: (bleed.outside + half * trim.width + (half ? safe.binding : safe.outside)) * x,
+      top: (bleed.top + safe.top) * y,
       width: (trim.width - safe.binding - safe.outside) * x, height: (trim.height - safe.top - safe.bottom) * y,
     }} />)}
   </div>;
 }
+
+const icons = {
+  add: 'M8 3v10M3 8h10',
+  duplicate: 'M5.5 5.5h7v7h-7zM3.5 10.5v-7h7',
+  delete: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5',
+  up: 'M8 13V3M4 7l4-4 4 4',
+  down: 'M8 3v10M4 9l4 4 4-4',
+};
+const Icon = ({ name }: { name: keyof typeof icons }) => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+  <path d={icons[name]} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+</svg>;
 
 export function App() {
   const api = window.imageflow;
@@ -36,26 +48,42 @@ export function App() {
   const [spreadId, setSpreadId] = useState('');
   const [template, setTemplate] = useState<TemplateInfo>();
   const [render, setRender] = useState<RenderStatus>();
-  const [geometry, setGeometry] = useState<Geometry>();
+  // The last finished render. The Inspector keeps showing its flow positions while an edit re-renders, so lines
+  // like "Flow 1 of 2" do not vanish for a moment and shift the panel.
+  const [lastReady, setLastReady] = useState<RenderStatus>();
+  const [geometry, setGeometry] = useState<BookGeometry>();
+  const [thumbs, setThumbs] = useState<BookGeometry>();
+  const [inView, setInView] = useState<string[]>([]);
+  const [hovered, setHovered] = useState<string>();
+  const [hoveredTarget, setHoveredTarget] = useState<string>();
+  const [editing, setEditing] = useState<{ spread: string; key: string }>();
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
-  const [dropHighlight, setDropHighlight] = useState<string>();
-  const [photo, setPhoto] = useState<string>();
+  const [dropTarget, setDropTarget] = useState<string>();
+  const [sourceTab, setSourceTab] = useState<SourceKind>('photo');
+  // Selection is exclusive: a source from the strip, or else the current spread.
+  const [selectedSource, setSelectedSource] = useState<SourceRef>();
+  const [focusBox, setFocusBox] = useState<{ box: string; at: number }>();
+  const [quick, setQuick] = useState<SourceRef>();
   const [busy, setBusy] = useState('');
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
-  const preview = useRef<HTMLIFrameElement>(null);
-  // The book check renders the whole book in a hidden frame after the preview is ready, once per project revision.
-  const checkFrame = useRef<HTMLIFrameElement>(null);
-  const [checkId, setCheckId] = useState<string>();
   const [check, setCheck] = useState<BookCheck>();
+  const canvas = useRef<HTMLElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const thumbList = useRef<HTMLDivElement>(null);
+  const pendingReveal = useRef<string>(undefined);
   const queue = useRef(Promise.resolve());
   const history = useRef<{ past: ProjectFiles[]; future: ProjectFiles[] }>({ past: [], future: [] });
   const spreads = summary?.project.spreads ?? [];
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
   const sequence = template && pageSequence(spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
+  const pageLabels = spreads.map((_, i) => {
+    const pages = sequence?.spreads[i]?.page;
+    return pages?.left && pages?.right ? pages.left + '–' + pages.right : String(pages?.left ?? pages?.right ?? '');
+  });
   const writable = !!summary && !summary.readOnly;
 
   function adopt(next: ProjectSummary, reset = false, selected?: string) {
@@ -63,12 +91,16 @@ export function App() {
     if (reset) {
       history.current = { past: [], future: [] };
       setTemplate(undefined);
-      setPhoto(undefined);
+      setSelectedSource(undefined);
+      setQuick(undefined);
+      setLastReady(undefined);
+      setEditing(undefined);
+      canvas.current?.scrollTo({ top: 0 });
     }
     setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0].id :
       next.project.spreads.find(({ id }) => id === previous)?.id ?? next.project.spreads[0].id));
+    if (selected) pendingReveal.current = selected;
     setRender(undefined);
-    setGeometry(undefined);
     setSummary(next);
   }
 
@@ -138,7 +170,12 @@ export function App() {
         history.current.future = [];
       }
       adopt(result.value.summary);
-      if (request.kind === 'photo') setPhoto(result.value.imported[0]);
+      // Imports into the library select the first new source; imports onto a box keep the spread selected.
+      if (!request.target) {
+        const kind = request.kind === 'photo' ? 'photo' : 'text';
+        setSourceTab(kind);
+        setSelectedSource({ kind, id: result.value.imported[0] });
+      }
       setNotice('Imported ' + result.value.imported.length + (result.value.imported.length === 1 ? ' file' : ' files'));
     });
   }
@@ -184,41 +221,75 @@ export function App() {
       }
     });
     const progress = api.onProgress(setBusy);
+    // In dev mode a full page reload or main-process restart would drop the open project; reopen it.
+    if (import.meta.env.DEV) {
+      void api.openProject('reload').then((result) => { if ('value' in result && result.value) adopt(result.value, true); });
+    }
     return () => { command(); changed(); progress(); };
   }, [api]);
 
-  useEffect(() => {
-    function receive(event: MessageEvent<RenderStatus | Geometry>) {
-      if (event.origin !== renderOrigin || !event.data) return;
-      const checked = checkFrame.current;
-      if (checked && event.source === checked.contentWindow && 'state' in event.data) {
-        const id = checked.dataset.project!;
-        setCheck(event.data.state === 'ready' ? { id, errors: event.data.errors, warnings: event.data.warnings } :
-          { id, errors: [{ message: event.data.message }], warnings: [] });
-        return;
-      }
-      if (event.source !== preview.current?.contentWindow) return;
-      if ('type' in event.data && event.data.type === 'geometry') setGeometry(event.data);
-      else if ('state' in event.data) {
-        setRender(event.data);
-        if (event.data.template) setTemplate(event.data.template);
-      }
-    }
-    window.addEventListener('message', receive);
-    return () => window.removeEventListener('message', receive);
-  }, []);
-
-  useEffect(() => {
-    if (summary && render && checkId !== summary.id) setCheckId(summary.id);
-  }, [summary, render, checkId]);
+  // The book frame renders every spread, so its status doubles as the book check.
+  function bookStatus(status: RenderStatus, id: string) {
+    if (id !== current.current?.id) return;
+    setRender(status);
+    if (status.state === 'ready') setLastReady(status);
+    if (status.template) setTemplate(status.template);
+    setCheck(status.state === 'ready' ? { id, errors: status.errors, warnings: status.warnings } :
+      { id, errors: [{ message: status.message }], warnings: [] });
+  }
   const checkCurrent = !!check && check.id === summary?.id;
   const spreadIssues = new Map<string, 'error' | 'warning'>();
   for (const [level, list] of [['warning', check?.warnings ?? []], ['error', check?.errors ?? []]] as const) {
     for (const { spread } of list as Issue[]) if (spread) spreadIssues.set(spread, level);
   }
 
+  // Scrolls the book so a spread is fully visible. Waits for the next layout if the spread is new.
+  function reveal(id: string) {
+    const sheet = geometry?.sheets.find(({ spread }) => spread === id);
+    const view = canvas.current;
+    if (!sheet || !view || !stage.current) {
+      pendingReveal.current = id;
+      return;
+    }
+    pendingReveal.current = undefined;
+    const top = stage.current.offsetTop + sheet.y;
+    const label = bookLayout.book.gap;
+    if (top - label >= view.scrollTop && top + sheet.height <= view.scrollTop + view.clientHeight) return;
+    view.scrollTo({ top: Math.max(0, top - Math.max(label, (view.clientHeight - sheet.height) / 2)), behavior: 'smooth' });
+  }
+  function measureView() {
+    const view = canvas.current;
+    if (!view || !stage.current || !geometry) return;
+    const top = view.scrollTop - stage.current.offsetTop;
+    const bottom = top + view.clientHeight;
+    const ids = geometry.sheets.filter(({ y, height }) => y < bottom && y + height > top).map(({ spread }) => spread);
+    setInView((previous) => previous.join() === ids.join() ? previous : ids);
+  }
+  useEffect(() => {
+    measureView();
+    if (pendingReveal.current) reveal(pendingReveal.current);
+  }, [geometry]);
+  // The sidebar follows the selection when you select another spread, not on every re-render after an edit,
+  // so a list you scrolled elsewhere stays where you left it.
+  const revealedThumb = useRef('');
+  useEffect(() => {
+    if (!spreadId || revealedThumb.current === spreadId || !thumbs) return;
+    const button = thumbList.current?.querySelector<HTMLElement>('[data-spread="' + CSS.escape(spreadId) + '"]');
+    const list = thumbList.current?.parentElement;
+    if (!button || !list) return;
+    revealIn(list, button);
+    revealedThumb.current = spreadId;
+  }, [spreadId, thumbs]);
+
+  function select(id: string, scroll = true) {
+    setSpreadId(id);
+    setSelectedSource(undefined);
+    if (scroll) reveal(id);
+  }
+
   function move(offset: number) {
     if (!spread) return;
+    pendingReveal.current = spread.id;
     edit(({ project }) => {
       const start = project.spreads.findIndex(({ id }) => id === spread.id);
       const end = start + offset;
@@ -240,48 +311,133 @@ export function App() {
     }, undefined, next.id);
   }
 
-  function target(event: DragEvent<HTMLElement>) {
-    const canvas = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - canvas.left;
-    const y = event.clientY - canvas.top;
-    return geometry?.boxes.findLast((box) => box.type !== 'element' && x >= box.x && x <= box.x + box.width &&
-      y >= box.y && y <= box.y + box.height);
+  function assign(spread: string, box: string, source: SourceRef) {
+    edit(({ project }) => {
+      const state = project.spreads.find(({ id }) => id === spread);
+      if (state) state.boxes[box] = { params: state.boxes[box]?.params ?? {}, ...(source.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
+    });
   }
+
+  // Finds the spread and box under a pointer. The label strip above each spread belongs to the spread.
+  function locate(event: { clientX: number; clientY: number }, types?: readonly string[]) {
+    const bounds = stage.current?.getBoundingClientRect();
+    if (!bounds || !geometry) return {};
+    const x = event.clientX - bounds.left;
+    const y = event.clientY - bounds.top;
+    const inside = (rect: Rect, above = 0) => x >= rect.x && x <= rect.x + rect.width && y >= rect.y - above && y <= rect.y + rect.height;
+    const sheet = geometry.sheets.find((rect) => inside(rect, bookLayout.book.gap))?.spread;
+    const wanted = types?.includes(photoMime) ? 'photo' : types?.includes(textMime) ? 'markdown' : undefined;
+    const box = geometry.boxes.findLast((rect) => rect.type !== 'element' && (!wanted || rect.type === wanted) && inside(rect));
+    // The smallest edit target under the pointer wins, unless a smaller box sits on top of it.
+    const area = (rect: Rect) => rect.width * rect.height;
+    const target = wanted ? undefined : geometry.targets.filter((rect) => inside(rect))
+      .sort((a, b) => area(a) - area(b))[0];
+    return { sheet, box, target: target && (!box || area(target) <= area(box)) ? target : undefined };
+  }
+  const targetKey = (target: { spread: string; edits: string[] }) => target.spread + '|' + target.edits.join(' ');
+  const closeEditor = useCallback(() => setEditing(undefined), []);
+  // Tab moves between the edit targets of a spread in reading order.
+  function stepEditor(direction: 1 | -1) {
+    if (!editing || !geometry) return;
+    const order = geometry.targets.filter(({ spread }) => spread === editing.spread)
+      .sort((a, b) => Math.abs(a.y - b.y) > 4 ? a.y - b.y : a.x - b.x);
+    const at = order.findIndex((target) => targetKey(target) === editing.key);
+    const next = order[(at + direction + order.length) % order.length];
+    setEditing(next ? { spread: next.spread, key: targetKey(next) } : undefined);
+  }
+  const editTarget = editing && geometry?.targets.find((target) => targetKey(target) === editing.key);
+  const editSpread = editing && spreads.find(({ id }) => id === editing.spread);
 
   function drop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
-    setDropHighlight(undefined);
-    if (!api || !writable || !spread || busy) return;
-    const box = target(event);
+    setDropTarget(undefined);
+    if (!api || !writable || busy || !summary) return;
+    const { box } = locate(event);
     const photoId = event.dataTransfer.getData(photoMime);
-    if (photoId && box?.type === 'photo' && summary?.photoIndex[photoId]) {
-      edit(({ project }) => {
-        const state = project.spreads.find(({ id }) => id === spread.id);
-        if (state) state.boxes[box.id] = { photo: photoId, params: state.boxes[box.id]?.params ?? {} };
-      });
+    const textId = event.dataTransfer.getData(textMime);
+    if (photoId || textId) {
+      if (photoId && box?.type === 'photo' && summary.photoIndex[photoId]) assign(box.spread, box.id, { kind: 'photo', id: photoId });
+      if (textId && box?.type === 'markdown' && summary.project.texts[textId]) assign(box.spread, box.id, { kind: 'text', id: textId });
+      if (box) select(box.spread, false);
       return;
     }
     const paths = api.pathsForFiles([...event.dataTransfer.files]);
     if (!paths.length) return;
     const kind = box?.type === 'markdown' ? 'markdown' : box?.type === 'photo' ? 'photo' :
       paths.every((path) => /\.md$/i.test(path)) ? 'markdown' : 'photo';
-    importFiles({ kind, paths, target: box ? { spread: spread.id, box: box.id } : undefined });
+    if (box) select(box.spread, false);
+    importFiles({ kind, paths, target: box && box.type !== 'element' ? { spread: box.spread, box: box.id } : undefined });
   }
 
-  const activeBox = geometry?.boxes.find(({ id }) => id === (dropHighlight ?? highlight));
+  // Clicking a box shows its source in the source inspector; double-clicking opens Quick Look.
+  function boxSource(spread: string, box: string): SourceRef | undefined {
+    const state = spreads.find(({ id }) => id === spread)?.boxes[box];
+    if (state?.photo) return { kind: 'photo', id: state.photo };
+    if (state?.text) return { kind: 'text', id: state.text };
+  }
+  function choose(source: SourceRef) {
+    setSelectedSource(source);
+    setSourceTab(source.kind);
+  }
+
+  const quickItems = useMemo(() => summary && quick ? sourceList(summary, quick.kind) : [], [summary, quick]);
+  function navigateQuick(step: number) {
+    if (!quick) return;
+    const at = quickItems.findIndex(({ id }) => id === quick.id);
+    const next = quickItems[at + step];
+    if (!next) return;
+    const source = { kind: quick.kind, id: next.id };
+    setQuick(source);
+    choose(source);
+  }
+  // Space opens Quick Look for the selected source unless a control has focus.
+  const onSpace = useEffectEvent((event: globalThis.KeyboardEvent) => {
+    if (event.key !== ' ' || event.defaultPrevented || quick || !summary) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('input, textarea, select, button, [contenteditable], dialog, [role="option"]')) return;
+    if (!selectedSource) return;
+    event.preventDefault();
+    setQuick(selectedSource);
+  });
+  useEffect(() => {
+    const listener = (event: globalThis.KeyboardEvent) => onSpace(event);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, []);
+
+  function thumbKeys(event: KeyboardEvent) {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+    const next = step && spreads[index + step];
+    if (!next) return;
+    event.preventDefault();
+    select(next.id);
+    thumbList.current?.querySelector<HTMLElement>('[data-spread="' + CSS.escape(next.id) + '"]')?.focus();
+  }
+
+  const usage = useMemo(() => summary ? sourceUsage(summary.project, pageLabels) : { photo: {}, text: {} },
+    [summary, pageLabels.join()]);
+  const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id }) => spread + ':' + id === dropTarget) :
+    highlight ? geometry?.boxes.find(({ spread: owner, id }) => owner === spread?.id && id === highlight) : undefined;
+  const spreadSelected = !selectedSource;
+  const selectedSheet = spreadSelected ? geometry?.sheets.find(({ spread: id }) => id === spread?.id) : undefined;
+  const hoveredSheet = hovered !== spread?.id ? geometry?.sheets.find(({ spread: id }) => id === hovered) : undefined;
   const issue = error || (render?.state === 'error' ? render.message : '');
-  const canExport = render?.state === 'ready' && !busy;
+  // While an edit re-renders, export stays available from the last finished render; a failed render disables it.
+  const canExport = (render ?? lastReady)?.state === 'ready' && !busy;
   const counts = summary ? assignmentCounts(summary.project) : {};
-  const select = (id: string) => {
-    if (id === spread?.id) return;
-    setRender(undefined);
-    setGeometry(undefined);
-    setSpreadId(id);
-  };
+  const format = template && resolveFormat(template.format);
+  const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
+  const pagesLabel = (i: number) => (pageLabels[i].includes('–') ? 'Pages ' : 'Page ') + pageLabels[i];
 
   return <div className="studio">
     <header className="toolbar">
-      <div className="brand"><span className="brand-icon" aria-hidden="true">◫</span> ImageFlow</div>
+      <div className="toolbar-actions">
+        <div className="brand"><span className="brand-icon" aria-hidden="true">◫</span> ImageFlow</div>
+        {summary && <div className="history">
+          <button disabled={!history.current.past.length || !!busy} onClick={() => undo('undo')}>Undo</button>
+          <button disabled={!history.current.future.length || !!busy} onClick={() => undo('redo')}>Redo</button>
+        </div>}
+      </div>
       <div className="toolbar-actions">
         <button disabled={!api || !!busy} onClick={() => act('new')}>New project…</button>
         <button disabled={!api || !!busy} onClick={() => act('open')}>Open project…</button>
@@ -293,105 +449,150 @@ export function App() {
     </header>
     <div className={summary ? 'workspace' : 'workspace welcome-workspace'}>
       <aside className="project-panel" aria-label="Project">
-        <p className="eyebrow">Project</p>
-        <h1>{summary?.project.title ?? 'Photobook studio'}</h1>
-        <p className="muted">{summary ? summary.folder + (summary.readOnly ? ' · Sample' : '') : 'Local photobook projects'}</p>
-        {!summary && <button className="sample-button" disabled={!api || !!busy} onClick={() => act('sample')}>Open sample project</button>}
+        <div className="project-head">
+          <p className="eyebrow">Project</p>
+          <h1>{summary?.project.title ?? 'Photobook studio'}</h1>
+          <p className="muted">{summary ? summary.folder + (summary.readOnly ? ' · Sample' : '') : 'Local photobook projects'}</p>
+          {!summary && <button className="sample-button" disabled={!api || !!busy} onClick={() => act('sample')}>Open sample project</button>}
+        </div>
+        {summary && <details className="document-settings">
+          <summary>Book settings</summary>
+          <fieldset disabled={!writable}>
+            <label className="field">Book title<input key={summary.project.title} defaultValue={summary.project.title}
+              onBlur={(event) => {
+                const title = event.target.value.trim();
+                if (title && title !== summary.project.title) edit(({ project }) => { project.title = title; });
+              }} /></label>
+            {template && <Fields schema={template.parameters} values={summary.project.params}
+              update={(id, value) => edit(({ project }) => { project.params[id] = value; })} />}
+          </fieldset>
+        </details>}
         {summary && <>
-          <div className="compact-actions history">
-            <button disabled={!history.current.past.length || !!busy} onClick={() => undo('undo')}>Undo</button>
-            <button disabled={!history.current.future.length || !!busy} onClick={() => undo('redo')}>Redo</button>
+          <div className="spread-bar">
+            <span className="eyebrow">Spreads</span>
+            <div className="icon-actions">
+              <button aria-label="Add" title="Add spread" disabled={!writable || !template || !!busy} onClick={() => add()}><Icon name="add" /></button>
+              <button aria-label="Duplicate" title="Duplicate spread" disabled={!writable || !template || !spreadSelected || !!busy} onClick={() => add(true)}><Icon name="duplicate" /></button>
+              <button aria-label="Move spread up" title="Move up" disabled={!writable || !spreadSelected || index === 0 || !!busy} onClick={() => move(-1)}><Icon name="up" /></button>
+              <button aria-label="Move spread down" title="Move down" disabled={!writable || !spreadSelected || index === spreads.length - 1 || !!busy} onClick={() => move(1)}><Icon name="down" /></button>
+              <button aria-label="Delete" title="Delete spread" disabled={!writable || !spreadSelected || spreads.length < 2 || !!busy} onClick={() => edit(({ project }) => {
+                project.spreads = project.spreads.filter(({ id }) => id !== spread.id);
+              })}><Icon name="delete" /></button>
+            </div>
           </div>
-          <p className="eyebrow section-label">Spreads</p>
-          <div className="compact-actions">
-            <button disabled={!writable || !template || !!busy} onClick={() => add()}>Add</button>
-            <button disabled={!writable || !template || !!busy} onClick={() => add(true)}>Duplicate</button>
-            <button disabled={!writable || spreads.length < 2 || !!busy} onClick={() => edit(({ project }) => {
-              project.spreads = project.spreads.filter(({ id }) => id !== spread.id);
-            })}>Delete</button>
+          <div className="thumbs-scroll">
+            <div ref={thumbList} className={thumbs ? 'spread-thumbs placed' : 'spread-thumbs'} style={{ height: thumbs?.height }}
+              role="group" aria-label="Spreads" onKeyDown={thumbKeys}>
+              {spreads.map(({ id, definition }, i) => {
+                const rect = thumbs?.sheets.find(({ spread }) => spread === id);
+                const level = spreadIssues.get(id);
+                return <button key={id} data-spread={id}
+                  aria-current={spreadSelected && index === i ? 'page' : undefined} aria-label={label(definition, i) + ' ' + pageLabels[i]}
+                  title={pagesLabel(i) + ' · ' + label(definition, i) + (level ? ' · ' + (level === 'error' ? 'Has errors' : 'Has warnings') : '')}
+                  className={'spread-thumb' + (inView.includes(id) ? ' in-view' : '')} tabIndex={index === i ? 0 : -1}
+                  style={rect ? { left: rect.x - 5, top: rect.y - 5, width: rect.width + 10, height: rect.height + 30 } : undefined}
+                  onClick={() => select(id)}>
+                  <span className="spread-thumb-label">
+                    {level && <span className={'issue-dot issue-' + level} />}
+                    <span className="pages">{pageLabels[i]}</span>
+                    <span className="name">{label(definition, i)}</span>
+                  </span>
+                </button>;
+              })}
+              <BookFrame project={summary.id} view="thumbs" title="Spread thumbnails" onGeometry={setThumbs} />
+            </div>
           </div>
-          <div className="compact-actions">
-            <button aria-label="Move spread up" disabled={!writable || index === 0 || !!busy} onClick={() => move(-1)}>↑</button>
-            <button aria-label="Move spread down" disabled={!writable || index === spreads.length - 1 || !!busy} onClick={() => move(1)}>↓</button>
-          </div>
-          <ol className="spread-list">
-            {spreads.map(({ id, definition }, i) => {
-              const pages = sequence?.spreads[i].page;
-              const range = pages?.left && pages?.right ? pages.left + '–' + pages.right : pages?.left ?? pages?.right;
-              const level = spreadIssues.get(id);
-              return <li key={id}><button aria-current={index === i ? 'page' : undefined} disabled={!!busy} onClick={() => select(id)}>
-                <span>{template?.spreads[definition]?.label ?? 'Spread ' + (i + 1)}</span>
-                <span className="muted">{level && <span className={'issue-dot issue-' + level}
-                  title={level === 'error' ? 'Has errors' : 'Has warnings'} aria-label={level === 'error' ? 'Has errors' : 'Has warnings'} />}{range}</span>
-              </button></li>;
-            })}
-          </ol>
           {template && <div className="format">
-            <p className="eyebrow">Print format</p>
-            <p>{template.format.label}</p>
-            <p className="muted">{sequence?.count} book pages</p>
+            <span>{template.format.label}</span>
+            <span className="muted">{sequence?.count} pages · {spreads.length} spreads</span>
           </div>}
         </>}
       </aside>
       <div className="workspace-center">
-        <main className="canvas" aria-label="Spread preview" onDragOver={(event) => {
-          if (!writable || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime)) return;
-          event.preventDefault();
-          setDropHighlight(target(event)?.id);
-        }} onDragLeave={() => setDropHighlight(undefined)} onDrop={drop}>
-          {summary && <iframe key={summary.id + ':' + index} ref={preview} title={'Spread ' + (index + 1) + ' preview'}
-            src={renderOrigin + '/render/' + summary.id + '?spread=' + index} />}
-          {checkId && <iframe key={checkId} ref={checkFrame} className="book-check" data-project={checkId} title="Book check"
-            aria-hidden="true" tabIndex={-1} src={renderOrigin + '/render/' + checkId + '?check'} />}
-          {!summary && <div className="welcome">
-            <span className="welcome-icon" aria-hidden="true">◫</span>
-            <h2>See your book take shape</h2>
-            <p>{api ? 'Create a book with the starter template, open a project you trust, or preview the Senja sample.' :
-              'Launch the desktop app to open an ImageFlow project.'}</p>
-            {api && <button className="primary" disabled={!!busy} onClick={() => act('sample')}>Try the Senja sample</button>}
-          </div>}
-          {geometry && showGuides && template && <Guides geometry={geometry} template={template} />}
-          {activeBox && <div className="box-highlight" aria-hidden="true" style={{
-            left: activeBox.x, top: activeBox.y, width: activeBox.width, height: activeBox.height,
-          }} />}
+        <div className="canvas-wrap">
+          <main ref={canvas} className="canvas" aria-label="Book preview" onScroll={measureView}
+            onDragOver={(event) => {
+              if (!writable || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime)) return;
+              event.preventDefault();
+              const { box } = locate(event, event.dataTransfer.types);
+              setDropTarget(box ? box.spread + ':' + box.id : undefined);
+            }} onDragLeave={() => setDropTarget(undefined)} onDrop={drop}>
+            {summary && <div ref={stage} className="stage"
+              style={{ height: geometry?.height, cursor: hoveredTarget ? 'pointer' : undefined,
+                '--aspect': format ? format.spreadWidth / format.height : undefined } as CSSProperties}
+              onClick={(event) => {
+                const { sheet, box, target } = locate(event);
+                if (!sheet) return;
+                select(sheet, false);
+                if (target) setEditing({ spread: target.spread, key: targetKey(target) });
+                if (box) setFocusBox({ box: box.id, at: Date.now() });
+              }}
+              onDoubleClick={(event) => {
+                const { box } = locate(event);
+                const source = box && boxSource(box.spread, box.id);
+                if (source) setQuick(source);
+              }}
+              onMouseMove={(event) => {
+                const { sheet, target } = locate(event);
+                setHovered(sheet);
+                setHoveredTarget(target && targetKey(target));
+              }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
+              <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus} />
+              {geometry?.sheets.map(({ spread: id, x, y, width }) => {
+                const i = spreads.findIndex((item) => item.id === id);
+                if (i < 0) return null;
+                const level = spreadIssues.get(id);
+                return <div key={id} className={'sheet-label' + (spreadSelected && id === spread?.id ? ' selected' : '')} style={{ left: x, top: y - 26, width }}>
+                  {level && <span className={'issue-dot issue-' + level} />}{pagesLabel(i)} · {label(spreads[i].definition, i)}
+                </div>;
+              })}
+              {hoveredSheet && <div className="sheet-hover" aria-hidden="true" style={{
+                left: hoveredSheet.x, top: hoveredSheet.y, width: hoveredSheet.width, height: hoveredSheet.height }} />}
+              {selectedSheet && <div className="sheet-selection" aria-hidden="true" style={{
+                left: selectedSheet.x, top: selectedSheet.y, width: selectedSheet.width, height: selectedSheet.height }} />}
+              {showGuides && template && geometry?.sheets.map((sheet) => <Guides key={sheet.spread} sheet={sheet} template={template} />)}
+              {activeBox && <div className="box-highlight" aria-hidden="true" style={{
+                left: activeBox.x, top: activeBox.y, width: activeBox.width, height: activeBox.height,
+              }} />}
+              {geometry?.targets.filter((target) => {
+                const key = targetKey(target);
+                return key === hoveredTarget || key === editing?.key;
+              }).map((target) => <div key={targetKey(target)} aria-hidden="true"
+                className={'edit-target' + (targetKey(target) === editing?.key ? ' active' : '')}
+                style={{ left: target.x - 4, top: target.y - 3, width: target.width + 8, height: target.height + 6 }} />)}
+              {editing && editTarget && editSpread && template && summary && <EditPopover key={editing.key}
+                project={summary.project} spread={editSpread} template={template} edits={editTarget.edits} anchor={editTarget}
+                bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={!writable} edit={edit} close={closeEditor} step={stepEditor} />}
+            </div>}
+            {!summary && <div className="welcome">
+              <span className="welcome-icon" aria-hidden="true">◫</span>
+              <h2>See your book take shape</h2>
+              <p>{api ? 'Create a book with the starter template, open a project you trust, or preview the Senja sample.' :
+                'Launch the desktop app to open an ImageFlow project.'}</p>
+              {api && <button className="primary" disabled={!!busy} onClick={() => act('sample')}>Try the Senja sample</button>}
+            </div>}
+            {summary && !geometry && render?.state !== 'error' && <div className="preview-message" role="status">Rendering book…</div>}
+            {summary && render?.state === 'error' && <div className="preview-message">Book preview unavailable</div>}
+          </main>
           {summary && <label className="guides-toggle"><input type="checkbox" checked={showGuides}
             onChange={(event) => setShowGuides(event.target.checked)} /> Guides</label>}
-          {summary && !render && <div className="preview-message" role="status">Rendering spread…</div>}
-          {render?.state === 'error' && <div className="preview-message">Spread preview unavailable</div>}
-        </main>
-        {summary && <section className="filmstrip" aria-label="Photos" onDragOver={(event) => {
-          if (writable && event.dataTransfer.types.includes('Files')) event.preventDefault();
-        }} onDrop={(event) => {
-          event.preventDefault();
-          if (!api || !writable || busy) return;
-          const paths = api.pathsForFiles([...event.dataTransfer.files]);
-          if (paths.length) importFiles({ kind: 'photo', paths });
-        }}>
-          <div className="filmstrip-bar">
-            <span className="eyebrow">Photos · {Object.keys(summary.photoIndex).length}</span>
-            <button disabled={!writable || !!busy} onClick={() => act('import-photos')}>Import photos…</button>
-            <button disabled={!writable || !!busy} onClick={() => act('import-folder')}>Import folder…</button>
-            <button disabled={!writable || !!busy} onClick={() => act('import-texts')}>Import Markdown…</button>
-          </div>
-          <div className="filmstrip-photos">
-            {Object.entries(summary.photoIndex).map(([id, entry]) => {
-              const title = entry.title || entry.path.split('/').pop() || id;
-              return <button key={id} className="thumbnail" aria-pressed={photo === id} title={title} aria-label={title}
-                draggable={writable && !!summary.photos[id]} onDragStart={(event) => {
-                  event.dataTransfer.setData(photoMime, id);
-                  event.dataTransfer.effectAllowed = 'copy';
-                }} onClick={() => setPhoto(id)}>
-                {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" /> : <span>Missing</span>}
-                <span>{title}</span>{!!counts[id] && <small>{counts[id]}×</small>}
-              </button>;
-            })}
-          </div>
-        </section>}
+        </div>
+        {summary && <Sources summary={summary} tab={sourceTab} setTab={setSourceTab}
+          selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={choose}
+          usage={usage} writable={writable} busy={!!busy} importSources={act} quickLook={setQuick}
+          importPaths={(files) => {
+            const paths = api?.pathsForFiles(files) ?? [];
+            if (paths.length) importFiles({ kind: paths.every((path) => /\.md$/i.test(path)) ? 'markdown' : 'photo', paths });
+          }} />}
       </div>
-      {summary && spread && <Inspector summary={summary} spread={spread} template={template} render={render} photo={photo}
+      {summary && spread && <Inspector summary={summary} spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
+        usage={usage} inspectSource={choose} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
+        targets={geometry?.targets.filter((target) => target.spread === spread.id)}
         edit={edit} highlight={setHighlight} issues={issue} check={check} checking={!checkCurrent} select={select}
         importText={(box) => importFiles({ kind: 'markdown', target: { spread: spread.id, box } })} />}
     </div>
+    {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
+      close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     <footer className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
       {issue || busy || notice || (summary ? 'Project preview · Proof export' : 'ImageFlow for macOS')}
     </footer>

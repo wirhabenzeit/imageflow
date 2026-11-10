@@ -1,54 +1,40 @@
-import { useState } from 'react';
-import type { Issue, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
+import { useEffect, useRef, useState } from 'react';
+import { Field, Fields } from './Fields';
+import type { BookGeometry, Issue, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
+import { BookFrame } from './BookFrame';
+import { revealIn } from './reveal';
 import type { ProjectFiles, SpreadState, Values } from './project';
 import type { Parameter, Parameters } from './parameters';
 import { isParameterValue } from './parameters';
 import { centered } from './spread';
 import type { Placement } from './spread';
-import { switchDefinition } from './editing';
+import { readEdit, resolveEditPath, switchDefinition, writeEdit } from './editing';
+import type { EditTarget } from './editing';
+import type { SourceUsage } from './editing';
+import { SourceInspector } from './SourceInspector';
+import type { SourceRef } from './source-items';
 
 export type Edit = (files: ProjectFiles) => void;
 
-function Field({ param, value, change }: { param: Parameter; value: Values[string]; change: (value: Values[string]) => void }) {
-  const [invalid, setInvalid] = useState(false);
-  function commit(next: Values[string]) {
-    const valid = isParameterValue(param, next);
-    setInvalid(!valid);
-    if (valid && next !== value) change(next);
-  }
-  if (param.type === 'boolean') {
-    return <label className="field checkbox"><input type="checkbox" defaultChecked={value === true}
-      onChange={(event) => commit(event.target.checked)} /> {param.label}</label>;
-  }
-  if (param.type === 'enum') {
-    return <label className="field">{param.label}<select defaultValue={String(value)} onChange={(event) => commit(event.target.value)}>
-      {param.options.map((option) => <option key={option} value={option}>{param.labels?.[option] ?? option}</option>)}
-    </select></label>;
-  }
-  const numeric = param.type === 'number' || param.type === 'integer';
-  return <label className="field">
-    <span>{param.label}{numeric && param.unit ? ' (' + param.unit + ')' : ''}</span>
-    {param.type === 'string' && param.multiline
-      ? <textarea rows={3} defaultValue={String(value)} maxLength={param.maxLength} placeholder={param.placeholder}
-          onBlur={(event) => commit(event.target.value)} />
-      : <input type={numeric ? 'number' : param.type === 'string' ? 'text' : param.type}
-          defaultValue={String(value)} aria-invalid={invalid || undefined}
-          min={numeric || param.type === 'date' ? param.min : undefined}
-          max={numeric || param.type === 'date' ? param.max : undefined}
-          step={numeric ? param.step ?? (param.type === 'integer' ? 1 : 'any') : undefined}
-          maxLength={param.type === 'string' ? param.maxLength : undefined}
-          placeholder={param.type === 'string' ? param.placeholder : undefined}
-          onChange={param.type === 'color' ? (event) => commit(event.target.value) : undefined}
-          onBlur={(event) => commit(numeric ? event.target.valueAsNumber : event.target.value)} />}
-    {invalid && <small className="error-text">Enter a value within the field’s limits.</small>}
-  </label>;
-}
-
-function Fields({ schema, values, update }: { schema: Parameters; values: Values; update: (id: string, value: Values[string]) => void }) {
-  return Object.entries(schema).map(([id, param]) => {
-    const value = isParameterValue(param, values[id]) ? values[id] : param.default;
-    return <Field key={id + ':' + String(value)} param={param} value={value} change={(next) => update(id, next)} />;
-  });
+// Shows the spread in every layout of the template, rendered by the template itself.
+function LayoutPicker({ summary, spread, template, choose }: {
+  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; choose: (definition: string) => void;
+}) {
+  const [geometry, setGeometry] = useState<BookGeometry>();
+  return <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout"
+    style={{ height: geometry?.height }}>
+    {Object.entries(template.spreads).map(([id, item]) => {
+      const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
+      return <button key={id} type="button" role="radio" aria-checked={id === spread.definition} aria-label={item.label}
+        title={item.label + (item.span === 'spread' ? '' : ' · single ' + item.span + ' page')} className="layout-option"
+        style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
+        onClick={() => { if (id !== spread.definition) choose(id); }}>
+        <span className="layout-option-label">{item.label}</span>
+      </button>;
+    })}
+    <BookFrame project={summary.id} view="layouts" query={'spread=' + encodeURIComponent(spread.id)} title="Layout previews"
+      onGeometry={setGeometry} />
+  </div>;
 }
 
 export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[] };
@@ -74,11 +60,29 @@ function CheckList({ check, checking, spread, select }: {
   </details>;
 }
 
-export function Inspector({ summary, spread, template, render, photo, edit, importText, highlight, issues, check, checking, select }: {
-  summary: ProjectSummary; spread: SpreadState; template?: TemplateInfo; render?: RenderStatus;
-  photo?: string; edit: (change: Edit, notice?: string) => void; importText: (box: string) => void;
+// Shows either the selected spread or the selected source, never both.
+export function Inspector({ summary, spread, source, template, render, usage, edit, importText, highlight, issues, check, checking,
+  select, inspectSource, quickLook, focus, targets = [] }: {
+  summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
+  edit: (change: Edit, notice?: string) => void; importText: (box: string) => void;
   highlight: (id?: string) => void; issues: string; check?: BookCheck; checking: boolean; select: (spread: string) => void;
+  inspectSource: (source: SourceRef) => void; quickLook: () => void; focus?: { box: string; at: number };
+  targets?: BookGeometry['targets'];
 }) {
+  const sections = useRef(new Map<string, HTMLElement>());
+  const [flash, setFlash] = useState<string>();
+  // A click on a box in the book scrolls to its section here.
+  useEffect(() => {
+    if (!focus || source) return;
+    const section = sections.current.get(focus.box);
+    if (!section) return;
+    if (section instanceof HTMLDetailsElement) section.open = true;
+    const panel = section.closest<HTMLElement>('.inspector');
+    if (panel) revealIn(panel, section, true);
+    setFlash(focus.box);
+    const timer = setTimeout(() => setFlash(undefined), 900);
+    return () => clearTimeout(timer);
+  }, [focus, source]);
   const definition = template?.spreads[spread.definition];
   function changeSpread(update: (spread: SpreadState) => void, notice?: string) {
     edit(({ project }) => {
@@ -88,30 +92,50 @@ export function Inspector({ summary, spread, template, render, photo, edit, impo
   }
   const writable = !summary.readOnly;
   const archived = Object.keys(spread.archive);
-  const selectedPhoto = photo ? summary.photoIndex[photo] : undefined;
-  return <aside className="inspector" aria-label="Inspector">
+  // Options a template attaches to a box or element with ctx.edit() appear in that box's or element's section,
+  // matching the popover you get by clicking it. Spread options claimed this way leave the Spread section.
+  const attached = new Map<string, EditTarget[]>();
+  const claimed = new Set<string>();
+  for (const { edits } of targets) {
+    const owner = edits.map((path) => /^(boxes|elements)\.([^.]+)\./.exec(path)).find(Boolean);
+    if (!owner) continue;
+    const prefix = owner[0];
+    const list = attached.get(prefix) ?? [];
+    for (const path of edits) {
+      const target = !path.startsWith(prefix) && resolveEditPath(template ?? { parameters: {}, spreads: {} }, spread.definition, path);
+      if (!target || list.some((item) => item.path === path)) continue;
+      list.push(target);
+      if (target.scope === 'spread') claimed.add(target.key);
+    }
+    attached.set(prefix, list);
+  }
+  const extras = (prefix: string) => (attached.get(prefix) ?? []).map((target) => {
+    const value = readEdit(summary.project, spread, target);
+    return <Field key={target.path + ':' + String(value)} param={target.param} value={value}
+      change={(next) => edit(({ project }) => writeEdit(project, spread.id, target, next), target.param.label + ' updated')} />;
+  });
+  const spreadParameters = Object.fromEntries(Object.entries(definition?.parameters ?? {}).filter(([key]) => !claimed.has(key)));
+  const header = <>
     <p className="eyebrow">Inspector</p>
     {issues && <div className="inspection-issues" role="alert">{issues}</div>}
-    <CheckList check={check} checking={checking} spread={spread.id} select={select} />
+    <CheckList check={check} checking={checking} spread={source ? '' : spread.id} select={select} />
+  </>;
+  if (source) {
+    return <aside className="inspector" aria-label="Inspector">
+      {header}
+      <SourceInspector summary={summary} source={source} template={template} render={render} usage={usage} writable={writable}
+        edit={edit} select={select} quickLook={quickLook} />
+    </aside>;
+  }
+  return <aside className="inspector" aria-label="Inspector">
+    {header}
     <fieldset disabled={!writable}>
-      <details open><summary>Document</summary>
-        <label className="field">Book title<input key={summary.project.title} defaultValue={summary.project.title}
-          onBlur={(event) => {
-            const title = event.target.value.trim();
-            if (title && title !== summary.project.title) edit(({ project }) => { project.title = title; });
-          }} /></label>
-        {template && <Fields schema={template.parameters} values={summary.project.params}
-          update={(id, value) => edit(({ project }) => { project.params[id] = value; })} />}
-      </details>
       {template && <details open><summary>Spread</summary>
-        <label className="field">Layout<select aria-label="Layout" value={spread.definition} onChange={(event) => {
-          const next = event.target.value;
-          changeSpread((item) => switchDefinition(item, next, template), 'Layout changed. Previous settings are stored with the spread.');
-        }}>
-          {!definition && <option value={spread.definition}>{spread.definition} (missing)</option>}
-          {Object.entries(template.spreads).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}
-        </select></label>
-        {definition && <Fields schema={definition.parameters} values={spread.params}
+        <p className="field-label">Layout{definition ? ' · ' + definition.label : ''}</p>
+        {!definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
+        <LayoutPicker summary={summary} spread={spread} template={template} choose={(next) =>
+          changeSpread((item) => switchDefinition(item, next, template), 'Layout changed. Previous settings are stored with the spread.')} />
+        {definition && <Fields schema={spreadParameters} values={spread.params}
           update={(id, value) => changeSpread((item) => { item.params[id] = value; })} />}
         {archived.length > 0 && <p className="muted">Stored layouts · {archived.map((id) => template.spreads[id]?.label ?? id).join(', ')}</p>}
       </details>}
@@ -119,12 +143,26 @@ export function Inspector({ summary, spread, template, render, photo, edit, impo
         const state = spread.boxes[id];
         const photoBox = box.type === 'photo';
         const assigned = photoBox ? state?.photo : state?.text;
-        const choices: [string, string | undefined][] = photoBox ? Object.entries(summary.photoIndex).map(([id, entry]) => [id, entry.title || entry.path.split('/').pop()]) :
-          Object.entries(summary.project.texts).map(([id, path]) => [id, path.split('/').pop()]);
+        const choices: [string, string | undefined][] = Object.entries(summary.project.texts).map(([id, path]) => [id, path.split('/').pop()]);
         const position = render?.state === 'ready' ? render.flow[spread.id + ':' + id] : undefined;
-        return <details key={spread.id + ':' + id} open onMouseEnter={() => highlight(id)} onMouseLeave={() => highlight()}>
+        return <details key={spread.id + ':' + id} open onMouseEnter={() => highlight(id)} onMouseLeave={() => highlight()}
+          ref={(element) => { if (element) sections.current.set(id, element); else sections.current.delete(id); }}
+          className={flash === id ? 'flash' : undefined}>
           <summary>{box.label}</summary>
-          <label className="field">{photoBox ? 'Photo' : 'Markdown'}
+          {photoBox ? <div className="box-photo">
+            {assigned && summary.photos[assigned]
+              ? <button type="button" className="box-photo-thumb" title="Show photo" onClick={() => inspectSource({ kind: 'photo', id: assigned })}>
+                  <img src={summary.photos[assigned]} alt="" />
+                </button>
+              : <span className="box-photo-empty">{assigned ? 'Missing' : 'Empty'}</span>}
+            <div className="box-photo-info">
+              <span className="box-photo-name">{assigned ? summary.photoIndex[assigned]?.title || assigned : 'No photo'}</span>
+              <span className="muted">{assigned ? 'Drag another photo onto the box to replace it.' : 'Drag a photo from the strip onto the box.'}</span>
+              {assigned && <button type="button" className="link" onClick={() => changeSpread((item) => {
+                if (item.boxes[id]) item.boxes[id] = { params: item.boxes[id].params };
+              }, 'Photo removed from ' + box.label)}>Remove</button>}
+            </div>
+          </div> : <label className="field">Markdown
             <select aria-label={box.label + ' assignment'} value={assigned ?? ''} onChange={(event) => {
               const value = event.target.value;
               changeSpread((item) => {
@@ -134,10 +172,14 @@ export function Inspector({ summary, spread, template, render, photo, edit, impo
             }}>
               <option value="">Unassigned</option>
               {assigned && !choices.some(([id]) => id === assigned) && <option value={assigned}>Missing · {assigned}</option>}
-              {choices.map(([id, label]) => <option value={id} key={id}>{label ?? id}{photoBox && !summary.photos[id] ? ' (missing)' : ''}</option>)}
+              {choices.map(([id, label]) => <option value={id} key={id}>{label ?? id}</option>)}
             </select>
-          </label>
-          {!photoBox && <button onClick={() => importText(id)}>Import Markdown…</button>}
+          </label>}
+          {!photoBox && <div className="box-actions">
+            {assigned && summary.project.texts[assigned] &&
+              <button type="button" onClick={() => inspectSource({ kind: 'text', id: assigned })}>Show text</button>}
+            <button onClick={() => importText(id)}>Import Markdown…</button>
+          </div>}
           {position && <p className="muted">Flow {position.part} of {position.parts}</p>}
           {photoBox && assigned && <div className="crop-controls">
             {([['centerX', 'Horizontal'], ['centerY', 'Vertical'], ['zoom', 'Zoom']] as const).map(([key, label]) =>
@@ -155,26 +197,21 @@ export function Inspector({ summary, spread, template, render, photo, edit, impo
             item.boxes[id] ??= { params: {} };
             item.boxes[id].params[key] = value;
           })} />
+          {extras('boxes.' + id + '.')}
         </details>;
       })}
       {Object.entries(definition?.elements ?? {}).map(([id, element]) => (
-        <details key={spread.id + ':' + id} open onMouseEnter={() => highlight(id)} onMouseLeave={() => highlight()}>
+        <details key={spread.id + ':' + id} open onMouseEnter={() => highlight(id)} onMouseLeave={() => highlight()}
+          ref={(element) => { if (element) sections.current.set(id, element); else sections.current.delete(id); }}
+          className={flash === id ? 'flash' : undefined}>
           <summary>{element.label}</summary>
           <Fields schema={element.parameters} values={spread.elements[id]?.params ?? {}} update={(key, value) => changeSpread((item) => {
             item.elements[id] ??= { params: {} };
             item.elements[id].params[key] = value;
           })} />
+          {extras('elements.' + id + '.')}
         </details>
       ))}
-      {photo && selectedPhoto && <details open>
-        <summary>Photo details</summary>
-        <p className="muted">{selectedPhoto.path.split('/').pop()}</p>
-        {([['title', 'Photo title'], ['caption', 'Caption'], ['credit', 'Credit'], ['altText', 'Alt text']] as const).map(([key, label]) =>
-          <Field key={photo + ':' + key + ':' + selectedPhoto[key]} param={{ type: 'string', label, default: '', multiline: key === 'caption' }}
-            value={selectedPhoto[key] ?? ''} change={(value) => edit(({ photoIndex }) => {
-              if (photoIndex[photo]) photoIndex[photo][key] = String(value);
-            })} />)}
-      </details>}
     </fieldset>
   </aside>;
 }

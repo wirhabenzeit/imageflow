@@ -124,12 +124,17 @@
     {
       "id": "march",
       "definition": "calendar",
-      "params": {
-        "month": "2027-03-01"
-      },
+      "params": {},
       "boxes": {
         "hero": {
           "photo": "segla"
+        }
+      },
+      "elements": {
+        "grid": {
+          "params": {
+            "month": "2027-03-01"
+          }
         }
       }
     },
@@ -185,12 +190,17 @@
     {
       "id": "may",
       "definition": "calendar",
-      "params": {
-        "month": "2027-05-01"
-      },
+      "params": {},
       "boxes": {
         "hero": {
           "photo": "shore"
+        }
+      },
+      "elements": {
+        "grid": {
+          "params": {
+            "month": "2027-05-01"
+          }
         }
       }
     },

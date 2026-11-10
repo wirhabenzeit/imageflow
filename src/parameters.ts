@@ -15,7 +15,7 @@ export const parameterSchema = z.discriminatedUnion('type', [
   z.object({ ...common, ...numeric, type: z.literal('number'), default: z.number() }),
   z.object({ ...common, type: z.literal('enum'), default: z.string(), options: z.array(z.string()).min(1), labels: z.record(z.string(), z.string()).optional() }),
   z.object({ ...common, type: z.literal('color'), default: color }),
-  z.object({ ...common, type: z.literal('date'), default: date, min: date.optional(), max: date.optional() }),
+  z.object({ ...common, type: z.literal('date'), default: date, min: date.optional(), max: date.optional(), precision: z.enum(['day', 'month']).optional() }),
 ]).refine((param) => isParameterValue(param, param.default), 'Default must satisfy the parameter constraints.');
 
 export type Parameter = z.infer<typeof parameterSchema>;

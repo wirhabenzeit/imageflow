@@ -142,8 +142,20 @@ type RenderContext = {
   page: { left?: number; right?: number };  // page numbers of this spread
   format: ResolvedFormat;                   // trim, bleed, safe area in mm
   mode: 'edit' | 'export';
+  edit(...paths: EditPath[]): { 'data-edit'?: string };  // marks a node for click-to-edit
 };
 ```
+
+### Click-to-edit
+
+`ctx.edit(...paths)` marks the node that shows parameters, so clicking it in the editor opens a popover with a control for each parameter (text field, month or date picker, segmented choice, slider, colour). Spread the result onto the node:
+
+```tsx
+<h2 {...ctx.edit('heading')}>{ctx.params.heading}</h2>
+<Element id="grid" {...ctx.edit('month')}>…</Element>
+```
+
+Paths name a spread parameter (`heading`), a document parameter (`document.paper`), an element parameter (`elements.grid.firstWeekday`), or a box parameter (`boxes.hero.showCaption`). With `spreadFor`, paths are type-checked. `<Element>` is an edit target for its own parameters without marking; marks on it add more. `ctx.edit` returns no attributes in export, and the Book check warns about paths the layout does not declare. Set `precision: 'month'` on a date parameter to edit it with a month picker; the value is the month's first day.
 
 Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths, image data, or Markdown source, and they cannot change project data.
 
@@ -154,7 +166,7 @@ Templates read photo metadata (for captions) and page numbers through the contex
 | `<Spread>` | Root of every spread. Sizes the spread to two trims plus bleed, sets geometry CSS variables, and handles page halves. |
 | `<PhotoBox id>` | Renders the assigned photo with its crop (`object-fit: cover` plus the saved crop), using a preview-size image in the editor and the original in export. Its element is the box's geometry and drop zone. |
 | `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. |
-| `<Element id>` | Wraps generated artwork so the editor can highlight it from the sidebar. |
+| `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked. |
 | `asset(path)` | Resolves a file in `template/assets/` for use in `src` or CSS. |
 
 Rules:

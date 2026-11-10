@@ -280,6 +280,8 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
   return {
     id, folder: basename(book.folder), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
+    photoSizes: Object.fromEntries([...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
+    texts: book.texts,
   };
 }
 

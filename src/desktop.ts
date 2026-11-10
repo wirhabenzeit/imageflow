@@ -17,7 +17,10 @@ export type ExportMode = 'proof' | 'print';
 export type Command = OpenAction | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'undo' | 'redo';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
+  // Thumbnail URL and pixel size per readable photo; Markdown source per readable text.
   photos: Record<string, string>;
+  photoSizes: Record<string, { width: number; height: number }>;
+  texts: Record<string, string>;
 };
 export type Result<T> = { value: T } | { error: string };
 export type ImportRequest = { kind: 'photo' | 'markdown'; paths?: string[]; folder?: boolean; target?: { spread: string; box: string } };
@@ -43,6 +46,23 @@ export type TemplateInfo = {
   version: string; format: PrintFormat; parameters: Parameters; spreads: Record<string, SpreadDefinition>;
 };
 export type BoxLocation = { id: string; type: 'photo' | 'markdown'; x: number; y: number; width: number; height: number };
+// The editor shows the whole book in two frames: the scrolling spread view and the sidebar thumbnails.
+// The layout picker renders one spread in every layout of the template.
+export type BookView = 'book' | 'thumbs' | 'layouts';
+export const bookLayout: Record<BookView, { pad: number; gap: number; columns?: number; columnGap?: number }> = {
+  book: { pad: 32, gap: 40 },
+  thumbs: { pad: 12, gap: 34 },
+  layouts: { pad: 6, gap: 26, columns: 2, columnGap: 12 },
+};
+export type Rect = { x: number; y: number; width: number; height: number };
+// Posted by a book frame after layout. Coordinates are relative to the frame document.
+export type BookGeometry = {
+  type: 'geometry'; height: number;
+  sheets: (Rect & { spread: string })[];
+  boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element' })[];
+  // Nodes a template marked with `ctx.edit(...)`, and elements with parameters.
+  targets: (Rect & { spread: string; edits: string[] })[];
+};
 // A preflight finding. `spread` is the spread id and `where` its readable location, such as "Pages 6–7 · Photo grid".
 export type Issue = { message: string; spread?: string; where?: string };
 export const issueText = ({ message, where }: Issue) => where ? where + ' · ' + message : message;

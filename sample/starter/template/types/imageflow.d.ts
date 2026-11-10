@@ -59,8 +59,8 @@ export type NumberParameter = Common & Numeric & { type: 'number'; default: numb
 export type EnumParameter = Common & { type: 'enum'; default: string; options: readonly string[]; labels?: Record<string, string> };
 /** A `#rrggbb` colour. */
 export type ColorParameter = Common & { type: 'color'; default: string };
-/** An ISO date such as `2027-03-01`. */
-export type DateParameter = Common & { type: 'date'; default: string; min?: string; max?: string };
+/** An ISO date such as `2027-03-01`. With `precision: 'month'` the editor picks a month and stores its first day. */
+export type DateParameter = Common & { type: 'date'; default: string; min?: string; max?: string; precision?: 'day' | 'month' };
 export type Parameter = BooleanParameter | StringParameter | IntegerParameter | NumberParameter | EnumParameter | ColorParameter | DateParameter;
 export type Parameters = Record<string, Parameter>;
 
@@ -108,6 +108,15 @@ type BoxContext<B> = B extends { type: 'photo' }
   ? { params: ValuesOf<B>; photo: Photo | null }
   : { params: ValuesOf<B>; text: FlowPosition | null };
 
+type ParameterKeys<T> = T extends { parameters?: infer P } ? keyof NonNullable<P> & string : never;
+type NestedPaths<Group extends string, R> = { [K in keyof R & string]: `${Group}.${K}.${ParameterKeys<R[K]>}` }[keyof R & string];
+/** A parameter that `edit` can point at: `heading`, `document.paper`, `elements.grid.firstWeekday`, or `boxes.hero.showCaption`. */
+export type EditPath<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
+  | ParameterKeys<S> | `document.${keyof D & string}`
+  | NestedPaths<'elements', NonNullable<S['elements']>> | NestedPaths<'boxes', NonNullable<S['boxes']>>;
+/** Attributes returned by `edit`. Spread them onto the node that shows the parameters. */
+export type EditMarker = { 'data-edit'?: string };
+
 /** The context passed to `render`, typed from a spread declared with `spreadFor`. */
 export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = {
   params: ValuesOf<S>;
@@ -118,6 +127,11 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   page: { left?: number; right?: number };
   format: ResolvedFormat;
   mode: 'edit' | 'export';
+  /**
+   * Marks the node that shows these parameters, so clicking it in the editor opens them for editing:
+   * `<h2 {...ctx.edit('heading')}>{ctx.params.heading}</h2>`. Returns no attributes in export.
+   */
+  edit(...paths: EditPath<S, D>[]): EditMarker;
 };
 
 /** The render context of a spread declared without `spreadFor`. */
@@ -129,6 +143,7 @@ export type UntypedRenderContext = {
   page: { left?: number; right?: number };
   format: ResolvedFormat;
   mode: 'edit' | 'export';
+  edit(...paths: string[]): EditMarker;
 };
 
 export type SpreadDefinition = SpreadDeclaration & { render(context: UntypedRenderContext): ImageFlowNode };
@@ -175,11 +190,21 @@ type Styling = { className?: string; style?: CSSProperties };
 
 /** The root of every spread. Sets `--trim-width`, `--trim-height`, `--bleed-*`, and `--safe-*` CSS variables. */
 export function Spread(props: Styling & { children?: ImageFlowNode }): ImageFlowElement;
-/** A box that shows the photo assigned to box `id`, cropped to fill it. */
-export function PhotoBox(props: Styling & { id: string }): ImageFlowElement;
-/** A box that shows its part of the Markdown text assigned to box `id`. */
-export function MarkdownBox(props: Styling & { id: string }): ImageFlowElement;
-/** Generated content with parameters, such as a calendar grid. */
-export function Element(props: Styling & { id: string; children?: ImageFlowNode }): ImageFlowElement;
+/**
+ * A box that shows the photo assigned to box `id`, cropped to fill it. In the editor, clicking it edits the box's
+ * parameters and any others it is marked with.
+ */
+export function PhotoBox(props: Styling & EditMarker & { id: string }): ImageFlowElement;
+/**
+ * A box that shows its part of the Markdown text assigned to box `id`. `columns` (1–6, default 1) splits it into
+ * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.
+ * In the editor, clicking it edits the box's parameters and any others it is marked with: `{...ctx.edit('textSize')}`.
+ */
+export function MarkdownBox(props: Styling & EditMarker & { id: string; columns?: number }): ImageFlowElement;
+/**
+ * Generated content with parameters, such as a calendar grid. In the editor, clicking it edits the element's
+ * parameters and any others it is marked with: `<Element id="grid" {...ctx.edit('month')}>`.
+ */
+export function Element(props: Styling & EditMarker & { id: string; children?: ImageFlowNode }): ImageFlowElement;
 /** URL of a file in `template/assets/`. */
 export function asset(path: string): string;
