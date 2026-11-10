@@ -1,0 +1,242 @@
+{
+  "schemaVersion": 1,
+  "title": "Along the coast",
+  "template": {
+    "id": "imageflow-starter",
+    "version": "0.2.0"
+  },
+  "params": {},
+  "texts": {
+    "arrival": "texts/arrival.md",
+    "notebook": "texts/notebook.md",
+    "return": "texts/return.md"
+  },
+  "spreads": [
+    {
+      "id": "title",
+      "definition": "title",
+      "params": {
+        "subtitle": "Field notes from Senja",
+        "heading": "Along the coast"
+      },
+      "boxes": {}
+    },
+    {
+      "id": "arriving",
+      "definition": "story",
+      "params": {
+        "heading": "Arriving"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "segla"
+        },
+        "body": {
+          "text": "arrival"
+        }
+      }
+    },
+    {
+      "id": "headlands",
+      "definition": "panorama",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "shore",
+          "params": {
+            "caption": true
+          }
+        }
+      }
+    },
+    {
+      "id": "settlements",
+      "definition": "grid",
+      "params": {
+        "heading": "Settlements"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "segla"
+        },
+        "second": {
+          "photo": "shore"
+        },
+        "third": {
+          "photo": "cottage"
+        },
+        "fourth": {
+          "photo": "light"
+        }
+      }
+    },
+    {
+      "id": "turning",
+      "definition": "story",
+      "params": {
+        "heading": "A turn in the path"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "cottage"
+        },
+        "body": {
+          "text": "arrival"
+        }
+      }
+    },
+    {
+      "id": "water",
+      "definition": "pair",
+      "params": {
+        "framed": false
+      },
+      "boxes": {
+        "hero": {
+          "photo": "shore",
+          "params": {
+            "caption": false
+          }
+        },
+        "second": {
+          "photo": "light",
+          "params": {
+            "caption": false
+          }
+        }
+      }
+    },
+    {
+      "id": "notebook",
+      "definition": "text",
+      "params": {
+        "heading": "From the notebook"
+      },
+      "boxes": {
+        "body": {
+          "text": "notebook"
+        },
+        "continuation": {
+          "text": "notebook"
+        }
+      }
+    },
+    {
+      "id": "march",
+      "definition": "calendar",
+      "params": {
+        "month": "2027-03-01"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "segla"
+        }
+      }
+    },
+    {
+      "id": "quiet",
+      "definition": "story",
+      "params": {
+        "heading": "When it got quiet"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "light"
+        },
+        "body": {
+          "text": "arrival"
+        }
+      }
+    },
+    {
+      "id": "road",
+      "definition": "panorama",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "cottage",
+          "params": {
+            "caption": true
+          }
+        }
+      }
+    },
+    {
+      "id": "frames",
+      "definition": "grid",
+      "params": {
+        "heading": "Four frames"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "light"
+        },
+        "second": {
+          "photo": "cottage"
+        },
+        "third": {
+          "photo": "shore"
+        },
+        "fourth": {
+          "photo": "segla"
+        }
+      }
+    },
+    {
+      "id": "may",
+      "definition": "calendar",
+      "params": {
+        "month": "2027-05-01"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "shore"
+        }
+      }
+    },
+    {
+      "id": "twilight",
+      "definition": "pair",
+      "params": {
+        "framed": true
+      },
+      "boxes": {
+        "hero": {
+          "photo": "segla",
+          "params": {
+            "caption": true
+          }
+        },
+        "second": {
+          "photo": "light",
+          "params": {
+            "caption": true
+          }
+        }
+      }
+    },
+    {
+      "id": "last-notes",
+      "definition": "text",
+      "params": {
+        "heading": "The last notes"
+      },
+      "boxes": {
+        "body": {
+          "text": "return"
+        },
+        "continuation": {
+          "text": "return"
+        }
+      }
+    },
+    {
+      "id": "closing",
+      "definition": "closing",
+      "params": {
+        "heading": "Until next time"
+      },
+      "boxes": {}
+    }
+  ]
+}

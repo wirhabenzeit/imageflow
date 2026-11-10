@@ -1,28 +1,45 @@
-# Senja Photobook Studio
+# ImageFlow
 
-An interactive prototype for editing a square photobook spread by spread. The starter book contains eight pages of sample text and generated Senja imagery.
+ImageFlow is a macOS photobook editor. Its draft starter project is a 28-page WhiteWall Gallery Square book with sample photos, Markdown, and a template you can edit.
 
-## Try the editor
+## Run locally
 
-Open `dist/senja-preview.html` in a browser to use the standalone editor. Generate this file with `npm run build` if it is missing. Book edits are held in the current tab session.
-
-- Select a spread in the Book panel. Add, duplicate, delete, or reorder spreads.
-- Select a layout in the Inspector. Switching layouts retains the spread’s existing content.
-- Use **Import folder** or **Add photos** in the Filmstrip to bring in JPEGs. Drag a photo onto a frame, or select the photo and then the frame. Checkmarks show which photos are used in the book, with a count for repeated placements.
-- Click a text frame and type directly on the spread. The Inspector has five text styles and three alignments. Select a photo frame to import a JPEG up to 50 MB, then drag or use arrow keys to position its crop.
-- Select **Preview** to review the book without editing controls.
-
-## Run the editor with PDF export
-
-Install Node.js 22.12 or newer and the macOS Xcode Command Line Tools (`xcode-select --install` if needed).
+Use Node.js 22.20+ or 24.12+ on macOS.
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173), or the address printed by Vite. The local server exports the complete book using original JPEGs and the same frame positions, text line breaks, and image crops shown in the editor.
+- Choose **New project…** to create an editable copy of the starter book. **Try the Senja sample** opens a read-only two-page proof example.
+- Add, duplicate, reorder, or delete spreads from the left panel. Select a layout and edit its settings in the Inspector. Changes save to the project folder. Use **Undo** and **Redo** for edits made during the session.
+- Import JPEG, PNG, and WebP photos with the File menu, or drop them onto the photo strip or a photo box. Assign photos from the strip or Inspector. The Inspector also exposes crop controls and photo metadata.
+- Drop a Markdown file onto a text box or assign an imported source in the Inspector. Assigning the same source to several boxes continues the text through the book. Edit the Markdown in your own editor. ImageFlow reloads changes to text, photos, and templates.
+- The **Book check** in the inspector lists errors and warnings for the whole book, with links to the affected spreads. It updates after every change.
+- **Export proof PDF** saves the current layout for review. **Export print PDF** checks the whole book against the template’s print format before saving, and downsamples photos to the format’s maximum resolution. Preflight reports page count, photo resolution, missing content, unplaced text, and PDF resource issues. The starter uses 290 × 290 mm trim and 3 mm outside, top, and bottom bleed.
 
-Each PDF page has an 846 × 846 pt trim area and 9 pt bleed on top, bottom, and outside. The prototype emits a standard Quartz PDF. PDF/X and printer color requirements need separate validation.
+| File or folder | Contents |
+| --- | --- |
+| `project.json` | Book title, spread order, assignments, crops, parameter values, and Markdown paths |
+| `photos.json` | Photo IDs, paths, titles, captions, credits, and alt text |
+| `photos/` | Original photos |
+| `texts/` | Editable Markdown sources |
+| `template/` | Project-owned TSX layout code, CSS, fonts, and assets |
+| `.imageflow/` | Disposable image cache with previews and colour-managed export copies |
 
-Run `npm run build` to type-check, bundle the app, and produce the standalone preview. Run `npm run preview` to serve the built app with the local export endpoint.
+Open projects you trust. Their templates run as code in the renderer. To test template changes, open a project folder and edit `template/index.tsx` or `template/styles.css`. Invalid templates show an error in the editor. The starter template ships `template/types/` and a `tsconfig.json`, so code editors type-check templates without installing packages; declare spreads with `spreadFor(documentParameters)` to get typed `params`, `boxes`, and `document` in `render`.
+
+The starter's four sample photos are placeholders upscaled from 768 px originals. They pass the resolution check but will print soft; replace them before ordering a proof.
+
+## Build and test
+
+```sh
+npm run package:mac
+npm run test:desktop
+```
+
+The ad-hoc-signed app appears in `out/ImageFlow-darwin-arm64/ImageFlow.app` on Apple Silicon or `out/ImageFlow-darwin-x64/ImageFlow.app` on Intel. The desktop checks require Poppler and exercise PDF geometry, line breaks, preflight, imports, autosave, live reload, and randomized Markdown continuation.
+
+The draft exports single-page or spread PDFs. The starter book targets the WhiteWall photo-paper format. Printer upload and a physical proof are separate validation steps.
+
+[v1 implementation plan](https://github.com/wirhabenzeit/imageflow/blob/docs/content-template-contract/docs/v1-implementation-plan.md) · [Template API](https://github.com/wirhabenzeit/imageflow/blob/docs/content-template-contract/docs/template-api.md)

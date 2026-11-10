@@ -1,0 +1,26 @@
+{
+  "segla": {
+    "path": "photos/segla.jpg",
+    "title": "Segla",
+    "caption": "The ridge above Fjordgård",
+    "altText": "The ridge above Fjordgård"
+  },
+  "shore": {
+    "path": "photos/shore.jpg",
+    "title": "Shore",
+    "caption": "The outer coast of Senja",
+    "altText": "The outer coast of Senja"
+  },
+  "cottage": {
+    "path": "photos/cottage.jpg",
+    "title": "Cottage",
+    "caption": "A cottage above the water",
+    "altText": "A cottage above the water"
+  },
+  "light": {
+    "path": "photos/light.jpg",
+    "title": "Evening light",
+    "caption": "Late light on the hills",
+    "altText": "Late light on the hills"
+  }
+}

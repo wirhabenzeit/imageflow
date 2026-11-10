@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "types": [],
+    "paths": {
+      "imageflow": ["./types/imageflow.d.ts"],
+      "react/jsx-runtime": ["./types/jsx-runtime.d.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"]
+}

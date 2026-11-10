@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "title": "Senja · Field Notes",
+  "template": { "id": "whitewall-field-notes", "version": "0.1.0" },
+  "params": { "showCaption": true },
+  "texts": { "arrival": "texts/arrival.md" },
+  "spreads": [
+    {
+      "id": "arrival",
+      "definition": "story",
+      "params": { "eyebrow": "FIELD NOTES / 01", "heading": "At the edge\nof Senja" },
+      "boxes": {
+        "landscape": { "photo": "segla", "crop": { "centerX": 0.48, "centerY": 0.5, "zoom": 1 } },
+        "story": { "text": "arrival" }
+      }
+    }
+  ]
+}
