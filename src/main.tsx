@@ -1,10 +1,9 @@
-import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from './App';
 import './styles.css';
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+const root = document.getElementById('root')!;
+if (window.location.hostname === 'render' && window.location.pathname.startsWith('/render/')) {
+  void import('./render').then(({ startRender }) => startRender(root));
+} else {
+  void import('./App').then(({ App }) => createRoot(root).render(<App />));
+}

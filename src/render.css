@@ -1,0 +1,82 @@
+.if-sheet {
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  color: #171717;
+}
+.if-spread {
+  position: absolute;
+  left: var(--bleed-outside);
+  top: var(--bleed-top);
+  width: calc(var(--trim-width) * 2);
+  height: var(--trim-height);
+}
+.if-spread .left-page, .if-spread .right-page {
+  position: absolute;
+  top: calc(-1 * var(--bleed-top));
+  bottom: calc(-1 * var(--bleed-bottom));
+  width: calc(var(--trim-width) + var(--bleed-outside));
+}
+.if-spread .left-page { left: calc(-1 * var(--bleed-outside)); }
+.if-spread .right-page { right: calc(-1 * var(--bleed-outside)); }
+.if-photo, .if-markdown { overflow: hidden; }
+.if-photo img { position: absolute; max-width: none; display: block; }
+.if-markdown { overflow-wrap: break-word; hyphens: manual; }
+.if-markdown :is(ol, ul) { padding-inline-start: 1.75em; }
+.if-preview { position: absolute; inset: 0; overflow: hidden; }
+.if-preview .if-sheet.if-fit {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(var(--if-zoom, 0.01));
+  box-shadow: 0 8px 40px #0005;
+}
+.if-preview [data-empty] {
+  outline: 1px dashed #908b80;
+  outline-offset: -1px;
+}
+.if-print-page {
+  contain: strict;
+  position: relative;
+  overflow: hidden;
+  break-after: page;
+}
+.if-print-page:last-child { break-after: auto; }
+.if-print-page > .if-sheet { position: absolute; top: 0; }
+@media print {
+  body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+}
+
+.if-preview .if-measure {
+  position: absolute;
+  left: -100000px;
+  top: 0;
+  visibility: hidden;
+}
+.if-preview .if-measure .if-sheet { position: relative; left: 0; top: 0; transform: none; }
+.if-preview [data-span="left"] .if-sheet::after,
+.if-preview [data-span="right"] .if-sheet::after {
+  content: 'Inside cover';
+  position: absolute;
+  display: grid;
+  place-items: center;
+  inset: 0 0 0 50%;
+  color: #70695f;
+  background: #e6e2d9;
+  font: 28px system-ui, sans-serif;
+}
+.if-preview [data-span="right"] .if-sheet::after { inset: 0 50% 0 0; }
+.if-placeholder {
+  display: grid;
+  place-items: center;
+  position: absolute;
+  inset: 0;
+  background: #e6e2d9;
+  color: #61594b;
+  font: 25px system-ui, sans-serif;
+}
+.if-markdown { orphans: 2; widows: 2; }
+.if-markdown :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
+.if-markdown .cont { text-indent: 0; }
+.if-markdown li.cont { list-style-type: none; }
+.if-spread > .bleed { position: absolute; inset: calc(-1 * var(--bleed-top)) calc(-1 * var(--bleed-outside)) calc(-1 * var(--bleed-bottom)); }

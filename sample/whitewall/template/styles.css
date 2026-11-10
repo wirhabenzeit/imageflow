@@ -1,0 +1,46 @@
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-latin-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-latin-600-normal.woff2") format("woff2");
+  font-weight: 600;
+}
+@font-face {
+  font-family: "Field Sans";
+  src: url("./fonts/inter-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+}
+.field-notes { color: #243b30; }
+.field-notes .paper { background: #f6f2e8; }
+.field-notes :is(.kicker, h1, .rule, .story, .caption) {
+  position: absolute;
+  left: calc(var(--trim-width) + 31mm);
+  margin: 0;
+}
+.field-notes :is(.kicker, .caption) { font: 500 11pt/1.4 "Field Sans"; }
+.field-notes .kicker { top: 36mm; letter-spacing: .16em; }
+.field-notes h1 {
+  top: 51mm;
+  right: 28mm;
+  font: 600 65pt/.94 "Field Serif";
+  letter-spacing: -.05em;
+  white-space: pre-line;
+}
+.field-notes .rule { top: 113mm; width: 19mm; border-top: .4mm solid #869387; }
+.field-notes .story {
+  top: 125mm;
+  width: 195mm;
+  height: 116mm;
+  font: 400 19pt/1.38 "Field Serif";
+}
+.field-notes .story p { margin: 0 0 .7em; }
+.field-notes .caption { bottom: 23mm; color: #4f6054; }
