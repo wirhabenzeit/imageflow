@@ -78,8 +78,20 @@ export function CropEditor({ frame, photo, src, placement: initial, inchesPerPix
     return () => element.removeEventListener('wheel', listener);
   }, []);
 
+  // Canvas shortcuts apply only when no control has focus: a focused button or the zoom slider handles its own
+  // Enter, Space and arrow keys (Cancel must cancel, the slider must zoom). Escape still leaves crop mode from
+  // the toolbar's buttons and slider.
   const keys = useEffectEvent((event: KeyboardEvent) => {
-    if (settling || (event.target as HTMLElement).closest('input:not([type="range"]), textarea, select')) return;
+    if (settling) return;
+    const control = (event.target as HTMLElement).closest?.('button, input, select, textarea, a[href], [role="radio"], [role="option"], [contenteditable]');
+    if (control) {
+      if (event.key === 'Escape' && control.matches('button, input[type="range"]')) {
+        event.preventDefault();
+        event.stopPropagation();
+        cancel();
+      }
+      return;
+    }
     const step = event.shiftKey ? 0.05 : 0.01;
     const nudge = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
     if (event.key === 'Escape') cancel();

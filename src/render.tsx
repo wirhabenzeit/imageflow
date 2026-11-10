@@ -146,6 +146,21 @@ function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: nu
   return { small, outside };
 }
 
+// True when nothing between the box and its sheet rotates, skews or mirrors it, so its on-screen rectangle is the
+// box itself. Crop mode draws the photo over that rectangle. The sheet's own preview scaling is not checked.
+function upright(box: HTMLElement, sheet: HTMLElement) {
+  for (let node: HTMLElement | null = box; node && node !== sheet; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (style.transform !== 'none') {
+      const matrix = new DOMMatrixReadOnly(style.transform);
+      if (!matrix.is2D || Math.abs(matrix.b) > 1e-6 || Math.abs(matrix.c) > 1e-6 || matrix.a <= 0 || matrix.d <= 0) return false;
+    }
+    if (style.rotate && style.rotate !== 'none' && !/^0(deg|rad|grad|turn)?$/.test(style.rotate)) return false;
+    if (style.scale && style.scale !== 'none' && style.scale.split(/\s+/).some((value) => parseFloat(value) < 0)) return false;
+  }
+  return true;
+}
+
 // Stacks every sheet in a column, scaled to the frame width, and reports where sheets and boxes landed.
 function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView) {
   const { pad, gap, columns = 1, columnGap = 0 } = bookLayout[view];
@@ -176,9 +191,9 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
         const scale = Number(sheet.style.getPropertyValue('--if-zoom')) || 1;
         return [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].map((box) => {
           const rect = relative(box);
-          const upright = Math.abs(rect.width - box.offsetWidth * scale) < 1.5 && Math.abs(rect.height - box.offsetHeight * scale) < 1.5;
+          const sized = Math.abs(rect.width - box.offsetWidth * scale) < 1.5 && Math.abs(rect.height - box.offsetHeight * scale) < 1.5;
           return {
-            spread, id: (box.dataset.box ?? box.dataset.element)!, upright,
+            spread, id: (box.dataset.box ?? box.dataset.element)!, upright: sized && upright(box, sheet),
             type: (box.dataset.boxType ?? 'element') as BookGeometry['boxes'][number]['type'], ...rect,
           };
         });
