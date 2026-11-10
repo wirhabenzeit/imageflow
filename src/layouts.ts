@@ -179,16 +179,23 @@ function content(box: BoxState | undefined): Partial<BoxState> {
   return box.photo ? { photo: box.photo, ...(box.focus ? { focus: box.focus } : {}) } : { text: box.text };
 }
 
+// Swaps the content of two boxes, on one spread or two; an empty box takes the content and leaves the other empty.
+// Returns what was in box `to`, if anything.
+export function swapContent(from: SpreadState, fromBox: string, to: SpreadState, toBox: string) {
+  if (from === to && fromBox === toBox) return;
+  const moving = content(from.boxes[fromBox]);
+  if (!moving.photo && !moving.text) throw new Error('There is no content in box ' + fromBox + '.');
+  const displaced = content(to.boxes[toBox]);
+  to.boxes[toBox] = { params: to.boxes[toBox]?.params ?? {}, ...moving };
+  from.boxes[fromBox] = { params: from.boxes[fromBox]?.params ?? {}, ...displaced };
+  return displaced.photo ?? displaced.text;
+}
+
 // Moves kept content into box `to`. Content already there moves to `from`, so nothing is lost: the two swap.
 // Returns what was swapped out, if anything. The moved content is no longer kept, so it cannot come back twice.
 export function moveContent(spread: SpreadState, from: string, to: string) {
-  if (from === to) return;
-  const moving = content(spread.boxes[from]);
-  if (!moving.photo && !moving.text) throw new Error('There is no content saved for box ' + from + '.');
-  const displaced = content(spread.boxes[to]);
-  spread.boxes[to] = { params: spread.boxes[to]?.params ?? {}, ...moving };
-  spread.boxes[from] = { params: spread.boxes[from]?.params ?? {}, ...displaced };
-  return displaced.photo ?? displaced.text;
+  if (!content(spread.boxes[from]).photo && !content(spread.boxes[from]).text) throw new Error('There is no content saved for box ' + from + '.');
+  return swapContent(spread, from, spread, to);
 }
 
 // Removes kept content from the spread; the source stays in the project.

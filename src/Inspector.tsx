@@ -221,7 +221,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
             (title ?? 'text') + ' part ' + part + ' of ' + parts).join(', ')}.</p>}
         {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
         {definition && <Fields key={spread.id} schema={spreadParameters} values={spread.params}
-          update={(id, value) => changeSpread((item) => { item.params[id] = value; })} />}
+          update={(id, value) => changeSpread((item) => { item.params[id] = value; }, spreadParameters[id].label + ' updated')} />}
       </details>}
       {template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={spread} template={template}
         kept={kept} label={keptLabel} settings={keptSettings} writable={writable} place={place}
@@ -309,7 +309,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
           <Fields schema={box.parameters} values={state?.params ?? {}} update={(key, value) => changeSpread((item) => {
             item.boxes[id] ??= { params: {} };
             item.boxes[id].params[key] = value;
-          })} />
+          }, box.parameters[key].label + ' updated')} />
           {extras('boxes.' + id + '.')}
         </details>;
       })}
@@ -326,7 +326,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
             values={spread.elements[id]?.params ?? {}} update={(key, value) => changeSpread((item) => {
             item.elements[id] ??= { params: {} };
             item.elements[id].params[key] = value;
-          })} />
+          }, element.parameters[key].label + ' updated')} />
           {extras('elements.' + id + '.')}
         </details>
       ))}

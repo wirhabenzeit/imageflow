@@ -11,7 +11,7 @@ import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
 import { assignmentCounts, newSpread, sourceUsage } from './editing';
-import { moveContent } from './layouts';
+import { moveContent, swapContent } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { BookCheck, Edit } from './Inspector';
@@ -75,8 +75,10 @@ export function App() {
   const [editing, setEditing] = useState<{ spread: string; key: string }>();
   // Crop mode for one photo box. After a commit, `settling` holds the project id the edit started from; the
   // overlay stays until the book has re-rendered, so the frame does not flash back to the old crop.
-  // `layout` is the spread's layout when crop mode opened: each layout has its own crop.
-  const [cropping, setCropping] = useState<{ spread: string; box: string; layout: string; settling?: string }>();
+  // The selected photo, whose crop drags and pinches adjust. `layout` is the spread's layout when it was selected:
+  // each layout has its own crop. `saved` holds the project id the last crop edit started from; after the photo is
+  // deselected, `settling` keeps its overlay until the book has re-rendered, so the frame does not flash back.
+  const [cropping, setCropping] = useState<{ spread: string; box: string; layout: string; saved?: string; settling?: string }>();
   // A template-supplied element editor that is open.
   const [elementEditor, setElementEditor] = useState<{ spread: string; element: string }>();
   const [showGuides, setShowGuides] = useState(false);
@@ -449,6 +451,7 @@ export function App() {
   const cropState = cropping && spreads.find(({ id }) => id === cropping.spread)?.boxes[cropping.box];
   const cropPhoto = cropState?.photo;
   const cropPlacement = cropping && placementIn(cropState, cropping.layout);
+  const cropBox = cropping && template?.spreads[cropping.layout]?.boxes[cropping.box];
   function cropBlocked(spread: string, box: string) {
     const state = spreads.find(({ id }) => id === spread)?.boxes[box];
     const frame = geometry?.boxes.find((rect) => rect.spread === spread && rect.id === box);
@@ -480,25 +483,31 @@ export function App() {
     setCropping({ spread, box, layout });
     return true;
   }
-  function commitCrop(placement: Placement) {
+  // Saves the selected photo's crop; the photo stays selected. The edit compares with the project when it applies,
+  // so an unchanged crop saves nothing.
+  function saveCrop(placement: Placement) {
     if (!cropping || cropping.settling || !cropFrame || !cropPhoto || !summary) return;
     const size = summary.photoSizes[cropPhoto];
     const aspect = cropFrame.width / cropFrame.height;
     const normal = (value: Placement) => JSON.stringify(placementOf(getCrop(size, value, aspect), value.zoom));
-    if (normal(placement) === normal(cropPlacement ?? centered)) {
-      setCropping(undefined);
-      return;
-    }
     const fits = normal(placement) === normal(centered);
     const { spread, box, layout } = cropping;
     edit(({ project }) => {
       const state = project.spreads.find(({ id }) => id === spread);
       const target = state?.boxes[box];
-      // Crop mode closes when the layout changes; never save a crop into a layout it was not made for.
+      // The selection ends when the layout changes; never save a crop into a layout it was not made for.
       if (!target?.photo || state?.definition !== layout) return;
       setPlacement(target, layout, fits ? centered : placement);
     }, 'Crop updated');
-    setCropping({ spread, box, layout, settling: summary.id });
+    setCropping({ ...cropping, saved: summary.id });
+  }
+  function deselectPhoto() {
+    setCropping((selection) => {
+      if (!selection || selection.settling) return selection;
+      // Keep the overlay until the book shows the last saved crop.
+      const waiting = selection.saved && (selection.saved === current.current?.id || render?.state !== 'ready');
+      return waiting ? { ...selection, settling: selection.saved } : undefined;
+    });
   }
   // If the save fails, there is no re-render to wait for.
   useEffect(() => {
@@ -506,6 +515,66 @@ export function App() {
     const timer = setTimeout(() => setCropping(undefined), 4000);
     return () => clearTimeout(timer);
   }, [cropping?.settling]);
+
+  // Moving a placed photo: press an unselected photo and drag it onto another photo box, on this spread or another.
+  // The two swap; onto an empty box it moves. Its crops were made for the old frame and stay behind.
+  const pendingMove = useRef<{ spread: string; box: string; photo: string; x: number; y: number }>(undefined);
+  const moved = useRef(false);
+  const [moving, setMoving] = useState<{ photo: string; x: number; y: number }>();
+  const moveDrag = useEffectEvent((event: PointerEvent) => {
+    const start = pendingMove.current;
+    if (!start) return;
+    if (!moving && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
+    setMoving({ photo: start.photo, x: event.clientX, y: event.clientY });
+    const { box } = locate(event, [photoMime]);
+    setDropTarget(box && !(box.spread === start.spread && box.id === start.box) ? box.spread + ':' + box.id : undefined);
+    // Near the top or bottom of the canvas, scroll it so another spread can be reached.
+    const bounds = canvas.current?.getBoundingClientRect();
+    if (bounds) {
+      const edge = event.clientY < bounds.top + 48 ? -1 : event.clientY > bounds.bottom - 48 ? 1 : 0;
+      if (edge) canvas.current!.scrollBy({ top: edge * 24 });
+    }
+  });
+  const moveDrop = useEffectEvent((event: PointerEvent) => {
+    const start = pendingMove.current;
+    pendingMove.current = undefined;
+    if (!start || !moving) return;
+    setMoving(undefined);
+    setDropTarget(undefined);
+    // The click that follows this pointerup is part of the move.
+    moved.current = true;
+    setTimeout(() => { moved.current = false; });
+    const { box } = locate(event, [photoMime]);
+    if (!box || box.type !== 'photo' || !summary || (box.spread === start.spread && box.id === start.box)) return;
+    const target = { spread: box.spread, box: box.id };
+    const label = template?.spreads[spreads.find(({ id }) => id === target.spread)?.definition ?? '']?.boxes[target.box]?.label ?? target.box;
+    let swapped: string | undefined;
+    edit(({ project }) => {
+      const from = project.spreads.find(({ id }) => id === start.spread);
+      const to = project.spreads.find(({ id }) => id === target.spread);
+      if (from?.boxes[start.box]?.photo === start.photo && to) swapped = swapContent(from, start.box, to, target.box);
+    }, () => sourceTitle(summary, 'photo', start.photo) + (swapped ? ' and ' + sourceTitle(summary, 'photo', swapped) + ' swapped' :
+      ' moved to ' + label));
+    select(target.spread, false);
+    setFocusBox({ box: target.box, at: Date.now() });
+  });
+  useEffect(() => {
+    const move = (event: PointerEvent) => moveDrag(event);
+    const up = (event: PointerEvent) => moveDrop(event);
+    const cancel = () => {
+      pendingMove.current = undefined;
+      setMoving(undefined);
+      setDropTarget(undefined);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+    };
+  }, []);
 
   // Changing a spread's layout (including by Undo) ends crop mode and closes the edit popover on that spread, so
   // neither saves into a layout it was not opened for. Element editors notice through their own stale check.
@@ -714,28 +783,41 @@ export function App() {
               style={{ height: geometry?.height, cursor: hoveredTarget ? 'pointer' : undefined,
                 '--aspect': format ? format.spreadWidth / format.height : undefined } as CSSProperties}
               onClick={(event) => {
+                // A click that ended a photo move is not a click.
+                if (moved.current) return;
                 const { sheet, top, target } = locate(event);
                 if (!sheet) return;
                 select(sheet, false);
-                if (target) setEditing({ spread: target.spread, key: targetKey(target) });
                 if (top) setFocusBox({ box: top.id, at: Date.now() });
+                // What is drawn on top decides. Its own parameters are in the Inspector, so a photo's primary action is
+                // selecting it to drag and pinch, and an element's is its own editor. A smaller click-to-edit node on
+                // top (a heading over a photo) keeps its popover.
+                const own = !target || (!!top && target.edits.every((path) =>
+                  path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')));
+                if (top?.type === 'photo' && own) {
+                  const blocked = cropBlocked(top.spread, top.id);
+                  if (!blocked) {
+                    startCrop(top.spread, top.id);
+                    return;
+                  }
+                  // A placed photo that cannot be selected says why; its parameters still open below.
+                  if (boxSource(top.spread, top.id)) setNotice(blocked);
+                }
+                if (top?.type === 'element' && own && openElementEditor(top.spread, top.id)) return;
+                if (target) setEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
-                // Acts on what is drawn on top, so an element over a photo opens its editor rather than crop mode.
+                // Double-clicking a Markdown box shows its text in Quick Look.
                 const { top } = locate(event);
-                if (!top) return;
-                // Double-clicking a photo means crop mode; if that is not possible, the status line says why.
-                if (top.type === 'photo') {
-                  startCrop(top.spread, top.id);
-                  return;
-                }
-                // Double-clicking an element with a template-supplied editor opens it.
-                if (top.type === 'element') {
-                  openElementEditor(top.spread, top.id);
-                  return;
-                }
-                const source = boxSource(top.spread, top.id);
+                const source = top?.type === 'markdown' && boxSource(top.spread, top.id);
                 if (source) setQuick(source);
+              }}
+              onPointerDown={(event) => {
+                // Pressing an unselected photo may start moving it to another box (the selected one pans instead).
+                if (event.button !== 0 || !writable || busy) return;
+                const { top } = locate(event);
+                const photo = top?.type === 'photo' && spreads.find(({ id }) => id === top.spread)?.boxes[top.id]?.photo;
+                pendingMove.current = photo ? { spread: top.spread, box: top.id, photo, x: event.clientX, y: event.clientY } : undefined;
               }}
               onMouseMove={(event) => {
                 const { sheet, target } = locate(event);
@@ -766,12 +848,24 @@ export function App() {
               }).map((target) => <div key={targetKey(target)} aria-hidden="true"
                 className={'edit-target' + (targetKey(target) === editing?.key ? ' active' : '')}
                 style={{ left: target.x - 4, top: target.y - 3, width: target.width + 8, height: target.height + 6 }} />)}
+              {moving && summary?.photos[moving.photo] && <img className="photo-move-ghost" src={summary.photos[moving.photo]} alt=""
+                style={{ left: moving.x, top: moving.y }} />}
               {cropping && cropFrame && cropPhoto && summary && <CropEditor key={cropping.spread + ':' + cropping.box}
                 frame={cropFrame} photo={summary.photoSizes[cropPhoto]} src={renderOrigin + '/render/' + summary.id + '/photo/' + cropPhoto}
                 placement={cropPlacement} settling={!!cropping.settling}
                 inchesPerPixel={format && cropSheet ? format.spreadWidth / cropSheet.width / 25.4 : undefined}
-                resolution={template?.format.output.resolution} commit={commitCrop} cancel={() => setCropping(undefined)}
-                toolbarHost={canvasWrap.current} />}
+                resolution={template?.format.output.resolution} save={saveCrop} close={deselectPhoto}
+                toolbarHost={canvasWrap.current}>
+                {/* The box's own parameters (such as Show caption) sit with the photo; they are also in the Inspector. */}
+                {cropBox && Object.keys(cropBox.parameters).length > 0 && <div className="crop-params">
+                  <Fields schema={cropBox.parameters} values={cropState?.params ?? {}} update={(key, value) => edit(({ project }) => {
+                    const state = project.spreads.find(({ id }) => id === cropping.spread);
+                    if (!state) return;
+                    state.boxes[cropping.box] ??= { params: {} };
+                    state.boxes[cropping.box].params[key] = value;
+                  }, cropBox.parameters[key].label + ' updated')} />
+                </div>}
+              </CropEditor>}
               {editing && editTarget && editSpread && template && summary && <EditPopover key={editing.key}
                 project={summary.project} spread={editSpread} template={template} edits={editTarget.edits} anchor={editTarget}
                 bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={!writable} edit={edit} close={closeEditor} step={stepEditor}
