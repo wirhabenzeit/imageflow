@@ -6,8 +6,10 @@ type FrameState = { geometry?: BookGeometry; status?: RenderStatus };
 
 // Renders the whole book in a frame. Each edit gets a new project id; the previous frame stays on screen
 // until the next one has reported its status, so edits do not flash or lose the scroll position.
-export function BookFrame({ project, view, query = '', title, onGeometry, onStatus }: {
+export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, viewport }: {
   project: string; view: BookView; query?: string; title: string;
+  // The part of the frame on screen, for frames that load photos lazily; sent when a frame asks for it.
+  viewport?: () => { top: number; bottom: number } | undefined;
   onGeometry: (geometry: BookGeometry | undefined) => void;
   onStatus?: (status: RenderStatus, project: string) => void;
 }) {
@@ -24,11 +26,16 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     setFrames(latest.current);
   }
 
-  const receive = useEffectEvent((event: MessageEvent<BookGeometry | RenderStatus>) => {
+  const receive = useEffectEvent((event: MessageEvent<BookGeometry | RenderStatus | { type: 'viewport-request' }>) => {
     if (event.origin !== renderOrigin || !event.data) return;
     const id = ids.find((key) => refs.current.get(key)?.contentWindow === event.source);
     if (!id) return;
     const data = event.data;
+    if ('type' in data && data.type === 'viewport-request') {
+      const range = viewport?.();
+      if (range) (event.source as Window).postMessage({ type: 'viewport', ...range }, renderOrigin);
+      return;
+    }
     if ('type' in data && data.type === 'geometry') {
       update(id, { geometry: data });
       if (id === shown) onGeometry(data);

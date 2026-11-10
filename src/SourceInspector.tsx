@@ -66,7 +66,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
       </details>
       <details open><summary>Details</summary>
         <fieldset disabled={!writable}>
-          {photoFields.map(([key, label]) => <Field key={source.id + ':' + key + ':' + photo[key]}
+          {photoFields.map(([key, label]) => <Field key={source.id + ':' + key}
             param={{ type: 'string', label, default: '', multiline: key === 'caption' || key === 'altText' }} value={photo[key] ?? ''}
             change={(value) => edit(({ photoIndex }) => { if (photoIndex[source.id]) photoIndex[source.id][key] = String(value); }, label + ' updated')} />)}
         </fieldset>

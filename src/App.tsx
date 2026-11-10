@@ -268,8 +268,21 @@ export function App() {
     if (top - label >= view.scrollTop && top + sheet.height <= view.scrollTop + view.clientHeight) return;
     view.scrollTo({ top: Math.max(0, top - Math.max(label, (view.clientHeight - sheet.height) / 2)), behavior: 'smooth' });
   }
+  // The part of the book frame that is on screen, in frame coordinates. The book frame loads photos near it.
+  function viewport() {
+    const view = canvas.current;
+    if (!view || !stage.current) return undefined;
+    const top = view.scrollTop - stage.current.offsetTop;
+    return { top, bottom: top + view.clientHeight };
+  }
   function measureView() {
     const view = canvas.current;
+    const range = viewport();
+    if (range) {
+      for (const frame of stage.current!.querySelectorAll<HTMLIFrameElement>('iframe.book-frame-book')) {
+        frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
+      }
+    }
     if (!view || !stage.current || !geometry) return;
     const top = view.scrollTop - stage.current.offsetTop;
     const bottom = top + view.clientHeight;
@@ -280,6 +293,12 @@ export function App() {
     measureView();
     if (pendingReveal.current) reveal(pendingReveal.current);
   }, [geometry]);
+  const onResize = useEffectEvent(() => measureView());
+  useEffect(() => {
+    const listener = () => onResize();
+    window.addEventListener('resize', listener);
+    return () => window.removeEventListener('resize', listener);
+  }, []);
   // The sidebar follows the selection when you select another spread, not on every re-render after an edit,
   // so a list you scrolled elsewhere stays where you left it.
   const revealedThumb = useRef('');
@@ -601,7 +620,8 @@ export function App() {
                 setHovered(sheet);
                 setHoveredTarget(target && targetKey(target));
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
-              <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus} />
+              <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus}
+                viewport={viewport} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const i = spreads.findIndex((item) => item.id === id);
                 if (i < 0) return null;

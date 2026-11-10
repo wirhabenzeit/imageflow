@@ -116,6 +116,15 @@ try {
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
   assert.equal((await read()).spreads[1].boxes.hero.crop, undefined);
 
+  // #11: the book view loads photos near the screen only; scrolling to the end loads the photos there.
+  await w.locator('main.canvas').evaluate((el) => el.scrollTo(0, 0));
+  const lastPhoto = frame.locator('[data-spread="twilight"] [data-box="hero"] img');
+  assert.equal(await lastPhoto.getAttribute('src'), null);
+  await w.locator('main.canvas').evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await lastPhoto.and(frame.locator('img[src]')).waitFor({ state: 'attached' });
+  assert.ok(await lastPhoto.evaluate((img) => img.decode().then(() => img.naturalWidth > 0)));
+  await w.locator('main.canvas').evaluate((el) => el.scrollTo(0, 0));
+
   const statusText = () => w.locator('.status').textContent();
   const saved = (text) => w.waitForFunction((text) => document.querySelector('.status')?.textContent === text, text);
   const thumb = (name) => w.getByRole('button', { name, exact: true }).click();

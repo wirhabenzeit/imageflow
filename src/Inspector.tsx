@@ -111,7 +111,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   }
   const extras = (prefix: string) => (attached.get(prefix) ?? []).map((target) => {
     const value = readEdit(summary.project, spread, target);
-    return <Field key={target.path + ':' + String(value)} param={target.param} value={value}
+    return <Field key={target.path} param={target.param} value={value}
       change={(next) => edit(({ project }) => writeEdit(project, spread.id, target, next), target.param.label + ' updated')} />;
   });
   // Layout previews restart each text; say so when this spread shows a later part of a chained text.
@@ -214,7 +214,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
             </div>
             <details className="crop-values"><summary>Crop values</summary>
               {([['centerX', 'Horizontal'], ['centerY', 'Vertical'], ['zoom', 'Zoom']] as const).map(([key, label]) =>
-                <Field key={key + ':' + (state?.crop ?? centered)[key]}
+                <Field key={key}
                   param={{ type: 'number', label, default: centered[key], min: key === 'zoom' ? 1 : 0, max: key === 'zoom' ? 20 : 1, step: .01 }}
                   value={(state?.crop ?? centered)[key]}
                   change={(value) => changeSpread((item) => {

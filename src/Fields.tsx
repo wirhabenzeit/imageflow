@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { Values } from './project';
 import type { Parameter, Parameters } from './parameters';
@@ -81,11 +81,24 @@ export function ParamControl({ param, value, draft, setDraft, apply, autoFocus =
 }
 
 // A labelled parameter in the Inspector. Typed values apply on blur or Enter; invalid values are not saved.
+// The field keeps its identity when the saved value changes, so typing is never lost to a save completing.
 export function Field({ param, value, change }: { param: Parameter; value: Value; change: (value: Value) => void }) {
   const [draft, setDraft] = useState<Value>();
   const [invalid, setInvalid] = useState(false);
-  // The applied value stays shown until the saved project arrives; Fields remounts each field when its value changes.
+  const typing = useRef(false);
+  // A new saved value replaces what the field shows, unless the user is typing in it.
+  useEffect(() => {
+    if (typing.current) return;
+    setDraft(undefined);
+    setInvalid(false);
+  }, [value]);
+  function type(next: Value) {
+    typing.current = true;
+    setDraft(next);
+  }
+  // The applied value stays shown until the saved project arrives.
   function apply(next: Value) {
+    typing.current = false;
     setDraft(next);
     const valid = isParameterValue(param, next);
     setInvalid(!valid);
@@ -93,7 +106,7 @@ export function Field({ param, value, change }: { param: Parameter; value: Value
   }
   return <div className="field">
     {param.type !== 'boolean' && <span className="field-name">{param.label}</span>}
-    <ParamControl param={param} value={value} draft={draft} setDraft={setDraft} apply={apply} commitOnBlur />
+    <ParamControl param={param} value={value} draft={draft} setDraft={type} apply={apply} commitOnBlur />
     {invalid && <small className="error-text">Enter a value within the field’s limits.</small>}
   </div>;
 }
@@ -101,6 +114,6 @@ export function Field({ param, value, change }: { param: Parameter; value: Value
 export function Fields({ schema, values, update }: { schema: Parameters; values: Values; update: (id: string, value: Value) => void }) {
   return Object.entries(schema).map(([id, param]) => {
     const value = isParameterValue(param, values[id]) ? values[id] : param.default;
-    return <Field key={id + ':' + String(value)} param={param} value={value} change={(next) => update(id, next)} />;
+    return <Field key={id} param={param} value={value} change={(next) => update(id, next)} />;
   });
 }
