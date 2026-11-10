@@ -102,7 +102,9 @@ try {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
   }, output);
   await exportButton.click();
-  await expectStatus('Proof PDF saved.');
+  // The two-page sample is shorter than its format allows; proof export reports that error and keeps it in Book check.
+  await expectStatus('Proof PDF saved. 1 error in Book check.');
+  assert.match(await window.locator('.book-check-list summary').textContent(), /Book check · 1 error/);
   checkProof(await PDFDocument.load(await readFile(output)), previewLines);
 
   const project = join(runDir, 'project');

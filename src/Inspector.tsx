@@ -114,6 +114,12 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     return <Field key={target.path + ':' + String(value)} param={target.param} value={value}
       change={(next) => edit(({ project }) => writeEdit(project, spread.id, target, next), target.param.label + ' updated')} />;
   });
+  // Layout previews restart each text; say so when this spread shows a later part of a chained text.
+  const continued = render?.state === 'ready' ? Object.entries(definition?.boxes ?? {})
+    .filter(([id, box]) => box.type === 'markdown' && spread.boxes[id]?.text)
+    .map(([id]) => render.flow[spread.id + ':' + id])
+    .filter((position) => !!position && position.part > 1)
+    .filter((position, index, all) => all.findIndex((other) => other.title === position.title) === index) : [];
   const spreadParameters = Object.fromEntries(Object.entries(definition?.parameters ?? {}).filter(([key]) => !claimed.has(key)));
   const header = <>
     <p className="eyebrow">Inspector</p>
@@ -135,7 +141,11 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
         {!definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
         <LayoutPicker summary={summary} spread={spread} template={template} choose={(next) =>
           changeSpread((item) => switchDefinition(item, next, template), 'Layout changed. Previous settings are stored with the spread.')} />
-        {definition && <Fields schema={spreadParameters} values={spread.params}
+        {continued.length > 0 && <p className="layout-note" role="note">
+          Previews start text from the beginning; this spread shows {continued.map(({ title, part, parts }) =>
+            (title ?? 'text') + ' part ' + part + ' of ' + parts).join(', ')}.</p>}
+        {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
+        {definition && <Fields key={spread.id} schema={spreadParameters} values={spread.params}
           update={(id, value) => changeSpread((item) => { item.params[id] = value; })} />}
         {archived.length > 0 && <p className="muted">Stored layouts · {archived.map((id) => template.spreads[id]?.label ?? id).join(', ')}</p>}
       </details>}
@@ -157,7 +167,20 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
               : <span className="box-photo-empty">{assigned ? 'Missing' : 'Empty'}</span>}
             <div className="box-photo-info">
               <span className="box-photo-name">{assigned ? summary.photoIndex[assigned]?.title || assigned : 'No photo'}</span>
-              <span className="muted">{assigned ? 'Drag another photo onto the box to replace it.' : 'Drag a photo from the strip onto the box.'}</span>
+              <span className="muted">{assigned ? 'Drag another photo onto the box, or:' : 'Drag a photo onto the box, or:'}</span>
+              {/* Keyboard path for assigning: the strip and canvas are drag-only. Choosing replaces the crop. */}
+              <select className="box-photo-pick" aria-label={(assigned ? 'Replace photo in ' : 'Choose photo for ') + box.label} value=""
+                onChange={(event) => {
+                  const photo = event.target.value;
+                  if (photo && photo !== assigned) changeSpread((item) => {
+                    item.boxes[id] = { params: item.boxes[id]?.params ?? {}, photo };
+                  }, (summary.photoIndex[photo]?.title || photo) + ' placed in ' + box.label);
+                }}>
+                <option value="">{assigned ? 'Replace photo…' : 'Choose photo…'}</option>
+                {Object.entries(summary.photoIndex).filter(([photo]) => photo !== assigned).map(([photo, entry]) =>
+                  <option key={photo} value={photo} disabled={!summary.photos[photo]}>
+                    {(entry.title || entry.path.split('/').pop()) + (summary.photos[photo] ? '' : ' (missing)')}</option>)}
+              </select>
               {assigned && <button type="button" className="link" onClick={() => changeSpread((item) => {
                 if (item.boxes[id]) item.boxes[id] = { params: item.boxes[id].params };
               }, 'Photo removed from ' + box.label)}>Remove</button>}

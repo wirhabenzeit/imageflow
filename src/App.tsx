@@ -203,10 +203,12 @@ export function App() {
         const result = await api.exportBook(before.id, command === 'print' ? 'print' : 'proof');
         if ('error' in result) throw new Error(result.error);
         if (!result.value) return;
-        const count = result.value.warnings.length;
-        setNotice((command === 'print' ? 'Print PDF saved.' : 'Proof PDF saved.') +
-          (count ? ' ' + count + (count === 1 ? ' warning' : ' warnings') + ' in Book check.' : ''));
-        if (before.id === current.current?.id) setCheck({ id: before.id, errors: [], warnings: result.value.warnings });
+        // The export rendered the whole book; its result is the complete Book check for that project state.
+        const { errors, warnings } = result.value;
+        const counted = (n: number, word: string) => n ? n + ' ' + word + (n === 1 ? '' : 's') : '';
+        const found = [counted(errors.length, 'error'), counted(warnings.length, 'warning')].filter(Boolean).join(', ');
+        setNotice((command === 'print' ? 'Print PDF saved.' : 'Proof PDF saved.') + (found ? ' ' + found + ' in Book check.' : ''));
+        if (before.id === current.current?.id) setCheck({ id: before.id, errors, warnings });
         return;
       }
       setBusy(command === 'new' ? 'Creating project…' : 'Opening project…');

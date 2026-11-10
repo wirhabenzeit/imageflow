@@ -115,6 +115,64 @@ try {
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
   assert.equal((await read()).spreads[1].boxes.hero.crop, undefined);
+
+  const statusText = () => w.locator('.status').textContent();
+  const saved = (text) => w.waitForFunction((text) => document.querySelector('.status')?.textContent === text, text);
+  const thumb = (name) => w.getByRole('button', { name, exact: true }).click();
+
+  // #12: the layout picker says when it restarts a text this spread continues.
+  await thumb('Photo and story 16–17');
+  await w.locator('.layout-note').filter({ hasText: 'arrival.md part 3 of 3' }).waitFor();
+  await thumb('Photo and story 2–3');
+  assert.equal(await w.locator('.layout-note').count(), 0);
+
+  // #9: photos can be assigned from the keyboard, to an empty box and as a replacement; Undo restores.
+  await w.getByRole('combobox', { name: 'Replace photo in Main photo' }).selectOption('shore');
+  await saved('Shore placed in Main photo');
+  assert.equal((await read()).spreads[1].boxes.hero.photo, 'shore');
+  await w.locator('.box-photo-info').getByRole('button', { name: 'Remove' }).first().click();
+  await saved('Photo removed from Main photo');
+  await w.getByRole('combobox', { name: 'Choose photo for Main photo' }).selectOption('cottage');
+  await saved('Cottage placed in Main photo');
+  assert.equal((await read()).spreads[1].boxes.hero.photo, 'cottage');
+  for (let i = 0; i < 3; i++) {
+    await w.getByRole('button', { name: 'Undo', exact: true }).click();
+    await saved('Edit undone');
+  }
+  assert.equal((await read()).spreads[1].boxes.hero.photo, 'segla');
+
+  // #10: a rejected value in one spread's field does not appear in another spread with the same field.
+  await thumb('Photo grid 6–7');
+  const gap = w.getByRole('spinbutton', { name: 'Gap', exact: true });
+  await gap.fill('99');
+  await gap.press('Tab');
+  await w.locator('.inspector .error-text').filter({ hasText: 'within the field' }).waitFor();
+  await thumb('Photo grid 20–21');
+  await w.waitForFunction(() => !document.querySelector('.inspector .error-text'));
+  assert.equal(await gap.inputValue(), '6');
+  assert.equal((await read()).spreads[3].params.gutter, undefined);
+
+  // #8: a proof export keeps Book check errors; print export still refuses the book.
+  await thumb('Two photos 10–11');
+  await ready();
+  await w.getByRole('button', { name: 'Delete', exact: true }).click();
+  await saved('Saved');
+  await ready();
+  await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
+  const pdf = join(work, 'proof.pdf');
+  await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, pdf);
+  await w.getByRole('button', { name: 'Export proof PDF', exact: true }).click();
+  await w.waitForFunction(() => /^Proof PDF saved/.test(document.querySelector('.status')?.textContent ?? '') ||
+    document.querySelector('.status-error'), null, { timeout: 60000 });
+  assert.match(await statusText(), /^Proof PDF saved\. 1 error/);
+  assert.match(await w.locator('.book-check-list summary').textContent(), /Book check · 1 error/);
+  await w.getByRole('button', { name: 'Export print PDF', exact: true }).click();
+  await w.locator('.status-error').waitFor({ timeout: 60000 });
+  assert.match(await statusText(), /Page count is 26/);
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await saved('Edit undone');
+  await ready();
+  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-list summary')?.textContent ?? ''));
   console.log('ImageFlow click-to-edit passed.');
 } finally {
   await app.close();

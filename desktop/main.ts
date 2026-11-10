@@ -302,10 +302,10 @@ async function exportBook(owner: BrowserWindow, projectId: string, mode: ExportM
   const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
   try {
     const fonts = mode === 'print' ? bundledFontNames(book.assets.files) : [];
-    const { bytes, warnings } = await printBook(renderOrigin + '/render/' + id, mode, fonts, job.signal, progress);
+    const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id, mode, fonts, job.signal, progress);
     progress('Saving PDF…');
     await saveProof(filePath, bytes, job.signal);
-    return { warnings };
+    return { warnings, errors };
   } catch (error) {
     if (job.signal.aborted) return null;
     throw error;

@@ -30,7 +30,7 @@ export type DesktopApi = {
   saveProject(id: string, files: ProjectFiles): Promise<Result<ProjectSummary>>;
   importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[] } | null>>;
   pathsForFiles(files: File[]): string[];
-  exportBook(id: string, mode: ExportMode): Promise<Result<{ warnings: Issue[] } | null>>;
+  exportBook(id: string, mode: ExportMode): Promise<Result<{ warnings: Issue[]; errors: Issue[] } | null>>;
   cancelExport(): Promise<void>;
   onCommand(listener: (command: Command) => void): () => void;
   onProjectChanged(listener: (result: Result<ProjectSummary>) => void): () => void;
@@ -71,7 +71,7 @@ export type RenderStatus = {
   state: 'ready'; template: TemplateInfo; pages: number;
   units: { side: PrintSide; spread: string; where: string }[];
   errors: Issue[]; warnings: Issue[];
-  flow: Record<string, { part: number; parts: number }>;
+  flow: Record<string, { part: number; parts: number; title?: string }>;
 } | { state: 'error'; message: string; template?: TemplateInfo };
 
 declare global {
