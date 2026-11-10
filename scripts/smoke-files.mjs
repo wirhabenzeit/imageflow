@@ -84,9 +84,10 @@ try {
   await empty.scrollIntoViewIfNeeded();
   await w.waitForTimeout(200);
   const emptyBox = await empty.boundingBox();
-  await w.mouse.click(emptyBox.x + emptyBox.width / 2, emptyBox.y + emptyBox.height / 2);
-  await w.getByRole('dialog', { name: 'Edit GPX track' }).getByRole('button', { name: 'Frame route…' }).click();
+  // Double-clicking the inset, which lies over the panorama photo, opens its editor rather than crop mode.
+  await w.mouse.dblclick(emptyBox.x + emptyBox.width / 2, emptyBox.y + emptyBox.height / 2);
   await routeDialog.waitFor();
+  assert.equal(await w.locator('.crop-editor').count(), 0);
   await routeEditor.getByText('Choose a GPX track for the route map first.').waitFor();
   await routeDialog.getByRole('button', { name: 'Cancel' }).click();
   await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));

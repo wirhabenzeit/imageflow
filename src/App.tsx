@@ -420,7 +420,10 @@ export function App() {
     const target = wanted ? undefined : geometry.targets.filter((rect) => inside(rect))
       .sort((a, b) => area(a) - area(b))[0];
     const element = wanted ? undefined : geometry.boxes.findLast((rect) => rect.type === 'element' && inside(rect));
-    return { sheet, box, element, target: target && (!box || area(target) <= area(box)) ? target : undefined };
+    // The box or element drawn on top: geometry lists them in document order, so a later one covers an earlier
+    // one (an inset map over a full-bleed photo). Templates that reorder with z-index are not accounted for.
+    const top = wanted ? box : geometry.boxes.findLast((rect) => inside(rect));
+    return { sheet, box, element, top, target: target && (!box || area(target) <= area(box)) ? target : undefined };
   }
   const targetKey = (target: { spread: string; edits: string[] }) => target.spread + '|' + target.edits.join(' ');
   const closeEditor = useCallback(() => setEditing(undefined), []);
@@ -711,22 +714,27 @@ export function App() {
               style={{ height: geometry?.height, cursor: hoveredTarget ? 'pointer' : undefined,
                 '--aspect': format ? format.spreadWidth / format.height : undefined } as CSSProperties}
               onClick={(event) => {
-                const { sheet, box, target } = locate(event);
+                const { sheet, top, target } = locate(event);
                 if (!sheet) return;
                 select(sheet, false);
                 if (target) setEditing({ spread: target.spread, key: targetKey(target) });
-                if (box) setFocusBox({ box: box.id, at: Date.now() });
+                if (top) setFocusBox({ box: top.id, at: Date.now() });
               }}
               onDoubleClick={(event) => {
-                const { box, element } = locate(event);
+                // Acts on what is drawn on top, so an element over a photo opens its editor rather than crop mode.
+                const { top } = locate(event);
+                if (!top) return;
                 // Double-clicking a photo means crop mode; if that is not possible, the status line says why.
-                if (box?.type === 'photo') {
-                  startCrop(box.spread, box.id);
+                if (top.type === 'photo') {
+                  startCrop(top.spread, top.id);
                   return;
                 }
                 // Double-clicking an element with a template-supplied editor opens it.
-                if (element && openElementEditor(element.spread, element.id)) return;
-                const source = box && boxSource(box.spread, box.id);
+                if (top.type === 'element') {
+                  openElementEditor(top.spread, top.id);
+                  return;
+                }
+                const source = boxSource(top.spread, top.id);
                 if (source) setQuick(source);
               }}
               onMouseMove={(event) => {
