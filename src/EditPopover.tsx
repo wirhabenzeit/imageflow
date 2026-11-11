@@ -1,3 +1,4 @@
+import { Icon } from './Icon';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import type { Rect, TemplateInfo } from './desktop';
@@ -115,7 +116,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
     onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
     <div className="ep-head">
       <span>{heading}</span>
-      <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)" onClick={() => { commit(); close(); }}>×</button>
+      <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)" onClick={() => { commit(); close(); }}><Icon name="close" /></button>
     </div>
     <fieldset disabled={readOnly || !!blocked}>
       {targets.map((target, i) => <div className="ep-field" key={target.path}>

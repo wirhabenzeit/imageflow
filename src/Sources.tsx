@@ -1,3 +1,4 @@
+import { Icon } from './Icon';
 import { useEffect, useMemo, useRef } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import { renderOrigin } from './desktop';
@@ -144,12 +145,12 @@ export function QuickLook({ summary, source, usage, navigate, close, jump }: {
     <div ref={frame} className="ql-frame" tabIndex={-1}>
       <header className="ql-header">
         <div className="ql-nav">
-          <button aria-label="Previous" disabled={at <= 0} onClick={() => navigate(-1)}>‹</button>
-          <button aria-label="Next" disabled={at >= items.length - 1} onClick={() => navigate(1)}>›</button>
+          <button aria-label="Previous" disabled={at <= 0} onClick={() => navigate(-1)}><Icon name="previous" /></button>
+          <button aria-label="Next" disabled={at >= items.length - 1} onClick={() => navigate(1)}><Icon name="next" /></button>
         </div>
         <h2>{item.title}</h2>
         <span className="muted">{at + 1} of {items.length}</span>
-        <button className="ql-close" aria-label="Close Quick Look" onClick={() => dialog.current?.close()}>✕</button>
+        <button className="ql-close" aria-label="Close Quick Look" onClick={() => dialog.current?.close()}><Icon name="close" /></button>
       </header>
       {source.kind === 'photo'
         ? <div className="ql-body ql-photo">{summary.photos[source.id]

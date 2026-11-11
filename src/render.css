@@ -102,5 +102,5 @@ html:has(.if-artwork) { overflow: hidden; }
 .if-preview .if-photo:has(> img:not([src])) { background: #e9e5dc; }
 
 /* Template-supplied element editors run in their own frame inside an editor dialog. */
-html:has(.if-editor), html:has(.if-editor) body { background: #fcfbf6; }
-.if-editor { padding: 16px 18px; font: 14px/1.4 system-ui, sans-serif; color: #26251e; }
+html:has(.if-editor), html:has(.if-editor) body { background: #f5f5f5; }
+.if-editor { padding: 16px 18px; font: 13px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; color: #292929; color-scheme: light; }

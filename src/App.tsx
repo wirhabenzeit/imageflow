@@ -3,6 +3,7 @@ import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, renderOrigin } from './desktop';
 import type { BookGeometry, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { PanelDivider, usePanels } from './panels';
+import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
 import { McpPanel } from './McpPanel';
 import { revealIn } from './reveal';
@@ -61,22 +62,6 @@ function Guides({ sheet, format }: { sheet: Rect; format: ResolvedFormat }) {
   </div>;
 }
 
-const icons = {
-  sidebarLeft: 'M3 3h10v10H3zM6 3v10',
-  sidebarRight: 'M3 3h10v10H3zM10 3v10',
-  undo: 'M6 4L3 7l3 3M3 7h6a3 3 0 0 1 3 3v2',
-  redo: 'M10 4l3 3-3 3M13 7H7a3 3 0 0 0-3 3v2',
-  export: 'M8 10V2M5 5l3-3 3 3M3 8v5h10V8',
-  chevron: 'M5 6l3 3 3-3',
-  add: 'M8 3v10M3 8h10',
-  duplicate: 'M5.5 5.5h7v7h-7zM3.5 10.5v-7h7',
-  delete: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5',
-  up: 'M8 13V3M4 7l4-4 4 4',
-  down: 'M8 3v10M4 9l4 4 4-4',
-};
-const Icon = ({ name }: { name: keyof typeof icons }) => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-  <path d={icons[name]} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-</svg>;
 
 export function App() {
   const api = window.imageflow;

@@ -1,3 +1,4 @@
+import { Icon } from './Icon';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
@@ -186,14 +187,14 @@ export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel
       <img src={src} alt="" draggable={false} style={{ left: left - frame.x, top: top - frame.y, ...image }} />
     </div>
     {!settling && toolbarHost && createPortal(<div ref={toolbar} className="crop-toolbar" role="toolbar" aria-label="Photo">
-      <button type="button" aria-label="Zoom out" onClick={zoomButton(1 / 1.25)}>−</button>
+      <button type="button" aria-label="Zoom out" onClick={zoomButton(1 / 1.25)}><Icon name="minus" /></button>
       <input type="range" aria-label="Zoom" min={0} max={Math.log(maxZoom)} step={0.01} value={Math.log(placement.zoom)}
         onChange={(event) => {
           zoomAround(Math.exp(event.target.valueAsNumber) / latest.current.zoom);
           // Keys and drags on the slider save after a pause, so a run of steps is one Undo step.
           commitSoon();
         }} onPointerUp={commit} />
-      <button type="button" aria-label="Zoom in" onClick={zoomButton(1.25)}>+</button>
+      <button type="button" aria-label="Zoom in" onClick={zoomButton(1.25)}><Icon name="plus" /></button>
       <span className="crop-zoom">{placement.zoom.toFixed(1)}×</span>
       {ppi !== undefined && <span className={'crop-ppi' + quality}
         title={resolution ? 'Print resolution · minimum ' + resolution.minimum + ' ppi, target ' + resolution.target + ' ppi' : 'Print resolution'}>
