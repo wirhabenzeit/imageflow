@@ -29,13 +29,18 @@ export default defineTemplate({id:'diagnostics-test',version:'1',contract:1,
   structure:{delivery:'pages',ends:'inside-covers',pageCount:{min:2,max:100,step:2}},
   output:{container:'pdf',colorSpace:'sRGB',transparency:'allow'}},
  spreads:{
-  base:{label:'Title',parameters:{heading:${heading},note:p.string({label:'Note',default:'Short note'})},
+  base:{label:'Title',parameters:{heading:${heading},note:p.string({label:'Note',default:'Short note'}),caption:p.string({label:'Caption',default:'A caption'})},
    boxes:{hero:{type:'photo',label:'Photo'}},
    render:ctx=><Spread>
     <ctx.PhotoBox id="hero" style={abs(10,10,100,100)} />
     <h1 {...ctx.edit('heading')} style={{...abs(170,20,110,12),font:'600 18pt/1.2 serif'}}>{ctx.params.heading}</h1>
     <p className="subtitle" style={{...abs(170,30,110,8),font:'11pt/1.2 sans-serif'}}>A subtitle under the heading</p>
     <div {...ctx.edit('note')} style={{...abs(170,60,40,6),overflow:'hidden',font:'10pt/1.2 sans-serif'}}>{ctx.params.note}</div>
+    <div className="clip" style={{...abs(170,80,60,6),overflow:'hidden'}}><h2 {...ctx.edit('caption')} style={{margin:0,font:'10pt/1.2 sans-serif'}}>{ctx.params.caption}</h2></div>
+    <h2 style={{...abs(170,100,100,8),visibility:'hidden',font:'12pt/1.2 sans-serif'}}>Hidden text in the same place</h2>
+    <p style={{...abs(170,100,100,8),font:'12pt/1.2 sans-serif'}}>Visible text in the same place</p>
+    <p style={{...abs(170,112,100,8),opacity:0,font:'12pt/1.2 sans-serif'}}>Transparent text over the next line</p>
+    <p style={{...abs(170,112,100,8),font:'12pt/1.2 sans-serif'}}>Visible text under transparent text</p>
    </Spread>},
   initial:{label:'Initial',parameters:{title:p.string({label:'Title',default:''})},
    render:ctx=><Spread><h1 style={abs(170,20,100,20)}>{initial(ctx.params.title)}</h1></Spread>},
@@ -87,6 +92,7 @@ try {
   const drafted = (await call('check_book', { project, expectedRevision: revision, draft: { operations: [
     { op: 'set_parameter', scope: 'spread', spread: 'first', key: 'heading', value: long },
     { op: 'set_parameter', scope: 'spread', spread: 'first', key: 'note', value: 'A note far too long for its little clipped box' },
+    { op: 'set_parameter', scope: 'spread', spread: 'first', key: 'caption', value: 'A caption that wraps onto many lines inside a container that only has room for one of them, so most of it is hidden' },
   ] } })).data;
   const find = (code) => drafted.diagnostics.find((d) => d.code === code);
   const overflow = find('text-overflows-box'), overlap = find('text-overlap'), clipped = find('text-clipped');
@@ -100,6 +106,15 @@ try {
   assert.ok(overlap.details.overlapMm > 1);
   assert.deepEqual([clipped.location.parameter, clipped.details.tag], ['note', 'div']);
   assert.ok(clipped.details.overflowBottomMm > 0);
+  // A heading that fits its own block can still be cut off by a clipping container further out.
+  const container = drafted.diagnostics.find((d) => d.code === 'text-clipped' && d.location.parameter === 'caption');
+  assert.ok(container, JSON.stringify(drafted.diagnostics));
+  assert.deepEqual([container.details.tag, container.details.clippedByTag], ['h2', 'div']);
+  assert.ok(container.details.overflowBottomMm > 5, JSON.stringify(container));
+  assert.match(container.message, /cut off by its container <div>/);
+  // Hidden and transparent text never overlaps visible text.
+  assert.ok(!drafted.diagnostics.some((d) => d.code === 'text-overlap' && /same place|transparent/i.test(d.details.text + d.details.otherText)),
+    JSON.stringify(drafted.diagnostics));
 
   // A layout that throws names its spread and the template source line, through the bundle's source map.
   const thrown = (await call('check_book', { project, expectedRevision: revision, draft: { operations: [

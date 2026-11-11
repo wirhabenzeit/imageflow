@@ -274,9 +274,15 @@ export function createAuthoringService(hooks: Hooks) {
       const unresolved = (cells: FixtureCell[], message: string) => {
         for (const cell of cells) outcome.set(cell.spread, { ...cellReport(cell, format, []), state: 'not-isolated', message });
       };
-      const run = async (cells: FixtureCell[], shown?: FixtureCell[]): Promise<void> => {
+      // `isolating` is the reason recorded for these fixtures if the budget runs out before an isolation render starts.
+      // The budget is checked at every isolation render, so a slow first half cannot carry the second past the deadline.
+      const run = async (cells: FixtureCell[], shown?: FixtureCell[], isolating?: string): Promise<void> => {
         if (!cells.length) return;
         signal.throwIfAborted();
+        if (isolating !== undefined) {
+          if (!affordable()) return unresolved(cells, isolating);
+          renders++;
+        }
         const result = await checked(session, signal, { expectedRevision: base.revision! }, true,
           fixtureDraft(template, format, cells, assets, previewRequest(shown ?? [])));
         if (result.revision !== base.revision || result.diagnostics.some(({ code }) => code === 'revision-conflict' || code === 'source-changed')) {
@@ -299,9 +305,7 @@ export function createAuthoringService(hooks: Hooks) {
           }
           const rest = cells.filter(({ spread }) => !outcome.has(spread));
           if (!rest.length) return;
-          if (!affordable()) return unresolved(rest, 'Rendered together with a failing fixture; the isolation budget ran out.');
-          renders++;
-          return run(rest, shown?.filter((cell) => rest.includes(cell)));
+          return run(rest, shown?.filter((cell) => rest.includes(cell)), 'Rendered together with a failing fixture; the isolation budget ran out.');
         }
         // The fixture book failed without naming a layout, for example in anchors(): bisect within the budget.
         const message = result.diagnostics[0]?.message ?? 'The fixture book could not be rendered.';
@@ -311,11 +315,10 @@ export function createAuthoringService(hooks: Hooks) {
             location: { where: 'Fixture · ' + cells[0].label }, fixture: { layout: cells[0].layout, case: cells[0].case, format } });
           return;
         }
-        if (!affordable()) return unresolved(cells, 'A fixture book containing this fixture failed: ' + message);
-        renders += 2;
+        const reason = 'A fixture book containing this fixture failed and the isolation budget ran out: ' + message;
         const half = Math.ceil(cells.length / 2);
-        await run(cells.slice(0, half));
-        await run(cells.slice(half));
+        await run(cells.slice(0, half), undefined, reason);
+        await run(cells.slice(half), undefined, reason);
       };
       await run(plan.cells, preview?.cells);
       // An image is still useful when isolation removed failing fixtures from the requested sheet.

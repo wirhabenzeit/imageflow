@@ -299,3 +299,21 @@ test('fixture checks require a loaded template and the expected revision', async
   assert.equal(broken.checks.bundle, 'failed');
   assert.equal(broken.checks.fixtures, 'not-run');
 });
+
+test('fixture isolation starts no render after the time budget runs out', async (t) => {
+  // A controlled clock: the first isolation render (the first half of the bisection) takes past the 60-second budget.
+  let now = 1_000_000, fixtureRenders = 0;
+  t.mock.method(Date, 'now', () => now);
+  const { renders, call } = await service(t, (book) => {
+    if (++fixtureRenders === 2) now += 61_000;
+    return book.project.spreads.some(({ id }) => id === 'fixture-typical-chapter') ? { message: 'Anchors could not be declared.' } : undefined;
+  });
+  const result = await call('check_book', { fixtures: {} }) as AuthoringCheckResult;
+  const report = result.fixtures!;
+  // The full fixture book, then the first half. Neither its own halves nor the second half start after the deadline.
+  assert.equal(renders.filter(({ book }) => book.fixture).length, 2);
+  assert.equal(report.coverage.rendered, 0);
+  assert.equal(report.coverage.notIsolated, report.coverage.planned);
+  assert.ok(report.cells.every(({ state, message }) => state === 'not-isolated' && /budget ran out: Anchors could not be declared/.test(message ?? '')));
+  assert.equal(result.checks.fixtures, 'failed');
+});

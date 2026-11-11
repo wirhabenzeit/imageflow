@@ -285,9 +285,21 @@ function checkTextBlocks(sheet: HTMLElement, format: ResolvedFormat) {
   const lines = new Map<HTMLElement, DOMRect[]>();
   const walker = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
+  // Hidden or fully transparent text still has layout rectangles, but nobody sees it overflow or overlap.
+  const transparent = new Map<Element, boolean>();
+  const invisible = (element: Element): boolean => {
+    if (element === sheet) return false;
+    let known = transparent.get(element);
+    if (known === undefined) {
+      known = getComputedStyle(element).opacity === '0' || (!!element.parentElement && invisible(element.parentElement));
+      transparent.set(element, known);
+    }
+    return known;
+  };
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     let block = node.parentElement;
     if (!node.textContent?.trim() || !block || block.closest('.if-placeholder, svg')) continue;
+    if (getComputedStyle(block).visibility !== 'visible' || invisible(block)) continue;
     while (block && block !== sheet && ['inline', 'contents'].includes(getComputedStyle(block).display)) block = block.parentElement;
     if (!block || block === sheet) continue;
     range.selectNodeContents(node);
@@ -297,18 +309,35 @@ function checkTextBlocks(sheet: HTMLElement, format: ResolvedFormat) {
   const markdown = (block: HTMLElement) => block.closest('[data-box-type="markdown"]');
   // Half a millimetre absorbs sub-pixel rounding when comparing glyph rectangles.
   const tolerance = 0.5 / mmPerPixel;
-  const overflows: { owner: ReturnType<typeof textOwner>; clipped: boolean; bottomMm: number; rightMm: number }[] = [];
-  for (const block of lines.keys()) {
-    if (markdown(block)) continue;
+  const overflows: { owner: ReturnType<typeof textOwner>; clipped: boolean; bottomMm: number; rightMm: number; clippedBy?: ReturnType<typeof textOwner> }[] = [];
+  for (const [block, rects] of lines) {
+    if (markdown(block) || !rects.length) continue;
     const style = getComputedStyle(block);
     if (style.textOverflow === 'ellipsis') continue;
-    const bottom = block.scrollHeight - block.clientHeight, right = block.scrollWidth - block.clientWidth;
     // Line-height slack below the last line is not a visible overflow; a quarter line or more means text does not fit.
     const fontSize = parseFloat(style.fontSize), lineHeight = parseFloat(style.lineHeight);
     const threshold = Math.max(tolerance, 0.25 * (Number.isFinite(lineHeight) ? lineHeight : fontSize * 1.2));
-    if (bottom < threshold && right < threshold) continue;
-    const clipped = [style.overflowX, style.overflowY].some((value) => value !== 'visible');
-    overflows.push({ owner: textOwner(block), clipped, bottomMm: Math.max(0, bottom) * mmPerPixel, rightMm: Math.max(0, right) * mmPerPixel });
+    const bottom = block.scrollHeight - block.clientHeight, right = block.scrollWidth - block.clientWidth;
+    if (bottom >= threshold || right >= threshold) {
+      const clipped = [style.overflowX, style.overflowY].some((value) => value !== 'visible');
+      overflows.push({ owner: textOwner(block), clipped, bottomMm: Math.max(0, bottom) * mmPerPixel, rightMm: Math.max(0, right) * mmPerPixel });
+      continue;
+    }
+    // A container further out can cut the text off even when the block itself fits its text.
+    const text = { top: Math.min(...rects.map(({ top }) => top)), bottom: Math.max(...rects.map(({ bottom }) => bottom)),
+      left: Math.min(...rects.map(({ left }) => left)), right: Math.max(...rects.map(({ right }) => right)) };
+    for (let ancestor = block.parentElement; ancestor && ancestor !== sheet; ancestor = ancestor.parentElement) {
+      const clip = getComputedStyle(ancestor);
+      const clipX = clip.overflowX !== 'visible', clipY = clip.overflowY !== 'visible';
+      if (!clipX && !clipY) continue;
+      const outer = ancestor.getBoundingClientRect();
+      const inner = { left: outer.left + ancestor.clientLeft, top: outer.top + ancestor.clientTop };
+      const cutBottom = clipY ? Math.max(0, text.bottom - (inner.top + ancestor.clientHeight), inner.top - text.top) : 0;
+      const cutRight = clipX ? Math.max(0, text.right - (inner.left + ancestor.clientWidth), inner.left - text.left) : 0;
+      if (cutBottom < threshold && cutRight < threshold) continue;
+      overflows.push({ owner: textOwner(block), clipped: true, bottomMm: cutBottom * mmPerPixel, rightMm: cutRight * mmPerPixel, clippedBy: textOwner(ancestor) });
+      break;
+    }
   }
   const overlaps: { owner: ReturnType<typeof textOwner>; other: ReturnType<typeof textOwner>; overlapMm: number }[] = [];
   const blocks = [...lines.keys()];
@@ -972,13 +1001,17 @@ export async function startRender(root: HTMLElement) {
       }
       const round = (value: number) => Math.round(value * 10) / 10;
       const blocks = checkTextBlocks(sheet, format);
-      for (const { owner: { tag, text, self, ...owner }, clipped, bottomMm, rightMm } of blocks.overflows) {
+      for (const { owner: { tag, text, self, ...owner }, clipped, bottomMm, rightMm, clippedBy } of blocks.overflows) {
         const name = describe({ tag, text, self, ...owner });
         const fix = owner.parameter ? 'shorten ' + owner.parameter + ', or ' : '';
-        warnings.push({ ...located(spread, 'Text in ' + name + (clipped ? ' is cut off by its box.' : ' runs out of its box.')),
+        const container = clippedBy ? describe({ ...clippedBy, parameter: undefined }) : undefined;
+        warnings.push({ ...located(spread, 'Text in ' + name + (container ? ' is cut off by its container ' + container + '.' : clipped ? ' is cut off by its box.' : ' runs out of its box.')),
           code: clipped ? 'text-clipped' : 'text-overflows-box', ...owner,
-          details: { overflowBottomMm: round(bottomMm), overflowRightMm: round(rightMm), tag, text },
-          suggestion: 'To fit the text, ' + fix + 'enlarge this ' + tag + ' or reduce its font size or line height in the template.' });
+          details: { overflowBottomMm: round(bottomMm), overflowRightMm: round(rightMm), tag, text,
+            ...(clippedBy ? { clippedByTag: clippedBy.tag, ...(clippedBy.box ? { clippedByBox: clippedBy.box } : {}),
+              ...(clippedBy.element ? { clippedByElement: clippedBy.element } : {}) } : {}) },
+          suggestion: 'To fit the text, ' + fix + 'enlarge ' + (container ? 'the clipping ' + clippedBy!.tag + ' container' : 'this ' + tag) +
+            ' or reduce the font size or line height in the template.' });
       }
       for (const { owner: { tag, text, self, ...owner }, other, overlapMm } of blocks.overlaps) {
         warnings.push({ ...located(spread, 'Text in ' + describe({ tag, text, self, ...owner }) + ' overlaps text in ' + describe(other) + '.'),
