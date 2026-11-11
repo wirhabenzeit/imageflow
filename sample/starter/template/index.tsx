@@ -1,29 +1,29 @@
-import { asset, defineTemplate, file, spreadFor, p, mm, pt, Spread, PhotoBox, MarkdownBox, Element } from 'imageflow';
-import type { CSSProperties, ElementEditorProps, ImageFlowNode, Photo, RenderContext } from 'imageflow';
+import { asset, box, defineTemplate, Element, file, geometry, issue, mm, p, pt, Spread, spreadFor } from 'imageflow';
+import type { CSSProperties, ElementEditorProps, ImageFlowNode, Photo, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
 
-// Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page. They
-// scale with the chosen format: horizontal values with the trim width, vertical values with the trim height.
+// Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page.
+// `geometry.design` scales them to the chosen format: horizontal values with the trim width, vertical values with
+// the trim height. Type sizes stay in points.
 const page = 290;
 const margin = 30;
 const bleed = 3;
 const inset = mm(5);
-const across = (value: number) => 'calc(var(--trim-width) * ' + value / page + ')';
-const down = (value: number) => 'calc(var(--trim-height) * ' + value / page + ')';
 
-function left(x: number, y: number, width: number, height: number): CSSProperties {
-  return { position: 'absolute', left: across(x), top: down(y), width: across(width), height: down(height) };
+// Design-page positions as CSS for one format, and the full-bleed areas photos fill.
+function draw(format: ResolvedFormat) {
+  const design = geometry.design(format, { width: page, height: page });
+  const place = (side: 'left' | 'right') => (x: number, y: number, width: number, height: number) =>
+    geometry.css(design[side](x, y, width, height));
+  return {
+    design, left: place('left'), right: place('right'),
+    // Full-bleed photos reach into the bleed on the outside, top and bottom. The edge at the fold stays at the fold.
+    full: {
+      left: geometry.css(geometry.page(format, 'left', 'bleed')), right: geometry.css(geometry.page(format, 'right', 'bleed')),
+      spread: geometry.css(geometry.spread(format, 'bleed')),
+    },
+  };
 }
-function right(x: number, y: number, width: number, height: number): CSSProperties {
-  return { ...left(x, y, width, height), left: 'calc(var(--trim-width) + ' + across(x) + ')' };
-}
-// Full-bleed photos reach into the bleed on the outside, top and bottom. WhiteWall's layflat binding has no
-// bleed at the gutter.
-const fullHeight = { top: 'calc(-1 * var(--bleed-top))', height: 'calc(var(--trim-height) + var(--bleed-top) + var(--bleed-bottom))' };
-const fullLeft: CSSProperties = { position: 'absolute', ...fullHeight,
-  left: 'calc(-1 * var(--bleed-outside))', width: 'calc(var(--trim-width) + var(--bleed-outside))' };
-const fullRight: CSSProperties = { ...fullLeft, left: 'var(--trim-width)' };
-const fullSpread: CSSProperties = { ...fullLeft, width: 'calc(2 * var(--trim-width) + 2 * var(--bleed-outside))' };
 
 // One print format per size; they share bleed, safe area, page count and output rules.
 function bookFormat(label: string, width: number, height: number) {
@@ -43,17 +43,14 @@ function bookFormat(label: string, width: number, height: number) {
 }
 
 const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90 });
+const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
 const textSize = p.number({ label: 'Body size', default: 11, min: 8, max: 16, step: .5, unit: 'pt' });
-const photo = (label: string) => ({ type: 'photo' as const, label });
 // For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
 // control for every declared parameter. The value is shared by every layout with this box, so it returns when the
 // spread switches back to a layout that draws captions.
-const captioned = (label: string) => ({
-  ...photo(label),
-  parameters: { caption: p.boolean({ label: 'Show caption', default: false }) },
-});
+const captioned = (label: string) => box.photo(label, { caption: p.boolean({ label: 'Show caption', default: false }) });
 const columns = p.enum({ label: 'Columns', default: '1', options: ['1', '2', '3'], labels: { 1: 'Full width', 2: '2 columns', 3: '3 columns' } });
-const body = (label: string, flowOrder = 1) => ({ type: 'markdown' as const, label, flowOrder, parameters: { columns } });
+const body = (label: string, flowOrder = 1) => box.markdown(label, { flowOrder, parameters: { columns } });
 
 const documentParameters = {
   showPageNumbers: p.boolean({ label: 'Page numbers', default: true }),
@@ -132,12 +129,15 @@ function RouteMap({ track, viewport, mode, style }: { track: string; viewport: V
       problem = source.name + ' ' + (error instanceof Error ? error.message : 'could not be read') + '; the route is left out.';
     }
   }
+  // The Book check reports an unreadable track on the route element and its file parameter.
+  const finding = problem ? issue({ code: 'gpx-invalid', message: problem, element: 'route', parameter: 'track', file: track,
+    suggestion: 'Assign a GPX file that contains a track or route, or clear the GPX track.' }) : {};
   // The printed book leaves an unavailable route out, but still reports why.
-  if (!line && mode !== 'edit') return problem ? <span hidden data-issue={problem} /> : null;
+  if (!line && mode !== 'edit') return problem ? <span hidden {...finding} /> : null;
   return <Element id="route" className={line ? 'route-map' : 'route-map empty'} style={style}>
     {line
       ? <svg viewBox={viewBox(viewport)} aria-label="Route"><polyline points={line} /></svg>
-      : <span data-issue={problem || undefined}>{problem ? 'Route unavailable' : 'Route map: add a GPX track'}</span>}
+      : <span {...finding}>{problem ? 'Route unavailable' : 'Route map: add a GPX track'}</span>}
   </Element>;
 }
 
@@ -258,6 +258,7 @@ export default defineTemplate({
   id: 'imageflow-starter',
   version: '0.3.0',
   contract: 1,
+  requires: ['anchors', 'geometry', 'box-helpers', 'template-issues', 'typed-components'],
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
     landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
@@ -268,23 +269,31 @@ export default defineTemplate({
     title: spread({
       label: 'Title page', span: 'right',
       parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow' }) },
-      render: (ctx) => <Paper context={ctx}>
-        <img alt="" className="compass" src={asset('compass.svg')} style={{ ...right(margin, 60, 14, 14), objectFit: 'contain' }} />
-        <h1 {...ctx.edit('heading')} style={right(margin, 120, page - 2 * margin, 110)}>{ctx.params.heading}</h1>
-        <p {...ctx.edit('subtitle')} className="subtitle" style={right(margin, 238, page - 2 * margin, 20)}>{ctx.params.subtitle}</p>
-      </Paper>,
+      render: (ctx) => {
+        const at = draw(ctx.format);
+        return <Paper context={ctx}>
+          <img alt="" className="compass" src={asset('compass.svg')} style={{ ...at.right(margin, 60, 14, 14), objectFit: 'contain' }} />
+          <h1 {...ctx.edit('heading')} style={at.right(margin, 120, page - 2 * margin, 110)}>{ctx.params.heading}</h1>
+          <p {...ctx.edit('subtitle')} className="subtitle" style={at.right(margin, 238, page - 2 * margin, 20)}>{ctx.params.subtitle}</p>
+        </Paper>;
+      },
     }),
     story: spread({
       label: 'Photo and story',
       parameters: { heading, textSize },
       boxes: { hero: captioned('Main photo'), body: body('Story') },
-      render: (ctx) => <Paper context={ctx} bled={{ left: true }}>
-        <PhotoBox id="hero" style={fullLeft} />
-        <h2 {...ctx.edit('heading')} style={right(margin, 40, page - 2 * margin, 44)}>{ctx.params.heading}</h2>
-        <MarkdownBox id="body" {...ctx.edit('textSize')} className="reading" columns={Number(ctx.boxes.body.params.columns)}
-          style={{ ...right(margin, 100, 150, 150), fontSize: ctx.params.textSize + 'pt' }} />
-        <Caption box={ctx.boxes.hero} style={right(margin, 262, 150, 10)} />
-      </Paper>,
+      // Listed by the contents layout. The heading is on the right page.
+      anchors: ({ params }) => [{ id: 'chapter', title: oneLine(params.heading), side: 'right' }],
+      render: (ctx) => {
+        const at = draw(ctx.format);
+        return <Paper context={ctx} bled={{ left: true }}>
+          <ctx.PhotoBox id="hero" style={at.full.left} />
+          <h2 {...ctx.edit('heading')} style={at.right(margin, 40, page - 2 * margin, 44)}>{ctx.params.heading}</h2>
+          <ctx.MarkdownBox id="body" {...ctx.edit('textSize')} className="reading" columns={ctx.boxes.body.params.columns}
+            style={{ ...at.right(margin, 100, 150, 150), fontSize: ctx.params.textSize + 'pt' }} />
+          <Caption box={ctx.boxes.hero} style={at.right(margin, 262, 150, 10)} />
+        </Paper>;
+      },
     }),
     panorama: spread({
       label: 'Panorama',
@@ -299,23 +308,28 @@ export default defineTemplate({
         },
         editor: { label: 'Frame route', parameters: ['centerX', 'centerY', 'zoom'], component: RouteEditor },
       } },
-      render: (ctx) => <Paper context={ctx} bled={{ left: true, right: true }}>
-        <PhotoBox id="hero" style={fullSpread} />
-        <RouteMap track={ctx.elements.route.params.track} viewport={ctx.elements.route.params} mode={ctx.mode}
-          style={right(page - margin - 60, margin, 60, 60)} />
-        <Caption box={ctx.boxes.hero} className="caption overlay" style={left(margin, 268, 2 * page - 2 * margin, 10)} />
-      </Paper>,
+      render: (ctx) => {
+        const at = draw(ctx.format);
+        return <Paper context={ctx} bled={{ left: true, right: true }}>
+          <ctx.PhotoBox id="hero" style={at.full.spread} />
+          <RouteMap track={ctx.elements.route.params.track} viewport={ctx.elements.route.params} mode={ctx.mode}
+            style={at.right(page - margin - 60, margin, 60, 60)} />
+          <Caption box={ctx.boxes.hero} className="caption overlay" style={at.left(margin, 268, 2 * page - 2 * margin, 10)} />
+        </Paper>;
+      },
     }),
     grid: spread({
       label: 'Photo grid',
       parameters: { heading, gutter: p.integer({ label: 'Gap', default: 6, min: 2, max: 20, unit: 'mm' }) },
-      boxes: { hero: photo('Upper left'), second: photo('Upper right'), third: photo('Lower left'), fourth: photo('Lower right') },
+      boxes: { hero: box.photo('Upper left'), second: box.photo('Upper right'), third: box.photo('Lower left'), fourth: box.photo('Lower right') },
       render: (ctx) => {
-        const cell = (page - 2 * 20 - ctx.params.gutter) / 2;
+        const at = draw(ctx.format);
+        // The gap is drawn on the design page too, so it scales with the format like the cells.
+        const cells = geometry.grid(at.design.right(20, 20, page - 40, page - 40),
+          { columns: 2, rows: 2, columnGap: at.design.width(ctx.params.gutter), rowGap: at.design.height(ctx.params.gutter) });
         return <Paper context={ctx}>
-          <h2 {...ctx.edit('heading')} style={left(margin, 196, page - 2 * margin, 64)}>{ctx.params.heading}</h2>
-          {(['hero', 'second', 'third', 'fourth'] as const).map((id, i) => <PhotoBox id={id} key={id}
-            style={right(20 + (i % 2) * (cell + ctx.params.gutter), 20 + Math.floor(i / 2) * (cell + ctx.params.gutter), cell, cell)} />)}
+          <h2 {...ctx.edit('heading')} style={at.left(margin, 196, page - 2 * margin, 64)}>{ctx.params.heading}</h2>
+          {(['hero', 'second', 'third', 'fourth'] as const).map((id, i) => <ctx.PhotoBox id={id} key={id} style={geometry.css(cells[i])} />)}
         </Paper>;
       },
     }),
@@ -324,14 +338,15 @@ export default defineTemplate({
       parameters: { framed: p.boolean({ label: 'White frame', default: false }) },
       boxes: { hero: captioned('Left photo'), second: captioned('Right photo') },
       render: (ctx) => {
+        const at = draw(ctx.format);
         const framed = ctx.params.framed;
         return <Paper context={ctx} bled={{ left: !framed, right: !framed }}>
-          <PhotoBox id="hero" style={framed ? left(20, 50, 250, 167) : fullLeft} />
-          <PhotoBox id="second" style={framed ? right(20, 50, 250, 167) : fullRight} />
+          <ctx.PhotoBox id="hero" style={framed ? at.left(20, 50, 250, 167) : at.full.left} />
+          <ctx.PhotoBox id="second" style={framed ? at.right(20, 50, 250, 167) : at.full.right} />
           <Caption box={ctx.boxes.hero} className={framed ? 'caption' : 'caption overlay'}
-            style={framed ? left(20, 222, 250, 10) : left(margin, 268, 200, 10)} />
+            style={framed ? at.left(20, 222, 250, 10) : at.left(margin, 268, 200, 10)} />
           <Caption box={ctx.boxes.second} className={framed ? 'caption' : 'caption overlay'}
-            style={framed ? right(20, 222, 250, 10) : right(60, 268, 200, 10)} />
+            style={framed ? at.right(20, 222, 250, 10) : at.right(60, 268, 200, 10)} />
         </Paper>;
       },
     }),
@@ -339,19 +354,22 @@ export default defineTemplate({
       label: 'Text spread',
       parameters: { heading, textSize },
       boxes: { body: body('Left text', 1), continuation: body('Right text', 2) },
+      anchors: ({ params }) => [{ id: 'chapter', title: oneLine(params.heading), side: 'left' }],
       render: (ctx) => {
+        const at = draw(ctx.format);
         const size = { fontSize: ctx.params.textSize + 'pt' };
         return <Paper context={ctx}>
-          <h2 {...ctx.edit('heading')} style={left(40, 40, 210, 44)}>{ctx.params.heading}</h2>
-          <MarkdownBox id="body" {...ctx.edit('textSize')} className="reading" columns={Number(ctx.boxes.body.params.columns)} style={{ ...left(70, 100, 170, 160), ...size }} />
-          <MarkdownBox id="continuation" {...ctx.edit('textSize')} className="reading" columns={Number(ctx.boxes.continuation.params.columns)}
-            style={{ ...right(50, 40, 170, 220), ...size }} />
+          <h2 {...ctx.edit('heading')} style={at.left(40, 40, 210, 44)}>{ctx.params.heading}</h2>
+          <ctx.MarkdownBox id="body" {...ctx.edit('textSize')} className="reading" columns={ctx.boxes.body.params.columns}
+            style={{ ...at.left(70, 100, 170, 160), ...size }} />
+          <ctx.MarkdownBox id="continuation" {...ctx.edit('textSize')} className="reading" columns={ctx.boxes.continuation.params.columns}
+            style={{ ...at.right(50, 40, 170, 220), ...size }} />
         </Paper>;
       },
     }),
     calendar: spread({
       label: 'Calendar spread',
-      boxes: { hero: photo('Calendar photo') },
+      boxes: { hero: box.photo('Calendar photo') },
       elements: { grid: {
         label: 'Calendar grid',
         parameters: {
@@ -361,19 +379,44 @@ export default defineTemplate({
         },
         editor: { label: 'Edit calendar', parameters: ['month', 'marked'], component: CalendarEditor },
       } },
-      render: (ctx) => <Paper context={ctx} bled={{ left: true }}>
-        <PhotoBox id="hero" style={fullLeft} />
-        <Element id="grid" className="calendar-grid" style={right(40, 70, 210, 170)}>
-          <CalendarGrid date={ctx.elements.grid.params.month} firstWeekday={ctx.elements.grid.params.firstWeekday}
-            marked={ctx.elements.grid.params.marked} />
-        </Element>
-      </Paper>,
+      render: (ctx) => {
+        const at = draw(ctx.format);
+        return <Paper context={ctx} bled={{ left: true }}>
+          <ctx.PhotoBox id="hero" style={at.full.left} />
+          <ctx.Element id="grid" className="calendar-grid" style={at.right(40, 70, 210, 170)}>
+            <CalendarGrid date={ctx.elements.grid.params.month} firstWeekday={ctx.elements.grid.params.firstWeekday}
+              marked={ctx.elements.grid.params.marked} />
+          </ctx.Element>
+        </Paper>;
+      },
+    }),
+    contents: spread({
+      label: 'Contents',
+      parameters: { contentsHeading: p.string({ label: 'Contents heading', default: 'Contents' }) },
+      render: (ctx) => {
+        const at = draw(ctx.format);
+        // Every spread declares its anchors before any spread renders, so these pages follow inserts, moves and
+        // layout switches like the folios do.
+        const chapters = ctx.book.anchors('chapter');
+        return <Paper context={ctx}>
+          <h2 {...ctx.edit('contentsHeading')} style={at.left(margin, 40, page - 2 * margin, 44)}>{ctx.params.contentsHeading}</h2>
+          <ol className="contents" style={at.right(margin, 40, page - 2 * margin, 220)}>
+            {chapters.map((chapter) => <li key={chapter.spread + chapter.side}>
+              <span>{chapter.title}</span><span className="contents-page">{chapter.page}</span>
+            </li>)}
+          </ol>
+          {!chapters.length && ctx.mode === 'edit' &&
+            <p className="caption" style={at.right(margin, 40, page - 2 * margin, 10)}>Story and text spreads appear here.</p>}
+        </Paper>;
+      },
     }),
     closing: spread({
       label: 'Closing page', span: 'left',
       // Not `heading`: an ID means the same thing in every layout, and a closing line is not a spread heading.
       parameters: { closingLine: p.string({ label: 'Closing line', default: 'Until next time' }) },
-      render: (ctx) => <Paper context={ctx}><h2 {...ctx.edit('closingLine')} style={left(margin, 120, page - 2 * margin, 60)}>{ctx.params.closingLine}</h2></Paper>,
+      render: (ctx) => <Paper context={ctx}>
+        <h2 {...ctx.edit('closingLine')} style={draw(ctx.format).left(margin, 120, page - 2 * margin, 60)}>{ctx.params.closingLine}</h2>
+      </Paper>,
     }),
   },
 });

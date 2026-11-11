@@ -11,6 +11,7 @@ import type { ImportRequest, ProjectSummary } from '../src/desktop';
 import { photoDetails, photoExtensions } from './photos';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
+import { runtimeExports } from '../src/runtime-exports';
 
 export const assetTypes: Record<string, string> = {
   '.js': 'text/javascript', '.css': 'text/css', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -63,7 +64,7 @@ export async function readProjectDocument(root: string, name: ManifestName): Pro
 }
 
 const hostModules = new Map([
-  ['imageflow', 'export const { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset, file } = globalThis.ImageFlowRuntime;'],
+  ['imageflow', 'export const { ' + runtimeExports.join(', ') + ' } = globalThis.ImageFlowRuntime;'],
   ['react', 'export default globalThis.ImageFlowReact; export const { createElement, Fragment, Children } = globalThis.ImageFlowReact;'],
   ['react/jsx-runtime', 'export const { jsx, jsxs, Fragment } = globalThis.ImageFlowJSX;'],
 ]);
@@ -143,8 +144,12 @@ async function bundleTemplate(folder: string) {
   } catch (error) {
     const message = 'Template could not be bundled. ' + (error instanceof Error ? error.message : String(error));
     const errors = (error as Partial<BuildFailure> | null)?.errors;
+    // An import of a helper this app's `imageflow` module lacks usually means the template needs a newer app.
+    const missingHelper = (text: string) => /No matching export in "imageflow-host:imageflow" for import "([^"]+)"/.exec(text)?.[1];
     const diagnostics: AuthoringDiagnostic[] = Array.isArray(errors) ? errors.slice(0, 50).map(({ text, location }) => ({
       code: 'template-compile-error', stage: 'template', severity: 'error', message: text,
+      ...(missingHelper(text) ? { suggestion: 'This version of ImageFlow does not provide ' + missingHelper(text) + '. Update ImageFlow, ' +
+        'or use only the exports it lists: ' + runtimeExports.join(', ') + '.' } : {}),
       ...(location ? { location: {
         path: relative(folder, resolve(root, location.file)), line: location.line, column: location.column + 1,
       } } : {}),

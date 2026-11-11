@@ -52,7 +52,7 @@ try {
 
   // Only layouts with the same footprint are offered: no single title or closing page for a full spread.
   assert.deepEqual(await picker.getByRole('radio').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label'))),
-    ['Photo and story', 'Panorama', 'Photo grid', 'Two photos', 'Text spread', 'Calendar spread']);
+    ['Photo and story', 'Panorama', 'Photo grid', 'Two photos', 'Text spread', 'Calendar spread', 'Contents']);
 
   // Crops are set per layout; the one set last is the focus other layouts fill around.
   await setCrop('Upper left', { Zoom: 2, Horizontal: 0.3 });
@@ -149,9 +149,29 @@ try {
   await rerendered(() => button('Undo').click());
   assert.deepEqual(await keptNames(), ['Cottage']);
 
+  // Story and text spreads declare chapter anchors on the page with their heading; a Contents layout lists them.
+  const chapters = [['Arriving', 3], ['A turn in the path', 9], ['From the notebook', 12], ['When it got quiet', 17], ['The last notes', 26]];
+  assert.deepEqual((await status()).anchors.map(({ id, title, page }) => [id, title, page]), chapters.map((entry) => ['chapter', ...entry]));
+  await rerendered(() => layout('Contents').click());
+  assert.deepEqual(await frame.locator('[data-spread="settlements"] .contents li').evaluateAll((items) =>
+    items.map((item) => [item.firstElementChild.textContent, Number(item.lastElementChild.textContent)])), chapters);
+  await rerendered(() => button('Undo').click());
+  assert.equal((await settlements()).definition, 'pair');
+
   // An ID with two parameter types is a template error naming both layouts.
   const templateFile = join(project, 'template', 'index.tsx');
   const templateSource = await readFile(templateFile, 'utf8');
+
+  // A lookup of an anchor no spread declares is a Book check warning on the spread that asked.
+  const contentsLookup = "const chapters = ctx.book.anchors('chapter');";
+  assert.ok(templateSource.includes(contentsLookup));
+  await rerendered(() => writeFile(templateFile, templateSource.replace(contentsLookup,
+    "const chapters = [ctx.book.anchor('map'), ...ctx.book.anchors('chapter')].filter(Boolean);")));
+  await rerendered(() => layout('Contents').click());
+  const missing = (await status()).warnings.filter(({ code }) => code === 'anchor-missing');
+  assert.deepEqual(missing.map(({ spread, details }) => [spread, details.anchor]), [['settlements', 'map']]);
+  await rerendered(() => button('Undo').click());
+  await rerendered(() => writeFile(templateFile, templateSource));
   const pairParameters = "parameters: { framed: p.boolean({ label: 'White frame', default: false }) },";
   assert.ok(templateSource.includes(pairParameters));
   await writeFile(templateFile, templateSource.replace(pairParameters,

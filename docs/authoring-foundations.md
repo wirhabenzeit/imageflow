@@ -43,7 +43,7 @@ An IPC failure returns `{ error }`. A completed check returns `{ value }`, with:
 
 ## Scope and limitations
 
-The prototype adds the local MCP connection, stable open-project handles, typed command batches, shared UI/MCP Undo, draft protection and recoverable manifest saves. Local authoring checks now include opt-in installed-runtime TypeScript validation, contact sheets, box/element close-ups and focused element measurements. PDF preflight, synthetic fixture content and broader client verification remain in #18. Template API changes remain in #29.
+The prototype adds the local MCP connection, stable open-project handles, typed command batches, shared UI/MCP Undo, draft protection and recoverable manifest saves. Local authoring checks now include opt-in installed-runtime TypeScript validation, contact sheets, box/element close-ups and focused element measurements. PDF preflight, synthetic fixture content and broader client verification remain in #18. The template API additions from #29 (geometry, box and finding helpers, typed IDs, anchors, capability requirements and examples) are described in [template-api.md](template-api.md); constrained custom dimensions are proposed in [decision 0002](decisions/0002-custom-dimensions.md).
 
 UI and MCP writes share the app-owned session and history. Agent mutations acquire an editor lease and serialize with saves and imports. Read-only agent checks can run while UI edits proceed; revision verification rejects changed-input results. Draft protection is deliberately conservative: any focused field or open editor blocks an agent mutation until the human finishes it.
 

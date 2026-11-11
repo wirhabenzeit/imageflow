@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
-import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { capabilities as templateCapabilities, runtimeExports } from '../src/runtime-exports';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from '../src/authoring-check';
 import type { AuthoringDiagnostic } from '../src/authoring';
 import type { ImportRequest } from '../src/desktop';
@@ -95,6 +96,16 @@ function sameDocuments(before: PromiseSettledResult<{ source: Buffer }>[], after
     if (document.status === 'fulfilled' && current.status === 'fulfilled') return document.value.source.equals(current.value.source);
     return document.status === 'rejected' && current.status === 'rejected' && failureIdentity(document.reason) === failureIdentity(current.reason);
   });
+}
+
+// Complete example templates shipped next to the API reference. The first line of each is its description.
+async function templateExamples(reference: string) {
+  const folder = join(dirname(reference), 'examples');
+  const names = (await readdir(folder)).filter((name) => name.endsWith('.tsx')).sort();
+  return Promise.all(names.map(async (name) => {
+    const source = await readFile(join(folder, name), 'utf8');
+    return { name: basename(name, '.tsx'), description: source.split('\n', 1)[0].replace(/^\/\/\s*/, ''), source };
+  }));
 }
 
 export function createAuthoringService(hooks: Hooks) {
@@ -294,13 +305,16 @@ export function createAuthoringService(hooks: Hooks) {
             'Call check_book with a spread preview after edits; images include whole-book text flow.',
             'Preview a new or unused layout before saving it: call check_book with draft.operations (an insert_spread with a ref) and target the preview at its $ref.',
             'Use apply_project_changes for project.json/photos.json; never edit these manifests while the app is open.',
-            'Copy new content into inbox/ and call import_sources. Then assign returned IDs with a command batch.'],
+            'Copy new content into inbox/ and call import_sources. Then assign returned IDs with a command batch.',
+            'To start or extend a template, call get_authoring_context with includeExamples and copy the closest example layout.'],
           template, diagnostics, checks: report.checks, sources,
           templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
           apiReference: await readFile(hooks.docs, 'utf8'),
+          ...(args.includeExamples ? { examples: await templateExamples(hooks.docs) } : {}),
           capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
             maxPreviewEdge: 1600, typescript: true, printPreflight: false, draftPreview: true, fixtures: false, contactSheets: true,
             elementInspection: true, detailPreviews: true, maxContactSheetSpreads: 12,
+            templateApi: { contract: 1, capabilities: [...templateCapabilities], exports: [...runtimeExports] },
             diagnostics: 'Stable codes with spread/box/element/source locations, measured details and suggested fixes.',
             draftProtection: 'All agent mutations wait until active human editors are closed or blurred.',
             imports: 'Only project/inbox paths. All selected files are validated before import; source files remain available to Undo.',

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -97,4 +97,20 @@ test('worker deadlines and cancellation terminate typechecking without a stale r
   const pending = check(controller.signal);
   controller.abort(new Error('cancelled check'));
   await assert.rejects(pending, /cancelled check/);
+});
+
+test('every shipped example template type-checks against the installed declarations', async (t) => {
+  const { entry, check } = await fixture(t);
+  const examples = (await readdir(resolve('docs/examples'))).filter((name) => name.endsWith('.tsx'));
+  assert.ok(examples.length >= 6);
+  for (const name of examples) {
+    await writeFile(entry, await readFile(resolve('docs/examples', name), 'utf8'));
+    assert.deepEqual((await check()).diagnostics, [], name);
+  }
+  // Layout-typed components and requires reject what the layout or the app does not have.
+  const minimal = await readFile(resolve('docs/examples/minimal.tsx'), 'utf8');
+  await writeFile(entry, minimal.replace('<ctx.PhotoBox id="hero"', '<ctx.PhotoBox id="heor"').replace("'typed-components']", "'typed-components', 'teleport']"));
+  const messages = (await check()).diagnostics.map(({ message }) => message).join('\n');
+  assert.match(messages, /"heor"/);
+  assert.match(messages, /"teleport"/);
 });

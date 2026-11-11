@@ -18,7 +18,7 @@ import { PreviewError } from '../src/preview';
 const source = 'export default {};';
 const project = { schemaVersion: 1, title: 'Context book', template: { id: 'test', version: '1' }, spreads: [{ id: 'one', definition: 'main' }] };
 const status: Extract<RenderStatus, { state: 'ready' }> = {
-  state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {},
+  state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {}, anchors: [],
   template: {
     version: '1', parameters: {}, spreads: { main: { label: 'Main', span: 'spread', parameters: {}, boxes: {}, elements: {} } },
     formatId: 'default', formats: { default: 'Default' },
@@ -532,4 +532,22 @@ test('actual input changes during preparation reject the command without retryin
   assert.equal(checks(), 1);
   assert.equal(saved, 0);
   assert.equal(session.receipts.size, 0);
+});
+
+test('context reports the installed template API and returns shipped examples on request', async (t) => {
+  const { work, call } = await fixture(t);
+  await mkdir(join(work, 'examples'));
+  await writeFile(join(work, 'examples', 'b-grid.tsx'), '// A grid.\nexport default {};\n');
+  await writeFile(join(work, 'examples', 'a-minimal.tsx'), '// The smallest template.\nexport default {};\n');
+  await writeFile(join(work, 'examples', 'notes.md'), 'Not an example.');
+  const plain = await call('get_authoring_context');
+  assert.equal(plain.examples, undefined);
+  const api = (plain.capabilities as { templateApi: { contract: number; capabilities: string[]; exports: string[] } }).templateApi;
+  assert.equal(api.contract, 1);
+  assert.ok(api.capabilities.includes('anchors') && api.exports.includes('geometry'));
+  const withExamples = await call('get_authoring_context', { includeExamples: true });
+  assert.deepEqual(withExamples.examples, [
+    { name: 'a-minimal', description: 'The smallest template.', source: '// The smallest template.\nexport default {};\n' },
+    { name: 'b-grid', description: 'A grid.', source: '// A grid.\nexport default {};\n' },
+  ]);
 });

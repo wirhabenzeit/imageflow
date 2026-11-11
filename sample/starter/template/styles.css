@@ -38,6 +38,9 @@
 .field-book .caption.overlay { color: #fff; }
 .field-book .left-folio { left: 15mm; }
 .field-book .right-folio { right: 15mm; }
+.field-book .contents { margin: 0; padding: 0; list-style: none; font: 400 13pt/1.35 "Field Serif"; }
+.field-book .contents li { display: flex; gap: 6mm; justify-content: space-between; margin: 0 0 4mm; }
+.field-book .contents-page { font: 500 10pt/1.75 "Field Sans"; font-variant-numeric: tabular-nums; }
 .field-book .calendar-grid h3 { margin-bottom: 12mm; }
 .field-book .days { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 6mm; }
 .field-book .days strong { font-weight: 500; }

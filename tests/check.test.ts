@@ -16,7 +16,7 @@ import { photoFile } from '../desktop/photos';
 
 // Rendering itself is exercised by smoke-authoring-preview; these tests exercise the consistency boundary.
 const status: Extract<RenderStatus, { state: 'ready' }> = {
-  state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {},
+  state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {}, anchors: [],
   template: {
     version: '1', parameters: {}, spreads: {}, formatId: 'default', formats: {},
     format: {
