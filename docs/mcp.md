@@ -36,7 +36,7 @@ Every inspection/check result identifies an input revision. Pass that revision a
 | Tool | Arguments and result |
 | --- | --- |
 | `list_projects` | No arguments. Returns the currently authorized open project, its stable handle, writable state and current revision. |
-| `get_authoring_context` | `project`, optional `includeSource`. Reads up to eight requested paths inside `template/` or `texts/`, with declarations and authoring guidance. |
+| `get_authoring_context` | `project`, optional `includeSource` and `includeExamples`. Reads up to eight requested paths inside `template/` or `texts/`, with declarations, authoring guidance and the installed template API (`capabilities.templateApi`: contract, capabilities and `imageflow` exports). `includeExamples` adds the shipped example templates, each with name, description and source. |
 | `inspect_book` | `project`, `view` of `summary`, `spreads`, `sources`, `parameters` or `elements`, optional `spread`, `offset` and `limit`. The `elements` view requires `spread` and optionally filters by `box` or `element`. Results are paginated with at most 100 records per call. |
 | `check_book` | `project`, optional `expectedRevision`, `preview`, `inspect`, `typescript` and `draft`. Combines check coverage, diagnostics, measured element inspection and optional artwork. With `draft`, it renders an unsaved command batch on top of the saved book. |
 | `apply_project_changes` | `project`, `expectedRevision`, `idempotencyKey`, `label`, `operations`, optional `dryRun`. Validates the complete batch and applies it through the app. One successful batch creates one named Undo entry. |
@@ -150,7 +150,8 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | `file-missing`, `file-unreadable`, `file-type` | Parameter and file source, with the box or element when it owns the parameter. |
 | `parameter-invalid`, `content-undeclared`, `element-undeclared`, `edit-path-unknown` | Saved values or edit markers the current declarations do not accept. |
 | `format-unavailable`, `page-sequence` | Book-level format and page-count findings. |
-| `template-issue` | A template-reported `data-issue`, located on its box or element. |
+| `template:<code>` | A structured template finding from `issue()`, with the template's code, its box or element, `parameter`, file `source`, `details` and `suggestion`. Severity as declared. |
+| `template-issue`, `template-issue-invalid` | A plain `data-issue` mark, or an `issue()` value that failed validation, on its box or element. |
 | `anchor-missing`, `anchor-ambiguous` | The spread whose `ctx.book.anchor(id)` found no anchor, or several; `anchor`, and `declared` for ambiguous lookups. |
 
 `render.anchors` lists every declared anchor with its spread and resolved page, in page order. A draft check reports the anchors of the drafted book.

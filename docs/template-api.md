@@ -17,6 +17,41 @@ template/
 
 The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided by the host and must not be bundled. Relative imports, CSS imports, and asset imports inside `template/` are allowed; other package imports are not supported. Templates must render deterministically without fetching data, timers, state, or effects. This is an authoring requirement, not a guarantee that arbitrary template JavaScript is safe; open only projects you trust.
 
+`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `Spread`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue` and `capabilities`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
+
+### Examples
+
+[`docs/examples`](examples) holds complete templates that compile against the installed declarations:
+
+| Example | Shows |
+| --- | --- |
+| `minimal.tsx` | One layout with a photo, an editable heading and a page number. |
+| `photo-story.tsx` | Photo and story, text continuation across layouts, chapter anchors and a contents layout. |
+| `grid-bleed.tsx` | A photo grid inside the safe area and a full-bleed panorama with a caption. |
+| `generated-element.tsx` | Generated SVG content from element parameters, edited by clicking it. |
+| `file-input.tsx` | An optional CSV file input, parsed by the template, with a structured finding for bad lines. |
+| `responsive.tsx` | Two formats and one layout that arranges itself by the shape of the chosen format. |
+
+Agents receive them with `get_authoring_context` and `includeExamples`. To start a template, copy the closest example. To extend one, copy a single layout and its declarations. The starter template is the complete reference book.
+
+### Requirements and compatibility
+
+Template contract 1 has grown by additive features. A template lists the ones it uses in `requires`, so an app without one of them names it instead of failing inside a layout:
+
+```ts
+defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, requires: ['anchors', 'geometry'], … })
+```
+
+| Capability | Provides |
+| --- | --- |
+| `anchors` | `anchors` declarations and `ctx.book`. |
+| `geometry` | The `geometry` helpers. |
+| `box-helpers` | `box.photo` and `box.markdown`. |
+| `template-issues` | `issue()` structured findings. |
+| `typed-components` | `ctx.PhotoBox`, `ctx.MarkdownBox` and `ctx.Element`. |
+
+`capabilities` lists what the installed app provides, and `get_authoring_context` reports it as `capabilities.templateApi`. Apps older than `requires` ignore it, but their bundler still rejects an import of a helper they lack. An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
+
 ## Declaration
 
 The following sketch illustrates the scopes; `MonthGrid` and the abbreviated format are placeholders. Use the starter template for a complete compilable package.
@@ -91,6 +126,18 @@ export default defineTemplate({
   },
 });
 ```
+
+### Reusable declarations and typed IDs
+
+Declarations are plain objects, so share them as constants. `box.photo(label, parameters?)` and `box.markdown(label, { flowOrder?, parameters? })` declare boxes without repeating `type`. The ID stays where the box is declared, which keeps its saved identity explicit:
+
+```tsx
+const caption = p.boolean({ label: 'Show caption', default: false });
+const story = box.markdown('Story', { flowOrder: 1 });
+spread({ label: 'Story', boxes: { hero: box.photo('Main photo', { caption }), story }, render: (ctx) => … })
+```
+
+With `spreadFor`, the render context types every parameter, box and element of its layout. `ctx.PhotoBox`, `ctx.MarkdownBox` and `ctx.Element` are the platform components restricted to that layout's IDs, so `<ctx.PhotoBox id="heor" />` fails type checking. The top-level components accept any ID for extracted helpers. `MarkdownBox` takes `columns` as a number or a numeric string, so an enum value such as `'2'` needs no cast. Runtime validation still checks every rendered box and element, for code that is not type-checked.
 
 ### Parameters
 
@@ -182,6 +229,7 @@ type RenderContext = {
   formatId: string;                         // the chosen key of `formats`, or 'default'
   mode: 'edit' | 'export';
   edit(...paths: EditPath[]): { 'data-edit'?: string };  // marks a node for click-to-edit
+  PhotoBox; MarkdownBox; Element;          // the platform components, typed to this layout's IDs
   book: {                                   // the whole book, as seen from this spread
     pages: number;
     anchor(id: string): Anchor | undefined; // the anchor with this ID (see Anchors)
@@ -277,8 +325,54 @@ render: (ctx) => {
 - **Choosing:** the generated control lists the project's files with an accepted extension, offers **Choose…** to add one, and **None** to clear the assignment. Adding a file copies it into `files/` and registers it in `project.json`; assigning it is a normal edit. Undo removes the assignment and keeps the file; clearing never deletes a file.
 - **Value:** the file's ID in the project's `files` registry, or `''`. Paths in the registry are relative to the project, so moving the project folder keeps its files.
 - **Content:** `file(id)` returns the file's name, extension and UTF-8 text, read when the project loads (files are limited to 20 MB). Preview and export render from the same text. It returns `undefined` when nothing is assigned or the assigned file cannot be read.
-- **Diagnostics:** ImageFlow reports an assigned file that is no longer registered, missing or unreadable, or whose extension is not in `accept`, as a Book check error for that element, which blocks print export. An unassigned file parameter is valid. The template parses the content; if it cannot, it should render without it and mark a node with `data-issue="…"`, which the Book check reports as a warning for that spread (a hidden node works in export).
+- **Diagnostics:** ImageFlow reports an assigned file that is no longer registered, missing or unreadable, or whose extension is not in `accept`, as a Book check error for that element, which blocks print export. An unassigned file parameter is valid. The template parses the content. If it cannot, it should render without it and report a [template finding](#template-findings) that names the element, parameter and file.
 - **Example:** the starter's Panorama layout has a Route map element that draws an assigned GPX track as a line in an inset (`sample/starter/files/senja-road.gpx`). It has no basemap: remote map styles and tiles would make export depend on the network, and are not part of the contract.
+
+### Template findings
+
+A template reports problems with its input, such as an assigned file it cannot parse, with `issue()`. Spread the result onto a rendered node; a hidden node works in export:
+
+```tsx
+<span hidden {...issue({
+  code: 'gpx-invalid', message: source.name + ' has no track.',
+  element: 'route', parameter: 'track', file: trackId, details: { points: 0 },
+  suggestion: 'Assign a GPX file that contains a track or route.',
+})} />
+```
+
+- `code` is lowercase (`a-z`, digits, `-`). The Book check and `check_book` report it as `template:<code>`, so it cannot collide with platform codes.
+- The location is the given `box` or `element`, or else the box or element that contains the node. `parameter` names the parameter, and `file` the file ID of a file parameter; it is reported as the finding's `source`.
+- `severity` is `warning` by default. `error` blocks print export, like other layout errors.
+- `details` carries measured or related values (strings or numbers). `suggestion` is advice for a person or agent; ImageFlow never applies it.
+- A finding is reported once per spread render, however many identical nodes carry it. Findings render from the same input every time, so editor, check and export report the same ones.
+
+A plain `data-issue="…"` attribute still works. It reports a `template-issue` warning on the containing box or element. An `issue()` value that fails validation is reported as `template-issue-invalid`.
+
+## Geometry helpers
+
+`geometry` computes rectangles in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the trim width), y from the top trim edge. `geometry.css(rect)` positions a node absolutely inside `<Spread>`. The helpers return plain numbers, so ordinary CSS and inline styles stay available, and nothing scales type.
+
+| Helper | Returns |
+| --- | --- |
+| `page(format, side, area?)` | One page. `area` is `trim` (default), `safe` (the format's safe insets, with the binding inset next to the fold) or `bleed` (outer edges extended into the bleed; the fold edge stays at the fold, because a page's binding bleed shows the facing page). Works for single first and last pages. |
+| `spread(format, area?)` | Both pages. Its `safe` area keeps only the outer, top and bottom insets. |
+| `inset(rect, mm \| { top, right, bottom, left })` | A smaller rectangle. |
+| `grid(rect, { columns, rows?, gap?, columnGap?, rowGap? })` | Equal cells in reading order, with gaps between cells only. |
+| `design(format, { width, height })` | Design coordinates. `left(x, y, w, h)` and `right(…)` map a fixed design canvas to a page, scaling x with the trim width and y with the trim height. `width(v)` and `height(v)` convert design lengths such as gaps. |
+| `css(rect)` | `{ position: 'absolute', left, top, width, height }` in `mm`. |
+
+```tsx
+render: (ctx) => {
+  const text = geometry.page(ctx.format, 'right', 'safe');
+  const cells = geometry.grid(geometry.page(ctx.format, 'left', 'safe'), { columns: 2, rows: 2, gap: 4 });
+  return <Spread>
+    {(['a', 'b', 'c', 'd'] as const).map((id, i) => <ctx.PhotoBox key={id} id={id} style={geometry.css(cells[i])} />)}
+    <ctx.MarkdownBox id="story" style={geometry.css(geometry.inset(text, { top: 20 }))} />
+  </Spread>;
+}
+```
+
+Use `geometry.page` and `geometry.spread` for physical layouts that keep margins in millimetres on every format. Use `geometry.design` to scale a composition drawn on a fixed canvas, as the starter does. These numbers are physical lengths for CSS, unlike the structured `mm()`, `pt()` and `inch()` values used in print-format declarations. The starter's layouts use these helpers; a recorded baseline (`tests/fixtures/starter-geometry.json`, checked by `scripts/smoke-starter-geometry.mjs`) confirms that they render the same millimetre geometry as the earlier hand-written CSS in both formats.
 
 ## Platform components
 
@@ -351,7 +445,7 @@ Not allowed in Markdown boxes: CSS counters for list numbering, `float`, `positi
 
 When the template is loaded:
 
-- `id`, `version`, `contract` present; contract version supported.
+- `id`, `version`, `contract` present; contract version supported; every capability in `requires` provided by this app.
 - Unique, stable identifiers for spreads, boxes, elements, and parameters; valid parameter defaults.
 - A valid print format.
 - Unique `flowOrder` among Markdown boxes of a spread.
@@ -360,7 +454,7 @@ When the template is loaded:
 When a spread renders:
 
 - Every declared box rendered once; no undeclared box or element ids.
-- Assigned files of file parameters exist, are readable, and have an accepted extension; `data-issue` marks reported by the template.
+- Assigned files of file parameters exist, are readable, and have an accepted extension; template findings from `issue()` or `data-issue`.
 - Valid anchor declarations; each `ctx.book.anchor(id)` lookup finds exactly one anchor (otherwise a warning).
 - No rendered content extends beyond the spread's bleed (Markdown overflow is handled by the flow and reported as unplaced text).
 
