@@ -1,12 +1,14 @@
 import { constants } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs, { link, lstat, mkdir, mkdtemp, open, realpath, rm, unlink } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { photoIndexSchema, projectSchema } from '../src/project';
+import { createLockOwner, isLockOwnerAlive } from './lock-owner';
 
 const names = ['project.json', 'photos.json'] as const;
-export type ProjectManifests = Record<typeof names[number], Buffer>;
+type ManifestName = typeof names[number];
+export type ProjectManifests = Record<ManifestName, Buffer>;
 export type ProjectLock = (() => Promise<void>) & { tryRelocate(newFolder: string): Promise<boolean> };
 export const maximumManifestBytes = 16 * 1024 * 1024;
 const maximumJournalBytes = maximumManifestBytes * 6;
@@ -14,12 +16,21 @@ const entrySchema = z.object({
   before: z.string().max(Math.ceil(maximumManifestBytes / 3) * 4),
   after: z.string().max(Math.ceil(maximumManifestBytes / 3) * 4),
 }).strict();
-const journalSchema = z.object({
-  version: z.literal(1), transaction: z.string().uuid(),
-  manifests: z.object({ 'project.json': entrySchema, 'photos.json': entrySchema }).strict(),
-}).strict();
-const ownerSchema = z.object({ version: z.literal(1), pid: z.number().int().positive().max(2147483647), token: z.string().uuid() }).strict();
-type Journal = { transaction: string; before: ProjectManifests; after: ProjectManifests };
+const guardedEntrySchema = z.union([entrySchema, z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict()]);
+const journalSchema = z.discriminatedUnion('version', [
+  z.object({ version: z.literal(1), transaction: z.string().uuid(),
+    manifests: z.object({ 'project.json': entrySchema, 'photos.json': entrySchema }).strict() }).strict(),
+  z.object({ version: z.literal(2), transaction: z.string().uuid(),
+    manifests: z.object({ 'project.json': guardedEntrySchema, 'photos.json': guardedEntrySchema }).strict() }).strict(),
+]);
+const ownerFields = { pid: z.number().int().positive().max(2147483647), token: z.string().uuid() };
+const ownerSchema = z.discriminatedUnion('version', [
+  z.object({ version: z.literal(1), ...ownerFields }).strict(),
+  z.object({ version: z.literal(2), ...ownerFields, endpoint: z.string().min(1).max(256) }).strict(),
+]);
+type ManifestEdit = { before: Buffer; after: Buffer } | { sha256: string };
+type Journal = { transaction: string; manifests: Record<ManifestName, ManifestEdit> };
+const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
 export class CommittedProjectSaveError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -122,8 +133,10 @@ function decodeJournal(bytes: Buffer): Journal {
   const { transaction, manifests } = parsed.data;
   return {
     transaction,
-    before: Object.fromEntries(names.map((name) => [name, decodeSource(name, manifests[name].before)])) as ProjectManifests,
-    after: Object.fromEntries(names.map((name) => [name, decodeSource(name, manifests[name].after)])) as ProjectManifests,
+    manifests: Object.fromEntries(names.map((name) => {
+      const entry = manifests[name];
+      return [name, 'sha256' in entry ? entry : { before: decodeSource(name, entry.before), after: decodeSource(name, entry.after) }];
+    })) as Journal['manifests'],
   };
 }
 
@@ -160,14 +173,25 @@ async function finishSave(folder: string, pending: NonNullable<Awaited<ReturnTyp
   // Validate every manifest before publishing any of them. Recheck each immediately before its rename as well.
   for (const name of names) {
     const bytes = await recoveryManifest(folder, name);
-    if (!bytes.equals(journal.before[name]) && !bytes.equals(journal.after[name])) throw conflict(name);
-    await writeDurably(join(staging, name), journal.after[name]);
+    const entry = journal.manifests[name];
+    if ('sha256' in entry) {
+      if (digest(bytes) !== entry.sha256) throw conflict(name);
+      validateManifest(name, bytes);
+    } else {
+      if (!bytes.equals(entry.before) && !bytes.equals(entry.after)) throw conflict(name);
+      if (!bytes.equals(entry.after)) await writeDurably(join(staging, name), entry.after);
+    }
   }
   await syncDirectory(staging);
   for (const name of names) {
     const bytes = await recoveryManifest(folder, name);
-    if (bytes.equals(journal.after[name])) continue;
-    if (!bytes.equals(journal.before[name])) throw conflict(name);
+    const entry = journal.manifests[name];
+    if ('sha256' in entry) {
+      if (digest(bytes) !== entry.sha256) throw conflict(name);
+      continue;
+    }
+    if (bytes.equals(entry.after)) continue;
+    if (!bytes.equals(entry.before)) throw conflict(name);
     // Both destinations are fixed names in the project root. rename() replaces a link rather than following it.
     await fs.rename(join(staging, name), join(folder, name));
     await syncDirectory(folder);
@@ -200,15 +224,19 @@ export async function persistProjectManifests(folder: string, before: ProjectMan
   const root = await realpath(folder);
   for (const name of names) {
     validateManifest(name, before[name]);
-    validateManifest(name, after[name]);
+    if (!before[name].equals(after[name])) validateManifest(name, after[name]);
   }
   const internal = await persistenceFolder(root, true);
   if (!internal) throw new Error('Could not create the project save directory.');
   if (await pendingJournal(root)) throw new Error('A previous project save needs recovery. Reload this project before making another edit.');
   for (const name of names) if (!(await manifest(root, name)).equals(before[name])) throw new Error('The project changed on disk. Reload before making more edits.');
   const transaction = randomUUID();
-  const bytes = Buffer.from(JSON.stringify({ version: 1, transaction, manifests: Object.fromEntries(names.map((name) =>
-    [name, { before: before[name].toString('base64'), after: after[name].toString('base64') }])) }) + '\n');
+  const edits = Object.fromEntries(names.map((name) => [name, before[name].equals(after[name])
+    ? { sha256: digest(before[name]) } : { before: before[name], after: after[name] }])) as Journal['manifests'];
+  const bytes = Buffer.from(JSON.stringify({ version: 2, transaction, manifests: Object.fromEntries(names.map((name) => {
+    const entry = edits[name];
+    return [name, 'sha256' in entry ? entry : { before: entry.before.toString('base64'), after: entry.after.toString('base64') }];
+  })) }) + '\n');
   const staging = await mkdtemp(join(internal, 'save-'));
   let published = false;
   let complete = false;
@@ -221,7 +249,7 @@ export async function persistProjectManifests(folder: string, before: ProjectMan
     published = true;
     await syncDirectory(internal);
     const pending = { internal, path, ...await boundedFile(path, maximumJournalBytes) };
-    await finishSave(root, pending, { transaction, before, after }, staging);
+    await finishSave(root, pending, { transaction, manifests: edits }, staging);
     complete = true;
   } catch (error) {
     if (published) throw new CommittedProjectSaveError('The save was interrupted after its recovery journal was committed. Reload this project to finish saving before making more edits.', { cause: error });
@@ -247,7 +275,7 @@ function processAlive(pid: number) {
 }
 
 async function readOwner(path: string) {
-  const file = await boundedFile(path, 1024);
+  const file = await boundedFile(path, 2048);
   let value: unknown;
   try { value = JSON.parse(file.bytes.toString('utf8')); }
   catch { throw new Error('The project writer lock is invalid. Preserve ' + path + ' and resolve its ownership before opening the project.'); }
@@ -268,41 +296,67 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
     if (code(error) !== 'EEXIST') throw error;
     throw new Error('Project lock acquisition is in progress or was interrupted. Close other ImageFlow instances and inspect ' + gate + ' before retrying.');
   }
-  const owner = { version: 1 as const, pid: process.pid, token: randomUUID() };
+  const token = randomUUID();
   let path = join(internal, 'writer.lock');
   let owned: Awaited<ReturnType<typeof readOwner>> | undefined;
+  let proof: Awaited<ReturnType<typeof createLockOwner>> | undefined;
   try {
-    await writeDurably(join(gate, 'owner.json'), JSON.stringify(owner));
-    await syncDirectory(gate);
-    await syncDirectory(internal);
-    const previous = await readOwner(path).catch((error: unknown) => {
-      if (code(error) !== 'ENOENT') throw error;
-      return undefined;
-    });
-    if (previous) {
-      if (processAlive(previous.owner.pid)) throw new Error('This project is already open for editing in another ImageFlow session (process ' + previous.owner.pid + ').');
-      // Preserve a proven dead owner's record. The acquisition gate serializes competing stale-lock claims.
-      await link(path, join(internal, 'writer-stale-' + previous.owner.token + '.json'));
-      await unlink(path);
+    try {
+      const previous = await readOwner(path).catch((error: unknown) => {
+        if (code(error) !== 'ENOENT') throw error;
+        return undefined;
+      });
+      if (previous) {
+        if (previous.owner.version === 1 && processAlive(previous.owner.pid)) {
+          throw new Error('This project has a legacy writer lock for a live or reused process ID. Close other ImageFlow sessions and resolve the recorded ownership before reopening.');
+        }
+        if (previous.owner.version === 2 && await isLockOwnerAlive(previous.owner.endpoint, previous.owner.token)) {
+          throw new Error('This project is already open for editing in another ImageFlow session.');
+        }
+      }
+      proof = await createLockOwner(token);
+      const owner = { version: 2 as const, pid: process.pid, token, endpoint: proof.endpoint };
+      await writeDurably(join(gate, 'owner.json'), JSON.stringify(owner));
+      await syncDirectory(gate);
+      await syncDirectory(internal);
+      if (previous) {
+        // Preserve a proven retired owner's record. The acquisition gate serializes competing stale-lock claims.
+        await link(path, join(internal, 'writer-stale-' + previous.owner.token + '.json'));
+        await unlink(path);
+        await syncDirectory(internal);
+      }
+      await link(join(gate, 'owner.json'), path);
+      await syncDirectory(internal);
+      owned = await readOwner(path);
+    } finally {
+      await rm(gate, { recursive: true });
       await syncDirectory(internal);
     }
-    await link(join(gate, 'owner.json'), path);
-    await syncDirectory(internal);
-    owned = await readOwner(path);
-  } finally {
-    await rm(gate, { recursive: true });
-    await syncDirectory(internal);
+  } catch (error) {
+    await proof?.close();
+    throw error;
   }
   let released = false;
-  const matchesOwner = (current: Awaited<ReturnType<typeof readOwner>>) => current.owner.token === owner.token &&
-    current.owner.pid === owner.pid && current.info.ino === owned!.info.ino && current.info.dev === owned!.info.dev;
+  const matchesOwner = (current: Awaited<ReturnType<typeof readOwner>>) => current.owner.version === 2 && current.owner.token === token &&
+    current.owner.endpoint === proof!.endpoint && current.info.ino === owned!.info.ino && current.info.dev === owned!.info.dev;
   const release = async () => {
     if (released) return;
-    if (await internalFolder(location, false) !== internal) throw new Error('The project lock directory changed. Its writer lock was preserved.');
-    const current = await readOwner(path);
-    if (!matchesOwner(current)) throw new Error('The project writer lock changed ownership. Its current lock was preserved.');
-    await unlink(path);
-    await syncDirectory(internal);
+    try {
+      if (await internalFolder(location, false) === internal) {
+        const current = await readOwner(path).catch((error: unknown) => {
+          if (code(error) !== 'ENOENT') throw error;
+          return undefined;
+        });
+        if (current && matchesOwner(current)) {
+          await unlink(path);
+          await syncDirectory(internal);
+        }
+      }
+    } catch (error) {
+      if (code(error) !== 'ENOENT') throw error;
+    }
+    // A renamed/deleted project may still contain the old record. Retiring the private endpoint makes it reclaimable.
+    await proof!.close();
     released = true;
   };
   return Object.assign(release, {

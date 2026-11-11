@@ -4,7 +4,8 @@ import type { ChildProcess } from 'node:child_process';
 import fs, { cp, link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import net from 'node:net';
 import { test } from 'node:test';
 import { build } from 'esbuild';
 import sharp from 'sharp';
@@ -151,7 +152,7 @@ test('journal validation rejects extra paths, unknown versions, invalid bytes, i
     await publishJournal(folder);
     const valid = JSON.parse(await readFile(journalPath(folder), 'utf8'));
     const invalid = [
-      { ...valid, version: 2 },
+      { ...valid, version: 3 },
       { ...valid, destination: '../outside' },
       { ...valid, manifests: { ...valid.manifests, '../outside': valid.manifests['project.json'] } },
       { ...valid, manifests: { ...valid.manifests, 'project.json': { before: '***', after: valid.manifests['project.json'].after } } },
@@ -205,6 +206,59 @@ test('updateProject uses recoverable publication and preserves untouched manifes
   } finally { await rm(root, { recursive: true }); }
 });
 
+test('title-only journal stores a guard for the unchanged photo manifest and retains paired recovery checks', async () => {
+  const { root, folder } = await fixture();
+  const photoBytes = Buffer.from(JSON.stringify({ large: { path: 'photos/large.jpg', caption: 'c'.repeat(2 * 1024 * 1024) } }));
+  const original = { ...before, 'photos.json': photoBytes };
+  const intended = { ...after, 'photos.json': photoBytes };
+  const publish = fs.rename;
+  try {
+    await writeFile(join(folder, 'photos.json'), photoBytes);
+    const unchanged = await lstat(join(folder, 'photos.json'));
+    fs.rename = async () => { throw new Error('Interrupted before the title was published'); };
+    await assert.rejects(persistProjectManifests(folder, original, intended), CommittedProjectSaveError);
+    fs.rename = publish;
+    const journalBytes = await readFile(journalPath(folder));
+    assert.ok(journalBytes.length < 2048);
+    const journal = JSON.parse(journalBytes.toString());
+    assert.equal(journal.version, 2);
+    assert.deepEqual(journal.manifests['photos.json'], { sha256: createHash('sha256').update(photoBytes).digest('hex') });
+    const internal = join(folder, '.imageflow/persistence');
+    for (const entry of await readdir(internal)) {
+      if (entry.startsWith('save-')) assert.equal((await readdir(join(internal, entry))).includes('photos.json'), false);
+    }
+    await writeFile(join(folder, 'photos.json'), '{}');
+    await assert.rejects(recoverProjectSave(folder), /photos.json changed outside ImageFlow/);
+    assert.deepEqual(await readFile(join(folder, 'project.json')), before['project.json']);
+    await writeFile(join(folder, 'photos.json'), photoBytes);
+    const restored = await lstat(join(folder, 'photos.json'));
+    await recoverProjectSave(folder);
+    assert.deepEqual(await manifests(folder), intended);
+    const recovered = await lstat(join(folder, 'photos.json'));
+    assert.equal(recovered.ino, unchanged.ino);
+    assert.equal(recovered.mtimeMs, restored.mtimeMs);
+  } finally { fs.rename = publish; await rm(root, { recursive: true }); }
+});
+
+test('an unchanged manifest is rechecked after publishing its paired changed manifest', async () => {
+  const { root, folder } = await fixture();
+  const intended = { ...after, 'photos.json': before['photos.json'] };
+  const publish = fs.rename;
+  try {
+    fs.rename = async (source, destination) => {
+      await publish(source, destination);
+      if (destination === join(folder, 'project.json')) await writeFile(join(folder, 'photos.json'), '{"external":{"path":"photos/other.jpg"}}');
+    };
+    await assert.rejects(persistProjectManifests(folder, before, intended), CommittedProjectSaveError);
+    fs.rename = publish;
+    assert.deepEqual(await readFile(join(folder, 'project.json')), intended['project.json']);
+    await assert.rejects(recoverProjectSave(folder), /photos.json changed outside ImageFlow/);
+    await writeFile(join(folder, 'photos.json'), before['photos.json']);
+    await recoverProjectSave(folder);
+    assert.deepEqual(await manifests(folder), intended);
+  } finally { fs.rename = publish; await rm(root, { recursive: true }); }
+});
+
 test('an interrupted import preserves journal-referenced assets while a rejected precommit import cleans up', async () => {
   const { root, folder, cache } = await fixture();
   try {
@@ -238,7 +292,7 @@ test('writer lock excludes another owner, releases idempotently, and preserves u
     const path = join(folder, '.imageflow/writer.lock');
     const replacement = JSON.stringify({ version: 1, pid: process.pid, token: randomUUID() });
     await writeFile(path, replacement);
-    await assert.rejects(nextRelease(), /changed ownership/);
+    await nextRelease();
     assert.equal(await readFile(path, 'utf8'), replacement);
   } finally { await rm(root, { recursive: true }); }
 });
@@ -291,6 +345,94 @@ test('relocation refuses copied lock files and hard-linked candidates while the 
     assert.equal(await lock.tryRelocate(moved), true);
     await lock();
     assert.ok(await lstat(join(candidate, '.imageflow/writer.lock')));
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('release retires ownership after the project folder or lock file disappears', async () => {
+  const { root, folder } = await fixture();
+  try {
+    const lock = await acquireProjectLock(folder);
+    const owner = JSON.parse(await readFile(join(folder, '.imageflow/writer.lock'), 'utf8'));
+    await rm(folder, { recursive: true });
+    await lock();
+    await assert.rejects(lstat(owner.endpoint), { code: 'ENOENT' });
+    await mkdir(folder);
+    const second = await acquireProjectLock(folder);
+    await rm(join(folder, '.imageflow/writer.lock'));
+    await second();
+    const third = await acquireProjectLock(folder);
+    await third();
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('a moved project can be left for another book and reopened while the same process remains alive', async () => {
+  const { root, folder } = await fixture();
+  const moved = join(root, 'Moved book');
+  const other = join(root, 'Other book');
+  try {
+    const first = await acquireProjectLock(folder);
+    const owner = JSON.parse(await readFile(join(folder, '.imageflow/writer.lock'), 'utf8'));
+    await rename(folder, moved);
+    await mkdir(other);
+    const second = await acquireProjectLock(other);
+    assert.equal(await first.tryRelocate(other), false);
+    await first();
+    const reopened = await acquireProjectLock(moved);
+    const current = JSON.parse(await readFile(join(moved, '.imageflow/writer.lock'), 'utf8'));
+    assert.equal(current.pid, owner.pid);
+    assert.notEqual(current.token, owner.token);
+    assert.deepEqual(JSON.parse(await readFile(join(moved, '.imageflow/writer-stale-' + owner.token + '.json'), 'utf8')), owner);
+    await second();
+    await reopened();
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('a live ownership proof excludes contenders even when its recorded process ID is stale', async () => {
+  const { root, folder } = await fixture();
+  const lock = await acquireProjectLock(folder);
+  try {
+    const path = join(folder, '.imageflow/writer.lock');
+    const owner = JSON.parse(await readFile(path, 'utf8'));
+    owner.pid = 2147483647;
+    await writeFile(path, JSON.stringify(owner));
+    await assert.rejects(acquireProjectLock(folder), /already open for editing/);
+    assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), owner);
+  } finally { await lock(); await rm(root, { recursive: true }); }
+});
+
+test('permission errors contacting an owner fail closed and preserve its lock', async () => {
+  const { root, folder } = await fixture();
+  const lock = await acquireProjectLock(folder);
+  const connect = net.createConnection;
+  try {
+    const path = join(folder, '.imageflow/writer.lock');
+    const owner = await readFile(path);
+    net.createConnection = (() => {
+      const socket = new net.Socket();
+      queueMicrotask(() => socket.emit('error', Object.assign(new Error('Permission denied'), { code: 'EACCES' })));
+      return socket;
+    }) as typeof net.createConnection;
+    await assert.rejects(acquireProjectLock(folder), /could not contact.*EACCES/);
+    assert.deepEqual(await readFile(path), owner);
+    net.createConnection = connect;
+    await assert.rejects(acquireProjectLock(folder), /already open for editing/);
+  } finally { net.createConnection = connect; await lock(); await rm(root, { recursive: true }); }
+});
+
+test('legacy locks require manual resolution for live process IDs and reclaim only proven dead IDs', async () => {
+  const { root, folder } = await fixture();
+  try {
+    await mkdir(join(folder, '.imageflow'));
+    const path = join(folder, '.imageflow/writer.lock');
+    const owner = { version: 1, pid: process.pid, token: randomUUID() };
+    await writeFile(path, JSON.stringify(owner));
+    await assert.rejects(acquireProjectLock(folder), /legacy writer lock.*live or reused process ID/);
+    assert.deepEqual(JSON.parse(await readFile(path, 'utf8')), owner);
+    owner.pid = 2147483647;
+    await writeFile(path, JSON.stringify(owner));
+    const lock = await acquireProjectLock(folder);
+    assert.deepEqual(JSON.parse(await readFile(join(folder, '.imageflow/writer-stale-' + owner.token + '.json'), 'utf8')), owner);
+    await lock();
   } finally { await rm(root, { recursive: true }); }
 });
 
