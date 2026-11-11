@@ -18,6 +18,7 @@ import { bundledFontNames } from './fonts';
 import { isProjectInputPath } from './revisions';
 import type { ProjectInputIndex } from './revisions';
 import { checkProject } from './check';
+import type { CheckDraft } from './check';
 import { captureBookPreview, checkBookRender } from './preview';
 import { ProjectSession } from './project-session';
 import { createAuthoringService, AuthoringError } from './authoring-service';
@@ -458,7 +459,7 @@ async function exportBook(owner: BrowserWindow, projectId: string, mode: ExportM
 }
 
 async function checkOpenBook(book: OpenProject, request: AuthoringCheckRequest, externalSignal?: AbortSignal,
-  inputs: ProjectInputIndex | undefined = projectSession?.book.folder === book.folder ? projectSession.inputs : undefined) {
+  inputs: ProjectInputIndex | undefined = projectSession?.book.folder === book.folder ? projectSession.inputs : undefined, draft?: CheckDraft) {
   const renditions = projectSession?.inputs === inputs ? projectSession?.renditions : undefined;
   const job = new AbortController();
   const timeout = setTimeout(() => job.abort(new Error('The authoring check timed out.')), 90_000);
@@ -478,7 +479,7 @@ async function checkOpenBook(book: OpenProject, request: AuthoringCheckRequest, 
       } finally {
         sessions.delete(id);
       }
-    }, externalSignal ? AbortSignal.any([job.signal, externalSignal]) : job.signal, inputs, renditions);
+    }, externalSignal ? AbortSignal.any([job.signal, externalSignal]) : job.signal, inputs, renditions, draft);
   } finally {
     clearTimeout(timeout);
     if (checkJob === job) checkJob = undefined;

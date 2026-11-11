@@ -3,15 +3,17 @@ import type { PrintSide } from './format';
 import { identifier } from './project';
 
 export const maxPreviewEdge = 1600;
-export const previewRequestSchema = z.strictObject({
+// `spread` validates the spread target. Draft checks also accept `$alias` batch references, resolved before rendering.
+export const makePreviewRequestSchema = (spread: z.ZodType<string, string>) => z.strictObject({
   target: z.union([
-    z.strictObject({ spread: identifier.refine((id) => id.length <= 256), side: z.enum(['left', 'right']).optional() }),
+    z.strictObject({ spread, side: z.enum(['left', 'right']).optional() }),
     z.strictObject({ page: z.int().positive() }),
   ]),
   bounds: z.enum(['trim', 'bleed']).default('trim'),
   maxEdge: z.int().min(1).max(maxPreviewEdge).default(1000),
   format: z.enum(['png', 'jpeg']).default('png'),
 });
+export const previewRequestSchema = makePreviewRequestSchema(identifier.refine((id) => id.length <= 256));
 
 export type PreviewRequest = z.input<typeof previewRequestSchema>;
 export type PreviewMetadata = {

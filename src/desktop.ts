@@ -90,7 +90,12 @@ export type BookGeometry = {
   targets: (Rect & { spread: string; edits: string[] })[];
 };
 // A preflight finding. `spread` is the spread id and `where` its readable location, such as "Pages 6–7 · Photo grid".
-export type Issue = { message: string; spread?: string; where?: string };
+// The optional fields give agents a stable `code`, the box/element/source involved, measured values and a repair hint.
+export type Issue = {
+  message: string; spread?: string; where?: string;
+  code?: string; box?: string; element?: string; source?: string; parameter?: string;
+  details?: Record<string, string | number>; suggestion?: string;
+};
 export const issueText = ({ message, where }: Issue) => where ? where + ' · ' + message : message;
 export type RenderStatus = {
   state: 'ready'; template: TemplateInfo; pages: number;

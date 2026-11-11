@@ -18,5 +18,11 @@ export type AuthoringCheckResult = AuthoringReport & {
     print: 'not-run';
   };
   render?: Extract<RenderStatus, { state: 'ready' }>;
-  image?: PreviewMetadata & { mimeType: 'image/png' | 'image/jpeg'; data: string };
+  image?: PreviewMetadata & { mimeType: 'image/png' | 'image/jpeg'; data: string; draft?: true };
+  // Present when the check rendered an unsaved command batch on top of the saved book.
+  draft?: AuthoringDraftSummary;
+};
+export type AuthoringDraftSummary = {
+  applied: boolean; committed: false;
+  changes?: string[]; affectedSpreads?: string[]; references?: Record<string, string>; reflow?: boolean;
 };

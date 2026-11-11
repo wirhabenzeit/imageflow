@@ -182,3 +182,26 @@ test('verified renditions survive template changes but rejected private output n
   await renditions.close();
   assert.deepEqual(await readdir(cache), []);
 });
+
+test('render findings keep their codes, locations, measured values and suggested fixes', async (t) => {
+  const { book, cache } = await fixture(t);
+  const findings: Extract<RenderStatus, { state: 'ready' }> = {
+    ...status,
+    errors: [
+      { message: 'Photo is 120 ppi (minimum 240).', spread: 's1', where: 'Pages 2–3 · Story', code: 'photo-resolution-low', box: 'hero',
+        source: 'ph-1', details: { ppi: 120, minimumPpi: 240 }, suggestion: 'Zoom the crop out.' },
+      { message: 'Untyped finding.' },
+    ],
+    warnings: [{ message: 'Text is smaller than the format minimum.', spread: 's2', code: 'text-too-small', element: 'caption', details: {} }],
+  };
+  const result = await checkProject(book, cache, {}, async () => ({ status: findings }), new AbortController().signal);
+  assert.equal(result.state, 'ready');
+  assert.deepEqual(result.diagnostics, [
+    { code: 'photo-resolution-low', stage: 'render', severity: 'error', message: 'Photo is 120 ppi (minimum 240).',
+      location: { spread: 's1', box: 'hero', source: 'ph-1', where: 'Pages 2–3 · Story' },
+      details: { ppi: 120, minimumPpi: 240 }, suggestion: 'Zoom the crop out.' },
+    { code: 'layout-error', stage: 'render', severity: 'error', message: 'Untyped finding.' },
+    { code: 'text-too-small', stage: 'render', severity: 'warning', message: 'Text is smaller than the format minimum.',
+      location: { spread: 's2', element: 'caption' } },
+  ]);
+});

@@ -10,8 +10,12 @@ export type AuthoringDiagnostic = {
   message: string;
   location?: {
     path?: string; line?: number; column?: number;
-    spread?: string; box?: string; element?: string; source?: string; where?: string;
+    spread?: string; box?: string; element?: string; source?: string; parameter?: string; where?: string;
   };
+  // Measured and allowed values, such as `{ ppi: 180, minimumPpi: 240 }`.
+  details?: Record<string, string | number>;
+  // A concrete repair, phrased in terms of template edits or project commands.
+  suggestion?: string;
 };
 
 export type AuthoringReport = {

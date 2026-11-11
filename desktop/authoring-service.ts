@@ -10,7 +10,9 @@ import { keptOutside } from '../src/layouts';
 import { sourceUsage } from '../src/editing';
 import { ProjectRevisionError } from './revisions';
 import type { ProjectInputCapture, ProjectInputIndex } from './revisions';
-import { loadProject, readProjectDocument } from './project';
+import { loadProject, readProjectDocument, withProjectFiles } from './project';
+import type { CheckDraft } from './check';
+import type { PreviewRequest } from '../src/preview';
 import { photoExtensions } from './photos';
 import type { OpenProject } from './project';
 import type { ProjectSession } from './project-session';
@@ -23,7 +25,7 @@ type Hooks = {
   session: () => ProjectSession | undefined;
   cache: string;
   docs: string;
-  check: (book: OpenProject, request: AuthoringCheckRequest, signal: AbortSignal, index?: ProjectInputIndex) => Promise<AuthoringCheckResult>;
+  check: (book: OpenProject, request: AuthoringCheckRequest, signal: AbortSignal, index?: ProjectInputIndex, draft?: CheckDraft) => Promise<AuthoringCheckResult>;
   changed: (book: OpenProject) => void;
   recovery: (message: string) => void;
   import: (request: ImportRequest, paths: string[], base: OpenProject) => Promise<{ imported: string[] }>;
@@ -101,7 +103,7 @@ export function createAuthoringService(hooks: Hooks) {
     if (!session || session.handle !== handle) throw new AuthoringError('PROJECT_CLOSED', 'This project is no longer open. Call list_projects for current handles.');
     return session;
   };
-  const checkOnce = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest, fresh: boolean) => {
+  const checkOnce = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest, fresh: boolean, draft?: CheckDraft) => {
     signal.throwIfAborted();
     const before = await contextInputs(session.inputs, signal);
     const matches = cachedCheck?.session === session && before.inputs && cachedCheck.inputs.revision === before.inputs.revision &&
@@ -109,12 +111,12 @@ export function createAuthoringService(hooks: Hooks) {
     if (!matches) cachedCheck = undefined;
     // expectedRevision is checked before reuse. It constrains the inputs without changing a no-preview render.
     const expectedMatches = !request.expectedRevision || request.expectedRevision === before.inputs?.revision;
-    if (!fresh && !request.preview && expectedMatches && cachedCheck) {
+    if (!fresh && !draft && !request.preview && expectedMatches && cachedCheck) {
       get(session.handle);
       return { result: structuredClone(cachedCheck.result), watcherInvalidated: false };
     }
-    if (fresh) cachedCheck = undefined;
-    const result = await hooks.check(session.book, request, signal, session.inputs);
+    if (fresh && !draft) cachedCheck = undefined;
+    const result = await hooks.check(session.book, request, signal, session.inputs, draft);
     get(session.handle);
     const after = await contextInputs(session.inputs, signal);
     if (before.failure !== after.failure || before.inputs?.revision !== after.inputs?.revision ||
@@ -125,18 +127,19 @@ export function createAuthoringService(hooks: Hooks) {
       }
       throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while checking. Check again.');
     }
-    if (result.state === 'ready' && after.inputs) {
+    // A draft result describes unsaved state and must never answer a later check of the saved book.
+    if (result.state === 'ready' && after.inputs && !draft) {
       const { image: _image, ...baseline } = result;
       cachedCheck = { session, inputs: after.inputs, result: structuredClone(baseline) };
     }
     return { result, watcherInvalidated: false };
   };
-  const checked = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest = {}, fresh = false) => {
-    const first = await checkOnce(session, signal, request, fresh);
+  const checked = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest = {}, fresh = false, draft?: CheckDraft) => {
+    const first = await checkOnce(session, signal, request, fresh, draft);
     if (!first.watcherInvalidated) return first.result;
     signal.throwIfAborted();
     cachedCheck = undefined;
-    const retried = await checkOnce(session, signal, request, true);
+    const retried = await checkOnce(session, signal, request, true, draft);
     if (retried.watcherInvalidated) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while checking. Check again.');
     return retried.result;
   };
@@ -161,6 +164,37 @@ export function createAuthoringService(hooks: Hooks) {
       throw new AuthoringError('SOURCE_CHANGED', 'Files changed while preparing the command. Check again.');
     }
   };
+  // Renders the saved book with an unsaved command batch applied. The batch is planned against the same freshly
+  // loaded, revision-verified book that is rendered, with the template declarations of that revision.
+  const draftCheck = async (session: ProjectSession, signal: AbortSignal, expectedRevision: string, operations: unknown,
+    preview: PreviewRequest | undefined) => {
+    const base = await checked(session, signal, { expectedRevision });
+    if (base.state !== 'ready' || !base.render) return { ...base, draft: { applied: false, committed: false } };
+    const template = base.render.template;
+    const draft: CheckDraft = (book) => {
+      let planned;
+      try { planned = applyProjectCommands(book, template, operations); }
+      catch (error) {
+        if (error instanceof ProjectCommandError) throw new AuthoringError(error.code, error.message, { operationIndex: error.operationIndex });
+        throw error;
+      }
+      let drafted;
+      try { drafted = withProjectFiles(book, planned.files); }
+      catch (error) { throw new AuthoringError('INVALID_OPERATION', error instanceof Error ? error.message : 'The draft is not a valid project.'); }
+      let target = preview?.target;
+      if (target && 'spread' in target && target.spread.startsWith('$')) {
+        const resolved = planned.references[target.spread.slice(1)];
+        if (!resolved) throw new AuthoringError('REFERENCE_NOT_FOUND', 'The draft defines no batch reference ' + target.spread + '.');
+        target = { ...target, spread: resolved };
+      }
+      return {
+        book: drafted, preview: preview && target ? { ...preview, target } : undefined,
+        summary: { applied: true, committed: false, changes: planned.changes, affectedSpreads: planned.affectedSpreads,
+          references: planned.references, reflow: planned.reflow },
+      };
+    };
+    return checked(session, signal, { expectedRevision }, true, draft);
+  };
   return async (name: string, args: Record<string, any>, signal: AbortSignal): Promise<Record<string, unknown>> => {
     if (name === 'list_projects') {
       const session = hooks.session();
@@ -173,7 +207,8 @@ export function createAuthoringService(hooks: Hooks) {
     const session = get(args.project);
     if (name === 'check_book') {
       if (args.preview?.target?.page && !args.expectedRevision) throw new AuthoringError('REVISION_REQUIRED', 'Page-number previews require expectedRevision; spread IDs can be used without it.');
-      return checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview }, true);
+      if (!args.draft) return checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview }, true);
+      return draftCheck(session, signal, args.expectedRevision, args.draft.operations, args.preview);
     }
     if (name === 'get_authoring_context' || name === 'inspect_book') {
       const report = await checked(session, signal);
@@ -229,13 +264,15 @@ export function createAuthoringService(hooks: Hooks) {
           project: session.handle, revision: report.revision, root: session.book.folder,
           workflow: ['Edit template/ TSX, CSS and assets directly with workspace tools.', 'Edit existing texts/ Markdown directly.',
             'Call check_book with a spread preview after edits; images include whole-book text flow.',
+            'Preview a new or unused layout before saving it: call check_book with draft.operations (an insert_spread with a ref) and target the preview at its $ref.',
             'Use apply_project_changes for project.json/photos.json; never edit these manifests while the app is open.',
             'Copy new content into inbox/ and call import_sources. Then assign returned IDs with a command batch.'],
           template, diagnostics, checks: report.checks, sources,
           templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
           apiReference: await readFile(hooks.docs, 'utf8'),
           capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
-            maxPreviewEdge: 1600, typescript: false, printPreflight: false, fixtures: false, contactSheets: false,
+            maxPreviewEdge: 1600, typescript: false, printPreflight: false, draftPreview: true, fixtures: false, contactSheets: false,
+            diagnostics: 'Stable codes with spread/box/element/source locations, measured details and suggested fixes.',
             draftProtection: 'All agent mutations wait until active human editors are closed or blurred.',
             imports: 'Only project/inbox paths. All selected files are validated before import; source files remain available to Undo.',
             idempotency: 'Up to 1000 successful requests for this open-project handle; replay returns the original result. Reopen expires the handle.' },

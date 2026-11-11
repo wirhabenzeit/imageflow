@@ -1,9 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { authoringCheckSchema } from '../src/authoring-check';
-import type { AuthoringCheckResult } from '../src/authoring-check';
+import type { AuthoringCheckResult, AuthoringDraftSummary } from '../src/authoring-check';
 import type { AuthoringDiagnostic } from '../src/authoring';
-import type { RenderStatus } from '../src/desktop';
+import type { Issue, RenderStatus } from '../src/desktop';
 import type { PreviewRequest } from '../src/preview';
 import { PreviewError } from '../src/preview';
 import { captureProjectInputs, ProjectRevisionError } from './revisions';
@@ -18,13 +18,29 @@ type RenderCheck = (book: OpenProject, preview: PreviewRequest | undefined, sign
   status: ReadyStatus; preview?: BookPreview;
 }>;
 
+/** Applies an unsaved command batch to the freshly loaded book. It may rewrite the preview request, for example to
+ * resolve a batch reference to the ID of an inserted spread. */
+export type CheckDraft = (book: OpenProject) => { book: OpenProject; preview?: PreviewRequest; summary: AuthoringDraftSummary };
+
+function diagnostic(issue: Issue, severity: 'error' | 'warning'): AuthoringDiagnostic {
+  const { message, code, spread, where, box, element, source, parameter, details, suggestion } = issue;
+  const location = Object.fromEntries(Object.entries({ spread, box, element, source, parameter, where })
+    .filter(([, value]) => value !== undefined && value !== ''));
+  return {
+    code: code ?? (severity === 'error' ? 'layout-error' : 'layout-warning'), stage: 'render', severity, message,
+    ...(Object.keys(location).length ? { location } : {}),
+    ...(details && Object.keys(details).length ? { details } : {}),
+    ...(suggestion ? { suggestion } : {}),
+  };
+}
+
 /** Read-only authoring check. The app supplies a private, temporary render session.
  * A check never adopts its disk reload into the editor or changes its Undo history.
  * Inputs are checked again after rendering; changed inputs invalidate the entire result.
  */
 export async function checkProject(
   source: OpenProject, fallbackCache: string, request: unknown, render: RenderCheck, signal: AbortSignal, index?: ProjectInputIndex,
-  renditions?: CheckRenditionCache,
+  renditions?: CheckRenditionCache, draft?: CheckDraft,
 ): Promise<AuthoringCheckResult> {
   const result: AuthoringCheckResult = {
     state: 'error', revision: null, diagnostics: [],
@@ -40,6 +56,8 @@ export async function checkProject(
   let privateCache: string | undefined;
   let retainedCache = false;
   let inputs: Awaited<ReturnType<typeof captureProjectInputs>> | undefined;
+  // An invalid draft is the caller's request error, not a check finding.
+  let draftError: unknown;
   const capture = () => index ? index.capture({ signal }) : captureProjectInputs(source.folder, { signal });
   const inputsMatch = async () => {
     const current = await capture();
@@ -65,7 +83,18 @@ export async function checkProject(
     await renditions?.seed(privateCache, photoKeys);
     result.checks.bundle = 'passed';
     phase = 'render';
-    const checked = await render(book, parsed.data.preview, signal);
+    let rendered = book;
+    let preview: PreviewRequest | undefined = parsed.data.preview;
+    if (draft) {
+      // Command errors propagate to the caller; the draft never reaches the editor or disk.
+      let planned: ReturnType<CheckDraft>;
+      try { planned = draft(book); }
+      catch (error) { draftError = error; throw error; }
+      rendered = planned.book;
+      preview = planned.preview;
+      result.draft = planned.summary;
+    }
+    const checked = await render(rendered, preview, signal);
     if (!await inputsMatch()) {
       throw new ProjectRevisionError('source-changed');
     }
@@ -73,20 +102,19 @@ export async function checkProject(
     result.state = 'ready';
     result.render = checked.status;
     result.checks.layout = 'completed';
-    result.diagnostics = (['error', 'warning'] as const).flatMap((severity) =>
-      checked.status[severity === 'error' ? 'errors' : 'warnings'].map((issue): AuthoringDiagnostic => ({
-        code: severity === 'error' ? 'layout-error' : 'layout-warning', stage: 'render', severity,
-        message: issue.message, location: { spread: issue.spread, where: issue.where },
-      })));
+    result.diagnostics = [
+      ...checked.status.errors.map((issue) => diagnostic(issue, 'error')),
+      ...checked.status.warnings.map((issue) => diagnostic(issue, 'warning')),
+    ];
     if (checked.preview) {
       const { bytes, mimeType, status: _status, ...metadata } = checked.preview;
-      result.image = { ...metadata, mimeType, data: Buffer.from(bytes).toString('base64') };
+      result.image = { ...metadata, mimeType, data: Buffer.from(bytes).toString('base64'), ...(draft ? { draft: true as const } : {}) };
     }
     retainedCache = await renditions?.retain(privateCache, photoKeys) ?? false;
     return result;
   } catch (error) {
     // Cancellation must not replace a compiler/source/render failure that already occurred.
-    if (signal.aborted) throw error;
+    if (signal.aborted || (draftError !== undefined && error === draftError)) throw error;
     if (error instanceof TemplateCompileError) {
       result.checks.bundle = 'failed';
       result.diagnostics = error.diagnostics;

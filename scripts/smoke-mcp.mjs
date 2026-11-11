@@ -105,6 +105,20 @@ try {
   assert.equal(dry.committed,false);
   assert.equal(await readFile(join(folder,'project.json'),'utf8'),before);
   await ready();
+  // A draft check renders the unused layout in the real book flow by batch reference, without saving it.
+  const draft=await call('check_book',{project,expectedRevision:revision,draft:{operations:batch.operations},preview:{target:{spread:'$chapter'},maxEdge:300}});
+  assert.ok(!draft.response.isError,JSON.stringify(draft.data));
+  assert.equal(draft.data.state,'ready');
+  assert.equal(draft.data.draft.applied,true);
+  assert.equal(draft.data.draft.committed,false);
+  assert.equal(draft.data.image.draft,true);
+  assert.equal(draft.data.image.spread,draft.data.draft.references.chapter);
+  const draftImage=draft.response.content.find(c=>c.type==='image');
+  assert.equal((await sharp(Buffer.from(draftImage.data,'base64')).metadata()).width,300);
+  assert.equal(await readFile(join(folder,'project.json'),'utf8'),before);
+  const missingAlias=await call('check_book',{project,expectedRevision:revision,draft:{operations:[{op:'set_title',title:'Draft'}]},preview:{target:{spread:'$chapter'}}});
+  assert.equal(missingAlias.data.error.code,'REFERENCE_NOT_FOUND');
+  await ready();
   const applied=await good('apply_project_changes',batch);
   assert.equal(applied.committed,true);
   assert.ok(applied.references.chapter);

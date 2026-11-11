@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { previewRequestSchema } from './preview';
-import { projectOperationsSchema } from './project-commands';
+import { makePreviewRequestSchema } from './preview';
+import { projectOperationsSchema, spreadReference } from './project-commands';
 
 const project = z.string().min(1).max(128).describe('Stable project handle returned by list_projects.');
 const revision = z.string().regex(/^[a-f0-9]{64}$/, 'Expected a SHA-256 input revision.');
@@ -33,12 +33,22 @@ export const mcpToolSchemas = {
     limit: z.int().min(1).max(100).default(30),
     spread: z.string().min(1).max(256).optional(),
   }),
-  check_book: z.strictObject({ project, expectedRevision: revision.optional(), preview: previewRequestSchema.optional() })
-    .superRefine((request, context) => {
-      if (request.preview && 'page' in request.preview.target && !request.expectedRevision) {
-        context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'Page-number previews require the inspected input revision.' });
-      }
-    }),
+  check_book: z.strictObject({
+    project, expectedRevision: revision.optional(),
+    preview: makePreviewRequestSchema(spreadReference).optional(),
+    draft: z.strictObject({ operations: projectOperationsSchema }).optional()
+      .describe('Unsaved command batch, using the apply_project_changes operations, to render on top of the saved book. Nothing is saved.'),
+  }).superRefine((request, context) => {
+    if (request.preview && 'page' in request.preview.target && !request.expectedRevision) {
+      context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'Page-number previews require the inspected input revision.' });
+    }
+    if (request.draft && !request.expectedRevision) {
+      context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'Draft checks require the inspected input revision.' });
+    }
+    if (request.preview && 'spread' in request.preview.target && request.preview.target.spread.startsWith('$') && !request.draft) {
+      context.addIssue({ code: 'custom', path: ['preview', 'target', 'spread'], message: 'Batch references such as $chapter can only target spreads inserted by a draft.' });
+    }
+  }),
   apply_project_changes: z.strictObject({
     project, expectedRevision: revision, idempotencyKey,
     label: z.string().trim().min(1).max(120), operations: projectOperationsSchema,
@@ -58,7 +68,7 @@ export const mcpTools: { name: McpToolName; description: string; readOnly: boole
   { name: 'list_projects', readOnly: true, description: 'List projects authorized by the connected ImageFlow app and obtain their stable handles and input revisions.' },
   { name: 'get_authoring_context', readOnly: true, description: 'Read template declarations, authoring guidance and selected template or Markdown source files for one authorized project.' },
   { name: 'inspect_book', readOnly: true, description: 'Inspect a bounded set of saved spreads, sources or parameter values for one project. Use the returned revision for subsequent checks and commands.' },
-  { name: 'check_book', readOnly: true, description: 'Refresh and bundle the project, check the whole-book layout, and optionally return a clean PNG or JPEG page or spread image with its revision and diagnostics. Coverage explicitly reports checks that were not run.' },
+  { name: 'check_book', readOnly: true, description: 'Refresh and bundle the project, check the whole-book layout, and optionally return a clean PNG or JPEG page or spread image with its revision and diagnostics. Pass draft.operations (apply_project_changes operations) to render an unsaved variant, for example an inserted spread using a new layout, and target it with its $alias. Diagnostics carry stable codes, box/element/source locations, measured values and suggested fixes. Coverage explicitly reports checks that were not run.' },
   { name: 'apply_project_changes', readOnly: false, description: 'Apply an atomic, revision-checked project command batch through ImageFlow. A unique idempotencyKey makes retries safe. dryRun validates without saving. One applied batch creates one named Undo entry.' },
   { name: 'import_sources', readOnly: false, description: 'Import up to 20 files copied into this project’s inbox/ folder. Requires the current input revision and a unique idempotencyKey. Returns registered source IDs and import outcomes.' },
 ];

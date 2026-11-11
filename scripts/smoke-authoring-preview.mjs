@@ -217,6 +217,45 @@ try {
   }, { ready, previousFrame });
   const recovered = await check({ expectedRevision: checked.revision });
   assert.equal(recovered.state, 'ready', JSON.stringify(recovered.diagnostics));
+
+  // Findings carry stable codes, the box/source involved, measured values and a suggested fix.
+  const diagnosed = template.replace("transparency: 'allow' }", "transparency: 'allow', resolution: { minimum: 300, target: 300, maximum: 600 } }");
+  assert.notEqual(diagnosed, template);
+  const previousDiagnosed = await w.locator(displayed).getAttribute('src');
+  // A missing font file is a bundle error; a file that exists but cannot be decoded fails at render time.
+  await writeFile(join(project, 'template', 'broken.woff2'), 'not a font');
+  await writeFile(join(project, 'template', 'style.css'), `
+    @font-face { font-family: Missing; src: url('./broken.woff2'); }
+    .if-spread > .bleed { background: #00ffff; }
+    .trim { position: absolute; inset: 0; background: #fff; }
+    .story { position: absolute; top: 10mm; width: 70mm; height: 12mm; font: 20px/28px Missing, serif; }
+  `);
+  await writeFile(join(project, 'texts', 'story.md'), Array.from({ length: 40 }, (_, i) => 'Paragraph ' + i + ' of a story that cannot fit.').join('\n\n'));
+  await writeFile(entry, diagnosed);
+  await w.waitForFunction(({ displayed, previousDiagnosed }) => {
+    const current = document.querySelector(displayed);
+    return current && current.getAttribute('src') !== previousDiagnosed;
+  }, { displayed, previousDiagnosed }).catch(async (error) => {
+    throw new Error('The diagnostics fixture did not reload: ' + await w.locator('.status').textContent().catch(() => ''), { cause: error });
+  });
+  const findings = await check();
+  assert.equal(findings.state, 'ready', JSON.stringify(findings.diagnostics));
+  const finding = (code) => {
+    const found = findings.diagnostics.find((diagnostic) => diagnostic.code === code);
+    assert.ok(found, code + ' missing from ' + JSON.stringify(findings.diagnostics));
+    assert.ok(found.suggestion, code + ' needs a suggested fix.');
+    return found;
+  };
+  const overflow = finding('text-overflow');
+  assert.deepEqual([overflow.severity, overflow.location.spread, overflow.location.box, overflow.location.source], ['error', 'later', 'story', 'story']);
+  assert.ok(overflow.details.overflowCharacters > 0);
+  assert.equal(overflow.details.boxes, 2);
+  const lowResolution = finding('photo-resolution-low');
+  assert.deepEqual([lowResolution.location.spread, lowResolution.location.box, lowResolution.location.source], ['later', 'photo', 'art']);
+  assert.equal(lowResolution.details.minimumPpi, 300);
+  assert.ok(lowResolution.details.ppi > 200 && lowResolution.details.ppi < 300, JSON.stringify(lowResolution.details));
+  assert.ok(Math.abs(lowResolution.details.boxWidthMm - 10) <= .2, JSON.stringify(lowResolution.details));
+  assert.equal(finding('font-load-failed').details.family, 'Missing');
   console.log('ImageFlow authoring preview passed.');
 } finally {
   await app?.close();

@@ -10,7 +10,7 @@ import type { ProjectFiles, SpreadState, Values } from './project';
 import { maxZoom, setPlacement } from './spread';
 
 const id = identifier.refine((value) => value.length <= 256, 'Identifiers must be at most 256 characters.');
-const spreadReference = z.union([id, z.string().startsWith('$').refine((value) => id.safeParse(value.slice(1)).success,
+export const spreadReference = z.union([id, z.string().startsWith('$').refine((value) => id.safeParse(value.slice(1)).success,
   'Use a spread ID or $ followed by a batch reference.')]);
 const value = z.union([z.string(), z.boolean(), z.number()]);
 const parameterValues = z.record(id, value);
