@@ -35,7 +35,7 @@ const status: Extract<RenderStatus, { state: 'ready' }> = {
 };
 const saved = { schemaVersion: 1, title: 'Draft book', template: { id: 'test', version: '1' }, spreads: [{ id: 'one', definition: 'main' }] };
 
-type Rendered = { book: OpenProject; preview?: PreviewRequest };
+type Rendered = { book: OpenProject; preview?: PreviewRequest; inspect?: import('../src/inspection').InspectionRequest };
 
 // `fails` makes the renderer reject a book the way a layout that throws does: the template loaded, the book did not render.
 async function fixture(t: TestContext, project: object = saved, fails?: (book: OpenProject) => boolean, writable = false) {
@@ -53,25 +53,75 @@ async function fixture(t: TestContext, project: object = saved, fails?: (book: O
   const changed: OpenProject[] = [];
   t.after(() => session.close());
   const renders: Rendered[] = [];
-  const service = createAuthoringService({
+  const typechecks: string[] = [];
+  const hooks: Parameters<typeof createAuthoringService>[0] = {
     session: () => session, cache, docs: join(work, 'api.md'),
-    check: (book, request, signal, index, draft) => checkProject(book, cache, request, async (snapshot, preview) => {
-      renders.push({ book: snapshot, preview });
+    check: (book, request, signal, index, draft) => checkProject(book, cache, request, async (snapshot, preview, _signal, inspect) => {
+      renders.push({ book: snapshot, preview, inspect });
       if (fails?.(snapshot)) throw new PreviewError('render-failed', 'Heading rejected.', { template: status.template });
       if (!preview) return { status };
       const image: BookPreview = { width: 4, height: 2, widthMm: 200, heightMm: 100, bounds: 'trim', side: 'spread', page: { left: 1, right: 2 },
         spread: 'spread' in preview.target ? preview.target.spread : 'one', bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png', status };
       return { status, preview: image };
-    }, signal, index, undefined, draft),
+    }, signal, index, undefined, draft, async () => {
+      typechecks.push(book.folder);
+      return { files: ['template/index.tsx'], totalDiagnostics: 1, truncated: false, elapsedMs: 10,
+        diagnostics: [{ code: 'typescript-error', stage: 'template', severity: 'error', message: 'Type check finding.' }] };
+    }),
     changed: (book) => { if (!writable) assert.fail('A draft must not change the open book.'); changed.push(book); },
     recovery: (message) => assert.fail('Unexpected save recovery: ' + message),
     import: async () => assert.fail('A draft must not import sources.'),
-  });
+  };
+  const service = createAuthoringService(hooks);
   const call = (name: string, args: Record<string, unknown> = {}) =>
     service(name, { project: session.handle, ...args }, new AbortController().signal);
   const revision = async () => ((await call('list_projects')).projects as { revision: string }[])[0].revision;
-  return { folder, session, renders, changed, call, revision };
+  return { folder, session, renders, changed, call, revision, hooks, typechecks };
 }
+
+test('typed drafts run the compiler once and do not repeat failed template preparation', async (t) => {
+  const { folder, call, revision, hooks, typechecks } = await fixture(t);
+  const original = hooks.check;
+  let checks = 0;
+  hooks.check = (...args) => { checks++; return original(...args); };
+  const draft = { operations: [{ op: 'set_title', title: 'Draft title' }] };
+  const result = await call('check_book', { expectedRevision: await revision(), draft, typescript: true }) as AuthoringCheckResult;
+  assert.equal(result.draft?.applied, true);
+  assert.equal(result.checks.typescript, 'failed');
+  assert.equal(result.typecheck?.totalDiagnostics, 1);
+  assert.equal(result.diagnostics.filter(({ code }) => code === 'typescript-error').length, 1);
+  assert.equal(typechecks.length, 1);
+  assert.equal(checks, 2); // Saved declarations, then the draft render.
+
+  await call('get_authoring_context'); // Warm the untyped saved-book cache.
+  checks = 0;
+  const warmed = await call('check_book', { expectedRevision: await revision(), draft, typescript: true }) as AuthoringCheckResult;
+  assert.equal(warmed.checks.typescript, 'failed');
+  assert.equal(warmed.typecheck?.totalDiagnostics, 1);
+  assert.equal(warmed.draft?.applied, true);
+  assert.equal(typechecks.length, 2);
+  assert.equal(checks, 1); // Cached declarations, one typed draft render.
+
+  await writeFile(join(folder, 'template/index.tsx'), 'export default { broken syntax');
+  checks = 0;
+  const failed = await call('check_book', { expectedRevision: await revision(), draft, typescript: true }) as AuthoringCheckResult;
+  assert.equal(failed.draft?.applied, false);
+  assert.equal(failed.checks.typescript, 'failed');
+  assert.ok(failed.diagnostics.some(({ code }) => code === 'template-compile-error'));
+  assert.equal(typechecks.length, 3);
+  assert.equal(checks, 1);
+});
+
+test('typed draft results are discarded if inputs change before the draft render', async (t) => {
+  const { folder, call, revision, hooks } = await fixture(t);
+  const original = hooks.check;
+  hooks.check = async (book, request, signal, index, draft) => {
+    if (draft) await writeFile(join(folder, 'template/index.tsx'), 'export default { changed: true };');
+    return original(book, request, signal, index, draft);
+  };
+  await assert.rejects(call('check_book', { expectedRevision: await revision(), typescript: true,
+    draft: { operations: [{ op: 'set_title', title: 'Draft title' }] } }), { code: 'SOURCE_CHANGED' });
+});
 
 test('a draft renders an inserted layout by batch reference without saving or recording history', async (t) => {
   const { folder, session, renders, call, revision } = await fixture(t);
@@ -89,7 +139,8 @@ test('a draft renders an inserted layout by batch reference without saving or re
   assert.deepEqual({ ...result.draft, references: undefined, changes: undefined },
     { applied: true, committed: false, affectedSpreads: ['one', inserted], reflow: true, references: undefined, changes: undefined });
   assert.equal(result.image?.draft, true);
-  assert.equal(result.image?.spread, inserted);
+  assert.ok(result.image && 'spread' in result.image);
+  assert.equal(result.image.spread, inserted);
   const drafted = renders.at(-1)!;
   assert.deepEqual(drafted.book.project.spreads.map(({ id, definition }) => [id, definition]), [['one', 'main'], [inserted, 'chapter']]);
   assert.deepEqual(drafted.preview?.target, { spread: inserted });
@@ -128,6 +179,21 @@ test('the check_book contract scopes batch references and revisions to drafts', 
   assert.throws(() => parseMcpArguments('check_book', { project, expectedRevision, draft: { operations: [] } }));
   const parsed = parseMcpArguments('check_book', { project, expectedRevision, draft, preview: { target: { spread: '$chapter' } } });
   assert.deepEqual((parsed.args.preview as { target: unknown }).target, { spread: '$chapter' });
+});
+
+test('draft aliases resolve consistently for contact sheets and focused inspection', async (t) => {
+  const { renders, call, revision, folder } = await fixture(t);
+  const before = await readFile(join(folder, 'project.json'), 'utf8');
+  const result = await call('check_book', { expectedRevision: await revision(),
+    draft: { operations: [{ op: 'insert_spread', definition: 'chapter', ref: 'new' }] },
+    preview: { target: { spreads: ['one', '$new'] } }, inspect: { spread: '$new' },
+  }) as AuthoringCheckResult;
+  const inserted = result.draft!.references!.new;
+  assert.deepEqual(renders.at(-1)?.preview?.target, { spreads: ['one', inserted] });
+  assert.equal(renders.at(-1)?.inspect?.spread, inserted);
+  assert.equal(await readFile(join(folder, 'project.json'), 'utf8'), before);
+  await assert.rejects(call('check_book', { expectedRevision: await revision(),
+    draft: { operations: [{ op: 'set_title', title: 'Draft' }] }, inspect: { spread: '$absent' } }), { code: 'REFERENCE_NOT_FOUND' });
 });
 
 test('a draft can repair a saved book whose layout fails to render, and the repair can be committed and undone', async (t) => {

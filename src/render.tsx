@@ -18,7 +18,10 @@ import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, layoutChoices } from './layouts';
 import { parsePreviewRequest, PreviewError } from './preview';
-import type { PreviewMetadata } from './preview';
+import type { PreviewMetadata, PagePreviewMetadata } from './preview';
+import { inspectionSchema } from './inspection';
+import type { ElementInspection, ElementMeasurement } from './inspection';
+import { contactSheetLayout } from './authoring-artwork';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -350,7 +353,7 @@ function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: Retu
   document.body.append(pages);
 }
 
-function artworkTarget(spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, target: ReturnType<typeof parsePreviewRequest>['target']) {
+function artworkTarget(spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, target: Exclude<ReturnType<typeof parsePreviewRequest>['target'], { spreads: string[] }>) {
   if ('page' in target) {
     const index = sequence.spreads.findIndex(({ page }) => page.left === target.page || page.right === target.page);
     if (index < 0) throw new PreviewError('preview-target-not-found', 'Page ' + target.page + ' does not exist in this book.');
@@ -360,11 +363,92 @@ function artworkTarget(spreads: SpreadState[], sequence: ReturnType<typeof pageS
   const index = spreads.findIndex(({ id }) => id === target.spread);
   if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' does not exist in this book.');
   const { span, page } = sequence.spreads[index];
-  const side = target.side ?? span;
+  const side = ('side' in target ? target.side : undefined) ?? span;
   if (side === 'spread') return { index, side, page, spread: target.spread };
   const number = page[side];
   if (!number) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' has no ' + side + ' page.');
   return { index, side, page: { [side]: number }, spread: target.spread };
+}
+
+function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: ResolvedFormat) {
+  const outer = sheet.getBoundingClientRect(), rect = node.getBoundingClientRect();
+  const scale = format.spreadWidth / outer.width;
+  return { x: (rect.left - outer.left) * scale, y: (rect.top - outer.top) * scale, width: rect.width * scale, height: rect.height * scale };
+}
+
+function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat,
+  request: ReturnType<typeof inspectionSchema.parse>): ElementInspection {
+  const nodes = [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].filter((node) =>
+    (!request.box || node.dataset.box === request.box) && (!request.element || node.dataset.element === request.element));
+  if ((request.box || request.element) && !nodes.length) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread.id + '.');
+  const definition = template.spreads[spread.definition];
+  const items: ElementMeasurement[] = nodes.slice(request.offset, request.offset + request.limit).map((node) => {
+    const box = node.dataset.box, id = box ?? node.dataset.element!, kind = box ? definition.boxes[id].type : 'element';
+    const prefix = (box ? 'boxes.' : 'elements.') + id + '.';
+    const parameters = box ? definition.boxes[id].parameters : definition.elements[id].parameters;
+    const style = getComputedStyle(node);
+    const points = (value: string) => Math.round(parseFloat(value) * 72 / 96 * 100) / 100;
+    const source = box ? spread.boxes[id]?.photo ?? spread.boxes[id]?.text : undefined;
+    return { spread: spread.id, id, kind, boundsMm: measuredBounds(node, sheet, format), upright: upright(node, sheet),
+      typography: { fontFamily: style.fontFamily, fontSizePt: points(style.fontSize),
+        lineHeightPt: style.lineHeight === 'normal' ? null : points(style.lineHeight), fontWeight: style.fontWeight, color: style.color },
+      editPaths: Object.keys(parameters).map((key) => prefix + key), ...(source ? { source } : {}) };
+  });
+  return { spread: spread.id, coordinateSpace: 'sheet-bleed-mm', items, total: nodes.length,
+    nextOffset: request.offset + items.length < nodes.length ? request.offset + items.length : null };
+}
+
+function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>,
+  format: ResolvedFormat, artwork: ReturnType<typeof parsePreviewRequest>) {
+  const { bounds, maxEdge } = artwork;
+  if ('spreads' in artwork.target) {
+    const targets = artwork.target.spreads.map((spread) => artworkTarget(spreads, sequence, { spread }));
+    const crops = targets.map(({ side }) => sheetCrop(format, side, bounds));
+    const grid = contactSheetLayout(crops, maxEdge, artwork.target.columns);
+    const frame = document.createElement('div');
+    frame.className = 'if-artwork';
+    Object.assign(frame.style, { width: grid.width + 'px', height: grid.height + 'px', background: '#e9e9e9', overflow: 'hidden' });
+    const cells = targets.map(({ index, spread, side, page }, i) => {
+      const { x, y, width, height, label: labelRect } = grid.cells[i], crop = crops[i];
+      const image = croppedSheet(sheets[index], crop, { width, height });
+      Object.assign(image.style, { position: 'absolute', left: x + 'px', top: y + 'px' });
+      const label = spread + ' · ' + Object.values(page).join('–');
+      const caption = document.createElement('div');
+      caption.textContent = label;
+      Object.assign(caption.style, { position: 'absolute', left: labelRect.x + 'px', top: labelRect.y + 'px',
+        width: labelRect.width + 'px', height: labelRect.height + 'px', font: '11px/16px sans-serif', color: '#111',
+        overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'center' });
+      frame.append(image, caption);
+      return { x, y, width, height, widthMm: crop.widthMm, heightMm: crop.heightMm, spread, side, page, bounds, label };
+    });
+    root.hidden = true;
+    document.body.append(frame);
+    return { frame, metadata: { kind: 'contact-sheet', width: grid.width, height: grid.height, bounds, columns: grid.columns, cells } as PreviewMetadata };
+  }
+  const target = artworkTarget(spreads, sequence, artwork.target);
+  const { index, side, page, spread } = target;
+  let crop = sheetCrop(format, side, bounds);
+  let detail: PagePreviewMetadata['detail'];
+  if ('box' in artwork.target || 'element' in artwork.target) {
+    const request = artwork.target;
+    const box = 'box' in request ? request.box : undefined, element = 'element' in request ? request.element : undefined;
+    const node = [...sheets[index].querySelectorAll<HTMLElement>('[data-box], [data-element]')]
+      .find((node) => box ? node.dataset.box === box : node.dataset.element === element);
+    if (!node) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread + '.');
+    const rect = measuredBounds(node, sheets[index], format), padding = request.paddingMm;
+    const x = Math.max(crop.x, rect.x - padding), y = Math.max(crop.y, rect.y - padding);
+    const right = Math.min(crop.x + crop.widthMm, rect.x + rect.width + padding);
+    const bottom = Math.min(crop.y + crop.heightMm, rect.y + rect.height + padding);
+    if (right <= x || bottom <= y) throw new PreviewError('preview-target-not-found', 'The element has no visible area within the requested page bounds.');
+    crop = { x, y, widthMm: right - x, heightMm: bottom - y };
+    detail = { ...(box ? { box } : { element }), xMm: x, yMm: y };
+  }
+  const { widthMm, heightMm } = crop, scale = maxEdge / Math.max(widthMm, heightMm);
+  const width = Math.max(1, Math.round(widthMm * scale)), height = Math.max(1, Math.round(heightMm * scale));
+  const frame = croppedSheet(sheets[index], crop, { width, height });
+  root.hidden = true;
+  document.body.append(frame);
+  return { frame, metadata: { width, height, widthMm, heightMm, bounds, spread, side, page, ...(detail ? { detail } : {}) } as PreviewMetadata };
 }
 
 // Font faces that were requested but could not be loaded. The book renders with a fallback font instead.
@@ -561,7 +645,7 @@ export async function startRender(root: HTMLElement) {
     const edit = book.mode === 'edit';
     const check = !edit && query.get('view') === 'check';
     const artwork = !edit && query.get('view') === 'artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
-    const target = artwork && artworkTarget(spreads, sequence, artwork.target);
+    const inspect = !edit && query.has('inspect') ? inspectionSchema.parse(JSON.parse(query.get('inspect')!)) : undefined;
     // The editor renders the whole book twice: as scrolling spreads and as sidebar thumbnails.
     const view: BookView = query.get('view') === 'thumbs' ? 'thumbs' : query.get('view') === 'layouts' ? 'layouts' : 'book';
     if (edit && view !== 'book') {
@@ -673,6 +757,12 @@ export async function startRender(root: HTMLElement) {
       }
     }
     const sheets = [...layouts.values()].map(({ sheet }) => sheet);
+    let inspection: ElementInspection | undefined;
+    if (inspect) {
+      const index = spreads.findIndex(({ id }) => id === inspect.spread);
+      if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + inspect.spread + ' does not exist in this book.');
+      inspection = inspectElements(sheets[index], spreads[index], template, format, inspect);
+    }
     if (edit) layoutBook(root, [...layouts].map(([spread, { sheet }]) => ({ spread, sheet })), view);
     if (lazy) {
       const load = photoLoader(root, () => onScreen);
@@ -681,19 +771,10 @@ export async function startRender(root: HTMLElement) {
       // Report ready once the photos on screen are decoded, so swapping in this frame shows them.
       await Promise.allSettled(load().map((img) => img.decode()));
     }
-    else if (artwork && target) {
-      const { index, side, page, spread } = target;
-      const { bounds, maxEdge } = artwork;
-      const crop = sheetCrop(format, side, bounds);
-      const { widthMm, heightMm } = crop;
-      const scale = maxEdge / Math.max(widthMm, heightMm);
-      const width = Math.max(1, Math.round(widthMm * scale));
-      const height = Math.max(1, Math.round(heightMm * scale));
-      const frame = croppedSheet(sheets[index], crop, { width, height });
-      root.hidden = true;
-      document.body.append(frame);
+    else if (artwork) {
+      const { frame, metadata } = renderArtwork(root, sheets, spreads, sequence, format, artwork);
       await settle([...frame.querySelectorAll<HTMLImageElement>('img')]);
-      window.imageflowPreview = { state: 'ready', metadata: { width, height, widthMm, heightMm, bounds, spread, side, page } };
+      window.imageflowPreview = { state: 'ready', metadata };
     } else if (!check) {
       makePrintPages(root, sheets, sequence, format);
       await Promise.allSettled([...document.querySelectorAll<HTMLImageElement>('.if-print-page img')].map((img) => img.decode()));
@@ -701,7 +782,7 @@ export async function startRender(root: HTMLElement) {
     const units: { side: PrintSide; spread: string; where: string }[] = sequence.spreads.flatMap(({ sides }, i) =>
       sides.map((side) => ({ side, spread: spreads[i].id, where: where[i] })));
     publish({
-      state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions,
+      state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions, ...(inspection ? { inspection } : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The template could not be rendered.';

@@ -12,15 +12,17 @@ import type { CheckRenditionCache } from './check-cache';
 import { loadProject, TemplateCompileError } from './project';
 import type { OpenProject } from './project';
 import type { BookPreview } from './preview';
+import type { InspectionRequest } from '../src/inspection';
+import type { Typecheck, TypecheckResult } from './typecheck';
 
 type ReadyStatus = Extract<RenderStatus, { state: 'ready' }>;
-type RenderCheck = (book: OpenProject, preview: PreviewRequest | undefined, signal: AbortSignal) => Promise<{
+type RenderCheck = (book: OpenProject, preview: PreviewRequest | undefined, signal: AbortSignal, inspect?: InspectionRequest) => Promise<{
   status: ReadyStatus; preview?: BookPreview;
 }>;
 
 /** Applies an unsaved command batch to the freshly loaded book. It may rewrite the preview request, for example to
  * resolve a batch reference to the ID of an inserted spread. */
-export type CheckDraft = (book: OpenProject) => { book: OpenProject; preview?: PreviewRequest; summary: AuthoringDraftSummary };
+export type CheckDraft = (book: OpenProject) => { book: OpenProject; preview?: PreviewRequest; inspect?: InspectionRequest; summary: AuthoringDraftSummary };
 
 function diagnostic(issue: Issue, severity: 'error' | 'warning'): AuthoringDiagnostic {
   const { message, code, spread, where, box, element, source, parameter, details, suggestion } = issue;
@@ -40,7 +42,7 @@ function diagnostic(issue: Issue, severity: 'error' | 'warning'): AuthoringDiagn
  */
 export async function checkProject(
   source: OpenProject, fallbackCache: string, request: unknown, render: RenderCheck, signal: AbortSignal, index?: ProjectInputIndex,
-  renditions?: CheckRenditionCache, draft?: CheckDraft,
+  renditions?: CheckRenditionCache, draft?: CheckDraft, typecheck?: Typecheck,
 ): Promise<AuthoringCheckResult> {
   const result: AuthoringCheckResult = {
     state: 'error', revision: null, diagnostics: [],
@@ -56,6 +58,7 @@ export async function checkProject(
   let privateCache: string | undefined;
   let retainedCache = false;
   let inputs: Awaited<ReturnType<typeof captureProjectInputs>> | undefined;
+  let types: TypecheckResult | undefined;
   // An invalid draft is the caller's request error, not a check finding.
   let draftError: unknown;
   const capture = () => index ? index.capture({ signal }) : captureProjectInputs(source.folder, { signal });
@@ -72,6 +75,14 @@ export async function checkProject(
         message: 'The project inputs changed. Inspect the current revision before requesting an exact-revision check.' });
       return result;
     }
+    if (parsed.data.typescript) {
+      if (!typecheck) throw new Error('The installed template type checker is unavailable.');
+      types = await typecheck(source.folder, signal);
+      result.checks.typescript = types.diagnostics.length ? 'failed' : 'passed';
+      const { diagnostics: _diagnostics, ...coverage } = types;
+      result.typecheck = coverage;
+      if (!await inputsMatch()) throw new ProjectRevisionError('source-changed');
+    }
     phase = 'template';
     // A rejected check may have read changed photo bytes. Never let its renditions poison a later check.
     privateCache = await mkdtemp(join(fallbackCache, 'check-'));
@@ -85,6 +96,7 @@ export async function checkProject(
     phase = 'render';
     let rendered = book;
     let preview: PreviewRequest | undefined = parsed.data.preview;
+    let inspect = parsed.data.inspect;
     if (draft) {
       // Command errors propagate to the caller; the draft never reaches the editor or disk.
       let planned: ReturnType<CheckDraft>;
@@ -92,9 +104,10 @@ export async function checkProject(
       catch (error) { draftError = error; throw error; }
       rendered = planned.book;
       preview = planned.preview;
+      inspect = planned.inspect ? { offset: 0, limit: 30, ...planned.inspect } : undefined;
       result.draft = planned.summary;
     }
-    const checked = await render(rendered, preview, signal);
+    const checked = await render(rendered, preview, signal, inspect);
     if (!await inputsMatch()) {
       throw new ProjectRevisionError('source-changed');
     }
@@ -103,6 +116,7 @@ export async function checkProject(
     result.render = checked.status;
     result.checks.layout = 'completed';
     result.diagnostics = [
+      ...types?.diagnostics ?? [],
       ...checked.status.errors.map((issue) => diagnostic(issue, 'error')),
       ...checked.status.warnings.map((issue) => diagnostic(issue, 'warning')),
     ];
@@ -151,6 +165,10 @@ export async function checkProject(
             (captureError instanceof Error ? captureError.message : String(captureError)) }];
       }
     }
+    if (result.diagnostics.some(({ code }) => code === 'source-changed')) {
+      delete result.typecheck;
+      result.checks.typescript = 'not-run';
+    } else if (types) result.diagnostics.unshift(...types.diagnostics);
     return result;
   } finally {
     // The app also removes its cache root at shutdown. Cleanup must not replace a useful check result.

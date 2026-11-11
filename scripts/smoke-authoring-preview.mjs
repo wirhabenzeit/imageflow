@@ -181,11 +181,60 @@ try {
   expectPixel(last, .5, .5, [255, 136, 0]);
 
   const inactive = await check({ preview: { target: { spread: 'first', side: 'left' } } });
+  // Detail crops and measured geometry come from the same fully flowed artwork, including asymmetric bleed.
+  const detail = await check({ inspect: { spread: 'later', box: 'photo' },
+    preview: { target: { spread: 'later', box: 'photo', paddingMm: 0 }, maxEdge: 300 } });
+  assert.equal(detail.state, 'ready', JSON.stringify(detail.diagnostics));
+  const measured = detail.render.inspection.items[0];
+  assert.equal(measured.id, 'photo');
+  assert.equal(measured.source, 'art');
+  for (const [key, expected] of Object.entries({ x: 52, y: 35, width: 10, height: 10 })) {
+    assert.ok(Math.abs(measured.boundsMm[key] - expected) < .1, JSON.stringify(measured));
+  }
+  const photoDetail = await raster(detail.image, { width: 300, height: 300, mimeType: 'image/png' });
+  expectPixel(photoDetail, .5, .5, [255, 0, 255]);
+  const sheetResult = await check({ preview: { target: { spreads: ['first', 'later', 'last'], columns: 2 }, maxEdge: 800 } });
+  assert.equal(sheetResult.state, 'ready', JSON.stringify(sheetResult.diagnostics));
+  const sheetImage = sheetResult.image;
+  assert.equal(sheetImage.kind, 'contact-sheet');
+  assert.deepEqual(sheetImage.cells.map(cell => cell.side), ['right', 'spread', 'left']);
+  const collage = await raster(sheetImage, { width: sheetImage.width, height: sheetImage.height, mimeType: 'image/png' });
+  if (process.env.IMAGEFLOW_PREVIEW_AUDIT === '1') {
+    await writeFile(join(build, 'feedback-contact-sheet.png'), Buffer.from(sheetImage.data, 'base64'));
+    await writeFile(join(build, 'feedback-detail.png'), Buffer.from(detail.image.data, 'base64'));
+  }
+  const cell = sheetImage.cells[1];
+  expectPixel(collage, (cell.x + cell.width * .25) / sheetImage.width, (cell.y + cell.height * .5) / sheetImage.height, [255, 0, 255]);
+  assert.ok(collage.count((r,g,b)=>r<60 && g>100 && b<60)>5, 'The contact sheet retains the later green text continuation.');
+  const absentDetail = await check({ preview: { target: { spread: 'later', box: 'absent' } } });
+  assert.equal(absentDetail.state, 'error');
+  assert.equal(absentDetail.diagnostics[0].code, 'preview-target-not-found');
   assert.equal(inactive.state, 'error');
   assert.equal(inactive.diagnostics[0].code, 'preview-target-not-found');
   const oversized = await check({ preview: { target: { page: 2 }, maxEdge: 1601 } });
   assert.equal(oversized.state, 'error');
   assert.equal(oversized.diagnostics[0].code, 'invalid-check-request');
+
+  // Simulate a renderer returning undersized metadata: ordinary pages and details must reject it.
+  for (const target of [{ page: 2 }, { spread: 'later', box: 'photo' }]) {
+    await app.evaluate(({ app }) => {
+      app.once('browser-window-created', (_event, window) => {
+        const execute = window.webContents.executeJavaScript.bind(window.webContents);
+        window.webContents.executeJavaScript = async (...args) => {
+          const result = await execute(...args);
+          if (result?.preview?.state === 'ready') {
+            result.preview.metadata.width = 100;
+            result.preview.metadata.height = 100;
+          }
+          return result;
+        };
+      });
+    });
+    const undersized = await check({ preview: { target, maxEdge: 400 } });
+    assert.equal(undersized.state, 'error');
+    assert.equal(undersized.diagnostics[0].code, 'preview-capture-failed');
+    assert.equal(undersized.image, undefined);
+  }
 
   const proof = join(work, 'proof.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, proof);

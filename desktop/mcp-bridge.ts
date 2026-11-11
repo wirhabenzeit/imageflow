@@ -43,7 +43,7 @@ function start() {
   const descriptorPath = resolve(args[1]);
   const handle = serveStdio(() => {
     const server = new McpServer({ name: 'imageflow', version: '0.1.0' }, {
-      instructions: 'Use list_projects to select an authorized book. Inspect its authoring context and current revision before editing. Edit template and Markdown source files directly when your client has workspace access. Use ImageFlow commands for project data. Copy import files into the project inbox/ folder, then register them with import_sources. check_book returns completed whole-book layout diagnostics and optional page or spread images. Its coverage identifies checks that were not run.',
+      instructions: 'Use list_projects to select an authorized book. Inspect its authoring context and current revision before editing. Edit template and Markdown source files directly with workspace tools. Use ImageFlow commands for project data. Copy import files into inbox/, then register them with import_sources. check_book combines optional TypeScript checking, whole-book layout, contact sheets, close-ups and measured element inspection. Drafts preview unsaved operations; then apply the same operations to save. Coverage identifies checks not run.',
     });
     const app = new McpAppClient(descriptorPath, () => server.server.getClientVersion()?.name ?? 'MCP client');
     server.server.oninitialized = () => { void app.connect().catch(() => {}); };

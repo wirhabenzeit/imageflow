@@ -17,9 +17,9 @@ const photoDependencies = [
 
 // esbuild options for the main process and preload; scripts/dev.mjs rebuilds them in watch mode.
 export const mainBuild = (destination = desktop) => ({
-  entryPoints: [join(root, 'desktop', 'main.ts'), join(root, 'desktop', 'preload.ts')],
+  entryPoints: [join(root, 'desktop', 'main.ts'), join(root, 'desktop', 'preload.ts'), join(root, 'desktop', 'typecheck-worker.ts')],
   outdir: destination, outExtension: { '.js': '.cjs' }, bundle: true,
-  platform: 'node', format: 'cjs', external: ['electron', 'esbuild', 'sharp'],
+  platform: 'node', format: 'cjs', external: ['electron', 'esbuild', 'sharp', 'typescript'],
 });
 
 // `dev` stages without the Vite build; the editor then comes from the Vite dev server.
@@ -29,6 +29,13 @@ export async function stageDesktop({ packaged = false, dev = false, destination 
   await Promise.all([
     dev ? Promise.resolve() : cp(join(root, 'dist'), join(destination, 'dist'), { recursive: true }),
     cp(join(root, 'node_modules', 'esbuild'), join(destination, 'node_modules', 'esbuild'), { recursive: true }),
+    cp(join(root, 'node_modules', 'typescript'), join(destination, 'node_modules', 'typescript'), { recursive: true }),
+    cp(join(root, 'sample/starter/template/types'), join(destination, 'authoring-types'), { recursive: true })
+      .then(() => cp(join(root, 'authoring'), join(destination, 'authoring-types'), { recursive: true }))
+      .then(() => Promise.all([
+        cp(join(root, 'node_modules/@types/react'), join(destination, 'authoring-types/react-runtime'), { recursive: true }),
+        cp(join(root, 'node_modules/csstype'), join(destination, 'authoring-types/csstype'), { recursive: true }),
+      ])),
     ...photoDependencies.map((name) => cp(join(root, 'node_modules', name), join(destination, 'node_modules', name), { recursive: true })),
     packaged ? Promise.resolve() : cp(sample, join(destination, 'sample'), {
       recursive: true, filter: (path) => basename(path) !== '.imageflow',
