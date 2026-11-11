@@ -102,14 +102,15 @@ html:has(.if-artwork) { overflow: hidden; }
 .if-preview .if-photo:has(> img:not([src])) { background: #e9e5dc; }
 
 /* Template-supplied element editors run in their own frame inside an editor dialog. */
-html:has(.if-editor), html:has(.if-editor) body { background: #f5f5f5; }
-.if-editor { padding: 16px 18px; font: 13px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; color: #292929; color-scheme: light; }
+html:has(.if-editor) { color-scheme: light dark; background: Canvas; }
+html:has(.if-editor) body { background: transparent; }
+.if-editor { padding: 16px 18px; font: 13px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: var(--if-editor-background); color: var(--if-editor-text); color-scheme: light dark; }
 
 /* Artwork uses its authored paper/ink colors and light browser defaults in either OS appearance. */
 html:has(.if-artwork), html:has(.if-print-page), .if-sheet { color-scheme: only light; }
 
-/* Legacy custom editors remain light. A template opts its editor into the host theme explicitly. */
-html:has(.if-editor) { color-scheme: only light; }
+/* Custom editors follow the host appearance and use these shared colors. */
 .if-editor {
   --if-editor-background: var(--panel-surface);
   --if-editor-text: var(--text);
@@ -122,9 +123,6 @@ html:has(.if-editor) { color-scheme: only light; }
   --if-editor-marked-background: var(--editor-marked-surface);
   --if-editor-marked-text: #fff;
 }
-html:has(.if-editor [data-imageflow-appearance="system"]),
-.if-editor:has([data-imageflow-appearance="system"]) { color-scheme: light dark; background: Canvas; }
-.if-editor:has([data-imageflow-appearance="system"]) { background: var(--if-editor-background); color: var(--if-editor-text); }
 /* Preview-frame gutters stay transparent so the host's selection and label layers remain visible. */
 html:has(.if-book) { color-scheme: light dark; }
 html:has(.if-book), html:has(.if-book) body { background: transparent; }

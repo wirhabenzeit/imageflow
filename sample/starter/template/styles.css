@@ -47,16 +47,16 @@
 .field-book .days .marked { color: var(--ink); font-weight: 600; text-decoration: underline; text-underline-offset: .2em; }
 
 /* The calendar's editor, shown in ImageFlow's editor dialog */
-.calendar-editor { color: var(--if-editor-text, #292929); font-family: "Field Sans", system-ui, sans-serif; }
+.calendar-editor { color: var(--if-editor-text); font-family: "Field Sans", system-ui, sans-serif; }
 .calendar-editor h3 { font: 600 18px/1.2 "Field Serif", Georgia, serif; margin: 0 0 12px; }
-.calendar-editor-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 12px; color: var(--if-editor-muted, #655f55); }
-.calendar-editor-nav button { width: 28px; height: 28px; border: 1px solid var(--if-editor-border, #cbc7bc); border-radius: 6px; background: var(--if-editor-control, #fff); color: var(--if-editor-text, #292929); font-size: 16px; cursor: pointer; }
+.calendar-editor-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 12px; color: var(--if-editor-muted); }
+.calendar-editor-nav button { width: 28px; height: 28px; border: 1px solid var(--if-editor-border); border-radius: 6px; background: var(--if-editor-control); color: var(--if-editor-text); font-size: 16px; cursor: pointer; }
 .calendar-editor .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; text-align: center; font-size: 13px; }
-.calendar-editor .days strong { font-weight: 600; color: var(--if-editor-muted, #655f55); padding: 4px 0; }
-.calendar-editor .days button { height: 32px; border: 1px solid transparent; border-radius: 6px; background: var(--if-editor-control, #f1eee6); color: var(--if-editor-text, #292929); font: inherit; cursor: pointer; }
-.calendar-editor .days button:hover { border-color: var(--if-editor-focus, #9bb3a3); }
-.calendar-editor .days button.marked { background: var(--if-editor-marked-background, #243b30); color: var(--if-editor-marked-text, #fff); font-weight: 600; }
-.calendar-editor .days button:focus-visible { outline: 2px solid var(--if-editor-focus, #243b30); outline-offset: 1px; }
+.calendar-editor .days strong { font-weight: 600; color: var(--if-editor-muted); padding: 4px 0; }
+.calendar-editor .days button { height: 32px; border: 1px solid transparent; border-radius: 6px; background: var(--if-editor-control); color: var(--if-editor-text); font: inherit; cursor: pointer; }
+.calendar-editor .days button:hover { border-color: var(--if-editor-focus); }
+.calendar-editor .days button.marked { background: var(--if-editor-marked-background); color: var(--if-editor-marked-text); font-weight: 600; }
+.calendar-editor .days button:focus-visible { outline: 2px solid var(--if-editor-focus); outline-offset: 1px; }
 
 /* Route inset on panoramas: a GPX track without a basemap. */
 .route-map { display: grid; place-items: center; border-radius: 2mm; background: #fffc; }
@@ -64,15 +64,15 @@
 /* The stroke keeps its width when the viewport zooms into the route. */
 .route-map polyline, .route-editor polyline { fill: none; stroke: var(--ink, #243b30); stroke-width: .9mm; stroke-linejoin: round;
   stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.route-editor { color: var(--if-editor-text, #292929); font-family: "Field Sans", system-ui, sans-serif; }
-.route-editor-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 12px; color: var(--if-editor-muted, #655f55); }
-.route-editor-nav button { min-width: 28px; height: 28px; padding: 0 8px; border: 1px solid var(--if-editor-border, #cbc7bc); border-radius: 6px; background: var(--if-editor-control, #fff); color: var(--if-editor-text, #292929);
+.route-editor { color: var(--if-editor-text); font-family: "Field Sans", system-ui, sans-serif; }
+.route-editor-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; font-size: 12px; color: var(--if-editor-muted); }
+.route-editor-nav button { min-width: 28px; height: 28px; padding: 0 8px; border: 1px solid var(--if-editor-border); border-radius: 6px; background: var(--if-editor-control); color: var(--if-editor-text);
   font: inherit; font-size: 14px; cursor: pointer; }
-.route-editor-frame { width: min(100%, 320px); aspect-ratio: 1; margin: 0 auto; border: 1px solid var(--if-editor-border, #cbc7bc); border-radius: 6px;
-  background: var(--if-editor-control, #f1eee6); cursor: grab; touch-action: none; overflow: hidden; }
+.route-editor-frame { width: min(100%, 320px); aspect-ratio: 1; margin: 0 auto; border: 1px solid var(--if-editor-border); border-radius: 6px;
+  background: var(--if-editor-control); cursor: grab; touch-action: none; overflow: hidden; }
 .route-editor-frame:active { cursor: grabbing; }
-.route-editor-frame:focus-visible { outline: 2px solid var(--if-editor-focus, #243b30); outline-offset: 2px; }
+.route-editor-frame:focus-visible { outline: 2px solid var(--if-editor-focus); outline-offset: 2px; }
 .route-editor-frame svg { display: block; width: 100%; height: 100%; }
-.route-editor-frame polyline { stroke: var(--if-editor-text, #243b30); stroke-width: 3px; }
-.route-editor-note { margin: 8px 0 0; font-size: 12px; color: var(--if-editor-muted, #655f55); text-align: center; }
+.route-editor-frame polyline { stroke: var(--if-editor-text); stroke-width: 3px; }
+.route-editor-note { margin: 8px 0 0; font-size: 12px; color: var(--if-editor-muted); text-align: center; }
 .route-map.empty { border: .3mm dashed #fff; background: #0003; color: #fff; font: 500 8pt/1.3 "Field Sans"; text-align: center; padding: 3mm; }

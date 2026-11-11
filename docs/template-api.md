@@ -310,10 +310,10 @@ elements: { grid: {
 
 #### Appearance in custom editors
 
-The app follows the system appearance. Custom editor frames remain light by default for compatibility with existing project-owned CSS. To follow the app appearance, put `data-imageflow-appearance="system"` on the custom editor’s root element and use the host’s CSS variables for its surfaces and text:
+Custom editor frames follow the system appearance automatically, including changes while a dialog is open. No appearance attribute or opt-in is needed. Editors must support both light and dark appearances: inherit the host's text and background colors, and use its CSS variables for custom surfaces, controls and states:
 
 ```tsx
-<div data-imageflow-appearance="system" style={{
+<div style={{
   color: 'var(--if-editor-text)',
   background: 'var(--if-editor-background)',
 }}>…</div>

@@ -162,9 +162,9 @@ function RouteEditor({ values, set, readOnly }: ElementEditorProps) {
   };
   const zoomBy = (factor: number) => move({ ...viewport, zoom: viewport.zoom * factor });
   const pan = (dx: number, dy: number) => move({ ...viewport, centerX: viewport.centerX + dx * viewport.size, centerY: viewport.centerY + dy * viewport.size });
-  if (!line) return <div className="route-editor" data-imageflow-appearance="system"><p className="route-editor-note">{problem}</p></div>;
+  if (!line) return <div className="route-editor"><p className="route-editor-note">{problem}</p></div>;
   const editable = !readOnly;
-  return <div className="route-editor" data-imageflow-appearance="system">
+  return <div className="route-editor">
     <div className="route-editor-nav">
       <button type="button" aria-label="Zoom out" disabled={!editable || viewport.zoom <= 1} onClick={() => zoomBy(1 / 1.5)}>−</button>
       <button type="button" aria-label="Zoom in" disabled={!editable || viewport.zoom >= maxRouteZoom} onClick={() => zoomBy(1.5)}>+</button>
@@ -243,7 +243,7 @@ function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {
     if (!days.delete(day)) days.add(day);
     set({ marked: [...days].sort((a, b) => a - b).join(',') });
   };
-  return <div className="calendar-editor" data-imageflow-appearance="system">
+  return <div className="calendar-editor">
     <div className="calendar-editor-nav">
       <button type="button" aria-label="Previous month" disabled={readOnly} onClick={() => shift(-1)}>‹</button>
       <button type="button" aria-label="Next month" disabled={readOnly} onClick={() => shift(1)}>›</button>

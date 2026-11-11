@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
@@ -122,6 +122,8 @@ try {
     return editor;
   }
   const editor = await calendar();
+  assert.equal(await editor.locator('html').evaluate((node) => getComputedStyle(node).colorScheme), 'light dark');
+  assert.equal(await editor.locator('[data-imageflow-appearance]').count(), 0, 'Custom editors follow the system without an opt-in.');
   await editor.getByRole('button', { name: '1', exact: true }).press('Space');
   await editor.getByRole('button', { name: '1', exact: true, pressed: true }).waitFor();
   const month = await editor.locator('h3').textContent();
@@ -155,21 +157,9 @@ try {
     rasters.push(execFileSync('pdftoppm', ['-r', '30', pdf]));
   }
   assert.ok(rasters[1].equals(rasters[0]), 'Proof artwork and text must be identical in both appearances.');
-  // Older project-owned editors without theme opt-in keep a readable light surface.
-  const code = join(book, 'template', 'index.tsx');
-  const css = join(book, 'template', 'styles.css');
-  await writeFile(code, (await readFile(code, 'utf8')).replaceAll(' data-imageflow-appearance="system"', ''));
-  await writeFile(css, (await readFile(css, 'utf8')).replace(/var\(--if-editor-[\w-]+,\s*([^()]+)\)/g, '$1'));
-  await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, book);
-  await menuAction(app, 'Open project…');
-  await ready();
-  const legacy = await calendar();
-  assert.equal(await legacy.locator('html').evaluate((node) => getComputedStyle(node).colorScheme), 'light only');
-  assert.equal(await legacy.locator('#root').evaluate((node) => getComputedStyle(node).color), 'rgb(41, 41, 41)');
-  await w.getByRole('dialog', { name: 'Edit calendar' }).getByRole('button', { name: 'Cancel', exact: true }).click();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(940, 650));
   await w.waitForFunction(() => innerWidth === 940);
   assert.equal(await w.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await w.screenshot({ path: join(root, '.build', 'appearance-minimum-dark.png') });
-  console.log('Appearance smoke passed: live native theme, editor controls/dialogs, template drafts, legacy editors, pixel-identical book and proof output.');
+  console.log('Appearance smoke passed: live native theme, editor controls/dialogs, automatic template appearance, preserved drafts, pixel-identical book and proof output.');
 } catch (error) { console.error('Appearance check failed', error); throw error; } finally { await app.close(); await rm(work, { recursive: true, force: true }); }
