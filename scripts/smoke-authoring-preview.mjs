@@ -215,6 +215,27 @@ try {
   assert.equal(oversized.state, 'error');
   assert.equal(oversized.diagnostics[0].code, 'invalid-check-request');
 
+  // Simulate a renderer returning undersized metadata: ordinary pages and details must reject it.
+  for (const target of [{ page: 2 }, { spread: 'later', box: 'photo' }]) {
+    await app.evaluate(({ app }) => {
+      app.once('browser-window-created', (_event, window) => {
+        const execute = window.webContents.executeJavaScript.bind(window.webContents);
+        window.webContents.executeJavaScript = async (...args) => {
+          const result = await execute(...args);
+          if (result?.preview?.state === 'ready') {
+            result.preview.metadata.width = 100;
+            result.preview.metadata.height = 100;
+          }
+          return result;
+        };
+      });
+    });
+    const undersized = await check({ preview: { target, maxEdge: 400 } });
+    assert.equal(undersized.state, 'error');
+    assert.equal(undersized.diagnostics[0].code, 'preview-capture-failed');
+    assert.equal(undersized.image, undefined);
+  }
+
   const proof = join(work, 'proof.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, proof);
   await w.getByRole('button', { name: 'Export proof PDF' }).click();

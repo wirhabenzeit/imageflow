@@ -101,8 +101,10 @@ export async function captureBookPreview(url: string, request: PreviewRequest, s
     if (!metadata) throw new PreviewError('preview-capture-failed', 'The renderer did not produce the requested artwork.');
     const { width, height } = metadata;
     const [availableWidth, availableHeight] = window.getContentSize();
+    const longest = Math.max(width, height);
+    const wrongEdge = 'kind' in metadata ? longest > options.maxEdge : longest !== options.maxEdge;
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 ||
-        Math.max(width, height) > options.maxEdge || width > availableWidth || height > availableHeight) {
+        wrongEdge || width > availableWidth || height > availableHeight) {
       throw new PreviewError('preview-capture-failed', 'The rendered artwork does not fit the preview dimensions.');
     }
     try {
