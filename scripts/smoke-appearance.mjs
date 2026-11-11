@@ -93,7 +93,9 @@ try {
   await w.locator('.source-import > summary').click();
   await w.getByRole('button', { name: 'Import folder…', exact: true }).waitFor();
   await w.keyboard.press('Escape');
-  await w.getByRole('button', { name: 'Adjust crop…', exact: true }).first().click();
+  // The sidebar's list of the spread's boxes opens a placed photo selected, with its crop toolbar.
+  await ready();
+  await w.locator('.inspector .content-item:has(img)').first().click();
   await w.locator('.crop-toolbar').waitFor();
   assert.equal(await w.locator('.crop-toolbar').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(53, 53, 53)');
   await w.screenshot({ path: join(root, '.build', 'appearance-crop-dark.png') });
@@ -116,7 +118,8 @@ try {
   // An open template editor follows appearance changes without discarding its uncommitted draft.
   async function calendar() {
     await w.locator('[data-spread="march"].spread-thumb').click();
-    await w.getByRole('button', { name: 'Edit calendar…', exact: true }).click();
+    await ready();
+    await w.locator('.inspector').getByRole('button', { name: 'Edit Calendar grid', exact: true }).click();
     const editor = w.frameLocator('.element-editor-frame');
     await editor.getByRole('button', { name: '14', exact: true }).waitFor();
     await w.waitForFunction(() => !document.querySelector('.element-editor .ee-status.muted'));
@@ -139,7 +142,8 @@ try {
   await w.getByRole('dialog', { name: 'Edit calendar' }).getByRole('button', { name: 'Cancel', exact: true }).click();
   await appearance('dark');
   await w.locator('[data-spread="road"].spread-thumb').click();
-  await w.getByRole('button', { name: 'Edit route…', exact: true }).click();
+  await ready();
+  await w.locator('.inspector').getByRole('button', { name: 'Edit Route map', exact: true }).click();
   await w.frameLocator('.element-editor-frame').locator('.route-editor-frame svg').waitFor();
   await w.waitForTimeout(200);
   await w.screenshot({ path: join(root, '.build', 'appearance-route-dark.png') });

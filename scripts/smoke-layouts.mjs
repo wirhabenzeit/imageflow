@@ -46,16 +46,29 @@ try {
   const button = (name) => w.getByRole('button', { name, exact: true });
   const picker = w.getByRole('radiogroup', { name: 'Layout' });
   const layout = (name) => picker.getByRole('radio', { name, exact: true });
-  const section = (label) => w.locator('.inspector details').filter({ has: w.locator(':scope > summary', { hasText: new RegExp('^' + label + '$') }) });
+  // The sidebar lists the spread's boxes; each opens its editor on the page. A placed photo is selected, with its
+  // photo choice, Remove and crop values in the crop toolbar.
+  const ready = () => w.waitForSelector('iframe.book-frame-book[data-current][data-ready]');
+  const openBox = async (label) => {
+    await ready();
+    await w.locator('.inspector').getByRole('button', { name: 'Edit ' + label, exact: true }).click();
+    await w.locator('.crop-editor, .edit-popover').first().waitFor();
+  };
+  const closeBox = async () => {
+    await w.keyboard.press('Escape');
+    await w.waitForFunction(() => !document.querySelector('.crop-editor, .edit-popover'));
+  };
   const setCrop = async (box, values) => {
-    const owner = section(box);
-    if (await owner.locator('.crop-values').getAttribute('open') === null) await owner.locator('.crop-values > summary').click();
+    await openBox(box);
+    const toolbar = w.locator('.crop-content');
+    if (await toolbar.locator('.crop-values').getAttribute('open') === null) await toolbar.locator('.crop-values > summary').click();
     for (const [label, value] of Object.entries(values)) {
       await rerendered(async () => {
-        await owner.getByRole('spinbutton', { name: label, exact: true }).fill(String(value));
-        await owner.getByRole('spinbutton', { name: label, exact: true }).press('Enter');
+        await toolbar.getByRole('spinbutton', { name: label, exact: true }).fill(String(value));
+        await toolbar.getByRole('spinbutton', { name: label, exact: true }).press('Enter');
       });
     }
+    await closeBox();
   };
   const kept = () => w.locator('.inspector').getByText(/^Saved outside this layout/).textContent();
 
@@ -133,10 +146,11 @@ try {
     { hero: 'segla', second: 'shore', third: 'cottage', fourth: 'light' });
   assert.equal(await kept(), 'Saved outside this layout · 2 photos');
   assert.deepEqual((await status()).warnings, []);
-  assert.match(await section('Left photo').locator('.crop-controls > p').textContent(), /^Fills the frame · moved · from another layout$/);
+  // The pair layout has no crop of its own: it fills around the focus set in the grid.
+  assert.equal(Object.hasOwn((await settlements()).boxes.hero.crops ?? {}, 'pair'), false);
 
   // Undo restores the previous layout in one step, and closes crop mode opened on the switched spread.
-  await section('Left photo').getByRole('button', { name: 'Adjust crop…' }).click();
+  await openBox('Left photo');
   await w.locator('.crop-editor').waitFor();
   await rerendered(() => button('Undo').click());
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
@@ -145,11 +159,14 @@ try {
   assert.equal((await settlements()).definition, 'pair');
 
   // Replacing a photo starts its crop over; removing one is a real edit.
-  const replace = section('Left photo').getByRole('combobox', { name: 'Replace photo in Left photo' });
+  await openBox('Left photo');
+  const replace = w.locator('.crop-content').getByRole('combobox', { name: 'Replace photo in Left photo' });
   const replacement = await replace.locator('option:not([value=""]):not([disabled])').first().getAttribute('value');
   await rerendered(() => replace.selectOption(replacement));
   assert.deepEqual((await settlements()).boxes.hero, { photo: replacement, params: {} });
-  await rerendered(() => section('Right photo').getByRole('button', { name: 'Remove' }).click());
+  await w.waitForFunction(() => !document.querySelector('.crop-editor'));
+  await openBox('Right photo');
+  await rerendered(() => w.locator('.crop-content').getByRole('button', { name: 'Remove' }).click());
 
   // B → C (no photo boxes) → A: the replacement and removal hold, the other photos and their crops return.
   await rerendered(() => layout('Text spread').click());
