@@ -1,4 +1,4 @@
-import { menuAction } from './ui-actions.mjs';
+import { menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -68,14 +68,13 @@ try {
       return state !== before && (!document.querySelector('.preview-state') || !!document.querySelector('.status-error'));
     }, before, { timeout: 30000 });
   };
-  await menuAction(app, 'Agent Connections…');
-  const dialog = window.getByRole('dialog', { name: 'Connect your agent' });
-  await dialog.getByRole('button', { name: 'Turn on agent access', exact: true }).click();
+  const dialog = await agentSettings(app);
+  await dialog.getByRole('checkbox', { name: 'Allow agents to use the open book', exact: true }).check();
   await dialog.getByText('Claude Code and other agents').click();
   const configuration = dialog.getByRole('textbox', { name: 'MCP connection configuration' });
   await configuration.waitFor();
   const config = JSON.parse(await configuration.inputValue()).mcpServers.imageflow;
-  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await closeSettings(app);
   client = new Client({ name: 'ImageFlow examples test', version: '1.0.0' });
   await client.connect(new StdioClientTransport({ ...config, stderr: 'pipe' }));
   const call = async (name, args = {}) => {

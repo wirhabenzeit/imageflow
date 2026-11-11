@@ -1,4 +1,4 @@
-import { menuAction } from './ui-actions.mjs';
+import { menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -43,9 +43,8 @@ try {
   await menuAction(app, 'Open project…');
   const ready = () => window.waitForFunction(()=>document.querySelector('iframe.book-frame-book[data-current][data-ready]') && !document.querySelector('.preview-state'));
   await ready();
-  await menuAction(app, 'Agent Connections…');
-  const connectionDialog=window.getByRole('dialog',{name:'Connect your agent'});
-  await connectionDialog.getByRole('button',{name:'Turn on agent access',exact:true}).click();
+  const connectionDialog=await agentSettings(app);
+  await connectionDialog.getByRole('checkbox', { name: 'Allow agents to use the open book', exact: true }).check();
   await connectionDialog.getByText('Claude Code and other agents').click();
   const configuration=connectionDialog.getByRole('textbox',{name:'MCP connection configuration'});
   await configuration.waitFor();
@@ -54,14 +53,21 @@ try {
   assert.equal(config.command,electron);
   assert.deepEqual(config.env,{ELECTRON_RUN_AS_NODE:'1'});
   assert.match(await connectionDialog.getByRole('textbox',{name:'Claude Code command'}).inputValue(),/^claude mcp add --scope user -e ELECTRON_RUN_AS_NODE=1 imageflow -- /);
-  await connectionDialog.getByRole('button',{name:'Close',exact:true}).click();
+  await connectionDialog.getByText('Waiting for an agent to connect.', { exact: true }).waitFor();
+  await closeSettings(app);
   await window.getByRole('button', { name: 'Agent · 0', exact: true }).waitFor();
   client = new Client({name:'ImageFlow prototype test',version:'1.0.0'});
   await client.connect(new StdioClientTransport({...config,stderr:'pipe'}));
   await window.getByRole('button', { name: 'Agent · 1', exact: true }).waitFor();
+  // The status-bar indicator opens the Agents pane of Settings.
+  const opened=app.waitForEvent('window');
   await window.getByRole('button', { name: 'Agent · 1', exact: true }).click();
-  await connectionDialog.getByText('Connected: ImageFlow prototype test', { exact: true }).waitFor();
-  await connectionDialog.getByRole('button', { name: 'Close', exact: true }).click();
+  const agents=await opened;
+  await agents.getByRole('tab', { name: 'Agents', selected: true }).waitFor();
+  await agents.getByText('Connected: ImageFlow prototype test', { exact: true }).waitFor();
+  assert.equal((await agents.evaluate(()=>window.imageflow.installMcp('nope'))).error,'Unknown agent.');
+  assert.match((await window.evaluate(()=>window.imageflow.installMcp('claude'))).error,/only available to Settings/);
+  await closeSettings(app);
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map(t=>t.name).sort(),['apply_project_changes','check_book','get_authoring_context','import_sources','inspect_book','list_projects'].sort());
   const call = async(name,args={}) => {
@@ -313,9 +319,12 @@ try {
   client = undefined;
   const waiting = window.getByRole('button', { name: 'Agent · 0', exact: true });
   await waiting.waitFor();
+  const reopened=app.waitForEvent('window');
   await waiting.click();
-  await connectionDialog.getByRole('button', { name: 'Disconnect agents', exact: true }).click();
-  await connectionDialog.getByRole('button', { name: 'Close', exact: true }).click();
+  const pane=await reopened;
+  await pane.getByRole('checkbox', { name: 'Allow agents to use the open book', exact: true }).uncheck();
+  await pane.getByText(/^Agents can check, preview and edit/).waitFor();
+  await closeSettings(app);
   await window.getByRole('button', { name: /^Agent ·/ }).waitFor({ state: 'detached' });
   console.log('ImageFlow MCP authoring prototype passed.');
 } finally {

@@ -4,9 +4,9 @@ ImageFlow exposes its open book to local MCP clients through a stdio bridge. The
 
 ## Connect
 
-Choose **ImageFlow → Agent Connections…**. The dialog has two steps.
+Open **ImageFlow → Settings…** and choose **Agents**. **ImageFlow → Agent Connections…** opens the same pane, and so does the **Agent ·** indicator in the status bar while access is on.
 
-**1. Add ImageFlow to your agent.** Do this once.
+**Agent apps:** add ImageFlow to each agent app once.
 
 - **Add to Claude Desktop** writes `ImageFlow.mcpb` to ImageFlow’s settings folder and opens it in Claude Desktop, which shows its extension installer. Choose **Install** there.
 - **Add to ChatGPT & Codex** runs `codex mcp add imageflow …`. ImageFlow uses the Codex CLI bundled with the ChatGPT desktop app, or `codex` from your login shell’s `PATH`. The ChatGPT desktop app, Codex CLI and Codex IDE extension share `~/.codex/config.toml`, so one entry serves all of them. Start a new task to load the tools. ChatGPT on the web and its remote connectors cannot reach a local app.
@@ -24,9 +24,9 @@ Agents need no separate Node.js installation. Every configuration starts the bri
 
 The configuration contains absolute paths, and `~` above stands for your home folder. If you move ImageFlow.app, add it to your agents again. The Claude Desktop extension then reports the moved app when it starts.
 
-**2. Allow access while you work.** Open an editable book and choose **Turn on agent access**. Close the dialog so ImageFlow can accept book edits. Keep ImageFlow open while using its tools.
+**Access:** open an editable book and select **Allow agents to use the open book**. Keep ImageFlow open while using its tools. Settings is a separate window, so the book stays editable while it is open.
 
-The dialog shows attached client names. **Turn off agent access** closes their app connections and removes the connection file. Turning it on again creates new credentials at the same path. An installed bridge reads the current connection file before each call, so agents reconnect without being set up again.
+The pane shows attached client names. Clearing the checkbox closes their app connections and removes the connection file. Selecting it again creates new credentials at the same path. An installed bridge reads the current connection file before each call, so agents reconnect without being set up again.
 
 For a development checkout, `node scripts/build-mcp.mjs` creates `.build/mcp-bridge.cjs`. Desktop staging bundles that bridge and includes this document. Packaging keeps it outside `app.asar`. A standalone invocation with any Node.js 22.20 or newer has the following form:
 

@@ -34,9 +34,11 @@ import { ImportReceipts } from './import-receipts';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
 import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
+import type { SettingsPane } from '../src/settings';
 
 let window: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
+let settingsPane: SettingsPane = 'general';
 let active: { id: string; book: OpenProject } | undefined;
 let busy = false;
 let projectSession: ProjectSession | undefined;
@@ -553,7 +555,10 @@ async function installMcp(target: McpClientTarget) {
 }
 
 function publishMcpSettings() {
-  if (window && !window.isDestroyed()) window.webContents.send(channels.mcpChanged, mcpSettings());
+  const settings = mcpSettings();
+  for (const owner of [window, settingsWindow]) {
+    if (owner && !owner.isDestroyed()) owner.webContents.send(channels.mcpChanged, settings);
+  }
 }
 
 async function disableMcp() {
@@ -592,7 +597,7 @@ async function agentLease(signal: AbortSignal) {
 
 async function enableMcp() {
   const owner = window;
-  if (!owner || owner.isDestroyed() || closing || quitting) throw new Error('Open ImageFlow before enabling the connection.');
+  if (!owner || owner.isDestroyed() || closing || quitting) throw new Error('Open the ImageFlow window before turning on agent access.');
   const queue = new AuthoringQueue({ ready: () => !busy && !closing && !quitting, maxPending: 32 });
   const service = createAuthoringService({
     session: () => projectSession, cache, docs: join(app.getAppPath(), 'docs', 'template-api.md'),
@@ -660,9 +665,12 @@ function followAppearance(owner: BrowserWindow) {
   owner.once('closed', () => nativeTheme.removeListener('updated', updateBackground));
 }
 
-function showSettings() {
+/** Opens Settings, switching to `pane` when given. Without one, an open window keeps its current pane. */
+function showSettings(pane?: SettingsPane) {
   const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
+  settingsPane = pane ?? (settingsWindow && !settingsWindow.isDestroyed() ? settingsPane : 'general');
   if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (pane) settingsWindow.webContents.send(channels.settingsPane, pane);
     if (!hidden) { settingsWindow.show(); settingsWindow.focus(); }
     return;
   }
@@ -790,8 +798,18 @@ void app.whenReady().then(async () => {
     if (direction !== 'undo' && direction !== 'redo') throw new Error('Unknown history action.');
     return activate(await projectSession!.undo(direction));
   }));
+  ipcMain.handle(channels.showSettings, (event, pane: SettingsPane) => {
+    if (editorOwner(event) && (pane === 'general' || pane === 'agents')) showSettings(pane);
+  });
+  ipcMain.handle(channels.settingsPane, (event) => settingsOwner(event) ? settingsPane : 'general');
+  ipcMain.handle(channels.fitSettings, (event, height: number) => {
+    const owner = settingsOwner(event);
+    if (!owner || typeof height !== 'number' || !Number.isFinite(height)) return;
+    const [width] = owner.getContentSize();
+    owner.setContentSize(width, Math.round(Math.min(Math.max(height, 120), 760)), process.platform === 'darwin');
+  });
   ipcMain.handle(channels.mcp, async (event, enabled?: boolean) => {
-    if (!editorOwner(event)) return { error: 'Request is only available to the editor.' };
+    if (!editorOwner(event) && !settingsOwner(event)) return { error: 'Request is only available to the editor or Settings.' };
     try {
       if (enabled !== undefined && typeof enabled !== 'boolean') throw new Error('Invalid connection setting.');
       const update = connectionSettingsQueue.then(async () => {
@@ -804,7 +822,7 @@ void app.whenReady().then(async () => {
     } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.mcpInstall, async (event, target: McpClientTarget) => {
-    if (!editorOwner(event)) return { error: 'Request is only available to the editor.' };
+    if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
     try { return { value: await installMcp(target) }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
@@ -831,9 +849,9 @@ void app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu', submenu: [
       { role: 'about' }, { type: 'separator' },
-      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: showSettings },
+      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
       { type: 'separator' },
-      menuCommand('Agent Connections…', undefined, 'agent-settings'),
+      { label: 'Agent Connections…', click: () => showSettings('agents') },
       { type: 'separator' }, { role: 'services' }, { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
     ] },
