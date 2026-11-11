@@ -14,6 +14,7 @@ import type { OpenProject } from './project';
 import type { BookPreview } from './preview';
 import type { InspectionRequest } from '../src/inspection';
 import type { Typecheck, TypecheckResult } from './typecheck';
+import { templateLocation } from './source-location';
 
 type ReadyStatus = Extract<RenderStatus, { state: 'ready' }>;
 type RenderCheck = (book: OpenProject, preview: PreviewRequest | undefined, signal: AbortSignal, inspect?: InspectionRequest) => Promise<{
@@ -22,7 +23,11 @@ type RenderCheck = (book: OpenProject, preview: PreviewRequest | undefined, sign
 
 /** Applies an unsaved command batch to the freshly loaded book. It may rewrite the preview request, for example to
  * resolve a batch reference to the ID of an inserted spread. */
-export type CheckDraft = (book: OpenProject) => { book: OpenProject; preview?: PreviewRequest; inspect?: InspectionRequest; summary: AuthoringDraftSummary };
+export type CheckDraft = (book: OpenProject) => {
+  book: OpenProject; preview?: PreviewRequest; inspect?: InspectionRequest;
+  // A command draft reports its planned changes. A synthetic fixture book has none and marks its image instead.
+  summary?: AuthoringDraftSummary; fixture?: true;
+};
 
 function diagnostic(issue: Issue, severity: 'error' | 'warning'): AuthoringDiagnostic {
   const { message, code, spread, where, box, element, source, parameter, details, suggestion } = issue;
@@ -46,7 +51,7 @@ export async function checkProject(
 ): Promise<AuthoringCheckResult> {
   const result: AuthoringCheckResult = {
     state: 'error', revision: null, diagnostics: [],
-    checks: { bundle: 'not-run', layout: 'not-run', typescript: 'not-run', print: 'not-run' },
+    checks: { bundle: 'not-run', declarations: 'not-run', layout: 'not-run', typescript: 'not-run', fixtures: 'not-run', print: 'not-run' },
   };
   const parsed = authoringCheckSchema.safeParse(request);
   if (!parsed.success) {
@@ -61,6 +66,7 @@ export async function checkProject(
   let types: TypecheckResult | undefined;
   // An invalid draft is the caller's request error, not a check finding.
   let draftError: unknown;
+  let loaded: OpenProject | undefined;
   const capture = () => index ? index.capture({ signal }) : captureProjectInputs(source.folder, { signal });
   const inputsMatch = async () => {
     const current = await capture();
@@ -87,6 +93,7 @@ export async function checkProject(
     // A rejected check may have read changed photo bytes. Never let its renditions poison a later check.
     privateCache = await mkdtemp(join(fallbackCache, 'check-'));
     const book = await loadProject(source.folder, privateCache, true);
+    loaded = book;
     if (!await inputsMatch()) {
       throw new ProjectRevisionError('source-changed');
     }
@@ -97,6 +104,7 @@ export async function checkProject(
     let rendered = book;
     let preview: PreviewRequest | undefined = parsed.data.preview;
     let inspect = parsed.data.inspect;
+    let fixture = false;
     if (draft) {
       // Command errors propagate to the caller; the draft never reaches the editor or disk.
       let planned: ReturnType<CheckDraft>;
@@ -105,7 +113,8 @@ export async function checkProject(
       rendered = planned.book;
       preview = planned.preview;
       inspect = planned.inspect ? { offset: 0, limit: 30, ...planned.inspect } : undefined;
-      result.draft = planned.summary;
+      if (planned.summary) result.draft = planned.summary;
+      fixture = !!planned.fixture;
     }
     const checked = await render(rendered, preview, signal, inspect);
     if (!await inputsMatch()) {
@@ -114,6 +123,7 @@ export async function checkProject(
     signal.throwIfAborted();
     result.state = 'ready';
     result.render = checked.status;
+    result.checks.declarations = 'passed';
     result.checks.layout = 'completed';
     result.diagnostics = [
       ...types?.diagnostics ?? [],
@@ -122,7 +132,7 @@ export async function checkProject(
     ];
     if (checked.preview) {
       const { bytes, mimeType, status: _status, ...metadata } = checked.preview;
-      result.image = { ...metadata, mimeType, data: Buffer.from(bytes).toString('base64'), ...(draft ? { draft: true as const } : {}) };
+      result.image = { ...metadata, mimeType, data: Buffer.from(bytes).toString('base64'), ...(fixture ? { fixture: true as const } : draft ? { draft: true as const } : {}) };
     }
     retainedCache = await renditions?.retain(privateCache, photoKeys) ?? false;
     return result;
@@ -141,13 +151,38 @@ export async function checkProject(
           ? error.code === 'preview-capture-failed' ? 'completed' : 'not-run'
           : 'failed';
       }
-      if (error instanceof PreviewError && error.template) result.template = error.template;
-      result.diagnostics = [{
-        code: error instanceof ProjectRevisionError || error instanceof PreviewError ? error.code : 'authoring-check-failed',
-        stage: error instanceof ProjectRevisionError ? 'project' : previewFailure ? 'preview' : phase === 'template' ? 'project' : phase,
-        severity: 'error', message: error instanceof Error ? error.message : String(error),
-        ...(error instanceof ProjectRevisionError && error.path ? { location: { path: error.path } } : {}),
-      }];
+      if (error instanceof PreviewError && error.template) {
+        result.template = error.template;
+        result.checks.declarations = 'passed';
+      }
+      const failure = error instanceof PreviewError ? error.failure : undefined;
+      if (failure?.layoutFailures) {
+        // Each layout that failed is named with its spread and, when the source map has it, the template line that threw.
+        // A fixture book uses this to render its other fixtures without the failing ones.
+        result.diagnostics = failure.layoutFailures.map(({ spread, message, stack }) => {
+          const at = templateLocation(stack, loaded);
+          return { code: 'layout-render-failed', stage: 'render' as const, severity: 'error' as const, message,
+            location: { spread, ...at },
+            suggestion: 'Fix the layout code' + (at ? ' at ' + at.path + ':' + at.line : '') + ' so it renders one <Spread> for this content; ' +
+              'guard empty, long or malformed inputs, or change the spread\'s parameters or layout.' };
+        });
+      } else if (failure?.declarationIssues) {
+        result.checks.declarations = 'failed';
+        result.diagnostics = failure.declarationIssues.map(({ path, message }) => ({
+          code: path === 'id' ? 'template-id-mismatch' : 'template-declaration-invalid', stage: 'template' as const, severity: 'error' as const,
+          message: (path ? path + ': ' : '') + message, location: { path: 'template/index.tsx', ...(path ? { declaration: path } : {}) },
+          suggestion: path === 'id' ? 'Use the template ID that project.json names, or open the book with its own template.'
+            : 'Change the declaration at ' + (path || 'the template root') + ' in the default export of template/index.tsx so it satisfies the template API.',
+        }));
+      } else {
+        const at = templateLocation(failure?.stack, loaded);
+        result.diagnostics = [{
+          code: error instanceof ProjectRevisionError || error instanceof PreviewError ? error.code : 'authoring-check-failed',
+          stage: error instanceof ProjectRevisionError ? 'project' : previewFailure ? 'preview' : phase === 'template' ? 'project' : phase,
+          severity: 'error', message: error instanceof Error ? error.message : String(error),
+          ...(error instanceof ProjectRevisionError && error.path ? { location: { path: error.path } } : at ? { location: at } : {}),
+        }];
+      }
     }
     // Compiler/render failures are only attributable to the captured revision if inputs stayed stable.
     if (result.revision) {

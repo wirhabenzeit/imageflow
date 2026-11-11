@@ -57,6 +57,14 @@ export type BookContext = {
 const anchorDeclarations = z.array(z.strictObject({
   id: z.string().min(1).max(256), title: z.string().max(1000).optional(), side: z.enum(['left', 'right']).optional(),
 })).max(100);
+/** A failure that belongs to one spread of the book, such as a layout whose anchors() throws. */
+export class SpreadError extends Error {
+  constructor(message: string, readonly spread: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'SpreadError';
+  }
+}
+
 // Lookups that found no anchor, or several, keyed so repeated renders report each once.
 export type AnchorLookup = { spread: string; anchor: string; found: number };
 export type BookIndex = { pages: number; anchors: Anchor[]; lookups?: Map<string, AnchorLookup> };
@@ -68,11 +76,11 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
     if (!definition?.anchors) return [];
     let returned: unknown;
     try { returned = definition.anchors({ params: resolveParams(definition.parameters, spread.params), document }); }
-    catch (error) { throw new Error(definition.label + ' could not declare its anchors: ' + (error instanceof Error ? error.message : String(error))); }
+    catch (error) { throw new SpreadError(definition.label + ' could not declare its anchors: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error }); }
     const declared = anchorDeclarations.safeParse(returned);
     if (!declared.success) {
-      throw new Error(definition.label + ' declares invalid anchors: ' +
-        declared.error.issues.map((issue) => (issue.path.join('.') || 'anchors') + ' ' + issue.message).join('; ') + '.');
+      throw new SpreadError(definition.label + ' declares invalid anchors: ' +
+        declared.error.issues.map((issue) => (issue.path.join('.') || 'anchors') + ' ' + issue.message).join('; ') + '.', spread.id);
     }
     const { left, right } = sequence.spreads[i].page;
     return declared.data.map(({ id, title, side }): Anchor => {
@@ -397,7 +405,8 @@ export function SpreadView({ book, template, format, spread, page, index, positi
     params: resolveParams(definition.parameters, spread.params),
     document: resolveParams(template.parameters, book.project.params),
     boxes, elements, page, format, formatId: template.formatId, mode: book.mode,
-    edit: (...paths) => book.mode === 'edit' && paths.length ? { 'data-edit': paths.join(' ') } : {},
+    // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
+    edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
     book: bookContext(index, spread.id), PhotoBox, MarkdownBox, Element,
   });
   return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, lazyPhotos }}>{content}</SpreadData.Provider>;

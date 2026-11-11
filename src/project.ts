@@ -66,7 +66,10 @@ export type RenderProject = {
   problems: string[];
   template: { script: string; css?: string; assets: Record<string, string> };
   mode: 'edit' | 'export';
+  // A synthetic authoring fixture book. Its artwork carries a banner and fixture labels so it is never mistaken for the book.
+  fixture?: FixtureMarking;
 };
+export type FixtureMarking = { banner: string; labels: Record<string, string> };
 
 export function parseDocument<T>(schema: z.ZodType<T>, input: unknown, label: string): T {
   const result = schema.safeParse(input);

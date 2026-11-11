@@ -5,7 +5,7 @@ import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'nod
 import type { BuildFailure, Loader } from 'esbuild';
 import type { AuthoringDiagnostic } from '../src/authoring';
 import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
-import type { PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
+import type { FixtureMarking, PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
 import type { ImportRequest, ProjectSummary } from '../src/desktop';
 import { photoDetails, photoExtensions } from './photos';
@@ -90,6 +90,9 @@ async function bundleTemplate(folder: string) {
       outfile: resolve(root, 'template.js'),
       assetNames: 'asset-[name]-[hash]',
       metafile: true,
+      // Kept beside the bundle so checks can map runtime errors back to template source lines; never linked from it.
+      sourcemap: 'external',
+      sourcesContent: false,
       absWorkingDir: root,
       bundle: true,
       write: false,
@@ -178,6 +181,8 @@ export type OpenProject = ProjectFiles & {
   folder: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
   texts: Record<string, string>; files: Record<string, ProjectFile>; problems: string[]; readOnly: boolean;
   manifests: Record<ManifestName, Buffer>;
+  // Set only on synthetic fixture books rendered by authoring checks.
+  fixture?: FixtureMarking;
 };
 
 // Files for file parameters are read whole into the render data, so preview and export use the same input.
@@ -356,6 +361,7 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
     texts: book.texts,
     files: book.files,
     problems: book.problems,
+    ...(book.fixture ? { fixture: book.fixture } : {}),
     template: {
       script: base + '/template/template.js',
       css: book.assets.files.has('template.css') ? base + '/template/template.css' : undefined,
