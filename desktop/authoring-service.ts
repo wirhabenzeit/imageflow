@@ -13,6 +13,7 @@ import type { ProjectInputCapture, ProjectInputIndex } from './revisions';
 import { loadProject, readProjectDocument, withProjectFiles } from './project';
 import type { CheckDraft } from './check';
 import type { PreviewRequest } from '../src/preview';
+import type { InspectionRequest } from '../src/inspection';
 import { photoExtensions } from './photos';
 import type { OpenProject } from './project';
 import type { ProjectSession } from './project-session';
@@ -111,7 +112,7 @@ export function createAuthoringService(hooks: Hooks) {
     if (!matches) cachedCheck = undefined;
     // expectedRevision is checked before reuse. It constrains the inputs without changing a no-preview render.
     const expectedMatches = !request.expectedRevision || request.expectedRevision === before.inputs?.revision;
-    if (!fresh && !draft && !request.preview && expectedMatches && cachedCheck) {
+    if (!fresh && !draft && !request.preview && !request.inspect && !request.typescript && expectedMatches && cachedCheck) {
       get(session.handle);
       return { result: structuredClone(cachedCheck.result), watcherInvalidated: false };
     }
@@ -128,7 +129,7 @@ export function createAuthoringService(hooks: Hooks) {
       throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while checking. Check again.');
     }
     // A draft result describes unsaved state and must never answer a later check of the saved book.
-    if (result.state === 'ready' && after.inputs && !draft) {
+    if (result.state === 'ready' && after.inputs && !draft && !request.inspect) {
       const { image: _image, ...baseline } = result;
       cachedCheck = { session, inputs: after.inputs, result: structuredClone(baseline) };
     }
@@ -169,11 +170,12 @@ export function createAuthoringService(hooks: Hooks) {
   // Renders the saved book with an unsaved command batch applied. The batch is planned against the same freshly
   // loaded, revision-verified book that is rendered, with the template declarations of that revision.
   const draftCheck = async (session: ProjectSession, signal: AbortSignal, expectedRevision: string, operations: unknown,
-    preview: PreviewRequest | undefined) => {
+    preview: PreviewRequest | undefined, inspect?: InspectionRequest, typescript?: boolean) => {
     const base = await checked(session, signal, { expectedRevision });
     // A draft may repair a saved book whose render fails, as long as its template loaded at this revision.
     const template = base.revision === expectedRevision ? base.render?.template ?? base.template : undefined;
-    if (!template) return { ...base, draft: { applied: false, committed: false } };
+    if (!template) return { ...(typescript ? await checked(session, signal, { expectedRevision, typescript }, true) : base),
+      draft: { applied: false, committed: false } };
     const draft: CheckDraft = (book) => {
       let planned;
       try { planned = applyProjectCommands(book, template, operations); }
@@ -185,18 +187,22 @@ export function createAuthoringService(hooks: Hooks) {
       try { drafted = withProjectFiles(book, planned.files); }
       catch (error) { throw new AuthoringError('INVALID_OPERATION', error instanceof Error ? error.message : 'The draft is not a valid project.'); }
       let target = preview?.target;
-      if (target && 'spread' in target && target.spread.startsWith('$')) {
-        const resolved = planned.references[target.spread.slice(1)];
-        if (!resolved) throw new AuthoringError('REFERENCE_NOT_FOUND', 'The draft defines no batch reference ' + target.spread + '.');
-        target = { ...target, spread: resolved };
-      }
+      const resolve = (reference: string) => {
+        if (!reference.startsWith('$')) return reference;
+        const resolved = planned.references[reference.slice(1)];
+        if (!resolved) throw new AuthoringError('REFERENCE_NOT_FOUND', 'The draft defines no batch reference ' + reference + '.');
+        return resolved;
+      };
+      if (target && 'spread' in target) target = { ...target, spread: resolve(target.spread) };
+      if (target && 'spreads' in target) target = { ...target, spreads: target.spreads.map(resolve) };
       return {
         book: drafted, preview: preview && target ? { ...preview, target } : undefined,
+        inspect: inspect ? { ...inspect, spread: resolve(inspect.spread) } : undefined,
         summary: { applied: true, committed: false, changes: planned.changes, affectedSpreads: planned.affectedSpreads,
           references: planned.references, reflow: planned.reflow },
       };
     };
-    return checked(session, signal, { expectedRevision }, true, draft);
+    return checked(session, signal, { expectedRevision, typescript }, true, draft);
   };
   return async (name: string, args: Record<string, any>, signal: AbortSignal): Promise<Record<string, unknown>> => {
     if (name === 'list_projects') {
@@ -210,8 +216,15 @@ export function createAuthoringService(hooks: Hooks) {
     const session = get(args.project);
     if (name === 'check_book') {
       if (args.preview?.target?.page && !args.expectedRevision) throw new AuthoringError('REVISION_REQUIRED', 'Page-number previews require expectedRevision; spread IDs can be used without it.');
-      if (!args.draft) return checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview }, true);
-      return draftCheck(session, signal, args.expectedRevision, args.draft.operations, args.preview);
+      if (!args.draft) return checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview,
+        ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true);
+      return draftCheck(session, signal, args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript);
+    }
+    if (name === 'inspect_book' && args.view === 'elements') {
+      const report = await checked(session, signal, { inspect: { spread: args.spread, box: args.box, element: args.element,
+        offset: args.offset, limit: args.limit } });
+      return { project: session.handle, revision: report.revision, state: report.state, diagnostics: report.diagnostics,
+        checks: report.checks, ...report.render?.inspection };
     }
     if (name === 'get_authoring_context' || name === 'inspect_book') {
       const report = await checked(session, signal);
@@ -274,7 +287,8 @@ export function createAuthoringService(hooks: Hooks) {
           templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
           apiReference: await readFile(hooks.docs, 'utf8'),
           capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
-            maxPreviewEdge: 1600, typescript: false, printPreflight: false, draftPreview: true, fixtures: false, contactSheets: false,
+            maxPreviewEdge: 1600, typescript: true, printPreflight: false, draftPreview: true, fixtures: false, contactSheets: true,
+            elementInspection: true, detailPreviews: true, maxContactSheetSpreads: 12,
             diagnostics: 'Stable codes with spread/box/element/source locations, measured details and suggested fixes.',
             draftProtection: 'All agent mutations wait until active human editors are closed or blurred.',
             imports: 'Only project/inbox paths. All selected files are validated before import; source files remain available to Undo.',

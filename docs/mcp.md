@@ -37,8 +37,8 @@ Every inspection/check result identifies an input revision. Pass that revision a
 | --- | --- |
 | `list_projects` | No arguments. Returns the currently authorized open project, its stable handle, writable state and current revision. |
 | `get_authoring_context` | `project`, optional `includeSource`. Reads up to eight requested paths inside `template/` or `texts/`, with declarations and authoring guidance. |
-| `inspect_book` | `project`, `view` of `summary`, `spreads`, `sources` or `parameters`, optional `spread`, `offset` and `limit`. Results are paginated with at most 100 records per call. |
-| `check_book` | `project`, optional `expectedRevision`, `preview` and `draft`. Returns check coverage, diagnostics, revision, and optional rendered artwork. With `draft`, it renders an unsaved command batch on top of the saved book. |
+| `inspect_book` | `project`, `view` of `summary`, `spreads`, `sources`, `parameters` or `elements`, optional `spread`, `offset` and `limit`. The `elements` view requires `spread` and optionally filters by `box` or `element`. Results are paginated with at most 100 records per call. |
+| `check_book` | `project`, optional `expectedRevision`, `preview`, `inspect`, `typescript` and `draft`. Combines check coverage, diagnostics, measured element inspection and optional artwork. With `draft`, it renders an unsaved command batch on top of the saved book. |
 | `apply_project_changes` | `project`, `expectedRevision`, `idempotencyKey`, `label`, `operations`, optional `dryRun`. Validates the complete batch and applies it through the app. One successful batch creates one named Undo entry. |
 | `import_sources` | `project`, `expectedRevision`, `idempotencyKey`, `kind`, `paths`, and `accept` for file inputs. Registers files copied into this project’s `inbox/` folder and returns source IDs. |
 
@@ -72,7 +72,47 @@ Omit `side` to capture the whole spread. A single-page opening or closing layout
 
 The defaults are trim bounds, PNG and 1000 pixels on the longest edge. Set `bounds` to `bleed` for output bleed, or `format` to `jpeg`. The longest edge may be between 1 and 1600 pixels. Images contain clean export-mode artwork after whole-book text flow, including the actual continuation on later pages. Metadata includes pixel and millimetre dimensions, spread identity, side, page numbers and rendering bounds. Image bytes appear once in an MCP image block. The text and structured result carry the image metadata.
 
-A rendered image can accompany layout errors or warnings. Coverage reports TypeScript checking and print preflight as `not-run` in this prototype. Capture uses screen-media artwork. Print-specific CSS, contact sheets, detailed crop targets and synthetic fixture content remain follow-up work. CSS background-image readiness has not been verified by the preview equivalence tests.
+A rendered image can accompany layout or type errors. TypeScript checking is opt-in; print preflight remains `not-run`. Capture uses screen-media artwork. Print-specific CSS and synthetic fixture content remain follow-up work. CSS background-image readiness has not been verified by the preview equivalence tests.
+
+### TypeScript feedback
+
+Set `typescript: true` on `check_book` to check template code against declarations shipped with the installed app. This is separate from bundling: an annotation such as `const count: number = 'wrong'` bundles but produces a `typescript-error` with a TypeScript diagnostic number, source path, one-based line and column. Usable artwork still returns with `state: ready`; check `checks.typescript` and diagnostic severities before treating a result as valid.
+
+The compiler uses fixed strict settings and the installed `imageflow`, supported React and JSX types. It does not read the project's `tsconfig.json`, install packages, execute template code, or trust copied `template/types/imageflow.d.ts` declarations. Local TS/TSX files and declaration files are checked; imported JS/JSX can participate but is not checked with `checkJs`. The `typecheck` result lists source files, total diagnostic count, truncation and elapsed milliseconds. The same before/after revision verification covers type checking and rendering; changed inputs discard the findings.
+
+Checking runs off the app thread with a 15-second deadline, cancellation and a 256 MiB worker heap limit. Template code is limited to 512 source files / 8 MiB, and at most 50 diagnostics are returned. Timeout, resource or compiler availability failures are explicit diagnostics, never a successful type check. Ordinary context/preview calls omit this work unless requested.
+
+### Contact sheets and close-ups
+
+A contact sheet renders up to 12 specified spreads in one whole-book render, including the correct later-page text continuation. The array order determines cell order. Single-page ends occupy their available side. Labels identify spread IDs and physical pages; they are outside the artwork.
+
+```json
+{
+  "project": "handle-from-list_projects",
+  "typescript": true,
+  "preview": { "target": { "spreads": ["arrival", "story", "closing"], "columns": 2 }, "maxEdge": 1200 }
+}
+```
+
+Contact-sheet `maxEdge` ranges from 128 to 1600; columns range from 1 to 4 (default 3). `image.kind` is `contact-sheet`. Its `cells` include pixel rectangles, spread/page identities, physical dimensions, bounds and labels. The collage itself has no physical print size. The result uses the same single native MCP image block as a page preview. Cells fit without stretching, so empty space is expected when page shapes differ.
+
+For a close-up, use `preview.target: { "spread": "arrival", "box": "hero", "paddingMm": 2 }`, or use `element` instead of `box`. Padding defaults to 2 mm and is bounded to 0–20 mm. The axis-aligned crop is clipped to the spread's trim/bleed bounds and keeps neighboring artwork. `image.detail` identifies the owner and crop origin in millimetres from the sheet's outer bleed corner. Missing or entirely clipped targets return `preview-target-not-found`.
+
+### Focused element inspection
+
+Use `inspect_book` with `view: "elements"` and a `spread`, or combine `inspect` with artwork in one `check_book` call:
+
+```json
+{
+  "project": "handle-from-list_projects",
+  "inspect": { "spread": "arrival", "box": "hero" },
+  "preview": { "target": { "spread": "arrival", "box": "hero", "paddingMm": 2 }, "maxEdge": 800 }
+}
+```
+
+The standalone tool returns `items`, `total` and `nextOffset`; combined checks put the same result in `render.inspection`. Measurements are taken after whole-book flow, before preview scaling. Each item includes its stable ID/kind, assigned source when present, axis-aligned `boundsMm`, an `upright` flag, the owner's computed typography and its declared parameter edit paths. Coordinates use `sheet-bleed-mm`, with the origin at the full sheet's outer bleed corner. Typography describes the owner element's computed style; nested headings or spans may have different styles. `lineHeightPt: null` means CSS `normal`. No CSS source location or arbitrary DOM identity is inferred. Custom `ctx.edit(...)` markers on other DOM nodes are outside this inspection scope.
+
+Inspection requires one spread and supports either a `box` or `element` filter, plus `offset` and `limit` (default 30, maximum 100). Draft `$aliases` work in inspection, close-up and contact-sheet targets. Measurements and cells from an unsaved draft describe that draft and do not enter the saved-book inspection cache.
 
 ### Draft previews
 

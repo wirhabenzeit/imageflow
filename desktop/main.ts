@@ -18,6 +18,7 @@ import { bundledFontNames } from './fonts';
 import { isProjectInputPath } from './revisions';
 import type { ProjectInputIndex } from './revisions';
 import { checkProject } from './check';
+import { checkTemplateTypes } from './typecheck';
 import type { CheckDraft } from './check';
 import { captureBookPreview, checkBookRender } from './preview';
 import { ProjectSession } from './project-session';
@@ -469,20 +470,21 @@ async function checkOpenBook(book: OpenProject, request: AuthoringCheckRequest, 
   checkJobs.add(job);
   if (!externalSignal) checkJob = job;
   try {
-    return await checkProject(book, cache, request, async (snapshot, preview, signal) => {
+    return await checkProject(book, cache, request, async (snapshot, preview, signal, inspect) => {
       const id = randomUUID();
       sessions.set(id, { book: snapshot, mode: 'export' });
       try {
         const url = renderOrigin + '/render/' + id;
         if (preview) {
-          const image = await captureBookPreview(url, preview, signal);
+          const image = await captureBookPreview(url, preview, signal, inspect);
           return { status: image.status, preview: image };
         }
-        return { status: await checkBookRender(url, signal) };
+        return { status: await checkBookRender(url, signal, inspect) };
       } finally {
         sessions.delete(id);
       }
-    }, externalSignal ? AbortSignal.any([job.signal, externalSignal]) : job.signal, inputs, renditions, draft);
+    }, externalSignal ? AbortSignal.any([job.signal, externalSignal]) : job.signal, inputs, renditions, draft,
+    (folder, signal) => checkTemplateTypes(folder, signal, app.getAppPath()));
   } finally {
     clearTimeout(timeout);
     if (checkJob === job) checkJob = undefined;

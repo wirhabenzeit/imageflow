@@ -102,6 +102,7 @@ export type RenderStatus = {
   units: { side: PrintSide; spread: string; where: string }[];
   errors: Issue[]; warnings: Issue[];
   flow: Record<string, { part: number; parts: number; title?: string }>;
+  inspection?: import('./inspection').ElementInspection;
 } | { state: 'error'; message: string; template?: TemplateInfo };
 
 declare global {

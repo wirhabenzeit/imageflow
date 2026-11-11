@@ -78,7 +78,8 @@ try {
   let context=await good('get_authoring_context',{project});
   assert.ok(context.apiReference.includes('defineTemplate'));
   assert.ok(context.sources['template/index.tsx'].text.includes('NEW_LAYOUT'));
-  assert.equal(context.capabilities.typescript,false);
+  assert.equal(context.capabilities.typescript,true);
+  assert.equal(context.capabilities.contactSheets,true);
   const check=await call('check_book',{project,preview:{target:{spread:'first'},maxEdge:300}});
   assert.ok(!check.response.isError,JSON.stringify(check.data));
   const image=check.response.content.find(c=>c.type==='image');
@@ -103,6 +104,12 @@ try {
   ]};
   const dry=await good('apply_project_changes',{...batch,dryRun:true});
   assert.equal(dry.committed,false);
+  assert.equal(await readFile(join(folder,'project.json'),'utf8'),before);
+  const overview=await good('check_book',{project,expectedRevision:revision,draft:{operations:batch.operations},
+    preview:{target:{spreads:['first','$chapter'],columns:2},maxEdge:600},inspect:{spread:'first',box:'hero'}});
+  assert.equal(overview.image.kind,'contact-sheet');
+  assert.deepEqual(overview.image.cells.map(cell=>cell.spread),['first',overview.draft.references.chapter]);
+  assert.equal(overview.render.inspection.items[0].id,'hero');
   assert.equal(await readFile(join(folder,'project.json'),'utf8'),before);
   await ready();
   // A draft check renders the unused layout in the real book flow by batch reference, without saving it.
@@ -191,6 +198,24 @@ try {
   assert.equal(spreads.items[0].boxes.hero.photo,photo);
   assert.equal(spreads.nextOffset,1);
   assert.equal(assigned.history.undo,'Place photo');
+  const measured=await good('inspect_book',{project,view:'elements',spread:'first',box:'hero'});
+  assert.equal(measured.coordinateSpace,'sheet-bleed-mm');
+  assert.equal(measured.items[0].source,photo);
+  assert.ok(Math.abs(measured.items[0].boundsMm.width-40)<.1);
+  const invalidTypes=authored+'\nconst typeMismatch: number = "wrong";\n';
+  await writeFile(entry,invalidTypes);
+  const typed=await good('check_book',{project,typescript:true,preview:{target:{spread:'first',box:'hero',paddingMm:0},maxEdge:300}});
+  assert.equal(typed.checks.typescript,'failed');
+  assert.ok(typed.diagnostics.some(d=>d.code==='typescript-error' && d.details.typescriptCode===2322 && d.location.path==='template/index.tsx'));
+  assert.equal(typed.image.detail.box,'hero');
+  assert.ok(typed.typecheck.files.includes('template/index.tsx'));
+  const beforeTypeRestore=await window.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
+  await writeFile(entry,authored);
+  await window.waitForFunction(previous=>{
+    const frame=document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return frame && frame.getAttribute('src')!==previous;
+  },beforeTypeRestore);
+  await ready();
 
   // Compiler failure is actionable, preserves the app's last image, and recovers through check_book.
   const shown=await window.locator('iframe.book-frame-book[data-ready]').first().getAttribute('src');
@@ -238,9 +263,13 @@ try {
   await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Edit redone');
   assert.equal(await chapterHeading(),'Recovered');
   await ready();
+  const beforeRestore=await window.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
   await writeFile(entry,authored);
   // Let the app adopt the restored template before the next step reads inputs.
-  await window.waitForFunction(()=>!document.querySelector('.status-error'));
+  await window.waitForFunction(previous=>{
+    const frame=document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return frame && frame.getAttribute('src')!==previous;
+  },beforeRestore);
   await ready();
   await good('check_book',{project});
   await ready();

@@ -205,3 +205,27 @@ test('render findings keep their codes, locations, measured values and suggested
       location: { spread: 's2', element: 'caption' } },
   ]);
 });
+
+test('typechecking reports failures alongside usable artwork and discards diagnostics if inputs change', async (t) => {
+  const { book, cache, folder } = await fixture(t);
+  const types = { files: ['template/index.tsx'], totalDiagnostics: 1, truncated: false, elapsedMs: 10,
+    diagnostics: [{ code: 'typescript-error', stage: 'template' as const, severity: 'error' as const, message: 'Wrong type.',
+      location: { path: 'template/index.tsx', line: 1, column: 1 } }] };
+  let rendered = false;
+  const ready = await checkProject(book, cache, { typescript: true }, async () => { rendered = true; return { status }; },
+    new AbortController().signal, undefined, undefined, undefined, async () => types);
+  assert.equal(rendered, true);
+  assert.equal(ready.state, 'ready');
+  assert.equal(ready.checks.typescript, 'failed');
+  assert.equal(ready.diagnostics[0].code, 'typescript-error');
+  assert.equal(ready.typecheck?.totalDiagnostics, 1);
+  const changed = await checkProject(book, cache, { typescript: true }, async () => assert.fail('Changed inputs must not render.'),
+    new AbortController().signal, undefined, undefined, undefined, async () => {
+      await writeFile(join(folder, 'template/new.ts'), 'export const newValue = 1;');
+      return types;
+    });
+  assert.equal(changed.state, 'error');
+  assert.equal(changed.diagnostics[0].code, 'source-changed');
+  assert.equal(changed.typecheck, undefined);
+  assert.equal(changed.checks.typescript, 'not-run');
+});
