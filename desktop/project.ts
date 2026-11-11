@@ -1,14 +1,16 @@
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { Loader } from 'esbuild';
+import type { BuildFailure, Loader } from 'esbuild';
+import type { AuthoringDiagnostic } from '../src/authoring';
 import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
 import type { PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
 import type { ImportRequest, ProjectSummary } from '../src/desktop';
 import { photoDetails, photoExtensions } from './photos';
 import type { ProjectPhoto } from './photos';
+import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
 
 export const assetTypes: Record<string, string> = {
   '.js': 'text/javascript', '.css': 'text/css', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -37,14 +39,27 @@ async function containedPath(root: string, path: string, folder?: string) {
   return actual;
 }
 
-async function readJson(root: string, name: string) {
-  const path = await containedPath(root, name);
-  const source = await readFile(path, 'utf8');
+type ManifestName = 'project.json' | 'photos.json';
+
+export async function readProjectManifest(root: string, name: ManifestName) {
+  return readFile(await containedPath(root, name));
+}
+
+function parseJson(source: Buffer, name: ManifestName) {
   try {
-    return JSON.parse(source) as unknown;
+    return JSON.parse(source.toString('utf8')) as unknown;
   } catch {
     throw new Error(name + ' contains invalid JSON.');
   }
+}
+
+export function readProjectDocument(root: string, name: 'project.json'): Promise<{ document: Project; source: Buffer }>;
+export function readProjectDocument(root: string, name: 'photos.json'): Promise<{ document: PhotoIndex; source: Buffer }>;
+export async function readProjectDocument(root: string, name: ManifestName): Promise<{ document: Project | PhotoIndex; source: Buffer }> {
+  const source = await readProjectManifest(root, name);
+  const value = parseJson(source, name);
+  const document = name === 'project.json' ? parseDocument(projectSchema, value, name) : parseDocument(photoIndexSchema, value, name);
+  return { document, source };
 }
 
 const hostModules = new Map([
@@ -52,6 +67,13 @@ const hostModules = new Map([
   ['react', 'export default globalThis.ImageFlowReact; export const { createElement, Fragment, Children } = globalThis.ImageFlowReact;'],
   ['react/jsx-runtime', 'export const { jsx, jsxs, Fragment } = globalThis.ImageFlowJSX;'],
 ]);
+
+export class TemplateCompileError extends Error {
+  constructor(message: string, readonly diagnostics: AuthoringDiagnostic[]) {
+    super(message);
+    this.name = 'TemplateCompileError';
+  }
+}
 
 async function bundleTemplate(folder: string) {
   const entry = await containedPath(folder, 'template/index.tsx', 'template');
@@ -61,7 +83,7 @@ async function bundleTemplate(folder: string) {
   );
   try {
     // esbuild reads its executable path when the module is first loaded.
-    const { build } = require('esbuild') as typeof import('esbuild');
+    const { build } = await import('esbuild');
     const { outputFiles, metafile } = await build({
       entryPoints: [entry],
       outfile: resolve(root, 'template.js'),
@@ -119,7 +141,15 @@ async function bundleTemplate(folder: string) {
     }
     return { files, urls };
   } catch (error) {
-    throw new Error('Template could not be bundled. ' + (error instanceof Error ? error.message : String(error)));
+    const message = 'Template could not be bundled. ' + (error instanceof Error ? error.message : String(error));
+    const errors = (error as Partial<BuildFailure> | null)?.errors;
+    const diagnostics: AuthoringDiagnostic[] = Array.isArray(errors) ? errors.slice(0, 50).map(({ text, location }) => ({
+      code: 'template-compile-error', stage: 'template', severity: 'error', message: text,
+      ...(location ? { location: {
+        path: relative(folder, resolve(root, location.file)), line: location.line, column: location.column + 1,
+      } } : {}),
+    })) : [{ code: 'template-compile-error', stage: 'template', severity: 'error', message }];
+    throw new TemplateCompileError(message, diagnostics);
   }
 }
 
@@ -142,6 +172,7 @@ type TemplateAssets = Awaited<ReturnType<typeof bundleTemplate>>;
 export type OpenProject = ProjectFiles & {
   folder: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
   texts: Record<string, string>; files: Record<string, ProjectFile>; problems: string[]; readOnly: boolean;
+  manifests: Record<ManifestName, Buffer>;
 };
 
 // Files for file parameters are read whole into the render data, so preview and export use the same input.
@@ -150,11 +181,12 @@ const fileName = (path: string) => basename(path).replace(/^fl-[0-9a-f-]{12}-/, 
 
 export async function loadProject(path: string, fallback: string, readOnly = false): Promise<OpenProject> {
   const folder = await realpath(path);
-  const [projectFile, photoFile] = await Promise.all([readJson(folder, 'project.json'), readJson(folder, 'photos.json')]);
-  const project = parseDocument(projectSchema, projectFile, 'project.json');
-  const photoIndex = parseDocument(photoIndexSchema, photoFile, 'photos.json');
+  await recoverProjectSave(folder, { readOnly });
+  const [{ document: project, source: projectFile }, { document: photoIndex, source: photoFile }] = await Promise.all([
+    readProjectDocument(folder, 'project.json'), readProjectDocument(folder, 'photos.json'),
+  ]);
   const [assets, cache] = await Promise.all([bundleTemplate(folder), readOnly ? fallback : cacheFolder(folder, fallback)]);
-  return readContent({ folder, assets, cache, readOnly, project, photoIndex });
+  return readContent({ folder, assets, cache, readOnly, project, photoIndex, manifests: { 'project.json': projectFile, 'photos.json': photoFile } });
 }
 
 async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>): Promise<OpenProject> {
@@ -197,7 +229,7 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   return { ...book, photos, texts, files, problems: problems.sort() };
 }
 
-function json(value: unknown) {
+function projectJson(value: unknown) {
   return JSON.stringify(value, null, 2) + '\n';
 }
 
@@ -205,40 +237,34 @@ export async function updateProject(book: OpenProject, files: ProjectFiles, relo
   if (book.readOnly) throw new Error('Use New Project to make an editable copy of the sample.');
   const project = parseDocument(projectSchema, files.project, 'project.json');
   const photoIndex = parseDocument(photoIndexSchema, files.photoIndex, 'photos.json');
-  const projectChanged = json(book.project) !== json(project);
-  const indexChanged = json(book.photoIndex) !== json(photoIndex);
+  const projectSource = projectJson(project);
+  const indexSource = projectJson(photoIndex);
+  const projectChanged = projectJson(book.project) !== projectSource;
+  const indexChanged = projectJson(book.photoIndex) !== indexSource;
   if (!projectChanged && !indexChanged) return book;
-  const currentProject = parseDocument(projectSchema, await readJson(book.folder, 'project.json'), 'project.json');
-  const currentIndex = parseDocument(photoIndexSchema, await readJson(book.folder, 'photos.json'), 'photos.json');
-  if (json(currentProject) !== json(book.project) || json(currentIndex) !== json(book.photoIndex)) {
+  const [projectFile, photoFile] = await Promise.all([readProjectManifest(book.folder, 'project.json'), readProjectManifest(book.folder, 'photos.json')]);
+  const currentProject = parseDocument(projectSchema, parseJson(projectFile, 'project.json'), 'project.json');
+  const currentIndex = parseDocument(photoIndexSchema, parseJson(photoFile, 'photos.json'), 'photos.json');
+  if (projectJson(currentProject) !== projectJson(book.project) || projectJson(currentIndex) !== projectJson(book.photoIndex)) {
     throw new Error('The project changed on disk. Reload before making more edits.');
   }
-  const staging = await mkdtemp(join(book.folder, '.imageflow-write-'));
-  try {
-    const projectPath = join(staging, 'project.json');
-    const indexPath = join(staging, 'photos.json');
-    if (projectChanged) await writeFile(projectPath, json(project));
-    if (indexChanged) await writeFile(indexPath, json(photoIndex));
-    if (indexChanged) await rename(indexPath, join(book.folder, 'photos.json'));
-    try {
-      if (projectChanged) await rename(projectPath, join(book.folder, 'project.json'));
-    } catch (error) {
-      if (indexChanged) {
-        await writeFile(indexPath, json(book.photoIndex));
-        await rename(indexPath, join(book.folder, 'photos.json'));
-      }
-      throw error;
+  const manifests = {
+    'project.json': projectChanged ? Buffer.from(projectSource) : projectFile,
+    'photos.json': indexChanged ? Buffer.from(indexSource) : photoFile,
+  };
+  await persistProjectManifests(book.folder, { 'project.json': projectFile, 'photos.json': photoFile }, manifests);
+  if (reloadContent) {
+    try { return await readContent({ ...book, project, photoIndex, manifests }); }
+    catch (error) {
+      throw new CommittedProjectSaveError('The project was saved, but its content could not be reloaded. Reload the project before making more edits.', { cause: error });
     }
-  } finally {
-    await rm(staging, { recursive: true, force: true });
   }
-  if (reloadContent) return readContent({ ...book, project, photoIndex });
   const photos = new Map([...book.photos].flatMap(([id, photo]) => {
     if (!photoIndex[id]) return [];
     const { title, caption, credit, altText } = photoIndex[id];
     return [[id, { ...photo, title, caption, credit, altText }] as const];
   }));
-  return { ...book, project, photoIndex, photos };
+  return { ...book, project, photoIndex, photos, manifests };
 }
 
 export async function importIntoProject(book: OpenProject, request: ImportRequest, paths: string[]) {
@@ -289,7 +315,8 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     const next = await updateProject(book, { project, photoIndex }, true);
     return { book: next, imported, copied };
   } catch (error) {
-    await Promise.all(copied.map((path) => rm(path, { force: true })));
+    // A durable save intent may already refer to these assets, including when it needs recovery on next open.
+    if (!(error instanceof CommittedProjectSaveError)) await Promise.all(copied.map((path) => rm(path, { force: true })));
     throw error;
   }
 }

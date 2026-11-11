@@ -3,6 +3,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import metadata from '../package.json' with { type: 'json' };
+import { buildMcp } from './build-mcp.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 export const desktop = join(root, '.build', 'desktop');
@@ -36,6 +37,8 @@ export async function stageDesktop({ packaged = false, dev = false, destination 
     writeFile(join(destination, 'package.json'), JSON.stringify({
       name: 'imageflow', productName: 'ImageFlow', version: metadata.version, main: 'main.cjs',
     })),
+    cp(join(root, 'docs'), join(destination, 'docs'), { recursive: true }),
+    buildMcp(join(destination, 'mcp-bridge.cjs')),
     build(mainBuild(destination)),
   ]);
 }

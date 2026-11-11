@@ -1,0 +1,509 @@
+{
+  "label": "current",
+  "revision": "4b9f0b6-working-tree-performance-update",
+  "startedAt": "2026-11-11T07:29:29.181Z",
+  "stagedMainSha256": "013e7e48aa7465ba04f01581b4aae893e2ec4bde4ef5138d9abf8f1a6c3e0b9c",
+  "fixture": {
+    "count": 300,
+    "spreads": 150,
+    "pages": 300,
+    "totalBytes": 5817163676,
+    "minPhotoBytes": 19385319,
+    "maxPhotoBytes": 19412491,
+    "dimensions": {
+      "width": 6000,
+      "height": 4000
+    },
+    "synthetic": "Unique deterministic textured landscape pixels, encoded as ordinary JPEGs without padding.",
+    "proofMaximumPpi": 150
+  },
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpus": 14,
+    "cpu": "Apple M4 Pro",
+    "memoryBytes": 51539607552,
+    "node": "v22.22.0"
+  },
+  "cacheConditions": "New app process/profile, fixture-derived caches cleared. OS file cache was not flushed and may be warm.",
+  "records": [
+    {
+      "name": "cold-context",
+      "tool": "get_authoring_context",
+      "elapsedMs": 13875.9145,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 7,
+        "filesHashed": 318,
+        "bytesHashed": 5817844384,
+        "cacheHits": 1824,
+        "photoFilesHashed": 300,
+        "photoBytesHashed": 5817163676
+      },
+      "peakMemoryMiB": 1571.609375
+    },
+    {
+      "name": "first-check-preview",
+      "tool": "check_book",
+      "elapsedMs": 1171.072833000002,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 61033,
+        "sha256": "19ff2746852c8bf17a6714aef3b7efecaf043ec5964af407645ee08827b96f33"
+      },
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 10,
+        "bytesHashed": 358680,
+        "cacheHits": 1520,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 1571.671875
+    },
+    {
+      "name": "warm-list-1",
+      "tool": "list_projects",
+      "elapsedMs": 39.278667000002315,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "inputs": {
+        "captures": 1,
+        "filesHashed": 2,
+        "bytesHashed": 71736,
+        "cacheHits": 304,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 1571.671875
+    },
+    {
+      "name": "warm-context-1",
+      "tool": "get_authoring_context",
+      "elapsedMs": 116.83987500000148,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 6,
+        "bytesHashed": 215208,
+        "cacheHits": 912,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 1571.671875
+    },
+    {
+      "name": "warm-inspect-1",
+      "tool": "inspect_book",
+      "elapsedMs": 120.07525000000169,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 6,
+        "bytesHashed": 215208,
+        "cacheHits": 912,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 1571.671875
+    },
+    {
+      "name": "warm-check-preview-1",
+      "tool": "check_book",
+      "elapsedMs": 1092.1369579999991,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 61087,
+        "sha256": "11d06428b06b9e9ccd44b805639e628111eba5f12911591669ec516a778ec778"
+      },
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 10,
+        "bytesHashed": 358680,
+        "cacheHits": 1520,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2124.46875
+    },
+    {
+      "name": "warm-list-2",
+      "tool": "list_projects",
+      "elapsedMs": 38.26800000000003,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "inputs": {
+        "captures": 1,
+        "filesHashed": 2,
+        "bytesHashed": 71736,
+        "cacheHits": 304,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2124.46875
+    },
+    {
+      "name": "warm-context-2",
+      "tool": "get_authoring_context",
+      "elapsedMs": 117.83783400000175,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 6,
+        "bytesHashed": 215208,
+        "cacheHits": 912,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2124.46875
+    },
+    {
+      "name": "warm-inspect-2",
+      "tool": "inspect_book",
+      "elapsedMs": 114.59312499999942,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 6,
+        "bytesHashed": 215208,
+        "cacheHits": 912,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2124.46875
+    },
+    {
+      "name": "warm-check-preview-2",
+      "tool": "check_book",
+      "elapsedMs": 1098.2733750000007,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 61033,
+        "sha256": "19ff2746852c8bf17a6714aef3b7efecaf043ec5964af407645ee08827b96f33"
+      },
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 10,
+        "bytesHashed": 358680,
+        "cacheHits": 1520,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2124.46875
+    },
+    {
+      "name": "warm-list-3",
+      "tool": "list_projects",
+      "elapsedMs": 40.92091699999946,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "inputs": {
+        "captures": 1,
+        "filesHashed": 2,
+        "bytesHashed": 71736,
+        "cacheHits": 304,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2124.46875
+    },
+    {
+      "name": "warm-context-3",
+      "tool": "get_authoring_context",
+      "elapsedMs": 113.1037499999984,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 6,
+        "bytesHashed": 215208,
+        "cacheHits": 912,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2124.46875
+    },
+    {
+      "name": "warm-inspect-3",
+      "tool": "inspect_book",
+      "elapsedMs": 112.1057499999988,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 6,
+        "bytesHashed": 215208,
+        "cacheHits": 912,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2124.46875
+    },
+    {
+      "name": "warm-check-preview-3",
+      "tool": "check_book",
+      "elapsedMs": 1150.8249579999974,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 61033,
+        "sha256": "19ff2746852c8bf17a6714aef3b7efecaf043ec5964af407645ee08827b96f33"
+      },
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 10,
+        "bytesHashed": 358680,
+        "cacheHits": 1520,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2184.875
+    },
+    {
+      "name": "before-title-list",
+      "tool": "list_projects",
+      "elapsedMs": 40.51816699999836,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "inputs": {
+        "captures": 1,
+        "filesHashed": 2,
+        "bytesHashed": 71736,
+        "cacheHits": 304,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2184.875
+    },
+    {
+      "name": "title-edit",
+      "tool": "apply_project_changes",
+      "elapsedMs": 382.4681249999994,
+      "success": true,
+      "revision": "87c7e2cb4e1af7cd05ab335b5f89b99d0ea46cdf734bb7cab63930020b253e89",
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 10,
+        "bytesHashed": 392956,
+        "cacheHits": 1520,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2184.875
+    },
+    {
+      "name": "template-css-edit-preview",
+      "tool": "check_book",
+      "elapsedMs": 1285.3173749999987,
+      "success": true,
+      "revision": "0cfdc59bde4a19a590f91379c709f0fad99d68953815f901a4ef66e507670925",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 61358,
+        "sha256": "0f7df148c70372494de64ada187d143d462bfd60978f0800878837564f7de871"
+      },
+      "inputs": {
+        "captures": 6,
+        "filesHashed": 14,
+        "bytesHashed": 533914,
+        "cacheHits": 1822,
+        "photoFilesHashed": 0,
+        "photoBytesHashed": 0
+      },
+      "peakMemoryMiB": 2396.6875
+    },
+    {
+      "name": "one-photo-replaced-preview",
+      "tool": "check_book",
+      "elapsedMs": 1282.0387919999994,
+      "success": true,
+      "revision": "fced0ccb27bf5f0784fcfe24d5971fe2e6142b6c32b30184fe3076cf63a7342d",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 62334,
+        "sha256": "7e461450036311e416ffec0603ee92ef9f6545abb450395bfe436804cb85bb3c"
+      },
+      "inputs": {
+        "captures": 6,
+        "filesHashed": 12,
+        "bytesHashed": 19893662,
+        "cacheHits": 1519,
+        "photoFilesHashed": 1,
+        "photoBytesHashed": 19391705
+      },
+      "peakMemoryMiB": 2396.6875
+    }
+  ],
+  "runtime": {
+    "electron": "45.2.3",
+    "chromium": "156.0.8078.80",
+    "node": "24.22.2"
+  },
+  "openMs": 8413.997209000001,
+  "peakMemoryMiB": 2396.6875,
+  "finishedAt": "2026-11-11T07:30:00.253Z",
+  "bridgeErrors": "",
+  "sourceCommit": "502b8aac17c6fa4d47ad56d29c1060c76a7728a4",
+  "instrumentation": "Built-in un-packaged IMAGEFLOW_BENCHMARK=1 session input counters."
+}
