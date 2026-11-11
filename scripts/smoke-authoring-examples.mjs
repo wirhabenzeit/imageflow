@@ -70,13 +70,14 @@ try {
   };
   await menuAction(app, 'Agent Connections…');
   const dialog = window.getByRole('dialog', { name: 'Connect your agent' });
-  await dialog.getByRole('button', { name: 'Enable local connection', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Turn on agent access', exact: true }).click();
+  await dialog.getByText('Claude Code and other agents').click();
   const configuration = dialog.getByRole('textbox', { name: 'MCP connection configuration' });
   await configuration.waitFor();
   const config = JSON.parse(await configuration.inputValue()).mcpServers.imageflow;
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   client = new Client({ name: 'ImageFlow examples test', version: '1.0.0' });
-  await client.connect(new StdioClientTransport({ ...config, command: process.execPath, stderr: 'pipe' }));
+  await client.connect(new StdioClientTransport({ ...config, stderr: 'pipe' }));
   const call = async (name, args = {}) => {
     const response = await client.callTool({ name, arguments: args }, { timeout: 110000 });
     return { response, data: response.structuredContent ?? JSON.parse(response.content.find((c) => c.type === 'text').text) };

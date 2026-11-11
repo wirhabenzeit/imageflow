@@ -263,7 +263,7 @@ async function run(fixture, options) {
     result.openMs = performance.now() - opening;
     const enabled = await window.evaluate(() => window.imageflow.mcpSettings(true));
     assert.ok(enabled.value?.enabled, JSON.stringify(enabled));
-    const transport = new StdioClientTransport({ ...enabled.value.config, command: process.execPath, stderr: 'pipe' });
+    const transport = new StdioClientTransport({ ...enabled.value.launch, stderr: 'pipe' });
     transport.stderr?.on('data', (chunk) => { bridgeErrors += String(chunk); });
     client = new Client({ name: 'ImageFlow authoring benchmark', version: '1' });
     await client.connect(transport);

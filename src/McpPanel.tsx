@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DesktopApi, McpSettings } from './desktop';
+import type { DesktopApi, McpClientTarget, McpSettings } from './desktop';
 
 export function McpPanel({ api }: { api?: DesktopApi }) {
-  const [settings, setSettings] = useState<McpSettings>({ enabled: false, clients: [] });
+  const [settings, setSettings] = useState<McpSettings>();
   const [error, setError] = useState('');
-  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [pending, setPending] = useState<'access' | McpClientTarget>();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (!api) return;
@@ -12,30 +13,62 @@ export function McpPanel({ api }: { api?: DesktopApi }) {
     return api.onMcpChanged(setSettings);
   }, [api]);
   useEffect(() => api?.onCommand((command) => { if (command === 'agent-settings') dialog.current?.showModal(); }), [api]);
+  const enabled = !!settings?.enabled;
   async function toggle() {
     if (!api) return;
-    setPending(true);
+    setPending('access');
     setError('');
     try {
-      const result = await api.mcpSettings(!settings.enabled);
+      const result = await api.mcpSettings(!enabled);
       if ('error' in result) setError(result.error);
       else setSettings(result.value);
-    } finally { setPending(false); }
+    } finally { setPending(undefined); }
   }
+  async function install(target: McpClientTarget) {
+    if (!api) return;
+    setPending(target);
+    setError('');
+    setNotice('');
+    try {
+      const result = await api.installMcp(target);
+      if ('error' in result) setError(result.error);
+      else setNotice(result.value);
+    } finally { setPending(undefined); }
+  }
+  const clients = settings?.clients ?? [];
+  const otherConfig = settings && JSON.stringify({ mcpServers: { imageflow: settings.launch } }, null, 2);
   return <>
-    {settings.enabled && <button className="agent-status" title={settings.clients.length ? 'Connected: ' + settings.clients.map(({ name }) => name).join(', ') : 'Agent connection enabled · waiting for an agent'}
-      onClick={() => dialog.current?.showModal()}>Agent · {settings.clients.length}</button>}
+    {enabled && <button className="agent-status" title={clients.length ? 'Connected: ' + clients.map(({ name }) => name).join(', ') : 'Agent connection enabled · waiting for an agent'}
+      onClick={() => dialog.current?.showModal()}>Agent · {clients.length}</button>}
     <dialog ref={dialog} className="mcp-dialog" aria-labelledby="mcp-heading">
       <h2 id="mcp-heading">Connect your agent</h2>
-      <p>Enable a local MCP connection for the book open in ImageFlow. Your agent can check designs, see page images, and edit the book with Undo.</p>
-      <button disabled={pending} onClick={() => void toggle()}>{settings.enabled ? 'Disconnect agents' : 'Enable local connection'}</button>
-      {settings.config && <>
-        <p>Add this server to your agent’s MCP settings, then close this dialog to allow book edits. The bridge requires Node.js 22.20 or newer.</p>
-        <textarea aria-label="MCP connection configuration" readOnly rows={9}
-          value={JSON.stringify({ mcpServers: { imageflow: settings.config } }, null, 2)} />
-        <p>Give the agent access to your project folder to edit template files. Project state changes go through ImageFlow.</p>
-      </>}
-      <p role="status">{settings.enabled ? settings.clients.length ? 'Connected: ' + settings.clients.map(({ name }) => name).join(', ') : 'Waiting for an agent.' : 'Connection disabled.'}</p>
+      <p>Let an AI agent check designs, see page images and edit the open book. Its edits can be undone.</p>
+
+      <section aria-labelledby="mcp-install-heading">
+        <h3 id="mcp-install-heading">1. Add ImageFlow to your agent</h3>
+        <p className="muted">Do this once. You don’t need to install anything else.</p>
+        <div className="mcp-targets">
+          <button disabled={!!pending} onClick={() => void install('claude')}>Add to Claude Desktop</button>
+          <button disabled={!!pending} onClick={() => void install('codex')}>Add to ChatGPT &amp; Codex</button>
+        </div>
+        {notice && <p role="status">{notice}</p>}
+        <details>
+          <summary>Claude Code and other agents</summary>
+          <p>Run this command for Claude Code:</p>
+          <textarea aria-label="Claude Code command" readOnly rows={4} value={settings?.claudeCode ?? ''} />
+          <p>Other MCP clients use this stdio server configuration:</p>
+          <textarea aria-label="MCP connection configuration" readOnly rows={12} value={otherConfig ?? ''} />
+        </details>
+      </section>
+
+      <section aria-labelledby="mcp-access-heading">
+        <h3 id="mcp-access-heading">2. Allow access while you work</h3>
+        <p className="muted">Agents can reach this book only while access is on. Close this dialog so ImageFlow can accept their edits.</p>
+        <button className={enabled ? undefined : 'primary'} disabled={!!pending} onClick={() => void toggle()}>
+          {enabled ? 'Turn off agent access' : 'Turn on agent access'}
+        </button>
+        <p role="status">{enabled ? clients.length ? 'Connected: ' + clients.map(({ name }) => name).join(', ') : 'Waiting for an agent.' : 'Agent access is off.'}</p>
+      </section>
       {error && <p role="alert" className="error-text">{error}</p>}
       <form method="dialog"><button>Close</button></form>
     </dialog>

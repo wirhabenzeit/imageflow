@@ -531,3 +531,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .appearance-options input:focus-visible + span { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
 .appearance-options label:hover input:not(:checked) + span { background: var(--segment-hover); }
 .appearance-setting p { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+.mcp-dialog h3 { margin: 20px 0 4px; font-size: 14px; }
+.mcp-dialog section > p { margin: 4px 0 8px; }
+.mcp-targets { display: flex; flex-wrap: wrap; gap: 8px; }
+.mcp-dialog details { margin-top: 10px; font-size: 13px; }
+.mcp-dialog summary { cursor: pointer; }

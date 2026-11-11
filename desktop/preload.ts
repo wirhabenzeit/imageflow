@@ -18,6 +18,7 @@ const api: DesktopApi = {
   history: (id, direction) => ipcRenderer.invoke(channels.history, id, direction),
   mcpSettings: (enabled) => ipcRenderer.invoke(channels.mcp, enabled),
   onMcpChanged: (listener) => listen(channels.mcpChanged, listener),
+  installMcp: (target) => ipcRenderer.invoke(channels.mcpInstall, target),
   onAgentLease: (listener) => listen<string>(channels.agentLease, (id) => {
     ipcRenderer.send(channels.agentLeaseReply, id, listener(id));
   }),

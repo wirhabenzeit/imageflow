@@ -16,7 +16,7 @@ export const channels = {
   check: 'project:check', cancelCheck: 'project:cancel-check',
   panelVisibility: 'editor:panel-visibility',
   settings: 'app:settings', updateSettings: 'app:update-settings', settingsChanged: 'app:settings-changed',
-  history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed',
+  history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed', mcpInstall: 'mcp:install',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
 } as const;
 
@@ -33,7 +33,12 @@ export type ProjectSummary = ProjectFiles & {
 };
 export type Result<T> = { value: T } | { error: string };
 export type HistoryState = { undo?: string; redo?: string };
-export type McpSettings = { enabled: boolean; clients: { name: string }[]; config?: { command: string; args: string[] } };
+// How an MCP client starts ImageFlow's stdio bridge. It does not change when the connection is enabled again.
+export type McpLaunch = { command: string; args: string[]; env: Record<string, string> };
+export type McpSettings = { enabled: boolean; clients: { name: string }[]; launch: McpLaunch; claudeCode: string };
+// `claude` opens Claude Desktop's extension installer; `codex` registers the bridge for the ChatGPT desktop app and
+// Codex, which share ~/.codex/config.toml.
+export type McpClientTarget = 'claude' | 'codex';
 export type ProjectChange = Result<ProjectSummary> | { building: true };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions.
 export type ImportRequest = {
@@ -50,6 +55,7 @@ export type DesktopApi = {
   history(id: string, direction: 'undo' | 'redo'): Promise<Result<ProjectSummary>>;
   mcpSettings(enabled?: boolean): Promise<Result<McpSettings>>;
   onMcpChanged(listener: (settings: McpSettings) => void): () => void;
+  installMcp(target: McpClientTarget): Promise<Result<string>>;
   onAgentLease(listener: (id: string) => boolean): () => void;
   onAgentRelease(listener: () => void): () => void;
   importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[] } | null>>;

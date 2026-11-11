@@ -1,5 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
 import type { IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
@@ -7,7 +8,8 @@ import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } 
 import { basename, dirname, extname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { channels, desktopScheme, editorURL, renderOrigin, settingsURL } from '../src/desktop';
-import type { Command, ExportMode, ImportRequest, OpenAction, ProjectChange, ProjectSummary, Result, McpSettings } from '../src/desktop';
+import type { Command, ExportMode, ImportRequest, OpenAction, ProjectChange, ProjectSummary, Result, McpClientTarget, McpSettings } from '../src/desktop';
+import { mcpTools } from '../src/mcp-contract';
 import { identifier } from '../src/project';
 import type { ProjectFiles, RenderProject } from '../src/project';
 import { printBook, saveProof } from './export';
@@ -25,6 +27,7 @@ import { ProjectSession } from './project-session';
 import { SettingsStore } from './settings';
 import { createAuthoringService, AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
+import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex } from './mcp-setup';
 import { AuthoringQueue } from './authoring-queue';
 import { authoringErrorResult } from './authoring-errors';
 import { ImportReceipts } from './import-receipts';
@@ -503,10 +506,50 @@ async function checkOpenBook(book: OpenProject, request: AuthoringCheckRequest, 
   }
 }
 
+const mcpDescriptorPath = () => join(app.getPath('userData'), 'mcp-connection.json');
+
+function mcpLaunch() {
+  // Packaging unpacks the bridge next to app.asar so ImageFlow's executable can run it as a plain Node script.
+  const appPath = app.getAppPath();
+  const bridge = join(appPath.endsWith('.asar') ? appPath + '.unpacked' : appPath, 'mcp-bridge.cjs');
+  return bridgeLaunch(process.execPath, bridge, mcpDescriptorPath());
+}
+
 function mcpSettings(): McpSettings {
-  return { enabled: !!mcpConnection, clients: mcpClients, ...(mcpConnection ? {
-    config: { command: 'node', args: [join(app.getAppPath(), 'mcp-bridge.cjs'), '--connection', mcpConnection.descriptorPath] },
-  } : {}) };
+  const launch = mcpLaunch();
+  return { enabled: !!mcpConnection, clients: mcpClients, launch, claudeCode: claudeCodeCommand(launch) };
+}
+
+function openWith(bundleId: string, file: string) {
+  return new Promise<void>((resolve, reject) => {
+    execFile('/usr/bin/open', ['-b', bundleId, file], (error) => { if (error) reject(error); else resolve(); });
+  });
+}
+
+async function installMcp(target: McpClientTarget) {
+  const launch = mcpLaunch();
+  if (target === 'claude') {
+    const file = join(app.getPath('userData'), 'ImageFlow.mcpb');
+    await writeFile(file, claudeExtension({ launch, version: app.getVersion(), tools: mcpTools }));
+    if (process.platform === 'darwin') {
+      try { await openWith('com.anthropic.claudefordesktop', file); }
+      catch {
+        shell.showItemInFolder(file);
+        throw new Error('Claude Desktop was not found. Install it, then open ImageFlow.mcpb from the folder shown in Finder.');
+      }
+    } else {
+      const failure = await shell.openPath(file);
+      if (failure) throw new Error(failure);
+    }
+    return 'Claude Desktop opened its extension installer. Choose Install there.';
+  }
+  if (target === 'codex') {
+    const codex = await findCodex();
+    if (!codex) throw new Error('Neither the ChatGPT desktop app nor the Codex CLI was found. Install one, or add the configuration under Other agents manually.');
+    await addToCodex(codex, launch);
+    return 'Added ImageFlow to ChatGPT and Codex. Start a new task in ChatGPT or Codex to load its tools.';
+  }
+  throw new Error('Unknown agent.');
 }
 
 function publishMcpSettings() {
@@ -567,7 +610,7 @@ async function enableMcp() {
     },
   });
   const connection = await createMcpConnection({
-    descriptorPath: join(app.getPath('userData'), 'mcp-connection.json'),
+    descriptorPath: mcpDescriptorPath(),
     onClientsChanged: (clients) => { mcpClients = clients; publishMcpSettings(); },
     onCall: async (name, args, signal) => {
       mcpCalls++;
@@ -759,6 +802,11 @@ void app.whenReady().then(async () => {
       await update;
       return { value: mcpSettings() };
     } catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.mcpInstall, async (event, target: McpClientTarget) => {
+    if (!editorOwner(event)) return { error: 'Request is only available to the editor.' };
+    try { return { value: await installMcp(target) }; }
+    catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.on(channels.agentLeaseReply, (event, id: string, allowed: boolean) => {
     if (event.sender === window?.webContents && event.senderFrame === window.webContents.mainFrame) agentLeases.get(id)?.(allowed === true);

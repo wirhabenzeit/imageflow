@@ -45,15 +45,19 @@ try {
   await ready();
   await menuAction(app, 'Agent Connections…');
   const connectionDialog=window.getByRole('dialog',{name:'Connect your agent'});
-  await connectionDialog.getByRole('button',{name:'Enable local connection',exact:true}).click();
+  await connectionDialog.getByRole('button',{name:'Turn on agent access',exact:true}).click();
+  await connectionDialog.getByText('Claude Code and other agents').click();
   const configuration=connectionDialog.getByRole('textbox',{name:'MCP connection configuration'});
   await configuration.waitFor();
   const config=JSON.parse(await configuration.inputValue()).mcpServers.imageflow;
-  assert.equal(config.command,'node');
+  // Agents start the bridge with ImageFlow's own executable in Node mode; no separate Node installation.
+  assert.equal(config.command,electron);
+  assert.deepEqual(config.env,{ELECTRON_RUN_AS_NODE:'1'});
+  assert.match(await connectionDialog.getByRole('textbox',{name:'Claude Code command'}).inputValue(),/^claude mcp add --scope user -e ELECTRON_RUN_AS_NODE=1 imageflow -- /);
   await connectionDialog.getByRole('button',{name:'Close',exact:true}).click();
   await window.getByRole('button', { name: 'Agent · 0', exact: true }).waitFor();
   client = new Client({name:'ImageFlow prototype test',version:'1.0.0'});
-  await client.connect(new StdioClientTransport({...config,command:process.execPath,stderr:'pipe'}));
+  await client.connect(new StdioClientTransport({...config,stderr:'pipe'}));
   await window.getByRole('button', { name: 'Agent · 1', exact: true }).waitFor();
   await window.getByRole('button', { name: 'Agent · 1', exact: true }).click();
   await connectionDialog.getByText('Connected: ImageFlow prototype test', { exact: true }).waitFor();

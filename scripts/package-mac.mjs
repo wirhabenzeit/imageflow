@@ -28,7 +28,8 @@ try {
     download: { cacheRoot: join(root, '.build', 'electron-cache'), checksums: electronChecksums },
     appBundleId: 'ch.wirhabenzeit.imageflow',
     appCategoryType: 'public.app-category.photography',
-    asar: { unpackDir: 'node_modules/@img' },
+    // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar.
+    asar: { unpackDir: 'node_modules/@img', unpack: '**/mcp-bridge.cjs' },
     extraResource: [esbuildBinary, books],
     icon: join(root, 'resources', 'ImageFlow.icns'),
     prune: false,

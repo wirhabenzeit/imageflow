@@ -4,16 +4,31 @@ ImageFlow exposes its open book to local MCP clients through a stdio bridge. The
 
 ## Connect
 
-1. Open an editable project in ImageFlow.
-2. Choose **ImageFlow → Agent Connections…**, then **Enable local connection**.
-3. Copy the displayed `mcpServers.imageflow` configuration into your agent’s MCP settings. It contains the bridge executable and the path to a connection file.
-4. Close the connection dialog so ImageFlow can accept book edits. Connect or restart the MCP server in your agent.
+Choose **ImageFlow → Agent Connections…**. The dialog has two steps.
 
-The bridge requires Node.js 22.20 or newer. If your client cannot find `node`, replace the configuration’s `command` with the absolute path to your Node executable. Keep ImageFlow open while using its tools.
+**1. Add ImageFlow to your agent.** Do this once.
 
-The connection dialog shows attached client names. **Disconnect agents** closes their app connections and removes the connection file. Enabling again creates new credentials. An existing bridge reads the current connection file before each call and can reconnect after it has been enabled again.
+- **Add to Claude Desktop** writes `ImageFlow.mcpb` to ImageFlow’s settings folder and opens it in Claude Desktop, which shows its extension installer. Choose **Install** there.
+- **Add to ChatGPT & Codex** runs `codex mcp add imageflow …`. ImageFlow uses the Codex CLI bundled with the ChatGPT desktop app, or `codex` from your login shell’s `PATH`. The ChatGPT desktop app, Codex CLI and Codex IDE extension share `~/.codex/config.toml`, so one entry serves all of them. Start a new task to load the tools. ChatGPT on the web and its remote connectors cannot reach a local app.
+- **Claude Code and other agents** shows a `claude mcp add` command and a generic `mcpServers.imageflow` stdio configuration.
 
-For a development checkout, `node scripts/build-mcp.mjs` creates `.build/mcp-bridge.cjs`. Desktop staging bundles that bridge and includes this document. A standalone invocation has the following form, using the connection path supplied by the app.
+Agents need no separate Node.js installation. Every configuration starts the bridge with ImageFlow’s own executable in Node mode (`ELECTRON_RUN_AS_NODE=1`), so the bridge always matches the installed app. The configuration has this form:
+
+```json
+{
+  "command": "/Applications/ImageFlow.app/Contents/MacOS/ImageFlow",
+  "args": ["/Applications/ImageFlow.app/Contents/Resources/app.asar.unpacked/mcp-bridge.cjs", "--connection", "~/Library/Application Support/ImageFlow/mcp-connection.json"],
+  "env": { "ELECTRON_RUN_AS_NODE": "1" }
+}
+```
+
+The configuration contains absolute paths, and `~` above stands for your home folder. If you move ImageFlow.app, add it to your agents again. The Claude Desktop extension then reports the moved app when it starts.
+
+**2. Allow access while you work.** Open an editable book and choose **Turn on agent access**. Close the dialog so ImageFlow can accept book edits. Keep ImageFlow open while using its tools.
+
+The dialog shows attached client names. **Turn off agent access** closes their app connections and removes the connection file. Turning it on again creates new credentials at the same path. An installed bridge reads the current connection file before each call, so agents reconnect without being set up again.
+
+For a development checkout, `node scripts/build-mcp.mjs` creates `.build/mcp-bridge.cjs`. Desktop staging bundles that bridge and includes this document. Packaging keeps it outside `app.asar`. A standalone invocation with any Node.js 22.20 or newer has the following form:
 
 ```sh
 node /absolute/path/to/mcp-bridge.cjs --connection /absolute/path/to/mcp-connection.json
@@ -270,7 +285,7 @@ The socket accepts at most eight attached clients and four outstanding calls per
 
 A connection handshake has a five-second timeout. An individual bridge call has a two-minute timeout including time spent waiting in the queue, and artwork rendering has a separate one-minute timeout. MCP cancellation propagates to the app. Disconnecting or revoking a connection cancels its pending work; cancelled waiting requests never execute. A committed mutation can outlive the response, so use the original idempotency key when recovering from a lost response. Normal app shutdown waits for accepted saves and lock release.
 
-Closed project handles and unavailable connections return actionable errors. Call `list_projects` for current handles, or re-enable the connection in ImageFlow when the app connection has closed. Inputs changing during a check invalidate its result and require another check. Compilation diagnostics retain source paths and positions when the compiler provides them.
+Closed project handles and unavailable connections return actionable errors. Call `list_projects` for current handles, or turn on agent access in ImageFlow again when the app connection has closed. Inputs changing during a check invalidate its result and require another check. Compilation diagnostics retain source paths and positions when the compiler provides them.
 
 ImageFlow records interrupted manifest saves in `.imageflow/persistence/pending-save.json`. A writable reopen completes the save when each live manifest matches its recorded original or intended bytes. Read-only checks refuse a pending save until that recovery completes. An interrupted durable tool save returns `SAVE_RECOVERY_REQUIRED` with `committed: "pending"`; reload the book and inspect it before making another change. Its idempotency key cannot repeat the command in that open-project session. A different or missing live manifest produces a conflict and preserves the journal and staging evidence. Restore each conflicting manifest to its recorded original or intended bytes, or restore a consistent backup before reopening.
 
