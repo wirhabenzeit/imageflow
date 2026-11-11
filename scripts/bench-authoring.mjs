@@ -247,7 +247,7 @@ async function run(fixture, options) {
     const window = await app.firstWindow();
     result.runtime = await app.evaluate(() => ({ electron: process.versions.electron, chromium: process.versions.chrome, node: process.versions.node }));
     window.setDefaultTimeout(120000);
-    await window.getByRole('button', { name: 'Open project…', exact: true }).waitFor();
+    await window.locator('.welcome').waitFor();
     await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, join(fixture, 'book'));
     // Use the normal open IPC and changed event to retain its returned stable handle without a preceding hash scan.
     const opened = await window.evaluate(() => window.imageflow.openProject('open'));

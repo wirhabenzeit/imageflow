@@ -1,3 +1,4 @@
+import { menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -39,7 +40,7 @@ try {
   const window = await app.firstWindow();
   window.setDefaultTimeout(20000);
   await app.evaluate(({dialog}, folder) => { dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]}); },folder);
-  await window.getByRole('button',{name:'Open project…',exact:true}).click();
+  await menuAction(app, 'Open project…');
   const ready = () => window.waitForFunction(()=>document.querySelector('iframe.book-frame-book[data-current][data-ready]') && !document.querySelector('.preview-state'));
   await ready();
   await window.getByRole('button',{name:'Connect an agent…',exact:true}).click();
@@ -294,7 +295,7 @@ try {
   await window.evaluate(()=>window.imageflow.mcpSettings(true));
   assert.equal((await good('list_projects')).projects[0].project,project);
   const priorFrame=await window.locator('iframe.book-frame-book[data-current]').getAttribute('src');
-  await window.getByRole('button',{name:'Open project…',exact:true}).click();
+  await menuAction(app, 'Open project…');
   await window.waitForFunction((prior)=>{const frame=document.querySelector('iframe.book-frame-book[data-current][data-ready]');return frame && frame.getAttribute('src')!==prior;},priorFrame);
   await ready();
   assert.equal((await call('inspect_book',{project,view:'summary'})).data.error.code,'PROJECT_CLOSED');

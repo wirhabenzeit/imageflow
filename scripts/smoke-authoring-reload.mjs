@@ -1,3 +1,4 @@
+import { menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -51,7 +52,7 @@ try {
   }, { current, previous });
 
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, project);
-  await button('New project…').click();
+  await menuAction(app, 'New project…');
   await readyAfter(null);
   const source = await readFile(template, 'utf8');
   const style = await readFile(css, 'utf8');
@@ -139,7 +140,9 @@ try {
   assert.ok(Math.abs(await scroll() - position) <= 1);
   assert.equal(await selected(), 'arriving');
   assert.equal(await window.locator('.crop-editor').count(), 0);
+  await window.locator('.export-menu > summary').click();
   assert.equal(await button('Export print PDF').isDisabled(), true);
+  await window.locator('.export-menu > summary').click();
   assert.deepEqual((await window.evaluate(() => window.reloadEvents)).slice(0, 2), ['building', 'error']);
 
   // A runtime failure leaves the same last-good frame and rejects clicks and drops on its artwork.
@@ -214,7 +217,7 @@ try {
   previous = await frameUrl();
   book.title = 'Loaded manually';
   await replace(manifest, JSON.stringify(book));
-  await button('Reload').click();
+  await menuAction(app, 'Reload');
   await readyAfter(previous);
   await window.getByRole('heading', { name: 'Loaded manually', exact: true }).waitFor();
   const manuallyLoaded = await frameUrl();

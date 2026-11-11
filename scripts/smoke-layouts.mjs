@@ -1,3 +1,4 @@
+import { menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -46,7 +47,7 @@ try {
   };
   const kept = () => w.locator('.inspector').getByText(/^Saved outside this layout/).textContent();
 
-  await rerendered(() => button('New project…').click());
+  await rerendered(() => menuAction(app, 'New project…'));
   await button('Photo grid 6–7').click();
   await w.locator('[data-spread="settlements"][aria-current="page"]').waitFor();
 
@@ -107,7 +108,7 @@ try {
   assert.equal(await w.locator('.inspector').getByText(/^Saved outside this layout/).count(), 0);
 
   // Everything above is in project.json: reloading shows the same book.
-  await rerendered(() => button('Reload').click());
+  await rerendered(() => menuAction(app, 'Reload'));
   assert.deepEqual(await settlements(), state);
   assert.deepEqual((await status()).errors, []);
 

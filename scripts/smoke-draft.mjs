@@ -1,3 +1,4 @@
+import { menuAction, exportAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -68,7 +69,7 @@ try {
   }
 
   await chooseSave(project);
-  await button('New project…').click();
+  await menuAction(app, 'New project…');
   const starter = await ready();
   assert.deepEqual(starter.errors, []);
   assert.equal(starter.pages, 28);
@@ -82,7 +83,7 @@ try {
   assert.deepEqual(bookCheck.warnings, [], bookCheck.warnings.map(({ where, message }) => where + ' · ' + message).join('\n'));
 
   await chooseSave(pdf);
-  await button('Export print PDF').click();
+  await exportAction(window, 'Export print PDF');
   await window.waitForFunction(() => document.querySelector('.status-error') || document.querySelector('.status')?.textContent === 'Print PDF saved.', null, { timeout: 45000 });
   assert.equal(await status(), 'Print PDF saved.');
   const pages = (await PDFDocument.load(await readFile(pdf))).getPages();
@@ -144,7 +145,7 @@ try {
   await app.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
   }, project);
-  await changed(() => button('Open project…').click());
+  await changed(() => menuAction(app, 'Open project…'));
   assert.equal(await window.locator('h1').textContent(), 'My first book');
   assert.equal((await read()).spreads.length, 16);
   if (!packaged) await checkFlow(app, root);

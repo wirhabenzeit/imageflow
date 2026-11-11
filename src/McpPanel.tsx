@@ -22,8 +22,8 @@ export function McpPanel({ api }: { api?: DesktopApi }) {
     } finally { setPending(false); }
   }
   return <>
-    <button disabled={!api} onClick={() => dialog.current?.showModal()}>
-      {settings.enabled ? `Agent connection · ${settings.clients.length}` : 'Connect an agent…'}
+    <button className="agent-button" aria-label={settings.enabled ? `Agent connection · ${settings.clients.length}` : 'Connect an agent…'} title={settings.enabled ? `Agent connection · ${settings.clients.length}` : 'Connect an agent…'} disabled={!api} onClick={() => dialog.current?.showModal()}>
+      Agents
     </button>
     <dialog ref={dialog} className="mcp-dialog" aria-labelledby="mcp-heading">
       <h2 id="mcp-heading">Connect your agent</h2>

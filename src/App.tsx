@@ -2,6 +2,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, renderOrigin } from './desktop';
 import type { BookGeometry, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
+import { PanelDivider, usePanels } from './panels';
 import { BookFrame } from './BookFrame';
 import { McpPanel } from './McpPanel';
 import { revealIn } from './reveal';
@@ -73,6 +74,7 @@ const Icon = ({ name }: { name: keyof typeof icons }) => <svg viewBox="0 0 16 16
 
 export function App() {
   const api = window.imageflow;
+  const { panels, toggle: togglePanel, resize: resizePanel } = usePanels();
   const [summary, setSummary] = useState<ProjectSummary>();
   const [projectInstance, setProjectInstance] = useState(0);
   const current = useRef<ProjectSummary>(undefined);
@@ -126,6 +128,21 @@ export function App() {
   const [agentWorking, setAgentWorking] = useState(false);
   const pendingTasks = useRef(0);
   const workspace = useRef<HTMLDivElement>(null);
+  const exportMenu = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const close = (event: globalThis.PointerEvent) => {
+      if (!exportMenu.current?.contains(event.target as Node)) exportMenu.current?.removeAttribute('open');
+    };
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && exportMenu.current?.open) {
+        exportMenu.current.removeAttribute('open');
+        exportMenu.current.querySelector('summary')?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape); };
+  }, []);
   const spreads = summary?.project.spreads ?? [];
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
@@ -303,6 +320,10 @@ export function App() {
   const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, importFile: importParameterFile }), [summary?.project.files]);
 
   function act(command: Command) {
+    if (command === 'toggle-project' || command === 'toggle-inspector') {
+      togglePanel(command === 'toggle-project' ? 'left' : 'right');
+      return;
+    }
     if (command === 'undo' || command === 'redo') return undo(command);
     if (command === 'import-photos' || command === 'import-folder' || command === 'import-texts') {
       return importFiles({ kind: command === 'import-texts' ? 'markdown' : 'photo', folder: command === 'import-folder' });
@@ -349,7 +370,7 @@ export function App() {
     });
   }
 
-  const onCommand = useEffectEvent((command: Command) => { if (!busy && !agentLocked.current) act(command); });
+  const onCommand = useEffectEvent((command: Command) => { if (command.startsWith('toggle-') || (!busy && !agentLocked.current)) act(command); });
   const onProjectChanged = useEffectEvent((change: ProjectChange) => {
     if ('building' in change) beginReload();
     else if ('error' in change) {
@@ -463,8 +484,10 @@ export function App() {
   useEffect(() => {
     const listener = () => onResize();
     window.addEventListener('resize', listener);
-    return () => window.removeEventListener('resize', listener);
-  }, []);
+    const observer = new ResizeObserver(listener);
+    if (canvas.current) observer.observe(canvas.current);
+    return () => { window.removeEventListener('resize', listener); observer.disconnect(); };
+  }, [projectInstance]);
   // The sidebar follows the selection when you select another spread, not on every re-render after an edit,
   // so a list you scrolled elsewhere stays where you left it.
   const revealedThumb = useRef('');
@@ -837,25 +860,37 @@ export function App() {
 
   return <ProjectFilesContext.Provider value={projectFiles}><div className="studio">
     <header className="toolbar">
-      <div className="toolbar-actions">
-        <div className="brand"><span className="brand-icon" aria-hidden="true">◫</span> ImageFlow</div>
+      <div className="toolbar-actions project-context">
+        <button className="toolbar-icon" aria-label="Toggle project panel" aria-pressed={!panels.leftHidden} title="Toggle project panel (⌥⌘1)" onClick={() => togglePanel('left')}>◧</button>
+        <div className="project-identity" title={summary?.folder}>
+          <strong>{summary?.project.title ?? 'ImageFlow'}</strong>
+          <span className="muted">{summary ? summary.readOnly ? 'Sample · Read only' : busy ? 'Working…' : 'Saved locally' : 'Photobook studio'}</span>
+        </div>
         {summary && <div className="history">
-          <button title={summary.history?.undo ? 'Undo ' + summary.history.undo : undefined} disabled={!writable || !summary.history?.undo || !!busy} onClick={() => undo('undo')}>Undo</button>
-          <button title={summary.history?.redo ? 'Redo ' + summary.history.redo : undefined} disabled={!writable || !summary.history?.redo || !!busy} onClick={() => undo('redo')}>Redo</button>
+          <button aria-label="Undo" title={summary.history?.undo ? 'Undo ' + summary.history.undo : 'Undo'} disabled={!writable || !summary.history?.undo || !!busy} onClick={() => undo('undo')}>↶</button>
+          <button aria-label="Redo" title={summary.history?.redo ? 'Redo ' + summary.history.redo : 'Redo'} disabled={!writable || !summary.history?.redo || !!busy} onClick={() => undo('redo')}>↷</button>
         </div>}
       </div>
       <div className="toolbar-actions">
         <McpPanel api={api} />
-        <button disabled={!api || !!busy} onClick={() => act('new')}>New project…</button>
-        <button disabled={!api || !!busy} onClick={() => act('open')}>Open project…</button>
-        <button disabled={!summary || !!busy || typeof reload === 'string'} onClick={() => act('reload')}>Reload</button>
-        <button disabled={!canExport} onClick={() => act('export')}>Export proof PDF</button>
-        <button className="primary" disabled={!canExport} onClick={() => act('print')}>Export print PDF</button>
-        {exporting && <button onClick={() => void api?.cancelExport()}>Cancel export</button>}
+        <div className="export-area">
+          {summary && <BookCheckIndicator check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}
+          {exporting ? <div className="export-progress"><span role="status" title={busy}>{busy}</span><button onClick={() => void api?.cancelExport()}>Cancel export</button></div> : <details ref={exportMenu} className="export-menu">
+            <summary>Export…</summary>
+            <div className="export-choices">
+              <button className="primary" disabled={!canExport || !checkCurrent || !!check?.errors.length} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('print'); }}>Export print PDF</button>
+              <button disabled={!canExport} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('export'); }}>Export proof PDF</button>
+              {checkCurrent && !!check?.errors.length && <p>Resolve Book check errors before print export.</p>}
+            </div>
+          </details>}
+        </div>
+        <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘2)" disabled={!summary} onClick={() => togglePanel('right')}>◨</button>
       </div>
     </header>
-    <div ref={workspace} inert={agentWorking} key={projectInstance} className={summary ? 'workspace' : 'workspace welcome-workspace'}>
-      <aside className="project-panel" aria-label="Project">
+    <div ref={workspace} inert={agentWorking} key={projectInstance} className={summary ? 'workspace' : 'workspace welcome-workspace'}
+      style={{ '--left-panel': panels.leftHidden ? '0px' : panels.left + 'px', '--right-panel': panels.rightHidden ? '0px' : panels.right + 'px',
+        '--left-divider': panels.leftHidden ? '0px' : '6px', '--right-divider': panels.rightHidden ? '0px' : '6px' } as CSSProperties}>
+      <aside className="project-panel" aria-label="Project" hidden={panels.leftHidden}>
         <div className="project-head">
           <p className="eyebrow">Project</p>
           <h1>{summary?.project.title ?? 'Photobook studio'}</h1>
@@ -924,6 +959,7 @@ export function App() {
           </div>}
         </>}
       </aside>
+      {!panels.leftHidden ? <PanelDivider side="left" width={panels.left} resize={resizePanel} /> : <div />}
       <div className="workspace-center">
         <div ref={canvasWrap} className="canvas-wrap">
           <main ref={canvas} className="canvas" aria-label="Book preview" onScroll={measureView}
@@ -1035,7 +1071,10 @@ export function App() {
               <h2>See your book take shape</h2>
               <p>{api ? 'Create a book with the starter template, open a project you trust, or preview the Senja sample.' :
                 'Launch the desktop app to open an ImageFlow project.'}</p>
-              {api && <button className="primary" disabled={!!busy} onClick={() => act('sample')}>Try the Senja sample</button>}
+              {api && <div className="welcome-actions">
+                <button disabled={!!busy} onClick={() => act('new')}>New project…</button>
+                <button disabled={!!busy} onClick={() => act('open')}>Open project…</button>
+                <button className="primary" disabled={!!busy} onClick={() => act('sample')}>Try the Senja sample</button></div>}
             </div>}
           </main>
           {summary && previewNotice && <div className={geometry ? 'preview-state' : 'preview-message'} role="status">{previewNotice}</div>}
@@ -1050,6 +1089,8 @@ export function App() {
             if (paths.length) importFiles({ kind: paths.every((path) => /\.md$/i.test(path)) ? 'markdown' : 'photo', paths });
           }} />}
       </div>
+      {summary && (!panels.rightHidden ? <PanelDivider side="right" width={panels.right} resize={resizePanel} /> : <div />)}
+      <div className="inspector-host" hidden={panels.rightHidden || !summary}>
       {summary && spread && <Inspector summary={writable || summary.readOnly ? summary : { ...summary, readOnly: true }}
         spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} inspectSource={choose} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
@@ -1058,6 +1099,7 @@ export function App() {
         openEditor={(element) => openElementEditor(spread.id, element)} place={(from, to) => place(spread.id, from, to)}
         edit={edit} highlight={setHighlight} issues={issue} select={select}
         importText={(box) => importFiles({ kind: 'markdown', target: { spread: spread.id, box } })} />}
+      </div>
     </div>
     {summary && template && elementEditor && spreads.some(({ id }) => id === elementEditor.spread) &&
       <ElementEditorDialog key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
@@ -1067,10 +1109,9 @@ export function App() {
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     <footer className="status-bar">
-      <span className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
+      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
         {issue || busy || notice || (summary ? 'Project preview · Proof export' : 'ImageFlow for macOS')}
       </span>
-      {summary && <BookCheckIndicator check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}
     </footer>
   </div></ProjectFilesContext.Provider>;
 }

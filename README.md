@@ -48,6 +48,10 @@ The draft exports single-page or spread PDFs. The starter book targets the White
 
 [Authoring feedback foundations](docs/authoring-foundations.md) describes the internal revision-checked book checks and page artwork capture being prepared for MCP, including the current limits.
 
+The toolbar shows the project name, local save state, Undo/Redo, and **Export…** (Print or Proof). Book check sits beside Export; errors disable Print while Proof remains available. New, Open and Reload are in the File menu with ⌘N, ⌘O and ⌘R.
+
+Toggle either sidebar with the toolbar buttons or **View → Toggle Project Panel / Toggle Inspector** (⌥⌘1 / ⌥⌘2). Drag the inner dividers to resize; focus a divider and use Left/Right to adjust it by 10 pixels. Double-click or press Home to restore its default width. Panel sizes and visibility are remembered on this computer, separately from the project. Selecting artwork leaves a hidden Inspector closed. The canvas, thumbnails and layout previews refit to the available width.
+
 The canvas scrolls through the whole book; the left sidebar contains spread thumbnails and expandable **Book settings**. The bottom **Photos / Texts** strip selects source content for the Inspector. Space, or double-clicking a text box, opens Quick Look. Clicking selects what is drawn on top: a photo is selected for dragging and pinching, an element with its own editor, such as the starter's calendar (month and marked days) or route map (Frame route), opens it, and template-marked text or a parameterized box/element opens a popover. Every parameter is also in the Inspector, which a click scrolls to. Done in an element editor saves the session as one undoable edit. Typed popover values commit on Enter or an outside click; Escape discards uncommitted typing. Choices apply immediately. Layout thumbnails illustrate composition; Markdown starts at the beginning in these previews.
 
 Local agents can author templates and edit the open book through the [MCP prototype](docs/mcp.md).

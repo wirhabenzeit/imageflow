@@ -1,3 +1,4 @@
+import { menuAction, exportAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -110,7 +111,7 @@ try {
   await app.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
   }, project);
-  await w.getByRole('button', { name: 'Open project…' }).click();
+  await menuAction(app, 'Open project…');
   const ready = 'iframe.book-frame-book[data-current][data-ready]';
   const displayed = 'iframe.book-frame-book[data-ready]:not([aria-hidden="true"])';
   const frame = w.frameLocator(ready);
@@ -238,7 +239,7 @@ try {
 
   const proof = join(work, 'proof.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, proof);
-  await w.getByRole('button', { name: 'Export proof PDF' }).click();
+  await exportAction(w, 'Export proof PDF');
   await w.waitForFunction(() => document.querySelector('.status')?.textContent?.startsWith('Proof PDF saved.'));
   const proofText = execFileSync('pdftotext', ['-f', '2', '-l', '2', proof, '-'], { encoding: 'utf8' });
   assert.match(proofText, /Later continuation/);

@@ -733,6 +733,10 @@ void app.whenReady().then(async () => {
       { type: 'separator' },
       { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
     ] },
+    { label: 'View', submenu: [
+      menuCommand('Toggle Project Panel', 'Alt+Cmd+1', 'toggle-project'),
+      menuCommand('Toggle Inspector', 'Alt+Cmd+2', 'toggle-inspector'),
+    ] },
     { role: 'windowMenu' },
   ]));
   await restoreDevProject();

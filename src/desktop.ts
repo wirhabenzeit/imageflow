@@ -18,7 +18,7 @@ export const channels = {
 
 export type OpenAction = 'open' | 'new' | 'sample' | 'reload';
 export type ExportMode = 'proof' | 'print';
-export type Command = OpenAction | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'undo' | 'redo';
+export type Command = OpenAction | 'toggle-project' | 'toggle-inspector' | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'undo' | 'redo';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState;

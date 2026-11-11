@@ -1,3 +1,4 @@
+import { menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -23,7 +24,7 @@ async function measure(format) {
     const w = await app.firstWindow();
     w.setDefaultTimeout(30000);
     await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, project);
-    await w.getByRole('button', { name: 'Open project…' }).click();
+    await menuAction(app, 'Open project…');
     const frame = w.frameLocator('iframe.book-frame-book[data-current][data-ready]');
     await frame.locator('.if-sheet').first().waitFor();
     const status = await frame.locator('body').evaluate(() => window.imageflowRenderStatus);
