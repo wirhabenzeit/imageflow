@@ -152,10 +152,12 @@ export function createAuthoringService(hooks: Hooks) {
     for (let attempt = 0; ; attempt++) {
       const inputs = await revision(session, expected, signal);
       const report = await checked(session, signal, { expectedRevision: inputs.revision }, attempt > 0);
-      if (report.state !== 'ready' || !report.render) return { report };
+      // A saved book that fails to render can still be repaired with the declarations of the template that loaded.
+      const template = report.render?.template ?? report.template;
+      if (!template) return { report };
       const fresh = await loadProject(session.book.folder, hooks.cache, session.book.readOnly);
       const loaded = await revision(session, expected, signal);
-      if (loaded.observation === inputs.observation) return { inputs, report, fresh };
+      if (loaded.observation === inputs.observation) return { inputs, report, fresh, template };
       if (attempt === 0 && loaded.revision === inputs.revision && loaded.metadataObservation === inputs.metadataObservation) {
         signal.throwIfAborted();
         cachedCheck = undefined;
@@ -329,13 +331,13 @@ export function createAuthoringService(hooks: Hooks) {
         return { recovery: result };
       }
     };
-    const { inputs, report, fresh } = await prepareMutation(session, args.expectedRevision, signal);
-    if (!fresh || !inputs || !report.render) return { ...report, committed: false };
+    const { inputs, report, fresh, template } = await prepareMutation(session, args.expectedRevision, signal);
+    if (!fresh || !inputs || !template) return { ...report, committed: false };
     signal.throwIfAborted();
     let result: Record<string, unknown>;
     if (name === 'apply_project_changes') {
       let planned;
-      try { planned = applyProjectCommands(fresh, report.render.template, args.operations); }
+      try { planned = applyProjectCommands(fresh, template, args.operations); }
       catch (error) {
         if (error instanceof ProjectCommandError) throw new AuthoringError(error.code, error.message, { operationIndex: error.operationIndex });
         throw error;

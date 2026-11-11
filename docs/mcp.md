@@ -91,6 +91,8 @@ Test a layout before it is in the book by passing an unsaved command batch as `d
 
 Nothing is saved, recorded in Undo or shown in the editor. The result's `draft` field reports `applied`, `committed: false`, the planned changes, affected spreads, resolved references and whether text reflows. Its image metadata carries `draft: true`. Diagnostics, page numbers and text flow describe the drafted book. Command errors such as `SPREAD_NOT_FOUND` or `REFERENCE_NOT_FOUND` are returned as tool errors, as for `apply_project_changes`. A changed revision returns `revision-conflict` with `draft.applied: false`. When the draft looks right, send the same operations to `apply_project_changes`.
 
+A draft can also repair a saved book whose layout fails to render, for example because a parameter value makes it throw. The check keeps the declarations of the template that loaded at that revision, and both the draft and the committed batch are planned against them. A finished failed reload in the app does not block the agent's mutation. Open editors, focused fields and reloads still in progress do. A template that fails to compile has no declarations, so it must be fixed in source first.
+
 ### Diagnostics
 
 Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an optional `location` with `spread`, `box`, `element`, `source`, `parameter` and readable `where`, optional `details` with measured and allowed values, and an optional `suggestion` that names a template edit or command. Stable render codes include:

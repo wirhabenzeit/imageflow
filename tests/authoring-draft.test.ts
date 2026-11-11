@@ -38,7 +38,7 @@ const saved = { schemaVersion: 1, title: 'Draft book', template: { id: 'test', v
 type Rendered = { book: OpenProject; preview?: PreviewRequest };
 
 // `fails` makes the renderer reject a book the way a layout that throws does: the template loaded, the book did not render.
-async function fixture(t: TestContext, project: object = saved, fails?: (book: OpenProject) => boolean) {
+async function fixture(t: TestContext, project: object = saved, fails?: (book: OpenProject) => boolean, writable = false) {
   const work = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-draft-')));
   t.after(() => rm(work, { recursive: true, force: true }));
   const folder = join(work, 'book');
@@ -49,7 +49,8 @@ async function fixture(t: TestContext, project: object = saved, fails?: (book: O
   await writeFile(join(folder, 'photos.json'), '{}');
   await writeFile(join(folder, 'template/index.tsx'), 'export default {};');
   await writeFile(join(work, 'api.md'), '# API');
-  const session = new ProjectSession(await loadProject(folder, cache, true));
+  const session = new ProjectSession(await loadProject(folder, cache, !writable));
+  const changed: OpenProject[] = [];
   t.after(() => session.close());
   const renders: Rendered[] = [];
   const service = createAuthoringService({
@@ -62,14 +63,14 @@ async function fixture(t: TestContext, project: object = saved, fails?: (book: O
         spread: 'spread' in preview.target ? preview.target.spread : 'one', bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png', status };
       return { status, preview: image };
     }, signal, index, undefined, draft),
-    changed: () => assert.fail('A draft must not change the open book.'),
-    recovery: () => assert.fail('A draft must not save project files.'),
+    changed: (book) => { if (!writable) assert.fail('A draft must not change the open book.'); changed.push(book); },
+    recovery: (message) => assert.fail('Unexpected save recovery: ' + message),
     import: async () => assert.fail('A draft must not import sources.'),
   });
   const call = (name: string, args: Record<string, unknown> = {}) =>
     service(name, { project: session.handle, ...args }, new AbortController().signal);
   const revision = async () => ((await call('list_projects')).projects as { revision: string }[])[0].revision;
-  return { folder, session, renders, call, revision };
+  return { folder, session, renders, changed, call, revision };
 }
 
 test('a draft renders an inserted layout by batch reference without saving or recording history', async (t) => {
@@ -129,9 +130,10 @@ test('the check_book contract scopes batch references and revisions to drafts', 
   assert.deepEqual((parsed.args.preview as { target: unknown }).target, { spread: '$chapter' });
 });
 
-test('a draft can repair a saved book whose layout fails to render', async (t) => {
+test('a draft can repair a saved book whose layout fails to render, and the repair can be committed and undone', async (t) => {
   const failing = { ...saved, spreads: [{ id: 'one', definition: 'main', params: { heading: 'Hello' } }] };
-  const { call, revision } = await fixture(t, failing, (book) => book.project.spreads.some(({ params }) => params.heading === 'Hello'));
+  const { folder, session, changed, call, revision } = await fixture(t, failing,
+    (book) => book.project.spreads.some(({ params }) => params.heading === 'Hello'), true);
   const expectedRevision = await revision();
   const before = await call('check_book', { expectedRevision }) as AuthoringCheckResult;
   assert.equal(before.state, 'error');
@@ -147,4 +149,20 @@ test('a draft can repair a saved book whose layout fails to render', async (t) =
   assert.equal(repaired.draft?.applied, true);
   assert.deepEqual(repaired.draft?.changes, ['Updated heading']);
   assert.equal(repaired.image?.draft, true);
+  const heading = async () => JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).spreads[0].params.heading;
+  assert.equal(await heading(), 'Hello');
+  // The same operations commit against the failing saved book, using the declarations of the template that loaded.
+  const committed = await call('apply_project_changes', {
+    expectedRevision, idempotencyKey: 'repair', label: 'Repair heading',
+    operations: [{ op: 'set_parameter', scope: 'spread', spread: 'one', key: 'heading', value: 'Recovered' }],
+  });
+  assert.equal(committed.committed, true, JSON.stringify(committed));
+  assert.equal(await heading(), 'Recovered');
+  assert.equal(changed.length, 1);
+  assert.deepEqual(session.history, { undo: 'Repair heading', redo: undefined });
+  const after = await call('check_book', { expectedRevision: committed.revision }) as AuthoringCheckResult;
+  assert.equal(after.state, 'ready', JSON.stringify(after.diagnostics));
+  await session.undo('undo');
+  assert.equal(await heading(), 'Hello');
+  assert.equal((await call('check_book') as AuthoringCheckResult).state, 'error');
 });

@@ -222,6 +222,22 @@ try {
   assert.equal(repaired.data.state,'ready');
   assert.equal(repaired.data.draft.applied,true);
   assert.ok(repaired.response.content.some(c=>c.type==='image'));
+  // The settled render failure does not block the agent: the same operations commit, render, and undo in the app.
+  const chapterHeading=async()=>JSON.parse(await readFile(join(folder,'project.json'),'utf8')).spreads.find(s=>s.id===applied.references.chapter).params.heading;
+  assert.equal(await chapterHeading(),'A new chapter');
+  const committedRepair=await good('apply_project_changes',{project,expectedRevision:failing.data.revision,idempotencyKey:'repair-heading',label:'Repair heading',operations:[repair]});
+  assert.equal(committedRepair.committed,true);
+  assert.equal(await chapterHeading(),'Recovered');
+  await window.waitForFunction(()=>!document.querySelector('.status-error'));
+  await ready();
+  assert.equal((await good('check_book',{project,expectedRevision:committedRepair.revision})).state,'ready');
+  await window.getByRole('button',{name:'Undo',exact:true}).click();
+  await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Edit undone');
+  assert.equal(await chapterHeading(),'A new chapter');
+  await window.getByRole('button',{name:'Redo',exact:true}).click();
+  await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Edit redone');
+  assert.equal(await chapterHeading(),'Recovered');
+  await ready();
   await writeFile(entry,authored);
   // Let the app adopt the restored template before the next step reads inputs.
   await window.waitForFunction(()=>!document.querySelector('.status-error'));
