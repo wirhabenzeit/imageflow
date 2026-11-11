@@ -200,6 +200,8 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | `layout-render-failed` | A spread whose layout threw, or rendered no single `<Spread>`, with the error message and the template `path`, `line` and `column` where it threw when the source map has them. In a fixture check, the fixture instead of the spread. |
 | `template-declaration-invalid` | A declaration in the template's default export that violates the template API, by `declaration` path such as `spreads.chapter.parameters.heading`. At most 20 per check. |
 | `template-id-mismatch` | The template declares a different `id` from the one `project.json` names. |
+| `declaration-unknown-property` | A property the template API does not know, such as `paramters`; ImageFlow ignores it. `details.path` is the declaration path, `property`, and `didYouMean` when a known property is close. Warning. |
+| `declaration-document-mismatch` | A spread typed with `spreadFor(document)` whose document parameters are missing from, or differ from, the template's `parameters`; `spread`, `parameter`. Warning. |
 | `anchor-missing`, `anchor-ambiguous` | The spread whose `ctx.book.anchor(id)` found no anchor, or several; `anchor`, and `declared` for ambiguous lookups. |
 
 `render.anchors` lists every declared anchor with its spread and resolved page, in page order. A draft check reports the anchors of the drafted book.

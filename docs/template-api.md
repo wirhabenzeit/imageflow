@@ -17,7 +17,7 @@ template/
 
 The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided by the host and must not be bundled. Relative imports, CSS imports, and asset imports inside `template/` are allowed; other package imports are not supported. Templates must render deterministically without fetching data, timers, state, or effects. This is an authoring requirement, not a guarantee that arbitrary template JavaScript is safe; open only projects you trust.
 
-`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `Spread`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue` and `capabilities`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
+`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `printFormat`, `Spread`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue` and `capabilities`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
 
 ### Examples
 
@@ -25,14 +25,16 @@ The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided b
 
 | Example | Shows |
 | --- | --- |
-| `minimal.tsx` | One layout with a photo, an editable heading and a page number. |
+| `minimal.tsx` | **Quickstart.** One layout with a full-bleed photo, an editable heading, a book setting and a page number. |
 | `photo-story.tsx` | Photo and story, text continuation across layouts, chapter anchors and a contents layout. |
 | `grid-bleed.tsx` | A photo grid inside the safe area and a full-bleed panorama with a caption. |
 | `generated-element.tsx` | Generated SVG content from element parameters, edited by clicking it. |
 | `file-input.tsx` | An optional CSV file input, parsed by the template, with a structured finding for bad lines. |
 | `responsive.tsx` | Two formats and one layout that arranges itself by the shape of the chosen format. |
 
-Agents receive them with `get_authoring_context` and `includeExamples`. To start a template, copy the closest example. To extend one, copy a single layout and its declarations. The starter template is the complete reference book.
+Agents receive them with `get_authoring_context` and `includeExamples`. To start a template, copy `minimal.tsx` (or the closest example) and add layouts. To extend one, copy a single layout and its declarations. The starter template is the complete reference book, not a required starting point.
+
+The examples use the generic `serif` and `sans-serif` font families, so they preview anywhere but **print export rejects them**: print preflight accepts only fonts bundled inside `template/` and loaded with `@font-face` from CSS the template imports. Before printing, add font files to `template/fonts/`, import a stylesheet that declares them, and use those families. The starter template shows the pattern ([Fonts and output](#fonts-and-output)).
 
 ### Requirements and compatibility
 
@@ -49,87 +51,103 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, requires: ['anchor
 | `box-helpers` | `box.photo` and `box.markdown`. |
 | `template-issues` | `issue()` structured findings. |
 | `typed-components` | `ctx.PhotoBox`, `ctx.MarkdownBox` and `ctx.Element`. |
+| `spread-builder` | `spreads` as a function, `spreads: ({ spread }) => ({ … })`. |
+| `bound-geometry` | `ctx.geometry` and the `rect` prop of platform components. |
+| `text-component` | `ctx.Text`. |
+| `format-helper` | `printFormat`. |
+| `box-records` | `box.photos`. |
 
 `capabilities` lists what the installed app provides, and `get_authoring_context` reports it as `capabilities.templateApi`. Apps older than `requires` ignore it, but their bundler still rejects an import of a helper they lack. An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
 
 ## Declaration
 
-The following sketch illustrates the scopes; `MonthGrid` and the abbreviated format are placeholders. Use the starter template for a complete compilable package.
+The following sketch illustrates the scopes; `MonthGrid` and the abbreviated format are placeholders. Use [`minimal.tsx`](examples/minimal.tsx) for a complete, compilable starting point.
 
 ```tsx
-import { defineTemplate, p, mm, Spread, PhotoBox, MarkdownBox, Element } from 'imageflow';
+import { box, defineTemplate, mm, p, printFormat, Spread } from 'imageflow';
 import './styles.css';
 
 export default defineTemplate({
   id: 'senja-starter',
   version: '0.1.0',
   contract: 1,
+  requires: ['spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-helpers', 'typed-components'],
 
   // One print format, or several named `formats` the user chooses between; see below.
-  format: {
-    label: 'Saal Digital Professional Line 30 × 30 cm',
+  format: printFormat({
+    label: 'Square · 30 × 30 cm',
     trim: { width: mm(294), height: mm(294) },
-    /* bleed, safe, structure, output … */
-  },
+    /* bleed, safe, pageCount, output … */
+  }),
 
-  // Document scope
+  // Document scope: Book settings, read through ctx.document.
   parameters: {
     showPageNumbers: p.boolean({ label: 'Show page numbers', default: true }),
     accent: p.color({ label: 'Accent colour', default: '#2c5070' }),
   },
 
-  spreads: {
-    story: {
+  // `spread` types each layout's render context from its own declarations and the document parameters above.
+  spreads: ({ spread }) => ({
+    story: spread({
       label: 'Photo and story',
       parameters: {
         heading: p.string({ label: 'Heading', multiline: true, default: '' }),
         eyebrow: p.string({ label: 'Chapter label', default: '' }),
       },
       boxes: {
-        hero: {
-          type: 'photo',
-          label: 'Main photograph',
-          parameters: { showCaption: p.boolean({ label: 'Show caption', default: true }) },
-        },
-        body: { type: 'markdown', label: 'Story', flowOrder: 1 },
+        hero: box.photo('Main photograph', { showCaption: p.boolean({ label: 'Show caption', default: true }) }),
+        body: box.markdown('Story', { flowOrder: 1 }),
       },
-      render: ({ params, boxes }) => (
+      render: (ctx) => (
         <Spread className="story">
-          <PhotoBox id="hero" className="hero" />
-          {boxes.hero.params.showCaption && boxes.hero.photo?.caption && (
-            <p className="caption">{boxes.hero.photo.caption}</p>
+          <ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />
+          {ctx.boxes.hero.params.showCaption && ctx.boxes.hero.photo?.caption && (
+            <p className="caption">{ctx.boxes.hero.photo.caption}</p>
           )}
-          <p className="eyebrow">{params.eyebrow}</p>
-          <h1 className="heading">{params.heading}</h1>
-          <MarkdownBox id="body" className="body editorial" />
+          <ctx.Text parameter="eyebrow" className="eyebrow" />
+          <ctx.Text parameter="heading" as="h1" className="heading" style={{ color: ctx.document.accent }} />
+          <ctx.MarkdownBox id="body" className="body editorial" />
         </Spread>
       ),
-    },
+    }),
 
-    calendar: {
+    calendar: spread({
       label: 'Calendar month',
       parameters: {
         year: p.integer({ label: 'Year', default: 2027 }),
         month: p.integer({ label: 'Month', min: 1, max: 12, default: 1 }),
       },
-      boxes: { photo: { type: 'photo', label: 'Photo of the month' } },
+      boxes: { photo: box.photo('Photo of the month') },
       elements: { grid: { label: 'Calendar grid', parameters: { firstWeekday: p.enum({ label: 'Week starts', options: ['monday', 'sunday'], default: 'monday' }) } } },
-      render: ({ params, elements }) => (
+      render: (ctx) => (
         <Spread className="calendar">
-          <PhotoBox id="photo" className="left-page bleed" />
-          <Element id="grid" className="grid">
-            <MonthGrid year={params.year} month={params.month} firstWeekday={elements.grid.params.firstWeekday} />
-          </Element>
+          <ctx.PhotoBox id="photo" className="left-page bleed" />
+          <ctx.Element id="grid" className="grid">
+            <MonthGrid year={ctx.params.year} month={ctx.params.month} firstWeekday={ctx.elements.grid.params.firstWeekday} />
+          </ctx.Element>
         </Spread>
       ),
-    },
-  },
+    }),
+  }),
 });
 ```
 
+### Declaring spreads
+
+Declare `spreads` as a function of `{ spread }`. Its `spread` builder types each layout's `ctx.params`, `ctx.boxes`, `ctx.elements` and edit paths from the layout's own declarations, and `ctx.document` from the template's `parameters`, so the document settings are declared once. `defineTemplate` calls the function and validates the resulting record; the builder itself only exists for TypeScript and returns each definition unchanged.
+
+`spreads` can also be a plain record. Its spreads are then typed only broadly (`UntypedRenderContext`), unless they come from `spreadFor(documentParameters)`, which returns the same builder for spreads declared outside `defineTemplate`, such as in their own files. Pass it the same object as the template's `parameters`: a spread typed with document parameters the template does not declare fails type checking, and the Book check warns about it (`declaration-document-mismatch`), because `ctx.document` would lack those values at runtime.
+
+The authoring types reject declaration mistakes that used to load silently:
+
+- A template needs exactly one of `format` or `formats`; `defaultFormat` must name one of the `formats`.
+- Unknown properties, such as `paramters` for `parameters`, `lable` or `mutliline` in a parameter, or `flowOrdr` in a box, fail type checking, usually with a "did you mean" hint.
+
+At runtime, for templates that are not type-checked, an unknown property anywhere in the declaration (template, format, spread, box, element, element editor or parameter) is reported as a `declaration-unknown-property` warning that names the property, its path and the property it probably meant. It is a warning rather than an error so that contract-1 templates that loaded before keep loading. When an unknown property makes the declaration invalid, for example `lable` leaving `label` missing, the declaration error lists it next to the schema error.
+
 ### Reusable declarations and typed IDs
 
-Declarations are plain objects, so share them as constants. `box.photo(label, parameters?)` and `box.markdown(label, { flowOrder?, parameters? })` declare boxes without repeating `type`. The ID stays where the box is declared, which keeps its saved identity explicit:
+Declarations are plain objects, so share them as constants. `box.photo(label, parameters?)` and `box.markdown(label, { flowOrder?, parameters? })` declare boxes without repeating `type`. `box.photos(ids, label, parameters?)` declares several photo boxes with explicit IDs, typed without casts: `boxes: box.photos(['one', 'two', 'three'], (id, i) => 'Photo ' + (i + 1))`. The ID stays where the box is declared, which keeps its saved identity explicit:
 
 ```tsx
 const caption = p.boolean({ label: 'Show caption', default: false });
@@ -137,11 +155,11 @@ const story = box.markdown('Story', { flowOrder: 1 });
 spread({ label: 'Story', boxes: { hero: box.photo('Main photo', { caption }), story }, render: (ctx) => … })
 ```
 
-With `spreadFor`, the render context types every parameter, box and element of its layout. `ctx.PhotoBox`, `ctx.MarkdownBox` and `ctx.Element` are the platform components restricted to that layout's IDs, so `<ctx.PhotoBox id="heor" />` fails type checking. The top-level components accept any ID for extracted helpers. `MarkdownBox` takes `columns` as a number or a numeric string, so an enum value such as `'2'` needs no cast. Runtime validation still checks every rendered box and element, for code that is not type-checked.
+With the `spread` builder, the render context types every parameter, box and element of its layout. `ctx.PhotoBox`, `ctx.MarkdownBox` and `ctx.Element` are the platform components restricted to that layout's IDs, so `<ctx.PhotoBox id="heor" />` fails type checking. The top-level components accept any ID for extracted helpers. `MarkdownBox` takes `columns` as a number or a numeric string, so an enum value such as `'2'` needs no cast. Runtime validation still checks every rendered box and element, for code that is not type-checked.
 
 ### Parameters
 
-`p.*` helpers create plain, serializable schema objects; the editor generates sidebar controls from them, and `spreadFor(documentParameters)` supplies inferred render-context types. `defineTemplate` alone uses a broad context.
+`p.*` helpers create plain, serializable schema objects; the editor generates controls from them, and the `spread` builder infers render-context types from them. A spread declared as a plain object gets a broad context.
 
 | Helper | Value | Options |
 | --- | --- | --- |
@@ -179,9 +197,11 @@ formats: {
 defaultFormat: 'square',   // optional; otherwise the first format
 ```
 
+`printFormat({ label, trim, bleed, safe, pageCount, delivery?, ends?, output? })` builds a complete `PrintFormat` with less repetition. `bleed` and `safe` take one length for all four sides (`mm(12)`), `{ all, …sides }` where named sides override `all` (`{ all: mm(3), binding: mm(0) }`), or all four sides. `delivery` defaults to `'pages'`, `ends` to `'single-pages'`, and `output` to `{ container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' }`, with given fields replacing those. The result is an ordinary `PrintFormat`, reported in full by `get_authoring_context` and Book settings. It describes geometry, not a printer's product: page counts, resolution, minimum text size, font rules and file-size limits come from the printer's specification.
+
 Each entry is a complete `PrintFormat`, so presets may differ in bleed, safe area, page-count rules and output limits, not only in trim. Every format is validated when the template loads (schema and geometry: PDF edges between 10 and 1000 mm, binding bleed within the facing page, safe insets leaving room inside the trim), so a broken preset is a template error rather than something a book discovers after switching to it. The choice is stored as `format` in `project.json` and applies to the whole book. A project without it uses `defaultFormat`, else the first format. A project naming a format the template no longer has is previewed in the default format, but the Book check reports an error, so print export is blocked until a format is chosen again; proof export still works. A template with a single `format` ignores the project's choice.
 
-Changing the format re-renders the book: assignments, crops and text sources stay, while text flow, photo resolution and print checks are recomputed. Layouts adapt through `ctx.format` (resolved millimetres), `ctx.formatId` (the chosen key, or `'default'` for a single `format`), and the `--trim-*`, `--bleed-*` and `--safe-*` CSS variables of `<Spread>`. The starter template draws its layouts on a 290 × 290 design page and scales positions with the trim size; full-bleed boxes use the bleed variables directly.
+Changing the format re-renders the book: assignments, crops and text sources stay, while text flow, photo resolution and print checks are recomputed. Layouts adapt through `ctx.format` (resolved millimetres), `ctx.geometry` (the geometry helpers for that format), `ctx.formatId` (the chosen key, or `'default'` for a single `format`), and the `--trim-*`, `--bleed-*` and `--safe-*` CSS variables of `<Spread>`. The starter template draws its layouts on a 290 × 290 design page and scales positions with the trim size; full-bleed boxes use the bleed variables directly.
 
 Arbitrary dimensions within declared limits, rather than named presets, are not supported yet.
 
@@ -229,7 +249,9 @@ type RenderContext = {
   formatId: string;                         // the chosen key of `formats`, or 'default'
   mode: 'edit' | 'export';
   edit(...paths: EditPath[]): { 'data-edit'?: string };  // marks a node for click-to-edit
+  geometry: BoundGeometry;                  // the geometry helpers with this format applied
   PhotoBox; MarkdownBox; Element;          // the platform components, typed to this layout's IDs
+  Text;                                     // shows a string parameter and makes it editable
   book: {                                   // the whole book, as seen from this spread
     pages: number;
     anchor(id: string): Anchor | undefined; // the anchor with this ID (see Anchors)
@@ -247,7 +269,16 @@ type RenderContext = {
 <Element id="grid" {...ctx.edit('month')}>…</Element>
 ```
 
-Paths name a spread parameter (`heading`), a document parameter (`document.paper`), an element parameter (`elements.grid.firstWeekday`), or a box parameter (`boxes.hero.showCaption`). With `spreadFor`, paths are type-checked. `<Element>` is an edit target for its own parameters without marking; marks on it add more. Outside the editor the marker stays as an invisible `data-edit` attribute, so checks can name the parameter a text block shows (for example in `text-overflows-box`); the Book check warns about paths the layout does not declare. Set `precision: 'month'` on a date parameter to edit it with a month picker; the value is the month's first day.
+Paths name a spread parameter (`heading`), a document parameter (`document.paper`), an element parameter (`elements.grid.firstWeekday`), or a box parameter (`boxes.hero.showCaption`). With the `spread` builder, paths are type-checked. `<Element>` is an edit target for its own parameters without marking; marks on it add more. Outside the editor the marker stays as an invisible `data-edit` attribute, so checks can name the parameter a text block shows (for example in `text-overflows-box`); the Book check warns about paths the layout does not declare. Set `precision: 'month'` on a date parameter to edit it with a month picker; the value is the month's first day.
+
+For the common case of one string parameter shown as text, `ctx.Text` reads the value and marks the node in one step:
+
+```tsx
+<ctx.Text parameter="heading" as="h2" rect={ctx.geometry.page('right', 'safe')} />
+<ctx.Text parameter="boxes.hero.credit" as="figcaption" placeholder="Photo credit" />
+```
+
+`parameter` takes the same paths as `ctx.edit`, limited to string parameters. `as` is one of `h1`–`h6`, `p` (default), `span`, `div`, `blockquote` or `figcaption`; `className`, `style`, `rect` and `issue()` markers work as on the platform components. When the value is empty, the editor shows a dimmed placeholder in the template's own type (`placeholder`, else the parameter's `placeholder`, else its label) and marks the node `data-empty`; the exported book shows the empty node. The value is rendered as text, never as HTML, and newlines follow the node's CSS `white-space`. Use `ctx.edit` for nodes that combine several parameters or show more than the value.
 
 Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths, image data, or Markdown source, and they cannot change project data.
 
@@ -363,7 +394,9 @@ A plain `data-issue="…"` attribute still works. It reports a `template-issue` 
 
 ## Geometry helpers
 
-`geometry` computes rectangles in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the trim width), y from the top trim edge. `geometry.css(rect)` positions a node absolutely inside `<Spread>`. The helpers return plain numbers, so ordinary CSS and inline styles stay available, and nothing scales type.
+`geometry` computes rectangles in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the trim width), y from the top trim edge. Pass a rectangle to a platform component's `rect` prop (`PhotoBox`, `MarkdownBox`, `Element`, `Text`), or `geometry.css(rect)` to any node's `style`, to position it absolutely inside `<Spread>`. Properties in `style` win over the ones `rect` sets, so `rect={area} style={{ height: 'auto' }}` lets a block grow.
+
+`ctx.geometry` holds the same helpers with the spread's format already applied: `ctx.geometry.page(side, area?)`, `ctx.geometry.spread(area?)` and `ctx.geometry.design(canvas)`, plus `inset`, `grid` and `css`. The functions below remain available for helpers outside `render`. The helpers return plain numbers, so ordinary CSS and inline styles stay available, and nothing scales type.
 
 | Helper | Returns |
 | --- | --- |
@@ -376,16 +409,16 @@ A plain `data-issue="…"` attribute still works. It reports a `template-issue` 
 
 ```tsx
 render: (ctx) => {
-  const text = geometry.page(ctx.format, 'right', 'safe');
-  const cells = geometry.grid(geometry.page(ctx.format, 'left', 'safe'), { columns: 2, rows: 2, gap: 4 });
+  const text = ctx.geometry.page('right', 'safe');
+  const cells = ctx.geometry.grid(ctx.geometry.page('left', 'safe'), { columns: 2, rows: 2, gap: 4 });
   return <Spread>
-    {(['a', 'b', 'c', 'd'] as const).map((id, i) => <ctx.PhotoBox key={id} id={id} style={geometry.css(cells[i])} />)}
-    <ctx.MarkdownBox id="story" style={geometry.css(geometry.inset(text, { top: 20 }))} />
+    {(['a', 'b', 'c', 'd'] as const).map((id, i) => <ctx.PhotoBox key={id} id={id} rect={cells[i]} />)}
+    <ctx.MarkdownBox id="story" rect={ctx.geometry.inset(text, { top: 20 })} />
   </Spread>;
 }
 ```
 
-Use `geometry.page` and `geometry.spread` for physical layouts that keep margins in millimetres on every format. Use `geometry.design` to scale a composition drawn on a fixed canvas, as the starter does. These numbers are physical lengths for CSS, unlike the structured `mm()`, `pt()` and `inch()` values used in print-format declarations. The starter's layouts use these helpers; a recorded baseline (`tests/fixtures/starter-geometry.json`, checked by `scripts/smoke-starter-geometry.mjs`) confirms that they render the same millimetre geometry as the earlier hand-written CSS in both formats.
+Use `page` and `spread` for physical layouts that keep margins in millimetres on every format. Use `design` to scale a composition drawn on a fixed canvas, as the starter does. These numbers are physical lengths for CSS, unlike the structured `mm()`, `pt()` and `inch()` values used in print-format declarations. The starter's layouts use these helpers; a recorded baseline (`tests/fixtures/starter-geometry.json`, checked by `scripts/smoke-starter-geometry.mjs`) confirms that they render the same millimetre geometry as the earlier hand-written CSS in both formats.
 
 ## Platform components
 
@@ -395,12 +428,13 @@ Use `geometry.page` and `geometry.spread` for physical layouts that keep margins
 | `<PhotoBox id>` | Renders the assigned photo with its crop (the photo always covers the box; the saved crop picks the visible region), using a preview-size image in the editor and a rendition capped at the format maximum resolution in export (300 ppi when omitted). Its element is the box's geometry and drop zone. Users select the photo in the editor and drag and pinch it; templates do not handle the crop. |
 | `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. |
 | `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked; an element can supply its own editor (see Element editors). |
+| `<ctx.Text parameter>` | Shows a string parameter and makes it editable by clicking it (see Click-to-edit). Only on the render context, because it reads the layout's values. |
 | `asset(path)` | Resolves a file in `template/assets/` for use in `src` or CSS. |
 
 Rules:
 
 - Each declared box is rendered exactly once through its component; each declared element at most once.
-- Boxes and elements are positioned and sized by template CSS on the component's element (`className`, `style`).
+- Boxes and elements are positioned and sized by template CSS on the component's element (`className`, `style`), or by `rect` (see Geometry helpers).
 - An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted; templates can style `[data-empty]`.
 
 ## CSS contract
@@ -459,6 +493,7 @@ Not allowed in Markdown boxes: CSS counters for list numbering, `float`, `positi
 When the template is loaded:
 
 - `id`, `version`, `contract` present; contract version supported; every capability in `requires` provided by this app.
+- Exactly one of `format` or `formats`. Unknown declaration properties and `spreadFor` document mismatches are warnings (see [Declaring spreads](#declaring-spreads)).
 - Unique, stable identifiers for spreads, boxes, elements, and parameters; valid parameter defaults.
 - A valid print format.
 - Unique `flowOrder` among Markdown boxes of a spread.
@@ -506,24 +541,25 @@ The project also stores the document parameter values, the template `id` and `ve
 
 ## Authoring and compatibility details
 
-Use the project’s `template/tsconfig.json` and bundled `types/` to check templates without installing host packages. Run `npx tsc -p sample/starter/template` in this repository. For inferred parameter and edit-path types:
+Use the project’s `template/tsconfig.json` and bundled `types/` to check templates without installing host packages. Run `npx tsc -p sample/starter/template` in this repository. For layouts in their own files, export the document parameters and a builder made from them:
 
 ```tsx
-const documentParameters = { accent: p.color({ label: 'Accent', default: '#223344' }) };
-const spread = spreadFor(documentParameters);
-const story = spread({
+// document.ts
+export const documentParameters = { accent: p.color({ label: 'Accent', default: '#223344' }) };
+export const spread = spreadFor(documentParameters);
+
+// spreads/story.tsx
+export const story = spread({
   label: 'Story',
   parameters: { heading: p.string({ label: 'Heading', default: '' }) },
   render: (ctx) => <Spread>
-    <h1 {...ctx.edit('heading')} style={{ color: ctx.document.accent }}>
-      {ctx.params.heading}
-    </h1>
+    <ctx.Text parameter="heading" as="h1" style={{ color: ctx.document.accent }} />
   </Spread>,
 });
-// Use parameters: documentParameters and spreads: { story } in defineTemplate.
+// index.tsx: defineTemplate({ …, parameters: documentParameters, spreads: { story } })
 ```
 
-Import `spreadFor` alongside the other helpers. `mm`, `pt`, and `inch` produce structured lengths for the print-format declaration; use CSS strings such as `'30mm'` in React styles. They are not CSS values.
+Helpers shared between layouts can take a slice of the typed context, such as `Pick<RenderContext<{ label: string }, typeof documentParameters>, 'document' | 'geometry'>`, as the starter's `Paper` and `Caption` do. `mm`, `pt`, and `inch` produce structured lengths for the print-format declaration; use CSS strings such as `'30mm'` in React styles. They are not CSS values.
 
 `MarkdownBox` accepts `columns` (default 1, rounded and clamped to 1–6). Use `style={{ columnGap: '5mm' }}` for the gap. Text continues down each column, then through the next assigned box in spread/flow order. Expose a box parameter and pass its resolved value to `columns` if users should control it. Column layout remains platform-owned; avoid overriding its flow machinery with CSS.
 
@@ -531,7 +567,7 @@ Numeric `step` is a control increment, not a runtime divisibility constraint. Mo
 
 Adjusting a selected photo draws it over the box's on-screen rectangle, so it assumes the box is upright. If template CSS rotates or skews a `PhotoBox` (or an ancestor inside the spread), the editor offers only the numeric crop values for it. Clicks act on the box or element drawn on top, in document order; content stacked with `z-index` is not accounted for.
 
-Identifiers start with a letter or digit, then contain letters, digits, underscores or hyphens; reserved Object prototype names are rejected. Dots separate edit-path scopes and cannot occur in identifiers. PhotoBox, MarkdownBox and Element automatically expose their declared parameters; explicit edit marks add parameters. Ordinary nodes need `ctx.edit`. Export omits edit marks. Avoid overlapping targets or marking several nodes with the identical path list: the current editor identifies targets by spread and path list.
+Identifiers start with a letter or digit, then contain letters, digits, underscores or hyphens; reserved Object prototype names are rejected. Dots separate edit-path scopes and cannot occur in identifiers. PhotoBox, MarkdownBox and Element automatically expose their declared parameters; explicit edit marks add parameters. Ordinary nodes need `ctx.edit` or `ctx.Text`. Exported artwork keeps the invisible `data-edit` marks, so checks can name the parameter a text block shows. Avoid overlapping targets or marking several nodes with the identical path list: the current editor identifies targets by spread and path list.
 
 ### Persistence and evolution
 

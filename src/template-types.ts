@@ -1,11 +1,12 @@
 // Compile-time check that the `imageflow` types shipped with the starter template match the runtime.
 // `npm run build` fails here when one side changes without the other. Nothing in this file runs.
 import type * as Declared from '../sample/starter/template/types/imageflow';
-import type { PrintFormat, ResolvedFormat } from './format';
+import type { PrintFormat, printFormat, ResolvedFormat } from './format';
+import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
-import type { Anchor, AnchorDeclaration, BookContext, Element, IssueMarker, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue }
-  from './template';
+import type { Anchor, AnchorDeclaration, BookContext, Element, IssueMarker, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
+  Text, TextTag } from './template';
 import type { Capability, runtimeExports } from './runtime-exports';
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
@@ -31,4 +32,9 @@ export const declaredTypesMatchRuntime: [
   Same<keyof Parameters<typeof Declared.MarkdownBox>[0], keyof Parameters<typeof MarkdownBox>[0]>,
   Same<keyof Parameters<typeof Declared.Element>[0], keyof Parameters<typeof Element>[0]>,
   Same<Declared.Capability, Capability>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<keyof Declared.TextProps, keyof Parameters<typeof Text>[0]>,
+  Same<Declared.TextTag, TextTag>,
+  Same<keyof Declared.BoundGeometry, keyof BoundGeometry>,
+  Same<keyof Parameters<typeof Declared.printFormat>[0], keyof Parameters<typeof printFormat>[0]>,
+  Assignable<ReturnType<typeof Declared.printFormat>, PrintFormat>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

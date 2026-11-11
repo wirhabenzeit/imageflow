@@ -1,7 +1,7 @@
 import { createContext, useContext, useLayoutEffect, useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
-import { cssMM, formatSchema, inch, mm, pt } from './format';
+import { cssMM, formatSchema, inch, mm, printFormat, pt } from './format';
 import type { PrintFormat, ResolvedFormat, Span } from './format';
 import { identifier } from './project';
 import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
@@ -10,10 +10,12 @@ import { declarationConflicts } from './layouts';
 import { p, parametersSchema, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import type { BoxDefinition, SpreadDefinition, TemplateInfo } from './desktop';
-import { geometry } from './geometry';
+import { boundGeometry, geometry } from './geometry';
+import type { BoundGeometry, Rect } from './geometry';
+import { rememberDocument } from './declaration-check';
 import { capabilities, runtimeExports } from './runtime-exports';
 
-export { inch, mm, p, pt };
+export { inch, mm, p, printFormat, pt };
 export type { PrintFormat, ResolvedFormat, Span } from './format';
 export type { Parameter, Parameters } from './parameters';
 
@@ -31,10 +33,13 @@ export type RenderContext = {
   edit: (...paths: string[]) => EditMarker;
   // The whole book as seen from this spread: page count and the anchors every spread declares.
   book: BookContext;
+  // The geometry helpers with this spread's format applied.
+  geometry: BoundGeometry;
   // The platform components again, so the declarations can type-check box and element IDs per layout.
   PhotoBox: typeof PhotoBox;
   MarkdownBox: typeof MarkdownBox;
   Element: typeof Element;
+  Text: typeof Text;
 };
 export type EditMarker = { 'data-edit'?: string };
 // Attributes returned by `issue()`. Platform components forward them to their own node, so a finding can sit on a box,
@@ -187,18 +192,29 @@ export function chooseFormat(template: DeclaredTemplate, chosen?: string): Templ
     formatChoices: Object.fromEntries(Object.entries(template.formats).map(([id, format]) => [id, format.label])),
   };
 }
+type DeclaredSpread = Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | 'elements'> & {
+  span?: Span; parameters?: Parameters;
+  boxes?: Record<string, Omit<BoxDefinition, 'parameters'> & { parameters?: Parameters }>;
+  elements?: Record<string, { label: string; parameters?: Parameters }>;
+  render(context: RenderContext): ReactNode;
+  anchors?(context: AnchorContext): AnchorDeclaration[];
+};
+// The builder `spreads: ({ spread }) => ...` receives. It only exists for TypeScript, so at runtime it returns the
+// definition unchanged.
+const spreadBuilder = <T,>(definition: T) => definition;
 export type TemplateDeclaration = {
   id: string; version: string; contract: 1; requires?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
-  spreads: Record<string, Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | 'elements'> & {
-    span?: Span; parameters?: Parameters;
-    boxes?: Record<string, Omit<BoxDefinition, 'parameters'> & { parameters?: Parameters }>;
-    elements?: Record<string, { label: string; parameters?: Parameters }>;
-    render(context: RenderContext): ReactNode;
-    anchors?(context: AnchorContext): AnchorDeclaration[];
-  }>;
+  spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
 };
-export const defineTemplate = <T extends TemplateDeclaration>(template: T) => template;
+// `spreads` may be a function of the builder; the declaration ImageFlow validates always has the built record.
+// Applied by defineTemplate and again when the template loads, for templates exported without defineTemplate.
+export function normalizeTemplate(template: unknown) {
+  if (!template || typeof template !== 'object' || typeof (template as { spreads?: unknown }).spreads !== 'function') return template;
+  const declared = template as { spreads: (tools: { spread: typeof spreadBuilder }) => unknown };
+  return { ...declared, spreads: declared.spreads({ spread: spreadBuilder }) };
+}
+export const defineTemplate = (template: TemplateDeclaration) => normalizeTemplate(template);
 
 export function templateInfo(template: Template): TemplateInfo {
   return {
@@ -214,9 +230,10 @@ export function templateInfo(template: Template): TemplateInfo {
   };
 }
 
+type SpreadValues = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'elements'>;
 const SpreadData = createContext<{
   book: RenderProject; spread: SpreadState; format: ResolvedFormat; renderPhotos: boolean;
-  definition: Template['spreads'][string]; lazyPhotos: boolean;
+  definition: Template['spreads'][string]; documentParameters: Parameters; values: SpreadValues; lazyPhotos: boolean;
 } | null>(null);
 
 function useSpread() {
@@ -226,6 +243,9 @@ function useSpread() {
 }
 
 type Styling = { className?: string; style?: CSSProperties };
+// `rect` positions a platform component absolutely, in millimetres; properties in `style` win over it.
+type Placement = { rect?: Rect };
+const place = (rect: Rect | undefined, style: CSSProperties | undefined) => rect ? { ...geometry.css(rect), ...style } : style;
 
 export function Spread({ className, style, children, ...marker }: Styling & IssueMarker & { children?: ReactNode }) {
   const { format } = useSpread();
@@ -254,7 +274,7 @@ function exportSource(photo: Photo & { src: string }, cssWidth: number, format: 
   return width < photo.width ? photo.src + '/' + width : photo.src;
 }
 
-export function PhotoBox({ id, className, style, 'data-edit': marked, ...marker }: Styling & EditMarker & IssueMarker & { id: string }) {
+export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker & { id: string }) {
   const { spread, book, format, renderPhotos, definition, lazyPhotos } = useSpread();
   const box = spread.boxes[id];
   const photo = box?.photo ? book.photos[box.photo] : undefined;
@@ -290,7 +310,7 @@ export function PhotoBox({ id, className, style, 'data-edit': marked, ...marker 
   return (
     <div ref={frame} data-box={id} data-box-type="photo" data-empty={photo ? undefined : ''}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
-      className={['if-photo', className].filter(Boolean).join(' ')} style={style} {...issueOn(marker)}>
+      className={['if-photo', className].filter(Boolean).join(' ')} style={place(rect, style)} {...issueOn(marker)}>
       {photo && renderPhotos &&
         <img ref={image} src={book.mode === 'edit' && !lazyPhotos ? photo.src : undefined}
           data-src={lazyPhotos ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
@@ -300,8 +320,8 @@ export function PhotoBox({ id, className, style, 'data-edit': marked, ...marker 
 }
 
 // `columns` splits the box into that many columns; text flows down each column before moving to the next box.
-export function MarkdownBox({ id, className, style, columns = 1, 'data-edit': marked, ...marker }: Styling & EditMarker & IssueMarker &
-  { id: string; columns?: number }) {
+export function MarkdownBox({ id, className, style, rect, columns = 1, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker &
+  IssueMarker & { id: string; columns?: number | `${number}` }) {
   const { spread, book, definition } = useSpread();
   const text = spread.boxes[id]?.text;
   const count = Math.max(1, Math.min(6, Math.round(Number(columns)) || 1));
@@ -309,7 +329,7 @@ export function MarkdownBox({ id, className, style, columns = 1, 'data-edit': ma
     <div data-box={id} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
       data-empty={text !== undefined && book.texts[text] !== undefined ? undefined : ''}
-      className={['if-markdown', className].filter(Boolean).join(' ')} style={style} {...issueOn(marker)}>
+      className={['if-markdown', className].filter(Boolean).join(' ')} style={place(rect, style)} {...issueOn(marker)}>
       {book.mode === 'edit' && (!text || book.texts[text] === undefined) &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
     </div>
@@ -317,11 +337,45 @@ export function MarkdownBox({ id, className, style, columns = 1, 'data-edit': ma
 }
 
 // In the editor an element is also an edit target for its own parameters and any it is marked with.
-export function Element({ id, className, style, children, 'data-edit': marked, ...marker }: Styling & EditMarker & IssueMarker &
+export function Element({ id, className, style, rect, children, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker &
   { id: string; children?: ReactNode }) {
   const { book, definition } = useSpread();
   return <div data-element={id} data-edit={editTarget(book, 'elements.' + id + '.', definition.elements[id]?.parameters, marked)}
-    className={className} style={style} {...issueOn(marker)}>{children}</div>;
+    className={className} style={place(rect, style)} {...issueOn(marker)}>{children}</div>;
+}
+
+export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | 'div' | 'blockquote' | 'figcaption';
+const textTags = new Set<string>(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'div', 'blockquote', 'figcaption']);
+// The declaration and resolved value a parameter path names: `heading`, `document.title`, `boxes.hero.credit`.
+function parameterAt({ definition, documentParameters, values }: Pick<NonNullable<ReturnType<typeof useSpread>>, 'definition' | 'documentParameters' | 'values'>,
+  path: string) {
+  const own = <T,>(record: Record<string, T> | undefined, key: string) => record && Object.hasOwn(record, key) ? record[key] : undefined;
+  const parts = path.split('.');
+  if (parts.length === 1) return { param: own(definition.parameters, path), value: own(values.params, path) };
+  if (parts.length === 2 && parts[0] === 'document') return { param: own(documentParameters, parts[1]), value: own(values.document, parts[1]) };
+  if (parts.length === 3 && (parts[0] === 'boxes' || parts[0] === 'elements')) {
+    const declared = parts[0] === 'boxes' ? own(definition.boxes, parts[1]) : own(definition.elements, parts[1]);
+    const resolved = parts[0] === 'boxes' ? own(values.boxes, parts[1]) : own(values.elements, parts[1]);
+    return { param: own(declared?.parameters, parts[2]), value: own(resolved?.params, parts[2]) };
+  }
+  return { param: undefined, value: undefined };
+}
+
+// Shows a string parameter and marks the node for editing. Empty, it shows an editor-only placeholder.
+export function Text({ parameter, as = 'p', placeholder, className, style, rect, ...marker }: Styling & Placement & IssueMarker &
+  { parameter: string; as?: TextTag; placeholder?: string }) {
+  const data = useSpread();
+  const { param, value } = parameterAt(data, parameter);
+  if (!param) throw new Error('Text shows parameter ' + parameter + ', which this layout does not declare.');
+  if (!textTags.has(as)) throw new Error('Text cannot render as ' + as + '. Use one of ' + [...textTags].join(', ') + '.');
+  const text = value === undefined ? '' : String(value);
+  const empty = !text && data.book.mode === 'edit';
+  const hint = placeholder ?? (param.type === 'string' && param.placeholder ? param.placeholder : param.label);
+  const Tag = as;
+  // The edit marker stays in export, like ctx.edit(), so checks can name the parameter this text shows.
+  return <Tag data-edit={parameter} data-empty={empty ? '' : undefined} className={className} style={place(rect, style)} {...issueOn(marker)}>
+    {empty ? <span className="if-text-placeholder">{hint}</span> : text}
+  </Tag>;
 }
 
 let assets: Record<string, string> = {};
@@ -336,7 +390,12 @@ export function asset(path: string) {
 
 // Returns an identity helper for spread declarations. It exists for TypeScript: `spread({...})` infers each
 // spread's parameters, boxes, and elements, and types its render context with the given document parameters.
-export const spreadFor = (_document: Parameters) => <T,>(definition: T) => definition;
+// The definitions remember the document they were typed with, so loading can report a mismatch with the template's
+// own parameters (the authoring types reject it too).
+export const spreadFor = (document: Parameters) => <T,>(definition: T) => {
+  rememberDocument(definition, document);
+  return definition;
+};
 
 // The project's files for file parameters, read by `file(id)` during render.
 let files: Record<string, ProjectFile> = {};
@@ -356,6 +415,9 @@ export const box = {
   markdown: (label: string, options: { flowOrder?: number; parameters?: Parameters } = {}) => ({
     type: 'markdown' as const, label, parameters: options.parameters ?? {}, ...(options.flowOrder !== undefined ? { flowOrder: options.flowOrder } : {}),
   }),
+  // Several photo boxes with explicit IDs: `box.photos(['one', 'two'], (id, i) => 'Photo ' + (i + 1))`.
+  photos: <K extends string>(ids: readonly K[], label: (id: K, index: number) => string, parameters: Parameters = {}) =>
+    Object.fromEntries(ids.map((id, i) => [id, box.photo(label(id, i), parameters)])) as Record<K, ReturnType<typeof box.photo>>,
 };
 
 // A structured finding a template reports about its input, such as a file it cannot parse. Spread the result onto
@@ -377,7 +439,7 @@ export function issue(found: TemplateIssue): Required<IssueMarker> {
 }
 
 export const runtime = {
-  defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
+  defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
 } satisfies Record<typeof runtimeExports[number], unknown>;
 
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
@@ -401,13 +463,15 @@ export function SpreadView({ book, template, format, spread, page, index, positi
   const elements = Object.fromEntries(Object.entries(definition.elements).map(([id, element]) => [
     id, { params: resolveParams(element.parameters, spread.elements[id]?.params ?? {}) },
   ]));
+  const values: SpreadValues = {
+    params: resolveParams(definition.parameters, spread.params), document: resolveParams(template.parameters, book.project.params), boxes, elements,
+  };
   const content = definition.render({
-    params: resolveParams(definition.parameters, spread.params),
-    document: resolveParams(template.parameters, book.project.params),
-    boxes, elements, page, format, formatId: template.formatId, mode: book.mode,
+    ...values, page, format, formatId: template.formatId, mode: book.mode,
     // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
     edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
-    book: bookContext(index, spread.id), PhotoBox, MarkdownBox, Element,
+    book: bookContext(index, spread.id), geometry: boundGeometry(format), PhotoBox, MarkdownBox, Element, Text,
   });
-  return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, lazyPhotos }}>{content}</SpreadData.Provider>;
+  return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, documentParameters: template.parameters, values, lazyPhotos }}>
+    {content}</SpreadData.Provider>;
 }

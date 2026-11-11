@@ -172,7 +172,9 @@ try {
   assert.equal(await farPhoto.evaluate((img) => img.decode().then(() => img.naturalWidth > 0)), true);
   await canvas.evaluate((el, position) => el.scrollTo(0, position), position);
 
-  const fixed = source.replace('{ctx.params.heading}', '{"Reloaded " + ctx.params.heading}');
+  // The title page's heading becomes a hand-written node that prefixes its text.
+  const fixed = source.replace('<ctx.Text parameter="heading" as="h1" rect={at.right(margin, 120, page - 2 * margin, 110)} />',
+    '<h1 {...ctx.edit(\'heading\')} style={ctx.geometry.css(at.right(margin, 120, page - 2 * margin, 110))}>{"Reloaded " + ctx.params.heading}</h1>');
   assert.notEqual(fixed, source);
   await replace(template, fixed);
   await readyAfter(previous);

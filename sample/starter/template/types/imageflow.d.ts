@@ -35,6 +35,30 @@ export type PrintFormat = {
   };
 };
 
+/** One length for every side, or `{ all, ...sides }` where the named sides override `all`, or all four sides. */
+export type InsetsShorthand = Length | (Partial<Insets> & { all: Length }) | Insets;
+/**
+ * Builds a complete `PrintFormat` with less repetition: insets take one length for every side, and `ends`, `delivery`
+ * and the PDF output basics have defaults. The result is an ordinary, fully specified `PrintFormat`. It describes
+ * geometry, not a printer product: copy page counts, resolution and file limits from your printer's specification.
+ *
+ *     printFormat({ label: 'Square · 20 × 20 cm', trim: { width: mm(200), height: mm(200) },
+ *       bleed: { all: mm(3), binding: mm(0) }, safe: mm(12), pageCount: { min: 24, max: 120, step: 2 } })
+ */
+export function printFormat(options: {
+  label: string;
+  trim: { width: Length; height: Length };
+  bleed: InsetsShorthand;
+  safe: InsetsShorthand;
+  pageCount: { min: number; max: number; step: 2 | 4 };
+  /** Default `'pages'`. */
+  delivery?: 'pages' | 'spreads';
+  /** Default `'single-pages'`. */
+  ends?: 'single-pages' | 'inside-covers';
+  /** Defaults to `{ container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' }`; given fields replace these. */
+  output?: Partial<PrintFormat['output']>;
+}): PrintFormat;
+
 type MillimeterInsets = { top: number; bottom: number; outside: number; binding: number };
 /** The print format in millimetres, as passed to `render`. */
 export type ResolvedFormat = {
@@ -78,16 +102,18 @@ export type ParameterValue<P> =
 export type ParameterValues<P> = { [K in keyof P]: ParameterValue<P[K]> };
 
 type Options<P extends Parameter> = Omit<P, 'type'>;
+/** Rejects option names the parameter type does not have, such as `mutliline`, which ImageFlow would ignore. */
+type Known<O, Allowed> = O & { [K in Exclude<keyof O, keyof Allowed>]: never };
 export const p: {
-  boolean<const O extends Options<BooleanParameter>>(options: O): O & { type: 'boolean' };
-  string<const O extends Options<StringParameter>>(options: O): O & { type: 'string' };
-  integer<const O extends Options<IntegerParameter>>(options: O): O & { type: 'integer' };
-  number<const O extends Options<NumberParameter>>(options: O): O & { type: 'number' };
+  boolean<const O extends Options<BooleanParameter>>(options: Known<O, Options<BooleanParameter>>): O & { type: 'boolean' };
+  string<const O extends Options<StringParameter>>(options: Known<O, Options<StringParameter>>): O & { type: 'string' };
+  integer<const O extends Options<IntegerParameter>>(options: Known<O, Options<IntegerParameter>>): O & { type: 'integer' };
+  number<const O extends Options<NumberParameter>>(options: Known<O, Options<NumberParameter>>): O & { type: 'number' };
   enum<const T extends string>(options: Common & { options: readonly T[]; default: NoInfer<T>; labels?: Partial<Record<T, string>> }):
     Common & { options: readonly T[]; default: T; labels?: Partial<Record<T, string>>; type: 'enum' };
-  color<const O extends Options<ColorParameter>>(options: O): O & { type: 'color' };
-  date<const O extends Options<DateParameter>>(options: O): O & { type: 'date' };
-  file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: O): O & { type: 'file'; default: '' };
+  color<const O extends Options<ColorParameter>>(options: Known<O, Options<ColorParameter>>): O & { type: 'color' };
+  date<const O extends Options<DateParameter>>(options: Known<O, Options<DateParameter>>): O & { type: 'date' };
+  file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: Known<O, Omit<FileParameter, 'type' | 'default'>>): O & { type: 'file'; default: '' };
 };
 
 // Declarations
@@ -173,12 +199,45 @@ type NestedPaths<Group extends string, R> = { [K in keyof R & string]: `${Group}
 export type EditPath<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
   | ParameterKeys<S> | `document.${keyof D & string}`
   | NestedPaths<'elements', NonNullable<S['elements']>> | NestedPaths<'boxes', NonNullable<S['boxes']>>;
+type StringKeys<P> = { [K in keyof P & string]: P[K] extends { type: 'string' } ? K : never }[keyof P & string];
+type StringParameterKeys<T> = T extends { parameters?: infer P } ? StringKeys<NonNullable<P>> : never;
+type NestedStringPaths<Group extends string, R> = { [K in keyof R & string]: `${Group}.${K}.${StringParameterKeys<R[K]>}` }[keyof R & string];
+/** A string parameter that `Text` can show: `heading`, `document.title`, `elements.map.label`, or `boxes.hero.credit`. */
+export type TextPath<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
+  | StringParameterKeys<S> | `document.${StringKeys<D>}`
+  | NestedStringPaths<'elements', NonNullable<S['elements']>> | NestedStringPaths<'boxes', NonNullable<S['boxes']>>;
 /** Attributes returned by `edit`. Spread them onto the node that shows the parameters. */
 export type EditMarker = { 'data-edit'?: string };
 /** Attributes returned by `issue`. Spread them onto a native node or any platform component, including `Spread`. */
 export type IssueMarker = { 'data-issue'?: string; 'data-issue-info'?: string };
+/**
+ * Places a platform component at a rectangle (millimetres, spread coordinates) with absolute positioning. Properties
+ * in `style` win over the ones `rect` sets, so `style={{ height: 'auto' }}` lets a heading grow.
+ */
+type Placement = { rect?: Rect };
+/** HTML tags `Text` can render. */
+export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | 'div' | 'blockquote' | 'figcaption';
+/**
+ * Props of `ctx.Text`. It shows the string parameter's value in an `as` tag (default `p`) and marks it for editing.
+ * When the value is empty, the editor shows `placeholder` (default: the parameter's `placeholder`, else its label);
+ * the exported book shows nothing there.
+ */
+export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & { parameter: Path; as?: TextTag; placeholder?: string };
 
-/** The context passed to `render`, typed from a spread declared with `spreadFor`. */
+/** The geometry helpers with the spread's format already applied: `ctx.geometry.page('left', 'bleed')`. */
+export type BoundGeometry = {
+  /** One page of the spread. Works for single first and last pages too. */
+  page(side: 'left' | 'right', area?: Area): Rect;
+  /** Both pages. Its `safe` area keeps only the outer, top and bottom insets. */
+  spread(area?: Area): Rect;
+  /** Design coordinates on a fixed canvas scaled to this format's trim; see `geometry.design`. */
+  design(canvas: { width: number; height: number }): DesignCanvas;
+  inset: typeof geometry.inset;
+  grid: typeof geometry.grid;
+  css: typeof geometry.css;
+};
+
+/** The context passed to `render`, typed from a spread declared with the `spread` builder or `spreadFor`. */
 export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = {
   params: ValuesOf<S>;
   document: ParameterValues<D>;
@@ -192,20 +251,28 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   mode: 'edit' | 'export';
   /**
    * Marks the node that shows these parameters, so clicking it in the editor opens them for editing:
-   * `<h2 {...ctx.edit('heading')}>{ctx.params.heading}</h2>`. Returns no attributes in export.
+   * `<h2 {...ctx.edit('heading')}>{ctx.params.heading}</h2>`. For a single string parameter, `ctx.Text` is shorter.
+   * The marker is invisible and stays in the exported artwork, so the Book check can name the parameter a text shows.
    */
   edit(...paths: EditPath<S, D>[]): EditMarker;
   /** Page count and the anchors all spreads declare: `ctx.book.anchor('map')?.page`. */
   book: BookContext;
+  /** The geometry helpers for this spread's format: `<ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />`. */
+  geometry: BoundGeometry;
   /** `PhotoBox` limited to this layout's photo box IDs: `<ctx.PhotoBox id="hero" />` fails type checking for unknown IDs. */
-  PhotoBox(props: Styling & EditMarker & IssueMarker & { id: BoxIds<S, 'photo'> }): ImageFlowElement;
+  PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & { id: BoxIds<S, 'photo'> }): ImageFlowElement;
   /** `MarkdownBox` limited to this layout's Markdown box IDs. */
-  MarkdownBox(props: Styling & EditMarker & IssueMarker & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
+  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
   /** `Element` limited to this layout's element IDs. */
-  Element(props: Styling & EditMarker & IssueMarker & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
+  Element(props: Styling & Placement & EditMarker & IssueMarker & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
+  /**
+   * Shows a string parameter and makes it editable by clicking it: `<ctx.Text parameter="heading" as="h2" rect={...} />`.
+   * Use `ctx.edit` for nodes that combine several parameters or show more than the value.
+   */
+  Text(props: TextProps<TextPath<S, D>>): ImageFlowElement;
 };
 
-/** The render context of a spread declared without `spreadFor`. */
+/** The render context of a spread declared as a plain object, without the `spread` builder. */
 export type UntypedRenderContext = {
   params: Values;
   document: Values;
@@ -217,9 +284,11 @@ export type UntypedRenderContext = {
   mode: 'edit' | 'export';
   edit(...paths: string[]): EditMarker;
   book: BookContext;
+  geometry: BoundGeometry;
   PhotoBox: typeof PhotoBox;
   MarkdownBox: typeof MarkdownBox;
   Element: typeof Element;
+  Text(props: TextProps): ImageFlowElement;
 };
 
 /**
@@ -228,16 +297,53 @@ export type UntypedRenderContext = {
  */
 export type AnchorContext<P = Values, D = Values> = { params: P; document: D };
 
-export type SpreadDefinition = SpreadDeclaration & {
+/** Type-only marker: the document parameters a spread's render context was typed with. Never set it yourself. */
+declare const typedDocument: unique symbol;
+export type SpreadDefinition<D extends Parameters = Parameters> = SpreadDeclaration & {
   render(context: UntypedRenderContext): ImageFlowNode;
   anchors?(context: AnchorContext): readonly AnchorDeclaration[];
+  readonly [typedDocument]?: D;
 };
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
-export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components';
+export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
+  'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
+/** The template as ImageFlow reads it, after `defineTemplate` has built its spreads. */
 export type TemplateDeclaration = {
+  id: string;
+  version: string;
+  contract: 1;
+  requires?: readonly Capability[];
+  format?: PrintFormat;
+  formats?: Record<string, PrintFormat>;
+  defaultFormat?: string;
+  parameters?: Parameters;
+  spreads: Record<string, SpreadDefinition>;
+};
+
+/** Declares one spread with a render context typed from its own declarations and the template's document parameters. */
+export type SpreadBuilder<D extends Parameters> = <
+  const P extends Parameters = {},
+  const B extends Record<string, BoxDeclaration> = {},
+  const E extends Record<string, ElementDeclaration> = {},
+>(definition: {
+  label: string;
+  /** `left` or `right` for a single page at the start or end of the book. Default `spread`. */
+  span?: Span;
+  parameters?: P;
+  boxes?: B;
+  elements?: E;
+  render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D>): ImageFlowNode;
+  /** Places other spreads can refer to through `ctx.book`, declared from this spread's values. */
+  anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[];
+}) => SpreadDefinition<D>;
+/** What `spreads` receives when it is a function. */
+export type TemplateTools<D extends Parameters> = { spread: SpreadBuilder<D> };
+
+type TemplateBase<D extends Parameters> = {
+  /** Stable template ID; `project.json` refers to it. */
   id: string;
   version: string;
   contract: 1;
@@ -246,42 +352,55 @@ export type TemplateDeclaration = {
    * instead of failing in a layout. Apps older than this field ignore it.
    */
   requires?: readonly Capability[];
-  /**
-   * Declare one `format`, or several named `formats` the user chooses between in Book settings (`defaultFormat`,
-   * else the first, is used until they do). Layouts adapt through `ctx.format`, `ctx.formatId`, and the
-   * `--trim-*`, `--bleed-*` and `--safe-*` CSS variables of `<Spread>`.
-   */
-  format?: PrintFormat;
-  formats?: Record<string, PrintFormat>;
-  defaultFormat?: string;
-  parameters?: Parameters;
-  spreads: Record<string, SpreadDefinition>;
+  /** Book settings, shown in Book settings and read through `ctx.document`. */
+  parameters?: D;
+};
+/**
+ * Declare one `format`, or several named `formats` the user chooses between in Book settings (`defaultFormat`,
+ * else the first, is used until they do). Layouts adapt through `ctx.format`, `ctx.formatId`, `ctx.geometry`, and the
+ * `--trim-*`, `--bleed-*` and `--safe-*` CSS variables of `<Spread>`.
+ */
+type FormatChoice<F extends string> =
+  | { format: PrintFormat; formats?: never; defaultFormat?: never }
+  | { formats: { [K in F]: PrintFormat }; defaultFormat?: NoInfer<F>; format?: never };
+type Missing<D, Typed> = Exclude<keyof Typed, keyof D> & string;
+/**
+ * A spread typed with `spreadFor(document)` must not read document parameters the template does not declare: at
+ * runtime they would be undefined.
+ */
+type TypedWith<T> = typeof typedDocument extends keyof T ? NonNullable<T[typeof typedDocument & keyof T]> : {};
+type DocumentCheck<S, D> = {
+  // Untyped spreads (`any`) are not checked.
+  [K in keyof S]: 0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never] ? unknown
+    : { [typedDocument]: `Declare document parameter ${Missing<D, TypedWith<S[K]>>} in the template's parameters, or remove it from spreadFor()` };
 };
 
-export function defineTemplate<const T extends TemplateDeclaration>(template: T): T;
+/**
+ * Declares the template. Prefer `spreads` as a function: its `spread` builder types every layout's `ctx.document`
+ * from `parameters`, so the document settings are declared once.
+ *
+ *     export default defineTemplate({
+ *       id: 'travel', version: '1.0.0', contract: 1, format,
+ *       parameters: { accent: p.color({ label: 'Accent', default: '#243b30' }) },
+ *       spreads: ({ spread }) => ({
+ *         story: spread({ label: 'Story', boxes: { hero: box.photo('Photo') }, render: (ctx) => ... ctx.document.accent ... }),
+ *       }),
+ *     });
+ */
+export function defineTemplate<
+  const D extends Parameters = {},
+  const F extends string = never,
+  const S extends Record<string, SpreadDefinition<any>> = {},
+>(template: TemplateBase<D> & FormatChoice<F> & { spreads: (S & DocumentCheck<S, D>) | ((tools: TemplateTools<D>) => S) }): TemplateDeclaration;
 
 /**
- * Returns `spread`, which declares one spread with a typed render context:
+ * Returns a `spread` builder typed with these document parameters, for spreads declared outside `defineTemplate`,
+ * such as in their own files. Pass the same object as the template's `parameters`:
  *
- *     const document = { paper: p.enum({ label: 'Paper', default: 'warm', options: ['warm', 'white'] }) };
- *     const spread = spreadFor(document);
- *     spread({ label: 'Story', parameters: { heading }, boxes: { hero: { type: 'photo', label: 'Photo' } },
- *       render: (ctx) => ... ctx.params.heading, ctx.boxes.hero.photo, ctx.document.paper ... });
+ *     export const document = { paper: p.enum({ label: 'Paper', default: 'warm', options: ['warm', 'white'] }) };
+ *     export const spread = spreadFor(document);
  */
-export function spreadFor<const D extends Parameters>(document: D): <
-  const P extends Parameters = {},
-  const B extends Record<string, BoxDeclaration> = {},
-  const E extends Record<string, ElementDeclaration> = {},
->(definition: {
-  label: string;
-  span?: Span;
-  parameters?: P;
-  boxes?: B;
-  elements?: E;
-  render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D>): ImageFlowNode;
-  /** Places other spreads can refer to through `ctx.book`, declared from this spread's values. */
-  anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[];
-}) => SpreadDefinition;
+export function spreadFor<const D extends Parameters>(document: D): SpreadBuilder<D>;
 
 // Components
 
@@ -298,18 +417,18 @@ export function Spread(props: Styling & IssueMarker & { children?: ImageFlowNode
  * A box that shows the photo assigned to box `id`, cropped to fill it. In the editor, clicking it edits the box's
  * parameters and any others it is marked with.
  */
-export function PhotoBox(props: Styling & EditMarker & IssueMarker & { id: string }): ImageFlowElement;
+export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & { id: string }): ImageFlowElement;
 /**
  * A box that shows its part of the Markdown text assigned to box `id`. `columns` (1–6, default 1) splits it into
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.
  * In the editor, clicking it edits the box's parameters and any others it is marked with: `{...ctx.edit('textSize')}`.
  */
-export function MarkdownBox(props: Styling & EditMarker & IssueMarker & { id: string; columns?: Columns }): ImageFlowElement;
+export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & { id: string; columns?: Columns }): ImageFlowElement;
 /**
  * Generated content with parameters, such as a calendar grid. In the editor, clicking it edits the element's
  * parameters and any others it is marked with: `<Element id="grid" {...ctx.edit('month')}>`.
  */
-export function Element(props: Styling & EditMarker & IssueMarker & { id: string; children?: ImageFlowNode }): ImageFlowElement;
+export function Element(props: Styling & Placement & EditMarker & IssueMarker & { id: string; children?: ImageFlowNode }): ImageFlowElement;
 // Reusable declarations
 
 /**
@@ -320,13 +439,19 @@ export const box: {
   photo<const P extends Parameters = {}>(label: string, parameters?: P): { type: 'photo'; label: string; parameters: P };
   markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P }):
     { type: 'markdown'; label: string; parameters: P; flowOrder?: number };
+  /**
+   * Several photo boxes with explicit IDs, typed without casts: `boxes: box.photos(['one', 'two'], (id, i) => 'Photo ' + (i + 1))`.
+   * The IDs are saved identities, so list them literally and never derive them from content.
+   */
+  photos<const K extends string, const P extends Parameters = {}>(ids: readonly K[], label: (id: K, index: number) => string, parameters?: P):
+    { [Id in K]: { type: 'photo'; label: string; parameters: P } };
 };
 
 // Geometry
 
 /**
  * A rectangle in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the
- * trim width), y from the top trim edge. Place a node with `style={geometry.css(rect)}` inside `<Spread>`.
+ * trim width), y from the top trim edge. Place a platform component with `rect={rect}`, or any node with `style={geometry.css(rect)}`, inside `<Spread>`.
  */
 export type Rect = { x: number; y: number; width: number; height: number };
 /**
@@ -335,6 +460,13 @@ export type Rect = { x: number; y: number; width: number; height: number };
  * the facing page.
  */
 export type Area = 'trim' | 'safe' | 'bleed';
+/** Rectangles on a design canvas, scaled to the trim; `width`/`height` convert a design length to millimetres. */
+export type DesignCanvas = {
+  left(x: number, y: number, width: number, height: number): Rect;
+  right(x: number, y: number, width: number, height: number): Rect;
+  width(value: number): number;
+  height(value: number): number;
+};
 export const geometry: {
   /** One page of the spread. Works for single first and last pages too. */
   page(format: ResolvedFormat, side: 'left' | 'right', area?: Area): Rect;
@@ -349,12 +481,7 @@ export const geometry: {
    * horizontally with its width and vertically with its height. Type sizes do not scale. `width`/`height` convert
    * a design length to millimetres.
    */
-  design(format: ResolvedFormat, canvas: { width: number; height: number }): {
-    left(x: number, y: number, width: number, height: number): Rect;
-    right(x: number, y: number, width: number, height: number): Rect;
-    width(value: number): number;
-    height(value: number): number;
-  };
+  design(format: ResolvedFormat, canvas: { width: number; height: number }): DesignCanvas;
   /** Absolute positioning for a rectangle, in millimetres. */
   css(rect: Rect): CSSProperties;
 };
@@ -387,3 +514,6 @@ export function asset(path: string): string;
  * latter in the Book check. Parse the text yourself and mark problems on a rendered node with `data-issue="…"`.
  */
 export function file(id: string): { name: string; extension: string; text: string } | undefined;
+
+// Only the declarations marked `export` above are part of the module.
+export {};

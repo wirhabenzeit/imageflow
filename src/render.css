@@ -126,3 +126,5 @@ html:has(.if-artwork), html:has(.if-print-page), .if-sheet { color-scheme: only 
 /* Preview-frame gutters stay transparent so the host's selection and label layers remain visible. */
 html:has(.if-book) { color-scheme: light dark; }
 html:has(.if-book), html:has(.if-book) body { background: transparent; }
+/* An empty ctx.Text in the editor: the placeholder takes the template's own type, dimmed. */
+.if-text-placeholder { opacity: .45; }

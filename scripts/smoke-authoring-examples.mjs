@@ -18,7 +18,7 @@ const folder = join(work, 'book');
 const entry = join(folder, 'template', 'index.tsx');
 await mkdir(join(folder, 'template'), { recursive: true });
 const minimal = await readFile(join(root, 'docs', 'examples', 'minimal.tsx'), 'utf8');
-const end = '\n  },\n});\n';
+const end = '\n  }),\n});\n';
 assert.ok(minimal.endsWith(end));
 // A layout an agent adds to the example: an editable note in an element. An empty note is a structured error
 // finding, attached directly to the platform component.
@@ -28,9 +28,9 @@ const note = `
       parameters: { note: p.string({ label: 'Note', default: 'Written on the road.' }) },
       elements: { body: { label: 'Note' } },
       render: (ctx) => {
-        const area = geometry.page(ctx.format, 'left', 'safe');
+        const area = ctx.geometry.page('left', 'safe');
         return <Spread>
-          <ctx.Element id="body" {...ctx.edit('note')} style={geometry.css({ ...area, height: 40 })}
+          <ctx.Element id="body" {...ctx.edit('note')} rect={{ ...area, height: 40 }}
             {...(ctx.params.note ? {} : issue({ code: 'note-empty', message: 'The note is empty.', parameter: 'note', severity: 'error',
               suggestion: 'Set the note parameter, or switch this spread to another layout.' }))}>
             <p style={{ margin: 0, font: '12pt/1.4 serif' }}>{ctx.params.note}</p>
@@ -38,7 +38,7 @@ const note = `
         </Spread>;
       },
     }),`;
-const withNote = (layout) => minimal.replace("import { defineTemplate, geometry,", "import { defineTemplate, geometry, issue,")
+const withNote = (layout) => minimal.replace("import { defineTemplate,", "import { defineTemplate, issue,")
   .slice(0, -end.length) + layout + end;
 await Promise.all([
   writeFile(entry, minimal),
@@ -99,6 +99,17 @@ try {
   assert.equal(baseline.checks.typescript, 'passed');
   assert.deepEqual(baseline.diagnostics, []);
 
+  // A misspelt declaration property still loads, but both checks name it: TypeScript, and the render as a warning
+  // with the property it probably meant.
+  await write(minimal.replace("label: 'Photo and heading',", "label: 'Photo and heading', lable: 'Photo',"));
+  const misspelt = (await call('check_book', { project, typescript: true })).data;
+  assert.equal(misspelt.state, 'ready', JSON.stringify(misspelt.diagnostics));
+  assert.equal(misspelt.checks.typescript, 'failed');
+  const unknown = misspelt.diagnostics.find(({ code }) => code === 'declaration-unknown-property');
+  assert.equal(unknown?.severity, 'warning', JSON.stringify(misspelt.diagnostics));
+  assert.deepEqual(unknown.details, { property: 'lable', didYouMean: 'label', path: 'spreads.photo.lable' });
+  await write(minimal);
+
   // Add a layout and preview it unsaved through a draft that inserts it.
   await write(withNote(note));
   const insert = [{ op: 'insert_spread', definition: 'note', ref: 'note', after: 'first' }];
@@ -131,7 +142,7 @@ try {
   assert.match(broken.diagnostics.map(({ message }) => message).join('\n'), /unknown, duplicate, or incompatible box: hero/);
 
   // A required capability this app lacks, and a helper it does not export, are named before any layout runs.
-  await write(minimal.replace("requires: ['geometry', 'typed-components']", "requires: ['geometry', 'teleport']"));
+  await write(minimal.replace("'typed-components']", "'teleport']"));
   const capability = (await call('check_book', { project })).data;
   assert.equal(capability.state, 'error');
   assert.match(capability.diagnostics[0].message, /does not provide: teleport\. Update ImageFlow/);
