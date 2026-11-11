@@ -123,14 +123,15 @@ function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Vi
   </Element>;
 }
 
-// The route map's own editor: drag to move, scroll or use the buttons to zoom, so the inset can show part of the
-// route. It edits the three viewport parameters together; the GPX track keeps its generated control.
+// The route map's own editor: choose or import the GPX track with ImageFlow's file control, then drag to move,
+// scroll or use the buttons to zoom, so the inset can show part of the route. Choosing the track and framing it is
+// one task, so one editor owns all four parameters and Done saves them together.
 let routeDrag: { x: number; y: number; start: Viewport; width: number } | undefined;
-function RouteEditor({ values, set, readOnly }: ElementEditorProps) {
+function RouteEditor({ values, set, readOnly, Control }: ElementEditorProps) {
   const viewport = routeWindow({ centerX: Number(values.centerX), centerY: Number(values.centerY), zoom: Number(values.zoom) });
   const source = file(String(values.track));
   let line = '';
-  let problem = source ? '' : 'Choose a GPX track for the route map first.';
+  let problem = source ? '' : 'Choose a GPX track to draw the route.';
   if (source) {
     try {
       line = routeLine(source.text);
@@ -144,9 +145,11 @@ function RouteEditor({ values, set, readOnly }: ElementEditorProps) {
   };
   const zoomBy = (factor: number) => move({ ...viewport, zoom: viewport.zoom * factor });
   const pan = (dx: number, dy: number) => move({ ...viewport, centerX: viewport.centerX + dx * viewport.size, centerY: viewport.centerY + dy * viewport.size });
-  if (!line) return <div className="route-editor"><p className="route-editor-note">{problem}</p></div>;
+  const track = <Control parameter="track" />;
+  if (!line) return <div className="route-editor">{track}<p className="route-editor-note">{problem}</p></div>;
   const editable = !readOnly;
   return <div className="route-editor">
+    {track}
     <div className="route-editor-nav">
       <button type="button" aria-label="Zoom out" disabled={!editable || viewport.zoom <= 1} onClick={() => zoomBy(1 / 1.5)}>−</button>
       <button type="button" aria-label="Zoom in" disabled={!editable || viewport.zoom >= maxRouteZoom} onClick={() => zoomBy(1.5)}>+</button>
@@ -240,7 +243,8 @@ export default defineTemplate({
   id: 'imageflow-starter',
   version: '0.4.0',
   contract: 1,
-  requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper'],
+  requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper',
+    'editor-native-controls'],
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
     landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
@@ -289,7 +293,7 @@ export default defineTemplate({
           centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01 }),
           zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1 }),
         },
-        editor: { label: 'Frame route', parameters: ['centerX', 'centerY', 'zoom'], component: RouteEditor },
+        editor: { label: 'Edit route', parameters: ['track', 'centerX', 'centerY', 'zoom'], component: RouteEditor },
       } },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);

@@ -164,7 +164,6 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     return <Field key={target.path} param={target.param} value={value}
       change={(next) => edit(({ project }) => writeEdit(project, spread.id, target, next), target.param.label + ' updated')} />;
   });
-  const spreadParameters = Object.fromEntries(Object.entries(definition?.parameters ?? {}).filter(([key]) => !claimed.has(key)));
   const header = <>
     <p className="eyebrow">Inspector</p>
     {issues && <div className="inspection-issues" role="alert">{issues}</div>}
@@ -191,8 +190,8 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
           }, () => template.spreads[next].label + ' · ' + consequence);
         }} />
         {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
-        {definition && <Fields key={spread.id} schema={spreadParameters} values={spread.params}
-          update={(id, value) => changeSpread((item) => { item.params[id] = value; }, spreadParameters[id].label + ' updated')} />}
+        {definition && <Fields key={spread.id} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
+          values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />}
       </details>}
       {template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={spread} template={template}
         kept={kept} label={keptLabel} settings={keptSettings} writable={writable} place={place}
@@ -277,7 +276,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
               )}
             </details>
           </div>}
-          <Fields schema={box.parameters} values={state?.params ?? {}} update={(key, value) => changeSpread((item) => {
+          <Fields schema={box.parameters} controls={box.controls} values={state?.params ?? {}} update={(key, value) => changeSpread((item) => {
             item.boxes[id] ??= { params: {} };
             item.boxes[id].params[key] = value;
           }, box.parameters[key].label + ' updated')} />
@@ -293,7 +292,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
             <button type="button" onClick={() => openEditor(id)}>{(element.editor.label ?? 'Open editor') + '…'}</button>
           </div>}
           {/* Parameters a template-supplied editor owns are edited there, not with generated controls. */}
-          <Fields schema={Object.fromEntries(Object.entries(element.parameters).filter(([key]) => !element.editor?.parameters.includes(key)))}
+          <Fields schema={element.parameters} controls={element.controls} exclude={element.editor?.parameters}
             values={spread.elements[id]?.params ?? {}} update={(key, value) => changeSpread((item) => {
             item.elements[id] ??= { params: {} };
             item.elements[id].params[key] = value;

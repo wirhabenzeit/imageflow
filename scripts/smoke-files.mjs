@@ -36,7 +36,7 @@ try {
   const route = '[data-spread="road"] [data-element="route"]';
   const trackLine = () => frame.locator(route + ' polyline').count();
   const messages = async (kind) => (await status())[kind].map(({ message }) => message).join('\n');
-  const routeDialog = w.getByRole('dialog', { name: 'Frame route' });
+  const routeDialog = w.getByRole('dialog', { name: 'Edit route' });
   const routeEditor = w.frameLocator('iframe.element-editor-frame');
   const editorReady = async () => {
     await routeDialog.waitFor();
@@ -52,17 +52,15 @@ try {
       return settled;
     }, null, { polling: 100 });
   };
-  // Clicking the inset opens its Frame route editor; the GPX track is in the Inspector's Route map section, which
-  // the click scrolls to. Returns that section, with the editor closed.
+  // Clicking the inset opens its Edit route editor, which owns the GPX track and the viewport. Returns the track
+  // control, ImageFlow's own file control inside the template's editor.
   const openRoute = async () => {
     await frame.locator(route).scrollIntoViewIfNeeded();
     await w.waitForTimeout(200);
     const box = await frame.locator(route).boundingBox();
     await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await routeDialog.waitFor();
-    await routeDialog.getByRole('button', { name: 'Cancel' }).click();
-    await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
-    return w.locator('.inspector details').filter({ has: w.locator(':scope > summary', { hasText: /^Route map$/ }) });
+    await editorReady();
+    return routeEditor.getByRole('combobox', { name: 'GPX track' });
   };
 
   await rerendered(() => menuAction(app, 'New project…'));
@@ -104,29 +102,37 @@ try {
   await w.mouse.click(emptyBox.x + emptyBox.width / 2, emptyBox.y + emptyBox.height / 2);
   await routeDialog.waitFor();
   assert.equal(await w.locator('.crop-editor').count(), 0);
-  await routeEditor.getByText('Choose a GPX track for the route map first.').waitFor();
+  await routeEditor.getByText('Choose a GPX track to draw the route.').waitFor();
+  assert.equal(await routeEditor.getByRole('combobox', { name: 'GPX track' }).inputValue(), '');
   await routeDialog.getByRole('button', { name: 'Cancel' }).click();
   await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
 
-  // Clearing is a valid state: no route, no issue. Undo restores the assignment.
-  let section = await openRoute();
-  assert.equal(await section.getByRole('combobox', { name: 'GPX track' }).inputValue(), 'senja-road');
-  await rerendered(() => section.getByRole('combobox', { name: 'GPX track' }).selectOption(''));
-  await saved('GPX track updated');
+  // Clearing is a valid state: no route, no issue. The editor shows the change at once; Done saves it, and Undo
+  // restores the assignment.
+  let track = await openRoute();
+  assert.equal(await track.inputValue(), 'senja-road');
+  await track.selectOption('');
+  await routeEditor.getByText('Choose a GPX track to draw the route.').waitFor();
+  await rerendered(() => routeDialog.getByRole('button', { name: 'Done' }).click());
+  await saved('Route map updated');
   assert.equal((await read()).spreads.find(({ id }) => id === 'road').elements.route.params.track, '');
   assert.equal(await trackLine(), 0);
   assert.equal((await status()).errors.length, 0);
   await rerendered(() => w.getByRole('button', { name: 'Undo', exact: true }).click());
   assert.equal(await trackLine(), 1);
 
-  // Choose… copies the file into files/, registers it and assigns it. A file the template cannot parse is the
-  // template's diagnostic (data-issue); the book still renders.
+  // Choose… in the editor copies the file into files/ and registers it at once; the editor reads it immediately and
+  // Done assigns it. A file the template cannot parse is the template's diagnostic; the book still renders.
   const broken = join(work, 'Broken ride.gpx');
   await writeFile(broken, '<gpx><trk><trkseg><trkpt lat="69.2"');
   await openDialog([broken]);
-  section = await openRoute();
-  await rerendered(() => section.getByRole('button', { name: 'Choose…' }).click());
-  await saved('GPX track updated');
+  track = await openRoute();
+  await routeEditor.getByRole('button', { name: 'Choose…' }).click();
+  await routeEditor.getByText('Broken ride.gpx is not valid GPX.').waitFor();
+  assert.match(await track.inputValue(), /^fl-/);
+  assert.deepEqual((await track.locator('option').allTextContents()).sort(), ['Broken ride.gpx', 'None', 'senja-road.gpx']);
+  await rerendered(() => routeDialog.getByRole('button', { name: 'Done' }).click());
+  await saved('Route map updated');
   const afterImport = await read();
   const imported = afterImport.spreads.find(({ id }) => id === 'road').elements.route.params.track;
   assert.match(imported, /^fl-/);
@@ -139,8 +145,6 @@ try {
   const gpx = (await status()).warnings.filter(({ code }) => code === 'template:gpx-invalid');
   assert.deepEqual(gpx.map(({ spread, element, parameter, source, suggestion }) => ({ spread, element, parameter, source, hint: !!suggestion })),
     [{ spread: 'road', element: 'route', parameter: 'track', source: imported, hint: true }]);
-  assert.deepEqual((await section.getByRole('combobox', { name: 'GPX track' }).locator('option').allTextContents()).sort(),
-    ['Broken ride.gpx', 'None', 'senja-road.gpx']);
   // Undo removes the assignment but keeps the registered file, so it can be chosen again.
   await rerendered(() => w.getByRole('button', { name: 'Undo', exact: true }).click());
   assert.equal(await trackLine(), 1);

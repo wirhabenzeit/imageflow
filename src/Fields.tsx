@@ -1,5 +1,7 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import { createContext, Fragment, useContext, useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
+import { controlLayout } from './controls';
+import type { ControlItem, ControlNode } from './controls';
 import type { Values } from './project';
 import type { Parameter, Parameters } from './parameters';
 import { isParameterValue } from './parameters';
@@ -109,7 +111,7 @@ export function ParamControl({ param, value, draft, setDraft, apply, autoFocus =
 
 // A labelled parameter in the Inspector. Typed values apply on blur or Enter; invalid values are not saved.
 // The field keeps its identity when the saved value changes, so typing is never lost to a save completing.
-export function Field({ param, value, change }: { param: Parameter; value: Value; change: (value: Value) => void }) {
+export function Field({ param, value, change, description }: { param: Parameter; value: Value; change: (value: Value) => void; description?: string }) {
   const [draft, setDraft] = useState<Value>();
   const [invalid, setInvalid] = useState(false);
   const typing = useRef(false);
@@ -134,13 +136,34 @@ export function Field({ param, value, change }: { param: Parameter; value: Value
   return <div className="field">
     {param.type !== 'boolean' && <span className="field-name">{param.label}</span>}
     <ParamControl param={param} value={value} draft={draft} setDraft={type} apply={apply} commitOnBlur />
+    {description && <small className="field-description">{description}</small>}
     {invalid && <small className="error-text">Enter a value within the field’s limits.</small>}
   </div>;
 }
 
-export function Fields({ schema, values, update }: { schema: Parameters; values: Values; update: (id: string, value: Value) => void }) {
-  return Object.entries(schema).map(([id, param]) => {
-    const value = isParameterValue(param, values[id]) ? values[id] : param.default;
-    return <Field key={id} param={param} value={value} change={(next) => update(id, next)} />;
-  });
+export type FieldNode = Extract<ControlNode, { kind: 'field' }>;
+// A control layout: fields, and titled groups of fields. `field` draws one field; its label is already applied to
+// the parameter, so controls and their accessible names use it.
+export function ControlList({ nodes, field }: { nodes: ControlNode[]; field: (node: FieldNode, param: Parameter) => ReactNode }) {
+  return nodes.map((node, i) => node.kind === 'field'
+    ? <Fragment key={node.key}>{field(node, node.label === node.param.label ? node.param : { ...node.param, label: node.label })}</Fragment>
+    : <fieldset key={'group ' + i + ' ' + node.label} className="control-group">
+      <legend>{node.label}</legend>
+      {node.description && <p className="control-description">{node.description}</p>}
+      <ControlList nodes={node.children} field={field} />
+    </fieldset>);
+}
+
+// The resolved value of every parameter: the saved one when it is allowed, else the default.
+const resolved = (schema: Parameters, values: Values) => Object.fromEntries(Object.entries(schema).map(([id, param]) =>
+  [id, isParameterValue(param, values[id]) ? values[id] : param.default]));
+
+// Generated controls for a scope, arranged by its `controls` (all parameters when absent). `exclude` leaves out
+// parameters edited elsewhere, such as by a custom editor or on the page.
+export function Fields({ schema, values, update, controls, exclude }: {
+  schema: Parameters; values: Values; update: (id: string, value: Value) => void; controls?: ControlItem[]; exclude?: readonly string[];
+}) {
+  const current = resolved(schema, values);
+  return <ControlList nodes={controlLayout(schema, controls, current, exclude)} field={(node, param) =>
+    <Field key={node.key} param={param} value={current[node.key]} description={node.description} change={(next) => update(node.key, next)} />} />;
 }

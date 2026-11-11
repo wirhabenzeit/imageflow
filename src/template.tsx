@@ -14,6 +14,8 @@ import { boundGeometry, geometry } from './geometry';
 import type { BoundGeometry, Rect } from './geometry';
 import { rememberDocument } from './declaration-check';
 import { capabilities, runtimeExports } from './runtime-exports';
+import { controlProblems, controlsSchema } from './controls';
+import type { ControlItem } from './controls';
 
 export { inch, mm, p, printFormat, pt };
 export type { PrintFormat, ResolvedFormat, Span } from './format';
@@ -125,6 +127,9 @@ export type FlowPosition = { part: number; parts: number; title?: string };
 export type ElementEditorProps = {
   values: Values; set: (changes: Values) => void; document: Values; format: ResolvedFormat;
   readOnly: boolean; commit: () => void; cancel: () => void;
+  // The app's own control for one of the editor's parameters, bound to the draft, and the file import it uses.
+  Control: (props: { parameter: string; label?: string }) => ReactNode;
+  importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };
 const elementEditor = z.object({
   label: z.string().min(1).optional(),
@@ -132,12 +137,19 @@ const elementEditor = z.object({
   component: z.custom<(props: ElementEditorProps) => ReactNode>((value) => typeof value === 'function', 'Expected an editor component.'),
   presentation: z.literal('dialog').default('dialog'),
 });
-const elements = z.record(identifier, z.object({ label: z.string().min(1), parameters: parametersSchema, editor: elementEditor.optional() })
-  .refine(({ parameters, editor }) => !editor || editor.parameters.every((key) => Object.hasOwn(parameters, key)),
-    'An element editor can only edit parameters its element declares.')).default({});
+// `controls` arranges a scope's generated controls; see src/controls.ts. Problems are reported at the scope.
+const checkControls = (context: z.RefinementCtx, parameters: Parameters, controls: ControlItem[] | undefined, owned?: readonly string[]) => {
+  for (const message of controlProblems(parameters, controls, owned)) context.addIssue({ code: 'custom', message, path: ['controls'] });
+};
+const elements = z.record(identifier, z.object({
+  label: z.string().min(1), parameters: parametersSchema, controls: controlsSchema, editor: elementEditor.optional(),
+}).refine(({ parameters, editor }) => !editor || editor.parameters.every((key) => Object.hasOwn(parameters, key)),
+  'An element editor can only edit parameters its element declares.')
+  .superRefine(({ parameters, controls, editor }, context) => checkControls(context, parameters, controls, editor?.parameters))).default({});
 const boxSchema = z.object({
   type: z.enum(['photo', 'markdown']), label: z.string().min(1), parameters: parametersSchema, flowOrder: z.int().positive().optional(),
-});
+  controls: controlsSchema,
+}).superRefine(({ parameters, controls }, context) => checkControls(context, parameters, controls));
 
 const definition = z.object({
   label: z.string().min(1),
@@ -145,9 +157,10 @@ const definition = z.object({
   parameters: parametersSchema,
   boxes: z.record(identifier, boxSchema).default({}),
   elements,
+  controls: controlsSchema,
   render: z.custom<(context: RenderContext) => ReactNode>((value) => typeof value === 'function', 'Expected a render function.'),
   anchors: z.custom<(context: AnchorContext) => unknown>((value) => typeof value === 'function', 'Expected an anchors function.').optional(),
-}).refine(({ boxes }) => {
+}).superRefine(({ parameters, controls }, context) => checkControls(context, parameters, controls)).refine(({ boxes }) => {
   const order = Object.values(boxes).filter(({ type }) => type === 'markdown').map(({ flowOrder }) => flowOrder);
   return order.length < 2 || (!order.includes(undefined) && new Set(order).size === order.length);
 }, 'Markdown boxes need unique flowOrder values.');
@@ -411,13 +424,16 @@ export function file(id: string): { name: string; extension: string; text: strin
 
 // Reusable box declarations. The ID stays explicit where the declaration is used: `boxes: { hero: box.photo('Hero') }`.
 export const box = {
-  photo: (label: string, parameters: Parameters = {}) => ({ type: 'photo' as const, label, parameters }),
-  markdown: (label: string, options: { flowOrder?: number; parameters?: Parameters } = {}) => ({
+  photo: (label: string, parameters: Parameters = {}, options: { controls?: ControlItem[] } = {}) => ({
+    type: 'photo' as const, label, parameters, ...(options.controls ? { controls: options.controls } : {}),
+  }),
+  markdown: (label: string, options: { flowOrder?: number; parameters?: Parameters; controls?: ControlItem[] } = {}) => ({
     type: 'markdown' as const, label, parameters: options.parameters ?? {}, ...(options.flowOrder !== undefined ? { flowOrder: options.flowOrder } : {}),
+    ...(options.controls ? { controls: options.controls } : {}),
   }),
   // Several photo boxes with explicit IDs: `box.photos(['one', 'two'], (id, i) => 'Photo ' + (i + 1))`.
   photos: <K extends string>(ids: readonly K[], label: (id: K, index: number) => string, parameters: Parameters = {}) =>
-    Object.fromEntries(ids.map((id, i) => [id, box.photo(label(id, i), parameters)])) as Record<K, ReturnType<typeof box.photo>>,
+    Object.fromEntries(ids.map((id, i) => [id, box.photo(label(id, i), parameters)])) as Record<K, { type: 'photo'; label: string; parameters: Parameters }>,
 };
 
 // A structured finding a template reports about its input, such as a file it cannot parse. Spread the result onto
