@@ -11,6 +11,7 @@ function listen<T>(channel: string, listener: (value: T) => void) {
 const api: DesktopApi = {
   getSettings: () => ipcRenderer.invoke(channels.settings),
   updateSettings: (patch) => ipcRenderer.invoke(channels.updateSettings, patch),
+  onSettingsChanged: (listener) => listen(channels.settingsChanged, listener),
   setPanelVisibility: (state) => ipcRenderer.invoke(channels.panelVisibility, state),
   openProject: (action) => ipcRenderer.invoke(channels.open, action),
   saveProject: (id, files, label) => ipcRenderer.invoke(channels.save, id, files, label),

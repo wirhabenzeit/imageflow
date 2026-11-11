@@ -9,6 +9,7 @@ import { menuAction } from './ui-actions.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'settings-'));
 const profile = join(work, 'profile');
+const settingsURL = 'imageflow://editor/settings';
 let app;
 async function launch() {
   app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
@@ -17,6 +18,25 @@ async function launch() {
   await page.emulateMedia({ colorScheme: null });
   await page.locator('.welcome').waitFor();
   return page;
+}
+async function openSettings() {
+  const existing = app.windows().find((page) => page.url() === settingsURL);
+  const created = existing ? undefined : app.waitForEvent('window');
+  await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.flatMap((item) => item.submenu?.items ?? []).find((item) => item.label === 'Settings…').click());
+  const page = existing ?? await created;
+  page.setDefaultTimeout(20000);
+  await page.emulateMedia({ colorScheme: null });
+  await page.getByRole('main', { name: 'Settings', exact: true }).waitFor();
+  await page.waitForFunction(() => !!document.querySelector('input[name="appearance"]:checked')).catch(async (error) => {
+    console.error(await page.locator('body').innerText(), await page.evaluate(() => window.imageflow.getSettings()));
+    throw error;
+  });
+  return page;
+}
+async function closeWindow(page) {
+  const closed = page.waitForEvent('close');
+  await app.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows().find((owner) => owner.webContents.getURL() === url).close(), page.url());
+  await closed;
 }
 async function checkAppearance(page, source) {
   await page.waitForFunction(async (appearance) => (await window.imageflow.getSettings()).value?.appearance === appearance, source);
@@ -31,50 +51,77 @@ try {
   await checkAppearance(page, 'system');
   const accelerator = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.flatMap((item) => item.submenu?.items ?? []).find((item) => item.label === 'Settings…')?.accelerator);
   assert.equal(accelerator, 'CmdOrCtrl+,');
-  await menuAction(app, 'Settings…');
-  let settings = page.getByRole('dialog', { name: 'Settings', exact: true });
-  await settings.waitFor();
+  let settings = await openSettings();
   assert.equal(await settings.getByRole('radio', { name: 'System', exact: true }).isChecked(), true);
-  await menuAction(app, 'Settings…'); // Reopening an already open dialog is harmless.
+  const native = await app.evaluate(({ BrowserWindow }, url) => {
+    const owner = BrowserWindow.getAllWindows().find((owner) => owner.webContents.getURL() === url);
+    return { title: owner.getTitle(), modal: owner.isModal(), parent: !!owner.getParentWindow(), resizable: owner.isResizable() };
+  }, settingsURL);
+  assert.deepEqual(native, { title: 'Settings', modal: false, parent: false, resizable: false });
+  assert.equal(await openSettings(), settings, 'Settings reuses its existing window.');
+  assert.equal(app.windows().filter((page) => page.url() === settingsURL).length, 1);
+  assert.equal(await page.getByRole('dialog', { name: 'Settings', exact: true }).count(), 0);
   await settings.getByRole('radio', { name: 'Dark', exact: true }).check();
-  await page.waitForFunction(() => document.querySelector('input[name="appearance"][value="dark"]').checked);
   await checkAppearance(page, 'dark');
-  await page.screenshot({ path: join(root, '.build', 'settings-dark.png') });
+  await checkAppearance(settings, 'dark');
+  await settings.screenshot({ path: join(root, '.build', 'settings-dark.png') });
   await settings.getByRole('radio', { name: 'Light', exact: true }).check();
-  await page.waitForFunction(() => document.querySelector('input[name="appearance"][value="light"]').checked);
   await checkAppearance(page, 'light');
-  await page.screenshot({ path: join(root, '.build', 'settings-light.png') });
-  // Native radio navigation and Escape work without custom keyboard handling.
+  await checkAppearance(settings, 'light');
+  await settings.screenshot({ path: join(root, '.build', 'settings-light.png') });
   await settings.getByRole('radio', { name: 'Light', exact: true }).focus();
-  await page.keyboard.press('ArrowRight');
-  await page.waitForFunction(() => document.querySelector('input[name="appearance"][value="dark"]').checked);
+  await settings.keyboard.press('ArrowRight');
   await checkAppearance(page, 'dark');
-  await page.keyboard.press('Escape');
-  await settings.waitFor({ state: 'hidden' });
-  await menuAction(app, 'Settings…');
-  assert.equal(await settings.getByRole('radio', { name: 'Dark', exact: true }).isChecked(), true);
+  await checkAppearance(settings, 'dark');
+
+  // Book controls remain usable while Settings is open, and Settings cannot perform project operations.
+  const book = join(work, 'Book');
+  await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, book);
+  await menuAction(app, 'New project…');
+  await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
+  await page.locator('.spread-thumb').first().click();
+  const heading = page.getByRole('textbox', { name: 'Heading', exact: true });
+  await heading.fill('Edited with Settings open');
+  await heading.press('Tab');
+  await page.frameLocator('iframe.book-frame-book[data-current]').getByText('Edited with Settings open', { exact: true }).waitFor();
+  assert.equal(JSON.parse(await readFile(join(book, 'project.json'), 'utf8')).spreads[0].params.heading, 'Edited with Settings open');
+  assert.equal(settings.isClosed(), false);
+  assert.ok((await settings.evaluate(() => window.imageflow.openProject('sample'))).error);
+
+  // A settings update from the editor also refreshes the separate window's selected option.
+  await page.evaluate(() => window.imageflow.updateSettings({ appearance: 'light' }));
+  await settings.waitForFunction(() => document.querySelector('input[value="light"]').checked);
+  await checkAppearance(settings, 'light');
+  await settings.getByRole('radio', { name: 'Dark', exact: true }).check();
+  await checkAppearance(page, 'dark');
   const file = await app.evaluate(({ app }) => app.getPath('userData'));
   assert.deepEqual(JSON.parse(await readFile(join(file, 'settings.json'), 'utf8')), { appearance: 'dark' });
-  // Invalid messages cannot change native appearance or overwrite the stored choice.
   for (const patch of [{ appearance: 'sepia' }, { appearance: null }, { unrelated: true }, null]) {
-    const result = await page.evaluate((patch) => window.imageflow.updateSettings(patch), patch);
+    const result = await settings.evaluate((patch) => window.imageflow.updateSettings(patch), patch);
     assert.ok(result.error);
   }
   await checkAppearance(page, 'dark');
-  await settings.getByRole('button', { name: 'Done', exact: true }).click();
-  await settings.waitFor({ state: 'hidden' });
+  await closeWindow(settings);
+  assert.equal(page.isClosed(), false, 'Closing Settings leaves the book window open.');
+  settings = await openSettings();
+  assert.equal(await settings.getByRole('radio', { name: 'Dark', exact: true }).isChecked(), true);
   await app.close();
+
   page = await launch();
   await checkAppearance(page, 'dark');
-  assert.deepEqual(await page.evaluate(() => window.imageflow.getSettings()), { value: { appearance: 'dark' } });
-  await menuAction(app, 'Settings…');
-  settings = page.getByRole('dialog', { name: 'Settings', exact: true });
+  settings = await openSettings();
   await settings.getByRole('radio', { name: 'System', exact: true }).check();
-  await page.waitForFunction(() => document.querySelector('input[name="appearance"][value="system"]').checked);
   await checkAppearance(page, 'system');
   await app.close();
   page = await launch();
   await checkAppearance(page, 'system');
-  assert.deepEqual(await page.evaluate(() => window.imageflow.getSettings()), { value: { appearance: 'system' } });
-  console.log('Settings smoke passed: native menu/shortcut, appearance choices, keyboard/close behavior, validation and persisted Dark/System after relaunch.');
+  settings = await openSettings();
+  await closeWindow(page);
+  assert.equal(settings.isClosed(), false, 'Settings remains independent of the book window.');
+  assert.equal(await openSettings(), settings);
+  await settings.getByRole('radio', { name: 'Dark', exact: true }).check();
+  await checkAppearance(settings, 'dark');
+  await settings.getByRole('radio', { name: 'System', exact: true }).check();
+  await checkAppearance(settings, 'system');
+  console.log('Settings smoke passed: independent native window, singleton/reopen/close behavior, usable book, synchronized appearance, validation and persisted Dark/System after relaunch.');
 } finally { await app?.close(); await rm(work, { recursive: true, force: true }); }

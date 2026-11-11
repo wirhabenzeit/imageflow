@@ -6,7 +6,7 @@ import type { FSWatcher } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { channels, desktopScheme, editorURL, renderOrigin } from '../src/desktop';
+import { channels, desktopScheme, editorURL, renderOrigin, settingsURL } from '../src/desktop';
 import type { Command, ExportMode, ImportRequest, OpenAction, ProjectChange, ProjectSummary, Result, McpSettings } from '../src/desktop';
 import { identifier } from '../src/project';
 import type { ProjectFiles, RenderProject } from '../src/project';
@@ -33,6 +33,7 @@ import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 
 let window: BrowserWindow | null = null;
+let settingsWindow: BrowserWindow | null = null;
 let active: { id: string; book: OpenProject } | undefined;
 let busy = false;
 let projectSession: ProjectSession | undefined;
@@ -72,7 +73,10 @@ if (app.isPackaged) process.env.ESBUILD_BINARY_PATH = join(process.resourcesPath
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
-app.on('second-instance', () => { if (window) { window.show(); window.focus(); } });
+app.on('second-instance', () => {
+  const owner = window ?? settingsWindow;
+  if (owner) { owner.show(); owner.focus(); }
+});
 
 protocol.registerSchemesAsPrivileged([
   { scheme: desktopScheme, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -95,7 +99,7 @@ async function serve(request: Request) {
   if (host !== 'editor' && host !== 'render') return new Response(null, { status: 404 });
   const dist = join(app.getAppPath(), 'dist');
   if (!devServer && /^\/assets\/[\w.-]+\.[a-z0-9]+$/i.test(pathname)) return net.fetch(pathToFileURL(join(dist, pathname)).href);
-  if (host === 'editor' && pathname === '/') {
+  if (host === 'editor' && (pathname === '/' || pathname === '/settings')) {
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigin + "; frame-ancestors 'none'; base-uri 'none'",
     });
@@ -133,6 +137,11 @@ function editorOwner(event: IpcMainInvokeEvent) {
   if (owner && event.sender === owner.webContents && event.senderFrame === owner.webContents.mainFrame &&
       event.senderFrame.url === editorURL) return owner;
   return undefined;
+}
+function settingsOwner(event: IpcMainInvokeEvent) {
+  const owner = settingsWindow;
+  return owner && event.sender === owner.webContents && event.senderFrame === owner.webContents.mainFrame &&
+    event.senderFrame.url === settingsURL ? owner : undefined;
 }
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'ImageFlow could not complete the request.';
@@ -602,6 +611,38 @@ function menuCommand(label: string, accelerator: string | undefined, command: Co
   return { label, accelerator, click: () => window?.webContents.send(channels.command, command) };
 }
 
+function followAppearance(owner: BrowserWindow) {
+  const updateBackground = () => owner.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#252525' : '#f5f5f5');
+  nativeTheme.on('updated', updateBackground);
+  owner.once('closed', () => nativeTheme.removeListener('updated', updateBackground));
+}
+
+function showSettings() {
+  const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (!hidden) { settingsWindow.show(); settingsWindow.focus(); }
+    return;
+  }
+  const preferences = new BrowserWindow({
+    title: 'Settings', width: 540, height: 240, useContentSize: true, show: false,
+    resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#252525' : '#f5f5f5',
+    autoHideMenuBar: true,
+    webPreferences: {
+      sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'),
+      backgroundThrottling: !hidden,
+    },
+  });
+  settingsWindow = preferences;
+  followAppearance(preferences);
+  preferences.webContents.on('will-frame-navigate', (event) => event.preventDefault());
+  preferences.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  preferences.on('page-title-updated', (event) => event.preventDefault());
+  preferences.once('ready-to-show', () => { if (!hidden) preferences.show(); });
+  preferences.once('closed', () => { if (settingsWindow === preferences) settingsWindow = null; });
+  void preferences.loadURL(settingsURL).catch((error: unknown) => console.error('ImageFlow could not open Settings', error));
+}
+
 function createWindow() {
   closing = false;
   closingProject = undefined;
@@ -615,9 +656,7 @@ function createWindow() {
       backgroundThrottling: !hidden,
     },
   });
-  const updateBackground = () => editor.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#252525' : '#f5f5f5');
-  nativeTheme.on('updated', updateBackground);
-  editor.once('closed', () => nativeTheme.removeListener('updated', updateBackground));
+  followAppearance(editor);
   window = editor;
   editor.webContents.on('will-frame-navigate', (event) => {
     const url = new URL(event.url);
@@ -685,13 +724,16 @@ void app.whenReady().then(async () => {
     }
   });
   ipcMain.handle(channels.open, (event, action: OpenAction) => fromEditor(event, (owner) => openProject(owner, action)));
-  ipcMain.handle(channels.settings, (event) => editorOwner(event)
-    ? { value: settings.value } : { error: 'Request is only available to the editor.' });
+  ipcMain.handle(channels.settings, (event) => editorOwner(event) || settingsOwner(event)
+    ? { value: settings.value } : { error: 'Request is only available to the editor or Settings.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {
-    if (!editorOwner(event)) return { error: 'Request is only available to the editor.' };
+    if (!editorOwner(event) && !settingsOwner(event)) return { error: 'Request is only available to the editor or Settings.' };
     try {
       const value = await settings.update(patch);
       nativeTheme.themeSource = value.appearance;
+      for (const owner of [window, settingsWindow]) {
+        if (owner && !owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value);
+      }
       return { value };
     } catch (error) { return { error: errorMessage(error) }; }
   });
@@ -741,7 +783,7 @@ void app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu', submenu: [
       { role: 'about' }, { type: 'separator' },
-      menuCommand('Settings…', 'CmdOrCtrl+,', 'settings'),
+      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: showSettings },
       { type: 'separator' },
       menuCommand('Agent Connections…', undefined, 'agent-settings'),
       { type: 'separator' }, { role: 'services' }, { type: 'separator' },

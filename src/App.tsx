@@ -7,7 +7,6 @@ import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
 import { McpPanel } from './McpPanel';
-import { SettingsPanel } from './SettingsPanel';
 import { revealIn } from './reveal';
 import { EditPopover } from './EditPopover';
 import { CropEditor } from './CropEditor';
@@ -302,7 +301,7 @@ export function App() {
   const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, importFile: importParameterFile }), [summary?.project.files]);
 
   function act(command: Command) {
-    if (command === 'settings' || command === 'agent-settings') return;
+    if (command === 'agent-settings') return;
     if (command === 'toggle-project' || command === 'toggle-inspector') {
       togglePanel(command === 'toggle-project' ? 'left' : 'right');
       return;
@@ -1094,6 +1093,5 @@ export function App() {
       <McpPanel api={api} />
       {summary && <BookCheckIndicator check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}
     </footer>
-    <SettingsPanel api={api} />
   </div></ProjectFilesContext.Provider>;
 }

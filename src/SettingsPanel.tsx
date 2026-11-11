@@ -7,8 +7,8 @@ const appearances: { value: Appearance; label: string }[] = [
 ];
 
 export function SettingsPanel({ api }: { api?: DesktopApi }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const revision = useRef(0);
+  const pending = useRef(0);
   const [settings, setSettings] = useState<AppSettings>();
   const [error, setError] = useState('');
   useEffect(() => {
@@ -19,8 +19,8 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
       if ('error' in result) setError(result.error);
       else setSettings(result.value);
     }).catch(() => { if (active) setError('Could not load settings. Please try again.'); });
-    const stop = api.onCommand((command) => {
-      if (command === 'settings' && !dialog.current?.open) dialog.current?.showModal();
+    const stop = api.onSettingsChanged((next) => {
+      if (!pending.current) setSettings(next);
     });
     return () => { active = false; stop(); };
   }, [api]);
@@ -28,6 +28,7 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
   async function choose(appearance: Appearance) {
     if (!api || !settings) return;
     const request = ++revision.current;
+    pending.current++;
     setSettings({ ...settings, appearance });
     setError('');
     try {
@@ -39,14 +40,13 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
       setError('Could not save settings. Please try again.');
       const saved = await api.getSettings().catch(() => undefined);
       if (request === revision.current && saved && 'value' in saved) setSettings(saved.value);
-    }
+    } finally { pending.current--; }
   }
 
-  return <dialog ref={dialog} className="settings-dialog" aria-labelledby="settings-heading">
-    <header className="settings-header"><h2 id="settings-heading">Settings</h2></header>
+  return <main className="studio settings-window" aria-label="Settings">
     <div className="settings-content">
       <section aria-labelledby="settings-general">
-        <h3 id="settings-general">General</h3>
+        <h1 id="settings-general">General</h1>
         <fieldset className="appearance-setting" disabled={!settings} aria-describedby="appearance-description">
           <legend>Appearance</legend>
           <div className="appearance-options">
@@ -60,6 +60,5 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
       </section>
       {error && <p role="alert" className="error-text">{error}</p>}
     </div>
-    <footer className="settings-footer"><form method="dialog"><button autoFocus>Done</button></form></footer>
-  </dialog>;
+  </main>;
 }
