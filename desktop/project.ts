@@ -259,12 +259,20 @@ export async function updateProject(book: OpenProject, files: ProjectFiles, relo
       throw new CommittedProjectSaveError('The project was saved, but its content could not be reloaded. Reload the project before making more edits.', { cause: error });
     }
   }
+  return { ...withProjectFiles(book, { project, photoIndex }), manifests };
+}
+
+/** The open book with other project/index data, without touching disk. Commands only reference registered sources,
+ * so loaded photo, text and file contents stay valid; photo metadata follows the new index. */
+export function withProjectFiles(book: OpenProject, files: ProjectFiles): OpenProject {
+  const project = parseDocument(projectSchema, files.project, 'project.json');
+  const photoIndex = parseDocument(photoIndexSchema, files.photoIndex, 'photos.json');
   const photos = new Map([...book.photos].flatMap(([id, photo]) => {
     if (!photoIndex[id]) return [];
     const { title, caption, credit, altText } = photoIndex[id];
     return [[id, { ...photo, title, caption, credit, altText }] as const];
   }));
-  return { ...book, project, photoIndex, photos, manifests };
+  return { ...book, project, photoIndex, photos };
 }
 
 export async function importIntoProject(book: OpenProject, request: ImportRequest, paths: string[]) {

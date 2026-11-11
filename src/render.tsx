@@ -18,7 +18,10 @@ import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, layoutChoices } from './layouts';
 import { parsePreviewRequest, PreviewError } from './preview';
-import type { PreviewMetadata } from './preview';
+import type { PreviewMetadata, PagePreviewMetadata } from './preview';
+import { inspectionSchema } from './inspection';
+import type { ElementInspection, ElementMeasurement } from './inspection';
+import { contactSheetLayout } from './authoring-artwork';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -66,23 +69,40 @@ function textAssignments(book: RenderProject, template: Template) {
 
 // Assigned files that are gone, unreadable, or of a type the parameter does not accept. An unassigned file
 // parameter is valid; the template renders without it.
-function fileErrors(book: RenderProject, schema: Parameters, values: Values, scope: string) {
-  return Object.entries(schema).flatMap(([id, param]) => {
+function fileErrors(book: RenderProject, schema: Parameters, values: Values, scope: string): Issue[] {
+  return Object.entries(schema).flatMap(([id, param]): Issue[] => {
     const value = values[id];
     if (param.type !== 'file' || typeof value !== 'string' || !value) return [];
     const where = scope + ' · ' + param.label + ': ';
     const path = book.project.files[value];
     const found = book.files[value];
-    if (!path || !found) return [where + 'the assigned file is no longer in the project. Choose it again.'];
-    if (found.problem) return [where + found.problem];
+    const finding = (code: string, message: string, suggestion: string): Issue[] =>
+      [{ message: where + message, code, parameter: id, source: value, suggestion }];
+    if (!path || !found) {
+      return finding('file-missing', 'the assigned file is no longer in the project. Choose it again.',
+        'Import the file again with import_sources, then assign its new ID to parameter ' + id + '.');
+    }
+    if (found.problem) return finding('file-unreadable', found.problem, 'Replace the file or assign another file to parameter ' + id + '.');
     if (!param.accept.includes(found.extension)) {
-      return [where + found.name + ' is not a ' + param.accept.join(' or ') + ' file. Choose another file.'];
+      return finding('file-type', found.name + ' is not a ' + param.accept.join(' or ') + ' file. Choose another file.',
+        'Assign a ' + param.accept.join(' or ') + ' file to parameter ' + id + '.');
     }
     return [];
   });
 }
 
-function validateSpread(container: HTMLElement, spread: SpreadState, template: Template, where: string, warnings: Issue[], errors: Issue[]) {
+// Converts a measured CSS pixel distance to millimetres, rounded for reporting.
+const reportedMm = (pixels: number, mmPerPixel: number) => Math.round(pixels * mmPerPixel * 10) / 10;
+const ptPerMm = 72 / 25.4;
+
+// The declared box or element that contains a node, for locating findings inside a spread.
+function ownerOf(node: Element) {
+  const owner = node.closest<HTMLElement>('[data-box], [data-element]');
+  return owner?.dataset.box !== undefined ? { box: owner.dataset.box } : owner?.dataset.element !== undefined ? { element: owner.dataset.element } : {};
+}
+
+function validateSpread(container: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat, where: string,
+  warnings: Issue[], errors: Issue[]) {
   const sheet = container.firstElementChild;
   if (!(sheet instanceof HTMLElement) || !sheet.matches('.if-sheet') || container.childElementCount !== 1) {
     throw new Error('Spread ' + spread.id + ' must render one <Spread> at its root.');
@@ -91,41 +111,55 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
   const remaining = new Set(Object.keys(definition.boxes));
   const elements = new Set(Object.keys(definition.elements));
   const bounds = sheet.getBoundingClientRect();
+  const mmPerPixel = format.spreadWidth / bounds.width;
   const resolution = template.format.output.resolution;
-  const issue = (message: string): Issue => ({ message, spread: spread.id, where });
-  const warn = (messages: string[]) => warnings.push(...messages.map(issue));
+  const issue = (message: string, extra: Omit<Issue, 'message' | 'spread' | 'where'> = {}): Issue => ({ message, spread: spread.id, where, ...extra });
+  const warn = (messages: string[], extra: Omit<Issue, 'message' | 'spread' | 'where'> = {}) =>
+    warnings.push(...messages.map((message) => issue(message, extra)));
   // State the current layout does not show stays with the spread for other layouts; only state that no layout of
   // the template declares is reported.
   const declared = declaredInTemplate(template.spreads);
   const undeclared = (scope: string, parameters: Parameters, values: Values) =>
     Object.fromEntries(Object.entries(values).filter(([id]) => Object.hasOwn(parameters, id) || !declared.param(scope, id)));
-  warn(parameterWarnings(definition.parameters, undeclared('', definition.parameters, spread.params), 'Layout'));
+  const parameterFix = 'Use set_parameter with a value the declaration allows, or reset_parameter to restore the default.';
+  warn(parameterWarnings(definition.parameters, undeclared('', definition.parameters, spread.params), 'Layout'),
+    { code: 'parameter-invalid', suggestion: parameterFix });
   for (const [id, state] of Object.entries(spread.boxes)) {
     const box = Object.hasOwn(definition.boxes, id) ? definition.boxes[id] : undefined;
     const kind = state.photo ? 'photo' : state.text ? 'text' : undefined;
     if (kind && !declared.box(id, kind)) {
-      warn(['Content saved for box ' + id + ' fits no box of this template.']);
+      warn(['Content saved for box ' + id + ' fits no box of this template.'], { code: 'content-undeclared', box: id,
+        source: state.photo ?? state.text, suggestion: 'Declare a ' + (kind === 'photo' ? 'photo' : 'markdown') + ' box ' + id +
+          ' in a layout, or discard the saved assignment with clear_box (spread ' + spread.id + ', box ' + id + ').' });
       continue;
     }
     if (box && kind && (kind === 'photo') !== (box.type === 'photo')) continue;
     const parameters = box?.parameters ?? {};
-    warn(parameterWarnings(parameters, undeclared('box ' + id, parameters, state.params), box?.label ?? 'Box ' + id));
+    warn(parameterWarnings(parameters, undeclared('box ' + id, parameters, state.params), box?.label ?? 'Box ' + id),
+      { code: 'parameter-invalid', box: id, suggestion: parameterFix });
   }
   for (const [id, state] of Object.entries(spread.elements)) {
     const element = Object.hasOwn(definition.elements, id) ? definition.elements[id] : undefined;
     if (!element && !declared.element(id)) {
-      warn(['Settings saved for element ' + id + ' fit no element of this template.']);
+      warn(['Settings saved for element ' + id + ' fit no element of this template.'], { code: 'element-undeclared', element: id,
+        suggestion: 'Declare element ' + id + ' in a layout, or reset its saved parameters.' });
       continue;
     }
     const parameters = element?.parameters ?? {};
-    warn(parameterWarnings(parameters, undeclared('element ' + id, parameters, state.params), element?.label ?? id));
+    warn(parameterWarnings(parameters, undeclared('element ' + id, parameters, state.params), element?.label ?? id),
+      { code: 'parameter-invalid', element: id, suggestion: parameterFix });
   }
   // Templates report problems with their input, such as a file they cannot parse, on the node concerned.
-  warn([...sheet.querySelectorAll<HTMLElement>('[data-issue]')].map((node) => node.dataset.issue!).filter(Boolean));
+  for (const node of sheet.querySelectorAll<HTMLElement>('[data-issue]')) {
+    if (node.dataset.issue) warnings.push(issue(node.dataset.issue, { code: 'template-issue', ...ownerOf(node) }));
+  }
   const unknown = new Set([...sheet.querySelectorAll<HTMLElement>('[data-edit]')]
     .flatMap((node) => node.dataset.edit!.split(' ').filter(Boolean))
     .filter((path) => !resolveEditPath(template, spread.definition, path)));
-  if (unknown.size) warn(['The layout marks unknown parameters as editable: ' + [...unknown].join(', ') + '.']);
+  if (unknown.size) {
+    warn(['The layout marks unknown parameters as editable: ' + [...unknown].join(', ') + '.'], { code: 'edit-path-unknown',
+      details: { paths: [...unknown].join(' ') }, suggestion: 'Declare these parameters in the layout, or remove them from ctx.edit(...).' });
+  }
   const boxes = new Map<string, HTMLElement>();
   for (const box of sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')) {
     const id = box.dataset.box ?? box.dataset.element!;
@@ -140,16 +174,34 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
       const assignment = spread.boxes[id];
       const ppi = Number(box.dataset.ppi);
       if (assignment?.photo && box.hasAttribute('data-empty')) {
-        errors.push(issue(definition.boxes[id].label + ' is missing photo ' + assignment.photo + '.'));
+        errors.push(issue(definition.boxes[id].label + ' is missing photo ' + assignment.photo + '.', {
+          code: 'photo-missing', box: id, source: assignment.photo,
+          suggestion: 'Restore the original file, import it again with import_sources, or assign another photo to box ' + id + '.',
+        }));
       }
       if (resolution && Number.isFinite(ppi) && ppi < resolution.minimum) {
-        errors.push(issue(definition.boxes[id].label + ' is ' + Math.round(ppi) + ' ppi (minimum ' + resolution.minimum + ').'));
+        errors.push(issue(definition.boxes[id].label + ' is ' + Math.round(ppi) + ' ppi (minimum ' + resolution.minimum + ').', {
+          code: 'photo-resolution-low', box: id, source: assignment?.photo,
+          details: { ppi: Math.round(ppi), minimumPpi: resolution.minimum,
+            boxWidthMm: reportedMm(box.getBoundingClientRect().width, mmPerPixel),
+            boxHeightMm: reportedMm(box.getBoundingClientRect().height, mmPerPixel) },
+          suggestion: 'Zoom the crop out (set_crop with a smaller zoom), assign a higher-resolution photo, or switch to a layout with a smaller box.',
+        }));
       }
     }
     const rect = box.getBoundingClientRect();
+    const overshoot = {
+      leftMm: reportedMm(bounds.left - rect.left, mmPerPixel), topMm: reportedMm(bounds.top - rect.top, mmPerPixel),
+      rightMm: reportedMm(rect.right - bounds.right, mmPerPixel), bottomMm: reportedMm(rect.bottom - bounds.bottom, mmPerPixel),
+    };
     if (rect.left < bounds.left - 1 || rect.top < bounds.top - 1 ||
         rect.right > bounds.right + 1 || rect.bottom > bounds.bottom + 1) {
-      errors.push(issue((definition.boxes[id]?.label ?? definition.elements[id]?.label ?? id) + ' extends outside the bleed.'));
+      const owner = box.dataset.element !== undefined ? { element: id } : { box: id };
+      errors.push(issue((definition.boxes[id]?.label ?? definition.elements[id]?.label ?? id) + ' extends outside the bleed.', {
+        code: 'outside-bleed', ...owner,
+        details: Object.fromEntries(Object.entries(overshoot).filter(([, value]) => value > 0)),
+        suggestion: 'Change the template CSS so this ' + (owner.box ? 'box' : 'element') + ' stays within the sheet, which includes the bleed.',
+      }));
     }
   }
   if (remaining.size) throw new Error(where + ' is missing boxes: ' + [...remaining].join(', ') + '.');
@@ -162,12 +214,14 @@ function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: nu
   const { bleed, safe, trim } = format;
   const text = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
-  let small = false;
-  let outside = false;
+  // The smallest text below the minimum and the largest safe-area overshoot, each with the box or element it is in.
+  let small: { sizeMm: number; owner: ReturnType<typeof ownerOf> } | undefined;
+  let outside: { overshootMm: number; owner: ReturnType<typeof ownerOf> } | undefined;
   for (let node = text.nextNode(); node; node = text.nextNode()) {
     const parent = node.parentElement;
     if (!node.textContent?.trim() || !parent || parent.closest('.if-placeholder, svg')) continue;
-    if (minimum && parseFloat(getComputedStyle(parent).fontSize) * mmPerPixel < minimum) small = true;
+    const sizeMm = parseFloat(getComputedStyle(parent).fontSize) * mmPerPixel;
+    if (minimum && sizeMm < minimum && (!small || sizeMm < small.sizeMm)) small = { sizeMm, owner: ownerOf(parent) };
     range.selectNodeContents(node);
     for (const rect of range.getClientRects()) {
       if (!rect.width || !rect.height) continue;
@@ -178,7 +232,8 @@ function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: nu
       const right = x + w / 2 >= trim.width;
       const leftSafe = right ? trim.width + safe.binding : safe.outside;
       const rightSafe = right ? trim.width * 2 - safe.outside : trim.width - safe.binding;
-      if (x < leftSafe - .2 || x + w > rightSafe + .2 || y < safe.top - .2 || y + h > trim.height - safe.bottom + .2) outside = true;
+      const overshootMm = Math.max(leftSafe - x, x + w - rightSafe, safe.top - y, y + h - (trim.height - safe.bottom));
+      if (overshootMm > .2 && (!outside || overshootMm > outside.overshootMm)) outside = { overshootMm, owner: ownerOf(parent) };
     }
   }
   return { small, outside };
@@ -298,7 +353,7 @@ function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: Retu
   document.body.append(pages);
 }
 
-function artworkTarget(spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, target: ReturnType<typeof parsePreviewRequest>['target']) {
+function artworkTarget(spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, target: Exclude<ReturnType<typeof parsePreviewRequest>['target'], { spreads: string[] }>) {
   if ('page' in target) {
     const index = sequence.spreads.findIndex(({ page }) => page.left === target.page || page.right === target.page);
     if (index < 0) throw new PreviewError('preview-target-not-found', 'Page ' + target.page + ' does not exist in this book.');
@@ -308,17 +363,105 @@ function artworkTarget(spreads: SpreadState[], sequence: ReturnType<typeof pageS
   const index = spreads.findIndex(({ id }) => id === target.spread);
   if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' does not exist in this book.');
   const { span, page } = sequence.spreads[index];
-  const side = target.side ?? span;
+  const side = ('side' in target ? target.side : undefined) ?? span;
   if (side === 'spread') return { index, side, page, spread: target.spread };
   const number = page[side];
   if (!number) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' has no ' + side + ' page.');
   return { index, side, page: { [side]: number }, spread: target.spread };
 }
 
+function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: ResolvedFormat) {
+  const outer = sheet.getBoundingClientRect(), rect = node.getBoundingClientRect();
+  const scale = format.spreadWidth / outer.width;
+  return { x: (rect.left - outer.left) * scale, y: (rect.top - outer.top) * scale, width: rect.width * scale, height: rect.height * scale };
+}
+
+function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat,
+  request: ReturnType<typeof inspectionSchema.parse>): ElementInspection {
+  const nodes = [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].filter((node) =>
+    (!request.box || node.dataset.box === request.box) && (!request.element || node.dataset.element === request.element));
+  if ((request.box || request.element) && !nodes.length) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread.id + '.');
+  const definition = template.spreads[spread.definition];
+  const items: ElementMeasurement[] = nodes.slice(request.offset, request.offset + request.limit).map((node) => {
+    const box = node.dataset.box, id = box ?? node.dataset.element!, kind = box ? definition.boxes[id].type : 'element';
+    const prefix = (box ? 'boxes.' : 'elements.') + id + '.';
+    const parameters = box ? definition.boxes[id].parameters : definition.elements[id].parameters;
+    const style = getComputedStyle(node);
+    const points = (value: string) => Math.round(parseFloat(value) * 72 / 96 * 100) / 100;
+    const source = box ? spread.boxes[id]?.photo ?? spread.boxes[id]?.text : undefined;
+    return { spread: spread.id, id, kind, boundsMm: measuredBounds(node, sheet, format), upright: upright(node, sheet),
+      typography: { fontFamily: style.fontFamily, fontSizePt: points(style.fontSize),
+        lineHeightPt: style.lineHeight === 'normal' ? null : points(style.lineHeight), fontWeight: style.fontWeight, color: style.color },
+      editPaths: Object.keys(parameters).map((key) => prefix + key), ...(source ? { source } : {}) };
+  });
+  return { spread: spread.id, coordinateSpace: 'sheet-bleed-mm', items, total: nodes.length,
+    nextOffset: request.offset + items.length < nodes.length ? request.offset + items.length : null };
+}
+
+function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>,
+  format: ResolvedFormat, artwork: ReturnType<typeof parsePreviewRequest>) {
+  const { bounds, maxEdge } = artwork;
+  if ('spreads' in artwork.target) {
+    const targets = artwork.target.spreads.map((spread) => artworkTarget(spreads, sequence, { spread }));
+    const crops = targets.map(({ side }) => sheetCrop(format, side, bounds));
+    const grid = contactSheetLayout(crops, maxEdge, artwork.target.columns);
+    const frame = document.createElement('div');
+    frame.className = 'if-artwork';
+    Object.assign(frame.style, { width: grid.width + 'px', height: grid.height + 'px', background: '#e9e9e9', overflow: 'hidden' });
+    const cells = targets.map(({ index, spread, side, page }, i) => {
+      const { x, y, width, height, label: labelRect } = grid.cells[i], crop = crops[i];
+      const image = croppedSheet(sheets[index], crop, { width, height });
+      Object.assign(image.style, { position: 'absolute', left: x + 'px', top: y + 'px' });
+      const label = spread + ' · ' + Object.values(page).join('–');
+      const caption = document.createElement('div');
+      caption.textContent = label;
+      Object.assign(caption.style, { position: 'absolute', left: labelRect.x + 'px', top: labelRect.y + 'px',
+        width: labelRect.width + 'px', height: labelRect.height + 'px', font: '11px/16px sans-serif', color: '#111',
+        overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'center' });
+      frame.append(image, caption);
+      return { x, y, width, height, widthMm: crop.widthMm, heightMm: crop.heightMm, spread, side, page, bounds, label };
+    });
+    root.hidden = true;
+    document.body.append(frame);
+    return { frame, metadata: { kind: 'contact-sheet', width: grid.width, height: grid.height, bounds, columns: grid.columns, cells } as PreviewMetadata };
+  }
+  const target = artworkTarget(spreads, sequence, artwork.target);
+  const { index, side, page, spread } = target;
+  let crop = sheetCrop(format, side, bounds);
+  let detail: PagePreviewMetadata['detail'];
+  if ('box' in artwork.target || 'element' in artwork.target) {
+    const request = artwork.target;
+    const box = 'box' in request ? request.box : undefined, element = 'element' in request ? request.element : undefined;
+    const node = [...sheets[index].querySelectorAll<HTMLElement>('[data-box], [data-element]')]
+      .find((node) => box ? node.dataset.box === box : node.dataset.element === element);
+    if (!node) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread + '.');
+    const rect = measuredBounds(node, sheets[index], format), padding = request.paddingMm;
+    const x = Math.max(crop.x, rect.x - padding), y = Math.max(crop.y, rect.y - padding);
+    const right = Math.min(crop.x + crop.widthMm, rect.x + rect.width + padding);
+    const bottom = Math.min(crop.y + crop.heightMm, rect.y + rect.height + padding);
+    if (right <= x || bottom <= y) throw new PreviewError('preview-target-not-found', 'The element has no visible area within the requested page bounds.');
+    crop = { x, y, widthMm: right - x, heightMm: bottom - y };
+    detail = { ...(box ? { box } : { element }), xMm: x, yMm: y };
+  }
+  const { widthMm, heightMm } = crop, scale = maxEdge / Math.max(widthMm, heightMm);
+  const width = Math.max(1, Math.round(widthMm * scale)), height = Math.max(1, Math.round(heightMm * scale));
+  const frame = croppedSheet(sheets[index], crop, { width, height });
+  root.hidden = true;
+  document.body.append(frame);
+  return { frame, metadata: { width, height, widthMm, heightMm, bounds, spread, side, page, ...(detail ? { detail } : {}) } as PreviewMetadata };
+}
+
+// Font faces that were requested but could not be loaded. The book renders with a fallback font instead.
+function fontFailures() {
+  return [...new Set([...document.fonts].filter((font) => font.status === 'error')
+    .map((font) => font.family.replace(/^["']|["']$/g, '')))].sort();
+}
+
 // Waits for fonts and photos so measurements and text flow see final metrics.
 async function settle(images: HTMLImageElement[]) {
+  // A font that fails to load is reported by `fontFailures` rather than aborting the render.
   const [, decoded] = await Promise.all([
-    Promise.all([...document.fonts].map((font) => font.load())),
+    Promise.allSettled([...document.fonts].map((font) => font.load())),
     Promise.allSettled(images.map((img) => img.decode())),
   ]);
   await document.fonts.ready;
@@ -355,7 +498,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   await settle([...root.querySelectorAll('img')]);
   const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
   const sheets = previews.map(({ definition, spread }, n) => {
-    const { sheet, boxes } = validateSpread(containers[n], spread, template, definition, [], []);
+    const { sheet, boxes } = validateSpread(containers[n], spread, template, format, definition, [], []);
     const sources = new Map<string, HTMLElement[]>();
     const order = Object.entries(template.spreads[definition].boxes).sort(([, a], [, b]) => (a.flowOrder ?? 1) - (b.flowOrder ?? 1));
     for (const [box] of order) {
@@ -502,7 +645,7 @@ export async function startRender(root: HTMLElement) {
     const edit = book.mode === 'edit';
     const check = !edit && query.get('view') === 'check';
     const artwork = !edit && query.get('view') === 'artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
-    const target = artwork && artworkTarget(spreads, sequence, artwork.target);
+    const inspect = !edit && query.has('inspect') ? inspectionSchema.parse(JSON.parse(query.get('inspect')!)) : undefined;
     // The editor renders the whole book twice: as scrolling spreads and as sidebar thumbnails.
     const view: BookView = query.get('view') === 'thumbs' ? 'thumbs' : query.get('view') === 'layouts' ? 'layouts' : 'book';
     if (edit && view !== 'book') {
@@ -535,52 +678,91 @@ export async function startRender(root: HTMLElement) {
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
-    const warnings = [...book.problems, ...parameterWarnings(template.parameters, book.project.params, 'Document')].map(message);
-    const errors = sequence.issues.map(message);
+    const warnings: Issue[] = [
+      ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
+      ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
+        suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
+    ];
+    const errors: Issue[] = sequence.issues.map((text) => ({ ...message(text), code: 'page-sequence',
+      suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format.' }));
     // The preview falls back to the default format, but printing at a size nobody chose is blocked.
     if (template.unknownChoice) {
-      errors.push(message('The template no longer offers the format ' + book.project.format + ' saved with this book. The preview uses ' +
-        template.format.label + '; choose a format in Book settings.'));
+      errors.push({ ...message('The template no longer offers the format ' + book.project.format + ' saved with this book. The preview uses ' +
+        template.format.label + '; choose a format in Book settings.'), code: 'format-unavailable',
+      details: { saved: book.project.format ?? '', used: template.format.label },
+      suggestion: 'Use select_format with one of the template formats, or declare format ' + book.project.format + ' again in the template.' });
     }
-    errors.push(...fileErrors(book, template.parameters, book.project.params, 'Document').map(message));
+    errors.push(...fileErrors(book, template.parameters, book.project.params, 'Document'));
     for (const spread of spreads) {
       const definition = template.spreads[spread.definition];
       if (!definition) continue;
       const scoped = [
         ...fileErrors(book, definition.parameters, spread.params, 'Layout'),
-        ...Object.entries(definition.boxes).flatMap(([id, box]) => fileErrors(book, box.parameters, spread.boxes[id]?.params ?? {}, box.label)),
+        ...Object.entries(definition.boxes).flatMap(([id, box]) =>
+          fileErrors(book, box.parameters, spread.boxes[id]?.params ?? {}, box.label).map((finding) => ({ ...finding, box: id }))),
         ...Object.entries(definition.elements).flatMap(([id, element]) =>
-          fileErrors(book, element.parameters, spread.elements[id]?.params ?? {}, element.label)),
+          fileErrors(book, element.parameters, spread.elements[id]?.params ?? {}, element.label).map((finding) => ({ ...finding, element: id }))),
       ];
-      errors.push(...scoped.map((text) => located(spread.id, text)));
+      errors.push(...scoped.map((finding) => ({ ...located(spread.id, finding.message), ...finding })));
     }
     for (const [i, result] of decoded.entries()) {
-      if (result.status === 'rejected') errors.push(message('Could not decode photo ' + (images[i].alt || images[i].closest('[data-box]')?.getAttribute('data-box')) + '.'));
+      if (result.status !== 'rejected') continue;
+      const box = images[i].closest<HTMLElement>('[data-box]')?.dataset.box;
+      const spread = images[i].closest<HTMLElement>('[data-spread]')?.dataset.spread;
+      const photo = spread && box ? spreads.find(({ id }) => id === spread)?.boxes[box]?.photo : undefined;
+      errors.push({ ...(spread ? located(spread, '') : {}), message: 'Could not decode photo ' + (images[i].alt || box) + '.',
+        code: 'photo-decode-failed', box, source: photo,
+        suggestion: 'Replace the original with a valid JPEG, PNG or WebP file, or assign another photo.' });
+    }
+    for (const family of fontFailures()) {
+      errors.push({ ...message('Font ' + family + ' could not be loaded; text using it renders with a fallback font.'), code: 'font-load-failed',
+        details: { family }, suggestion: 'Check the @font-face src path in the template CSS and that the font file exists inside template/.' });
     }
     const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
     const layouts = new Map(visible.map(({ spread, i }, n) => [
-      spread.id, validateSpread(containers[n], spread, template, where[i], warnings, errors),
+      spread.id, validateSpread(containers[n], spread, template, format, where[i], warnings, errors),
     ]));
     for (const [source, chain] of activeChains) {
       const first = chain[0];
       if (book.texts[source] === undefined) {
-        errors.push(located(first.spread, 'Missing Markdown source ' + source + '.'));
+        errors.push({ ...located(first.spread, 'Missing Markdown source ' + source + '.'), code: 'text-source-missing', box: first.box, source,
+          suggestion: 'Restore ' + (book.project.texts[source] ?? 'the Markdown file') + ', or assign another text to box ' + first.box + '.' });
         continue;
       }
       const boxes = chain.map(({ spread, box }) => layouts.get(spread)!.boxes.get(box)!);
       const result = flow.run(markdownToHtml(book.texts[source]), boxes, 'columns');
-      if (result.overflowText.trim() || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
+      const overflow = result.overflowText.trim();
+      if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
         const last = chain.at(-1)!;
-        errors.push(located(last.spread, 'Text from ' + (book.project.texts[source] ?? source) + ' does not fit; add a spread that continues it.'));
+        errors.push({ ...located(last.spread, 'Text from ' + (book.project.texts[source] ?? source) + ' does not fit; add a spread that continues it.'),
+          code: 'text-overflow', box: last.box, source,
+          details: { overflowCharacters: overflow.length, boxes: chain.length, path: book.project.texts[source] ?? '' },
+          suggestion: 'Insert a spread after ' + last.spread + ' with a markdown box and assign text ' + source +
+            ' to it so the flow continues, or enlarge the boxes, reduce the text size or shorten the text.' });
       }
     }
     const minimum = template.format.output.minimumTextSize;
     for (const [spread, { sheet }] of layouts) {
-      const typography = checkTypography(sheet, format, minimum && toMillimeters(minimum));
-      if (typography.small) warnings.push(located(spread, 'Text is smaller than the format minimum.'));
-      if (typography.outside) warnings.push(located(spread, 'Text extends outside the safe area.'));
+      const minimumMm = minimum && toMillimeters(minimum);
+      const typography = checkTypography(sheet, format, minimumMm);
+      if (typography.small && minimumMm) {
+        warnings.push({ ...located(spread, 'Text is smaller than the format minimum.'), code: 'text-too-small', ...typography.small.owner,
+          details: { sizePt: Math.round(typography.small.sizeMm * ptPerMm * 10) / 10, minimumPt: Math.round(minimumMm * ptPerMm * 10) / 10 },
+          suggestion: 'Increase the font size in the template CSS or the size parameter of this box or element.' });
+      }
+      if (typography.outside) {
+        warnings.push({ ...located(spread, 'Text extends outside the safe area.'), code: 'text-outside-safe-area', ...typography.outside.owner,
+          details: { overshootMm: Math.round(typography.outside.overshootMm * 10) / 10 },
+          suggestion: 'Move or inset this text in the template CSS so it stays inside the format safe area.' });
+      }
     }
     const sheets = [...layouts.values()].map(({ sheet }) => sheet);
+    let inspection: ElementInspection | undefined;
+    if (inspect) {
+      const index = spreads.findIndex(({ id }) => id === inspect.spread);
+      if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + inspect.spread + ' does not exist in this book.');
+      inspection = inspectElements(sheets[index], spreads[index], template, format, inspect);
+    }
     if (edit) layoutBook(root, [...layouts].map(([spread, { sheet }]) => ({ spread, sheet })), view);
     if (lazy) {
       const load = photoLoader(root, () => onScreen);
@@ -589,19 +771,10 @@ export async function startRender(root: HTMLElement) {
       // Report ready once the photos on screen are decoded, so swapping in this frame shows them.
       await Promise.allSettled(load().map((img) => img.decode()));
     }
-    else if (artwork && target) {
-      const { index, side, page, spread } = target;
-      const { bounds, maxEdge } = artwork;
-      const crop = sheetCrop(format, side, bounds);
-      const { widthMm, heightMm } = crop;
-      const scale = maxEdge / Math.max(widthMm, heightMm);
-      const width = Math.max(1, Math.round(widthMm * scale));
-      const height = Math.max(1, Math.round(heightMm * scale));
-      const frame = croppedSheet(sheets[index], crop, { width, height });
-      root.hidden = true;
-      document.body.append(frame);
+    else if (artwork) {
+      const { frame, metadata } = renderArtwork(root, sheets, spreads, sequence, format, artwork);
       await settle([...frame.querySelectorAll<HTMLImageElement>('img')]);
-      window.imageflowPreview = { state: 'ready', metadata: { width, height, widthMm, heightMm, bounds, spread, side, page } };
+      window.imageflowPreview = { state: 'ready', metadata };
     } else if (!check) {
       makePrintPages(root, sheets, sequence, format);
       await Promise.allSettled([...document.querySelectorAll<HTMLImageElement>('.if-print-page img')].map((img) => img.decode()));
@@ -609,7 +782,7 @@ export async function startRender(root: HTMLElement) {
     const units: { side: PrintSide; spread: string; where: string }[] = sequence.spreads.flatMap(({ sides }, i) =>
       sides.map((side) => ({ side, spread: spreads[i].id, where: where[i] })));
     publish({
-      state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions,
+      state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions, ...(inspection ? { inspection } : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The template could not be rendered.';

@@ -18,6 +18,8 @@ import { bundledFontNames } from './fonts';
 import { isProjectInputPath } from './revisions';
 import type { ProjectInputIndex } from './revisions';
 import { checkProject } from './check';
+import { checkTemplateTypes } from './typecheck';
+import type { CheckDraft } from './check';
 import { captureBookPreview, checkBookRender } from './preview';
 import { ProjectSession } from './project-session';
 import { createAuthoringService, AuthoringError } from './authoring-service';
@@ -197,6 +199,8 @@ function watchProject(book: OpenProject) {
   const folder = book.folder;
   const inputs = projectSession?.inputs;
   let checkingChanges = false;
+  // After a failed reload the editor shows an error, so a revert to the bytes it last loaded must still reload.
+  let reloadFailed = false;
   function scheduleReload(delay = 220) {
     clearTimeout(reloadTimer);
     reloadTimer = setTimeout(reload, delay);
@@ -243,7 +247,7 @@ function watchProject(book: OpenProject) {
           }
         }
       }
-      if (!external.some(Boolean)) return;
+      if (!external.some(Boolean) && !reloadFailed) return;
       busy = true;
       try {
         notify({ building: true });
@@ -255,6 +259,7 @@ function watchProject(book: OpenProject) {
           return;
         }
         for (const [i, file] of files.entries()) if (external[i]) importedWrites.delete(file);
+        reloadFailed = 'error' in next;
         notify('error' in next ? { error: next.error } : { value: activate(next.book, true) });
       } finally {
         busy = false;
@@ -458,27 +463,28 @@ async function exportBook(owner: BrowserWindow, projectId: string, mode: ExportM
 }
 
 async function checkOpenBook(book: OpenProject, request: AuthoringCheckRequest, externalSignal?: AbortSignal,
-  inputs: ProjectInputIndex | undefined = projectSession?.book.folder === book.folder ? projectSession.inputs : undefined) {
+  inputs: ProjectInputIndex | undefined = projectSession?.book.folder === book.folder ? projectSession.inputs : undefined, draft?: CheckDraft) {
   const renditions = projectSession?.inputs === inputs ? projectSession?.renditions : undefined;
   const job = new AbortController();
   const timeout = setTimeout(() => job.abort(new Error('The authoring check timed out.')), 90_000);
   checkJobs.add(job);
   if (!externalSignal) checkJob = job;
   try {
-    return await checkProject(book, cache, request, async (snapshot, preview, signal) => {
+    return await checkProject(book, cache, request, async (snapshot, preview, signal, inspect) => {
       const id = randomUUID();
       sessions.set(id, { book: snapshot, mode: 'export' });
       try {
         const url = renderOrigin + '/render/' + id;
         if (preview) {
-          const image = await captureBookPreview(url, preview, signal);
+          const image = await captureBookPreview(url, preview, signal, inspect);
           return { status: image.status, preview: image };
         }
-        return { status: await checkBookRender(url, signal) };
+        return { status: await checkBookRender(url, signal, inspect) };
       } finally {
         sessions.delete(id);
       }
-    }, externalSignal ? AbortSignal.any([job.signal, externalSignal]) : job.signal, inputs, renditions);
+    }, externalSignal ? AbortSignal.any([job.signal, externalSignal]) : job.signal, inputs, renditions, draft,
+    (folder, signal) => checkTemplateTypes(folder, signal, app.getAppPath()));
   } finally {
     clearTimeout(timeout);
     if (checkJob === job) checkJob = undefined;

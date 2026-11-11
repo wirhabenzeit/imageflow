@@ -182,3 +182,50 @@ test('verified renditions survive template changes but rejected private output n
   await renditions.close();
   assert.deepEqual(await readdir(cache), []);
 });
+
+test('render findings keep their codes, locations, measured values and suggested fixes', async (t) => {
+  const { book, cache } = await fixture(t);
+  const findings: Extract<RenderStatus, { state: 'ready' }> = {
+    ...status,
+    errors: [
+      { message: 'Photo is 120 ppi (minimum 240).', spread: 's1', where: 'Pages 2–3 · Story', code: 'photo-resolution-low', box: 'hero',
+        source: 'ph-1', details: { ppi: 120, minimumPpi: 240 }, suggestion: 'Zoom the crop out.' },
+      { message: 'Untyped finding.' },
+    ],
+    warnings: [{ message: 'Text is smaller than the format minimum.', spread: 's2', code: 'text-too-small', element: 'caption', details: {} }],
+  };
+  const result = await checkProject(book, cache, {}, async () => ({ status: findings }), new AbortController().signal);
+  assert.equal(result.state, 'ready');
+  assert.deepEqual(result.diagnostics, [
+    { code: 'photo-resolution-low', stage: 'render', severity: 'error', message: 'Photo is 120 ppi (minimum 240).',
+      location: { spread: 's1', box: 'hero', source: 'ph-1', where: 'Pages 2–3 · Story' },
+      details: { ppi: 120, minimumPpi: 240 }, suggestion: 'Zoom the crop out.' },
+    { code: 'layout-error', stage: 'render', severity: 'error', message: 'Untyped finding.' },
+    { code: 'text-too-small', stage: 'render', severity: 'warning', message: 'Text is smaller than the format minimum.',
+      location: { spread: 's2', element: 'caption' } },
+  ]);
+});
+
+test('typechecking reports failures alongside usable artwork and discards diagnostics if inputs change', async (t) => {
+  const { book, cache, folder } = await fixture(t);
+  const types = { files: ['template/index.tsx'], totalDiagnostics: 1, truncated: false, elapsedMs: 10,
+    diagnostics: [{ code: 'typescript-error', stage: 'template' as const, severity: 'error' as const, message: 'Wrong type.',
+      location: { path: 'template/index.tsx', line: 1, column: 1 } }] };
+  let rendered = false;
+  const ready = await checkProject(book, cache, { typescript: true }, async () => { rendered = true; return { status }; },
+    new AbortController().signal, undefined, undefined, undefined, async () => types);
+  assert.equal(rendered, true);
+  assert.equal(ready.state, 'ready');
+  assert.equal(ready.checks.typescript, 'failed');
+  assert.equal(ready.diagnostics[0].code, 'typescript-error');
+  assert.equal(ready.typecheck?.totalDiagnostics, 1);
+  const changed = await checkProject(book, cache, { typescript: true }, async () => assert.fail('Changed inputs must not render.'),
+    new AbortController().signal, undefined, undefined, undefined, async () => {
+      await writeFile(join(folder, 'template/new.ts'), 'export const newValue = 1;');
+      return types;
+    });
+  assert.equal(changed.state, 'error');
+  assert.equal(changed.diagnostics[0].code, 'source-changed');
+  assert.equal(changed.typecheck, undefined);
+  assert.equal(changed.checks.typescript, 'not-run');
+});

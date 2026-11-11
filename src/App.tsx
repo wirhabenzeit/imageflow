@@ -81,6 +81,8 @@ export function App() {
   const [render, setRender] = useState<RenderStatus>();
   const [reload, setReload] = useState<'loading' | 'rendering' | { error: string }>();
   const reloading = useRef(false);
+  // A reload that finished with an error is settled: the agent may commit a repair, while human edits stay disabled.
+  const reloadFailed = useRef(false);
   const inputGeneration = useRef(0);
   const candidateId = useRef<string>(undefined);
   const readyId = useRef<string>(undefined);
@@ -151,6 +153,7 @@ export function App() {
   function beginReload() {
     inputGeneration.current++;
     reloading.current = true;
+    reloadFailed.current = false;
     candidateId.current = undefined;
     readyId.current = undefined;
     holdInlineEditor();
@@ -161,7 +164,13 @@ export function App() {
 
   function adoptReload(next: ProjectSummary) {
     adopt(next);
+    reloadFailed.current = false;
     setReload('rendering');
+  }
+
+  function failReload(message: string) {
+    reloadFailed.current = true;
+    setReload({ error: message });
   }
 
   function adopt(next: ProjectSummary, reset = false, selected?: string) {
@@ -171,6 +180,7 @@ export function App() {
     if (reset) {
       inputGeneration.current++;
       reloading.current = false;
+      reloadFailed.current = false;
       setTemplate(undefined);
       setSelectedSource(undefined);
       setQuick(undefined);
@@ -322,12 +332,12 @@ export function App() {
         try {
           const result = await api.openProject(command);
           if (generation !== inputGeneration.current || current.current !== before) return;
-          if ('error' in result) setReload({ error: result.error });
+          if ('error' in result) failReload(result.error);
           else if (result.value) adoptReload(result.value);
-          else setReload({ error: 'Could not reload the project.' });
+          else failReload('Could not reload the project.');
         } catch (error) {
           if (generation === inputGeneration.current && current.current === before) {
-            setReload({ error: error instanceof Error ? error.message : 'Could not reload the project.' });
+            failReload(error instanceof Error ? error.message : 'Could not reload the project.');
           }
         }
         return;
@@ -344,7 +354,7 @@ export function App() {
     if ('building' in change) beginReload();
     else if ('error' in change) {
       if (!reloading.current) beginReload();
-      setReload({ error: change.error });
+      failReload(change.error);
     } else {
       if (!reloading.current) beginReload();
       adoptReload(change.value);
@@ -354,7 +364,8 @@ export function App() {
   const acquireAgentLease = useEffectEvent(() => {
     const focused = document.activeElement;
     const typing = focused instanceof HTMLElement && (focused.matches('input, textarea, select, [contenteditable="true"]') || !!focused.closest('dialog'));
-    if (pendingTasks.current || busy || reloading.current || editing || elementEditor || cropping || typing || agentLocked.current) return false;
+    const reloadRunning = reloading.current && !reloadFailed.current;
+    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || typing || agentLocked.current) return false;
     agentLocked.current = true;
     if (workspace.current) workspace.current.inert = true;
     setAgentWorking(true);
@@ -387,6 +398,7 @@ export function App() {
       readyId.current = id;
       if (reloading.current) setNotice('Project files reloaded');
       reloading.current = false;
+      reloadFailed.current = false;
       setReload(undefined);
       setLastReady(status);
       setTemplate(status.template);
@@ -394,7 +406,7 @@ export function App() {
     } else {
       candidateId.current = undefined;
       readyId.current = undefined;
-      if (reloading.current) setReload({ error: status.message });
+      if (reloading.current) failReload(status.message);
       else inputGeneration.current++;
       holdInlineEditor();
       clearCanvasEditors();

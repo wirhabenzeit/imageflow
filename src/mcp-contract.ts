@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { previewRequestSchema } from './preview';
-import { projectOperationsSchema } from './project-commands';
+import { makePreviewRequestSchema } from './preview';
+import { projectOperationsSchema, spreadReference } from './project-commands';
+import { makeInspectionSchema } from './inspection';
 
 const project = z.string().min(1).max(128).describe('Stable project handle returned by list_projects.');
 const revision = z.string().regex(/^[a-f0-9]{64}$/, 'Expected a SHA-256 input revision.');
@@ -28,17 +29,37 @@ export const mcpToolSchemas = {
   }),
   inspect_book: z.strictObject({
     project,
-    view: z.enum(['summary', 'spreads', 'sources', 'parameters']),
+    view: z.enum(['summary', 'spreads', 'sources', 'parameters', 'elements']),
     offset: z.int().min(0).default(0),
     limit: z.int().min(1).max(100).default(30),
     spread: z.string().min(1).max(256).optional(),
+    box: z.string().min(1).max(256).optional(), element: z.string().min(1).max(256).optional(),
+  }).superRefine((request, context) => {
+    if (request.view === 'elements' && !request.spread) context.addIssue({ code: 'custom', path: ['spread'], message: 'Element inspection requires a spread ID.' });
+    if ((request.box || request.element) && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Box and element filters require the elements view.' });
+    if (request.box && request.element) context.addIssue({ code: 'custom', message: 'Choose either a box or an element.' });
   }),
-  check_book: z.strictObject({ project, expectedRevision: revision.optional(), preview: previewRequestSchema.optional() })
-    .superRefine((request, context) => {
-      if (request.preview && 'page' in request.preview.target && !request.expectedRevision) {
-        context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'Page-number previews require the inspected input revision.' });
-      }
-    }),
+  check_book: z.strictObject({
+    project, expectedRevision: revision.optional(),
+    preview: makePreviewRequestSchema(spreadReference).optional(),
+    inspect: makeInspectionSchema(spreadReference).optional(),
+    typescript: z.boolean().optional().describe('Type-check template sources against the installed runtime in a bounded worker. Rendering still runs when types fail.'),
+    draft: z.strictObject({ operations: projectOperationsSchema }).optional()
+      .describe('Unsaved command batch, using the apply_project_changes operations, to render on top of the saved book. Nothing is saved.'),
+  }).superRefine((request, context) => {
+    if (request.preview && 'page' in request.preview.target && !request.expectedRevision) {
+      context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'Page-number previews require the inspected input revision.' });
+    }
+    if (request.draft && !request.expectedRevision) {
+      context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'Draft checks require the inspected input revision.' });
+    }
+    const target = request.preview?.target;
+    const references = [...(target && 'spread' in target ? [target.spread] : target && 'spreads' in target ? target.spreads : []),
+      ...(request.inspect ? [request.inspect.spread] : [])];
+    if (references.some((id) => id.startsWith('$')) && !request.draft) {
+      context.addIssue({ code: 'custom', path: ['preview', 'target', 'spread'], message: 'Batch references such as $chapter can only target spreads inserted by a draft.' });
+    }
+  }),
   apply_project_changes: z.strictObject({
     project, expectedRevision: revision, idempotencyKey,
     label: z.string().trim().min(1).max(120), operations: projectOperationsSchema,
@@ -57,8 +78,8 @@ export type McpToolArguments = { [Name in McpToolName]: z.output<typeof mcpToolS
 export const mcpTools: { name: McpToolName; description: string; readOnly: boolean }[] = [
   { name: 'list_projects', readOnly: true, description: 'List projects authorized by the connected ImageFlow app and obtain their stable handles and input revisions.' },
   { name: 'get_authoring_context', readOnly: true, description: 'Read template declarations, authoring guidance and selected template or Markdown source files for one authorized project.' },
-  { name: 'inspect_book', readOnly: true, description: 'Inspect a bounded set of saved spreads, sources or parameter values for one project. Use the returned revision for subsequent checks and commands.' },
-  { name: 'check_book', readOnly: true, description: 'Refresh and bundle the project, check the whole-book layout, and optionally return a clean PNG or JPEG page or spread image with its revision and diagnostics. Coverage explicitly reports checks that were not run.' },
+  { name: 'inspect_book', readOnly: true, description: 'Inspect saved spreads, sources or parameters. The elements view requires spread and measures box/element bounds in millimetres, computed typography, editable paths and assigned sources after whole-book text flow. Use the returned revision for checks and commands.' },
+  { name: 'check_book', readOnly: true, description: 'Check whole-book layout and return revision-tagged diagnostics and optional native artwork. Set typescript:true for installed-runtime type checking; type errors do not suppress usable images. Preview target supports page, spread, spread+box/element close-ups, or spreads:[IDs] contact sheets (at most 12). inspect requests bounded measured element geometry and typography. draft.operations renders unsaved changes; $aliases from inserted spreads work in preview and inspect targets. Coverage reports checks not run.' },
   { name: 'apply_project_changes', readOnly: false, description: 'Apply an atomic, revision-checked project command batch through ImageFlow. A unique idempotencyKey makes retries safe. dryRun validates without saving. One applied batch creates one named Undo entry.' },
   { name: 'import_sources', readOnly: false, description: 'Import up to 20 files copied into this project’s inbox/ folder. Requires the current input revision and a unique idempotencyKey. Returns registered source IDs and import outcomes.' },
 ];

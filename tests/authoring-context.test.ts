@@ -66,6 +66,25 @@ function countChecks(hooks: Parameters<typeof createAuthoringService>[0]) {
   return () => count;
 }
 
+for (const code of ['typescript-error', 'typescript-timeout']) {
+  test(code + ' results do not enter the context or inspection cache', async (t) => {
+    const { hooks, call } = await fixture(t);
+    hooks.check = (book, request, signal, index, draft) => checkProject(book, book.cache, request,
+      async () => ({ status }), signal, index, undefined, draft, async () => ({
+        files: ['template/index.tsx'], totalDiagnostics: 1, truncated: false, elapsedMs: 10,
+        diagnostics: [{ code, stage: 'template', severity: 'error', message: 'Type check finding.' }],
+      }));
+    for (const tool of ['get_authoring_context', 'inspect_book']) {
+      const typed = await call('check_book', { typescript: true });
+      assert.equal((typed.checks as { typescript: string }).typescript, 'failed');
+      const plain = await call(tool);
+      assert.equal((plain.checks as { typescript: string }).typescript, 'not-run');
+      assert.ok(!(plain.diagnostics as AuthoringDiagnostic[]).some((finding) => finding.code === code));
+      assert.equal(plain.typecheck, undefined);
+    }
+  });
+}
+
 function changeDuringMutationPreparation(
   hooks: Parameters<typeof createAuthoringService>[0], session: ProjectSession, change: () => void | Promise<void>,
 ) {

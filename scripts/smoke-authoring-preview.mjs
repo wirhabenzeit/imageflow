@@ -181,11 +181,60 @@ try {
   expectPixel(last, .5, .5, [255, 136, 0]);
 
   const inactive = await check({ preview: { target: { spread: 'first', side: 'left' } } });
+  // Detail crops and measured geometry come from the same fully flowed artwork, including asymmetric bleed.
+  const detail = await check({ inspect: { spread: 'later', box: 'photo' },
+    preview: { target: { spread: 'later', box: 'photo', paddingMm: 0 }, maxEdge: 300 } });
+  assert.equal(detail.state, 'ready', JSON.stringify(detail.diagnostics));
+  const measured = detail.render.inspection.items[0];
+  assert.equal(measured.id, 'photo');
+  assert.equal(measured.source, 'art');
+  for (const [key, expected] of Object.entries({ x: 52, y: 35, width: 10, height: 10 })) {
+    assert.ok(Math.abs(measured.boundsMm[key] - expected) < .1, JSON.stringify(measured));
+  }
+  const photoDetail = await raster(detail.image, { width: 300, height: 300, mimeType: 'image/png' });
+  expectPixel(photoDetail, .5, .5, [255, 0, 255]);
+  const sheetResult = await check({ preview: { target: { spreads: ['first', 'later', 'last'], columns: 2 }, maxEdge: 800 } });
+  assert.equal(sheetResult.state, 'ready', JSON.stringify(sheetResult.diagnostics));
+  const sheetImage = sheetResult.image;
+  assert.equal(sheetImage.kind, 'contact-sheet');
+  assert.deepEqual(sheetImage.cells.map(cell => cell.side), ['right', 'spread', 'left']);
+  const collage = await raster(sheetImage, { width: sheetImage.width, height: sheetImage.height, mimeType: 'image/png' });
+  if (process.env.IMAGEFLOW_PREVIEW_AUDIT === '1') {
+    await writeFile(join(build, 'feedback-contact-sheet.png'), Buffer.from(sheetImage.data, 'base64'));
+    await writeFile(join(build, 'feedback-detail.png'), Buffer.from(detail.image.data, 'base64'));
+  }
+  const cell = sheetImage.cells[1];
+  expectPixel(collage, (cell.x + cell.width * .25) / sheetImage.width, (cell.y + cell.height * .5) / sheetImage.height, [255, 0, 255]);
+  assert.ok(collage.count((r,g,b)=>r<60 && g>100 && b<60)>5, 'The contact sheet retains the later green text continuation.');
+  const absentDetail = await check({ preview: { target: { spread: 'later', box: 'absent' } } });
+  assert.equal(absentDetail.state, 'error');
+  assert.equal(absentDetail.diagnostics[0].code, 'preview-target-not-found');
   assert.equal(inactive.state, 'error');
   assert.equal(inactive.diagnostics[0].code, 'preview-target-not-found');
   const oversized = await check({ preview: { target: { page: 2 }, maxEdge: 1601 } });
   assert.equal(oversized.state, 'error');
   assert.equal(oversized.diagnostics[0].code, 'invalid-check-request');
+
+  // Simulate a renderer returning undersized metadata: ordinary pages and details must reject it.
+  for (const target of [{ page: 2 }, { spread: 'later', box: 'photo' }]) {
+    await app.evaluate(({ app }) => {
+      app.once('browser-window-created', (_event, window) => {
+        const execute = window.webContents.executeJavaScript.bind(window.webContents);
+        window.webContents.executeJavaScript = async (...args) => {
+          const result = await execute(...args);
+          if (result?.preview?.state === 'ready') {
+            result.preview.metadata.width = 100;
+            result.preview.metadata.height = 100;
+          }
+          return result;
+        };
+      });
+    });
+    const undersized = await check({ preview: { target, maxEdge: 400 } });
+    assert.equal(undersized.state, 'error');
+    assert.equal(undersized.diagnostics[0].code, 'preview-capture-failed');
+    assert.equal(undersized.image, undefined);
+  }
 
   const proof = join(work, 'proof.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, proof);
@@ -217,6 +266,45 @@ try {
   }, { ready, previousFrame });
   const recovered = await check({ expectedRevision: checked.revision });
   assert.equal(recovered.state, 'ready', JSON.stringify(recovered.diagnostics));
+
+  // Findings carry stable codes, the box/source involved, measured values and a suggested fix.
+  const diagnosed = template.replace("transparency: 'allow' }", "transparency: 'allow', resolution: { minimum: 300, target: 300, maximum: 600 } }");
+  assert.notEqual(diagnosed, template);
+  const previousDiagnosed = await w.locator(displayed).getAttribute('src');
+  // A missing font file is a bundle error; a file that exists but cannot be decoded fails at render time.
+  await writeFile(join(project, 'template', 'broken.woff2'), 'not a font');
+  await writeFile(join(project, 'template', 'style.css'), `
+    @font-face { font-family: Missing; src: url('./broken.woff2'); }
+    .if-spread > .bleed { background: #00ffff; }
+    .trim { position: absolute; inset: 0; background: #fff; }
+    .story { position: absolute; top: 10mm; width: 70mm; height: 12mm; font: 20px/28px Missing, serif; }
+  `);
+  await writeFile(join(project, 'texts', 'story.md'), Array.from({ length: 40 }, (_, i) => 'Paragraph ' + i + ' of a story that cannot fit.').join('\n\n'));
+  await writeFile(entry, diagnosed);
+  await w.waitForFunction(({ displayed, previousDiagnosed }) => {
+    const current = document.querySelector(displayed);
+    return current && current.getAttribute('src') !== previousDiagnosed;
+  }, { displayed, previousDiagnosed }).catch(async (error) => {
+    throw new Error('The diagnostics fixture did not reload: ' + await w.locator('.status').textContent().catch(() => ''), { cause: error });
+  });
+  const findings = await check();
+  assert.equal(findings.state, 'ready', JSON.stringify(findings.diagnostics));
+  const finding = (code) => {
+    const found = findings.diagnostics.find((diagnostic) => diagnostic.code === code);
+    assert.ok(found, code + ' missing from ' + JSON.stringify(findings.diagnostics));
+    assert.ok(found.suggestion, code + ' needs a suggested fix.');
+    return found;
+  };
+  const overflow = finding('text-overflow');
+  assert.deepEqual([overflow.severity, overflow.location.spread, overflow.location.box, overflow.location.source], ['error', 'later', 'story', 'story']);
+  assert.ok(overflow.details.overflowCharacters > 0);
+  assert.equal(overflow.details.boxes, 2);
+  const lowResolution = finding('photo-resolution-low');
+  assert.deepEqual([lowResolution.location.spread, lowResolution.location.box, lowResolution.location.source], ['later', 'photo', 'art']);
+  assert.equal(lowResolution.details.minimumPpi, 300);
+  assert.ok(lowResolution.details.ppi > 200 && lowResolution.details.ppi < 300, JSON.stringify(lowResolution.details));
+  assert.ok(Math.abs(lowResolution.details.boxWidthMm - 10) <= .2, JSON.stringify(lowResolution.details));
+  assert.equal(finding('font-load-failed').details.family, 'Missing');
   console.log('ImageFlow authoring preview passed.');
 } finally {
   await app?.close();

@@ -10,7 +10,7 @@ import type { ProjectFiles, SpreadState, Values } from './project';
 import { maxZoom, setPlacement } from './spread';
 
 const id = identifier.refine((value) => value.length <= 256, 'Identifiers must be at most 256 characters.');
-const spreadReference = z.union([id, z.string().startsWith('$').refine((value) => id.safeParse(value.slice(1)).success,
+export const spreadReference = z.union([id, z.string().startsWith('$').refine((value) => id.safeParse(value.slice(1)).success,
   'Use a spread ID or $ followed by a batch reference.')]);
 const value = z.union([z.string(), z.boolean(), z.number()]);
 const parameterValues = z.record(id, value);
@@ -285,10 +285,13 @@ export function applyProjectCommands(
       }
       case 'clear_box': {
         const spread = findSpread(operation.spread);
-        findBox(spread, operation.box);
         const before = own(spread.boxes, operation.box);
+        // Saved content outside the current layout, including content no layout declares any more, can be cleared too.
+        if (!before) findBox(spread, operation.box);
         if (!before || (!before.photo && !before.text && !before.crops && !before.focus)) break;
-        discardContent(spread, operation.box);
+        if (Object.values(template.spreads).some((layout) => own(layout.boxes, operation.box))) discardContent(spread, operation.box);
+        // No layout can show or edit this box, so its parameters go with its content.
+        else delete spread.boxes[operation.box];
         changed('Cleared box ' + operation.box, [spread.id], !!before.text);
         break;
       }

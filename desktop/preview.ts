@@ -4,6 +4,7 @@ import { desktopScheme } from '../src/desktop';
 import type { RenderStatus } from '../src/desktop';
 import { maxPreviewEdge, parsePreviewRequest, PreviewError } from '../src/preview';
 import type { PreviewMetadata, PreviewRequest } from '../src/preview';
+import type { InspectionRequest } from '../src/inspection';
 
 type ReadyStatus = Extract<RenderStatus, { state: 'ready' }>;
 export type BookPreview = PreviewMetadata & {
@@ -66,7 +67,9 @@ async function withRenderedBook<T>(
       })
     `);
     runSignal.throwIfAborted();
-    if (status.state === 'error') throw new PreviewError(preview?.state === 'error' ? preview.code : 'render-failed', status.message);
+    if (status.state === 'error') {
+      throw new PreviewError(preview?.state === 'error' ? preview.code : 'render-failed', status.message, { template: status.template });
+    }
     return useRender(window, status, preview?.state === 'ready' ? preview.metadata : undefined);
   };
   try {
@@ -84,19 +87,24 @@ async function withRenderedBook<T>(
   }
 }
 
-export function checkBookRender(url: string, signal?: AbortSignal) {
-  return withRenderedBook(url, new URLSearchParams({ view: 'check' }), signal, (_window, status) => status);
+export function checkBookRender(url: string, signal?: AbortSignal, inspect?: InspectionRequest) {
+  const query = new URLSearchParams({ view: 'check' });
+  if (inspect) query.set('inspect', JSON.stringify(inspect));
+  return withRenderedBook(url, query, signal, (_window, status) => status);
 }
 
-export async function captureBookPreview(url: string, request: PreviewRequest, signal?: AbortSignal): Promise<BookPreview> {
+export async function captureBookPreview(url: string, request: PreviewRequest, signal?: AbortSignal, inspect?: InspectionRequest): Promise<BookPreview> {
   const options = parsePreviewRequest(request);
   const query = new URLSearchParams({ view: 'artwork', request: JSON.stringify(options) });
+  if (inspect) query.set('inspect', JSON.stringify(inspect));
   return withRenderedBook(url, query, signal, async (window, status, metadata) => {
     if (!metadata) throw new PreviewError('preview-capture-failed', 'The renderer did not produce the requested artwork.');
     const { width, height } = metadata;
     const [availableWidth, availableHeight] = window.getContentSize();
+    const longest = Math.max(width, height);
+    const wrongEdge = 'kind' in metadata ? longest > options.maxEdge : longest !== options.maxEdge;
     if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 ||
-        Math.max(width, height) !== options.maxEdge || width > availableWidth || height > availableHeight) {
+        wrongEdge || width > availableWidth || height > availableHeight) {
       throw new PreviewError('preview-capture-failed', 'The rendered artwork does not fit the preview dimensions.');
     }
     try {

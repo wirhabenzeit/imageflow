@@ -101,6 +101,22 @@ test('replacement assignments reset crop state and clearing preserves box parame
   failure([{ op: 'assign_source', spread: 'one', box: 'hero', kind: 'photo', source: 'missing' }], 'SOURCE_NOT_FOUND');
 });
 
+test('clearing removes saved content the current layout does not declare', () => {
+  const base = files();
+  base.project.spreads[0].boxes.orphan = { photo: 'p1', params: { legacy: true } };
+  base.project.spreads[1] = { ...base.project.spreads[1], definition: 'minimal', boxes: { hero: { photo: 'p2', params: {} }, second: { photo: 'p1', params: { caption: true } } } };
+  const cleared = applyProjectCommands(base, template, [
+    { op: 'clear_box', spread: 'one', box: 'orphan' },
+    { op: 'clear_box', spread: 'two', box: 'second' },
+  ]);
+  // No layout declares `orphan`, so nothing can use its parameters any more.
+  assert.equal(Object.hasOwn(cleared.files.project.spreads[0].boxes, 'orphan'), false);
+  // `second` is kept for the main layout, so its parameters stay with the spread.
+  assert.deepEqual(cleared.files.project.spreads[1].boxes.second, { params: { caption: true } });
+  assert.deepEqual(cleared.changes, ['Cleared box orphan', 'Cleared box second']);
+  failure([{ op: 'clear_box', spread: 'one', box: 'unknown' }], 'BOX_NOT_FOUND');
+});
+
 test('swapping across spreads moves focus and keeps parameters while discarding per-frame crops', () => {
   const result = applyProjectCommands(files(), template, [{ op: 'swap_content', from: { spread: 'one', box: 'hero' }, to: { spread: 'two', box: 'hero' } }]);
   assert.deepEqual(result.files.project.spreads[0].boxes.hero, { params: { caption: true }, photo: 'p2' });
