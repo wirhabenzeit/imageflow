@@ -157,10 +157,23 @@ test('a failure late in a batch reports its operation and rolls back every earli
 });
 
 test('references must be declared earlier, unique, and point to existing spreads', () => {
-  failure([{ op: 'move_spread', spread: '$future' }], 'REFERENCE_NOT_FOUND');
+  failure([{ op: 'move_spread', spread: '$future', after: null }], 'REFERENCE_NOT_FOUND');
   failure([{ op: 'duplicate_spread', spread: 'one', ref: 'copy' }, { op: 'duplicate_spread', spread: 'one', ref: 'copy' }], 'DUPLICATE_REFERENCE', 1);
-  failure([{ op: 'duplicate_spread', spread: 'one', ref: 'copy' }, { op: 'remove_spread', spread: '$copy' }, { op: 'move_spread', spread: '$copy' }], 'SPREAD_NOT_FOUND', 2);
+  failure([{ op: 'duplicate_spread', spread: 'one', ref: 'copy' }, { op: 'remove_spread', spread: '$copy' }, { op: 'move_spread', spread: '$copy', after: null }], 'SPREAD_NOT_FOUND', 2);
   assert.throws(() => applyProjectCommands(files(), template, [{ op: 'duplicate_spread', spread: 'one' }], { generateId: () => 'one' }), { code: 'INVALID_SPREAD_ID', operationIndex: 0 });
+});
+
+test('moves require a destination and support the start, a spread, and earlier batch references', () => {
+  failure([{ op: 'move_spread', spread: 'two' }], 'INVALID_OPERATION');
+  const front = applyProjectCommands(files(), template, [{ op: 'move_spread', spread: 'two', after: null }]);
+  assert.deepEqual(front.files.project.spreads.map(({ id }) => id), ['two', 'one']);
+  const after = applyProjectCommands(files(), template, [{ op: 'move_spread', spread: 'one', after: 'two' }]);
+  assert.deepEqual(after.files.project.spreads.map(({ id }) => id), ['two', 'one']);
+  const referenced = applyProjectCommands(files(), template, [
+    { op: 'insert_spread', definition: 'main', ref: 'chapter' },
+    { op: 'move_spread', spread: 'one', after: '$chapter' },
+  ], { generateId: () => 'chapter-id' });
+  assert.deepEqual(referenced.files.project.spreads.map(({ id }) => id), ['two', 'chapter-id', 'one']);
 });
 
 test('metadata updates support explicit removal and identify every retained use', () => {
@@ -178,8 +191,8 @@ test('strict schemas reject unknown fields, malformed scopes, unsafe IDs, invali
     { op: 'set_title', title: 'Book', unexpected: true },
     { op: 'set_parameter', scope: 'document', spread: 'one', key: 'paper', value: 'white' },
     { op: 'set_parameter', scope: 'box', spread: 'one', key: 'caption', value: true },
-    { op: 'move_spread', spread: 'constructor' },
-    { op: 'move_spread', spread: '$__proto__' },
+    { op: 'move_spread', spread: 'constructor', after: null },
+    { op: 'move_spread', spread: '$__proto__', after: null },
     { op: 'insert_spread', definition: 'main', boxes: { hero: { photo: 'p1', unexpected: true } } },
     { op: 'set_crop', spread: 'one', box: 'hero', centerX: -.1, centerY: .5, zoom: 1 },
     { op: 'set_crop', spread: 'one', box: 'hero', centerX: .5, centerY: .5, zoom: Infinity },

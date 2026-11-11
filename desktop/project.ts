@@ -53,6 +53,15 @@ function parseJson(source: Buffer, name: ManifestName) {
   }
 }
 
+export function readProjectDocument(root: string, name: 'project.json'): Promise<{ document: Project; source: Buffer }>;
+export function readProjectDocument(root: string, name: 'photos.json'): Promise<{ document: PhotoIndex; source: Buffer }>;
+export async function readProjectDocument(root: string, name: ManifestName): Promise<{ document: Project | PhotoIndex; source: Buffer }> {
+  const source = await readProjectManifest(root, name);
+  const value = parseJson(source, name);
+  const document = name === 'project.json' ? parseDocument(projectSchema, value, name) : parseDocument(photoIndexSchema, value, name);
+  return { document, source };
+}
+
 const hostModules = new Map([
   ['imageflow', 'export const { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset, file } = globalThis.ImageFlowRuntime;'],
   ['react', 'export default globalThis.ImageFlowReact; export const { createElement, Fragment, Children } = globalThis.ImageFlowReact;'],
@@ -173,9 +182,9 @@ const fileName = (path: string) => basename(path).replace(/^fl-[0-9a-f-]{12}-/, 
 export async function loadProject(path: string, fallback: string, readOnly = false): Promise<OpenProject> {
   const folder = await realpath(path);
   await recoverProjectSave(folder, { readOnly });
-  const [projectFile, photoFile] = await Promise.all([readProjectManifest(folder, 'project.json'), readProjectManifest(folder, 'photos.json')]);
-  const project = parseDocument(projectSchema, parseJson(projectFile, 'project.json'), 'project.json');
-  const photoIndex = parseDocument(photoIndexSchema, parseJson(photoFile, 'photos.json'), 'photos.json');
+  const [{ document: project, source: projectFile }, { document: photoIndex, source: photoFile }] = await Promise.all([
+    readProjectDocument(folder, 'project.json'), readProjectDocument(folder, 'photos.json'),
+  ]);
   const [assets, cache] = await Promise.all([bundleTemplate(folder), readOnly ? fallback : cacheFolder(folder, fallback)]);
   return readContent({ folder, assets, cache, readOnly, project, photoIndex, manifests: { 'project.json': projectFile, 'photos.json': photoFile } });
 }

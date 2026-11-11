@@ -2,14 +2,15 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from '../src/authoring-check';
+import type { AuthoringDiagnostic } from '../src/authoring';
 import type { ImportRequest } from '../src/desktop';
 import { applyProjectCommands, ProjectCommandError } from '../src/project-commands';
 import { pageSequence } from '../src/format';
 import { keptOutside } from '../src/layouts';
 import { sourceUsage } from '../src/editing';
-import { parseDocument, projectSchema, photoIndexSchema } from '../src/project';
-import { captureProjectInputs, captureProjectRevision } from './revisions';
-import { loadProject } from './project';
+import { captureProjectInputs, captureProjectRevision, ProjectRevisionError } from './revisions';
+import type { ProjectInputCapture } from './revisions';
+import { loadProject, readProjectDocument } from './project';
 import { photoExtensions } from './photos';
 import type { OpenProject } from './project';
 import type { ProjectSession } from './project-session';
@@ -39,6 +40,58 @@ async function contained(root: string, path: string, allowed: string[]) {
     throw new AuthoringError('PATH_NOT_ALLOWED', 'The source points outside the allowed project folder.');
   }
   return actual;
+}
+
+async function contextInputs(folder: string, signal: AbortSignal): Promise<{ inputs?: ProjectInputCapture; failure?: string }> {
+  try { return { inputs: await captureProjectInputs(folder, { signal }) }; }
+  catch (error) {
+    signal.throwIfAborted();
+    if (!(error instanceof ProjectRevisionError)) throw error;
+    if (error.code === 'source-changed') throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while preparing context. Check again.');
+    return { failure: JSON.stringify([error.code, error.path]) };
+  }
+}
+
+async function contextSource(folder: string, path: string, signal: AbortSignal) {
+  signal.throwIfAborted();
+  const actual = await contained(folder, path, ['template', 'texts']);
+  if (!['.ts', '.tsx', '.css', '.json', '.md'].includes(extname(actual))) throw new AuthoringError('SOURCE_TYPE_NOT_SUPPORTED', 'Context reads support TS, TSX, CSS, JSON and Markdown files.');
+  const observe = async () => {
+    const info = await stat(actual, { bigint: true });
+    return { stamp: [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':'), size: info.size, regular: info.isFile() };
+  };
+  const before = await observe();
+  if (!before.regular) throw new AuthoringError('SOURCE_TYPE_NOT_SUPPORTED', 'Context reads require regular source files.');
+  if (before.size > 512_000n) throw new AuthoringError('SOURCE_TOO_LARGE', 'Read this source using your workspace tools; it exceeds 512 KB.');
+  const bytes = await readFile(actual, { signal });
+  if (before.stamp !== (await observe()).stamp || actual !== await contained(folder, path, ['template', 'texts'])) {
+    throw new AuthoringError('SOURCE_CHANGED', 'Source ' + path + ' changed while preparing context.');
+  }
+  return { text: bytes.toString('utf8').slice(0, 32_000), sha256: createHash('sha256').update(bytes).digest('hex'),
+    truncated: bytes.length > 32_000, observation: before.stamp };
+}
+
+async function contextTemplateFiles(folder: string) {
+  const root = join(folder, 'template');
+  if (await realpath(root) !== root) throw new AuthoringError('PATH_NOT_ALLOWED', 'The template folder points outside its expected location.');
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  return entries.filter((entry) => entry.isFile()).map((entry) => relative(folder, join(entry.parentPath, entry.name))).sort().slice(0, 200);
+}
+
+function failureIdentity(error: unknown) {
+  if (!(error instanceof Error)) return JSON.stringify([typeof error, String(error)]);
+  return JSON.stringify([error.name, 'code' in error ? error.code : undefined, error.message]);
+}
+
+const settledState = (results: PromiseSettledResult<unknown>[]) => JSON.stringify(results.map((result) => result.status === 'fulfilled'
+  ? ['fulfilled', result.value] : ['rejected', failureIdentity(result.reason)]));
+
+function sameDocuments(before: PromiseSettledResult<{ source: Buffer }>[], after: PromiseSettledResult<{ source: Buffer }>[]) {
+  return before.every((document, index) => {
+    const current = after[index];
+    if (document.status === 'fulfilled' && current.status === 'fulfilled') return document.value.source.equals(current.value.source);
+    return document.status === 'rejected' && current.status === 'rejected' && failureIdentity(document.reason) === failureIdentity(current.reason);
+  });
 }
 
 export function createAuthoringService(hooks: Hooks) {
@@ -73,32 +126,62 @@ export function createAuthoringService(hooks: Hooks) {
     }
     if (name === 'get_authoring_context' || name === 'inspect_book') {
       const report = await checked(session, signal);
-      const before = await captureProjectInputs(session.book.folder, { signal });
-      if (report.revision !== before.revision) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while preparing context. Check again.');
-      const project = parseDocument(projectSchema, JSON.parse(await readFile(join(session.book.folder, 'project.json'), 'utf8')), 'project.json');
-      const photos = parseDocument(photoIndexSchema, JSON.parse(await readFile(join(session.book.folder, 'photos.json'), 'utf8')), 'photos.json');
+      const folder = session.book.folder;
+      const before = await contextInputs(folder, signal);
+      if (report.revision !== (before.inputs?.revision ?? null)) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while preparing context. Check again.');
+      const reportedFailure = report.diagnostics.find(({ code }) => ['source-missing', 'source-outside-project', 'source-unreadable'].includes(code));
+      if (before.failure && reportedFailure && before.failure !== JSON.stringify([reportedFailure.code, reportedFailure.location?.path])) {
+        throw new AuthoringError('SOURCE_CHANGED', 'Unavailable inputs changed after checking. Check again.');
+      }
+      const readDocuments = () => Promise.allSettled([
+        readProjectDocument(folder, 'project.json'), readProjectDocument(folder, 'photos.json'),
+      ]);
+      const documents = await readDocuments();
+      const project = documents[0].status === 'fulfilled' ? documents[0].value.document : undefined;
+      const photos = documents[1].status === 'fulfilled' ? documents[1].value.document : undefined;
+      const diagnostics: AuthoringDiagnostic[] = report.diagnostics.map((diagnostic) => ({ ...diagnostic,
+        ...(diagnostic.location ? { location: { ...diagnostic.location } } : {}) }));
+      function unavailable(error: unknown, path: string) {
+        if (error instanceof AuthoringError && error.code === 'SOURCE_CHANGED') throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        const existing = diagnostics.find((diagnostic) => diagnostic.message === message);
+        if (existing) existing.location = { ...existing.location, path };
+        else diagnostics.push({ code: 'context-input-unavailable', stage: 'project', severity: 'error', message, location: { path } });
+      }
+      for (const [index, document] of documents.entries()) {
+        if (document.status === 'rejected') unavailable(document.reason, index === 0 ? 'project.json' : 'photos.json');
+      }
       const template = report.render?.template;
       let result: Record<string, unknown>;
+      let verifySources: (() => Promise<void>) | undefined;
       if (name === 'get_authoring_context') {
         const sources: Record<string, { text: string; sha256: string; truncated: boolean }> = {};
         const requested: string[] = args.includeSource ?? ['template/index.tsx'];
-        for (const path of requested) {
-          const file = await contained(session.book.folder, path, ['template', 'texts']);
-          if (!['.ts', '.tsx', '.css', '.json', '.md'].includes(extname(file))) throw new AuthoringError('SOURCE_TYPE_NOT_SUPPORTED', 'Context reads support TS, TSX, CSS, JSON and Markdown files.');
-          const size = (await stat(file)).size;
-          if (size > 512_000) throw new AuthoringError('SOURCE_TOO_LARGE', 'Read this source using your workspace tools; it exceeds 512 KB.');
-          const bytes = await readFile(file);
-          sources[path] = { text: bytes.toString('utf8').slice(0, 32_000), sha256: createHash('sha256').update(bytes).digest('hex'), truncated: bytes.length > 32_000 };
+        const readSources = () => Promise.allSettled(requested.map((path) => contextSource(folder, path, signal)));
+        const sourceResults = await readSources();
+        for (const [index, source] of sourceResults.entries()) {
+          if (source.status === 'rejected') unavailable(source.reason, requested[index]);
+          else {
+            const { observation: _observation, ...content } = source.value;
+            sources[requested[index]] = content;
+          }
         }
-        const entries = await readdir(join(session.book.folder, 'template'), { recursive: true, withFileTypes: true });
+        const files = await Promise.allSettled([contextTemplateFiles(folder)]);
+        if (files[0].status === 'rejected') unavailable(files[0].reason, 'template');
+        verifySources = async () => {
+          if (settledState(sourceResults) !== settledState(await readSources()) ||
+              settledState(files) !== settledState(await Promise.allSettled([contextTemplateFiles(folder)]))) {
+            throw new AuthoringError('SOURCE_CHANGED', 'Sources changed while preparing context. Check again.');
+          }
+        };
         result = {
           project: session.handle, revision: report.revision, root: session.book.folder,
           workflow: ['Edit template/ TSX, CSS and assets directly with workspace tools.', 'Edit existing texts/ Markdown directly.',
             'Call check_book with a spread preview after edits; images include whole-book text flow.',
             'Use apply_project_changes for project.json/photos.json; never edit these manifests while the app is open.',
             'Copy new content into inbox/ and call import_sources. Then assign returned IDs with a command batch.'],
-          template, diagnostics: report.diagnostics, checks: report.checks, sources,
-          templateFiles: entries.filter((entry) => entry.isFile()).slice(0, 200).map((entry) => relative(session.book.folder, join(entry.parentPath, entry.name))),
+          template, diagnostics, checks: report.checks, sources,
+          templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
           apiReference: await readFile(hooks.docs, 'utf8'),
           capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
             maxPreviewEdge: 1600, typescript: false, printPreflight: false, fixtures: false, contactSheets: false,
@@ -108,27 +191,32 @@ export function createAuthoringService(hooks: Hooks) {
         };
       } else {
         const offset = args.offset ?? 0, limit = args.limit ?? 30;
-        const sequence = template && pageSequence(project.spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
-        const labels = project.spreads.map((_, i) => Object.values(sequence?.spreads[i].page ?? {}).join('–'));
-        const usage = sourceUsage(project, labels, template?.spreads);
+        const sequence = template && project && pageSequence(project.spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
+        const labels = project?.spreads.map((_, i) => Object.values(sequence?.spreads[i].page ?? {}).join('–')) ?? [];
+        const usage = project ? sourceUsage(project, labels, template?.spreads) : { photo: {}, text: {} };
         const view = args.view ?? 'summary';
         const records = view === 'sources' ? [
-          ...Object.entries(photos).map(([id, source]) => ({ kind: 'photo', id, ...source, usage: usage.photo[id] ?? [] })),
-          ...Object.entries(project.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path, usage: usage.text[id] ?? [] })),
-          ...Object.entries(project.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path })),
-        ] : project.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...spread,
+          ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, usage: usage.photo[id] ?? [] })),
+          ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path, usage: usage.text[id] ?? [] })),
+          ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path })),
+        ] : project?.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...spread,
           page: sequence?.spreads[project.spreads.indexOf(spread)].page,
           kept: template ? keptOutside(spread, template.spreads) : [],
           ...(view === 'parameters' && template ? { declarations: template.spreads[spread.definition] } : {}),
-        }));
-        result = { project: session.handle, revision: report.revision, title: project.title, format: project.format,
+        })) ?? [];
+        result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format,
           pages: report.render?.pages, total: records.length, offset, items: records.slice(offset, offset + limit),
           nextOffset: offset + limit < records.length ? offset + limit : null,
-          ...(view === 'parameters' ? { document: { values: project.params, declarations: template?.parameters } } : {}),
-          diagnostics: report.diagnostics, checks: report.checks, history: session.history };
+          ...(view === 'parameters' ? { document: { values: project?.params, declarations: template?.parameters } } : {}),
+          diagnostics, checks: report.checks, history: session.history };
       }
-      const after = await captureProjectInputs(session.book.folder, { signal });
-      if (after.revision !== before.revision || after.observation !== before.observation) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while inspecting. Retry for current context.');
+      await verifySources?.();
+      const documentsAfter = await readDocuments();
+      const after = await contextInputs(folder, signal);
+      if (!sameDocuments(documents, documentsAfter) || before.failure !== after.failure ||
+          before.inputs?.revision !== after.inputs?.revision || before.inputs?.observation !== after.inputs?.observation) {
+        throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while inspecting. Retry for current context.');
+      }
       get(session.handle);
       return result;
     }

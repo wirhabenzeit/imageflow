@@ -45,7 +45,8 @@ export const projectOperationSchema = z.discriminatedUnion('op', [
     elements: z.record(id, z.strictObject({ params: parameterValues.default({}) })).default({}),
   }),
   z.strictObject({ op: z.literal('duplicate_spread'), spread: spreadReference, ref: id.optional(), after: spreadReference.nullable().optional() }),
-  z.strictObject({ op: z.literal('move_spread'), spread: spreadReference, after: spreadReference.nullable().optional() }),
+  z.strictObject({ op: z.literal('move_spread'), spread: spreadReference,
+    after: spreadReference.nullable().describe('Required destination. Use null to move to the start, or an existing spread ID or $alias to move immediately after it.') }),
   z.strictObject({ op: z.literal('remove_spread'), spread: spreadReference }),
   z.strictObject({ op: z.literal('switch_layout'), spread: spreadReference, definition: id }),
   z.strictObject({ op: z.literal('assign_source'), ...boxTarget.shape, kind: z.enum(['photo', 'text']), source: id }),
@@ -242,7 +243,7 @@ export function applyProjectCommands(
       }
       case 'move_spread': {
         const spread = findSpread(operation.spread);
-        const after = operation.after == null ? undefined : findSpread(operation.after);
+        const after = operation.after === null ? undefined : findSpread(operation.after);
         if (spread === after) break;
         const before = project.spreads.indexOf(spread);
         project.spreads.splice(before, 1);
