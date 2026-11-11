@@ -3,6 +3,7 @@ import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, renderOrigin } from './desktop';
 import type { BookGeometry, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { BookFrame } from './BookFrame';
+import { McpPanel } from './McpPanel';
 import { revealIn } from './reveal';
 import { EditPopover } from './EditPopover';
 import { CropEditor } from './CropEditor';
@@ -119,7 +120,10 @@ export function App() {
   const thumbList = useRef<HTMLDivElement>(null);
   const pendingReveal = useRef<string>(undefined);
   const queue = useRef(Promise.resolve());
-  const history = useRef<{ past: ProjectFiles[]; future: ProjectFiles[] }>({ past: [], future: [] });
+  const agentLocked = useRef(false);
+  const [agentWorking, setAgentWorking] = useState(false);
+  const pendingTasks = useRef(0);
+  const workspace = useRef<HTMLDivElement>(null);
   const spreads = summary?.project.spreads ?? [];
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
@@ -128,7 +132,7 @@ export function App() {
     const pages = sequence?.spreads[i]?.page;
     return pages?.left && pages?.right ? pages.left + '–' + pages.right : String(pages?.left ?? pages?.right ?? '');
   });
-  const writable = !!summary && !summary.readOnly && !reload;
+  const writable = !!summary && !summary.readOnly && !reload && !agentWorking;
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
   const generation = inputGeneration.current;
@@ -156,11 +160,6 @@ export function App() {
   }
 
   function adoptReload(next: ProjectSummary) {
-    const before = current.current;
-    if (before && (JSON.stringify(before.project) !== JSON.stringify(next.project) ||
-        JSON.stringify(before.photoIndex) !== JSON.stringify(next.photoIndex))) {
-      history.current = { past: [], future: [] };
-    }
     adopt(next);
     setReload('rendering');
   }
@@ -172,7 +171,6 @@ export function App() {
     if (reset) {
       inputGeneration.current++;
       reloading.current = false;
-      history.current = { past: [], future: [] };
       setTemplate(undefined);
       setSelectedSource(undefined);
       setQuick(undefined);
@@ -197,6 +195,7 @@ export function App() {
   }
 
   function enqueue(task: () => Promise<void>) {
+    pendingTasks.current++;
     queue.current = queue.current.then(async () => {
       setError('');
       setNotice('');
@@ -207,6 +206,7 @@ export function App() {
       } finally {
         setBusy('');
         setExporting(false);
+        pendingTasks.current--;
       }
     });
   }
@@ -215,18 +215,17 @@ export function App() {
   function edit(change: Edit, notice?: string | (() => string), selected?: string, canvasId?: string) {
     enqueue(async () => {
       const before = current.current;
-      if (!api || !before || before.readOnly || reloading.current || generation !== inputGeneration.current ||
+      if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current ||
           (canvasId && (before.id !== canvasId || readyId.current !== canvasId))) return;
       const files = structuredClone({ project: before.project, photoIndex: before.photoIndex });
       change(files);
       if (template) files.project.template.version = template.version;
       if (JSON.stringify(files.project) === JSON.stringify(before.project) &&
           JSON.stringify(files.photoIndex) === JSON.stringify(before.photoIndex)) return;
-      const result = await api.saveProject(before.id, files);
+      const label = (typeof notice === 'function' ? notice() : notice) ?? 'Project edit';
+      const result = await api.saveProject(before.id, files, label);
       if ('error' in result) throw new Error(result.error);
       if (current.current !== before) return;
-      history.current.past.push({ project: before.project, photoIndex: before.photoIndex });
-      history.current.future = [];
       adopt(result.value, false, selected);
       setNotice((typeof notice === 'function' ? notice() : notice) ?? 'Saved');
     });
@@ -240,19 +239,10 @@ export function App() {
     const generation = inputGeneration.current;
     enqueue(async () => {
       const before = current.current;
-      const [source, destination] = direction === 'undo'
-        ? [history.current.past, history.current.future]
-        : [history.current.future, history.current.past];
-      const prior = source.at(-1);
-      if (!api || !before || !prior || before.readOnly || reloading.current || generation !== inputGeneration.current) return;
-      const files = structuredClone(prior);
-      files.project.texts = { ...before.project.texts, ...files.project.texts };
-      files.photoIndex = { ...before.photoIndex, ...files.photoIndex };
-      const result = await api.saveProject(before.id, files);
+      if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current) return;
+      const result = await api.history(before.id, direction);
       if ('error' in result) throw new Error(result.error);
       if (current.current !== before) return;
-      source.pop();
-      destination.push({ project: before.project, photoIndex: before.photoIndex });
       adopt(result.value);
       setNotice(direction === 'undo' ? 'Edit undone' : 'Edit redone');
     });
@@ -262,16 +252,12 @@ export function App() {
     const generation = inputGeneration.current;
     enqueue(async () => {
       const before = current.current;
-      if (!api || !before || before.readOnly || reloading.current || generation !== inputGeneration.current ||
+      if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current ||
           (canvasId && (before.id !== canvasId || readyId.current !== canvasId))) return;
       setBusy('Importing files…');
       const result = await api.importFiles(before.id, request);
       if ('error' in result) throw new Error(result.error);
       if (!result.value || current.current !== before) return;
-      if (request.target) {
-        history.current.past.push({ project: before.project, photoIndex: before.photoIndex });
-        history.current.future = [];
-      }
       adopt(result.value.summary);
       // Imports into the library select the first new source; imports onto a box keep the spread selected.
       if (!request.target) {
@@ -290,7 +276,7 @@ export function App() {
     return new Promise<string | undefined>((resolve) => enqueue(async () => {
       try {
         const before = current.current;
-        if (!api || !before || before.readOnly || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
+        if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
         setBusy('Importing file…');
         const result = await api.importFiles(before.id, { kind: 'file', accept });
         if ('error' in result) throw new Error(result.error);
@@ -312,7 +298,7 @@ export function App() {
       return importFiles({ kind: command === 'import-texts' ? 'markdown' : 'photo', folder: command === 'import-folder' });
     }
     enqueue(async () => {
-      if (!api) return;
+      if (!api || agentLocked.current) return;
       const before = current.current;
       if (command === 'export' || command === 'print') {
         if (!before || readyId.current !== before.id) return;
@@ -353,7 +339,7 @@ export function App() {
     });
   }
 
-  const onCommand = useEffectEvent((command: Command) => { if (!busy) act(command); });
+  const onCommand = useEffectEvent((command: Command) => { if (!busy && !agentLocked.current) act(command); });
   const onProjectChanged = useEffectEvent((change: ProjectChange) => {
     if ('building' in change) beginReload();
     else if ('error' in change) {
@@ -365,8 +351,23 @@ export function App() {
       setError('');
     }
   });
+  const acquireAgentLease = useEffectEvent(() => {
+    const focused = document.activeElement;
+    const typing = focused instanceof HTMLElement && (focused.matches('input, textarea, select, [contenteditable="true"]') || !!focused.closest('dialog'));
+    if (pendingTasks.current || busy || reloading.current || editing || elementEditor || cropping || typing || agentLocked.current) return false;
+    agentLocked.current = true;
+    if (workspace.current) workspace.current.inert = true;
+    setAgentWorking(true);
+    return true;
+  });
   useEffect(() => {
     if (!api) return;
+    const lease = api.onAgentLease(() => acquireAgentLease());
+    const release = api.onAgentRelease(() => {
+      agentLocked.current = false;
+      if (workspace.current) workspace.current.inert = false;
+      setAgentWorking(false);
+    });
     const command = api.onCommand((command) => onCommand(command));
     const changed = api.onProjectChanged((change) => onProjectChanged(change));
     const progress = api.onProgress(setBusy);
@@ -374,7 +375,7 @@ export function App() {
     if (import.meta.env.DEV) {
       void api.openProject('reload').then((result) => { if ('value' in result && result.value) adopt(result.value, true); });
     }
-    return () => { command(); changed(); progress(); };
+    return () => { command(); changed(); progress(); lease(); release(); };
   }, [api]);
 
   // The book frame renders every spread, so its status doubles as the book check.
@@ -807,7 +808,7 @@ export function App() {
   const hoveredSheet = hovered !== spread?.id ? geometry?.sheets.find(({ spread: id }) => id === hovered) : undefined;
   const previewError = typeof reload === 'object' ? reload.error : render?.state === 'error' ? render.message : '';
   const issue = previewError || error;
-  const previewNotice = previewError ? (geometry ? 'Showing the last successful preview' : 'Book preview unavailable') :
+  const previewNotice = agentWorking ? 'Agent is updating the book…' : previewError ? (geometry ? 'Showing the last successful preview' : 'Book preview unavailable') :
     !canvasReady ? 'Building book preview…' : '';
   const blockedInline = editing?.held && !resumeInline && (canvasReady
     ? 'This field changed while you were editing. Close it and open the field again to continue.'
@@ -827,11 +828,12 @@ export function App() {
       <div className="toolbar-actions">
         <div className="brand"><span className="brand-icon" aria-hidden="true">◫</span> ImageFlow</div>
         {summary && <div className="history">
-          <button disabled={!writable || !history.current.past.length || !!busy} onClick={() => undo('undo')}>Undo</button>
-          <button disabled={!writable || !history.current.future.length || !!busy} onClick={() => undo('redo')}>Redo</button>
+          <button title={summary.history?.undo ? 'Undo ' + summary.history.undo : undefined} disabled={!writable || !summary.history?.undo || !!busy} onClick={() => undo('undo')}>Undo</button>
+          <button title={summary.history?.redo ? 'Redo ' + summary.history.redo : undefined} disabled={!writable || !summary.history?.redo || !!busy} onClick={() => undo('redo')}>Redo</button>
         </div>}
       </div>
       <div className="toolbar-actions">
+        <McpPanel api={api} />
         <button disabled={!api || !!busy} onClick={() => act('new')}>New project…</button>
         <button disabled={!api || !!busy} onClick={() => act('open')}>Open project…</button>
         <button disabled={!summary || !!busy || typeof reload === 'string'} onClick={() => act('reload')}>Reload</button>
@@ -840,7 +842,7 @@ export function App() {
         {exporting && <button onClick={() => void api?.cancelExport()}>Cancel export</button>}
       </div>
     </header>
-    <div key={projectInstance} className={summary ? 'workspace' : 'workspace welcome-workspace'}>
+    <div ref={workspace} inert={agentWorking} key={projectInstance} className={summary ? 'workspace' : 'workspace welcome-workspace'}>
       <aside className="project-panel" aria-label="Project">
         <div className="project-head">
           <p className="eyebrow">Project</p>

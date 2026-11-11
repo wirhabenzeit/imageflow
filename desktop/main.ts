@@ -7,23 +7,39 @@ import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } 
 import { basename, dirname, extname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { channels, desktopScheme, editorURL, renderOrigin } from '../src/desktop';
-import type { Command, ExportMode, ImportRequest, OpenAction, ProjectChange, ProjectSummary, Result } from '../src/desktop';
+import type { Command, ExportMode, ImportRequest, OpenAction, ProjectChange, ProjectSummary, Result, McpSettings } from '../src/desktop';
 import { identifier } from '../src/project';
 import type { ProjectFiles, RenderProject } from '../src/project';
 import { printBook, saveProof } from './export';
-import { assetTypes, importIntoProject, loadProject, projectSummary, readProjectManifest, renderData, updateProject } from './project';
+import { assetTypes, importIntoProject, loadProject, projectSummary, readProjectManifest, renderData } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions, photoFile } from './photos';
 import { bundledFontNames } from './fonts';
 import { isProjectInputPath } from './revisions';
 import { checkProject } from './check';
 import { captureBookPreview, checkBookRender } from './preview';
+import { ProjectSession } from './project-session';
+import { createAuthoringService, AuthoringError } from './authoring-service';
+import { createMcpConnection } from './mcp-connection';
+import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
+import type { ProjectLock } from './persistence';
+import type { AuthoringCheckRequest } from '../src/authoring-check';
 
 let window: BrowserWindow | null = null;
 let active: { id: string; book: OpenProject } | undefined;
 let busy = false;
+let projectSession: ProjectSession | undefined;
+let unlockProject: ProjectLock | undefined;
+let mcpConnection: Awaited<ReturnType<typeof createMcpConnection>> | undefined;
+let mcpClients: { name: string }[] = [];
+let mcpCalling = false;
+let closingProject: Promise<void> | undefined;
+let closing = false;
+let connectionSettingsQueue = Promise.resolve();
+const agentLeases = new Map<string, (allowed: boolean) => void>();
 let exportJob: AbortController | undefined;
 let checkJob: AbortController | undefined;
+const checkJobs = new Set<AbortController>();
 let watcher: FSWatcher | undefined;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 const observedChanges = new Set<string>();
@@ -42,6 +58,9 @@ const csp = devServer
   : "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data:";
 if (app.isPackaged) process.env.ESBUILD_BINARY_PATH = join(process.resourcesPath, 'esbuild');
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
+
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on('second-instance', () => { if (window) { window.show(); window.focus(); } });
 
 protocol.registerSchemesAsPrivileged([
   { scheme: desktopScheme, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -115,13 +134,18 @@ async function fromEditor<T>(event: IpcMainInvokeEvent, run: (owner: BrowserWind
   try {
     return { value: await run(owner) };
   } catch (error) {
+    if (error instanceof CommittedProjectSaveError && !owner.isDestroyed()) owner.webContents.send(channels.changed, { error: error.message });
     return { error: errorMessage(error) };
   } finally {
     busy = false;
   }
 }
 
-function activate(book: OpenProject): ProjectSummary {
+function activate(book: OpenProject, external = false): ProjectSummary {
+  if (closing) throw new AuthoringError('PROJECT_CLOSED', 'The project window closed.');
+  if (!projectSession || projectSession.book.folder !== book.folder) projectSession = new ProjectSession(book);
+  else if (external) projectSession.adoptExternal(book);
+  else projectSession.book = book;
   const previous = active;
   const id = randomUUID();
   active = { id, book };
@@ -135,7 +159,7 @@ function activate(book: OpenProject): ProjectSummary {
     if (mode === 'edit' && !retained.has(sessionId)) sessions.delete(sessionId);
   }
   sessions.set(id, { book, mode: 'edit' });
-  return projectSummary(book, id);
+  return { ...projectSummary(book, id), handle: projectSession.handle, history: projectSession.history };
 }
 
 function stopWatch() {
@@ -209,7 +233,7 @@ function watchProject(book: OpenProject) {
           return;
         }
         for (const [i, file] of files.entries()) if (external[i]) importedWrites.delete(file);
-        notify('error' in next ? { error: next.error } : { value: activate(next.book) });
+        notify('error' in next ? { error: next.error } : { value: activate(next.book, true) });
       } finally {
         busy = false;
       }
@@ -246,38 +270,57 @@ async function createProject(owner: BrowserWindow) {
   if (canceled || !filePath) return null;
   const folder = join(await realpath(dirname(filePath)), basename(filePath));
   await mkdir(folder);
+  const release = await acquireProjectLock(folder);
   try {
-    await cp(sampleFolder(true), folder, { recursive: true });
+    await cp(sampleFolder(true), folder, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
     const path = join(folder, 'project.json');
     const draft = JSON.parse(await readFile(path, 'utf8'));
     draft.title = basename(folder);
     await writeFile(path, JSON.stringify(draft, null, 2) + '\n');
-    return await loadProject(folder, cache);
+    return { book: await loadProject(folder, cache), release, keepLock: false };
   } catch (error) {
+    await release();
     await rm(folder, { recursive: true, force: true });
     throw error;
   }
 }
 
+async function loadOwnedProject(folder: string, readOnly = false) {
+  const path = await realpath(folder);
+  const keepLock = !!unlockProject && (path === projectSession?.book.folder || await unlockProject.tryRelocate(path));
+  const release = !readOnly && !keepLock ? await acquireProjectLock(path) : undefined;
+  try {
+    const book = await loadProject(path, cache, readOnly);
+    return { book, release, keepLock };
+  } catch (error) {
+    await release?.();
+    throw error;
+  }
+}
+
 async function openProject(owner: BrowserWindow, action: OpenAction): Promise<ProjectSummary | null> {
-  let book: OpenProject | null;
+  let loaded: Awaited<ReturnType<typeof loadOwnedProject>>;
   if (action === 'new') {
-    book = await createProject(owner);
-  } else if (action === 'sample') {
-    book = await loadProject(sampleFolder(), cache, true);
-  } else if (action === 'reload' && active) {
-    book = await loadProject(active.book.folder, cache, active.book.readOnly);
-  } else if (action === 'open') {
+    const created = await createProject(owner);
+    if (!created) return null;
+    loaded = created;
+  } else if (action === 'sample') loaded = await loadOwnedProject(sampleFolder(), true);
+  else if (action === 'reload' && active) loaded = await loadOwnedProject(active.book.folder, active.book.readOnly);
+  else if (action === 'open') {
     const choice = await dialog.showOpenDialog(owner, { title: 'Open ImageFlow Project', properties: ['openDirectory'] });
     if (choice.canceled || !choice.filePaths[0]) return null;
-    book = await loadProject(choice.filePaths[0], cache);
-  } else {
-    throw new Error('Choose a project folder first.');
+    loaded = await loadOwnedProject(choice.filePaths[0]);
+  } else throw new Error('Choose a project folder first.');
+  if (owner.isDestroyed()) { await loaded.release?.(); return null; }
+  if (!loaded.keepLock) {
+    try { await unlockProject?.(); }
+    catch (error) { await loaded.release?.(); throw error; }
+    unlockProject = loaded.release;
   }
-  if (!book || owner.isDestroyed()) return null;
-  const summary = activate(book);
-  if (action !== 'reload' || !watcher) watchProject(book);
-  if (devState) await writeFile(devState, JSON.stringify({ folder: book.folder, readOnly: book.readOnly })).catch(() => {});
+  if (action !== 'reload') projectSession = new ProjectSession(loaded.book);
+  const summary = activate(loaded.book, action === 'reload');
+  if (action !== 'reload' || !watcher) watchProject(loaded.book);
+  if (devState) await writeFile(devState, JSON.stringify({ folder: loaded.book.folder, readOnly: loaded.book.readOnly })).catch(() => {});
   return summary;
 }
 
@@ -286,7 +329,8 @@ async function restoreDevProject() {
   if (!devState) return;
   try {
     const { folder, readOnly } = JSON.parse(await readFile(devState, 'utf8')) as { folder: string; readOnly: boolean };
-    const book = await loadProject(folder, cache, readOnly);
+    const { book, release } = await loadOwnedProject(folder, readOnly);
+    unlockProject = release;
     activate(book);
     watchProject(book);
   } catch {
@@ -299,8 +343,9 @@ function currentBook(id: string) {
   return active.book;
 }
 
-async function importFiles(owner: BrowserWindow, id: string, request: ImportRequest) {
-  const book = currentBook(id);
+async function importFiles(owner: BrowserWindow, id: string, request: ImportRequest, base?: OpenProject) {
+  const current = currentBook(id);
+  const book = base ?? current;
   if (book.readOnly) throw new Error('Create a project to import files.');
   if (request.kind !== 'photo' && request.kind !== 'markdown' && request.kind !== 'file') throw new Error('Unknown import type.');
   if (request.kind === 'file' && (!Array.isArray(request.accept) || !request.accept.length ||
@@ -338,6 +383,8 @@ async function importFiles(owner: BrowserWindow, id: string, request: ImportRequ
     importedWrites.set(relative(book.folder, file), await fingerprint(file));
   }
   if (owner.isDestroyed()) return null;
+  projectSession!.adoptExternal(book);
+  projectSession!.record(next, 'Import sources', !!request.target);
   return { summary: activate(next), imported };
 }
 
@@ -371,11 +418,11 @@ async function exportBook(owner: BrowserWindow, projectId: string, mode: ExportM
   }
 }
 
-async function checkBook(projectId: string, request: unknown) {
-  const book = currentBook(projectId);
+async function checkOpenBook(book: OpenProject, request: AuthoringCheckRequest, externalSignal?: AbortSignal) {
   const job = new AbortController();
   const timeout = setTimeout(() => job.abort(new Error('The authoring check timed out.')), 90_000);
-  checkJob = job;
+  checkJobs.add(job);
+  if (!externalSignal) checkJob = job;
   try {
     return await checkProject(book, cache, request, async (snapshot, preview, signal) => {
       const id = randomUUID();
@@ -390,11 +437,102 @@ async function checkBook(projectId: string, request: unknown) {
       } finally {
         sessions.delete(id);
       }
-    }, job.signal);
+    }, externalSignal ? AbortSignal.any([job.signal, externalSignal]) : job.signal);
   } finally {
     clearTimeout(timeout);
-    checkJob = undefined;
+    if (checkJob === job) checkJob = undefined;
+    checkJobs.delete(job);
   }
+}
+
+function mcpSettings(): McpSettings {
+  return { enabled: !!mcpConnection, clients: mcpClients, ...(mcpConnection ? {
+    config: { command: 'node', args: [join(app.getAppPath(), 'mcp-bridge.cjs'), '--connection', mcpConnection.descriptorPath] },
+  } : {}) };
+}
+
+function publishMcpSettings() {
+  if (window && !window.isDestroyed()) window.webContents.send(channels.mcpChanged, mcpSettings());
+}
+
+async function disableMcp() {
+  const connection = mcpConnection;
+  mcpConnection = undefined;
+  mcpClients = [];
+  await connection?.close();
+  publishMcpSettings();
+}
+
+async function agentLease(signal: AbortSignal) {
+  const owner = window;
+  if (!owner || owner.isDestroyed()) throw new AuthoringError('PROJECT_CLOSED', 'Open a book in ImageFlow first.');
+  const id = randomUUID();
+  const allowed = await new Promise<boolean>((resolve) => {
+    const finish = (allowed: boolean) => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      agentLeases.delete(id);
+      resolve(allowed);
+    };
+    const abort = () => finish(false);
+    const timer = setTimeout(() => finish(false), 3000);
+    agentLeases.set(id, finish);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) return finish(false);
+    owner.webContents.send(channels.agentLease, id);
+  });
+  if (!allowed) throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish or close the active editor in ImageFlow, then retry. No changes were made.');
+}
+
+async function enableMcp() {
+  const owner = window;
+  if (!owner || owner.isDestroyed()) throw new Error('Open ImageFlow before enabling the connection.');
+  const service = createAuthoringService({
+    session: () => projectSession, cache, docs: join(app.getAppPath(), 'docs', 'template-api.md'),
+    check: checkOpenBook,
+    changed: (book) => {
+      const summary = activate(book);
+      window?.webContents.send(channels.changed, { value: summary });
+    },
+    recovery: (message) => { window?.webContents.send(channels.changed, { error: message }); },
+    import: async (request, paths, base) => {
+      if (!window || !active) throw new AuthoringError('PROJECT_CLOSED', 'The project closed before import.');
+      const result = await importFiles(window, active.id, { ...request, paths }, base);
+      if (!result) throw new AuthoringError('PROJECT_CLOSED', 'The project closed before import completed.');
+      return { imported: result.imported };
+    },
+  });
+  const connection = await createMcpConnection({
+    descriptorPath: join(app.getPath('userData'), 'mcp-connection.json'),
+    onClientsChanged: (clients) => { mcpClients = clients; publishMcpSettings(); },
+    onCall: async (name, args, signal) => {
+      const mutation = name === 'apply_project_changes' || name === 'import_sources';
+      if (mcpCalling || busy) return { state: 'error', error: { code: 'OPERATION_IN_PROGRESS', message: 'ImageFlow is finishing another operation. Retry shortly.' } };
+      mcpCalling = true;
+      let locked = false;
+      try {
+        if (mutation) {
+          await agentLease(signal);
+          signal.throwIfAborted();
+          if (busy) throw new AuthoringError('OPERATION_IN_PROGRESS', 'A project edit started. Retry after it finishes.');
+          busy = true;
+          locked = true;
+        }
+        return await service(name, args, signal);
+      } catch (error) {
+        return { state: 'error', error: { code: signal.aborted ? 'CANCELLED' : error instanceof AuthoringError ? error.code : 'AUTHORING_FAILED',
+          message: signal.aborted ? 'The request was cancelled.' : errorMessage(error),
+          ...(error instanceof AuthoringError ? error.details : {}) } };
+      } finally {
+        if (locked) busy = false;
+        if (mutation && window && !window.isDestroyed()) window.webContents.send(channels.agentRelease);
+        mcpCalling = false;
+      }
+    },
+  });
+  if (owner !== window || owner.isDestroyed()) { await connection.close(); return; }
+  mcpConnection = connection;
+  publishMcpSettings();
 }
 
 function menuCommand(label: string, accelerator: string | undefined, command: Command): MenuItemConstructorOptions {
@@ -402,6 +540,8 @@ function menuCommand(label: string, accelerator: string | undefined, command: Co
 }
 
 function createWindow() {
+  closing = false;
+  closingProject = undefined;
   // Automated checks set IMAGEFLOW_HIDE_WINDOW so test runs do not flash windows on screen.
   const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
   const editor = new BrowserWindow({
@@ -420,12 +560,24 @@ function createWindow() {
   });
   editor.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   editor.on('closed', () => {
+    closing = true;
     stopWatch();
     exportJob?.abort();
-    checkJob?.abort();
+    for (const job of checkJobs) job.abort();
     window = null;
-    for (const [id, { mode }] of sessions) if (mode === 'edit') sessions.delete(id);
-    active = undefined;
+    void disableMcp();
+    for (const reply of agentLeases.values()) reply(false);
+    // A save with a published journal must finish before another app can obtain this folder's lock.
+    closingProject = (async () => {
+      while (busy || mcpCalling) await new Promise((resolve) => setTimeout(resolve, 10));
+      const release = unlockProject;
+      unlockProject = undefined;
+      await release?.();
+      for (const [id, { mode }] of sessions) if (mode === 'edit') sessions.delete(id);
+      active = undefined;
+      projectSession = undefined;
+    })();
+    void closingProject.catch((error) => console.error('ImageFlow could not release its project lock', error));
   });
   void editor.loadURL(editorURL).catch((error: unknown) => console.error('ImageFlow could not open', error));
 }
@@ -442,15 +594,39 @@ void app.whenReady().then(async () => {
     }
   });
   ipcMain.handle(channels.open, (event, action: OpenAction) => fromEditor(event, (owner) => openProject(owner, action)));
-  ipcMain.handle(channels.save, (event, id: string, files: ProjectFiles) =>
-    fromEditor(event, async () => activate(await updateProject(currentBook(id), files))));
+  ipcMain.handle(channels.save, (event, id: string, files: ProjectFiles, label?: string) =>
+    fromEditor(event, async () => {
+      currentBook(id);
+      return activate(await projectSession!.save(files, typeof label === 'string' ? label : 'Project edit'));
+    }));
+  ipcMain.handle(channels.history, (event, id: string, direction: 'undo' | 'redo') => fromEditor(event, async () => {
+    currentBook(id);
+    if (direction !== 'undo' && direction !== 'redo') throw new Error('Unknown history action.');
+    return activate(await projectSession!.undo(direction));
+  }));
+  ipcMain.handle(channels.mcp, async (event, enabled?: boolean) => {
+    if (!editorOwner(event)) return { error: 'Request is only available to the editor.' };
+    try {
+      if (enabled !== undefined && typeof enabled !== 'boolean') throw new Error('Invalid connection setting.');
+      const update = connectionSettingsQueue.then(async () => {
+        if (enabled === true && !mcpConnection) await enableMcp();
+        if (enabled === false) await disableMcp();
+      });
+      connectionSettingsQueue = update.catch(() => {});
+      await update;
+      return { value: mcpSettings() };
+    } catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.on(channels.agentLeaseReply, (event, id: string, allowed: boolean) => {
+    if (event.sender === window?.webContents && event.senderFrame === window.webContents.mainFrame) agentLeases.get(id)?.(allowed === true);
+  });
   ipcMain.handle(channels.import, (event, id: string, request: ImportRequest) =>
     fromEditor(event, (owner) => importFiles(owner, id, request)));
   ipcMain.handle(channels.export, (event, id: string, mode: ExportMode) =>
     fromEditor(event, (owner) => exportBook(owner, id, mode)));
   ipcMain.handle(channels.cancel, (event) => { if (editorOwner(event)) exportJob?.abort(); });
-  ipcMain.handle(channels.check, (event, id: string, request: unknown) =>
-    fromEditor(event, () => checkBook(id, request)));
+  ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) =>
+    fromEditor(event, () => checkOpenBook(currentBook(id), request)));
   ipcMain.handle(channels.cancelCheck, (event) => { if (editorOwner(event)) checkJob?.abort(); });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -480,5 +656,7 @@ void app.whenReady().then(async () => {
   ]));
   await restoreDevProject();
   createWindow();
-  app.on('activate', () => { if (!window) createWindow(); });
+  app.on('activate', () => {
+    if (!window) void (closingProject ?? Promise.resolve()).then(() => { if (!window) createWindow(); });
+  });
 });

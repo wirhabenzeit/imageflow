@@ -1,6 +1,6 @@
 # Authoring feedback foundations (#18)
 
-This increment supports the first part of the authoring loop: edit project-owned template files, preserve useful artwork when an edit fails, and check/render current inputs through an app-owned service. It is not the complete MCP release.
+This increment supports the first part of the authoring loop: edit project-owned template files, preserve useful artwork when an edit fails, and check/render current inputs through an app-owned service. The local MCP prototype now builds on this service; see [connection setup and workflow](mcp.md).
 
 ## Implemented boundaries
 
@@ -14,7 +14,7 @@ This increment supports the first part of the authoring loop: edit project-owned
 
 ## Internal app API
 
-The Electron preload exposes `checkBook(id, request)` and `cancelCheck()` to the editor. These are internal integration points for the forthcoming MCP adapter, not a documented external automation endpoint. The current session ID is the same one used by existing save/export calls and changes when the app adopts a new project state.
+The Electron preload exposes `checkBook(id, request)` and `cancelCheck()` to the editor. These are internal app integration points. External agents use the local MCP bridge documented in [mcp.md](mcp.md). The current session ID is the same one used by existing save/export calls and changes when the app adopts a new project state.
 
 ```ts
 const result = await window.imageflow!.checkBook(currentSessionId, {
@@ -42,9 +42,9 @@ An IPC failure returns `{ error }`. A completed check returns `{ value }`, with:
 
 ## Scope and limitations
 
-This increment does not provide an MCP connection, external project commands, shared UI/MCP Undo, persistent project handles, TypeScript checking, PDF preflight, contact sheets, or unused-layout fixtures. Those remain in #18. Template API changes remain in #29.
+The prototype adds the local MCP connection, stable open-project handles, typed command batches, shared UI/MCP Undo, draft protection and recoverable manifest saves. TypeScript checking, PDF preflight, contact sheets, detailed crop targets, unused-layout fixtures and broader client verification remain in #18. Template API changes remain in #29.
 
-Checks currently use the existing desktop operation guard, so saves/imports and checks run one at a time. The shared command service and more precise draft conflict handling are subsequent work.
+UI and MCP writes share the app-owned session and history. Agent mutations acquire an editor lease and serialize with saves and imports. Read-only agent checks can run while UI edits proceed; revision verification rejects changed-input results. Draft protection is deliberately conservative: any focused field or open editor blocks an agent mutation until the human finishes it.
 
 Checks use before/after content and filesystem metadata verification rather than a fully immutable filesystem snapshot. Ordinary concurrent changes are rejected, but this is not an atomic transaction with an external file writer. Temporary-file activity inside a template directory can conservatively invalidate a check. The current renderer still resolves the whole book; large-book performance and finer invalidation require measurement.
 

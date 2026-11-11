@@ -10,7 +10,14 @@ function listen<T>(channel: string, listener: (value: T) => void) {
 
 const api: DesktopApi = {
   openProject: (action) => ipcRenderer.invoke(channels.open, action),
-  saveProject: (id, files) => ipcRenderer.invoke(channels.save, id, files),
+  saveProject: (id, files, label) => ipcRenderer.invoke(channels.save, id, files, label),
+  history: (id, direction) => ipcRenderer.invoke(channels.history, id, direction),
+  mcpSettings: (enabled) => ipcRenderer.invoke(channels.mcp, enabled),
+  onMcpChanged: (listener) => listen(channels.mcpChanged, listener),
+  onAgentLease: (listener) => listen<string>(channels.agentLease, (id) => {
+    ipcRenderer.send(channels.agentLeaseReply, id, listener(id));
+  }),
+  onAgentRelease: (listener) => listen(channels.agentRelease, listener),
   importFiles: (id, request) => ipcRenderer.invoke(channels.import, id, request),
   pathsForFiles: (files) => files.map((file) => webUtils.getPathForFile(file)).filter(Boolean),
   exportBook: (id, mode) => ipcRenderer.invoke(channels.export, id, mode),

@@ -12,6 +12,8 @@ export const channels = {
   command: 'project:command', changed: 'project:changed',
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
   check: 'project:check', cancelCheck: 'project:cancel-check',
+  history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed',
+  agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'sample' | 'reload';
@@ -19,12 +21,15 @@ export type ExportMode = 'proof' | 'print';
 export type Command = OpenAction | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'undo' | 'redo';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
+  handle?: string; history?: HistoryState;
   // Thumbnail URL and pixel size per readable photo; Markdown source per readable text.
   photos: Record<string, string>;
   photoSizes: Record<string, { width: number; height: number }>;
   texts: Record<string, string>;
 };
 export type Result<T> = { value: T } | { error: string };
+export type HistoryState = { undo?: string; redo?: string };
+export type McpSettings = { enabled: boolean; clients: { name: string }[]; config?: { command: string; args: string[] } };
 export type ProjectChange = Result<ProjectSummary> | { building: true };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions.
 export type ImportRequest = {
@@ -33,7 +38,12 @@ export type ImportRequest = {
 
 export type DesktopApi = {
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;
-  saveProject(id: string, files: ProjectFiles): Promise<Result<ProjectSummary>>;
+  saveProject(id: string, files: ProjectFiles, label?: string): Promise<Result<ProjectSummary>>;
+  history(id: string, direction: 'undo' | 'redo'): Promise<Result<ProjectSummary>>;
+  mcpSettings(enabled?: boolean): Promise<Result<McpSettings>>;
+  onMcpChanged(listener: (settings: McpSettings) => void): () => void;
+  onAgentLease(listener: (id: string) => boolean): () => void;
+  onAgentRelease(listener: () => void): () => void;
   importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[] } | null>>;
   pathsForFiles(files: File[]): string[];
   exportBook(id: string, mode: ExportMode): Promise<Result<{ warnings: Issue[]; errors: Issue[] } | null>>;

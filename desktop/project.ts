@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BuildFailure, Loader } from 'esbuild';
 import type { AuthoringDiagnostic } from '../src/authoring';
@@ -10,6 +10,7 @@ import { renderOrigin } from '../src/desktop';
 import type { ImportRequest, ProjectSummary } from '../src/desktop';
 import { photoDetails, photoExtensions } from './photos';
 import type { ProjectPhoto } from './photos';
+import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
 
 export const assetTypes: Record<string, string> = {
   '.js': 'text/javascript', '.css': 'text/css', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -171,6 +172,7 @@ const fileName = (path: string) => basename(path).replace(/^fl-[0-9a-f-]{12}-/, 
 
 export async function loadProject(path: string, fallback: string, readOnly = false): Promise<OpenProject> {
   const folder = await realpath(path);
+  await recoverProjectSave(folder, { readOnly });
   const [projectFile, photoFile] = await Promise.all([readProjectManifest(folder, 'project.json'), readProjectManifest(folder, 'photos.json')]);
   const project = parseDocument(projectSchema, parseJson(projectFile, 'project.json'), 'project.json');
   const photoIndex = parseDocument(photoIndexSchema, parseJson(photoFile, 'photos.json'), 'photos.json');
@@ -237,30 +239,17 @@ export async function updateProject(book: OpenProject, files: ProjectFiles, relo
   if (projectJson(currentProject) !== projectJson(book.project) || projectJson(currentIndex) !== projectJson(book.photoIndex)) {
     throw new Error('The project changed on disk. Reload before making more edits.');
   }
-  const staging = await mkdtemp(join(book.folder, '.imageflow-write-'));
-  try {
-    const projectPath = join(staging, 'project.json');
-    const indexPath = join(staging, 'photos.json');
-    if (projectChanged) await writeFile(projectPath, projectSource);
-    if (indexChanged) await writeFile(indexPath, indexSource);
-    if (indexChanged) await rename(indexPath, join(book.folder, 'photos.json'));
-    try {
-      if (projectChanged) await rename(projectPath, join(book.folder, 'project.json'));
-    } catch (error) {
-      if (indexChanged) {
-        await writeFile(indexPath, projectJson(book.photoIndex));
-        await rename(indexPath, join(book.folder, 'photos.json'));
-      }
-      throw error;
-    }
-  } finally {
-    await rm(staging, { recursive: true, force: true });
-  }
   const manifests = {
     'project.json': projectChanged ? Buffer.from(projectSource) : projectFile,
     'photos.json': indexChanged ? Buffer.from(indexSource) : photoFile,
   };
-  if (reloadContent) return readContent({ ...book, project, photoIndex, manifests });
+  await persistProjectManifests(book.folder, { 'project.json': projectFile, 'photos.json': photoFile }, manifests);
+  if (reloadContent) {
+    try { return await readContent({ ...book, project, photoIndex, manifests }); }
+    catch (error) {
+      throw new CommittedProjectSaveError('The project was saved, but its content could not be reloaded. Reload the project before making more edits.', { cause: error });
+    }
+  }
   const photos = new Map([...book.photos].flatMap(([id, photo]) => {
     if (!photoIndex[id]) return [];
     const { title, caption, credit, altText } = photoIndex[id];
@@ -317,7 +306,8 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     const next = await updateProject(book, { project, photoIndex }, true);
     return { book: next, imported, copied };
   } catch (error) {
-    await Promise.all(copied.map((path) => rm(path, { force: true })));
+    // A durable save intent may already refer to these assets, including when it needs recovery on next open.
+    if (!(error instanceof CommittedProjectSaveError)) await Promise.all(copied.map((path) => rm(path, { force: true })));
     throw error;
   }
 }

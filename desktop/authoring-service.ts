@@ -1,0 +1,205 @@
+import { createHash } from 'node:crypto';
+import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import type { AuthoringCheckRequest, AuthoringCheckResult } from '../src/authoring-check';
+import type { ImportRequest } from '../src/desktop';
+import { applyProjectCommands, ProjectCommandError } from '../src/project-commands';
+import { pageSequence } from '../src/format';
+import { keptOutside } from '../src/layouts';
+import { sourceUsage } from '../src/editing';
+import { parseDocument, projectSchema, photoIndexSchema } from '../src/project';
+import { captureProjectInputs, captureProjectRevision } from './revisions';
+import { loadProject } from './project';
+import { photoExtensions } from './photos';
+import type { OpenProject } from './project';
+import type { ProjectSession } from './project-session';
+import { CommittedProjectSaveError } from './persistence';
+
+export class AuthoringError extends Error {
+  constructor(readonly code: string, message: string, readonly details?: Record<string, unknown>) { super(message); }
+}
+type Hooks = {
+  session: () => ProjectSession | undefined;
+  cache: string;
+  docs: string;
+  check: (book: OpenProject, request: AuthoringCheckRequest, signal: AbortSignal) => Promise<AuthoringCheckResult>;
+  changed: (book: OpenProject) => void;
+  recovery: (message: string) => void;
+  import: (request: ImportRequest, paths: string[], base: OpenProject) => Promise<{ imported: string[] }>;
+};
+
+async function contained(root: string, path: string, allowed: string[]) {
+  if (isAbsolute(path) || !allowed.some((prefix) => path.startsWith(prefix + '/'))) {
+    throw new AuthoringError('PATH_NOT_ALLOWED', 'Use a relative path inside ' + allowed.join('/ or ') + '/.');
+  }
+  const actual = await realpath(resolve(root, path));
+  const within = relative(root, actual);
+  if (within.startsWith('..' + sep) || isAbsolute(within) ||
+      !allowed.some((prefix) => within.startsWith(prefix + sep))) {
+    throw new AuthoringError('PATH_NOT_ALLOWED', 'The source points outside the allowed project folder.');
+  }
+  return actual;
+}
+
+export function createAuthoringService(hooks: Hooks) {
+  const get = (handle: unknown) => {
+    const session = hooks.session();
+    if (!session || session.handle !== handle) throw new AuthoringError('PROJECT_CLOSED', 'This project is no longer open. Call list_projects for current handles.');
+    return session;
+  };
+  const checked = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest = {}) => {
+    const result = await hooks.check(session.book, request, signal);
+    get(session.handle);
+    return result;
+  };
+  const revision = async (session: ProjectSession, expected: unknown, signal: AbortSignal) => {
+    const current = await captureProjectInputs(session.book.folder, { signal });
+    if (current.revision !== expected) throw new AuthoringError('REVISION_CONFLICT', 'Inputs changed. Inspect or check the book again before editing.', { currentRevision: current.revision });
+    return current;
+  };
+  return async (name: string, args: Record<string, any>, signal: AbortSignal): Promise<Record<string, unknown>> => {
+    if (name === 'list_projects') {
+      const session = hooks.session();
+      if (!session) return { projects: [] };
+      let current: string | null = null;
+      try { current = await captureProjectRevision(session.book.folder, { signal }); } catch { signal.throwIfAborted(); }
+      return { projects: [{ project: session.handle, title: session.book.project.title, folder: session.book.folder,
+        writable: !session.book.readOnly, revision: current, history: session.history }], scope: 'The currently open, authorized book. Handles expire when closed or reopened.' };
+    }
+    const session = get(args.project);
+    if (name === 'check_book') {
+      if (args.preview?.target?.page && !args.expectedRevision) throw new AuthoringError('REVISION_REQUIRED', 'Page-number previews require expectedRevision; spread IDs can be used without it.');
+      return checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview });
+    }
+    if (name === 'get_authoring_context' || name === 'inspect_book') {
+      const report = await checked(session, signal);
+      const before = await captureProjectInputs(session.book.folder, { signal });
+      if (report.revision !== before.revision) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while preparing context. Check again.');
+      const project = parseDocument(projectSchema, JSON.parse(await readFile(join(session.book.folder, 'project.json'), 'utf8')), 'project.json');
+      const photos = parseDocument(photoIndexSchema, JSON.parse(await readFile(join(session.book.folder, 'photos.json'), 'utf8')), 'photos.json');
+      const template = report.render?.template;
+      let result: Record<string, unknown>;
+      if (name === 'get_authoring_context') {
+        const sources: Record<string, { text: string; sha256: string; truncated: boolean }> = {};
+        const requested: string[] = args.includeSource ?? ['template/index.tsx'];
+        for (const path of requested) {
+          const file = await contained(session.book.folder, path, ['template', 'texts']);
+          if (!['.ts', '.tsx', '.css', '.json', '.md'].includes(extname(file))) throw new AuthoringError('SOURCE_TYPE_NOT_SUPPORTED', 'Context reads support TS, TSX, CSS, JSON and Markdown files.');
+          const size = (await stat(file)).size;
+          if (size > 512_000) throw new AuthoringError('SOURCE_TOO_LARGE', 'Read this source using your workspace tools; it exceeds 512 KB.');
+          const bytes = await readFile(file);
+          sources[path] = { text: bytes.toString('utf8').slice(0, 32_000), sha256: createHash('sha256').update(bytes).digest('hex'), truncated: bytes.length > 32_000 };
+        }
+        const entries = await readdir(join(session.book.folder, 'template'), { recursive: true, withFileTypes: true });
+        result = {
+          project: session.handle, revision: report.revision, root: session.book.folder,
+          workflow: ['Edit template/ TSX, CSS and assets directly with workspace tools.', 'Edit existing texts/ Markdown directly.',
+            'Call check_book with a spread preview after edits; images include whole-book text flow.',
+            'Use apply_project_changes for project.json/photos.json; never edit these manifests while the app is open.',
+            'Copy new content into inbox/ and call import_sources. Then assign returned IDs with a command batch.'],
+          template, diagnostics: report.diagnostics, checks: report.checks, sources,
+          templateFiles: entries.filter((entry) => entry.isFile()).slice(0, 200).map((entry) => relative(session.book.folder, join(entry.parentPath, entry.name))),
+          apiReference: await readFile(hooks.docs, 'utf8'),
+          capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
+            maxPreviewEdge: 1600, typescript: false, printPreflight: false, fixtures: false, contactSheets: false,
+            draftProtection: 'All agent mutations wait until active human editors are closed or blurred.',
+            imports: 'Only project/inbox paths. All selected files are validated before import; source files remain available to Undo.',
+            idempotency: 'Up to 1000 successful requests for this open-project handle; replay returns the original result. Reopen expires the handle.' },
+        };
+      } else {
+        const offset = args.offset ?? 0, limit = args.limit ?? 30;
+        const sequence = template && pageSequence(project.spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
+        const labels = project.spreads.map((_, i) => Object.values(sequence?.spreads[i].page ?? {}).join('–'));
+        const usage = sourceUsage(project, labels, template?.spreads);
+        const view = args.view ?? 'summary';
+        const records = view === 'sources' ? [
+          ...Object.entries(photos).map(([id, source]) => ({ kind: 'photo', id, ...source, usage: usage.photo[id] ?? [] })),
+          ...Object.entries(project.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path, usage: usage.text[id] ?? [] })),
+          ...Object.entries(project.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path })),
+        ] : project.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...spread,
+          page: sequence?.spreads[project.spreads.indexOf(spread)].page,
+          kept: template ? keptOutside(spread, template.spreads) : [],
+          ...(view === 'parameters' && template ? { declarations: template.spreads[spread.definition] } : {}),
+        }));
+        result = { project: session.handle, revision: report.revision, title: project.title, format: project.format,
+          pages: report.render?.pages, total: records.length, offset, items: records.slice(offset, offset + limit),
+          nextOffset: offset + limit < records.length ? offset + limit : null,
+          ...(view === 'parameters' ? { document: { values: project.params, declarations: template?.parameters } } : {}),
+          diagnostics: report.diagnostics, checks: report.checks, history: session.history };
+      }
+      const after = await captureProjectInputs(session.book.folder, { signal });
+      if (after.revision !== before.revision || after.observation !== before.observation) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while inspecting. Retry for current context.');
+      get(session.handle);
+      return result;
+    }
+    if (name !== 'apply_project_changes' && name !== 'import_sources') throw new AuthoringError('UNKNOWN_TOOL', 'Unknown authoring tool.');
+    if (session.book.readOnly) throw new AuthoringError('READ_ONLY', 'Create an editable project in ImageFlow first.');
+    const request = JSON.stringify({ name, ...args });
+    const receipt = session.receipts.get(args.idempotencyKey);
+    if (receipt) {
+      if (receipt.request !== request) throw new AuthoringError('IDEMPOTENCY_CONFLICT', 'This key was already used for a different request.');
+      return { ...receipt.result, replayed: true };
+    }
+    if (session.receipts.size >= 1000) throw new AuthoringError('SESSION_LIMIT', 'This project session has reached 1000 requests. Reopen the book for a new handle.');
+    const inputs = await revision(session, args.expectedRevision, signal);
+    const commit = async (save: () => Promise<unknown>) => {
+      try { return { value: await save() }; }
+      catch (error) {
+        if (!(error instanceof CommittedProjectSaveError)) throw error;
+        const result = { state: 'error', project: session.handle, committed: 'pending', revision: null,
+          error: { code: 'SAVE_RECOVERY_REQUIRED', message: error.message } };
+        session.receipts.set(args.idempotencyKey, { request, result });
+        hooks.recovery(error.message);
+        return { recovery: result };
+      }
+    };
+    const report = await checked(session, signal, { expectedRevision: inputs.revision });
+    if (report.state !== 'ready' || !report.render) return { ...report, committed: false };
+    const fresh = await loadProject(session.book.folder, hooks.cache, session.book.readOnly);
+    const loaded = await revision(session, args.expectedRevision, signal);
+    if (loaded.observation !== inputs.observation) throw new AuthoringError('SOURCE_CHANGED', 'Files changed while preparing the command. Check again.');
+    signal.throwIfAborted();
+    let result: Record<string, unknown>;
+    if (name === 'apply_project_changes') {
+      let planned;
+      try { planned = applyProjectCommands(fresh, report.render.template, args.operations); }
+      catch (error) {
+        if (error instanceof ProjectCommandError) throw new AuthoringError(error.code, error.message, { operationIndex: error.operationIndex });
+        throw error;
+      }
+      result = { state: 'ready', project: session.handle, revision: inputs.revision, changes: planned.changes,
+        affectedSpreads: planned.affectedSpreads, references: planned.references, reflow: planned.reflow,
+        committed: !args.dryRun, dryRun: !!args.dryRun };
+      if (args.dryRun) return result;
+      const saved = await commit(() => session.save(planned.files, args.label, fresh));
+      if (saved.recovery) return saved.recovery;
+    } else {
+      const extensions = args.kind === 'photo' ? photoExtensions : new Set(args.kind === 'markdown' ? ['.md'] : args.accept);
+      const paths: string[] = [];
+      let size = 0;
+      for (const path of args.paths as string[]) {
+        const source = await contained(fresh.folder, path, ['inbox']);
+        if (paths.includes(source)) throw new AuthoringError('DUPLICATE_IMPORT', 'Each import source must appear only once, including paths that resolve to the same file.');
+        const info = await stat(source);
+        if (!info.isFile() || !extensions.has(extname(source).toLowerCase())) throw new AuthoringError('INVALID_IMPORT', 'Every selected file must match the requested import kind.');
+        size += info.size;
+        if (size > 100 * 1024 * 1024) throw new AuthoringError('IMPORT_TOO_LARGE', 'Import batches are limited to 100 MB.');
+        paths.push(source);
+      }
+      signal.throwIfAborted();
+      let imported: { imported: string[] } | undefined;
+      const saved = await commit(async () => { imported = await hooks.import({ kind: args.kind, accept: args.accept }, paths, fresh); });
+      if (saved.recovery) return saved.recovery;
+      result = { state: 'ready', project: session.handle, committed: true, revision: null,
+        sources: imported!.imported.map((id, i) => ({ id, path: args.paths[i], kind: args.kind })) };
+    }
+    // Commit acknowledgement survives a disconnected client; retries cannot repeat a successful batch.
+    result.revision = null;
+    session.receipts.set(args.idempotencyKey, { request, result });
+    hooks.changed(session.book);
+    try { result.revision = await captureProjectRevision(session.book.folder); }
+    catch { result.notice = 'The edit was committed, but files changed before a new revision could be captured. Check the book again.'; }
+    result.history = session.history;
+    return result;
+  };
+}
