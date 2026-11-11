@@ -175,6 +175,8 @@ export type EditPath<S extends SpreadDeclaration = SpreadDeclaration, D extends 
   | NestedPaths<'elements', NonNullable<S['elements']>> | NestedPaths<'boxes', NonNullable<S['boxes']>>;
 /** Attributes returned by `edit`. Spread them onto the node that shows the parameters. */
 export type EditMarker = { 'data-edit'?: string };
+/** Attributes returned by `issue`. Spread them onto a native node or any platform component, including `Spread`. */
+export type IssueMarker = { 'data-issue'?: string; 'data-issue-info'?: string };
 
 /** The context passed to `render`, typed from a spread declared with `spreadFor`. */
 export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = {
@@ -196,11 +198,11 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   /** Page count and the anchors all spreads declare: `ctx.book.anchor('map')?.page`. */
   book: BookContext;
   /** `PhotoBox` limited to this layout's photo box IDs: `<ctx.PhotoBox id="hero" />` fails type checking for unknown IDs. */
-  PhotoBox(props: Styling & EditMarker & { id: BoxIds<S, 'photo'> }): ImageFlowElement;
+  PhotoBox(props: Styling & EditMarker & IssueMarker & { id: BoxIds<S, 'photo'> }): ImageFlowElement;
   /** `MarkdownBox` limited to this layout's Markdown box IDs. */
-  MarkdownBox(props: Styling & EditMarker & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
+  MarkdownBox(props: Styling & EditMarker & IssueMarker & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
   /** `Element` limited to this layout's element IDs. */
-  Element(props: Styling & EditMarker & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
+  Element(props: Styling & EditMarker & IssueMarker & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
 };
 
 /** The render context of a spread declared without `spreadFor`. */
@@ -291,23 +293,23 @@ export type ImageFlowNode = ImageFlowElement | string | number | bigint | boolea
 type Styling = { className?: string; style?: CSSProperties };
 
 /** The root of every spread. Sets `--trim-width`, `--trim-height`, `--bleed-*`, and `--safe-*` CSS variables. */
-export function Spread(props: Styling & { children?: ImageFlowNode }): ImageFlowElement;
+export function Spread(props: Styling & IssueMarker & { children?: ImageFlowNode }): ImageFlowElement;
 /**
  * A box that shows the photo assigned to box `id`, cropped to fill it. In the editor, clicking it edits the box's
  * parameters and any others it is marked with.
  */
-export function PhotoBox(props: Styling & EditMarker & { id: string }): ImageFlowElement;
+export function PhotoBox(props: Styling & EditMarker & IssueMarker & { id: string }): ImageFlowElement;
 /**
  * A box that shows its part of the Markdown text assigned to box `id`. `columns` (1–6, default 1) splits it into
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.
  * In the editor, clicking it edits the box's parameters and any others it is marked with: `{...ctx.edit('textSize')}`.
  */
-export function MarkdownBox(props: Styling & EditMarker & { id: string; columns?: Columns }): ImageFlowElement;
+export function MarkdownBox(props: Styling & EditMarker & IssueMarker & { id: string; columns?: Columns }): ImageFlowElement;
 /**
  * Generated content with parameters, such as a calendar grid. In the editor, clicking it edits the element's
  * parameters and any others it is marked with: `<Element id="grid" {...ctx.edit('month')}>`.
  */
-export function Element(props: Styling & EditMarker & { id: string; children?: ImageFlowNode }): ImageFlowElement;
+export function Element(props: Styling & EditMarker & IssueMarker & { id: string; children?: ImageFlowNode }): ImageFlowElement;
 // Reusable declarations
 
 /**
@@ -370,11 +372,12 @@ export type TemplateIssue = {
   details?: Record<string, string | number>; suggestion?: string;
 };
 /**
- * Attributes that report a finding. Spread them onto a rendered node; a hidden node works in export:
+ * Attributes that report a finding. Spread them onto a rendered node or a platform component such as `Element`;
+ * a hidden node works in export:
  * `<span hidden {...issue({ code: 'gpx-invalid', message, element: 'route', parameter: 'track', file: track })} />`.
  * The plain `data-issue="…"` attribute still works and reports a `template-issue` warning.
  */
-export function issue(found: TemplateIssue): { 'data-issue': string; 'data-issue-info': string };
+export function issue(found: TemplateIssue): Required<IssueMarker>;
 
 /** URL of a file in `template/assets/`. */
 export function asset(path: string): string;

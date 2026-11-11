@@ -330,7 +330,7 @@ render: (ctx) => {
 
 ### Template findings
 
-A template reports problems with its input, such as an assigned file it cannot parse, with `issue()`. Spread the result onto a rendered node; a hidden node works in export:
+A template reports problems with its input, such as an assigned file it cannot parse, with `issue()`. Spread the result onto a rendered node, or onto `Spread`, `PhotoBox`, `MarkdownBox` or `Element`, which forward it to their own node; a hidden node works in export:
 
 ```tsx
 <span hidden {...issue({

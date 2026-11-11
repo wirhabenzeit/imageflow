@@ -37,6 +37,10 @@ export type RenderContext = {
   Element: typeof Element;
 };
 export type EditMarker = { 'data-edit'?: string };
+// Attributes returned by `issue()`. Platform components forward them to their own node, so a finding can sit on a box,
+// an element or the spread itself.
+export type IssueMarker = { 'data-issue'?: string; 'data-issue-info'?: string };
+const issueOn = (marker: IssueMarker) => ({ 'data-issue': marker['data-issue'], 'data-issue-info': marker['data-issue-info'] });
 
 // Anchors are declared from a spread's saved values, never from rendered output, so every spread can read every
 // anchor's page in the same single render: pages depend only on spread order and layout spans.
@@ -215,7 +219,7 @@ function useSpread() {
 
 type Styling = { className?: string; style?: CSSProperties };
 
-export function Spread({ className, style, children }: Styling & { children?: ReactNode }) {
+export function Spread({ className, style, children, ...marker }: Styling & IssueMarker & { children?: ReactNode }) {
   const { format } = useSpread();
   const { trim, bleed, safe } = format;
   const geometry = {
@@ -226,7 +230,7 @@ export function Spread({ className, style, children }: Styling & { children?: Re
   } as CSSProperties;
   return (
     <div className="if-sheet" style={{ width: cssMM(format.spreadWidth), height: cssMM(format.height) }}>
-      <div className={['if-spread', className].filter(Boolean).join(' ')} style={{ ...style, ...geometry }}>
+      <div className={['if-spread', className].filter(Boolean).join(' ')} style={{ ...style, ...geometry }} {...issueOn(marker)}>
         {children}
       </div>
     </div>
@@ -242,7 +246,7 @@ function exportSource(photo: Photo & { src: string }, cssWidth: number, format: 
   return width < photo.width ? photo.src + '/' + width : photo.src;
 }
 
-export function PhotoBox({ id, className, style, 'data-edit': marked }: Styling & EditMarker & { id: string }) {
+export function PhotoBox({ id, className, style, 'data-edit': marked, ...marker }: Styling & EditMarker & IssueMarker & { id: string }) {
   const { spread, book, format, renderPhotos, definition, lazyPhotos } = useSpread();
   const box = spread.boxes[id];
   const photo = box?.photo ? book.photos[box.photo] : undefined;
@@ -278,7 +282,7 @@ export function PhotoBox({ id, className, style, 'data-edit': marked }: Styling 
   return (
     <div ref={frame} data-box={id} data-box-type="photo" data-empty={photo ? undefined : ''}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
-      className={['if-photo', className].filter(Boolean).join(' ')} style={style}>
+      className={['if-photo', className].filter(Boolean).join(' ')} style={style} {...issueOn(marker)}>
       {photo && renderPhotos &&
         <img ref={image} src={book.mode === 'edit' && !lazyPhotos ? photo.src : undefined}
           data-src={lazyPhotos ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
@@ -288,7 +292,8 @@ export function PhotoBox({ id, className, style, 'data-edit': marked }: Styling 
 }
 
 // `columns` splits the box into that many columns; text flows down each column before moving to the next box.
-export function MarkdownBox({ id, className, style, columns = 1, 'data-edit': marked }: Styling & EditMarker & { id: string; columns?: number }) {
+export function MarkdownBox({ id, className, style, columns = 1, 'data-edit': marked, ...marker }: Styling & EditMarker & IssueMarker &
+  { id: string; columns?: number }) {
   const { spread, book, definition } = useSpread();
   const text = spread.boxes[id]?.text;
   const count = Math.max(1, Math.min(6, Math.round(Number(columns)) || 1));
@@ -296,7 +301,7 @@ export function MarkdownBox({ id, className, style, columns = 1, 'data-edit': ma
     <div data-box={id} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
       data-empty={text !== undefined && book.texts[text] !== undefined ? undefined : ''}
-      className={['if-markdown', className].filter(Boolean).join(' ')} style={style}>
+      className={['if-markdown', className].filter(Boolean).join(' ')} style={style} {...issueOn(marker)}>
       {book.mode === 'edit' && (!text || book.texts[text] === undefined) &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
     </div>
@@ -304,10 +309,11 @@ export function MarkdownBox({ id, className, style, columns = 1, 'data-edit': ma
 }
 
 // In the editor an element is also an edit target for its own parameters and any it is marked with.
-export function Element({ id, className, style, children, 'data-edit': marked }: Styling & EditMarker & { id: string; children?: ReactNode }) {
+export function Element({ id, className, style, children, 'data-edit': marked, ...marker }: Styling & EditMarker & IssueMarker &
+  { id: string; children?: ReactNode }) {
   const { book, definition } = useSpread();
   return <div data-element={id} data-edit={editTarget(book, 'elements.' + id + '.', definition.elements[id]?.parameters, marked)}
-    className={className} style={style}>{children}</div>;
+    className={className} style={style} {...issueOn(marker)}>{children}</div>;
 }
 
 let assets: Record<string, string> = {};
@@ -358,7 +364,7 @@ export const templateIssueSchema = z.strictObject({
   box: identifier.optional(), element: identifier.optional(), parameter: identifier.optional(), file: z.string().max(256).optional(),
   details: z.record(z.string(), z.union([z.string().max(1000), z.number()])).optional(), suggestion: z.string().max(1000).optional(),
 });
-export function issue(found: TemplateIssue): { 'data-issue': string; 'data-issue-info': string } {
+export function issue(found: TemplateIssue): Required<IssueMarker> {
   return { 'data-issue': found.message, 'data-issue-info': JSON.stringify(found) };
 }
 

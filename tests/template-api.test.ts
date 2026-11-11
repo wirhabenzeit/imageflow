@@ -4,7 +4,12 @@ import { mm, resolveFormat } from '../src/format';
 import type { PrintFormat } from '../src/format';
 import { geometry } from '../src/geometry';
 import { capabilities, runtimeExports } from '../src/runtime-exports';
-import { box, issue, runtime, templateIssueSchema, templateSchema } from '../src/template';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { projectSchema } from '../src/project';
+import type { RenderProject } from '../src/project';
+import { box, chooseFormat, issue, runtime, SpreadView, templateIssueSchema, templateSchema } from '../src/template';
+import type { RenderContext } from '../src/template';
 
 // Asymmetric insets and a binding bleed, so a helper that mirrors or ignores them fails.
 const format = resolveFormat({
@@ -73,4 +78,30 @@ test('the runtime exports exactly the listed helpers and checks a template\'s re
   const missing = templateSchema.safeParse(template(['anchors', 'teleport', 'time-travel']));
   assert.equal(missing.success, false);
   assert.match(missing.error!.issues[0].message, /does not provide: teleport, time-travel\. Update ImageFlow/);
+});
+
+test('platform components forward issue() markers to their own node', () => {
+  const found = (code: string) => issue({ code, message: 'Problem ' + code + '.', severity: 'error' });
+  const render = (ctx: RenderContext) => createElement(runtime.Spread, found('on-spread'),
+    createElement(ctx.PhotoBox, { id: 'hero', ...found('on-photo') }),
+    createElement(ctx.MarkdownBox, { id: 'story', ...found('on-markdown') }),
+    createElement(ctx.Element, { id: 'note', ...found('on-element') }, 'Note'));
+  const template = chooseFormat(templateSchema.parse({
+    id: 'issues', version: '1', contract: 1, parameters: {},
+    format: { label: 'F', trim: { width: mm(100), height: mm(100) },
+      bleed: { top: mm(0), bottom: mm(0), outside: mm(0), binding: mm(0) }, safe: { top: mm(5), bottom: mm(5), outside: mm(5), binding: mm(5) },
+      structure: { delivery: 'pages', ends: 'inside-covers', pageCount: { min: 2, max: 20, step: 2 } },
+      output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' } },
+    spreads: { main: { label: 'Main', boxes: { hero: box.photo('Hero'), story: box.markdown('Story') }, elements: { note: { label: 'Note' } }, render } },
+  }));
+  const project = projectSchema.parse({ schemaVersion: 1, title: 'Issues', template: { id: 'issues', version: '1' }, spreads: [{ id: 'one', definition: 'main' }] });
+  const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+  const html = renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
+    page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
+  // Each finding sits on the node the component renders, where the Book check finds it and its owner.
+  const marked = [...html.matchAll(/<div ([^>]*data-issue-info="[^"]*"[^>]*)>/g)].map(([, attributes]) => [
+    attributes.match(/data-box="(\w+)"|data-element="(\w+)"|class="(if-spread)"/)!.slice(1).find(Boolean),
+    attributes.match(/&quot;code&quot;:&quot;([a-z-]+)&quot;/)![1],
+  ]);
+  assert.deepEqual(marked, [['if-spread', 'on-spread'], ['hero', 'on-photo'], ['story', 'on-markdown'], ['note', 'on-element']]);
 });

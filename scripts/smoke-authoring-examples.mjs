@@ -19,17 +19,21 @@ await mkdir(join(folder, 'template'), { recursive: true });
 const minimal = await readFile(join(root, 'docs', 'examples', 'minimal.tsx'), 'utf8');
 const end = '\n  },\n});\n';
 assert.ok(minimal.endsWith(end));
-// A layout an agent adds to the example: an editable note. An empty note is reported as a structured finding.
+// A layout an agent adds to the example: an editable note in an element. An empty note is a structured error
+// finding, attached directly to the platform component.
 const note = `
     note: spread({
       label: 'Note page',
       parameters: { note: p.string({ label: 'Note', default: 'Written on the road.' }) },
+      elements: { body: { label: 'Note' } },
       render: (ctx) => {
         const area = geometry.page(ctx.format, 'left', 'safe');
         return <Spread>
-          <p {...ctx.edit('note')} {...(ctx.params.note ? {} : issue({ code: 'note-empty', message: 'The note is empty.', parameter: 'note',
-            suggestion: 'Set the note parameter, or switch this spread to another layout.' }))}
-            style={{ ...geometry.css({ ...area, height: 40 }), margin: 0, font: '12pt/1.4 serif' }}>{ctx.params.note}</p>
+          <ctx.Element id="body" {...ctx.edit('note')} style={geometry.css({ ...area, height: 40 })}
+            {...(ctx.params.note ? {} : issue({ code: 'note-empty', message: 'The note is empty.', parameter: 'note', severity: 'error',
+              suggestion: 'Set the note parameter, or switch this spread to another layout.' }))}>
+            <p style={{ margin: 0, font: '12pt/1.4 serif' }}>{ctx.params.note}</p>
+          </ctx.Element>
         </Spread>;
       },
     }),`;
@@ -120,7 +124,7 @@ try {
   assert.ok(typed.image);
 
   // A layout that renders a box it does not declare fails to render; the draft reports it without saving anything.
-  await write(withNote(note.replace('<p {...ctx.edit', '<ctx.PhotoBox id={"hero" as never} style={{}} /><p {...ctx.edit')));
+  await write(withNote(note.replace('<ctx.Element id="body"', '<ctx.PhotoBox id={"hero" as never} style={{}} /><ctx.Element id="body"')));
   const broken = (await draftCheck()).result;
   assert.equal(broken.state, 'error');
   assert.match(broken.diagnostics.map(({ message }) => message).join('\n'), /unknown, duplicate, or incompatible box: hero/);
@@ -155,17 +159,24 @@ try {
   for (let i = 0; i < draftPixels.length; i++) difference += Math.abs(draftPixels[i] - savedPixels[i]);
   assert.ok(difference / draftPixels.length < 1, 'The saved render differs from its draft preview by ' + difference / draftPixels.length);
 
-  // A structured template finding reaches MCP with its code and location, as the app's Book check shows it.
+  // A structured template finding on a platform component reaches MCP with its code, severity and location, as the
+  // app's Book check shows it, and as an error it blocks print export.
   const emptied = await good('apply_project_changes', { project, expectedRevision: committed.revision, idempotencyKey: 'empty-note', label: 'Empty note',
     operations: [{ op: 'set_parameter', scope: 'spread', spread: inserted, key: 'note', value: '' }] });
-  const finding = (await good('check_book', { project, expectedRevision: emptied.revision })).diagnostics.filter(({ code }) => code === 'template:note-empty');
-  assert.deepEqual(finding.map(({ severity, location, suggestion }) => ({ severity, spread: location.spread, parameter: location.parameter, hint: !!suggestion })),
-    [{ severity: 'warning', spread: inserted, parameter: 'note', hint: true }]);
+  const finding = (await call('check_book', { project, expectedRevision: emptied.revision })).data.diagnostics
+    .filter(({ code }) => code === 'template:note-empty');
+  assert.deepEqual(finding.map(({ severity, location, suggestion }) => ({ severity, spread: location.spread, element: location.element,
+    parameter: location.parameter, hint: !!suggestion })), [{ severity: 'error', spread: inserted, element: 'body', parameter: 'note', hint: true }]);
   const inApp = async () => (await window.frameLocator('iframe.book-frame-book[data-current][data-ready]').locator('body')
-    .evaluate(() => window.imageflowRenderStatus))?.warnings?.filter(({ code }) => code === 'template:note-empty') ?? [];
+    .evaluate(() => window.imageflowRenderStatus))?.errors?.filter(({ code }) => code === 'template:note-empty') ?? [];
   for (let attempt = 0; !(await inApp()).length && attempt < 100; attempt++) await window.waitForTimeout(100);
-  assert.deepEqual((await inApp()).map(({ spread, parameter, message }) => ({ spread, parameter, message })),
-    finding.map(({ location, message }) => ({ spread: location.spread, parameter: location.parameter, message })));
+  assert.deepEqual((await inApp()).map(({ spread, element, parameter, message }) => ({ spread, element, parameter, message })),
+    finding.map(({ location, message }) => ({ spread: location.spread, element: location.element, parameter: location.parameter, message })));
+  const pdf = join(work, 'print.pdf');
+  await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, pdf);
+  await window.getByRole('button', { name: 'Export print PDF', exact: true }).click();
+  await window.locator('.status-error', { hasText: 'The note is empty.' }).waitFor({ timeout: 60000 });
+  await assert.rejects(readFile(pdf), { code: 'ENOENT' });
   console.log('ImageFlow authoring examples passed.');
 } finally {
   await client?.close().catch(() => {});
