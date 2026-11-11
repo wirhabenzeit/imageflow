@@ -146,7 +146,7 @@ try {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
   }, project);
   await changed(() => menuAction(app, 'Open project…'));
-  assert.equal(await window.locator('h1').textContent(), 'My first book');
+  assert.equal(await window.locator('.project-identity strong').textContent(), 'My first book');
   assert.equal((await read()).spreads.length, 16);
   if (!packaged) await checkFlow(app, root);
   console.log('ImageFlow draft workflow passed' + (packaged ? ' (packaged).' : '.'));

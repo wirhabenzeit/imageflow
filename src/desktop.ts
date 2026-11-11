@@ -12,6 +12,7 @@ export const channels = {
   command: 'project:command', changed: 'project:changed',
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
   check: 'project:check', cancelCheck: 'project:cancel-check',
+  panelVisibility: 'editor:panel-visibility',
   history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
 } as const;
@@ -37,6 +38,7 @@ export type ImportRequest = {
 };
 
 export type DesktopApi = {
+  setPanelVisibility(state: { sidebar: boolean; inspector: boolean }): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;
   saveProject(id: string, files: ProjectFiles, label?: string): Promise<Result<ProjectSummary>>;
   history(id: string, direction: 'undo' | 'redo'): Promise<Result<ProjectSummary>>;

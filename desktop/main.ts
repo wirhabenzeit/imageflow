@@ -709,6 +709,14 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.cancel, (event) => { if (editorOwner(event)) exportJob?.abort(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) =>
     fromEditor(event, () => checkOpenBook(currentBook(id), request)));
+  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean }) => {
+    if (!editorOwner(event) || typeof state?.sidebar !== 'boolean' || typeof state?.inspector !== 'boolean') return;
+    const menu = Menu.getApplicationMenu();
+    const sidebar = menu?.getMenuItemById('sidebar');
+    const inspector = menu?.getMenuItemById('inspector');
+    if (sidebar) sidebar.label = state.sidebar ? 'Hide Sidebar' : 'Show Sidebar';
+    if (inspector) inspector.label = state.inspector ? 'Hide Inspector' : 'Show Inspector';
+  });
   ipcMain.handle(channels.cancelCheck, (event) => { if (editorOwner(event)) checkJob?.abort(); });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -740,8 +748,8 @@ void app.whenReady().then(async () => {
       { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
     ] },
     { label: 'View', submenu: [
-      menuCommand('Toggle Project Panel', 'Alt+Cmd+1', 'toggle-project'),
-      menuCommand('Toggle Inspector', 'Alt+Cmd+2', 'toggle-inspector'),
+      { ...menuCommand('Hide Sidebar', 'Alt+Cmd+1', 'toggle-project'), id: 'sidebar' },
+      { ...menuCommand('Hide Inspector', 'Alt+Cmd+2', 'toggle-inspector'), id: 'inspector' },
     ] },
     { role: 'windowMenu' },
   ]));

@@ -27,13 +27,14 @@ function LayoutPicker({ summary, spread, template, choose }: {
   const choices = layoutChoices(template.spreads, spread.definition);
   const describe = (id: string) => id === spread.definition ? 'Current layout' : describeLayoutChange(planLayoutChange(spread, id, template.spreads));
   const shown = pointed && choices.includes(pointed) ? pointed : undefined;
-  return <>
+  return <div className="layout-picker-shell">
     <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout"
-      aria-describedby="layout-consequence" style={{ height: geometry?.height }} onMouseLeave={() => setPointed(undefined)}>
+      style={{ height: geometry?.height }} onMouseLeave={() => setPointed(undefined)}>
       {choices.map((id) => {
         const item = template.spreads[id];
         const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
         return <button key={id} type="button" role="radio" aria-checked={id === spread.definition} aria-label={item.label}
+          aria-describedby={shown === id ? 'layout-consequence' : undefined}
           title={item.label + (item.span === 'spread' ? '' : ' · single ' + item.span + ' page')} className="layout-option"
           style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
           onMouseEnter={() => setPointed(id)} onFocus={() => setPointed(id)} onBlur={() => setPointed(undefined)}
@@ -44,9 +45,9 @@ function LayoutPicker({ summary, spread, template, choose }: {
       <BookFrame project={summary.id} view="layouts" query={'spread=' + encodeURIComponent(spread.id)} title="Layout previews"
         onGeometry={setGeometry} />
     </div>
-    <p id="layout-consequence" className="layout-consequence muted" aria-live="polite">
+    <p id="layout-consequence" className="layout-consequence" role="tooltip" hidden={!shown}>
       {shown ? template.spreads[shown].label + ' · ' + describe(shown) : '\u00a0'}</p>
-  </>;
+  </div>;
 }
 
 // Content the spread keeps for other layouts. Placing an item moves it into a box of this layout (swapping with what

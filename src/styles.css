@@ -2,7 +2,7 @@
 body { margin: 0; }
 .studio {
   --edge: #d8d8d8;
-  --muted: #737373;
+  --muted: #626262;
   --accent: #007aff;
   --text: #292929;
   --panel-surface: #f5f5f5;
@@ -10,7 +10,7 @@ body { margin: 0; }
   --control-border: #c7c7c7;
   --control-fill: linear-gradient(#fff, #f7f7f7);
   --selection-surface: #e0eaf5;
-  --focus-ring: #007aff50;
+  --focus-ring: #0069d9;
   --ui-font: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   display: grid;
   grid-template-rows: 64px minmax(0, 1fr) minmax(32px, auto);
@@ -98,7 +98,7 @@ body { margin: 0; }
 .toolbar .history button { min-height: 30px; padding: 4px 10px; font-size: 12px; }
 
 /* Sidebar: project and spread thumbnails */
-.project-panel { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; min-height: 0; border-right: 1px solid var(--edge); }
+.project-panel { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-height: 0; border-right: 1px solid var(--edge); }
 .welcome-workspace .project-panel { grid-template-rows: auto; align-content: start; }
 .project-head { padding: 18px 16px 12px; }
 .sample-button { margin-top: 16px; }
@@ -342,7 +342,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .inspector .box-photo-info select.box-photo-pick { margin-top: 3px; padding: 3px 6px; font-size: 12px; }
 .layout-note { margin: 4px 0 6px; font-size: 11px; color: var(--muted); }
 /* What switching to the pointed-at layout would do; reserves its line so the panel does not shift. */
-.layout-consequence { margin: 2px 0 6px; min-height: 1.4em; font-size: 11px; line-height: 1.4; }
+
 
 /* Template-supplied element editors */
 .element-editor { padding: 0; border: 0; border-radius: 12px; background: var(--control-surface); color: var(--text); box-shadow: 0 24px 80px #0007;
@@ -363,7 +363,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 
 /* A unified, quiet document toolbar. Native traffic lights occupy the left inset on macOS. */
 .studio {
-  --edge: #d8d8d8; --muted: #737373; --accent: #007aff;
+  --edge: #d8d8d8; --muted: #626262; --accent: #007aff;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 56px minmax(0, 1fr) 28px;
   background: #f5f5f5; color: #292929;
@@ -386,10 +386,10 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .toolbar button:disabled { opacity: .3; }
 .export-area { width: 112px; display: flex; justify-content: flex-end; align-items: center; }
 .export-menu { position: relative; width: 112px; flex: none; }
-.export-menu > summary { display: flex; align-items: center; justify-content: center; gap: 7px; cursor: default; border: 1px solid #c7c7c7; border-radius: 6px; padding: 5px 9px; background: linear-gradient(#ffffff, #f7f7f7); box-shadow: 0 1px 1px #00000008; color: #393939; font-size: 12px; font-weight: 500; list-style: none; }
-.export-menu > summary:hover { border-color: #b4b4b4; }
-.export-menu > summary::-webkit-details-marker { display: none; }
-.export-menu > summary:focus-visible { outline: 3px solid #007aff50; outline-offset: 2px; }
+.export-menu > :is(summary, .action-menu-trigger) { display: flex; align-items: center; justify-content: center; gap: 7px; cursor: default; border: 1px solid #c7c7c7; border-radius: 6px; padding: 5px 9px; background: linear-gradient(#ffffff, #f7f7f7); box-shadow: 0 1px 1px #00000008; color: #393939; font-size: 12px; font-weight: 500; list-style: none; }
+.export-menu > :is(summary, .action-menu-trigger):hover { border-color: #b4b4b4; }
+.export-menu > :is(summary, .action-menu-trigger)::-webkit-details-marker { display: none; }
+.export-menu > :is(summary, .action-menu-trigger):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .export-choices { position: absolute; right: 0; top: calc(100% + 8px); width: 228px; padding: 5px; z-index: 30; display: grid; gap: 2px; background: #f8f8f8; border: 1px solid #c7c7c7; border-radius: 8px; box-shadow: 0 8px 28px #0002; }
 .studio .export-choices button { text-align: left; min-height: 29px; padding: 5px 10px; border: 0; border-radius: 4px; font-size: 13px; font-weight: 400; background: transparent; color: inherit; }
 .studio .export-choices button:hover:not(:disabled) { background: var(--accent); color: white; }
@@ -403,7 +403,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .welcome-workspace { grid-template-columns: minmax(0, var(--left-panel, 232px)) var(--left-divider, 6px) minmax(240px, 1fr); }
 .workspace[data-resizing] { transition: none; }
 .project-panel { grid-column: 1; min-width: 0; display: block; overflow: clip; border: 0; background: #efefef; }
-.project-panel-content { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; height: 100%; width: var(--left-content, 232px); transition: opacity 160ms, transform 220ms; }
+.project-panel-content { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); height: 100%; width: var(--left-content, 232px); transition: opacity 160ms, transform 220ms; }
 .welcome-workspace .project-panel-content { grid-template-rows: auto; align-content: start; }
 .project-head { padding: 14px 14px 12px; }
 .project-head .eyebrow { display: none; }
@@ -438,7 +438,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .sources-bar > * { flex-shrink: 0; }
 .sources { grid-template-rows: 38px 132px; background: #f3f3f3; }
 .welcome-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
-.layout-consequence { height: 4.2em; overflow: auto; scrollbar-gutter: stable; }
+
 @media (max-width: 1100px) {
   .project-panel-content { width: min(var(--left-content), 24vw); }
   .inspector-host > .inspector { width: min(var(--right-content), 29vw); }
@@ -503,3 +503,22 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
   .inspector details > summary::before { transition: none; }
   .quicklook[open], .edit-popover, .inspector details.flash { animation: none; }
 }
+
+/* Hover consequences float over the Inspector instead of reserving an empty block. */
+.layout-picker-shell { position: relative; }
+.layout-consequence { position: absolute; z-index: 8; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 8px 10px; background: #fafafa; border: 1px solid var(--control-border); border-radius: 6px; box-shadow: 0 4px 16px #0002; font-size: 11px; line-height: 1.45; pointer-events: none; }
+.layout-consequence[hidden] { display: none; }
+.sources { container-type: inline-size; }
+.sources-bar { overflow: visible; }
+.sources-bar .spacer { min-width: 0; flex-shrink: 1; }
+.source-import { position: relative; flex: none; }
+.source-import > :is(summary, .action-menu-trigger) { display: flex; align-items: center; gap: 5px; min-height: 26px; padding: 3px 8px; border: 1px solid var(--control-border); border-radius: 6px; background: var(--control-fill); color: var(--text); font: 400 11px/1.4 var(--ui-font); list-style: none; cursor: default; }
+.source-import > summary::-webkit-details-marker { display: none; }
+.source-import > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.source-import .action-menu-choices { position: absolute; right: 0; bottom: calc(100% + 7px); z-index: 40; display: grid; width: 190px; padding: 5px; border: 1px solid var(--control-border); border-radius: 7px; background: #fafafa; box-shadow: 0 5px 20px #0002; }
+.studio .source-import .action-menu-choices button { border: 0; background: transparent; box-shadow: none; text-align: left; font-size: 12px; }
+.studio .source-import .action-menu-choices button:hover { background: var(--accent); color: white; }
+.studio .agent-status { flex: none; margin-right: 14px; min-height: 22px; padding: 1px 6px; border: 0; background: transparent; box-shadow: none; color: #315e87; font-size: 11px; }
+.studio .agent-status:hover { background: #dce8f5; }
+.studio .book-check-clean .book-check-toggle { opacity: 1; color: var(--muted); }
+@container (max-width: 480px) { .sources-bar .hint { display: none; } }

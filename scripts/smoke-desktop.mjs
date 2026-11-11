@@ -117,7 +117,7 @@ try {
   await menuAction(instance, 'Open project…');
   await window.locator('.status-error').waitFor();
   assert.match(await status.textContent(), /project\.json.*schemaVersion/);
-  assert.equal(await window.locator('h1').textContent(), 'Senja · Field Notes');
+  assert.equal(await window.locator('.project-identity strong').textContent(), 'Senja · Field Notes');
 
   await instance.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });

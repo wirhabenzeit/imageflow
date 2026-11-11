@@ -3,6 +3,7 @@ import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, renderOrigin } from './desktop';
 import type { BookGeometry, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { PanelDivider, usePanels } from './panels';
+import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
 import { McpPanel } from './McpPanel';
@@ -120,21 +121,9 @@ export function App() {
   const [agentWorking, setAgentWorking] = useState(false);
   const pendingTasks = useRef(0);
   const workspace = useRef<HTMLDivElement>(null);
-  const exportMenu = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
-    const close = (event: globalThis.PointerEvent) => {
-      if (!exportMenu.current?.contains(event.target as Node)) exportMenu.current?.removeAttribute('open');
-    };
-    const escape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape' && exportMenu.current?.open) {
-        exportMenu.current.removeAttribute('open');
-        exportMenu.current.querySelector('summary')?.focus();
-      }
-    };
-    document.addEventListener('pointerdown', close);
-    document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape); };
-  }, []);
+    void api?.setPanelVisibility({ sidebar: !panels.leftHidden, inspector: !panels.rightHidden });
+  }, [api, panels.leftHidden, panels.rightHidden]);
   const spreads = summary?.project.spreads ?? [];
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
@@ -866,14 +855,14 @@ export function App() {
       </div>
       <div className="toolbar-actions">
         <div className="export-area">
-          {exporting ? <div className="export-progress"><span role="status" title={busy}>{busy}</span><button onClick={() => void api?.cancelExport()}>Cancel export</button></div> : <details ref={exportMenu} className="export-menu">
-            <summary><Icon name="export" /><span>Export</span><Icon name="chevron" /></summary>
+          {exporting ? <div className="export-progress"><span role="status" title={busy}>{busy}</span><button onClick={() => void api?.cancelExport()}>Cancel export</button></div> : <ActionMenu className="export-menu" disabled={!summary} label={<><Icon name="export" /><span>Export</span><Icon name="chevron" /></>}>
             <div className="export-choices">
               <button className="primary" disabled={!canExport || !checkCurrent || !!check?.errors.length} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('print'); }}>Export print PDF</button>
               <button disabled={!canExport} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('export'); }}>Export proof PDF</button>
+              {!checkCurrent && <p>Checking book… Print export will be available when checks finish.</p>}
               {checkCurrent && !!check?.errors.length && <p>Resolve Book check errors before print export.</p>}
             </div>
-          </details>}
+          </ActionMenu>}
         </div>
         <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘2)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>
@@ -885,9 +874,8 @@ export function App() {
       <aside className={'project-panel' + (panels.leftHidden ? ' is-collapsed' : '')} aria-label="Project" inert={panels.leftHidden} aria-hidden={panels.leftHidden}>
         <div className="project-panel-content">
         <div className="project-head">
-          <p className="eyebrow">Project</p>
-          <h1>{summary?.project.title ?? 'Photobook studio'}</h1>
-          <p className="muted">{summary ? summary.folder + (summary.readOnly ? ' · Sample' : '') : 'Local photobook projects'}</p>
+          <h1>{summary ? template?.format.label ?? 'Book' : 'Photobook studio'}</h1>
+          <p className="muted" title={summary?.folder}>{summary ? (sequence ? sequence.count + ' pages · ' + spreads.length + ' spreads' : 'Loading book…') + (summary.readOnly ? ' · Sample' : '') : 'Local photobook projects'}</p>
           {!summary && <button className="sample-button" disabled={!api || !!busy} onClick={() => act('sample')}>Open sample project</button>}
         </div>
         {summary && <details className="document-settings">
@@ -946,10 +934,6 @@ export function App() {
                 hold={holdPreview} accept={acceptCandidate} />
             </div>
           </div>
-          {template && <div className="format">
-            <span>{template.format.label}</span>
-            <span className="muted">{sequence?.count} pages · {spreads.length} spreads</span>
-          </div>}
         </>}
         </div>
       </aside>
@@ -1102,11 +1086,11 @@ export function App() {
         edit={editCanvas} close={() => setElementEditor(undefined)} />}
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
-    <McpPanel api={api} />
     <footer className="status-bar">
       <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
         {issue || busy || notice || (summary ? 'Project preview · Proof export' : 'ImageFlow for macOS')}
       </span>
+      <McpPanel api={api} />
       {summary && <BookCheckIndicator check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}
     </footer>
   </div></ProjectFilesContext.Provider>;

@@ -16,11 +16,13 @@ async function launch() {
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
   const w = await app.firstWindow();
   w.setDefaultTimeout(20000);
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1400, 900));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 900));
   await app.evaluate(({ dialog }, filePath) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath });
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
   }, join(work, 'Book'));
+  await w.locator('.welcome').waitFor();
+  assert.equal(await w.getByRole('button', { name: 'Export', exact: true }).isDisabled(), true);
   await menuAction(app, first ? 'New project…' : 'Open project…');
   first = false;
   await w.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
@@ -33,6 +35,10 @@ try {
     node.getBoundingClientRect();
     await Promise.all(node.getAnimations().map((animation) => animation.finished));
   });
+  const labels = () => app.evaluate(({ Menu }) => ['sidebar', 'inspector'].map((id) => Menu.getApplicationMenu().getMenuItemById(id).label));
+  assert.deepEqual(await labels(), ['Hide Sidebar', 'Hide Inspector']);
+  assert.equal(await w.locator('.project-head').innerText().then((text) => text.includes('28 pages')), true);
+  assert.equal(await w.locator('.project-head').innerText().then((text) => text.includes('Book\nBook')), false);
   const before = await canvas();
   await w.getByRole('button', { name: 'Toggle project panel', exact: true }).click();
   assert.equal(await w.getByRole('complementary', { name: 'Project', exact: true }).count(), 0);
@@ -44,10 +50,11 @@ try {
   assert.ok(new Set(widths).size > 2, 'Panel collapse animates through intermediate canvas widths');
   await settle();
   assert.ok((await canvas()).width > before.width + 200);
-  await menuAction(app, 'Toggle Inspector');
+  await menuAction(app, 'Hide Inspector');
   await settle();
+  assert.deepEqual(await labels(), ['Show Sidebar', 'Show Inspector']);
   assert.ok((await canvas()).width > before.width + 450);
-  await menuAction(app, 'Toggle Project Panel');
+  await menuAction(app, 'Show Sidebar');
   await w.getByRole('button', { name: 'Toggle Inspector', exact: true }).click();
   await settle();
   const left = w.getByRole('separator', { name: 'Resize project panel' });
@@ -69,8 +76,12 @@ try {
   await w.locator('.spread-thumb').nth(1).click();
   await settle();
   const stable = await canvas();
+  const fieldBefore = await w.locator('.inspector .field').first().boundingBox();
   await w.getByRole('radio', { name: 'Photo grid', exact: true }).hover();
   assert.deepEqual(await canvas(), stable);
+  assert.deepEqual(await w.locator('.inspector .field').first().boundingBox(), fieldBefore);
+  assert.equal(await w.getByRole('tooltip').count(), 1);
+  assert.equal(await w.locator('#layout-consequence').getAttribute('aria-live'), null);
   await w.locator('.status').evaluate((node) => { node.textContent = 'A long status message '.repeat(80); });
   assert.deepEqual(await canvas(), stable);
   // Both book geometry and overlay hit targets follow panel resizing.
@@ -88,7 +99,7 @@ try {
   w = await launch();
   assert.equal(await w.getByRole('button', { name: 'Toggle Inspector', exact: true }).getAttribute('aria-pressed'), 'false');
   assert.equal(await w.getByRole('separator', { name: 'Resize project panel' }).getAttribute('aria-valuenow'), '302');
-  await menuAction(app, 'Toggle Inspector');
+  await menuAction(app, 'Show Inspector');
   const restored = w.getByRole('separator', { name: 'Resize Inspector' });
   assert.equal(await restored.getAttribute('aria-valuenow'), '286');
   await settle();
@@ -97,6 +108,40 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(940, 650));
   await settle();
   assert.equal(await w.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  const sourceBar = await w.locator('.sources-bar').boundingBox();
+  const importTrigger = w.locator('.source-import > summary');
+  const importBox = await importTrigger.boundingBox();
+  assert.ok(importBox.x >= sourceBar.x && importBox.x + importBox.width <= sourceBar.x + sourceBar.width);
+  assert.equal(await w.locator('.sources-bar').evaluate((node) => node.scrollWidth <= node.clientWidth), true);
+  await importTrigger.focus();
+  await w.keyboard.press('ArrowDown');
+  assert.equal(await w.evaluate(() => document.activeElement.textContent), 'Import photos…');
+  await w.keyboard.press('ArrowDown');
+  assert.equal(await w.evaluate(() => document.activeElement.textContent), 'Import folder…');
+  const folder = await w.getByRole('button', { name: 'Import folder…', exact: true }).boundingBox();
+  assert.ok(folder.x >= 0 && folder.x + folder.width <= 940 && folder.y >= 0 && folder.y + folder.height <= 650);
+  await w.keyboard.press('Escape');
+  assert.equal(await w.locator('.source-import').getAttribute('open'), null);
+  await w.locator('.export-menu > summary').focus();
+  await w.keyboard.press('ArrowDown');
+  assert.equal(await w.evaluate(() => document.activeElement.textContent), 'Export print PDF');
+  await w.keyboard.press('ArrowDown');
+  assert.equal(await w.evaluate(() => document.activeElement.textContent), 'Export proof PDF');
+  await w.keyboard.press('Tab');
+  assert.equal(await w.locator('.export-menu').getAttribute('open'), null);
+  // Check rendered secondary-text and focus colors against the surfaces they sit on.
+  const contrast = await w.evaluate(() => {
+    const rgb = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number);
+    const lum = (values) => values.map((n) => { n /= 255; return n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4; }).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0);
+    const ratio = (a, b) => (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+    const text = lum(rgb(getComputedStyle(document.querySelector('.muted')).color));
+    const backgrounds = ['.project-panel', '.inspector'].map((selector) => lum(rgb(getComputedStyle(document.querySelector(selector)).backgroundColor)));
+    const trigger = document.querySelector('.source-import > summary');
+    trigger.focus();
+    const focus = lum(rgb(getComputedStyle(trigger).outlineColor));
+    return backgrounds.map((background) => ({ text: ratio(text, background), focus: ratio(focus, background) }));
+  });
+  assert.ok(contrast.every((value) => value.text >= 4.5 && value.focus >= 3));
   await w.emulateMedia({ reducedMotion: 'reduce' });
   await w.getByRole('button', { name: 'Toggle Inspector', exact: true }).click();
   assert.equal(await w.locator('.workspace').evaluate((node) => getComputedStyle(node).transitionDuration), '0s');

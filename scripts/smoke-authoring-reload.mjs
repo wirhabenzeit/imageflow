@@ -219,7 +219,7 @@ try {
   await replace(manifest, JSON.stringify(book));
   await menuAction(app, 'Reload');
   await readyAfter(previous);
-  await window.getByRole('heading', { name: 'Loaded manually', exact: true }).waitFor();
+  await window.locator('.project-identity').getByText('Loaded manually', { exact: true }).waitFor();
   const manuallyLoaded = await frameUrl();
   await window.waitForTimeout(500);
   assert.deepEqual(await window.evaluate(() => window.reloadEvents), []);
@@ -231,7 +231,7 @@ try {
   book.title = 'Edited on disk';
   await replace(manifest, JSON.stringify(book));
   await readyAfter(previous);
-  await window.getByRole('heading', { name: 'Edited on disk', exact: true }).waitFor();
+  await window.locator('.project-identity').getByText('Edited on disk', { exact: true }).waitFor();
   assert.equal(await button('Undo').isDisabled(), true);
 
   previous = await frameUrl();

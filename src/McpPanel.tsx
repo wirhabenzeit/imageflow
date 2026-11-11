@@ -23,7 +23,9 @@ export function McpPanel({ api }: { api?: DesktopApi }) {
     } finally { setPending(false); }
   }
   return <>
-    <dialog ref={dialog} className="mcp-dialog" data-clients={settings.clients.length} aria-labelledby="mcp-heading">
+    {settings.enabled && <button className="agent-status" title={settings.clients.length ? 'Connected: ' + settings.clients.map(({ name }) => name).join(', ') : 'Agent connection enabled · waiting for an agent'}
+      onClick={() => dialog.current?.showModal()}>Agent · {settings.clients.length}</button>}
+    <dialog ref={dialog} className="mcp-dialog" aria-labelledby="mcp-heading">
       <h2 id="mcp-heading">Connect your agent</h2>
       <p>Enable a local MCP connection for the book open in ImageFlow. Your agent can check designs, see page images, and edit the book with Undo.</p>
       <button disabled={pending} onClick={() => void toggle()}>{settings.enabled ? 'Disconnect agents' : 'Enable local connection'}</button>

@@ -1,3 +1,4 @@
+import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { useEffect, useMemo, useRef } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
@@ -60,10 +61,11 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
       </div>
       <span className="hint"><kbd>Space</kbd> Quick Look</span>
       <span className="spacer" />
-      {tab === 'photo' ? <>
-        <button disabled={!writable || busy} onClick={() => importSources('import-photos')}>Import photos…</button>
-        <button disabled={!writable || busy} onClick={() => importSources('import-folder')}>Import folder…</button>
-      </> : <button disabled={!writable || busy} onClick={() => importSources('import-texts')}>Import Markdown…</button>}
+      <ActionMenu className="source-import" disabled={!writable || busy} label={<>Import <Icon name="chevron" /></>}>
+        <button onClick={() => importSources('import-photos')}>Import photos…</button>
+        <button onClick={() => importSources('import-folder')}>Import folder…</button>
+        <button onClick={() => importSources('import-texts')}>Import Markdown…</button>
+      </ActionMenu>
     </div>
     <div ref={list} className={'source-items source-items-' + tab} role="listbox" aria-orientation="horizontal"
       aria-label={tab === 'photo' ? 'Photos' : 'Texts'} onKeyDown={keys}>
