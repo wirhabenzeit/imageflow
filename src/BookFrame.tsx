@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { BookGeometry, BookView, RenderStatus } from './desktop';
 
-type FrameState = { geometry?: BookGeometry; status?: RenderStatus; published?: boolean };
+type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
 export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, viewport, hold, accept }: {
@@ -32,7 +32,10 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       if (range) (event.source as Window).postMessage({ type: 'viewport', ...range }, renderOrigin);
       return;
     }
-    const frame = { ...latest.current.get(id) };
+    const element = refs.current.get(id)!;
+    const previous = latest.current.get(id);
+    // Revisiting a URL creates a new iframe. Readiness belongs to that instance, not its previous mount.
+    const frame: FrameState = previous?.element === element ? { ...previous } : { element };
     if ('type' in data && data.type === 'geometry') {
       frame.geometry = data;
       if (id === shown) onGeometry(data);
@@ -57,14 +60,23 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     return () => window.removeEventListener('message', listener);
   }, []);
 
-  return ids.map((id) => <iframe key={id} title={title} tabIndex={-1}
-    className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending')}
-    data-current={id === target || undefined} data-ready={frames[id]?.status?.state === 'ready' && frames[id]?.published ? '' : undefined}
-    aria-hidden={id !== shown || undefined} style={{ height: frames[id]?.geometry?.height }}
-    ref={(element) => {
-      if (!element) return;
-      refs.current.set(id, element);
-      return () => { refs.current.delete(id); };
-    }}
-    src={id} />);
+  return ids.map((id) => {
+    const frame = frames[id];
+    return <iframe key={id} title={title} tabIndex={-1}
+      className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending')}
+      data-current={id === target || undefined} data-ready={frame?.status?.state === 'ready' && frame.published ? '' : undefined}
+      aria-hidden={id !== shown || undefined} style={{ height: frame?.geometry?.height }}
+      ref={(element) => {
+        if (!element) return;
+        refs.current.set(id, element);
+        if (latest.current.get(id)?.element !== element) {
+          // Clear the cached ready flag before a recreated frame is measured or shown.
+          const fresh = { element };
+          latest.current.set(id, fresh);
+          setFrames((current) => ({ ...current, [id]: fresh }));
+        }
+        return () => { refs.current.delete(id); };
+      }}
+      src={id} />;
+  });
 }

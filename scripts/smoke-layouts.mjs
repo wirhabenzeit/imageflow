@@ -17,6 +17,18 @@ const app = await _electron.launch({ executablePath: electron, args: [join(root,
 try {
   const w = await app.firstWindow();
   w.setDefaultTimeout(20000);
+  // Register before the app's message listener so a preview can be held deterministically.
+  await w.addInitScript(() => {
+    if (location.hostname !== 'editor') return;
+    window.__layoutMessages = [];
+    window.addEventListener('message', (event) => {
+      const candidate = document.querySelector('iframe.book-frame-layouts[data-current]');
+      if (!window.__holdLayouts || event.origin !== 'imageflow://render' || event.source !== candidate?.contentWindow) return;
+      event.stopImmediatePropagation();
+      window.__layoutMessages.push({ data: event.data, origin: event.origin, source: event.source });
+    });
+  });
+  await w.reload();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1400, 900));
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, project);
   const frame = w.frameLocator('iframe.book-frame-book[data-current]');
@@ -48,6 +60,49 @@ try {
   const kept = () => w.locator('.inspector').getByText(/^Saved outside this layout/).textContent();
 
   await rerendered(() => menuAction(app, 'New project…'));
+  const layoutReady = async (spread) => {
+    await w.waitForFunction((spread) => {
+      const frame = document.querySelector('iframe.book-frame-layouts[data-current][data-ready]:not([aria-hidden])');
+      return frame && new URL(frame.src).searchParams.get('spread') === spread;
+    }, spread);
+  };
+  const pickerHasNoOverlap = () => picker.getByRole('radio').evaluateAll((items) => {
+    const bounds = items.map((item) => item.getBoundingClientRect());
+    return bounds.every((a, i) => bounds.slice(i + 1).every((b) =>
+      Math.min(a.right, b.right) - Math.max(a.left, b.left) <= 1 || Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) <= 1));
+  });
+  await w.locator('.spread-thumb[data-spread="last-notes"]').click();
+  await layoutReady('last-notes');
+  await w.locator('.spread-thumb[data-spread="closing"]').click();
+  await layoutReady('closing');
+  // Hold the next frame's real messages so the transition is checked even on a fast computer.
+  await w.evaluate(() => {
+    window.__layoutMessages = [];
+    window.__holdLayouts = true;
+  });
+  await w.locator('.spread-thumb[data-spread="last-notes"]').click();
+  await w.waitForFunction(() => window.__layoutMessages.some(({ data }) => data.state === 'ready'));
+  await w.screenshot({ path: join(root, '.build', 'layout-picker-transition.png') });
+  assert.equal(await pickerHasNoOverlap(), true, 'Layout labels must not overlap while the next preview is pending.');
+  assert.equal(await picker.getAttribute('aria-busy'), 'true');
+  assert.equal(await picker.getByRole('radio').evaluateAll((items) => items.every((item) => item.disabled)), true);
+  assert.equal(await w.locator('iframe.book-frame-layouts[data-current]').getAttribute('data-ready'), null,
+    'A recreated iframe cannot reuse readiness from its previous mount.');
+  await w.evaluate(() => {
+    window.__holdLayouts = false;
+    for (const message of window.__layoutMessages) window.dispatchEvent(new MessageEvent('message', message));
+    window.__layoutMessages = [];
+  });
+  await layoutReady('last-notes');
+  assert.equal(await pickerHasNoOverlap(), true);
+  assert.equal(await picker.getByRole('radio').count(), 7);
+  await w.locator('.inspector').screenshot({ path: join(root, '.build', 'layout-picker-ready.png') });
+  // Revisit cached URLs across single-page and full-spread choice sets.
+  for (const spread of ['closing', 'last-notes', 'title', 'last-notes', 'closing', 'last-notes']) {
+    await w.locator('.spread-thumb[data-spread="' + spread + '"]').click();
+    await layoutReady(spread);
+    assert.equal(await pickerHasNoOverlap(), true);
+  }
   await button('Photo grid 6–7').click();
   await w.locator('[data-spread="settlements"][aria-current="page"]').waitFor();
 

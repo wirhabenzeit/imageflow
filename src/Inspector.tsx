@@ -25,15 +25,18 @@ function LayoutPicker({ summary, spread, template, choose }: {
   const [geometry, setGeometry] = useState<BookGeometry>();
   const [pointed, setPointed] = useState<string>();
   const choices = layoutChoices(template.spreads, spread.definition);
+  // The retained preview and its hit targets must describe the same set of layouts until the next frame is ready.
+  const displayed = geometry ? geometry.sheets.map(({ spread }) => spread).filter((id) => Object.hasOwn(template.spreads, id)) : choices;
+  const pending = !!geometry && (displayed.length !== choices.length || displayed.some((id, i) => id !== choices[i]));
   const describe = (id: string) => id === spread.definition ? 'Current layout' : describeLayoutChange(planLayoutChange(spread, id, template.spreads));
-  const shown = pointed && choices.includes(pointed) ? pointed : undefined;
+  const shown = !pending && pointed && choices.includes(pointed) ? pointed : undefined;
   return <div className="layout-picker-shell">
-    <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout"
+    <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout" aria-busy={pending || undefined}
       style={{ height: geometry?.height }} onMouseLeave={() => setPointed(undefined)}>
-      {choices.map((id) => {
+      {displayed.map((id) => {
         const item = template.spreads[id];
         const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
-        return <button key={id} type="button" role="radio" aria-checked={id === spread.definition} aria-label={item.label}
+        return <button key={id} type="button" role="radio" disabled={pending} aria-checked={id === spread.definition} aria-label={item.label}
           aria-describedby={shown === id ? 'layout-consequence' : undefined}
           title={item.label + (item.span === 'spread' ? '' : ' · single ' + item.span + ' page')} className="layout-option"
           style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
@@ -161,12 +164,6 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     return <Field key={target.path} param={target.param} value={value}
       change={(next) => edit(({ project }) => writeEdit(project, spread.id, target, next), target.param.label + ' updated')} />;
   });
-  // Layout previews restart each text; say so when this spread shows a later part of a chained text.
-  const continued = render?.state === 'ready' ? Object.entries(definition?.boxes ?? {})
-    .filter(([id, box]) => box.type === 'markdown' && spread.boxes[id]?.text)
-    .map(([id]) => render.flow[spread.id + ':' + id])
-    .filter((position) => !!position && position.part > 1)
-    .filter((position, index, all) => all.findIndex((other) => other.title === position.title) === index) : [];
   const spreadParameters = Object.fromEntries(Object.entries(definition?.parameters ?? {}).filter(([key]) => !claimed.has(key)));
   const header = <>
     <p className="eyebrow">Inspector</p>
@@ -193,9 +190,6 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
             switchLayout(item, next, template.spreads);
           }, () => template.spreads[next].label + ' · ' + consequence);
         }} />
-        {continued.length > 0 && <p className="layout-note" role="note">
-          Previews start text from the beginning; this spread shows {continued.map(({ title, part, parts }) =>
-            (title ?? 'text') + ' part ' + part + ' of ' + parts).join(', ')}.</p>}
         {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
         {definition && <Fields key={spread.id} schema={spreadParameters} values={spread.params}
           update={(id, value) => changeSpread((item) => { item.params[id] = value; }, spreadParameters[id].label + ' updated')} />}

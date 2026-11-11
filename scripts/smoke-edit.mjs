@@ -383,11 +383,10 @@ try {
   const saved = (text) => w.waitForFunction((text) => document.querySelector('.status')?.textContent === text, text);
   const thumb = (name) => w.getByRole('button', { name, exact: true }).click();
 
-  // #12: the layout picker says when it restarts a text this spread continues.
+  // Continued texts keep their flow position beside the source control.
   await thumb('Photo and story 16–17');
-  await w.locator('.layout-note').filter({ hasText: 'arrival.md part 3 of 3' }).waitFor();
+  await w.locator('.inspector').getByText('Flow 3 of 3', { exact: true }).waitFor();
   await thumb('Photo and story 2–3');
-  assert.equal(await w.locator('.layout-note').count(), 0);
 
   // #9: photos can be assigned from the keyboard, to an empty box and as a replacement; Undo restores.
   await w.getByRole('combobox', { name: 'Replace photo in Main photo' }).selectOption('shore');
