@@ -2,7 +2,7 @@ import type { PrintFormat, PrintSide, Span } from './format';
 import type { Parameters } from './parameters';
 import type { ProjectFiles } from './project';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
-import type { AppSettings } from './settings';
+import type { AppSettings, SettingsPane } from './settings';
 
 export const desktopScheme = 'imageflow';
 export const editorURL = desktopScheme + '://editor/';
@@ -16,13 +16,14 @@ export const channels = {
   check: 'project:check', cancelCheck: 'project:cancel-check',
   panelVisibility: 'editor:panel-visibility',
   settings: 'app:settings', updateSettings: 'app:update-settings', settingsChanged: 'app:settings-changed',
-  history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed',
+  showSettings: 'app:show-settings', settingsPane: 'app:settings-pane', fitSettings: 'app:fit-settings',
+  history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed', mcpInstall: 'mcp:install',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'sample' | 'reload';
 export type ExportMode = 'proof' | 'print';
-export type Command = OpenAction | 'agent-settings' | 'toggle-project' | 'toggle-inspector' | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'undo' | 'redo';
+export type Command = OpenAction | 'toggle-project' | 'toggle-inspector' | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'undo' | 'redo';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState;
@@ -33,7 +34,12 @@ export type ProjectSummary = ProjectFiles & {
 };
 export type Result<T> = { value: T } | { error: string };
 export type HistoryState = { undo?: string; redo?: string };
-export type McpSettings = { enabled: boolean; clients: { name: string }[]; config?: { command: string; args: string[] } };
+// How an MCP client starts ImageFlow's stdio bridge. It does not change when the connection is enabled again.
+export type McpLaunch = { command: string; args: string[]; env: Record<string, string> };
+export type McpSettings = { enabled: boolean; clients: { name: string }[]; launch: McpLaunch; claudeCode: string };
+// `claude` opens Claude Desktop's extension installer; `codex` registers the bridge for the ChatGPT desktop app and
+// Codex, which share ~/.codex/config.toml.
+export type McpClientTarget = 'claude' | 'codex';
 export type ProjectChange = Result<ProjectSummary> | { building: true };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions.
 export type ImportRequest = {
@@ -44,12 +50,19 @@ export type DesktopApi = {
   getSettings(): Promise<Result<AppSettings>>;
   updateSettings(patch: Partial<AppSettings>): Promise<Result<AppSettings>>;
   onSettingsChanged(listener: (settings: AppSettings) => void): () => void;
+  showSettings(pane: SettingsPane): Promise<void>;
+  // The pane Settings should show: read once when it loads, then pushed while it stays open.
+  settingsPane(): Promise<SettingsPane>;
+  onSettingsPane(listener: (pane: SettingsPane) => void): () => void;
+  // Settings sizes its native window to the current pane's content height.
+  fitSettings(height: number): Promise<void>;
   setPanelVisibility(state: { sidebar: boolean; inspector: boolean }): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;
   saveProject(id: string, files: ProjectFiles, label?: string): Promise<Result<ProjectSummary>>;
   history(id: string, direction: 'undo' | 'redo'): Promise<Result<ProjectSummary>>;
   mcpSettings(enabled?: boolean): Promise<Result<McpSettings>>;
   onMcpChanged(listener: (settings: McpSettings) => void): () => void;
+  installMcp(target: McpClientTarget): Promise<Result<string>>;
   onAgentLease(listener: (id: string) => boolean): () => void;
   onAgentRelease(listener: () => void): () => void;
   importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[] } | null>>;

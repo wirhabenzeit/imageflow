@@ -15,8 +15,11 @@ const icons = {
   delete: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5',
   up: 'M8 13V3M4 7l4-4 4 4',
   down: 'M8 3v10M4 9l4 4 4-4',
+  // Settings toolbar: sliders for General, a sparkle for agents.
+  settings: 'M2.5 5h5.5M11.5 5h2M2.5 11h1.5M7.5 11h6M8 5a1.75 1.75 0 1 0 3.5 0a1.75 1.75 0 1 0-3.5 0M4 11a1.75 1.75 0 1 0 3.5 0a1.75 1.75 0 1 0-3.5 0',
+  agent: 'M7 2.5l1.3 3.7 3.7 1.3-3.7 1.3L7 12.5 5.7 8.8 2 7.5l3.7-1.3zM12 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z',
 };
-export const Icon = ({ name }: { name: keyof typeof icons }) => <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+export const Icon = ({ name, size = 14 }: { name: keyof typeof icons; size?: number }) => <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">
   <path d={icons[name]} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
 </svg>;
 
