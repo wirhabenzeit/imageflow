@@ -1,3 +1,4 @@
+import { menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -39,10 +40,10 @@ try {
   const window = await app.firstWindow();
   window.setDefaultTimeout(20000);
   await app.evaluate(({dialog}, folder) => { dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]}); },folder);
-  await window.getByRole('button',{name:'Open project…',exact:true}).click();
+  await menuAction(app, 'Open project…');
   const ready = () => window.waitForFunction(()=>document.querySelector('iframe.book-frame-book[data-current][data-ready]') && !document.querySelector('.preview-state'));
   await ready();
-  await window.getByRole('button',{name:'Connect an agent…',exact:true}).click();
+  await menuAction(app, 'Agent Connections…');
   const connectionDialog=window.getByRole('dialog',{name:'Connect your agent'});
   await connectionDialog.getByRole('button',{name:'Enable local connection',exact:true}).click();
   const configuration=connectionDialog.getByRole('textbox',{name:'MCP connection configuration'});
@@ -50,9 +51,13 @@ try {
   const config=JSON.parse(await configuration.inputValue()).mcpServers.imageflow;
   assert.equal(config.command,'node');
   await connectionDialog.getByRole('button',{name:'Close',exact:true}).click();
+  await window.getByRole('button', { name: 'Agent · 0', exact: true }).waitFor();
   client = new Client({name:'ImageFlow prototype test',version:'1.0.0'});
   await client.connect(new StdioClientTransport({...config,command:process.execPath,stderr:'pipe'}));
-  await window.getByRole('button',{name:'Agent connection · 1',exact:true}).waitFor();
+  await window.getByRole('button', { name: 'Agent · 1', exact: true }).waitFor();
+  await window.getByRole('button', { name: 'Agent · 1', exact: true }).click();
+  await connectionDialog.getByText('Connected: ImageFlow prototype test', { exact: true }).waitFor();
+  await connectionDialog.getByRole('button', { name: 'Close', exact: true }).click();
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map(t=>t.name).sort(),['apply_project_changes','check_book','get_authoring_context','import_sources','inspect_book','list_projects'].sort());
   const call = async(name,args={}) => {
@@ -290,14 +295,24 @@ try {
 
   // Revocation disconnects the bridge; re-enabling gives it a new token and it reconnects.
   await window.evaluate(()=>window.imageflow.mcpSettings(false));
+  await window.getByRole('button', { name: /^Agent ·/ }).waitFor({ state: 'detached' });
   assert.equal((await call('list_projects')).response.isError,true);
   await window.evaluate(()=>window.imageflow.mcpSettings(true));
+  await window.getByRole('button', { name: /^Agent ·/ }).waitFor();
   assert.equal((await good('list_projects')).projects[0].project,project);
   const priorFrame=await window.locator('iframe.book-frame-book[data-current]').getAttribute('src');
-  await window.getByRole('button',{name:'Open project…',exact:true}).click();
+  await menuAction(app, 'Open project…');
   await window.waitForFunction((prior)=>{const frame=document.querySelector('iframe.book-frame-book[data-current][data-ready]');return frame && frame.getAttribute('src')!==prior;},priorFrame);
   await ready();
   assert.equal((await call('inspect_book',{project,view:'summary'})).data.error.code,'PROJECT_CLOSED');
+  await client.close();
+  client = undefined;
+  const waiting = window.getByRole('button', { name: 'Agent · 0', exact: true });
+  await waiting.waitFor();
+  await waiting.click();
+  await connectionDialog.getByRole('button', { name: 'Disconnect agents', exact: true }).click();
+  await connectionDialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await window.getByRole('button', { name: /^Agent ·/ }).waitFor({ state: 'detached' });
   console.log('ImageFlow MCP authoring prototype passed.');
 } finally {
   await client?.close();

@@ -3,8 +3,7 @@ import type { Issue } from './desktop';
 
 export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[] };
 
-// The Book check as a small indicator in the status bar: a red or amber "!" with the number of issues, or a faint
-// check mark when there are none. Clicking it lists the issues above the bar, with links to their spreads.
+// A labeled book-check status in the footer, with a popover for findings.
 export function BookCheckIndicator({ check, checking, spread, select }: {
   check?: BookCheck; checking: boolean; spread: string; select: (spread: string) => void;
 }) {
@@ -40,8 +39,7 @@ export function BookCheckIndicator({ check, checking, spread, select }: {
     <button type="button" className="book-check-toggle" aria-expanded={items.length ? open : undefined} title={title}
       disabled={!items.length} onClick={() => setOpen(!open)}>
       <span className="visually-hidden">{title}</span>
-      <span aria-hidden="true" className="book-check-icon">{items.length ? '!' : '✓'}</span>
-      {items.length > 0 && <span aria-hidden="true">{items.length}</span>}
+      <span aria-hidden="true">{checking ? 'Checking book…' : items.length ? label : 'Book check: no issues'}</span>
     </button>
     {open && items.length > 0 && <div className="book-check-panel" role="dialog" aria-label="Book check">
       <p className="book-check-heading">Book check · {label}</p>

@@ -102,5 +102,27 @@ html:has(.if-artwork) { overflow: hidden; }
 .if-preview .if-photo:has(> img:not([src])) { background: #e9e5dc; }
 
 /* Template-supplied element editors run in their own frame inside an editor dialog. */
-html:has(.if-editor), html:has(.if-editor) body { background: #fcfbf6; }
-.if-editor { padding: 16px 18px; font: 14px/1.4 system-ui, sans-serif; color: #26251e; }
+html:has(.if-editor) { color-scheme: light dark; background: Canvas; }
+html:has(.if-editor) body { background: transparent; }
+.if-editor { padding: 16px 18px; font: 13px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  background: var(--if-editor-background); color: var(--if-editor-text); color-scheme: light dark; }
+
+/* Artwork uses its authored paper/ink colors and light browser defaults in either OS appearance. */
+html:has(.if-artwork), html:has(.if-print-page), .if-sheet { color-scheme: only light; }
+
+/* Custom editors follow the host appearance and use these shared colors. */
+.if-editor {
+  --if-editor-background: var(--panel-surface);
+  --if-editor-text: var(--text);
+  --if-editor-muted: var(--muted);
+  --if-editor-control: var(--control-surface);
+  --if-editor-border: var(--control-border);
+  --if-editor-selection: var(--selection-surface);
+  --if-editor-accent: var(--accent);
+  --if-editor-focus: var(--focus-ring);
+  --if-editor-marked-background: var(--editor-marked-surface);
+  --if-editor-marked-text: #fff;
+}
+/* Preview-frame gutters stay transparent so the host's selection and label layers remain visible. */
+html:has(.if-book) { color-scheme: light dark; }
+html:has(.if-book), html:has(.if-book) body { background: transparent; }

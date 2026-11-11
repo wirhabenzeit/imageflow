@@ -1,3 +1,4 @@
+import { menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -64,7 +65,7 @@ try {
     return w.locator('.inspector details').filter({ has: w.locator(':scope > summary', { hasText: /^Route map$/ }) });
   };
 
-  await rerendered(() => w.getByRole('button', { name: 'New project…', exact: true }).click());
+  await rerendered(() => menuAction(app, 'New project…'));
   // The starter assigns a sample track: drawn, no issues. The other panorama has none and shows an empty frame.
   assert.equal(await trackLine(), 1);
   assert.equal((await status()).errors.length + (await status()).warnings.length, 0);
@@ -161,12 +162,12 @@ try {
   data.spreads.find(({ id }) => id === 'road').elements.route.params.track = 'notes';
   await writeFile(join(project, 'files', 'notes.txt'), 'not a track');
   await writeFile(join(project, 'project.json'), JSON.stringify(data, null, 2));
-  await rerendered(() => w.getByRole('button', { name: 'Reload', exact: true }).click());
+  await rerendered(() => menuAction(app, 'Reload'));
   assert.match(await messages('errors'), /GPX track: notes\.txt is not a \.gpx file/);
   // A reference to an ID that is not registered is kept and reported, not dropped.
   delete data.files.notes;
   await writeFile(join(project, 'project.json'), JSON.stringify(data, null, 2));
-  await rerendered(() => w.getByRole('button', { name: 'Reload', exact: true }).click());
+  await rerendered(() => menuAction(app, 'Reload'));
   assert.match(await messages('errors'), /GPX track: the assigned file is no longer in the project/);
   assert.equal((await read()).spreads.find(({ id }) => id === 'road').elements.route.params.track, 'notes');
   data.spreads.find(({ id }) => id === 'road').elements.route.params.track = 'senja-road';
@@ -176,7 +177,7 @@ try {
   const moved = join(work, 'Moved book');
   await rename(project, moved);
   await openDialog([moved]);
-  await rerendered(() => w.getByRole('button', { name: 'Open project…', exact: true }).click());
+  await rerendered(() => menuAction(app, 'Open project…'));
   assert.equal(await trackLine(), 1);
   assert.equal((await status()).errors.length, 0);
   assert.ok((await readdir(join(moved, 'files'))).includes('senja-road.gpx'));

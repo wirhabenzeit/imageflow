@@ -1,3 +1,5 @@
+import { ActionMenu } from './ActionMenu';
+import { Icon } from './Icon';
 import { useEffect, useMemo, useRef } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import { renderOrigin } from './desktop';
@@ -59,10 +61,11 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
       </div>
       <span className="hint"><kbd>Space</kbd> Quick Look</span>
       <span className="spacer" />
-      {tab === 'photo' ? <>
-        <button disabled={!writable || busy} onClick={() => importSources('import-photos')}>Import photos…</button>
-        <button disabled={!writable || busy} onClick={() => importSources('import-folder')}>Import folder…</button>
-      </> : <button disabled={!writable || busy} onClick={() => importSources('import-texts')}>Import Markdown…</button>}
+      <ActionMenu className="source-import" disabled={!writable || busy} label={<>Import <Icon name="chevron" /></>}>
+        <button onClick={() => importSources('import-photos')}>Import photos…</button>
+        <button onClick={() => importSources('import-folder')}>Import folder…</button>
+        <button onClick={() => importSources('import-texts')}>Import Markdown…</button>
+      </ActionMenu>
     </div>
     <div ref={list} className={'source-items source-items-' + tab} role="listbox" aria-orientation="horizontal"
       aria-label={tab === 'photo' ? 'Photos' : 'Texts'} onKeyDown={keys}>
@@ -144,12 +147,12 @@ export function QuickLook({ summary, source, usage, navigate, close, jump }: {
     <div ref={frame} className="ql-frame" tabIndex={-1}>
       <header className="ql-header">
         <div className="ql-nav">
-          <button aria-label="Previous" disabled={at <= 0} onClick={() => navigate(-1)}>‹</button>
-          <button aria-label="Next" disabled={at >= items.length - 1} onClick={() => navigate(1)}>›</button>
+          <button aria-label="Previous" disabled={at <= 0} onClick={() => navigate(-1)}><Icon name="previous" /></button>
+          <button aria-label="Next" disabled={at >= items.length - 1} onClick={() => navigate(1)}><Icon name="next" /></button>
         </div>
         <h2>{item.title}</h2>
         <span className="muted">{at + 1} of {items.length}</span>
-        <button className="ql-close" aria-label="Close Quick Look" onClick={() => dialog.current?.close()}>✕</button>
+        <button className="ql-close" aria-label="Close Quick Look" onClick={() => dialog.current?.close()}><Icon name="close" /></button>
       </header>
       {source.kind === 'photo'
         ? <div className="ql-body ql-photo">{summary.photos[source.id]

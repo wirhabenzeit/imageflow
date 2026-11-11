@@ -1,3 +1,4 @@
+import { menuAction, exportAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -78,8 +79,7 @@ try {
 
   await window.getByRole('button', { name: 'Try the Senja sample' }).click();
   await expectStatus('Project preview · Proof export');
-  const exportButton = window.getByRole('button', { name: 'Export proof PDF' });
-  await exportButton.and(window.locator(':enabled')).waitFor();
+  await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
   const previewLines = await window.frameLocator('iframe.book-frame-book[data-current]').locator('[data-box="story"]').evaluate((box) => {
     const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
     const lines = new Map();
@@ -101,7 +101,7 @@ try {
   await instance.evaluate(({ dialog }, path) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
   }, output);
-  await exportButton.click();
+  await exportAction(window, 'Export proof PDF');
   // The two-page sample is shorter than its format allows; proof export reports that error and keeps it in Book check.
   await expectStatus('Proof PDF saved. 1 error in Book check.');
   assert.match(await window.locator('.book-check-toggle').textContent(), /Book check · 1 error/);
@@ -114,18 +114,18 @@ try {
   await instance.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
   }, project);
-  await window.getByRole('button', { name: 'Open project…' }).click();
+  await menuAction(instance, 'Open project…');
   await window.locator('.status-error').waitFor();
   assert.match(await status.textContent(), /project\.json.*schemaVersion/);
-  assert.equal(await window.locator('h1').textContent(), 'Senja · Field Notes');
+  assert.equal(await window.locator('.project-identity strong').textContent(), 'Senja · Field Notes');
 
   await instance.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
   }, join(root, 'sample', 'whitewall'));
-  await window.getByRole('button', { name: 'Open project…' }).click();
-  await exportButton.and(window.locator(':enabled')).waitFor();
-  await window.getByRole('button', { name: 'Reload', exact: true }).click();
-  await exportButton.and(window.locator(':enabled')).waitFor();
+  await menuAction(instance, 'Open project…');
+  await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
+  await menuAction(instance, 'Reload');
+  await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
   console.log('ImageFlow desktop smoke test passed.');
 } finally {
   await instance?.close();

@@ -1,3 +1,4 @@
+import { menuAction, exportAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -17,7 +18,7 @@ try {
   const w = await app.firstWindow();
   w.setDefaultTimeout(20000);
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, project);
-  await w.getByRole('button', { name: 'New project…', exact: true }).click();
+  await menuAction(app, 'New project…');
   const ready = () => w.waitForSelector('iframe.book-frame-book[data-current][data-ready]');
   await ready();
   const frame = w.frameLocator('iframe.book-frame-book[data-current]');
@@ -120,7 +121,7 @@ try {
   await calendarEditor.getByRole('button', { name: '3', exact: true }).press('Escape');
   await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
   assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
-  await w.locator('.toolbar .brand').click();
+  await w.locator('.status-bar').click();
   await w.waitForFunction(() => !document.querySelector('.edit-popover'));
 
   // Editor review cases (#15). Helpers: click an application menu item; wait for the book to render anew.
@@ -232,7 +233,7 @@ try {
   assert.equal(await editorDialog.getByRole('button', { name: 'Done' }).isDisabled(), true);
   await closeEditor();
   await rerendered(() => writeFile(templateFile, templateSource));
-  await w.locator('.toolbar .brand').click();
+  await w.locator('.status-bar').click();
   await w.waitForFunction(() => !document.querySelector('.edit-popover'));
 
   // Clicking a text box edits its own options (columns) plus the body size the template marks it with.
@@ -357,7 +358,7 @@ try {
     await w.waitForFunction(() => /rotates or mirrors/.test(document.querySelector('.status')?.textContent ?? ''));
     assert.equal(await w.locator('.crop-editor').count(), 0, rule);
     // The click opened the photo's popover instead; close it so it doesn't cover the next attempt.
-    await w.locator('.toolbar .brand').click();
+    await w.locator('.status-bar').click();
     await w.waitForFunction(() => !document.querySelector('.edit-popover'));
   }
   const restored = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
@@ -382,11 +383,10 @@ try {
   const saved = (text) => w.waitForFunction((text) => document.querySelector('.status')?.textContent === text, text);
   const thumb = (name) => w.getByRole('button', { name, exact: true }).click();
 
-  // #12: the layout picker says when it restarts a text this spread continues.
+  // Continued texts keep their flow position beside the source control.
   await thumb('Photo and story 16–17');
-  await w.locator('.layout-note').filter({ hasText: 'arrival.md part 3 of 3' }).waitFor();
+  await w.locator('.inspector').getByText('Flow 3 of 3', { exact: true }).waitFor();
   await thumb('Photo and story 2–3');
-  assert.equal(await w.locator('.layout-note').count(), 0);
 
   // #9: photos can be assigned from the keyboard, to an empty box and as a replacement; Undo restores.
   await w.getByRole('combobox', { name: 'Replace photo in Main photo' }).selectOption('shore');
@@ -421,23 +421,23 @@ try {
   await saved('Saved');
   await ready();
   await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
-  // The Book check is an indicator in the status bar, not part of the Inspector; clicking it lists the issues.
+  // The Book check is an indicator next to Export; clicking it lists the issues.
   assert.equal(await w.locator('.inspector .book-check-list').count(), 0);
-  assert.deepEqual(await w.locator('.status-bar .book-check-toggle > [aria-hidden]').allTextContents(), ['!', '1']);
+  assert.deepEqual(await w.locator('.status-bar .book-check-toggle > [aria-hidden]').allTextContents(), ['1 error']);
   await w.locator('.book-check-toggle').click();
   assert.match(await w.getByRole('dialog', { name: 'Book check' }).textContent(), /Page count is 26/);
   await w.keyboard.press('Escape');
   await w.getByRole('dialog', { name: 'Book check' }).waitFor({ state: 'detached' });
   const pdf = join(work, 'proof.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, pdf);
-  await w.getByRole('button', { name: 'Export proof PDF', exact: true }).click();
+  await exportAction(w, 'Export proof PDF');
   await w.waitForFunction(() => /^Proof PDF saved/.test(document.querySelector('.status')?.textContent ?? '') ||
     document.querySelector('.status-error'), null, { timeout: 60000 });
   assert.match(await statusText(), /^Proof PDF saved\. 1 error/);
   assert.match(await w.locator('.book-check-toggle').textContent(), /Book check · 1 error/);
-  await w.getByRole('button', { name: 'Export print PDF', exact: true }).click();
-  await w.locator('.status-error').waitFor({ timeout: 60000 });
-  assert.match(await statusText(), /Page count is 26/);
+  await w.locator('.export-menu > summary').click();
+  assert.equal(await w.getByRole('button', { name: 'Export print PDF', exact: true }).isDisabled(), true);
+  await w.locator('.export-menu > summary').click();
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await saved('Edit undone');
   await ready();
@@ -457,7 +457,7 @@ try {
   assert.ok(Math.abs(sheetBox.width / sheetBox.height - (323 * 2) / 246) < 0.01);
   const printed = join(work, 'landscape.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, printed);
-  await w.getByRole('button', { name: 'Export print PDF', exact: true }).click();
+  await exportAction(w, 'Export print PDF');
   await w.waitForFunction(() => /^Print PDF saved/.test(document.querySelector('.status')?.textContent ?? '') ||
     document.querySelector('.status-error'), null, { timeout: 90000 });
   assert.match(await statusText(), /^Print PDF saved/);
@@ -485,7 +485,7 @@ try {
   // A saved format the template no longer offers: previewed in the default, but an error that blocks print export.
   previous = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
   await writeFile(join(project, 'project.json'), JSON.stringify({ ...await read(), format: 'retired' }, null, 2));
-  await w.getByRole('button', { name: 'Reload', exact: true }).click();
+  await menuAction(app, 'Reload');
   await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, previous);
   const retired = await frame.locator('body').evaluate(() => window.imageflowRenderStatus);
   assert.equal(retired.template.formatId, 'square');

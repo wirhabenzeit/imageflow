@@ -11,6 +11,7 @@ export function McpPanel({ api }: { api?: DesktopApi }) {
     void api.mcpSettings().then((result) => { if ('value' in result) setSettings(result.value); });
     return api.onMcpChanged(setSettings);
   }, [api]);
+  useEffect(() => api?.onCommand((command) => { if (command === 'agent-settings') dialog.current?.showModal(); }), [api]);
   async function toggle() {
     if (!api) return;
     setPending(true);
@@ -22,9 +23,8 @@ export function McpPanel({ api }: { api?: DesktopApi }) {
     } finally { setPending(false); }
   }
   return <>
-    <button disabled={!api} onClick={() => dialog.current?.showModal()}>
-      {settings.enabled ? `Agent connection · ${settings.clients.length}` : 'Connect an agent…'}
-    </button>
+    {settings.enabled && <button className="agent-status" title={settings.clients.length ? 'Connected: ' + settings.clients.map(({ name }) => name).join(', ') : 'Agent connection enabled · waiting for an agent'}
+      onClick={() => dialog.current?.showModal()}>Agent · {settings.clients.length}</button>}
     <dialog ref={dialog} className="mcp-dialog" aria-labelledby="mcp-heading">
       <h2 id="mcp-heading">Connect your agent</h2>
       <p>Enable a local MCP connection for the book open in ImageFlow. Your agent can check designs, see page images, and edit the book with Undo.</p>

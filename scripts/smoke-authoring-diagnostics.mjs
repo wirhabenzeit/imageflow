@@ -1,3 +1,4 @@
+import { menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -61,9 +62,9 @@ try {
   const window = await app.firstWindow();
   window.setDefaultTimeout(30000);
   await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, folder);
-  await window.getByRole('button', { name: 'Open project…', exact: true }).click();
+  await menuAction(app, 'Open project…');
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]') && !document.querySelector('.preview-state'));
-  await window.getByRole('button', { name: 'Connect an agent…', exact: true }).click();
+  await menuAction(app, 'Agent Connections…');
   const dialog = window.getByRole('dialog', { name: 'Connect your agent' });
   await dialog.getByRole('button', { name: 'Enable local connection', exact: true }).click();
   const configuration = dialog.getByRole('textbox', { name: 'MCP connection configuration' });

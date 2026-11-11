@@ -1,3 +1,4 @@
+import { menuAction } from './ui-actions.mjs';
 // Measures editor rendering cost (issue #11): time from one edit to every book frame being ready, memory, and
 // rapid consecutive edits. Builds a book from the starter spreads, optionally with a distinct photo per box.
 //
@@ -56,7 +57,7 @@ try {
   const allReady = () => w.waitForFunction((views) => views.every((view) =>
     document.querySelector('iframe.book-frame-' + view + '[data-current][data-ready]')), views);
   let start = Date.now();
-  await w.getByRole('button', { name: 'Open project…', exact: true }).click();
+  await menuAction(app, 'Open project…');
   await allReady();
   const openMs = Date.now() - start;
   await w.waitForTimeout(1500);

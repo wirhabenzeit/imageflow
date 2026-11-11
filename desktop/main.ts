@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, protocol } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol } from 'electron';
 import type { IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
@@ -6,7 +6,7 @@ import type { FSWatcher } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { channels, desktopScheme, editorURL, renderOrigin } from '../src/desktop';
+import { channels, desktopScheme, editorURL, renderOrigin, settingsURL } from '../src/desktop';
 import type { Command, ExportMode, ImportRequest, OpenAction, ProjectChange, ProjectSummary, Result, McpSettings } from '../src/desktop';
 import { identifier } from '../src/project';
 import type { ProjectFiles, RenderProject } from '../src/project';
@@ -22,6 +22,7 @@ import { checkTemplateTypes } from './typecheck';
 import type { CheckDraft } from './check';
 import { captureBookPreview, checkBookRender } from './preview';
 import { ProjectSession } from './project-session';
+import { SettingsStore } from './settings';
 import { createAuthoringService, AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
 import { AuthoringQueue } from './authoring-queue';
@@ -32,6 +33,7 @@ import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 
 let window: BrowserWindow | null = null;
+let settingsWindow: BrowserWindow | null = null;
 let active: { id: string; book: OpenProject } | undefined;
 let busy = false;
 let projectSession: ProjectSession | undefined;
@@ -55,6 +57,7 @@ let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 const observedChanges = new Set<string>();
 const importedWrites = new ImportReceipts();
 let cache: string;
+let settings: SettingsStore;
 const sessions = new Map<string, { book: OpenProject; mode: RenderProject['mode'] }>();
 // `npm run dev` serves the editor and render pages from a Vite dev server for hot reloading. The custom protocol
 // proxies those requests, so origins, IPC checks, and frame messaging match the built app.
@@ -70,7 +73,10 @@ if (app.isPackaged) process.env.ESBUILD_BINARY_PATH = join(process.resourcesPath
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
-app.on('second-instance', () => { if (window) { window.show(); window.focus(); } });
+app.on('second-instance', () => {
+  const owner = window ?? settingsWindow;
+  if (owner) { owner.show(); owner.focus(); }
+});
 
 protocol.registerSchemesAsPrivileged([
   { scheme: desktopScheme, privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -93,7 +99,7 @@ async function serve(request: Request) {
   if (host !== 'editor' && host !== 'render') return new Response(null, { status: 404 });
   const dist = join(app.getAppPath(), 'dist');
   if (!devServer && /^\/assets\/[\w.-]+\.[a-z0-9]+$/i.test(pathname)) return net.fetch(pathToFileURL(join(dist, pathname)).href);
-  if (host === 'editor' && pathname === '/') {
+  if (host === 'editor' && (pathname === '/' || pathname === '/settings')) {
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigin + "; frame-ancestors 'none'; base-uri 'none'",
     });
@@ -131,6 +137,11 @@ function editorOwner(event: IpcMainInvokeEvent) {
   if (owner && event.sender === owner.webContents && event.senderFrame === owner.webContents.mainFrame &&
       event.senderFrame.url === editorURL) return owner;
   return undefined;
+}
+function settingsOwner(event: IpcMainInvokeEvent) {
+  const owner = settingsWindow;
+  return owner && event.sender === owner.webContents && event.senderFrame === owner.webContents.mainFrame &&
+    event.senderFrame.url === settingsURL ? owner : undefined;
 }
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'ImageFlow could not complete the request.';
@@ -600,18 +611,52 @@ function menuCommand(label: string, accelerator: string | undefined, command: Co
   return { label, accelerator, click: () => window?.webContents.send(channels.command, command) };
 }
 
+function followAppearance(owner: BrowserWindow) {
+  const updateBackground = () => owner.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#252525' : '#f5f5f5');
+  nativeTheme.on('updated', updateBackground);
+  owner.once('closed', () => nativeTheme.removeListener('updated', updateBackground));
+}
+
+function showSettings() {
+  const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (!hidden) { settingsWindow.show(); settingsWindow.focus(); }
+    return;
+  }
+  const preferences = new BrowserWindow({
+    title: 'Settings', width: 540, height: 240, useContentSize: true, show: false,
+    resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#252525' : '#f5f5f5',
+    autoHideMenuBar: true,
+    webPreferences: {
+      sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'),
+      backgroundThrottling: !hidden,
+    },
+  });
+  settingsWindow = preferences;
+  followAppearance(preferences);
+  preferences.webContents.on('will-frame-navigate', (event) => event.preventDefault());
+  preferences.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  preferences.on('page-title-updated', (event) => event.preventDefault());
+  preferences.once('ready-to-show', () => { if (!hidden) preferences.show(); });
+  preferences.once('closed', () => { if (settingsWindow === preferences) settingsWindow = null; });
+  void preferences.loadURL(settingsURL).catch((error: unknown) => console.error('ImageFlow could not open Settings', error));
+}
+
 function createWindow() {
   closing = false;
   closingProject = undefined;
   // Automated checks set IMAGEFLOW_HIDE_WINDOW so test runs do not flash windows on screen.
   const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
   const editor = new BrowserWindow({
-    width: 1520, height: 950, minWidth: 940, minHeight: 650, show: !hidden,
+    width: 1520, height: 950, minWidth: 940, minHeight: 650, show: !hidden, backgroundColor: nativeTheme.shouldUseDarkColors ? '#252525' : '#f5f5f5',
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 20 } } : {}),
     webPreferences: {
       sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'),
       backgroundThrottling: !hidden,
     },
   });
+  followAppearance(editor);
   window = editor;
   editor.webContents.on('will-frame-navigate', (event) => {
     const url = new URL(event.url);
@@ -649,6 +694,9 @@ function createWindow() {
 }
 
 void app.whenReady().then(async () => {
+  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'));
+  await settings.load();
+  nativeTheme.themeSource = settings.value.appearance;
   cache = await mkdtemp(join(app.getPath('temp'), 'imageflow-cache-'));
   powerMonitor.on('resume', () => { projectSession?.inputs.invalidate(); });
   if (!app.isPackaged && process.env.IMAGEFLOW_BENCHMARK === '1') {
@@ -660,6 +708,7 @@ void app.whenReady().then(async () => {
     event.preventDefault();
     quitCleanup ??= (async () => {
       await closingProject;
+      await settings.settled();
       await rm(cache, { recursive: true, force: true });
     })().catch((error) => console.error('ImageFlow could not finish cleanup', error)).finally(() => {
       quitReady = true;
@@ -675,6 +724,19 @@ void app.whenReady().then(async () => {
     }
   });
   ipcMain.handle(channels.open, (event, action: OpenAction) => fromEditor(event, (owner) => openProject(owner, action)));
+  ipcMain.handle(channels.settings, (event) => editorOwner(event) || settingsOwner(event)
+    ? { value: settings.value } : { error: 'Request is only available to the editor or Settings.' });
+  ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {
+    if (!editorOwner(event) && !settingsOwner(event)) return { error: 'Request is only available to the editor or Settings.' };
+    try {
+      const value = await settings.update(patch);
+      nativeTheme.themeSource = value.appearance;
+      for (const owner of [window, settingsWindow]) {
+        if (owner && !owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value);
+      }
+      return { value };
+    } catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.handle(channels.save, (event, id: string, files: ProjectFiles, label?: string) =>
     fromEditor(event, async () => {
       currentBook(id);
@@ -708,10 +770,25 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.cancel, (event) => { if (editorOwner(event)) exportJob?.abort(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) =>
     fromEditor(event, () => checkOpenBook(currentBook(id), request)));
+  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean }) => {
+    if (!editorOwner(event) || typeof state?.sidebar !== 'boolean' || typeof state?.inspector !== 'boolean') return;
+    const menu = Menu.getApplicationMenu();
+    const sidebar = menu?.getMenuItemById('sidebar');
+    const inspector = menu?.getMenuItemById('inspector');
+    if (sidebar) sidebar.label = state.sidebar ? 'Hide Sidebar' : 'Show Sidebar';
+    if (inspector) inspector.label = state.inspector ? 'Hide Inspector' : 'Show Inspector';
+  });
   ipcMain.handle(channels.cancelCheck, (event) => { if (editorOwner(event)) checkJob?.abort(); });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: 'appMenu' },
+    { role: 'appMenu', submenu: [
+      { role: 'about' }, { type: 'separator' },
+      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: showSettings },
+      { type: 'separator' },
+      menuCommand('Agent Connections…', undefined, 'agent-settings'),
+      { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
+    ] },
     { label: 'File', submenu: [
       menuCommand('New Project…', 'Cmd+N', 'new'),
       menuCommand('Open Project Folder…', 'Cmd+O', 'open'),
@@ -732,6 +809,10 @@ void app.whenReady().then(async () => {
       menuCommand('Redo Project Edit', 'Cmd+Shift+Z', 'redo'),
       { type: 'separator' },
       { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+    ] },
+    { label: 'View', submenu: [
+      { ...menuCommand('Hide Sidebar', 'Alt+Cmd+1', 'toggle-project'), id: 'sidebar' },
+      { ...menuCommand('Hide Inspector', 'Alt+Cmd+2', 'toggle-inspector'), id: 'inspector' },
     ] },
     { role: 'windowMenu' },
   ]));

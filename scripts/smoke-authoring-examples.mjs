@@ -1,3 +1,4 @@
+import { menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -53,7 +54,7 @@ try {
   const window = await app.firstWindow();
   window.setDefaultTimeout(30000);
   await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, folder);
-  await window.getByRole('button', { name: 'Open project…', exact: true }).click();
+  await menuAction(app, 'Open project…');
   const shown = () => window.evaluate(() => (document.querySelector('iframe.book-frame-book[data-current][data-ready]')?.getAttribute('src') ?? '') +
     '|' + (document.querySelector('.status-error')?.textContent ?? ''));
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
@@ -67,7 +68,7 @@ try {
       return state !== before && (!document.querySelector('.preview-state') || !!document.querySelector('.status-error'));
     }, before, { timeout: 30000 });
   };
-  await window.getByRole('button', { name: 'Connect an agent…', exact: true }).click();
+  await menuAction(app, 'Agent Connections…');
   const dialog = window.getByRole('dialog', { name: 'Connect your agent' });
   await dialog.getByRole('button', { name: 'Enable local connection', exact: true }).click();
   const configuration = dialog.getByRole('textbox', { name: 'MCP connection configuration' });
@@ -174,7 +175,10 @@ try {
     finding.map(({ location, message }) => ({ spread: location.spread, element: location.element, parameter: location.parameter, message })));
   const pdf = join(work, 'print.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, pdf);
-  await window.getByRole('button', { name: 'Export print PDF', exact: true }).click();
+  await window.locator('.export-menu > summary').click();
+  assert.equal(await window.getByRole('button', { name: 'Export print PDF', exact: true }).isDisabled(), true);
+  await window.keyboard.press('Escape');
+  await menuAction(app, 'Export Print PDF…');
   await window.locator('.status-error', { hasText: 'The note is empty.' }).waitFor({ timeout: 60000 });
   await assert.rejects(readFile(pdf), { code: 'ENOENT' });
   console.log('ImageFlow authoring examples passed.');
