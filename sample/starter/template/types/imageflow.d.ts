@@ -127,6 +127,29 @@ export type SpreadDeclaration = {
   elements?: Record<string, ElementDeclaration>;
 };
 
+// Anchors
+
+/**
+ * A place other spreads can refer to, such as a chapter opening listed in a table of contents. `side` names the page
+ * of a two-page spread (default: its first page). Several spreads may declare the same ID; `book.anchors(id)` lists
+ * them all.
+ */
+export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
+/** A declared anchor with the book page it is on. */
+export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' };
+/** The whole book as seen from one spread. */
+export type BookContext = {
+  /** Number of pages in the book. */
+  pages: number;
+  /**
+   * The anchor with this ID. Undefined when no spread declares it; the first when several do. The Book check warns
+   * about both, on the spread that asked.
+   */
+  anchor(id: string): Anchor | undefined;
+  /** All anchors with this ID, or all anchors, in page order. */
+  anchors(id?: string): Anchor[];
+};
+
 // Render context
 
 export type Photo = { width: number; height: number; caption?: string; title?: string; credit?: string; altText?: string };
@@ -165,6 +188,8 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
    * `<h2 {...ctx.edit('heading')}>{ctx.params.heading}</h2>`. Returns no attributes in export.
    */
   edit(...paths: EditPath<S, D>[]): EditMarker;
+  /** Page count and the anchors all spreads declare: `ctx.book.anchor('map')?.page`. */
+  book: BookContext;
 };
 
 /** The render context of a spread declared without `spreadFor`. */
@@ -178,9 +203,19 @@ export type UntypedRenderContext = {
   formatId: string;
   mode: 'edit' | 'export';
   edit(...paths: string[]): EditMarker;
+  book: BookContext;
 };
 
-export type SpreadDefinition = SpreadDeclaration & { render(context: UntypedRenderContext): ImageFlowNode };
+/**
+ * Declares a spread's anchors from its saved values. ImageFlow calls it for every spread before rendering, so it must
+ * be a pure function of `params` and `document`.
+ */
+export type AnchorContext<P = Values, D = Values> = { params: P; document: D };
+
+export type SpreadDefinition = SpreadDeclaration & {
+  render(context: UntypedRenderContext): ImageFlowNode;
+  anchors?(context: AnchorContext): readonly AnchorDeclaration[];
+};
 export type TemplateDeclaration = {
   id: string;
   version: string;
@@ -218,6 +253,8 @@ export function spreadFor<const D extends Parameters>(document: D): <
   boxes?: B;
   elements?: E;
   render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D>): ImageFlowNode;
+  /** Places other spreads can refer to through `ctx.book`, declared from this spread's values. */
+  anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[];
 }) => SpreadDefinition;
 
 // Components

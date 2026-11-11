@@ -182,6 +182,11 @@ type RenderContext = {
   formatId: string;                         // the chosen key of `formats`, or 'default'
   mode: 'edit' | 'export';
   edit(...paths: EditPath[]): { 'data-edit'?: string };  // marks a node for click-to-edit
+  book: {                                   // the whole book, as seen from this spread
+    pages: number;
+    anchor(id: string): Anchor | undefined; // the anchor with this ID (see Anchors)
+    anchors(id?: string): Anchor[];         // all anchors with this ID, or all anchors, in page order
+  };
 };
 ```
 
@@ -198,6 +203,38 @@ Paths name a spread parameter (`heading`), a document parameter (`document.paper
 
 Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths, image data, or Markdown source, and they cannot change project data.
 
+
+### Anchors
+
+A layout can declare anchors: places that other spreads refer to by ID, such as chapter openings for a table of contents or a map that a caption points to. Declare them with `anchors`, a function of the spread's saved values:
+
+```tsx
+story: spread({
+  label: 'Photo and story',
+  parameters: { heading },
+  anchors: ({ params }) => [{ id: 'chapter', title: params.heading, side: 'right' }],
+  render: (ctx) => …,
+}),
+contents: spread({
+  label: 'Contents',
+  render: (ctx) => <ol>{ctx.book.anchors('chapter').map((chapter) =>
+    <li key={chapter.spread}>{chapter.title} · {chapter.page}</li>)}</ol>,
+}),
+// elsewhere: 'See the route on page ' + ctx.book.anchor('route')?.page
+```
+
+```ts
+type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
+type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' };
+```
+
+- **One render pass.** Page numbers depend only on spread order and layout spans, never on rendered content. ImageFlow calls every spread's `anchors` with its resolved `params` and `document` values before any spread renders, so every layout reads the same anchors. Like `render`, `anchors` must be a pure function of its input. An `anchors` function that throws or returns an invalid declaration is a render error naming the layout.
+- **Pages follow the book.** Inserting, moving, removing or switching a spread renumbers every anchor, as it does the folios. `side` picks the page of a two-page spread and defaults to the first. A single left or right page has only one page, whichever side is named.
+- **Repeated layouts.** Anchors belong to spread instances, so a layout used five times declares five anchors with the same ID. `anchors(id)` lists all of them in page order. `anchor(id)` is for an ID that one spread declares.
+- **Book check.** `anchor(id)` warns `anchor-missing` when no spread declares the ID, and `anchor-ambiguous` when several do. In that case it returns the first. Both warnings are on the spread that asked. `anchors(id)` returning an empty list is not a finding.
+- **Previews.** Layout-picker previews read the anchors of the book as saved, so a contents layout previews with real pages.
+
+An anchor marks a whole page, not a point found by measuring the render. Text flow decides which page a heading inside Markdown continuation lands on, so such headings cannot be anchors yet.
 
 ### Element editors
 
@@ -324,6 +361,7 @@ When a spread renders:
 
 - Every declared box rendered once; no undeclared box or element ids.
 - Assigned files of file parameters exist, are readable, and have an accepted extension; `data-issue` marks reported by the template.
+- Valid anchor declarations; each `ctx.book.anchor(id)` lookup finds exactly one anchor (otherwise a warning).
 - No rendered content extends beyond the spread's bleed (Markdown overflow is handled by the flow and reported as unplaced text).
 
 At export:

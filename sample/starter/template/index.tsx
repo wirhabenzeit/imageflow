@@ -43,6 +43,7 @@ function bookFormat(label: string, width: number, height: number) {
 }
 
 const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90 });
+const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
 const textSize = p.number({ label: 'Body size', default: 11, min: 8, max: 16, step: .5, unit: 'pt' });
 const photo = (label: string) => ({ type: 'photo' as const, label });
 // For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
@@ -278,6 +279,8 @@ export default defineTemplate({
       label: 'Photo and story',
       parameters: { heading, textSize },
       boxes: { hero: captioned('Main photo'), body: body('Story') },
+      // Listed by the contents layout. The heading is on the right page.
+      anchors: ({ params }) => [{ id: 'chapter', title: oneLine(params.heading), side: 'right' }],
       render: (ctx) => <Paper context={ctx} bled={{ left: true }}>
         <PhotoBox id="hero" style={fullLeft} />
         <h2 {...ctx.edit('heading')} style={right(margin, 40, page - 2 * margin, 44)}>{ctx.params.heading}</h2>
@@ -339,6 +342,7 @@ export default defineTemplate({
       label: 'Text spread',
       parameters: { heading, textSize },
       boxes: { body: body('Left text', 1), continuation: body('Right text', 2) },
+      anchors: ({ params }) => [{ id: 'chapter', title: oneLine(params.heading), side: 'left' }],
       render: (ctx) => {
         const size = { fontSize: ctx.params.textSize + 'pt' };
         return <Paper context={ctx}>
@@ -368,6 +372,25 @@ export default defineTemplate({
             marked={ctx.elements.grid.params.marked} />
         </Element>
       </Paper>,
+    }),
+    contents: spread({
+      label: 'Contents',
+      parameters: { contentsHeading: p.string({ label: 'Contents heading', default: 'Contents' }) },
+      render: (ctx) => {
+        // Every spread declares its anchors before any spread renders, so these pages follow inserts, moves and
+        // layout switches like the folios do.
+        const chapters = ctx.book.anchors('chapter');
+        return <Paper context={ctx}>
+          <h2 {...ctx.edit('contentsHeading')} style={left(margin, 40, page - 2 * margin, 44)}>{ctx.params.contentsHeading}</h2>
+          <ol className="contents" style={right(margin, 40, page - 2 * margin, 220)}>
+            {chapters.map((chapter) => <li key={chapter.spread + chapter.side}>
+              <span>{chapter.title}</span><span className="contents-page">{chapter.page}</span>
+            </li>)}
+          </ol>
+          {!chapters.length && ctx.mode === 'edit' &&
+            <p className="caption" style={right(margin, 40, page - 2 * margin, 10)}>Story and text spreads appear here.</p>}
+        </Paper>;
+      },
     }),
     closing: spread({
       label: 'Closing page', span: 'left',

@@ -18,7 +18,7 @@ import { PreviewError } from '../src/preview';
 const source = 'export default {};';
 const project = { schemaVersion: 1, title: 'Context book', template: { id: 'test', version: '1' }, spreads: [{ id: 'one', definition: 'main' }] };
 const status: Extract<RenderStatus, { state: 'ready' }> = {
-  state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {},
+  state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {}, anchors: [],
   template: {
     version: '1', parameters: {}, spreads: { main: { label: 'Main', span: 'spread', parameters: {}, boxes: {}, elements: {} } },
     formatId: 'default', formats: { default: 'Default' },

@@ -13,7 +13,8 @@ import { markdownToHtml } from './markdown';
 import { parameterWarnings, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import { flow } from './text-flow';
-import { chooseFormat, runtime, setTemplateAssets, setTemplateFiles, SpreadView, templateInfo, templateSchema } from './template';
+import { bookIndex, chooseFormat, runtime, setTemplateAssets, setTemplateFiles, SpreadView, templateInfo, templateSchema } from './template';
+import type { AnchorLookup } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, layoutChoices } from './layouts';
@@ -485,13 +486,15 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   const previews = layoutChoices(template.spreads, spreads[index].definition).map((definition) => ({
     definition, span: template.spreads[definition].span, spread: { ...spreads[index], definition, id: definition },
   }));
+  // Previews read the anchors of the book as saved, so a contents layout shows the real pages.
+  const anchors = bookIndex(book, template, sequence);
   root.className = 'if-preview';
   let renderError: unknown;
   const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
   flushSync(() => react.render(previews.map(({ definition, span, spread }) => (
     <div className="if-spread-container" data-span={span} data-spread={definition} key={definition}>
       <SpreadView book={book} spread={spread} template={template} format={format} positions={{}}
-        page={sequence.spreads[index].page} renderPhotos />
+        page={sequence.spreads[index].page} index={anchors} renderPhotos />
     </div>
   ))));
   if (renderError) throw renderError;
@@ -509,7 +512,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
     return { spread: definition, sheet };
   });
   layoutBook(root, sheets, 'layouts');
-  publish({ state: 'ready', template: info, pages: sequence.count, units: [], errors: [], warnings: [], flow: {} });
+  publish({ state: 'ready', template: info, pages: sequence.count, units: [], errors: [], warnings: [], flow: {}, anchors: anchors.anchors });
 }
 
 // Loads the photos of spreads within a screen of the visible range and unloads those more than three screens
@@ -664,13 +667,15 @@ export async function startRender(root: HTMLElement) {
       return pages + ' · ' + (template.spreads[spread.definition]?.label ?? spread.definition);
     });
     if (edit) root.className = 'if-preview';
+    const lookups = new Map<string, AnchorLookup>();
+    const index = { ...bookIndex(book, template, sequence), lookups };
 
     let renderError: unknown;
     const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
     flushSync(() => react.render(visible.map(({ spread, i }) => (
       <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} key={spread.id}>
         <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
-          page={sequence.spreads[i].page} renderPhotos lazyPhotos={lazy} />
+          page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy} />
       </div>
     ))));
     if (renderError) throw renderError;
@@ -713,6 +718,16 @@ export async function startRender(root: HTMLElement) {
       errors.push({ ...(spread ? located(spread, '') : {}), message: 'Could not decode photo ' + (images[i].alt || box) + '.',
         code: 'photo-decode-failed', box, source: photo,
         suggestion: 'Replace the original with a valid JPEG, PNG or WebP file, or assign another photo.' });
+    }
+    for (const { spread, anchor, found } of lookups.values()) {
+      warnings.push(found ? {
+        ...located(spread, found + ' spreads declare anchor ' + anchor + '; this spread uses the first.'), code: 'anchor-ambiguous',
+        details: { anchor, declared: found },
+        suggestion: 'Give each anchor a unique ID in the layouts\' anchors(), or list them with ctx.book.anchors(' + JSON.stringify(anchor) + ').',
+      } : {
+        ...located(spread, 'No spread declares anchor ' + anchor + '.'), code: 'anchor-missing', details: { anchor },
+        suggestion: 'Insert a spread whose layout declares anchor ' + anchor + ', or change the referenced anchor ID.',
+      });
     }
     for (const family of fontFailures()) {
       errors.push({ ...message('Font ' + family + ' could not be loaded; text using it renders with a fallback font.'), code: 'font-load-failed',
@@ -782,7 +797,8 @@ export async function startRender(root: HTMLElement) {
     const units: { side: PrintSide; spread: string; where: string }[] = sequence.spreads.flatMap(({ sides }, i) =>
       sides.map((side) => ({ side, spread: spreads[i].id, where: where[i] })));
     publish({
-      state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions, ...(inspection ? { inspection } : {}),
+      state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions, anchors: index.anchors,
+      ...(inspection ? { inspection } : {}),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The template could not be rendered.';

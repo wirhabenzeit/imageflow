@@ -27,8 +27,67 @@ export type RenderContext = {
   mode: RenderProject['mode'];
   // Marks a rendered node as the place where these parameters are edited; spread the result onto the node.
   edit: (...paths: string[]) => EditMarker;
+  // The whole book as seen from this spread: page count and the anchors every spread declares.
+  book: BookContext;
 };
 export type EditMarker = { 'data-edit'?: string };
+
+// Anchors are declared from a spread's saved values, never from rendered output, so every spread can read every
+// anchor's page in the same single render: pages depend only on spread order and layout spans.
+export type AnchorContext = { params: Values; document: Values };
+export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
+export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' };
+export type BookContext = {
+  pages: number;
+  // The anchor declared with this ID, if exactly one spread declares it. With several, the first; the check warns.
+  anchor(id: string): Anchor | undefined;
+  // All anchors with this ID, or all anchors, in page order.
+  anchors(id?: string): Anchor[];
+};
+const anchorDeclarations = z.array(z.strictObject({
+  id: z.string().min(1).max(256), title: z.string().max(1000).optional(), side: z.enum(['left', 'right']).optional(),
+})).max(100);
+// Lookups that found no anchor, or several, keyed so repeated renders report each once.
+export type AnchorLookup = { spread: string; anchor: string; found: number };
+export type BookIndex = { pages: number; anchors: Anchor[]; lookups?: Map<string, AnchorLookup> };
+
+export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: RenderContext['page'] }[] }): BookIndex {
+  const document = resolveParams(template.parameters, book.project.params);
+  const anchors = book.project.spreads.flatMap((spread, i) => {
+    const definition = template.spreads[spread.definition];
+    if (!definition?.anchors) return [];
+    let returned: unknown;
+    try { returned = definition.anchors({ params: resolveParams(definition.parameters, spread.params), document }); }
+    catch (error) { throw new Error(definition.label + ' could not declare its anchors: ' + (error instanceof Error ? error.message : String(error))); }
+    const declared = anchorDeclarations.safeParse(returned);
+    if (!declared.success) {
+      throw new Error(definition.label + ' declares invalid anchors: ' +
+        declared.error.issues.map((issue) => (issue.path.join('.') || 'anchors') + ' ' + issue.message).join('; ') + '.');
+    }
+    const { left, right } = sequence.spreads[i].page;
+    return declared.data.map(({ id, title, side }): Anchor => {
+      // A single-page spread has only one page, whichever side the declaration names.
+      const resolved = !left ? 'right' : !right ? 'left' : side ?? 'left';
+      return { id, ...(title !== undefined ? { title } : {}), spread: spread.id, page: (resolved === 'left' ? left : right)!, side: resolved };
+    });
+  });
+  // A spread may declare its right-page anchor before its left-page one. The sort is stable within a page.
+  return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page) };
+}
+
+export function bookContext(index: BookIndex, spread: string): BookContext {
+  const copy = (anchor: Anchor) => ({ ...anchor });
+  const matching = (id: string) => index.anchors.filter((anchor) => anchor.id === id);
+  return {
+    pages: index.pages,
+    anchor(id) {
+      const found = matching(id);
+      if (found.length !== 1) index.lookups?.set(spread + '\u0000' + id, { spread, anchor: id, found: found.length });
+      return found[0] && copy(found[0]);
+    },
+    anchors: (id) => (id === undefined ? index.anchors : matching(id)).map(copy),
+  };
+}
 
 // In the editor, boxes and elements are edit targets for their own parameters, followed by any they are marked with.
 function editTarget(book: RenderProject, prefix: string, parameters: Parameters | undefined, marked?: string) {
@@ -64,6 +123,7 @@ const definition = z.object({
   boxes: z.record(identifier, box).default({}),
   elements,
   render: z.custom<(context: RenderContext) => ReactNode>((value) => typeof value === 'function', 'Expected a render function.'),
+  anchors: z.custom<(context: AnchorContext) => unknown>((value) => typeof value === 'function', 'Expected an anchors function.').optional(),
 }).refine(({ boxes }) => {
   const order = Object.values(boxes).filter(({ type }) => type === 'markdown').map(({ flowOrder }) => flowOrder);
   return order.length < 2 || (!order.includes(undefined) && new Set(order).size === order.length);
@@ -108,6 +168,7 @@ export type TemplateDeclaration = {
     boxes?: Record<string, Omit<BoxDefinition, 'parameters'> & { parameters?: Parameters }>;
     elements?: Record<string, { label: string; parameters?: Parameters }>;
     render(context: RenderContext): ReactNode;
+    anchors?(context: AnchorContext): AnchorDeclaration[];
   }>;
 };
 export const defineTemplate = <T extends TemplateDeclaration>(template: T) => template;
@@ -117,7 +178,7 @@ export function templateInfo(template: Template): TemplateInfo {
     format: template.format, formatId: template.formatId, formats: template.formatChoices,
     version: template.version, parameters: template.parameters,
     // Functions (render, editor components) stay in the render frame; the editor gets plain declarations.
-    spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, elements, ...info }]) => [id, {
+    spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, anchors: _anchors, elements, ...info }]) => [id, {
       ...info,
       elements: Object.fromEntries(Object.entries(elements).map(([key, { editor, ...element }]) => [key, {
         ...element, ...(editor ? { editor: { label: editor.label, parameters: editor.parameters, presentation: editor.presentation } } : {}),
@@ -263,9 +324,9 @@ export function file(id: string): { name: string; extension: string; text: strin
 export const runtime = { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset, file };
 
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
-export function SpreadView({ book, template, format, spread, page, positions, renderPhotos, lazyPhotos = false }: {
+export function SpreadView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false }: {
   book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState;
-  page: RenderContext['page']; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
+  page: RenderContext['page']; index: BookIndex; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
 }) {
   const definition = template.spreads[spread.definition];
   if (!definition) throw new Error('Spread ' + spread.id + ' uses an unknown definition: ' + spread.definition + '.');
@@ -288,6 +349,7 @@ export function SpreadView({ book, template, format, spread, page, positions, re
     document: resolveParams(template.parameters, book.project.params),
     boxes, elements, page, format, formatId: template.formatId, mode: book.mode,
     edit: (...paths) => book.mode === 'edit' && paths.length ? { 'data-edit': paths.join(' ') } : {},
+    book: bookContext(index, spread.id),
   });
   return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, lazyPhotos }}>{content}</SpreadData.Provider>;
 }

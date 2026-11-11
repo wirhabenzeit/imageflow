@@ -102,6 +102,8 @@ export type RenderStatus = {
   units: { side: PrintSide; spread: string; where: string }[];
   errors: Issue[]; warnings: Issue[];
   flow: Record<string, { part: number; parts: number; title?: string }>;
+  // Anchors the layouts declare, with the page each resolves to, in page order.
+  anchors: { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' }[];
   inspection?: import('./inspection').ElementInspection;
 } | { state: 'error'; message: string; template?: TemplateInfo };
 

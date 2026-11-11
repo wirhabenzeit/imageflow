@@ -20,7 +20,7 @@ import type { PreviewRequest } from '../src/preview';
 
 const layout = (label: string, parameters = {}) => ({ label, span: 'spread' as const, parameters, boxes: {}, elements: {} });
 const status: Extract<RenderStatus, { state: 'ready' }> = {
-  state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {},
+  state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {}, anchors: [],
   template: {
     version: '1', parameters: {}, spreads: { main: layout('Main', { heading: p.string({ label: 'Heading', default: '' }) }), chapter: layout('Chapter opening') },
     formatId: 'default', formats: { default: 'Default' },

@@ -4,7 +4,7 @@ import type * as Declared from '../sample/starter/template/types/imageflow';
 import type { PrintFormat, ResolvedFormat } from './format';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
-import type { RenderContext, runtime } from './template';
+import type { Anchor, AnchorDeclaration, BookContext, RenderContext, runtime } from './template';
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assignable<A, B> = [A] extends [B] ? true : false;
@@ -16,4 +16,7 @@ export const declaredTypesMatchRuntime: [
   Same<keyof Declared.ResolvedFormat, keyof ResolvedFormat>,
   Same<keyof Declared.UntypedRenderContext, keyof RenderContext>,
   Same<keyof Declared.Photo, keyof Photo>,
-] = [true, true, true, true, true, true];
+  Same<Declared.Anchor, Anchor>,
+  Same<Declared.AnchorDeclaration, AnchorDeclaration>,
+  Same<keyof Declared.BookContext, keyof BookContext>,
+] = [true, true, true, true, true, true, true, true, true];

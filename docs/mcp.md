@@ -151,6 +151,9 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | `parameter-invalid`, `content-undeclared`, `element-undeclared`, `edit-path-unknown` | Saved values or edit markers the current declarations do not accept. |
 | `format-unavailable`, `page-sequence` | Book-level format and page-count findings. |
 | `template-issue` | A template-reported `data-issue`, located on its box or element. |
+| `anchor-missing`, `anchor-ambiguous` | The spread whose `ctx.book.anchor(id)` found no anchor, or several; `anchor`, and `declared` for ambiguous lookups. |
+
+`render.anchors` lists every declared anchor with its spread and resolved page, in page order. A draft check reports the anchors of the drafted book.
 
 Findings without a specific code use `layout-error` or `layout-warning`. Compiler errors use `template-compile-error` with file, line and column.
 
