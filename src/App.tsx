@@ -62,6 +62,12 @@ function Guides({ sheet, format }: { sheet: Rect; format: ResolvedFormat }) {
 }
 
 const icons = {
+  sidebarLeft: 'M3 3h10v10H3zM6 3v10',
+  sidebarRight: 'M3 3h10v10H3zM10 3v10',
+  undo: 'M6 4L3 7l3 3M3 7h6a3 3 0 0 1 3 3v2',
+  redo: 'M10 4l3 3-3 3M13 7H7a3 3 0 0 0-3 3v2',
+  export: 'M8 10V2M5 5l3-3 3 3M3 8v5h10V8',
+  chevron: 'M5 6l3 3 3-3',
   add: 'M8 3v10M3 8h10',
   duplicate: 'M5.5 5.5h7v7h-7zM3.5 10.5v-7h7',
   delete: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5',
@@ -75,6 +81,7 @@ const Icon = ({ name }: { name: keyof typeof icons }) => <svg viewBox="0 0 16 16
 export function App() {
   const api = window.imageflow;
   const { panels, toggle: togglePanel, resize: resizePanel } = usePanels();
+  const [resizing, setResizing] = useState(false);
   const [summary, setSummary] = useState<ProjectSummary>();
   const [projectInstance, setProjectInstance] = useState(0);
   const current = useRef<ProjectSummary>(undefined);
@@ -320,6 +327,7 @@ export function App() {
   const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, importFile: importParameterFile }), [summary?.project.files]);
 
   function act(command: Command) {
+    if (command === 'agent-settings') return;
     if (command === 'toggle-project' || command === 'toggle-inspector') {
       togglePanel(command === 'toggle-project' ? 'left' : 'right');
       return;
@@ -858,25 +866,23 @@ export function App() {
   const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
   const pagesLabel = (i: number) => (pageLabels[i].includes('–') ? 'Pages ' : 'Page ') + pageLabels[i];
 
-  return <ProjectFilesContext.Provider value={projectFiles}><div className="studio">
+  return <ProjectFilesContext.Provider value={projectFiles}><div className={navigator.platform.includes('Mac') ? 'studio mac-studio' : 'studio'}>
     <header className="toolbar">
       <div className="toolbar-actions project-context">
-        <button className="toolbar-icon" aria-label="Toggle project panel" aria-pressed={!panels.leftHidden} title="Toggle project panel (⌥⌘1)" onClick={() => togglePanel('left')}>◧</button>
+        <button className="toolbar-icon" aria-label="Toggle project panel" aria-pressed={!panels.leftHidden} title="Toggle project panel (⌥⌘1)" onClick={() => togglePanel('left')}><Icon name="sidebarLeft" /></button>
         <div className="project-identity" title={summary?.folder}>
           <strong>{summary?.project.title ?? 'ImageFlow'}</strong>
           <span className="muted">{summary ? summary.readOnly ? 'Sample · Read only' : busy ? 'Working…' : 'Saved locally' : 'Photobook studio'}</span>
         </div>
         {summary && <div className="history">
-          <button aria-label="Undo" title={summary.history?.undo ? 'Undo ' + summary.history.undo : 'Undo'} disabled={!writable || !summary.history?.undo || !!busy} onClick={() => undo('undo')}>↶</button>
-          <button aria-label="Redo" title={summary.history?.redo ? 'Redo ' + summary.history.redo : 'Redo'} disabled={!writable || !summary.history?.redo || !!busy} onClick={() => undo('redo')}>↷</button>
+          <button aria-label="Undo" title={summary.history?.undo ? 'Undo ' + summary.history.undo : 'Undo'} disabled={!writable || !summary.history?.undo || !!busy} onClick={() => undo('undo')}><Icon name="undo" /></button>
+          <button aria-label="Redo" title={summary.history?.redo ? 'Redo ' + summary.history.redo : 'Redo'} disabled={!writable || !summary.history?.redo || !!busy} onClick={() => undo('redo')}><Icon name="redo" /></button>
         </div>}
       </div>
       <div className="toolbar-actions">
-        <McpPanel api={api} />
         <div className="export-area">
-          {summary && <BookCheckIndicator check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}
           {exporting ? <div className="export-progress"><span role="status" title={busy}>{busy}</span><button onClick={() => void api?.cancelExport()}>Cancel export</button></div> : <details ref={exportMenu} className="export-menu">
-            <summary>Export…</summary>
+            <summary><Icon name="export" /><span>Export</span><Icon name="chevron" /></summary>
             <div className="export-choices">
               <button className="primary" disabled={!canExport || !checkCurrent || !!check?.errors.length} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('print'); }}>Export print PDF</button>
               <button disabled={!canExport} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('export'); }}>Export proof PDF</button>
@@ -884,13 +890,15 @@ export function App() {
             </div>
           </details>}
         </div>
-        <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘2)" disabled={!summary} onClick={() => togglePanel('right')}>◨</button>
+        <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘2)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>
     </header>
     <div ref={workspace} inert={agentWorking} key={projectInstance} className={summary ? 'workspace' : 'workspace welcome-workspace'}
-      style={{ '--left-panel': panels.leftHidden ? '0px' : panels.left + 'px', '--right-panel': panels.rightHidden ? '0px' : panels.right + 'px',
+      data-resizing={resizing || undefined}
+      style={{ '--left-content': panels.left + 'px', '--right-content': panels.right + 'px', '--left-panel': panels.leftHidden ? '0px' : panels.left + 'px', '--right-panel': panels.rightHidden ? '0px' : panels.right + 'px',
         '--left-divider': panels.leftHidden ? '0px' : '6px', '--right-divider': panels.rightHidden ? '0px' : '6px' } as CSSProperties}>
-      <aside className="project-panel" aria-label="Project" hidden={panels.leftHidden}>
+      <aside className={'project-panel' + (panels.leftHidden ? ' is-collapsed' : '')} aria-label="Project" inert={panels.leftHidden} aria-hidden={panels.leftHidden}>
+        <div className="project-panel-content">
         <div className="project-head">
           <p className="eyebrow">Project</p>
           <h1>{summary?.project.title ?? 'Photobook studio'}</h1>
@@ -958,8 +966,9 @@ export function App() {
             <span className="muted">{sequence?.count} pages · {spreads.length} spreads</span>
           </div>}
         </>}
+        </div>
       </aside>
-      {!panels.leftHidden ? <PanelDivider side="left" width={panels.left} resize={resizePanel} /> : <div />}
+      {!panels.leftHidden ? <PanelDivider side="left" width={panels.left} resize={resizePanel} onResizing={setResizing} /> : <div />}
       <div className="workspace-center">
         <div ref={canvasWrap} className="canvas-wrap">
           <main ref={canvas} className="canvas" aria-label="Book preview" onScroll={measureView}
@@ -1089,8 +1098,8 @@ export function App() {
             if (paths.length) importFiles({ kind: paths.every((path) => /\.md$/i.test(path)) ? 'markdown' : 'photo', paths });
           }} />}
       </div>
-      {summary && (!panels.rightHidden ? <PanelDivider side="right" width={panels.right} resize={resizePanel} /> : <div />)}
-      <div className="inspector-host" hidden={panels.rightHidden || !summary}>
+      {summary && (!panels.rightHidden ? <PanelDivider side="right" width={panels.right} resize={resizePanel} onResizing={setResizing} /> : <div />)}
+      <div className={'inspector-host' + (panels.rightHidden ? ' is-collapsed' : '')} inert={panels.rightHidden} aria-hidden={panels.rightHidden || !summary}>
       {summary && spread && <Inspector summary={writable || summary.readOnly ? summary : { ...summary, readOnly: true }}
         spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} inspectSource={choose} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
@@ -1108,10 +1117,12 @@ export function App() {
         edit={editCanvas} close={() => setElementEditor(undefined)} />}
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
+    <McpPanel api={api} />
     <footer className="status-bar">
       <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
         {issue || busy || notice || (summary ? 'Project preview · Proof export' : 'ImageFlow for macOS')}
       </span>
+      {summary && <BookCheckIndicator check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}
     </footer>
   </div></ProjectFilesContext.Provider>;
 }

@@ -26,15 +26,15 @@ export function usePanels() {
   const resize = (side: Side, width: number) => setPanels((value) => ({ ...value, [side]: bounded(side, width) }));
   return { panels, toggle, resize };
 }
-export function PanelDivider({ side, width, resize }: { side: Side; width: number; resize: (side: Side, width: number) => void }) {
+export function PanelDivider({ side, width, resize, onResizing }: { side: Side; width: number; resize: (side: Side, width: number) => void; onResizing: (active: boolean) => void }) {
   const [drag, setDrag] = useState<{ x: number; width: number }>();
   const move = (event: PointerEvent<HTMLDivElement>) => {
     if (drag) resize(side, drag.width + (event.clientX - drag.x) * (side === 'left' ? 1 : -1));
   };
   return <div className="panel-divider" role="separator" tabIndex={0} aria-label={side === 'left' ? 'Resize project panel' : 'Resize Inspector'}
     aria-orientation="vertical" aria-valuemin={limits[side][0]} aria-valuemax={limits[side][1]} aria-valuenow={width}
-    onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); setDrag({ x: event.clientX, width }); }}
-    onPointerMove={move} onPointerUp={() => setDrag(undefined)} onLostPointerCapture={() => setDrag(undefined)}
+    onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); onResizing(true); setDrag({ x: event.clientX, width }); }}
+    onPointerMove={move} onPointerUp={() => setDrag(undefined)} onLostPointerCapture={() => { setDrag(undefined); onResizing(false); }}
     onDoubleClick={() => resize(side, defaults[side])} onKeyDown={(event) => {
       if (event.key === 'Home') { event.preventDefault(); resize(side, defaults[side]); }
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {

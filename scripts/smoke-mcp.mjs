@@ -43,7 +43,7 @@ try {
   await menuAction(app, 'Open project…');
   const ready = () => window.waitForFunction(()=>document.querySelector('iframe.book-frame-book[data-current][data-ready]') && !document.querySelector('.preview-state'));
   await ready();
-  await window.getByRole('button',{name:'Connect an agent…',exact:true}).click();
+  await menuAction(app, 'Agent Connections…');
   const connectionDialog=window.getByRole('dialog',{name:'Connect your agent'});
   await connectionDialog.getByRole('button',{name:'Enable local connection',exact:true}).click();
   const configuration=connectionDialog.getByRole('textbox',{name:'MCP connection configuration'});
@@ -53,7 +53,7 @@ try {
   await connectionDialog.getByRole('button',{name:'Close',exact:true}).click();
   client = new Client({name:'ImageFlow prototype test',version:'1.0.0'});
   await client.connect(new StdioClientTransport({...config,command:process.execPath,stderr:'pipe'}));
-  await window.getByRole('button',{name:'Agent connection · 1',exact:true}).waitFor();
+  await window.waitForFunction(() => document.querySelector('.mcp-dialog')?.dataset.clients === '1');
   const tools = await client.listTools();
   assert.deepEqual(tools.tools.map(t=>t.name).sort(),['apply_project_changes','check_book','get_authoring_context','import_sources','inspect_book','list_projects'].sort());
   const call = async(name,args={}) => {

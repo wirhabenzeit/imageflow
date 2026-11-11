@@ -606,7 +606,8 @@ function createWindow() {
   // Automated checks set IMAGEFLOW_HIDE_WINDOW so test runs do not flash windows on screen.
   const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
   const editor = new BrowserWindow({
-    width: 1520, height: 950, minWidth: 940, minHeight: 650, show: !hidden,
+    width: 1520, height: 950, minWidth: 940, minHeight: 650, show: !hidden, backgroundColor: '#f5f5f5',
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 20 } } : {}),
     webPreferences: {
       sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'),
       backgroundThrottling: !hidden,
@@ -711,7 +712,12 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.cancelCheck, (event) => { if (editorOwner(event)) checkJob?.abort(); });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: 'appMenu' },
+    { role: 'appMenu', submenu: [
+      { role: 'about' }, { type: 'separator' },
+      menuCommand('Agent Connections…', undefined, 'agent-settings'),
+      { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
+    ] },
     { label: 'File', submenu: [
       menuCommand('New Project…', 'Cmd+N', 'new'),
       menuCommand('Open Project Folder…', 'Cmd+O', 'open'),

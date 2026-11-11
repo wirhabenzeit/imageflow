@@ -68,7 +68,7 @@ try {
       return state !== before && (!document.querySelector('.preview-state') || !!document.querySelector('.status-error'));
     }, before, { timeout: 30000 });
   };
-  await window.getByRole('button', { name: 'Connect an agent…', exact: true }).click();
+  await menuAction(app, 'Agent Connections…');
   const dialog = window.getByRole('dialog', { name: 'Connect your agent' });
   await dialog.getByRole('button', { name: 'Enable local connection', exact: true }).click();
   const configuration = dialog.getByRole('textbox', { name: 'MCP connection configuration' });

@@ -5,7 +5,7 @@ ImageFlow exposes its open book to local MCP clients through a stdio bridge. The
 ## Connect
 
 1. Open an editable project in ImageFlow.
-2. Choose **Connect an agent…**, then **Enable local connection**.
+2. Choose **ImageFlow → Agent Connections…**, then **Enable local connection**.
 3. Copy the displayed `mcpServers.imageflow` configuration into your agent’s MCP settings. It contains the bridge executable and the path to a connection file.
 4. Close the connection dialog so ImageFlow can accept book edits. Connect or restart the MCP server in your agent.
 
