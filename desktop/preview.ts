@@ -51,7 +51,7 @@ async function withRenderedBook<T>(
     try {
       await window.loadURL(address.href);
     } catch (error) {
-      runSignal.throwIfAborted();
+      if (runSignal.aborted) throw error;
       // An aborted subresource can still leave a renderable document.
       if (window.webContents.getURL() !== address.href) throw error;
     }
@@ -74,7 +74,7 @@ async function withRenderedBook<T>(
     runSignal.throwIfAborted();
     return value;
   } catch (error) {
-    runSignal.throwIfAborted();
+    if (runSignal.aborted) throw error;
     if (error instanceof PreviewError) throw error;
     throw new PreviewError('render-failed', 'The book renderer stopped before it was ready.', { cause: error });
   } finally {

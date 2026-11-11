@@ -44,6 +44,8 @@ Every inspection/check result identifies an input revision. Pass that revision a
 
 Tool argument schemas are advertised through `tools/list`. The app validates them again before execution. Requests use only the selected project handle, even if the foreground book changes during a call.
 
+Context and inspection remain available when a manifest is malformed or missing: results retain check diagnostics and safe template sources. Unavailable parsed sections are omitted or empty, and `revision` is `null` when the complete input set cannot be captured. Repair the reported files and check again before attempting a mutation.
+
 ### Page images
 
 Address a physical page with a spread ID and side.
@@ -69,6 +71,8 @@ A rendered image can accompany layout errors or warnings. Coverage reports TypeS
 ### Project command batches
 
 Use a unique `idempotencyKey` for a new request. If the connection is lost after sending a request, retry the exact same arguments and key. The app retains successful receipts for the open project session. Reusing a key with different arguments returns an idempotency conflict. A dry run validates and describes the batch without committing it.
+
+`move_spread` requires an explicit `after`: use `null` for the start, or a spread ID or `$alias` to move immediately after that spread. Omitting the destination is a validation error. For insertion, omitting `after` appends; for duplication, it places the copy after the original.
 
 This batch inserts a layout and assigns a photo to its new spread through a batch-local reference.
 
@@ -109,15 +113,19 @@ Use `kind: "markdown"` for Markdown sources. File parameters use `kind: "file"` 
 
 ## Limits and recovery
 
-The socket accepts at most eight attached clients and four outstanding calls per client. ImageFlow serializes project work and may return an operation-in-progress result for overlapping requests. Transport requests are limited to 1 MiB. Responses, including emitted MCP image content and metadata, are limited to 8 MiB. Reduce page resolution, requested source files or pagination size when a payload is too large.
+The socket accepts at most eight attached clients and four outstanding calls per client. ImageFlow queues overlapping agent requests in arrival order, with at most 32 waiting requests. Requests wait for active UI operations and earlier agent work; mutations retain exclusive access and the human-editing check. A full queue returns `AUTHORING_QUEUE_FULL`. Transport requests are limited to 1 MiB. Responses, including emitted MCP image content and metadata, are limited to 8 MiB. Reduce page resolution, requested source files or pagination size when a payload is too large.
 
-A connection handshake has a five-second timeout. An individual bridge call has a two-minute timeout, and artwork rendering has a separate one-minute timeout. MCP cancellation propagates to the app. Disconnecting or revoking a connection cancels its pending work. A committed mutation can outlive the response, so use the original idempotency key when recovering from a lost response.
+A connection handshake has a five-second timeout. An individual bridge call has a two-minute timeout including time spent waiting in the queue, and artwork rendering has a separate one-minute timeout. MCP cancellation propagates to the app. Disconnecting or revoking a connection cancels its pending work; cancelled waiting requests never execute. A committed mutation can outlive the response, so use the original idempotency key when recovering from a lost response. Normal app shutdown waits for accepted saves and lock release.
 
 Closed project handles and unavailable connections return actionable errors. Call `list_projects` for current handles, or re-enable the connection in ImageFlow when the app connection has closed. Inputs changing during a check invalidate its result and require another check. Compilation diagnostics retain source paths and positions when the compiler provides them.
 
 ImageFlow records interrupted manifest saves in `.imageflow/persistence/pending-save.json`. A writable reopen completes the save when each live manifest matches its recorded original or intended bytes. Read-only checks refuse a pending save until that recovery completes. An interrupted durable tool save returns `SAVE_RECOVERY_REQUIRED` with `committed: "pending"`; reload the book and inspect it before making another change. Its idempotency key cannot repeat the command in that open-project session. A different or missing live manifest produces a conflict and preserves the journal and staging evidence. Restore each conflicting manifest to its recorded original or intended bytes, or restore a consistent backup before reopening.
 
-Writer ownership is recorded in `.imageflow/writer.lock`. Another live owner blocks a writable open. ImageFlow reclaims a proven dead process and preserves its record. A malformed lock or interrupted `.imageflow/writer-lock-acquire` gate needs manual recovery. Close all ImageFlow instances, back up the project and lock/journal evidence, and verify that the recorded process is no longer running before moving an orphan gate or malformed lock aside. Keep pending save journals and abandoned save/recovery staging directories available for inspection until the saved manifests have been reconciled.
+Version-2 journals store before/after bytes only for changed manifests and a SHA-256 guard for each untouched manifest. Recovery checks the complete pair, including guarded files, before publishing changes. A guarded file that changed needs its original bytes restored from a backup; the journal does not contain a copy. Version-1 journals remain recoverable.
+
+Writer ownership is recorded in `.imageflow/writer.lock`. New locks use a private local socket outside the project to verify the owning app, so a reused process ID cannot block recovery. Moving or removing the open folder does not prevent switching projects or closing the app. A live owner blocks a writable open; a confirmed absent owner allows recovery while preserving its record. Permission errors or an unresponsive owner fail closed. Legacy version-1 locks still use conservative PID checks; an apparently live PID requires manual verification. A malformed lock or interrupted `.imageflow/writer-lock-acquire` gate also needs manual recovery. Close all ImageFlow instances, back up the project and lock/journal evidence, and verify that no writer remains before moving an orphan gate or malformed lock aside. Keep pending save journals and abandoned save/recovery staging directories available for inspection until the saved manifests have been reconciled.
+
+Imported-file watcher receipts retain exact filesystem fingerprints for up to one minute and at most 2048 paths. Repeated matching events are suppressed during that window. Expired or evicted receipts may cause an extra reload; changed fingerprints always trigger external-change handling.
 
 Source consistency uses content revisions and filesystem change observations around loading/rendering. It detects ordinary concurrent edits, including edits reverted during a check. External writers can still race outside those observations. Large-book performance, immutable input snapshots, broader validation fixtures and additional client compatibility testing remain part of the full authoring release.
 

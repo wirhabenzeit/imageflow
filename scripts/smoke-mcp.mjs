@@ -67,6 +67,14 @@ try {
   const discovered=await good('list_projects');
   const project=discovered.projects[0].project;
   assert.equal(discovered.projects[0].folder,folder);
+  // Typical clients request context and inspection concurrently. Both requests must finish.
+  const parallel = await Promise.all([
+    good('get_authoring_context',{project}),
+    good('inspect_book',{project,view:'summary'}),
+    good('list_projects'),
+  ]);
+  assert.equal(parallel[0].project,project);
+  assert.equal(parallel[2].projects[0].project,project);
   let context=await good('get_authoring_context',{project});
   assert.ok(context.apiReference.includes('defineTemplate'));
   assert.ok(context.sources['template/index.tsx'].text.includes('NEW_LAYOUT'));
@@ -152,6 +160,18 @@ try {
   assert.equal(await window.locator('iframe.book-frame-book[data-ready]').first().getAttribute('src'),shown);
   await writeFile(entry,authored);
   await good('check_book',{project,preview:{target:{spread:'first'},maxEdge:300}});
+  await ready();
+
+  // Broken project JSON must not hide the diagnostics or template sources needed for recovery.
+  const savedManifest=await readFile(join(folder,'project.json'),'utf8');
+  await writeFile(join(folder,'project.json'),'{ invalid JSON');
+  for (const name of ['get_authoring_context','inspect_book']) {
+    const result=await good(name,{project,...(name==='inspect_book' ? {view:'summary'} : {})});
+    assert.ok(result.diagnostics.some(d=>d.message.includes('invalid JSON') && d.location?.path==='project.json'));
+    if (name==='get_authoring_context') assert.equal(result.sources['template/index.tsx'].text,authored);
+  }
+  await writeFile(join(folder,'project.json'),savedManifest);
+  await good('check_book',{project});
   await ready();
 
   // Revocation disconnects the bridge; re-enabling gives it a new token and it reconnects.

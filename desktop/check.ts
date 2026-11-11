@@ -77,7 +77,8 @@ export async function checkProject(
     }
     return result;
   } catch (error) {
-    signal.throwIfAborted();
+    // Cancellation must not replace a compiler/source/render failure that already occurred.
+    if (signal.aborted) throw error;
     if (error instanceof TemplateCompileError) {
       result.checks.bundle = 'failed';
       result.diagnostics = error.diagnostics;
@@ -105,7 +106,7 @@ export async function checkProject(
             message: 'Project inputs changed during this check. Run it again for current diagnostics.' }];
         }
       } catch (captureError) {
-        signal.throwIfAborted();
+        if (signal.aborted) throw error;
         result.diagnostics = [{ code: 'source-changed', stage: 'project', severity: 'error',
           message: 'Project inputs could not be verified after the check: ' +
             (captureError instanceof Error ? captureError.message : String(captureError)) }];

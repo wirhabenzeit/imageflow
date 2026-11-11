@@ -9,6 +9,8 @@ import { loadProject } from '../desktop/project';
 import { captureProjectRevision } from '../desktop/revisions';
 import type { RenderStatus } from '../src/desktop';
 import { mm } from '../src/format';
+import { PreviewError } from '../src/preview';
+import { authoringErrorResult } from '../desktop/authoring-errors';
 
 // Rendering itself is exercised by smoke-authoring-preview; these tests exercise the consistency boundary.
 const status: Extract<RenderStatus, { state: 'ready' }> = {
@@ -106,5 +108,20 @@ test('cancelling during rendering cleans up the check cache', async (t) => {
     controller.abort();
     return { status };
   }, controller.signal), { name: 'AbortError' });
+  assert.deepEqual(await readdir(cache), []);
+});
+
+test('a render failure keeps its error identity when cancellation arrives concurrently', async (t) => {
+  const { book, cache } = await fixture(t);
+  const controller = new AbortController();
+  const failure = new PreviewError('preview-capture-failed', 'Unable to capture the requested page.');
+  await assert.rejects(checkProject(book, cache, {}, async () => {
+    controller.abort(new Error('Request deadline elapsed.'));
+    throw failure;
+  }, controller.signal), (error) => {
+    assert.equal(error, failure);
+    assert.equal(authoringErrorResult(error, controller.signal).error.code, 'PREVIEW_CAPTURE_FAILED');
+    return true;
+  });
   assert.deepEqual(await readdir(cache), []);
 });

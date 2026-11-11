@@ -21,6 +21,9 @@ import { captureBookPreview, checkBookRender } from './preview';
 import { ProjectSession } from './project-session';
 import { createAuthoringService, AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
+import { AuthoringQueue } from './authoring-queue';
+import { authoringErrorResult } from './authoring-errors';
+import { ImportReceipts } from './import-receipts';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
 import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
@@ -32,9 +35,13 @@ let projectSession: ProjectSession | undefined;
 let unlockProject: ProjectLock | undefined;
 let mcpConnection: Awaited<ReturnType<typeof createMcpConnection>> | undefined;
 let mcpClients: { name: string }[] = [];
-let mcpCalling = false;
+let mcpCalls = 0;
+let mcpQueue: AuthoringQueue | undefined;
 let closingProject: Promise<void> | undefined;
 let closing = false;
+let quitting = false;
+let quitReady = false;
+let quitCleanup: Promise<void> | undefined;
 let connectionSettingsQueue = Promise.resolve();
 const agentLeases = new Map<string, (allowed: boolean) => void>();
 let exportJob: AbortController | undefined;
@@ -43,7 +50,7 @@ const checkJobs = new Set<AbortController>();
 let watcher: FSWatcher | undefined;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 const observedChanges = new Set<string>();
-const importedWrites = new Map<string, string>();
+const importedWrites = new ImportReceipts();
 let cache: string;
 const sessions = new Map<string, { book: OpenProject; mode: RenderProject['mode'] }>();
 // `npm run dev` serves the editor and render pages from a Vite dev server for hot reloading. The custom protocol
@@ -129,6 +136,7 @@ function errorMessage(error: unknown) {
 async function fromEditor<T>(event: IpcMainInvokeEvent, run: (owner: BrowserWindow) => Promise<T>): Promise<Result<T>> {
   const owner = editorOwner(event);
   if (!owner) return { error: 'Request is only available to the editor.' };
+  if (closing || quitting) return { error: 'ImageFlow is closing this project.' };
   if (busy) return { error: 'ImageFlow is finishing another project operation.' };
   busy = true;
   try {
@@ -457,9 +465,13 @@ function publishMcpSettings() {
 
 async function disableMcp() {
   const connection = mcpConnection;
+  const queue = mcpQueue;
   mcpConnection = undefined;
+  mcpQueue = undefined;
   mcpClients = [];
+  queue?.close();
   await connection?.close();
+  await queue?.whenIdle();
   publishMcpSettings();
 }
 
@@ -481,12 +493,14 @@ async function agentLease(signal: AbortSignal) {
     if (signal.aborted) return finish(false);
     owner.webContents.send(channels.agentLease, id);
   });
+  signal.throwIfAborted();
   if (!allowed) throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish or close the active editor in ImageFlow, then retry. No changes were made.');
 }
 
 async function enableMcp() {
   const owner = window;
-  if (!owner || owner.isDestroyed()) throw new Error('Open ImageFlow before enabling the connection.');
+  if (!owner || owner.isDestroyed() || closing || quitting) throw new Error('Open ImageFlow before enabling the connection.');
+  const queue = new AuthoringQueue({ ready: () => !busy && !closing && !quitting, maxPending: 32 });
   const service = createAuthoringService({
     session: () => projectSession, cache, docs: join(app.getAppPath(), 'docs', 'template-api.md'),
     check: checkOpenBook,
@@ -506,32 +520,35 @@ async function enableMcp() {
     descriptorPath: join(app.getPath('userData'), 'mcp-connection.json'),
     onClientsChanged: (clients) => { mcpClients = clients; publishMcpSettings(); },
     onCall: async (name, args, signal) => {
-      const mutation = name === 'apply_project_changes' || name === 'import_sources';
-      if (mcpCalling || busy) return { state: 'error', error: { code: 'OPERATION_IN_PROGRESS', message: 'ImageFlow is finishing another operation. Retry shortly.' } };
-      mcpCalling = true;
-      let locked = false;
+      mcpCalls++;
+      let requestSignal = signal;
       try {
-        if (mutation) {
-          await agentLease(signal);
-          signal.throwIfAborted();
-          if (busy) throw new AuthoringError('OPERATION_IN_PROGRESS', 'A project edit started. Retry after it finishes.');
-          busy = true;
-          locked = true;
-        }
-        return await service(name, args, signal);
+        return await queue.run(async (queuedSignal) => {
+          requestSignal = queuedSignal;
+          const mutation = name === 'apply_project_changes' || name === 'import_sources';
+          // Reserve the writer before asking the renderer for its editing lease.
+          if (mutation) busy = true;
+          try {
+            if (mutation) await agentLease(queuedSignal);
+            queuedSignal.throwIfAborted();
+            return await service(name, args, queuedSignal);
+          } finally {
+            if (mutation) {
+              busy = false;
+              if (window && !window.isDestroyed()) window.webContents.send(channels.agentRelease);
+            }
+          }
+        }, signal);
       } catch (error) {
-        return { state: 'error', error: { code: signal.aborted ? 'CANCELLED' : error instanceof AuthoringError ? error.code : 'AUTHORING_FAILED',
-          message: signal.aborted ? 'The request was cancelled.' : errorMessage(error),
-          ...(error instanceof AuthoringError ? error.details : {}) } };
+        return authoringErrorResult(error, requestSignal);
       } finally {
-        if (locked) busy = false;
-        if (mutation && window && !window.isDestroyed()) window.webContents.send(channels.agentRelease);
-        mcpCalling = false;
+        mcpCalls--;
       }
     },
   });
-  if (owner !== window || owner.isDestroyed()) { await connection.close(); return; }
+  if (owner !== window || owner.isDestroyed() || closing || quitting) { queue.close(); await connection.close(); return; }
   mcpConnection = connection;
+  mcpQueue = queue;
   publishMcpSettings();
 }
 
@@ -565,26 +582,41 @@ function createWindow() {
     exportJob?.abort();
     for (const job of checkJobs) job.abort();
     window = null;
-    void disableMcp();
+    const disconnect = disableMcp().catch((error) => console.error('ImageFlow could not disconnect its agent connection', error));
     for (const reply of agentLeases.values()) reply(false);
     // A save with a published journal must finish before another app can obtain this folder's lock.
     closingProject = (async () => {
-      while (busy || mcpCalling) await new Promise((resolve) => setTimeout(resolve, 10));
+      // An enable request may still be creating its private socket before publishing mcpConnection.
+      await connectionSettingsQueue;
+      await disconnect;
+      while (busy || mcpCalls) await new Promise((resolve) => setTimeout(resolve, 10));
       const release = unlockProject;
       unlockProject = undefined;
-      await release?.();
-      for (const [id, { mode }] of sessions) if (mode === 'edit') sessions.delete(id);
-      active = undefined;
-      projectSession = undefined;
-    })();
-    void closingProject.catch((error) => console.error('ImageFlow could not release its project lock', error));
+      try { await release?.(); }
+      finally {
+        for (const [id, { mode }] of sessions) if (mode === 'edit') sessions.delete(id);
+        active = undefined;
+        projectSession = undefined;
+      }
+    })().catch((error) => console.error('ImageFlow could not close its project', error));
   });
   void editor.loadURL(editorURL).catch((error: unknown) => console.error('ImageFlow could not open', error));
 }
 
 void app.whenReady().then(async () => {
   cache = await mkdtemp(join(app.getPath('temp'), 'imageflow-cache-'));
-  app.on('will-quit', () => { void rm(cache, { recursive: true, force: true }); });
+  app.on('before-quit', () => { quitting = true; });
+  app.on('will-quit', (event) => {
+    if (quitReady) return;
+    event.preventDefault();
+    quitCleanup ??= (async () => {
+      await closingProject;
+      await rm(cache, { recursive: true, force: true });
+    })().catch((error) => console.error('ImageFlow could not finish cleanup', error)).finally(() => {
+      quitReady = true;
+      app.quit();
+    });
+  });
   protocol.handle(desktopScheme, async (request) => {
     try {
       return await serve(request);
@@ -657,6 +689,6 @@ void app.whenReady().then(async () => {
   await restoreDevProject();
   createWindow();
   app.on('activate', () => {
-    if (!window) void (closingProject ?? Promise.resolve()).then(() => { if (!window) createWindow(); });
+    if (!window && !quitting) void (closingProject ?? Promise.resolve()).then(() => { if (!window && !quitting) createWindow(); });
   });
 });
