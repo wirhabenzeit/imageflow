@@ -169,8 +169,9 @@ export function createAuthoringService(hooks: Hooks) {
   const draftCheck = async (session: ProjectSession, signal: AbortSignal, expectedRevision: string, operations: unknown,
     preview: PreviewRequest | undefined) => {
     const base = await checked(session, signal, { expectedRevision });
-    if (base.state !== 'ready' || !base.render) return { ...base, draft: { applied: false, committed: false } };
-    const template = base.render.template;
+    // A draft may repair a saved book whose render fails, as long as its template loaded at this revision.
+    const template = base.revision === expectedRevision ? base.render?.template ?? base.template : undefined;
+    if (!template) return { ...base, draft: { applied: false, committed: false } };
     const draft: CheckDraft = (book) => {
       let planned;
       try { planned = applyProjectCommands(book, template, operations); }
@@ -237,7 +238,7 @@ export function createAuthoringService(hooks: Hooks) {
       for (const [index, document] of documents.entries()) {
         if (document.status === 'rejected') unavailable(document.reason, index === 0 ? 'project.json' : 'photos.json');
       }
-      const template = report.render?.template;
+      const template = report.render?.template ?? report.template;
       let result: Record<string, unknown>;
       let verifySources: (() => Promise<void>) | undefined;
       if (name === 'get_authoring_context') {

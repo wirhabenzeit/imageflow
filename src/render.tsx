@@ -127,7 +127,7 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     if (kind && !declared.box(id, kind)) {
       warn(['Content saved for box ' + id + ' fits no box of this template.'], { code: 'content-undeclared', box: id,
         source: state.photo ?? state.text, suggestion: 'Declare a ' + (kind === 'photo' ? 'photo' : 'markdown') + ' box ' + id +
-          ' in a layout, or use clear_box to discard the saved assignment.' });
+          ' in a layout, or discard the saved assignment with clear_box (spread ' + spread.id + ', box ' + id + ').' });
       continue;
     }
     if (box && kind && (kind === 'photo') !== (box.type === 'photo')) continue;

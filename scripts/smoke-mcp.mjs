@@ -206,9 +206,34 @@ try {
   await good('check_book',{project,preview:{target:{spread:'first'},maxEdge:300}});
   await ready();
 
+  // A draft can repair a saved book whose layout throws at render time for its current parameter value.
+  const chapterLayout='render:ctx=><Spread><h1>{ctx.params.heading}</h1></Spread>}';
+  assert.ok(authored.includes(chapterLayout));
+  await writeFile(entry,authored.replace(chapterLayout,
+    "render:ctx=>{if(ctx.params.heading==='A new chapter') throw new Error('Heading rejected');return <Spread><h1>{ctx.params.heading}</h1></Spread>;}}"));
+  await window.locator('.status-error').waitFor();
+  const failing=await call('check_book',{project});
+  assert.equal(failing.data.state,'error',JSON.stringify(failing.data));
+  assert.match(failing.data.revision,/^[a-f0-9]{64}$/);
+  const repair={op:'set_parameter',scope:'spread',spread:applied.references.chapter,key:'heading',value:'Recovered'};
+  const repaired=await call('check_book',{project,expectedRevision:failing.data.revision,draft:{operations:[repair]},
+    preview:{target:{spread:applied.references.chapter},maxEdge:300}});
+  assert.ok(!repaired.response.isError,JSON.stringify(repaired.data));
+  assert.equal(repaired.data.state,'ready');
+  assert.equal(repaired.data.draft.applied,true);
+  assert.ok(repaired.response.content.some(c=>c.type==='image'));
+  await writeFile(entry,authored);
+  // Let the app adopt the restored template before the next step reads inputs.
+  await window.waitForFunction(()=>!document.querySelector('.status-error'));
+  await ready();
+  await good('check_book',{project});
+  await ready();
+
   // Broken project JSON must not hide the diagnostics or template sources needed for recovery.
   const savedManifest=await readFile(join(folder,'project.json'),'utf8');
   await writeFile(join(folder,'project.json'),'{ invalid JSON');
+  // Inputs that change during a call correctly return SOURCE_CHANGED. Let the app observe this write first.
+  await window.locator('.status-error').waitFor();
   for (const name of ['get_authoring_context','inspect_book']) {
     const result=await good(name,{project,...(name==='inspect_book' ? {view:'summary'} : {})});
     assert.ok(result.diagnostics.some(d=>d.message.includes('invalid JSON') && d.location?.path==='project.json'));

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { PrintSide } from './format';
 import { identifier } from './project';
+import type { TemplateInfo } from './desktop';
 
 export const maxPreviewEdge = 1600;
 // `spread` validates the spread target. Draft checks also accept `$alias` batch references, resolved before rendering.
@@ -31,9 +32,12 @@ type PreviewErrorCode = 'invalid-preview-request' | 'preview-target-not-found' |
   'render-failed' | 'render-timeout' | 'preview-capture-failed';
 
 export class PreviewError extends Error {
-  constructor(readonly code: PreviewErrorCode, message: string, options?: ErrorOptions) {
+  // Declarations of a template that loaded before the book failed to render, when available.
+  readonly template?: TemplateInfo;
+  constructor(readonly code: PreviewErrorCode, message: string, options?: ErrorOptions & { template?: TemplateInfo }) {
     super(message, options);
     this.name = 'PreviewError';
+    if (options?.template) this.template = options.template;
   }
 }
 

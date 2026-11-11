@@ -198,6 +198,8 @@ function watchProject(book: OpenProject) {
   const folder = book.folder;
   const inputs = projectSession?.inputs;
   let checkingChanges = false;
+  // After a failed reload the editor shows an error, so a revert to the bytes it last loaded must still reload.
+  let reloadFailed = false;
   function scheduleReload(delay = 220) {
     clearTimeout(reloadTimer);
     reloadTimer = setTimeout(reload, delay);
@@ -244,7 +246,7 @@ function watchProject(book: OpenProject) {
           }
         }
       }
-      if (!external.some(Boolean)) return;
+      if (!external.some(Boolean) && !reloadFailed) return;
       busy = true;
       try {
         notify({ building: true });
@@ -256,6 +258,7 @@ function watchProject(book: OpenProject) {
           return;
         }
         for (const [i, file] of files.entries()) if (external[i]) importedWrites.delete(file);
+        reloadFailed = 'error' in next;
         notify('error' in next ? { error: next.error } : { value: activate(next.book, true) });
       } finally {
         busy = false;

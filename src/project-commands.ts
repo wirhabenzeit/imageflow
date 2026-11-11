@@ -285,10 +285,13 @@ export function applyProjectCommands(
       }
       case 'clear_box': {
         const spread = findSpread(operation.spread);
-        findBox(spread, operation.box);
         const before = own(spread.boxes, operation.box);
+        // Saved content outside the current layout, including content no layout declares any more, can be cleared too.
+        if (!before) findBox(spread, operation.box);
         if (!before || (!before.photo && !before.text && !before.crops && !before.focus)) break;
-        discardContent(spread, operation.box);
+        if (Object.values(template.spreads).some((layout) => own(layout.boxes, operation.box))) discardContent(spread, operation.box);
+        // No layout can show or edit this box, so its parameters go with its content.
+        else delete spread.boxes[operation.box];
         changed('Cleared box ' + operation.box, [spread.id], !!before.text);
         break;
       }

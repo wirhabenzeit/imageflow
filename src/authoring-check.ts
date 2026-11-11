@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AuthoringReport } from './authoring';
-import type { RenderStatus } from './desktop';
+import type { RenderStatus, TemplateInfo } from './desktop';
 import { previewRequestSchema } from './preview';
 import type { PreviewMetadata } from './preview';
 
@@ -18,6 +18,8 @@ export type AuthoringCheckResult = AuthoringReport & {
     print: 'not-run';
   };
   render?: Extract<RenderStatus, { state: 'ready' }>;
+  // Declarations of a template that loaded, compiled and validated before its book failed to render.
+  template?: TemplateInfo;
   image?: PreviewMetadata & { mimeType: 'image/png' | 'image/jpeg'; data: string; draft?: true };
   // Present when the check rendered an unsaved command batch on top of the saved book.
   draft?: AuthoringDraftSummary;

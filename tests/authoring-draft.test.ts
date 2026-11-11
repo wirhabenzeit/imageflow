@@ -13,14 +13,16 @@ import { ProjectSession } from '../desktop/project-session';
 import type { AuthoringCheckResult } from '../src/authoring-check';
 import type { RenderStatus } from '../src/desktop';
 import { mm } from '../src/format';
+import { p } from '../src/parameters';
+import { PreviewError } from '../src/preview';
 import { parseMcpArguments } from '../src/mcp-contract';
 import type { PreviewRequest } from '../src/preview';
 
-const layout = (label: string) => ({ label, span: 'spread' as const, parameters: {}, boxes: {}, elements: {} });
+const layout = (label: string, parameters = {}) => ({ label, span: 'spread' as const, parameters, boxes: {}, elements: {} });
 const status: Extract<RenderStatus, { state: 'ready' }> = {
   state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {},
   template: {
-    version: '1', parameters: {}, spreads: { main: layout('Main'), chapter: layout('Chapter opening') },
+    version: '1', parameters: {}, spreads: { main: layout('Main', { heading: p.string({ label: 'Heading', default: '' }) }), chapter: layout('Chapter opening') },
     formatId: 'default', formats: { default: 'Default' },
     format: {
       label: 'Draft test', trim: { width: mm(100), height: mm(100) },
@@ -35,14 +37,15 @@ const saved = { schemaVersion: 1, title: 'Draft book', template: { id: 'test', v
 
 type Rendered = { book: OpenProject; preview?: PreviewRequest };
 
-async function fixture(t: TestContext) {
+// `fails` makes the renderer reject a book the way a layout that throws does: the template loaded, the book did not render.
+async function fixture(t: TestContext, project: object = saved, fails?: (book: OpenProject) => boolean) {
   const work = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-draft-')));
   t.after(() => rm(work, { recursive: true, force: true }));
   const folder = join(work, 'book');
   const cache = join(work, 'cache');
   await mkdir(join(folder, 'template'), { recursive: true });
   await mkdir(cache);
-  await writeFile(join(folder, 'project.json'), JSON.stringify(saved));
+  await writeFile(join(folder, 'project.json'), JSON.stringify(project));
   await writeFile(join(folder, 'photos.json'), '{}');
   await writeFile(join(folder, 'template/index.tsx'), 'export default {};');
   await writeFile(join(work, 'api.md'), '# API');
@@ -53,6 +56,7 @@ async function fixture(t: TestContext) {
     session: () => session, cache, docs: join(work, 'api.md'),
     check: (book, request, signal, index, draft) => checkProject(book, cache, request, async (snapshot, preview) => {
       renders.push({ book: snapshot, preview });
+      if (fails?.(snapshot)) throw new PreviewError('render-failed', 'Heading rejected.', { template: status.template });
       if (!preview) return { status };
       const image: BookPreview = { width: 4, height: 2, widthMm: 200, heightMm: 100, bounds: 'trim', side: 'spread', page: { left: 1, right: 2 },
         spread: 'spread' in preview.target ? preview.target.spread : 'one', bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png', status };
@@ -123,4 +127,24 @@ test('the check_book contract scopes batch references and revisions to drafts', 
   assert.throws(() => parseMcpArguments('check_book', { project, expectedRevision, draft: { operations: [] } }));
   const parsed = parseMcpArguments('check_book', { project, expectedRevision, draft, preview: { target: { spread: '$chapter' } } });
   assert.deepEqual((parsed.args.preview as { target: unknown }).target, { spread: '$chapter' });
+});
+
+test('a draft can repair a saved book whose layout fails to render', async (t) => {
+  const failing = { ...saved, spreads: [{ id: 'one', definition: 'main', params: { heading: 'Hello' } }] };
+  const { call, revision } = await fixture(t, failing, (book) => book.project.spreads.some(({ params }) => params.heading === 'Hello'));
+  const expectedRevision = await revision();
+  const before = await call('check_book', { expectedRevision }) as AuthoringCheckResult;
+  assert.equal(before.state, 'error');
+  assert.equal(before.diagnostics[0].code, 'render-failed');
+  // Context keeps the declarations needed to plan the repair.
+  const context = await call('get_authoring_context');
+  assert.ok((context.template as { spreads: Record<string, unknown> }).spreads.main);
+  const repaired = await call('check_book', {
+    expectedRevision, preview: { target: { spread: 'one' } },
+    draft: { operations: [{ op: 'set_parameter', scope: 'spread', spread: 'one', key: 'heading', value: 'Recovered' }] },
+  }) as AuthoringCheckResult;
+  assert.equal(repaired.state, 'ready', JSON.stringify(repaired.diagnostics));
+  assert.equal(repaired.draft?.applied, true);
+  assert.deepEqual(repaired.draft?.changes, ['Updated heading']);
+  assert.equal(repaired.image?.draft, true);
 });

@@ -66,7 +66,9 @@ async function withRenderedBook<T>(
       })
     `);
     runSignal.throwIfAborted();
-    if (status.state === 'error') throw new PreviewError(preview?.state === 'error' ? preview.code : 'render-failed', status.message);
+    if (status.state === 'error') {
+      throw new PreviewError(preview?.state === 'error' ? preview.code : 'render-failed', status.message, { template: status.template });
+    }
     return useRender(window, status, preview?.state === 'ready' ? preview.metadata : undefined);
   };
   try {

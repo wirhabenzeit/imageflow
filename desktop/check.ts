@@ -127,6 +127,7 @@ export async function checkProject(
           ? error.code === 'preview-capture-failed' ? 'completed' : 'not-run'
           : 'failed';
       }
+      if (error instanceof PreviewError && error.template) result.template = error.template;
       result.diagnostics = [{
         code: error instanceof ProjectRevisionError || error instanceof PreviewError ? error.code : 'authoring-check-failed',
         stage: error instanceof ProjectRevisionError ? 'project' : previewFailure ? 'preview' : phase === 'template' ? 'project' : phase,
@@ -138,11 +139,13 @@ export async function checkProject(
     if (result.revision) {
       try {
         if (!await inputsMatch()) {
+          delete result.template;
           result.diagnostics = [{ code: 'source-changed', stage: 'project', severity: 'error',
             message: 'Project inputs changed during this check. Run it again for current diagnostics.' }];
         }
       } catch (captureError) {
         if (signal.aborted) throw error;
+        delete result.template;
         result.diagnostics = [{ code: 'source-changed', stage: 'project', severity: 'error',
           message: 'Project inputs could not be verified after the check: ' +
             (captureError instanceof Error ? captureError.message : String(captureError)) }];
