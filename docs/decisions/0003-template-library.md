@@ -101,9 +101,23 @@ The built-in starter keeps an **Include sample content** option, checked by defa
 
 `project.json` also records the template's source hash at creation, as `template.hash`. Nothing uses it yet. It lets a later version tell whether a project's copy was edited, which a template update needs (see Deferred).
 
-### Library window
+### Managing templates in Settings
 
-A *Templates* window, opened from the Window menu and from the project picker, lists the entries and offers *Import…*, *Export…* (phase 2), *Reveal in Finder* and *Delete*. Deleting moves the entry to the Trash. The built-in templates cannot be deleted.
+The library is managed in a **Templates** pane of the app's Settings window (*ImageFlow › Settings…*, ⌘,). The Settings window does not exist yet. This pane is its first content, and later app-wide preferences join it as more panes.
+
+The pane lists every entry with its thumbnail, label, ID, version, source (*Built-in* or imported, with the import date) and size on disk. Older versions of an ID are grouped under the newest. Entries the current app cannot use show the reason. The pane offers:
+
+- *Import…* for a template folder, and in phase 2 for an `.imageflow-template` file;
+- *Export…* for the selected entry (phase 2);
+- *Reveal in Finder* for the selected entry, and for the `Templates/` folder;
+- *Delete* for the selected entry or version. Deleting moves the entry to the Trash and says that existing books are not affected. Built-in templates cannot be deleted.
+
+The pane is reachable from other places that need it:
+
+- the New Project picker has a *Manage Templates…* button that opens the pane;
+- after *Save Template to Library…*, the confirmation offers *Show in Settings*.
+
+The library list is read by both the pane and the picker from the same main-process service, so an import or a deletion in one shows immediately in the other.
 
 ## Consequences
 
@@ -111,7 +125,8 @@ A *Templates* window, opened from the Window menu and from the project picker, l
 - Users see a picker instead of an immediate save dialog. For a library with only the starter, the picker can preselect it so that creating a book takes no extra click beyond confirming.
 - An empty book needs a usable empty state in the editor: no spreads, and a prompt to add the first layout.
 - Template code runs at import, not only when a project opens. Import errors need the same quality of diagnostics as project load errors.
-- The `Templates/` folder grows with every imported version. The window shows the size of each entry so that users can remove old versions.
+- The `Templates/` folder grows with every imported version. The Settings pane shows the size of each entry so that users can remove old versions.
+- The app needs a Settings window, with the standard *Settings…* menu item and ⌘, shortcut. The template library is its first pane, so the window's structure (a pane per area) should be designed to take later preferences.
 
 ## Deferred
 
@@ -130,6 +145,7 @@ A *Templates* window, opened from the Window menu and from the project picker, l
   - selecting the newest version per ID, and user entries overriding built-ins;
   - entries the app does not support are listed but cannot be selected.
 - Lifecycle smoke test (extends `smoke-project-lifecycle.mjs`): save the open project's template to a temporary library, create a new project from it, and check that the new project's `template/` matches the source and that `project.json` names the ID, version and hash. Delete the library entry and reopen the project, which must still load and render.
+- Settings test: an import from the Templates pane appears in the New Project picker without reopening it, and a deletion from the pane removes it from the picker.
 - Import failure test: a template with a compile error, and one whose `requires` lists an unknown capability, are both rejected with diagnostics, and nothing is left in `Templates/`.
 - Phase 2: an exported `.imageflow-template` round-trips to an identical hash.
 
