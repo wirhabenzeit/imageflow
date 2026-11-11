@@ -1,4 +1,4 @@
-import { menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
+import { testBook, menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -14,7 +14,7 @@ import sharp from 'sharp';
 // finding, then save the layout and compare the saved render with its draft preview.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'examples-smoke-'));
-const folder = join(work, 'book');
+const folder = join(work, 'book.imageflow');
 const entry = join(folder, 'template', 'index.tsx');
 await mkdir(join(folder, 'template'), { recursive: true });
 const minimal = await readFile(join(root, 'docs', 'examples', 'minimal.tsx'), 'utf8');
@@ -51,10 +51,10 @@ const app = await _electron.launch({ executablePath: electron, args: [join(root,
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 let client;
 try {
-  const window = await app.firstWindow();
+  const window = await testBook(app, folder, false);
   window.setDefaultTimeout(30000);
   await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, folder);
-  await menuAction(app, 'Open project…');
+
   const shown = () => window.evaluate(() => (document.querySelector('iframe.book-frame-book[data-current][data-ready]')?.getAttribute('src') ?? '') +
     '|' + (document.querySelector('.status-error')?.textContent ?? ''));
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
@@ -69,7 +69,7 @@ try {
     }, before, { timeout: 30000 });
   };
   const dialog = await agentSettings(app);
-  await dialog.getByRole('checkbox', { name: 'Allow agents to use the open book', exact: true }).check();
+  await dialog.getByRole('checkbox', { name: 'Allow agents to use open books', exact: true }).check();
   await dialog.getByText('Claude Code and other agents').click();
   const configuration = dialog.getByRole('textbox', { name: 'MCP connection configuration' });
   await configuration.waitFor();

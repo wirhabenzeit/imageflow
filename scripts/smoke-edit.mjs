@@ -1,4 +1,4 @@
-import { menuAction, exportAction } from './ui-actions.mjs';
+import { testBook, menuAction, exportAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -10,15 +10,15 @@ import { _electron } from 'playwright-core';
 // Click-to-edit: nodes marked with ctx.edit() open a popover that edits their parameters in place.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'edit-'));
-const project = join(work, 'Book');
+const project = join(work, 'Book.imageflow');
 const read = async () => JSON.parse(await readFile(join(project, 'project.json'), 'utf8'));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
-  const w = await app.firstWindow();
+  const w = await testBook(app, project, true);
   w.setDefaultTimeout(20000);
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, project);
-  await menuAction(app, 'New project…');
+
   const ready = () => w.waitForSelector('iframe.book-frame-book[data-current][data-ready]');
   await ready();
   const frame = w.frameLocator('iframe.book-frame-book[data-current]');
@@ -210,16 +210,7 @@ try {
   await w.waitForFunction(() => !document.querySelector('.edit-popover'));
 
   // Editor review cases (#15). Helpers: click an application menu item; wait for the book to render anew.
-  const menu = (label) => app.evaluate(({ Menu }, label) => {
-    const find = (items) => {
-      for (const item of items) {
-        if (item.label === label) return item;
-        const inner = item.submenu && find(item.submenu.items);
-        if (inner) return inner;
-      }
-    };
-    find(Menu.getApplicationMenu().items).click();
-  }, label);
+  const menu = (label) => menuAction(app, label);
   const rerendered = async (change) => {
     const old = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
     await change();
@@ -245,7 +236,7 @@ try {
   const external = JSON.parse(beforeExternal);
   external.spreads[7].elements.grid.params.month = '2028-05-01';
   await writeFile(join(project, 'project.json'), JSON.stringify(external, null, 2));
-  await rerendered(() => menu('Reload Project'));
+  await rerendered(() => menu('Reload Book'));
   await editorDialog.getByRole('alert').filter({ hasText: 'changed while this editor was open' }).waitFor();
   await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
   assert.equal(await editorDialog.getByRole('button', { name: 'Done' }).isDisabled(), true);
@@ -255,7 +246,7 @@ try {
   assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2028-05-01' });
   await closeEditor();
   await writeFile(join(project, 'project.json'), beforeExternal);
-  await rerendered(() => menu('Reload Project'));
+  await rerendered(() => menu('Reload Book'));
 
   // The same holds when only the template changes what the editor shows: a calendar without a saved month uses the
   // template default, and a new default makes the open draft stale too.
@@ -264,7 +255,7 @@ try {
   const unsaved = JSON.parse(beforeExternal);
   delete unsaved.spreads[7].elements.grid.params.month;
   await writeFile(join(project, 'project.json'), JSON.stringify(unsaved, null, 2));
-  await rerendered(() => menu('Reload Project'));
+  await rerendered(() => menu('Reload Book'));
   await openCalendarEditor();
   assert.match(await calendarEditor.locator('h3').textContent(), /January 2027/);
   const defaultMonth = "default: '2027-01-01', precision: 'month'";
@@ -280,7 +271,7 @@ try {
   await closeEditor();
   await rerendered(() => writeFile(templateFile, templateSource));
   await writeFile(join(project, 'project.json'), beforeExternal);
-  await rerendered(() => menu('Reload Project'));
+  await rerendered(() => menu('Reload Book'));
 
   // set() followed directly by commit() saves the values just set, not the previous render's.
   const withEditor = (code) => templateSource.replace(

@@ -1,4 +1,4 @@
-import { menuAction, exportAction } from './ui-actions.mjs';
+import { testBook, menuAction, exportAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -11,7 +11,7 @@ import sharp from 'sharp';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const build = join(root, '.build');
 const work = await mkdtemp(join(build, 'authoring-preview-'));
-const project = join(work, 'book');
+const project = join(work, 'book.imageflow');
 const entry = join(project, 'template', 'index.tsx');
 const story = { text: 'story' };
 const template = `import { defineTemplate, mm, Spread, MarkdownBox, PhotoBox } from 'imageflow';
@@ -106,12 +106,12 @@ try {
   app = await _electron.launch({ executablePath: electron,
     args: [join(build, 'desktop'), '--user-data-dir=' + join(work, 'profile')],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' }, timeout: 15000 });
-  const w = await app.firstWindow();
+  const w = await testBook(app, project, false);
   w.setDefaultTimeout(30000);
   await app.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
   }, project);
-  await menuAction(app, 'Open project…');
+
   const ready = 'iframe.book-frame-book[data-current][data-ready]';
   const displayed = 'iframe.book-frame-book[data-ready]:not([aria-hidden="true"])';
   const frame = w.frameLocator(ready);

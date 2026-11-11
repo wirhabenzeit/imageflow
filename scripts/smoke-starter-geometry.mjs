@@ -1,4 +1,4 @@
-import { menuAction } from './ui-actions.mjs';
+import { testBook, menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -14,17 +14,17 @@ const baseline = join(root, 'tests', 'fixtures', 'starter-geometry.json');
 const work = await mkdtemp(join(root, '.build', 'geometry-'));
 
 async function measure(format) {
-  const project = join(work, format);
+  const project = join(work, format + '.imageflow');
   await cp(join(root, 'sample', 'starter'), project, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
   const manifest = JSON.parse(await readFile(join(project, 'project.json'), 'utf8'));
   await writeFile(join(project, 'project.json'), JSON.stringify({ ...manifest, format }, null, 2));
   const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile-' + format)],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
   try {
-    const w = await app.firstWindow();
+    const w = await testBook(app, project, false);
     w.setDefaultTimeout(30000);
     await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, project);
-    await menuAction(app, 'Open project…');
+
     const frame = w.frameLocator('iframe.book-frame-book[data-current][data-ready]');
     await frame.locator('.if-sheet').first().waitFor();
     const status = await frame.locator('body').evaluate(() => window.imageflowRenderStatus);

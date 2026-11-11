@@ -48,7 +48,7 @@ const scratch = await realpath(join(tmpdir(), 'imageflow-dev'));
 let fresh;
 // Copies the starter like New Project does, removes the previous copy, and makes the copy the one to open.
 async function freshProject() {
-  const folder = join(scratch, 'Book ' + new Date().toTimeString().slice(0, 8).replaceAll(':', '.'));
+  const folder = join(scratch, 'Book ' + new Date().toTimeString().slice(0, 8).replaceAll(':', '.') + '.imageflow');
   await rm(folder, { recursive: true, force: true });
   await cp(starter, folder, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
   const path = join(folder, 'project.json');
@@ -57,7 +57,7 @@ async function freshProject() {
   await writeFile(path, JSON.stringify(draft, null, 2) + '\n');
   if (fresh && fresh !== folder) await rm(fresh, { recursive: true, force: true });
   fresh = folder;
-  await writeFile(devState, JSON.stringify({ folder, readOnly: false }));
+  await writeFile(devState, JSON.stringify([{ folder, readOnly: false }]));
   console.log('Fresh starter project: ' + folder);
 }
 if (!keepLast) {

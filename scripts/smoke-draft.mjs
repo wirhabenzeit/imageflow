@@ -1,4 +1,4 @@
-import { menuAction, exportAction } from './ui-actions.mjs';
+import { testBook, menuAction, exportAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -10,7 +10,7 @@ import { checkFlow } from './check-flow.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'draft-'));
-const project = join(work, 'Draft Photobook');
+const project = join(work, 'Draft Photobook.imageflow');
 const pdf = join(work, 'print.pdf');
 const packaged = process.argv.includes('--packaged');
 const read = async (file = 'project.json') => JSON.parse(await readFile(join(project, file), 'utf8'));
@@ -21,7 +21,7 @@ try {
     args: [...(packaged ? [] : [join(root, '.build/desktop')]), '--user-data-dir=' + join(work, 'profile')],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' },
   });
-  const window = await app.firstWindow();
+  const window = await testBook(app, project, true);
   window.setDefaultTimeout(15000);
   const button = (name) => window.getByRole('button', { name, exact: true });
   const frame = 'iframe.book-frame-book[data-current]';
@@ -69,7 +69,7 @@ try {
   }
 
   await chooseSave(project);
-  await menuAction(app, 'New project…');
+
   const starter = await ready();
   assert.deepEqual(starter.errors, []);
   assert.equal(starter.pages, 28);
@@ -145,7 +145,8 @@ try {
   await app.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
   }, project);
-  await changed(() => menuAction(app, 'Open project…'));
+  await menuAction(app, 'Open project…');
+  await ready();
   assert.equal(await window.locator('.project-identity strong').textContent(), 'My first book');
   assert.equal((await read()).spreads.length, 16);
   if (!packaged) await checkFlow(app, root);

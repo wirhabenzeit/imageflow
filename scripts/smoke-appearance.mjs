@@ -6,16 +6,16 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { menuAction, exportAction, agentSettings, closeSettings } from './ui-actions.mjs';
+import { testBook, menuAction, exportAction, agentSettings, closeSettings } from './ui-actions.mjs';
 
 // Change app settings only inside this isolated profile, never the user's macOS preference.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'appearance-'));
-const book = join(work, 'Book');
+const book = join(work, 'Book.imageflow');
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
   assert.equal(await app.evaluate(({ nativeTheme }) => nativeTheme.themeSource), 'system');
-  const w = await app.firstWindow();
+  let w = await app.firstWindow();
   w.setDefaultTimeout(25000);
   await w.emulateMedia({ colorScheme: null });
   await app.evaluate(({ BrowserWindow, dialog }, filePath) => {
@@ -32,12 +32,12 @@ try {
       throw error;
     });
   }
-  await w.locator('.welcome').waitFor();
+  await w.locator('.start-window').waitFor();
   await appearance('dark');
-  assert.equal(await w.getByRole('button', { name: 'Export', exact: true }).isDisabled(), true);
+  assert.equal(await w.getByRole('button', { name: 'Open…', exact: true }).isEnabled(), true);
   await w.screenshot({ path: join(root, '.build', 'appearance-welcome-dark.png') });
   await appearance('light');
-  await menuAction(app, 'New project…');
+  w = await testBook(app, book, true);
   const ready = () => w.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   await ready();
   await w.locator('.spread-thumb').nth(1).click();
@@ -151,7 +151,7 @@ try {
   await w.screenshot({ path: join(root, '.build', 'appearance-route-dark.png') });
   await w.getByRole('dialog', { name: 'Edit route' }).getByRole('button', { name: 'Cancel', exact: true }).click();
   // Real proof exports, including flowed text, rasterize identically in both appearances.
-  await menuAction(app, 'Open Sample Project');
+  w = await menuAction(app, 'Open Sample Project');
   await w.locator('.project-identity strong').getByText('Senja · Field Notes', { exact: true }).waitFor();
   await ready();
   const rasters = [];

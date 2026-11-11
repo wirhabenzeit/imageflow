@@ -578,3 +578,46 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .crop-content .crop-values-fields { position: absolute; bottom: calc(100% + 14px); left: 0; width: 190px; display: grid; gap: 2px; padding: 6px 10px;
   background: var(--popup-surface); border: 1px solid var(--control-border); border-radius: 8px; box-shadow: 0 6px 20px #0002; }
 .crop-content .crop-values-fields .field { margin: 4px 0; display: grid; gap: 3px; }
+
+/* Document chooser and the shared creation sheet. */
+.studio.start-window { position: relative; grid-template-columns: 240px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+.start-drag { position: absolute; inset: 0 0 auto; height: 38px; -webkit-app-region: drag; }
+.start-actions { padding: 62px 28px 32px; background: var(--sidebar-surface); display: flex; flex-direction: column; align-items: stretch; border-right: 1px solid var(--edge); }
+.start-brand { font: 60px/1 Georgia, serif; color: var(--accent); }
+.start-actions h1 { font-size: 28px; letter-spacing: -.04em; margin: 14px 0 6px; }
+.start-actions p { color: var(--muted); margin: 0 0 28px; font-size: 14px; line-height: 1.6; }
+.start-actions > button { padding: 8px 12px; margin-bottom: 10px; font-size: 13px; }
+.start-actions .start-sample { margin-top: auto; border: 0; background: none; box-shadow: none; color: var(--accent); }
+.recent-books { overflow: auto; padding: 48px 24px 20px; }
+.recent-books h2 { font-size: 14px; font-weight: 600; margin: 0 0 18px; }
+.recent-books ul { list-style: none; margin: 0; padding: 0; }
+.recent-books li { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--subtle-border); padding: 10px 0; }
+.studio .recent-open { display: flex; gap: 14px; align-items: center; width: 100%; min-width: 0; padding: 4px; text-align: left; background: none; border: 0; box-shadow: none; }
+.recent-open:hover:not(:disabled) { background: var(--subtle-hover); }
+.recent-cover { flex: 0 0 60px; height: 66px; background: var(--canvas-surface); display: grid; place-items: center; border-radius: 3px; overflow: hidden; color: var(--muted); font-size: 26px; }
+.recent-cover img { width: 100%; height: 100%; object-fit: contain; }
+.recent-description { min-width: 0; display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
+.recent-description strong { color: var(--text); font-size: 13px; font-weight: 600; }
+.recent-location { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-actions { display: flex; align-items: center; gap: 5px; flex: none; }
+.studio .recent-remove { border: 0; background: none; box-shadow: none; color: var(--muted); padding: 4px; font-size: 20px; }
+.recent-empty { text-align: center; max-width: 260px; margin: 74px auto 0; color: var(--muted); }
+.recent-empty > span { font-size: 50px; opacity: .45; }
+.recent-empty h3 { font-weight: 500; color: var(--text); font-size: 17px; margin: 16px 0 8px; }
+.recent-empty p { line-height: 1.6; }
+.start-status { grid-column: 1 / -1; min-height: 30px; padding: 6px 16px; color: var(--error-text); border-top: 1px solid var(--edge); font-size: 12px; }
+.studio.starter-picker { display: flex; flex-direction: column; padding: 24px; gap: 20px; }
+.starter-picker h1 { font-size: 20px; margin: 0 0 6px; }
+.starter-picker p { margin: 0; }
+.starter-choices { flex: 1; overflow: auto; }
+.starter-choice { display: flex; gap: 16px; align-items: center; padding: 14px; border: 1px solid var(--edge); border-radius: 8px; cursor: default; }
+.starter-choice:has(input:checked) { background: var(--selection-surface); border-color: var(--selection-border); }
+.starter-choice input { flex: none; accent-color: var(--accent); }
+.starter-art { flex: 0 0 90px; height: 116px; padding: 14px 9px; background: #2b4546; color: #f5ebda; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 2px 3px 5px #0002; }
+.starter-art > :first-child { font: 23px/.95 Georgia, serif; }
+.starter-art > :last-child { font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
+.starter-description { display: grid; gap: 8px; color: var(--muted); }
+.starter-description strong { font-size: 15px; color: var(--text); }
+.starter-description small { font-size: 11px; }
+.starter-picker footer { display: flex; gap: 8px; justify-content: flex-end; }
+.book-loading { margin: auto; padding: 60px; color: var(--muted); }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { DesktopApi, McpClientTarget, McpSettings } from './desktop';
 
-/** The Agents pane in Settings: access for the open book, and one-time setup per agent app. */
+/** The Agents pane in Settings: access for open books, and one-time setup per agent app. */
 export function AgentSettings({ api }: { api?: DesktopApi }) {
   const [settings, setSettings] = useState<McpSettings>();
   const [error, setError] = useState('');
@@ -42,14 +42,14 @@ export function AgentSettings({ api }: { api?: DesktopApi }) {
     } finally { setPending(undefined); }
   }
   const status = enabled ? clients.length ? 'Connected: ' + clients.map(({ name }) => name).join(', ') : 'Waiting for an agent to connect.'
-    : 'Agents can check, preview and edit the book with Undo.';
+    : 'Agents select an open book to check, preview and edit with Undo.';
   const otherConfig = settings ? JSON.stringify({ mcpServers: { imageflow: settings.launch } }, null, 2) : '';
   return <div className="settings-form agent-settings">
     <span className="settings-label" id="agent-access-label">Access:</span>
     <div className="settings-control" role="group" aria-labelledby="agent-access-label">
       <label className="pc-switch">
         <input type="checkbox" checked={requested ?? enabled} disabled={!settings || !!pending} onChange={(event) => void setAccess(event.target.checked)} />
-        Allow agents to use the open book
+        Allow agents to use open books
       </label>
       {/* One line in every state, so checking the box never resizes the window. */}
       <p className="settings-note settings-status" role="status" title={status}>{status}</p>

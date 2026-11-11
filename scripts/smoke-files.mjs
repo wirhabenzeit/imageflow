@@ -1,4 +1,4 @@
-import { menuAction } from './ui-actions.mjs';
+import { testBook, menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -9,12 +9,12 @@ import { _electron } from 'playwright-core';
 // File parameters (#16): the starter's panorama route map reads an optional GPX track from the project's files/.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'files-'));
-const project = join(work, 'Book');
+const project = join(work, 'Book.imageflow');
 const read = async () => JSON.parse(await readFile(join(project, 'project.json'), 'utf8'));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
-  const w = await app.firstWindow();
+  const w = await testBook(app, project, true);
   w.setDefaultTimeout(20000);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1400, 900));
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, project);
@@ -63,7 +63,7 @@ try {
     return routeEditor.getByRole('combobox', { name: 'GPX track' });
   };
 
-  await rerendered(() => menuAction(app, 'New project…'));
+  await w.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   // The starter assigns a sample track: drawn, no issues. The other panorama has none and shows an empty frame.
   assert.equal(await trackLine(), 1);
   assert.equal((await status()).errors.length + (await status()).warnings.length, 0);
@@ -178,7 +178,7 @@ try {
   await writeFile(join(project, 'project.json'), JSON.stringify(data, null, 2));
 
   // References are relative to the project: a moved project opens with its track.
-  const moved = join(work, 'Moved book');
+  const moved = join(work, 'Moved book.imageflow');
   await rename(project, moved);
   await openDialog([moved]);
   await rerendered(() => menuAction(app, 'Open project…'));

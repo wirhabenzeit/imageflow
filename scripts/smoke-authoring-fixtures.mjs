@@ -1,4 +1,4 @@
-import { menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
+import { testBook, menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -14,7 +14,7 @@ import sharp from 'sharp';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const out = process.env.IMAGEFLOW_FIXTURE_OUT;
 const work = await mkdtemp(join(root, '.build', 'fixture-smoke-'));
-const folder = join(work, 'book');
+const folder = join(work, 'book.imageflow');
 await Promise.all(['template', 'texts'].map((name) => mkdir(join(folder, name), { recursive: true })));
 // `fragile` throws when its title is empty; `story` overflows with long Markdown. Neither layout is used by the book.
 const source = `import { defineTemplate, mm, Spread, p } from 'imageflow';
@@ -42,23 +42,23 @@ await Promise.all([
     spreads: [{ id: 'first', definition: 'base' }] })),
   writeFile(join(folder, 'photos.json'), '{}'),
 ]);
-const starter = join(work, 'starter');
+const starter = join(work, 'starter.imageflow');
 await cp(join(root, 'sample/starter'), starter, { recursive: true });
 
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 let client;
 try {
-  const window = await app.firstWindow();
+  let window = await app.firstWindow();
   window.setDefaultTimeout(30000);
   const open = async (path) => {
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, path);
-    await menuAction(app, 'Open project…');
+    window = await testBook(app, path);
     await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]') && !document.querySelector('.preview-state'));
   };
   await open(folder);
   const dialog = await agentSettings(app);
-  await dialog.getByRole('checkbox', { name: 'Allow agents to use the open book', exact: true }).check();
+  await dialog.getByRole('checkbox', { name: 'Allow agents to use open books', exact: true }).check();
   await dialog.getByText('Claude Code and other agents').click();
   const configuration = dialog.getByRole('textbox', { name: 'MCP connection configuration' });
   await configuration.waitFor();
@@ -128,7 +128,7 @@ try {
 
   // The starter template: every layout and case in its current format, with the GPX map element fed malformed data.
   await open(starter);
-  project = (await call('list_projects')).data.projects[0].project;
+  project = (await call('list_projects')).data.projects.find((entry) => entry.folder === starter).project;
   const starterCheck = await call('check_book', { project, fixtures: { preview: { maxEdge: 1200, columns: 3 } } });
   const starterReport = starterCheck.data.fixtures;
   assert.equal(starterCheck.data.checks.fixtures, 'completed');

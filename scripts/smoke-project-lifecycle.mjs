@@ -1,3 +1,4 @@
+import { testBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -7,10 +8,10 @@ import { _electron } from 'playwright-core';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'lifecycle-smoke-'));
-const first = join(work, 'first');
-const second = join(work, 'second');
-const third = join(work, 'third');
-const moved = join(work, 'moved');
+const first = join(work, 'first.imageflow');
+const second = join(work, 'second.imageflow');
+const third = join(work, 'third.imageflow');
+const moved = join(work, 'moved.imageflow');
 await mkdir(join(first, 'template'), { recursive: true });
 await writeFile(join(first, 'template/index.tsx'), `import {defineTemplate,mm,Spread} from 'imageflow';
 export default defineTemplate({id:'lifecycle',version:'1',contract:1,
@@ -26,29 +27,24 @@ const app = await _electron.launch({ executablePath:electron, args:[join(root,'.
 let closed = false;
 app.on('close', () => { closed = true; });
 try {
-  const window = await app.firstWindow();
-  window.setDefaultTimeout(20000);
-  async function open(folder) {
-    await app.evaluate(({dialog}, folder) => { dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]}); }, folder);
-    const result = await window.evaluate(() => window.imageflow.openProject('open'));
-    assert.ok(result.value, JSON.stringify(result));
-    return result.value;
-  }
-  await open(first);
+  let window = await testBook(app, first);
   await rename(first, moved);
-  await open(second);
-  await open(moved);
-  await rm(moved, { recursive:true, force:true });
-  await open(second);
+  window = await testBook(app, moved);
+  assert.equal((await window.evaluate(() => window.imageflow.currentProject())).value.folder, 'moved.imageflow');
+  await window.close();
+  window = await testBook(app, second);
   const lockPath = join(second, '.imageflow/writer.lock');
   const oldOwner = JSON.parse(await readFile(lockPath, 'utf8'));
   await writeFile(lockPath, 'damaged ownership evidence');
-  await open(third);
+  await window.close();
+  for (let attempt = 0; await stat(oldOwner.endpoint).catch(() => false); attempt++) {
+    assert.ok(attempt < 200); await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   assert.equal(await readFile(lockPath, 'utf8'), 'damaged ownership evidence');
-  await assert.rejects(stat(oldOwner.endpoint), { code:'ENOENT' });
-  // The test owns this fixture; removing its preserved damaged record permits reopening it.
+  // The fixture owns the damaged record and removes it only after the original capability is retired.
   await rm(lockPath);
-  const book = await open(second);
+  window = await testBook(app, second);
+  const book = (await window.evaluate(() => window.imageflow.currentProject())).value;
 
   // Enabling a connection can be in flight before it is assigned to the window's active connection.
   await app.evaluate(() => {

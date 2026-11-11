@@ -28,6 +28,20 @@ try {
     download: { cacheRoot: join(root, '.build', 'electron-cache'), checksums: electronChecksums },
     appBundleId: 'ch.wirhabenzeit.imageflow',
     appCategoryType: 'public.app-category.photography',
+    extendInfo: {
+      CFBundleIconFile: 'ImageFlow.icns',
+      UTExportedTypeDeclarations: [{
+        UTTypeIdentifier: 'ch.wirhabenzeit.imageflow.book',
+        UTTypeDescription: 'ImageFlow Book',
+        UTTypeConformsTo: ['com.apple.package'],
+        UTTypeTagSpecification: { 'public.filename-extension': ['imageflow'] },
+      }],
+      CFBundleDocumentTypes: [{
+        CFBundleTypeName: 'ImageFlow Book', CFBundleTypeRole: 'Editor', LSHandlerRank: 'Owner',
+        LSItemContentTypes: ['ch.wirhabenzeit.imageflow.book'], LSTypeIsPackage: true,
+        CFBundleTypeIconFile: 'ImageFlow.icns',
+      }],
+    },
     // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar.
     asar: { unpackDir: 'node_modules/@img', unpack: '**/mcp-bridge.cjs' },
     extraResource: [esbuildBinary, books],

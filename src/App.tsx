@@ -357,7 +357,7 @@ export function App() {
       setBusy(command === 'new' ? 'Creating project…' : 'Opening project…');
       const result = await api.openProject(command);
       if ('error' in result) throw new Error(result.error);
-      if (result.value) adopt(result.value, true);
+      // New/Open belongs to its own window; this editor keeps its book.
     });
   }
 
@@ -394,11 +394,14 @@ export function App() {
     const command = api.onCommand((command) => onCommand(command));
     const changed = api.onProjectChanged((change) => onProjectChanged(change));
     const progress = api.onProgress(setBusy);
-    // In dev mode a full page reload or main-process restart would drop the open project; reopen it.
-    if (import.meta.env.DEV) {
-      void api.openProject('reload').then((result) => { if ('value' in result && result.value) adopt(result.value, true); });
-    }
-    return () => { command(); changed(); progress(); lease(); release(); };
+    const appError = api.onAppError(setError);
+    let mounted = true;
+    void api.currentProject().then((result) => {
+      if (!mounted || current.current) return;
+      if ('error' in result) setError(result.error);
+      else adopt(result.value, true);
+    });
+    return () => { mounted = false; command(); changed(); progress(); lease(); release(); appError(); };
   }, [api]);
 
   // The book frame renders every spread, so its status doubles as the book check.
@@ -953,7 +956,7 @@ export function App() {
         <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘2)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>
     </header>
-    <div ref={workspace} inert={agentWorking} key={projectInstance} className={summary ? 'workspace' : 'workspace welcome-workspace'}
+    <div ref={workspace} inert={agentWorking} key={projectInstance} className="workspace"
       data-resizing={resizing || undefined}
       style={{ '--left-content': panels.left + 'px', '--right-content': panels.right + 'px', '--left-panel': panels.leftHidden ? '0px' : panels.left + 'px', '--right-panel': panels.rightHidden ? '0px' : panels.right + 'px',
         '--left-divider': panels.leftHidden ? '0px' : '6px', '--right-divider': panels.rightHidden ? '0px' : '6px' } as CSSProperties}>
@@ -962,7 +965,6 @@ export function App() {
         <div className="project-head">
           <h1>{summary ? template?.format.label ?? 'Book' : 'Photobook studio'}</h1>
           <p className="muted" title={summary?.folder}>{summary ? (sequence ? sequence.count + ' pages · ' + spreads.length + ' spreads' : 'Loading book…') + (summary.readOnly ? ' · Sample' : '') : 'Local photobook projects'}</p>
-          {!summary && <button className="sample-button" disabled={!api || !!busy} onClick={() => act('sample')}>Open sample project</button>}
         </div>
         {summary && <details className="document-settings">
           <summary>Book settings</summary>
@@ -1142,16 +1144,7 @@ export function App() {
                   importText={() => importFiles({ kind: 'markdown', target: { spread: editing.spread, box: editing.owner!.id } })} />}
               </EditPopover>}
             </div>}
-            {!summary && <div className="welcome">
-              <span className="welcome-icon" aria-hidden="true">◫</span>
-              <h2>See your book take shape</h2>
-              <p>{api ? 'Create a book with the starter template, open a project you trust, or preview the Senja sample.' :
-                'Launch the desktop app to open an ImageFlow project.'}</p>
-              {api && <div className="welcome-actions">
-                <button disabled={!!busy} onClick={() => act('new')}>New project…</button>
-                <button disabled={!!busy} onClick={() => act('open')}>Open project…</button>
-                <button className="primary" disabled={!!busy} onClick={() => act('sample')}>Try the Senja sample</button></div>}
-            </div>}
+            {!summary && <p className="book-loading" role="status">{error || 'Opening book…'}</p>}
           </main>
           {summary && previewNotice && <div className={geometry ? 'preview-state' : 'preview-message'} role="status">{previewNotice}</div>}
           {summary && <label className="guides-toggle"><input type="checkbox" checked={showGuides}

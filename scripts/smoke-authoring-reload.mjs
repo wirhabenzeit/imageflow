@@ -1,4 +1,4 @@
-import { menuAction } from './ui-actions.mjs';
+import { testBook, menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const build = join(root, '.build');
 await mkdir(build, { recursive: true });
 const work = await mkdtemp(join(build, 'authoring-reload-'));
-const project = join(work, 'Book');
+const project = join(work, 'Book.imageflow');
 const manifest = join(project, 'project.json');
 const photos = join(project, 'photos.json');
 const template = join(project, 'template/index.tsx');
@@ -30,7 +30,7 @@ try {
     args: [process.env.IMAGEFLOW_TEST_DESKTOP ?? join(build, 'desktop'), '--user-data-dir=' + join(work, 'profile')],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' },
   });
-  const window = await app.firstWindow();
+  const window = await testBook(app, project, true);
   window.setDefaultTimeout(30000);
   const button = (name) => window.getByRole('button', { name, exact: true });
   const preview = window.frameLocator(shown);
@@ -52,7 +52,7 @@ try {
   }, { current, previous });
 
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, project);
-  await menuAction(app, 'New project…');
+
   await readyAfter(null);
   const source = await readFile(template, 'utf8');
   const style = await readFile(css, 'utf8');

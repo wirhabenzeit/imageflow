@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import fs, { link, lstat, mkdir, mkdtemp, open, realpath, rm, unlink } from 'node:fs/promises';
+import fs, { link, lstat, mkdir, mkdtemp, open, realpath, rm, stat, unlink } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { photoIndexSchema, projectSchema } from '../src/project';
@@ -26,7 +26,8 @@ const journalSchema = z.discriminatedUnion('version', [
 const ownerFields = { pid: z.number().int().positive().max(2147483647), token: z.string().uuid() };
 const ownerSchema = z.discriminatedUnion('version', [
   z.object({ version: z.literal(1), ...ownerFields }).strict(),
-  z.object({ version: z.literal(2), ...ownerFields, endpoint: z.string().min(1).max(256) }).strict(),
+  z.object({ version: z.literal(2), ...ownerFields, endpoint: z.string().min(1).max(256),
+    directory: z.object({ device: z.string(), inode: z.string() }).strict().optional() }).strict(),
 ]);
 type ManifestEdit = { before: Buffer; after: Buffer } | { sha256: string };
 type Journal = { transaction: string; manifests: Record<ManifestName, ManifestEdit> };
@@ -287,6 +288,8 @@ async function readOwner(path: string) {
 // Call before opening a writable project and keep the returned release function for that editor's lifetime.
 export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
   let location = await realpath(folder);
+  const rootInfo = await stat(location, { bigint: true });
+  const directoryIdentity = { device: String(rootInfo.dev), inode: String(rootInfo.ino) };
   const originalInternal = await internalFolder(location, true);
   if (!originalInternal) throw new Error('Could not create the project lock directory.');
   let internal = originalInternal;
@@ -310,12 +313,14 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
         if (previous.owner.version === 1 && processAlive(previous.owner.pid)) {
           throw new Error('This project has a legacy writer lock for a live or reused process ID. Close other ImageFlow sessions and resolve the recorded ownership before reopening.');
         }
-        if (previous.owner.version === 2 && await isLockOwnerAlive(previous.owner.endpoint, previous.owner.token)) {
+        if (previous.owner.version === 2 &&
+            (!previous.owner.directory || previous.owner.directory.device === directoryIdentity.device && previous.owner.directory.inode === directoryIdentity.inode) &&
+            await isLockOwnerAlive(previous.owner.endpoint, previous.owner.token)) {
           throw new Error('This project is already open for editing in another ImageFlow session.');
         }
       }
       proof = await createLockOwner(token);
-      const owner = { version: 2 as const, pid: process.pid, token, endpoint: proof.endpoint };
+      const owner = { version: 2 as const, pid: process.pid, token, endpoint: proof.endpoint, directory: directoryIdentity };
       await writeDurably(join(gate, 'owner.json'), JSON.stringify(owner));
       await syncDirectory(gate);
       await syncDirectory(internal);
@@ -367,6 +372,8 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
       if (released) return false;
       try {
         const candidate = await realpath(newFolder);
+        const candidateInfo = await stat(candidate, { bigint: true });
+        if (String(candidateInfo.dev) !== directoryIdentity.device || String(candidateInfo.ino) !== directoryIdentity.inode) return false;
         const candidateInternal = await internalFolder(candidate, false);
         if (!candidateInternal) return false;
         const candidatePath = join(candidateInternal, 'writer.lock');

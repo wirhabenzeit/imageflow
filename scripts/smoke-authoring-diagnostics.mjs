@@ -1,4 +1,4 @@
-import { menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
+import { testBook, menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -14,7 +14,7 @@ import sharp from 'sharp';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const out = process.env.IMAGEFLOW_DIAGNOSTICS_OUT;
 const work = await mkdtemp(join(root, '.build', 'diagnostics-smoke-'));
-const folder = join(work, 'book');
+const folder = join(work, 'book.imageflow');
 await mkdir(join(folder, 'template'), { recursive: true });
 const helper = `export function initial(title: string) {
   // An empty title has no first letter.
@@ -59,13 +59,13 @@ const app = await _electron.launch({ executablePath: electron, args: [join(root,
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 let client;
 try {
-  const window = await app.firstWindow();
+  const window = await testBook(app, folder, false);
   window.setDefaultTimeout(30000);
   await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, folder);
-  await menuAction(app, 'Open project…');
+
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]') && !document.querySelector('.preview-state'));
   const dialog = await agentSettings(app);
-  await dialog.getByRole('checkbox', { name: 'Allow agents to use the open book', exact: true }).check();
+  await dialog.getByRole('checkbox', { name: 'Allow agents to use open books', exact: true }).check();
   await dialog.getByText('Claude Code and other agents').click();
   const configuration = dialog.getByRole('textbox', { name: 'MCP connection configuration' });
   await configuration.waitFor();

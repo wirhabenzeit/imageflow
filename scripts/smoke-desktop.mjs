@@ -68,7 +68,10 @@ try {
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' },
     timeout: 15000,
   });
-  const window = await instance.firstWindow();
+  const chooser = await instance.firstWindow();
+  const created = instance.waitForEvent('window');
+  await chooser.getByRole('button', { name: 'Explore a Sample', exact: true }).click();
+  const window = await created;
   window.setDefaultTimeout(15000);
   const status = window.locator('.status');
   const expectStatus = async (message) => {
@@ -77,7 +80,6 @@ try {
     assert.equal(await status.textContent(), message);
   };
 
-  await window.getByRole('button', { name: 'Try the Senja sample' }).click();
   await expectStatus('Project preview · Proof export');
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
   const previewLines = await window.frameLocator('iframe.book-frame-book[data-current]').locator('[data-box="story"]').evaluate((box) => {
@@ -107,7 +109,7 @@ try {
   assert.match(await window.locator('.book-check-toggle').textContent(), /Book check · 1 error/);
   checkProof(await PDFDocument.load(await readFile(output)), previewLines);
 
-  const project = join(runDir, 'project');
+  const project = join(runDir, 'project.imageflow');
   await mkdir(project);
   await writeFile(join(project, 'project.json'), '{"schemaVersion":0}');
   await writeFile(join(project, 'photos.json'), '{}');
@@ -119,11 +121,6 @@ try {
   assert.match(await status.textContent(), /project\.json.*schemaVersion/);
   assert.equal(await window.locator('.project-identity strong').textContent(), 'Senja · Field Notes');
 
-  await instance.evaluate(({ dialog }, folder) => {
-    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
-  }, join(root, 'sample', 'whitewall'));
-  await menuAction(instance, 'Open project…');
-  await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
   await menuAction(instance, 'Reload');
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
   console.log('ImageFlow desktop smoke test passed.');

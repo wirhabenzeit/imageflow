@@ -161,21 +161,6 @@ async function bundleTemplate(folder: string) {
   }
 }
 
-async function cacheFolder(folder: string, fallback: string) {
-  try {
-    const candidate = join(folder, '.imageflow');
-    await mkdir(candidate, { recursive: true });
-    const cache = await realpath(candidate);
-    if (!isInside(folder, cache)) throw new Error('Cache is outside the project.');
-    const photos = join(cache, 'photos');
-    await mkdir(photos, { recursive: true });
-    if (await realpath(photos) !== photos) throw new Error('Photo cache is a link.');
-    return photos;
-  } catch {
-    return fallback;
-  }
-}
-
 type TemplateAssets = Awaited<ReturnType<typeof bundleTemplate>>;
 export type OpenProject = ProjectFiles & {
   folder: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
@@ -195,7 +180,8 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   const [{ document: project, source: projectFile }, { document: photoIndex, source: photoFile }] = await Promise.all([
     readProjectDocument(folder, 'project.json'), readProjectDocument(folder, 'photos.json'),
   ]);
-  const [assets, cache] = await Promise.all([bundleTemplate(folder), readOnly ? fallback : cacheFolder(folder, fallback)]);
+  const assets = await bundleTemplate(folder);
+  const cache = fallback;
   return readContent({ folder, assets, cache, readOnly, project, photoIndex, manifests: { 'project.json': projectFile, 'photos.json': photoFile } });
 }
 

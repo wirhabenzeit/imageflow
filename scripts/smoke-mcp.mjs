@@ -1,4 +1,4 @@
-import { menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
+import { testBook, menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,7 +11,7 @@ import sharp from 'sharp';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'mcp-smoke-'));
-const folder = join(work, 'book');
+const folder = join(work, 'book.imageflow');
 await Promise.all(['template', 'inbox', 'photos'].map((name) => mkdir(join(folder, name), { recursive: true })));
 const source = `import { defineTemplate, mm, Spread, PhotoBox, p } from 'imageflow';
 const format = (label, w, h) => ({label, trim:{width:mm(w),height:mm(h)},
@@ -37,14 +37,14 @@ await Promise.all([
 const app = await _electron.launch({executablePath:electron,args:[join(root,'.build/desktop'),'--user-data-dir='+join(work,'profile')],env:{...process.env,IMAGEFLOW_HIDE_WINDOW:'1'}});
 let client;
 try {
-  const window = await app.firstWindow();
+  const window = await testBook(app, folder, false);
   window.setDefaultTimeout(20000);
   await app.evaluate(({dialog}, folder) => { dialog.showOpenDialog=async()=>({canceled:false,filePaths:[folder]}); },folder);
-  await menuAction(app, 'Open project…');
+
   const ready = () => window.waitForFunction(()=>document.querySelector('iframe.book-frame-book[data-current][data-ready]') && !document.querySelector('.preview-state'));
   await ready();
   const connectionDialog=await agentSettings(app);
-  await connectionDialog.getByRole('checkbox', { name: 'Allow agents to use the open book', exact: true }).check();
+  await connectionDialog.getByRole('checkbox', { name: 'Allow agents to use open books', exact: true }).check();
   await connectionDialog.getByText('Claude Code and other agents').click();
   const configuration=connectionDialog.getByRole('textbox',{name:'MCP connection configuration'});
   await configuration.waitFor();
@@ -312,9 +312,9 @@ try {
   assert.equal((await good('list_projects')).projects[0].project,project);
   const priorFrame=await window.locator('iframe.book-frame-book[data-current]').getAttribute('src');
   await menuAction(app, 'Open project…');
-  await window.waitForFunction((prior)=>{const frame=document.querySelector('iframe.book-frame-book[data-current][data-ready]');return frame && frame.getAttribute('src')!==prior;},priorFrame);
   await ready();
-  assert.equal((await call('inspect_book',{project,view:'summary'})).data.error.code,'PROJECT_CLOSED');
+  assert.equal(await window.locator('iframe.book-frame-book[data-current]').getAttribute('src'), priorFrame);
+  assert.equal((await good('list_projects')).projects[0].project, project);
   await client.close();
   client = undefined;
   const waiting = window.getByRole('button', { name: 'Agent · 0', exact: true });
@@ -322,8 +322,8 @@ try {
   const reopened=app.waitForEvent('window');
   await waiting.click();
   const pane=await reopened;
-  await pane.getByRole('checkbox', { name: 'Allow agents to use the open book', exact: true }).uncheck();
-  await pane.getByText(/^Agents can check, preview and edit/).waitFor();
+  await pane.getByRole('checkbox', { name: 'Allow agents to use open books', exact: true }).uncheck();
+  await pane.getByText(/^Agents select an open book to check, preview and edit/).waitFor();
   await closeSettings(app);
   await window.getByRole('button', { name: /^Agent ·/ }).waitFor({ state: 'detached' });
   console.log('ImageFlow MCP authoring prototype passed.');

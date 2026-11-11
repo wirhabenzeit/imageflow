@@ -1,3 +1,4 @@
+import { testBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { createCipheriv, createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -67,7 +68,7 @@ async function encodedPhoto(index, initialQuality = 97) {
 
 async function prepare(fixture, count) {
   assert.ok(Number.isInteger(count) && count >= 1 && count <= 300, 'Photo count must be between 1 and 300.');
-  const book = join(fixture, 'book');
+  const book = join(fixture, 'book.imageflow');
   await mkdir(join(book, 'photos'), { recursive: true });
   const metadataPath = join(fixture, 'metadata.json');
   let metadata = await readFile(metadataPath, 'utf8').then(JSON.parse).catch(() => ({
@@ -101,7 +102,7 @@ async function prepare(fixture, count) {
 }
 
 async function createBook(fixture, metadata) {
-  const book = join(fixture, 'book');
+  const book = join(fixture, 'book.imageflow');
   await Promise.all(['template', 'texts'].map((folder) => mkdir(join(book, folder), { recursive: true })));
   const template = `import { defineTemplate, mm, Spread, PhotoBox, MarkdownBox } from 'imageflow';
 import './style.css';
@@ -158,7 +159,7 @@ export default defineTemplate({
 }
 
 async function restore(fixture, metadata, clearCache) {
-  const book = join(fixture, 'book');
+  const book = join(fixture, 'book.imageflow');
   const writer = await stat(join(book, '.imageflow/writer.lock')).catch(() => undefined);
   const journal = await stat(join(book, '.imageflow/persistence/pending-save.json')).catch(() => undefined);
   assert.ok(!writer && !journal, 'Close the benchmark app cleanly before restoring fixture inputs or clearing derived caches.');
@@ -244,19 +245,10 @@ async function run(fixture, options) {
     const opening = performance.now();
     app = await _electron.launch({ executablePath: electron, args: [resolve(options.app), '--user-data-dir=' + profile],
       env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_BENCHMARK: '1' }, timeout: 20000 });
-    const window = await app.firstWindow();
+    const window = await testBook(app, join(fixture, 'book.imageflow'));
     result.runtime = await app.evaluate(() => ({ electron: process.versions.electron, chromium: process.versions.chrome, node: process.versions.node }));
     window.setDefaultTimeout(120000);
-    await window.locator('.welcome').waitFor();
-    await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, join(fixture, 'book'));
-    // Use the normal open IPC and changed event to retain its returned stable handle without a preceding hash scan.
-    const opened = await window.evaluate(() => window.imageflow.openProject('open'));
-    assert.ok(opened.value, JSON.stringify(opened));
-    const project = opened.value.handle;
-    await app.evaluate(({ BrowserWindow }, summary) => {
-      BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().startsWith('imageflow://editor/'))
-        .webContents.send('project:changed', { value: summary });
-    }, opened.value);
+    const project = (await window.evaluate(() => window.imageflow.currentProject())).value.handle;
     const ready = () => window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]') &&
       document.querySelector('iframe.book-frame-thumbs[data-current][data-ready]') && !document.querySelector('.preview-state'));
     await ready();
@@ -347,12 +339,12 @@ async function run(fixture, options) {
     await measure('title-edit', 'apply_project_changes', { project, expectedRevision: discovered.data.projects[0].revision,
       idempotencyKey: options.label + '-title', label: 'Benchmark title edit', operations: [{ op: 'set_title', title: 'Large authoring benchmark edited' }] });
     await ready();
-    const cssPath = join(fixture, 'book/template/style.css');
+    const cssPath = join(fixture, 'book.imageflow/template/style.css');
     const css = await readFile(cssPath, 'utf8');
     const cssChanged = await measure('template-css-edit-preview', 'check_book', { project, preview }, () => writeFile(cssPath, css.replace('#fcfaf5', '#f3f7ef')));
     await ready();
     const changed = await measure('one-photo-replaced-preview', 'check_book', { project, preview },
-      () => copyFile(join(fixture, 'replacement-photo.jpg'), join(fixture, 'book/photos', metadata.photos[0].name)));
+      () => copyFile(join(fixture, 'replacement-photo.jpg'), join(fixture, 'book.imageflow/photos', metadata.photos[0].name)));
     if (cssChanged.record.image && changed.record.image) assert.notEqual(cssChanged.record.image.sha256, changed.record.image.sha256);
     await finish();
   } catch (error) {

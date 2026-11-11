@@ -1,4 +1,4 @@
-import { menuAction } from './ui-actions.mjs';
+import { testBook, menuAction } from './ui-actions.mjs';
 // Measures editor rendering cost (issue #11): time from one edit to every book frame being ready, memory, and
 // rapid consecutive edits. Builds a book from the starter spreads, optionally with a distinct photo per box.
 //
@@ -20,7 +20,7 @@ const { values } = parseArgs({ options: {
 } });
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'bench-'));
-const project = join(work, 'Book');
+const project = join(work, 'Book.imageflow');
 await cp(join(root, 'sample/starter'), project, { recursive: true, filter: (path) => !path.includes('.imageflow') });
 const data = JSON.parse(await readFile(join(project, 'project.json'), 'utf8'));
 const [first, ...middle] = data.spreads.slice(0, -1);
@@ -49,7 +49,7 @@ const app = await _electron.launch({
 const memoryMB = async () => Math.round((await app.evaluate(({ app }) =>
   app.getAppMetrics().reduce((sum, metric) => sum + metric.memory.workingSetSize, 0))) / 1024);
 try {
-  const w = await app.firstWindow();
+  const w = await testBook(app, project);
   w.setDefaultTimeout(300000);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1400, 900));
   await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, project);
@@ -57,7 +57,7 @@ try {
   const allReady = () => w.waitForFunction((views) => views.every((view) =>
     document.querySelector('iframe.book-frame-' + view + '[data-current][data-ready]')), views);
   let start = Date.now();
-  await menuAction(app, 'Open project…');
+
   await allReady();
   const openMs = Date.now() - start;
   await w.waitForTimeout(1500);

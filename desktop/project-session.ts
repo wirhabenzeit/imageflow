@@ -14,13 +14,18 @@ const same = (a: ProjectFiles, b: ProjectFiles) => JSON.stringify(a.project) ===
 /** One app-owned history shared by UI saves, agent batches and imports onto a spread. */
 export class ProjectSession {
   readonly handle = randomUUID();
-  readonly inputs: ProjectInputIndex;
+  inputs: ProjectInputIndex;
   readonly renditions = new CheckRenditionCache();
   private past: Entry[] = [];
   private future: Entry[] = [];
   readonly receipts = new Map<string, { request: string; result: Record<string, unknown> }>();
   constructor(public book: OpenProject) {
     this.inputs = new ProjectInputIndex(book.folder);
+  }
+
+  relocate(folder: string) {
+    this.inputs.close();
+    this.inputs = new ProjectInputIndex(folder);
   }
 
   close() {
