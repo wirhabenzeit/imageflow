@@ -1,0 +1,504 @@
+{
+  "label": "baseline",
+  "revision": "4b9f0b61072613b1b596dd7c3e8b81d8b8eba3e2",
+  "startedAt": "2026-11-11T07:18:22.651Z",
+  "fixture": {
+    "count": 300,
+    "spreads": 150,
+    "pages": 300,
+    "totalBytes": 5817163676,
+    "minPhotoBytes": 19385319,
+    "maxPhotoBytes": 19412491,
+    "dimensions": {
+      "width": 6000,
+      "height": 4000
+    },
+    "synthetic": "Unique deterministic textured landscape pixels, encoded as ordinary JPEGs without padding.",
+    "proofMaximumPpi": 150
+  },
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpus": 14,
+    "cpu": "Apple M4 Pro",
+    "memoryBytes": 51539607552,
+    "node": "v22.22.0"
+  },
+  "cacheConditions": "New app process/profile, fixture-derived caches cleared. OS file cache was not flushed and may be warm.",
+  "records": [
+    {
+      "name": "cold-context",
+      "tool": "get_authoring_context",
+      "elapsedMs": 32927.958042,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 1530,
+        "bytesHashed": 29087069840,
+        "cacheHits": 0,
+        "photoFilesHashed": 1500,
+        "photoBytesHashed": 29085818380
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "first-check-preview",
+      "tool": "check_book",
+      "elapsedMs": 25969.631833,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 61087,
+        "sha256": "11d06428b06b9e9ccd44b805639e628111eba5f12911591669ec516a778ec778"
+      },
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 918,
+        "bytesHashed": 17452241904,
+        "cacheHits": 0,
+        "photoFilesHashed": 900,
+        "photoBytesHashed": 17451491028
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-list-1",
+      "tool": "list_projects",
+      "elapsedMs": 4577.313458000004,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "inputs": {
+        "captures": 1,
+        "filesHashed": 306,
+        "bytesHashed": 5817413968,
+        "cacheHits": 0,
+        "photoFilesHashed": 300,
+        "photoBytesHashed": 5817163676
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-context-1",
+      "tool": "get_authoring_context",
+      "elapsedMs": 32367.982416999992,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 1530,
+        "bytesHashed": 29087069840,
+        "cacheHits": 0,
+        "photoFilesHashed": 1500,
+        "photoBytesHashed": 29085818380
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-inspect-1",
+      "tool": "inspect_book",
+      "elapsedMs": 31000.018624999997,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 1530,
+        "bytesHashed": 29087069840,
+        "cacheHits": 0,
+        "photoFilesHashed": 1500,
+        "photoBytesHashed": 29085818380
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-check-preview-1",
+      "tool": "check_book",
+      "elapsedMs": 21989.970457999996,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 61087,
+        "sha256": "11d06428b06b9e9ccd44b805639e628111eba5f12911591669ec516a778ec778"
+      },
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 918,
+        "bytesHashed": 17452241904,
+        "cacheHits": 0,
+        "photoFilesHashed": 900,
+        "photoBytesHashed": 17451491028
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-list-2",
+      "tool": "list_projects",
+      "elapsedMs": 4286.7381250000035,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "inputs": {
+        "captures": 1,
+        "filesHashed": 306,
+        "bytesHashed": 5817413968,
+        "cacheHits": 0,
+        "photoFilesHashed": 300,
+        "photoBytesHashed": 5817163676
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-context-2",
+      "tool": "get_authoring_context",
+      "elapsedMs": 30493.406292,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 1530,
+        "bytesHashed": 29087069840,
+        "cacheHits": 0,
+        "photoFilesHashed": 1500,
+        "photoBytesHashed": 29085818380
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-inspect-2",
+      "tool": "inspect_book",
+      "elapsedMs": 31106.366332999984,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 1530,
+        "bytesHashed": 29087069840,
+        "cacheHits": 0,
+        "photoFilesHashed": 1500,
+        "photoBytesHashed": 29085818380
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-check-preview-2",
+      "tool": "check_book",
+      "elapsedMs": 22395.344374999986,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 61087,
+        "sha256": "11d06428b06b9e9ccd44b805639e628111eba5f12911591669ec516a778ec778"
+      },
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 918,
+        "bytesHashed": 17452241904,
+        "cacheHits": 0,
+        "photoFilesHashed": 900,
+        "photoBytesHashed": 17451491028
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-list-3",
+      "tool": "list_projects",
+      "elapsedMs": 4386.257790999982,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "inputs": {
+        "captures": 1,
+        "filesHashed": 306,
+        "bytesHashed": 5817413968,
+        "cacheHits": 0,
+        "photoFilesHashed": 300,
+        "photoBytesHashed": 5817163676
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-context-3",
+      "tool": "get_authoring_context",
+      "elapsedMs": 30436.164749999996,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 1530,
+        "bytesHashed": 29087069840,
+        "cacheHits": 0,
+        "photoFilesHashed": 1500,
+        "photoBytesHashed": 29085818380
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-inspect-3",
+      "tool": "inspect_book",
+      "elapsedMs": 30321.891416999977,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "inputs": {
+        "captures": 5,
+        "filesHashed": 1530,
+        "bytesHashed": 29087069840,
+        "cacheHits": 0,
+        "photoFilesHashed": 1500,
+        "photoBytesHashed": 29085818380
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "warm-check-preview-3",
+      "tool": "check_book",
+      "elapsedMs": 22331.458250000025,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 61087,
+        "sha256": "11d06428b06b9e9ccd44b805639e628111eba5f12911591669ec516a778ec778"
+      },
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 918,
+        "bytesHashed": 17452241904,
+        "cacheHits": 0,
+        "photoFilesHashed": 900,
+        "photoBytesHashed": 17451491028
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "before-title-list",
+      "tool": "list_projects",
+      "elapsedMs": 4710.809041999979,
+      "success": true,
+      "revision": "69960424f9796adaa3f01e266af2b39e659fa59616c9661b522131da3bebbf26",
+      "inputs": {
+        "captures": 1,
+        "filesHashed": 306,
+        "bytesHashed": 5817413968,
+        "cacheHits": 0,
+        "photoFilesHashed": 300,
+        "photoBytesHashed": 5817163676
+      },
+      "peakMemoryMiB": 1808.0625
+    },
+    {
+      "name": "title-edit",
+      "tool": "apply_project_changes",
+      "elapsedMs": 38149.842957999965,
+      "success": true,
+      "revision": "87c7e2cb4e1af7cd05ab335b5f89b99d0ea46cdf734bb7cab63930020b253e89",
+      "inputs": {
+        "captures": 6,
+        "filesHashed": 1836,
+        "bytesHashed": 34904500946,
+        "cacheHits": 0,
+        "photoFilesHashed": 1800,
+        "photoBytesHashed": 34902982056
+      },
+      "peakMemoryMiB": 1836.375
+    },
+    {
+      "name": "template-css-edit-preview",
+      "tool": "check_book",
+      "elapsedMs": 23506.390000000014,
+      "success": true,
+      "revision": "0cfdc59bde4a19a590f91379c709f0fad99d68953815f901a4ef66e507670925",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 61433,
+        "sha256": "cbc704345a8b243f42cbb8dceec0613a8890f23c177fe004d55fb6e63616c546"
+      },
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 918,
+        "bytesHashed": 17452293318,
+        "cacheHits": 0,
+        "photoFilesHashed": 900,
+        "photoBytesHashed": 17451491028
+      },
+      "peakMemoryMiB": 1961.078125
+    },
+    {
+      "name": "one-photo-replaced-preview",
+      "tool": "check_book",
+      "elapsedMs": 23501.714749999985,
+      "success": true,
+      "revision": "fced0ccb27bf5f0784fcfe24d5971fe2e6142b6c32b30184fe3076cf63a7342d",
+      "checks": {
+        "bundle": "passed",
+        "layout": "completed",
+        "typescript": "not-run",
+        "print": "not-run"
+      },
+      "diagnosticCounts": {
+        "error": 0,
+        "warning": 0
+      },
+      "diagnostics": [],
+      "image": {
+        "width": 400,
+        "height": 200,
+        "bytes": 62710,
+        "sha256": "be4e574b640d0de4c9f046a870d0832b577710d8d6b0e29a9b0b6f2fa9251afc"
+      },
+      "inputs": {
+        "captures": 3,
+        "filesHashed": 918,
+        "bytesHashed": 17452311453,
+        "cacheHits": 0,
+        "photoFilesHashed": 900,
+        "photoBytesHashed": 17451509163
+      },
+      "peakMemoryMiB": 1961.078125
+    }
+  ],
+  "openMs": 12995.277625,
+  "peakMemoryMiB": 1961.078125,
+  "finishedAt": "2026-11-11T07:25:30.277Z",
+  "bridgeErrors": "",
+  "sourceCommit": "4b9f0b61072613b1b596dd7c3e8b81d8b8eba3e2",
+  "instrumentation": "Measurement-only counters in revision capture and streamed hash updates, applied by scripts/bench-authoring.mjs prepare-baseline.",
+  "stagedMainSha256": "1accaf6cfea344a2032a1eea2f93b3049c1b196100df4a9cb97af9116607817f"
+}
