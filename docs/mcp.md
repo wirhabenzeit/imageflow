@@ -38,7 +38,7 @@ Every inspection/check result identifies an input revision. Pass that revision a
 | `list_projects` | No arguments. Returns the currently authorized open project, its stable handle, writable state and current revision. |
 | `get_authoring_context` | `project`, optional `includeSource` and `includeExamples`. Reads up to eight requested paths inside `template/` or `texts/`, with declarations, authoring guidance and the installed template API (`capabilities.templateApi`: contract, capabilities and `imageflow` exports). `includeExamples` adds the shipped example templates, each with name, description and source. |
 | `inspect_book` | `project`, `view` of `summary`, `spreads`, `sources`, `parameters` or `elements`, optional `spread`, `offset` and `limit`. The `elements` view requires `spread` and optionally filters by `box` or `element`. Results are paginated with at most 100 records per call. |
-| `check_book` | `project`, optional `expectedRevision`, `preview`, `inspect`, `typescript` and `draft`. Combines check coverage, diagnostics, measured element inspection and optional artwork. With `draft`, it renders an unsaved command batch on top of the saved book. |
+| `check_book` | `project`, optional `expectedRevision`, `preview`, `inspect`, `typescript`, `draft` and `fixtures`. Combines check coverage, diagnostics, measured element inspection and optional artwork. With `draft`, it renders an unsaved command batch on top of the saved book. With `fixtures`, it renders layouts with synthetic content in separate fixture books and reports a coverage matrix. |
 | `apply_project_changes` | `project`, `expectedRevision`, `idempotencyKey`, `label`, `operations`, optional `dryRun`. Validates the complete batch and applies it through the app. One successful batch creates one named Undo entry. |
 | `import_sources` | `project`, `expectedRevision`, `idempotencyKey`, `kind`, `paths`, and `accept` for file inputs. Registers files copied into this project’s `inbox/` folder and returns source IDs. |
 
@@ -72,7 +72,9 @@ Omit `side` to capture the whole spread. A single-page opening or closing layout
 
 The defaults are trim bounds, PNG and 1000 pixels on the longest edge. Set `bounds` to `bleed` for output bleed, or `format` to `jpeg`. The longest edge may be between 1 and 1600 pixels. Images contain clean export-mode artwork after whole-book text flow, including the actual continuation on later pages. Metadata includes pixel and millimetre dimensions, spread identity, side, page numbers and rendering bounds. Image bytes appear once in an MCP image block. The text and structured result carry the image metadata.
 
-A rendered image can accompany layout or type errors. TypeScript checking is opt-in; print preflight remains `not-run`. Capture uses screen-media artwork. Print-specific CSS and synthetic fixture content remain follow-up work. CSS background-image readiness has not been verified by the preview equivalence tests.
+Set `guides: true` to draw each page's trim (solid magenta) and safe area (dashed cyan) over the artwork, and `labels: true` to outline every box and element in orange with its ID. Both default to `false`, so images stay clean artwork unless requested; the metadata then carries `guides: true` or `labels: true`. They work for pages, spreads, close-ups, contact sheets and fixture sheets.
+
+A rendered image can accompany layout or type errors. TypeScript checking is opt-in; print preflight remains `not-run`. Capture uses screen-media artwork. Print-specific CSS remains follow-up work. CSS background-image readiness has not been verified by the preview equivalence tests.
 
 ### TypeScript feedback
 
@@ -133,6 +135,47 @@ Nothing is saved, recorded in Undo or shown in the editor. The result's `draft` 
 
 A draft can also repair a saved book whose layout fails to render, for example because a parameter value makes it throw. The check keeps the declarations of the template that loaded at that revision, and both the draft and the committed batch are planned against them. A finished failed reload in the app does not block the agent's mutation. Open editors, focused fields and reloads still in progress do. A template that fails to compile has no declarations, so it must be fixed in source first.
 
+### Layout fixtures
+
+A draft shows a layout with the book's real content. Fixtures test how layouts cope with content the book does not have yet: long and empty headings, long Markdown, portrait photos and malformed files. They work for layouts the book does not use, and they never touch the saved book.
+
+```json
+{
+  "project": "handle-from-list_projects",
+  "fixtures": {
+    "layouts": ["chapter", "three-photos"],
+    "formats": "all",
+    "preview": { "printFormat": "landscape", "cells": [{ "layout": "chapter", "case": "long-text" }], "maxEdge": 1200 }
+  }
+}
+```
+
+ImageFlow first checks the saved book as usual. It then builds one synthetic fixture book per tested format from the declarations of that revision and renders it through the normal whole-book renderer. Each fixture is one spread of one layout with one case of content:
+
+| Case | Content | Tested when the layout has |
+| --- | --- | --- |
+| `typical` | String parameters use their default, or else their placeholder. Photo boxes get a synthetic 3:2 landscape photo, Markdown boxes about 180 words with a heading. | Always |
+| `long-text` | String parameters filled to `maxLength` (at most 400 characters; multiline values get several lines). Markdown of about 2,200 words with long headings, a list, a quotation and an unbreakable URL. | String parameters or Markdown boxes |
+| `empty` | Empty string parameters, no photos or text assigned, file parameters unassigned. | Boxes, string or file parameters |
+| `portrait-photos` | As `typical`, with a synthetic 2:3 portrait photo. | Photo boxes |
+| `malformed-files` | As `typical`, with each file parameter assigned a synthetic file of its first accepted extension whose content is invalid. | File parameters |
+
+`layouts` defaults to every declared layout (at most 24), `formats` to the book's current format (`"all"` tests up to four), and `cases` to every case that applies. At most 48 fixtures are rendered per format. Parameters other than strings and files keep their declared defaults; document parameters keep their saved values, so book-wide styling matches the book. Each fixture flows its own Markdown, so synthetic text never continues on another spread, and the saved book's text flow is unaffected.
+
+The result keeps the saved book's `diagnostics`, `checks.layout` and `render` as for an ordinary check, and adds:
+
+- `checks.fixtures`: `completed` when every planned fixture has an outcome, `failed` when some could not be isolated, `not-run` when no fixture rendered (for example after a compile error or a revision conflict).
+- `fixtures.matrix` and `fixtures.coverage`: tested layouts, formats and cases, counts of `planned`, `rendered`, `failed` and `notIsolated` fixtures, and every `skipped` layout, format or layout/case pair with its reason.
+- `fixtures.cells`: one entry per layout, case and format, with `state` (`passed`, `warnings`, `errors`, `failed` or `not-isolated`), error and warning counts and the finding codes.
+- `fixtures.diagnostics`: at most 100 findings in the common envelope, each with `fixture: { layout, case, format }` instead of a saved spread. `fixtures.diagnosticsTruncated` reports whether more exist; cell counts always cover all of them.
+- `fixtures.notEvaluated`: what a synthetic book cannot answer. Photo resolution, page count and sequence, anchors on other spreads, book-level findings and print preflight belong to the saved-book check.
+
+A layout that throws, or renders no single `<Spread>`, fails only its fixture: the result has `state: "failed"`, the error message and a `layout-render-failed` finding, and the other fixtures of that format still render. A fixture book that fails without naming a layout is bisected within a budget of 12 extra renders; fixtures left over are `not-isolated`. Fixture checks stop starting renders after 60 seconds and report the remaining formats as skipped.
+
+`fixtures.preview` returns one contact sheet for one tested format (`printFormat`, default the first) with up to 12 `cells` (default the first 12 tested fixtures). `columns`, `bounds`, `maxEdge` (128–1600, default 1200) and `format` work as for contact sheets. Fixtures that failed are left out of the sheet. The sheet is visibly distinct from book artwork: a dark banner reads `SYNTHETIC FIXTURES · <format> · not the saved book`, the background is hatched amber, each label starts with `FIXTURE ·` and names the layout and case, and the synthetic photos show a grid, thirds and a centre mark. The metadata carries `fixture: true` and `banner`. Fixture artwork is only delivered as such a sheet.
+
+Fixtures cannot be combined with `preview`, `inspect` or `draft`. To see one fixture large, request a single cell with a larger `maxEdge`. To check a layout with the book's real content and continuation, use a draft.
+
 ### Diagnostics
 
 Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an optional `location` with `spread`, `box`, `element`, `source`, `parameter` and readable `where`, optional `details` with measured and allowed values, and an optional `suggestion` that names a template edit or command. Stable render codes include:
@@ -152,11 +195,31 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | `format-unavailable`, `page-sequence` | Book-level format and page-count findings. |
 | `template:<code>` | A structured template finding from `issue()`, with the template's code, its box or element, `parameter`, file `source`, `details` and `suggestion`. Severity as declared. |
 | `template-issue`, `template-issue-invalid` | A plain `data-issue` mark, or an `issue()` value that failed validation, on its box or element. |
+| `text-overflows-box`, `text-clipped` | A text block whose text runs out of its own fixed-size box (`clipped` when the box hides the overflow), with its box or element and the `parameter` its `ctx.edit` marker names; `overflowBottomMm`, `overflowRightMm`, `tag` and the start of its `text`. Line-height slack under a quarter line is ignored. |
+| `text-overlap` | Two text blocks whose lines overlap, located at the first; `overlapMm`, both blocks' `tag` and `text`, and `otherBox`, `otherElement` or `otherParameter`. Lines within one flowing Markdown box are not compared. |
+| `layout-render-failed` | A spread whose layout threw, or rendered no single `<Spread>`, with the error message and the template `path`, `line` and `column` where it threw when the source map has them. In a fixture check, the fixture instead of the spread. |
+| `template-declaration-invalid` | A declaration in the template's default export that violates the template API, by `declaration` path such as `spreads.chapter.parameters.heading`. At most 20 per check. |
+| `template-id-mismatch` | The template declares a different `id` from the one `project.json` names. |
 | `anchor-missing`, `anchor-ambiguous` | The spread whose `ctx.book.anchor(id)` found no anchor, or several; `anchor`, and `declared` for ambiguous lookups. |
 
 `render.anchors` lists every declared anchor with its spread and resolved page, in page order. A draft check reports the anchors of the drafted book.
 
-Findings without a specific code use `layout-error` or `layout-warning`. Compiler errors use `template-compile-error` with file, line and column.
+Findings without a specific code use `layout-error` or `layout-warning`. Compiler errors use `template-compile-error` with file, line and column. Other render failures, such as template module code that throws while it loads, use `render-failed` and carry the template `path`, `line` and `column` when a stack frame maps to template source.
+
+ImageFlow bundles each template with an external source map. It is never linked from the bundle; checks use it to map the first stack frame inside template code, skipping ImageFlow's runtime and React, back to the file, line and column. Locations name files inside `template/` only.
+
+### Check levels
+
+`checks` reports each level separately, so a ready image never stands in for a passed check:
+
+| Level | Values | Meaning |
+| --- | --- | --- |
+| `bundle` | `passed`, `failed`, `not-run` | esbuild bundled `template/index.tsx` and its imports. This is not type checking. |
+| `declarations` | `passed`, `failed`, `not-run` | The default export satisfies the template API and its ID matches `project.json`. `not-run` when the bundle failed or the module threw while loading. |
+| `layout` | `completed`, `failed`, `not-run` | The whole book rendered and its layout findings were collected. `completed` can still carry errors. |
+| `typescript` | `passed`, `failed`, `not-run` | Opt-in installed-runtime type checking. |
+| `fixtures` | `completed`, `failed`, `not-run` | Synthetic layout fixtures, when requested. |
+| `print` | `not-run` | Print preflight runs at PDF export, not in checks. |
 
 ### Project command batches
 
@@ -217,10 +280,10 @@ Writer ownership is recorded in `.imageflow/writer.lock`. New locks use a privat
 
 Imported-file watcher receipts retain exact filesystem fingerprints for at most 2048 paths. A queued event pins its receipt while other work delays processing. The one-minute duplicate-event grace starts at the first verified consumption and is not renewed by repeats. Unobserved writes expire after five minutes. Evicted receipts may cause an extra reload; changed fingerprints always trigger external-change handling.
 
-Source consistency uses content revisions, filesystem metadata and watcher generations around loading/rendering. It detects ordinary concurrent edits, including edits reverted during a check. Cached digests rely on filesystem identity and timestamps changing when an unwatched file changes; this is not an immutable input snapshot. External writers can still race outside those observations. Immutable snapshots, broader validation fixtures and additional client compatibility testing remain part of the full authoring release.
+Source consistency uses content revisions, filesystem metadata and watcher generations around loading/rendering. It detects ordinary concurrent edits, including edits reverted during a check. Cached digests rely on filesystem identity and timestamps changing when an unwatched file changes; this is not an immutable input snapshot. External writers can still race outside those observations. Immutable snapshots and additional client compatibility testing remain part of the full authoring release.
 
 ## Verification
 
-`tests/mcp-connection.test.ts` exercises token rejection, private file/socket permissions, argument/path validation, request/response limits, cancellation, revocation, reconnection and SDK client tool discovery/image delivery. `scripts/smoke-mcp.mjs` exercises a real running ImageFlow instance with the official SDK client. Desktop preview/reload smoke tests cover later-page flow, proof agreement, single-page ends, asymmetric bleed and recovery after template errors.
+`tests/mcp-connection.test.ts` exercises token rejection, private file/socket permissions, argument/path validation, request/response limits, cancellation, revocation, reconnection and SDK client tool discovery/image delivery. `scripts/smoke-mcp.mjs` exercises a real running ImageFlow instance with the official SDK client. `scripts/smoke-authoring-fixtures.mjs` renders unused layouts as fixtures in two formats, including a layout that throws on empty content, and every layout and case of the starter template. Desktop preview/reload smoke tests cover later-page flow, proof agreement, single-page ends, asymmetric bleed and recovery after template errors.
 
 See [the large-book benchmark](authoring-performance.md) for the reproducible 300-photo authoring workload, measured timings and hash-byte counts. The benchmark script generates its large fixture under `.build/`; originals are not committed to the repository.

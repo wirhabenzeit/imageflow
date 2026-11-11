@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { PrintSide } from './format';
 import { identifier } from './project';
-import type { TemplateInfo } from './desktop';
+import type { RenderStatus, TemplateInfo } from './desktop';
 
 export const maxPreviewEdge = 1600;
 const owner = identifier.refine((id) => id.length <= 256);
@@ -18,6 +18,8 @@ export const makePreviewRequestSchema = (spread: z.ZodType<string, string>) => z
   bounds: z.enum(['trim', 'bleed']).default('trim'),
   maxEdge: z.int().min(1).max(maxPreviewEdge).default(1000),
   format: z.enum(['png', 'jpeg']).default('png'),
+  guides: z.boolean().default(false).describe('Draw trim (magenta) and safe-area (cyan, dashed) guides over the artwork.'),
+  labels: z.boolean().default(false).describe('Outline every box and element and label it with its ID.'),
 }).refine((request) => !('spreads' in request.target) || request.maxEdge >= 128,
   'Contact sheets require maxEdge of at least 128 pixels.');
 export const previewRequestSchema = makePreviewRequestSchema(identifier.refine((id) => id.length <= 256));
@@ -34,9 +36,14 @@ export type PagePreviewMetadata = {
   page: { left?: number; right?: number };
   // Axis-aligned crop, in millimetres from the full sheet's outer bleed corner.
   detail?: { box?: string; element?: string; xMm: number; yMm: number };
+  // Present when the image carries requested guide or label overlays rather than clean artwork.
+  guides?: true; labels?: true;
 };
 export type ContactSheetMetadata = {
   kind: 'contact-sheet'; width: number; height: number; bounds: 'trim' | 'bleed'; columns: number;
+  // Present on synthetic fixture sheets: the banner text drawn across the top `height` pixels.
+  banner?: { text: string; height: number };
+  guides?: true; labels?: true;
   // Pixel positions address each image inside the contact sheet. Physical sizes belong to its cells, not the collage.
   cells: (PagePreviewMetadata & { x: number; y: number; label: string })[];
 };
@@ -48,10 +55,17 @@ type PreviewErrorCode = 'invalid-preview-request' | 'preview-target-not-found' |
 export class PreviewError extends Error {
   // Declarations of a template that loaded before the book failed to render, when available.
   readonly template?: TemplateInfo;
-  constructor(readonly code: PreviewErrorCode, message: string, options?: ErrorOptions & { template?: TemplateInfo }) {
+  // Where the render failed: spreads, declarations or a stack, as the renderer reported them.
+  readonly failure?: Pick<Extract<RenderStatus, { state: 'error' }>, 'layoutFailures' | 'declarationIssues' | 'stack'>;
+  constructor(readonly code: PreviewErrorCode, message: string, options?: ErrorOptions & { template?: TemplateInfo;
+    failure?: PreviewError['failure'] }) {
     super(message, options);
     this.name = 'PreviewError';
     if (options?.template) this.template = options.template;
+    const { layoutFailures, declarationIssues, stack } = options?.failure ?? {};
+    if (layoutFailures?.length || declarationIssues?.length || stack) {
+      this.failure = { ...(layoutFailures?.length ? { layoutFailures } : {}), ...(declarationIssues?.length ? { declarationIssues } : {}), ...(stack ? { stack } : {}) };
+    }
   }
 }
 

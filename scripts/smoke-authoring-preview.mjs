@@ -135,7 +135,7 @@ try {
   const checked = await check();
   assert.equal(checked.state, 'ready');
   assert.match(checked.revision, /^[a-f0-9]{64}$/);
-  assert.deepEqual(checked.checks, { bundle: 'passed', layout: 'completed', typescript: 'not-run', print: 'not-run' });
+  assert.deepEqual(checked.checks, { bundle: 'passed', declarations: 'passed', layout: 'completed', typescript: 'not-run', fixtures: 'not-run', print: 'not-run' });
   assert.equal(checked.render.pages, 4);
   assert.equal(checked.image, undefined);
   assert.ok(checked.diagnostics.some(({ severity, message }) => severity === 'error' && /Page count is 4/.test(message)));

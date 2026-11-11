@@ -11,6 +11,8 @@ export type AuthoringDiagnostic = {
   location?: {
     path?: string; line?: number; column?: number;
     spread?: string; box?: string; element?: string; source?: string; parameter?: string; where?: string;
+    // Path inside the template's default export, such as `spreads.chapter.parameters.heading.default`.
+    declaration?: string;
   };
   // Measured and allowed values, such as `{ ppi: 180, minimumPpi: 240 }`.
   details?: Record<string, string | number>;

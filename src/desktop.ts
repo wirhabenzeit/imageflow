@@ -105,7 +105,16 @@ export type RenderStatus = {
   // Anchors the layouts declare, with the page each resolves to, in page order.
   anchors: { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' }[];
   inspection?: import('./inspection').ElementInspection;
-} | { state: 'error'; message: string; template?: TemplateInfo };
+} | {
+  state: 'error'; message: string; template?: TemplateInfo;
+  // Spreads whose layout threw or rendered no single <Spread> root, with the stack where template code threw.
+  layoutFailures?: LayoutFailure[];
+  // Declarations that violate the template contract, by path such as `spreads.chapter.parameters.heading.default`.
+  declarationIssues?: { path: string; message: string }[];
+  // Stack of any other failure, such as template module code that throws when imported.
+  stack?: string;
+};
+export type LayoutFailure = { spread: string; message: string; stack?: string };
 
 declare global {
   interface Window {

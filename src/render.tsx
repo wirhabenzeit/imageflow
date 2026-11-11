@@ -8,12 +8,12 @@ import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } 
 import { cssMM, pageSequence, resolveFormat, toMillimeters } from './format';
 import type { PrintSide, ResolvedFormat } from './format';
 import { parseDocument } from './project';
-import type { RenderProject, SpreadState, Values } from './project';
+import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
 import { parameterWarnings, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import { flow } from './text-flow';
-import { bookIndex, chooseFormat, runtime, setTemplateAssets, setTemplateFiles, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import { bookIndex, chooseFormat, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
@@ -22,7 +22,7 @@ import { parsePreviewRequest, PreviewError } from './preview';
 import type { PreviewMetadata, PagePreviewMetadata } from './preview';
 import { inspectionSchema } from './inspection';
 import type { ElementInspection, ElementMeasurement } from './inspection';
-import { contactSheetLayout } from './authoring-artwork';
+import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -263,6 +263,70 @@ function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: nu
   return { small, outside };
 }
 
+// A short description of a text block for findings: its box/element, its edited parameter, its tag and text.
+function textOwner(block: HTMLElement) {
+  const owner = ownerOf(block);
+  const parameter = block.closest<HTMLElement>('[data-edit]')?.dataset.edit;
+  const text = (block.textContent ?? '').replace(/\s+/g, ' ').trim();
+  const self = block.dataset.box !== undefined || block.dataset.element !== undefined;
+  return { ...owner, ...(parameter ? { parameter } : {}), tag: block.localName, self, text: text.length > 60 ? text.slice(0, 59) + '…' : text };
+}
+const describe = ({ box, element, parameter, tag, self }: ReturnType<typeof textOwner>) => {
+  const owner = box !== undefined ? 'box ' + box : element !== undefined ? 'element ' + element : '';
+  if (self && owner) return owner;
+  return '<' + tag + '>' + (parameter ? ' showing ' + parameter : '') + (owner ? ' in ' + owner : '');
+};
+
+/** Text blocks whose text spills out of their own fixed-size box, or overlaps text in another block. Flowing Markdown
+ * boxes report overflow through text flow, and text inside them is not compared with itself. */
+function checkTextBlocks(sheet: HTMLElement, format: ResolvedFormat) {
+  const bounds = sheet.getBoundingClientRect();
+  const mmPerPixel = format.spreadWidth / bounds.width;
+  const lines = new Map<HTMLElement, DOMRect[]>();
+  const walker = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    let block = node.parentElement;
+    if (!node.textContent?.trim() || !block || block.closest('.if-placeholder, svg')) continue;
+    while (block && block !== sheet && ['inline', 'contents'].includes(getComputedStyle(block).display)) block = block.parentElement;
+    if (!block || block === sheet) continue;
+    range.selectNodeContents(node);
+    const rects = [...range.getClientRects()].filter(({ width, height }) => width > 0.5 && height > 0.5);
+    lines.set(block, [...lines.get(block) ?? [], ...rects]);
+  }
+  const markdown = (block: HTMLElement) => block.closest('[data-box-type="markdown"]');
+  // Half a millimetre absorbs sub-pixel rounding when comparing glyph rectangles.
+  const tolerance = 0.5 / mmPerPixel;
+  const overflows: { owner: ReturnType<typeof textOwner>; clipped: boolean; bottomMm: number; rightMm: number }[] = [];
+  for (const block of lines.keys()) {
+    if (markdown(block)) continue;
+    const style = getComputedStyle(block);
+    if (style.textOverflow === 'ellipsis') continue;
+    const bottom = block.scrollHeight - block.clientHeight, right = block.scrollWidth - block.clientWidth;
+    // Line-height slack below the last line is not a visible overflow; a quarter line or more means text does not fit.
+    const fontSize = parseFloat(style.fontSize), lineHeight = parseFloat(style.lineHeight);
+    const threshold = Math.max(tolerance, 0.25 * (Number.isFinite(lineHeight) ? lineHeight : fontSize * 1.2));
+    if (bottom < threshold && right < threshold) continue;
+    const clipped = [style.overflowX, style.overflowY].some((value) => value !== 'visible');
+    overflows.push({ owner: textOwner(block), clipped, bottomMm: Math.max(0, bottom) * mmPerPixel, rightMm: Math.max(0, right) * mmPerPixel });
+  }
+  const overlaps: { owner: ReturnType<typeof textOwner>; other: ReturnType<typeof textOwner>; overlapMm: number }[] = [];
+  const blocks = [...lines.keys()];
+  for (let i = 0; i < blocks.length; i++) {
+    for (let j = i + 1; j < blocks.length; j++) {
+      const a = blocks[i], b = blocks[j];
+      if (a.contains(b) || b.contains(a) || (markdown(a) && markdown(a) === markdown(b))) continue;
+      let overlap = 0;
+      for (const p of lines.get(a)!) for (const q of lines.get(b)!) {
+        const width = Math.min(p.right, q.right) - Math.max(p.left, q.left), height = Math.min(p.bottom, q.bottom) - Math.max(p.top, q.top);
+        if (width > tolerance && height > tolerance) overlap = Math.max(overlap, height);
+      }
+      if (overlap) overlaps.push({ owner: textOwner(a), other: textOwner(b), overlapMm: overlap * mmPerPixel });
+    }
+  }
+  return { overflows: overflows.slice(0, 5), overlaps: overlaps.slice(0, 5) };
+}
+
 // True when nothing between the box and its sheet rotates, skews or mirrors it, so its on-screen rectangle is the
 // box itself. Crop mode draws the photo over that rectangle. The sheet's own preview scaling is not checked.
 function upright(box: HTMLElement, sheet: HTMLElement) {
@@ -324,6 +388,35 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
   root.classList.add('if-book', 'if-view-' + view);
   fit();
   new ResizeObserver(fit).observe(root);
+}
+
+type Failure = { message: string; stack?: string };
+// The message of an error, and the stack of its innermost cause, where template code threw.
+function failure(error: unknown): Failure {
+  let deepest = error;
+  while (deepest instanceof Error && deepest.cause instanceof Error) deepest = deepest.cause;
+  const stack = deepest instanceof Error ? deepest.stack : undefined;
+  return { message: error instanceof Error ? error.message : String(error), ...(stack ? { stack: stack.slice(0, 4000) } : {}) };
+}
+
+class LayoutRenderError extends Error {
+  constructor(readonly failures: Map<string, Failure>) {
+    super('Layouts failed to render: ' + [...failures].map(([spread, { message }]) => spread + ': ' + message).join('; '));
+  }
+}
+
+// Template declarations that do not satisfy the template contract, by declaration path.
+class DeclarationError extends Error {
+  constructor(message: string, readonly issues: { path: string; message: string }[]) { super(message); }
+}
+
+// Outside the editor, a layout that throws is attributed to its spread; the book still fails as a whole, except that
+// a fixture book reports which fixtures failed so the others can be rendered without them.
+class LayoutBoundary extends React.Component<{ spread: string; failures: Map<string, Failure>; children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: unknown) { this.props.failures.set(this.props.spread, failure(error)); }
+  render() { return this.state.failed ? null : this.props.children; }
 }
 
 // Both PDF pages and artwork captures start from a fully flowed sheet and use the same bleed offsets.
@@ -422,32 +515,96 @@ function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Temp
     nextOffset: request.offset + items.length < nodes.length ? request.offset + items.length : null };
 }
 
+type MmRect = { x: number; y: number; width: number; height: number };
+const overlayStyle = (rect: MmRect, extra: Partial<CSSStyleDeclaration>) => ({
+  position: 'absolute', left: cssMM(rect.x), top: cssMM(rect.y), width: cssMM(rect.width), height: cssMM(rect.height),
+  boxSizing: 'border-box', ...extra,
+});
+
+/** Draws requested authoring overlays onto a sheet after all checks and measurements: trim and safe-area guides, and
+ * outlined, labelled boxes and elements. Coordinates are millimetres from the sheet's outer bleed corner, so the
+ * overlays scale and crop with the artwork. */
+function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, labels }: { guides: boolean; labels: boolean }) {
+  const layer = document.createElement('div');
+  Object.assign(layer.style, { position: 'absolute', inset: '0', pointerEvents: 'none', zIndex: '2147483647' });
+  const add = (rect: MmRect, extra: Partial<CSSStyleDeclaration>, text?: string) => {
+    const node = document.createElement('div');
+    Object.assign(node.style, overlayStyle(rect, extra));
+    if (text) {
+      const tag = document.createElement('span');
+      tag.textContent = text;
+      Object.assign(tag.style, { position: 'absolute', left: '0', top: '0', background: '#ff6a00', color: '#fff',
+        font: '600 2.6mm/1.25 sans-serif', padding: '0 0.8mm', whiteSpace: 'nowrap' });
+      node.append(tag);
+    }
+    layer.append(node);
+  };
+  if (labels) {
+    for (const node of sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')) {
+      const rect = measuredBounds(node, sheet, format);
+      add(rect, { border: '0.35mm solid #ff6a00' }, node.dataset.box !== undefined ? 'box ' + node.dataset.box : 'element ' + node.dataset.element);
+    }
+  }
+  if (guides) {
+    const { trim, bleed, safe } = format;
+    for (const page of [0, 1]) {
+      const x = bleed.outside + page * trim.width;
+      add({ x, y: bleed.top, width: trim.width, height: trim.height }, { border: '0.3mm solid #e6007e' });
+      add({ x: x + (page ? safe.binding : safe.outside), y: bleed.top + safe.top, width: trim.width - safe.outside - safe.binding,
+        height: trim.height - safe.top - safe.bottom }, { border: '0.3mm dashed #00a3e0' });
+    }
+  }
+  sheet.append(layer);
+}
+
 function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>,
-  format: ResolvedFormat, artwork: ReturnType<typeof parsePreviewRequest>) {
-  const { bounds, maxEdge } = artwork;
+  format: ResolvedFormat, artwork: ReturnType<typeof parsePreviewRequest>, fixture?: FixtureMarking) {
+  const { bounds, maxEdge, guides, labels } = artwork;
+  const overlays = { ...(guides ? { guides: true as const } : {}), ...(labels ? { labels: true as const } : {}) };
+  const annotated = new Set<number>();
+  const annotate = (index: number) => {
+    if ((guides || labels) && !annotated.has(index)) annotateSheet(sheets[index], format, { guides, labels });
+    annotated.add(index);
+  };
+  // Synthetic fixture artwork is only delivered inside its labelled, bannered contact sheet.
+  if (fixture && !('spreads' in artwork.target)) {
+    throw new PreviewError('invalid-preview-request', 'Fixture artwork is only available as a labelled contact sheet.');
+  }
   if ('spreads' in artwork.target) {
     const targets = artwork.target.spreads.map((spread) => artworkTarget(spreads, sequence, { spread }));
+    for (const { index } of targets) annotate(index);
     const crops = targets.map(({ side }) => sheetCrop(format, side, bounds));
-    const grid = contactSheetLayout(crops, maxEdge, artwork.target.columns);
+    const header = fixture ? fixtureBannerHeight(maxEdge) : 0;
+    const grid = contactSheetLayout(crops, maxEdge, artwork.target.columns, header);
     const frame = document.createElement('div');
     frame.className = 'if-artwork';
-    Object.assign(frame.style, { width: grid.width + 'px', height: grid.height + 'px', background: '#e9e9e9', overflow: 'hidden' });
+    Object.assign(frame.style, { width: grid.width + 'px', height: grid.height + 'px', overflow: 'hidden',
+      background: fixture ? 'repeating-linear-gradient(135deg, #f2c94c 0 8px, #fbe7a1 8px 16px)' : '#e9e9e9' });
+    if (fixture) {
+      const banner = document.createElement('div');
+      banner.textContent = fixture.banner;
+      Object.assign(banner.style, { position: 'absolute', left: '0', top: '0', width: grid.width + 'px', height: header + 'px',
+        background: '#1d1d1d', color: '#f2c94c', font: 'bold ' + Math.round(header * 0.55) + 'px/' + header + 'px sans-serif',
+        overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'center', letterSpacing: '0.04em' });
+      frame.append(banner);
+    }
     const cells = targets.map(({ index, spread, side, page }, i) => {
       const { x, y, width, height, label: labelRect } = grid.cells[i], crop = crops[i];
       const image = croppedSheet(sheets[index], crop, { width, height });
       Object.assign(image.style, { position: 'absolute', left: x + 'px', top: y + 'px' });
-      const label = spread + ' · ' + Object.values(page).join('–');
+      const label = fixture ? 'FIXTURE · ' + (fixture.labels[spread] ?? spread) : spread + ' · ' + Object.values(page).join('–');
       const caption = document.createElement('div');
       caption.textContent = label;
       Object.assign(caption.style, { position: 'absolute', left: labelRect.x + 'px', top: labelRect.y + 'px',
-        width: labelRect.width + 'px', height: labelRect.height + 'px', font: '11px/16px sans-serif', color: '#111',
+        width: labelRect.width + 'px', height: labelRect.height + 'px', font: (fixture ? 'bold ' : '') + '11px/16px sans-serif', color: '#111',
         overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'center' });
       frame.append(image, caption);
       return { x, y, width, height, widthMm: crop.widthMm, heightMm: crop.heightMm, spread, side, page, bounds, label };
     });
     root.hidden = true;
     document.body.append(frame);
-    return { frame, metadata: { kind: 'contact-sheet', width: grid.width, height: grid.height, bounds, columns: grid.columns, cells } as PreviewMetadata };
+    return { frame, metadata: { kind: 'contact-sheet', width: grid.width, height: grid.height, bounds, columns: grid.columns, cells,
+      ...(fixture ? { banner: { text: fixture.banner, height: header } } : {}), ...overlays } as PreviewMetadata };
   }
   const target = artworkTarget(spreads, sequence, artwork.target);
   const { index, side, page, spread } = target;
@@ -467,12 +624,13 @@ function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: Spread
     crop = { x, y, widthMm: right - x, heightMm: bottom - y };
     detail = { ...(box ? { box } : { element }), xMm: x, yMm: y };
   }
+  annotate(index);
   const { widthMm, heightMm } = crop, scale = maxEdge / Math.max(widthMm, heightMm);
   const width = Math.max(1, Math.round(widthMm * scale)), height = Math.max(1, Math.round(heightMm * scale));
   const frame = croppedSheet(sheets[index], crop, { width, height });
   root.hidden = true;
   document.body.append(frame);
-  return { frame, metadata: { width, height, widthMm, heightMm, bounds, spread, side, page, ...(detail ? { detail } : {}) } as PreviewMetadata };
+  return { frame, metadata: { width, height, widthMm, heightMm, bounds, spread, side, page, ...(detail ? { detail } : {}), ...overlays } as PreviewMetadata };
 }
 
 // Font faces that were requested but could not be loaded. The book renders with a fallback font instead.
@@ -656,9 +814,18 @@ export async function startRender(root: HTMLElement) {
     Object.assign(globalThis, { ImageFlowRuntime: runtime, ImageFlowReact: React, ImageFlowJSX: jsx });
     const [module] = await Promise.all([import(/* @vite-ignore */ book.template.script), loadStyles(book.template.css)]);
     // The project's format choice is resolved first; everything below works with that one format.
-    const template = chooseFormat(parseDocument(templateSchema, module.default, 'Template'), book.project.format);
+    const declared = templateSchema.safeParse(module.default);
+    if (!declared.success) {
+      const issues = declared.error.issues.slice(0, 20).map((issue) => ({ path: issue.path.join('.'), message: issue.message }));
+      const [first] = issues;
+      throw new DeclarationError('Template' + (first.path ? ' → ' + first.path.split('.').join(' → ') : '') + ': ' + first.message, issues);
+    }
+    const template = chooseFormat(declared.data, book.project.format);
+    if (template.id !== book.project.template.id) {
+      throw new DeclarationError('The template ID does not match project.json.', [{ path: 'id',
+        message: 'The template declares ID ' + template.id + ', but project.json uses ' + book.project.template.id + '.' }]);
+    }
     info = templateInfo(template);
-    if (template.id !== book.project.template.id) throw new Error('The template ID does not match project.json.');
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
     if (book.mode === 'edit' && query.get('view') === 'editor') {
@@ -694,14 +861,17 @@ export async function startRender(root: HTMLElement) {
     const index = { ...bookIndex(book, template, sequence), lookups };
 
     let renderError: unknown;
+    const layoutFailures = new Map<string, Failure>();
     const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
-    flushSync(() => react.render(visible.map(({ spread, i }) => (
-      <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} key={spread.id}>
-        <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
-          page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy} />
-      </div>
-    ))));
+    flushSync(() => react.render(visible.map(({ spread, i }) => {
+      const view = <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
+        page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy} />;
+      return <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} key={spread.id}>
+        {edit ? view : <LayoutBoundary spread={spread.id} failures={layoutFailures}>{view}</LayoutBoundary>}
+      </div>;
+    })));
     if (renderError) throw renderError;
+    if (layoutFailures.size) throw new LayoutRenderError(layoutFailures);
     const images = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
@@ -757,9 +927,16 @@ export async function startRender(root: HTMLElement) {
         details: { family }, suggestion: 'Check the @font-face src path in the template CSS and that the font file exists inside template/.' });
     }
     const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
-    const layouts = new Map(visible.map(({ spread, i }, n) => [
-      spread.id, validateSpread(containers[n], spread, template, format, where[i], warnings, errors),
-    ]));
+    const layouts = new Map(visible.map(({ spread, i }, n) => {
+      try { return [spread.id, validateSpread(containers[n], spread, template, format, where[i], warnings, errors)] as const; }
+      catch (error) {
+        if (edit) throw error;
+        layoutFailures.set(spread.id, failure(error));
+        return [spread.id, undefined] as const;
+      }
+    }));
+    if (layoutFailures.size) throw new LayoutRenderError(layoutFailures);
+    const validated = layouts as Map<string, NonNullable<ReturnType<typeof validateSpread>>>;
     for (const [source, chain] of activeChains) {
       const first = chain[0];
       if (book.texts[source] === undefined) {
@@ -767,7 +944,7 @@ export async function startRender(root: HTMLElement) {
           suggestion: 'Restore ' + (book.project.texts[source] ?? 'the Markdown file') + ', or assign another text to box ' + first.box + '.' });
         continue;
       }
-      const boxes = chain.map(({ spread, box }) => layouts.get(spread)!.boxes.get(box)!);
+      const boxes = chain.map(({ spread, box }) => validated.get(spread)!.boxes.get(box)!);
       const result = flow.run(markdownToHtml(book.texts[source]), boxes, 'columns');
       const overflow = result.overflowText.trim();
       if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
@@ -780,7 +957,7 @@ export async function startRender(root: HTMLElement) {
       }
     }
     const minimum = template.format.output.minimumTextSize;
-    for (const [spread, { sheet }] of layouts) {
+    for (const [spread, { sheet }] of validated) {
       const minimumMm = minimum && toMillimeters(minimum);
       const typography = checkTypography(sheet, format, minimumMm);
       if (typography.small && minimumMm) {
@@ -793,15 +970,34 @@ export async function startRender(root: HTMLElement) {
           details: { overshootMm: Math.round(typography.outside.overshootMm * 10) / 10 },
           suggestion: 'Move or inset this text in the template CSS so it stays inside the format safe area.' });
       }
+      const round = (value: number) => Math.round(value * 10) / 10;
+      const blocks = checkTextBlocks(sheet, format);
+      for (const { owner: { tag, text, self, ...owner }, clipped, bottomMm, rightMm } of blocks.overflows) {
+        const name = describe({ tag, text, self, ...owner });
+        const fix = owner.parameter ? 'shorten ' + owner.parameter + ', or ' : '';
+        warnings.push({ ...located(spread, 'Text in ' + name + (clipped ? ' is cut off by its box.' : ' runs out of its box.')),
+          code: clipped ? 'text-clipped' : 'text-overflows-box', ...owner,
+          details: { overflowBottomMm: round(bottomMm), overflowRightMm: round(rightMm), tag, text },
+          suggestion: 'To fit the text, ' + fix + 'enlarge this ' + tag + ' or reduce its font size or line height in the template.' });
+      }
+      for (const { owner: { tag, text, self, ...owner }, other, overlapMm } of blocks.overlaps) {
+        warnings.push({ ...located(spread, 'Text in ' + describe({ tag, text, self, ...owner }) + ' overlaps text in ' + describe(other) + '.'),
+          code: 'text-overlap', ...owner,
+          details: { overlapMm: round(overlapMm), tag, text, otherTag: other.tag, otherText: other.text,
+            ...(other.box ? { otherBox: other.box } : {}), ...(other.element ? { otherElement: other.element } : {}),
+            ...(other.parameter ? { otherParameter: other.parameter } : {}) },
+          suggestion: 'Give each text block its own space in the template layout, limit the length of the parameters they show, ' +
+            'or let the first block push the second down instead of positioning both absolutely.' });
+      }
     }
-    const sheets = [...layouts.values()].map(({ sheet }) => sheet);
+    const sheets = [...validated.values()].map(({ sheet }) => sheet);
     let inspection: ElementInspection | undefined;
     if (inspect) {
       const index = spreads.findIndex(({ id }) => id === inspect.spread);
       if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + inspect.spread + ' does not exist in this book.');
       inspection = inspectElements(sheets[index], spreads[index], template, format, inspect);
     }
-    if (edit) layoutBook(root, [...layouts].map(([spread, { sheet }]) => ({ spread, sheet })), view);
+    if (edit) layoutBook(root, [...validated].map(([spread, { sheet }]) => ({ spread, sheet })), view);
     if (lazy) {
       const load = photoLoader(root, () => onScreen);
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -810,7 +1006,7 @@ export async function startRender(root: HTMLElement) {
       await Promise.allSettled(load().map((img) => img.decode()));
     }
     else if (artwork) {
-      const { frame, metadata } = renderArtwork(root, sheets, spreads, sequence, format, artwork);
+      const { frame, metadata } = renderArtwork(root, sheets, spreads, sequence, format, artwork, book.fixture);
       await settle([...frame.querySelectorAll<HTMLImageElement>('img')]);
       window.imageflowPreview = { state: 'ready', metadata };
     } else if (!check) {
@@ -827,6 +1023,10 @@ export async function startRender(root: HTMLElement) {
     const message = error instanceof Error ? error.message : 'The template could not be rendered.';
     if (error instanceof PreviewError) window.imageflowPreview = { state: 'error', code: error.code };
     root.hidden = true;
-    publish({ state: 'error', message, template: info });
+    const layoutFailures = error instanceof LayoutRenderError ? [...error.failures].map(([spread, details]) => ({ spread, ...details }))
+      : error instanceof SpreadError ? [{ spread: error.spread, ...failure(error) }] : undefined;
+    publish({ state: 'error', message, template: info,
+      ...(layoutFailures ? { layoutFailures } : error instanceof DeclarationError ? { declarationIssues: error.issues }
+        : error instanceof PreviewError ? {} : { stack: failure(error).stack }) });
   }
 }

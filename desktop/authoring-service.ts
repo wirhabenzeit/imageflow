@@ -19,6 +19,13 @@ import { photoExtensions } from './photos';
 import type { OpenProject } from './project';
 import type { ProjectSession } from './project-session';
 import { CommittedProjectSaveError } from './persistence';
+import { FixtureError, fixtureCases, fixtureLimits, fixtureRequestSchema, planFixtures } from '../src/fixtures';
+import type { FixtureCell } from '../src/fixtures';
+import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
+import { cellReport, fixtureAssets, fixtureDraft, fixtureFindings, fixtureNotEvaluated } from './fixtures';
+
+// Fixture checks share the bridge's two-minute call deadline with queueing, so they stop starting renders after this.
+const fixtureBudgetMs = 60_000;
 
 export class AuthoringError extends Error {
   constructor(readonly code: string, message: string, readonly details?: Record<string, unknown>) { super(message); }
@@ -227,6 +234,113 @@ export function createAuthoringService(hooks: Hooks) {
     }
     return result;
   };
+  // Renders layouts with synthetic content in fixture books, one per format, from the declarations of the saved
+  // revision. The saved book is checked as usual; fixture findings and images are reported separately from it.
+  const fixtureCheck = async (session: ProjectSession, signal: AbortSignal, request: unknown, expectedRevision?: string,
+    typescript?: boolean) => {
+    const started = Date.now();
+    const base = await checked(session, signal, { ...(expectedRevision ? { expectedRevision } : {}), ...(typescript ? { typescript } : {}) });
+    const template = base.revision && !base.diagnostics.some(({ code }) => code === 'revision-conflict')
+      ? base.render?.template ?? base.template : undefined;
+    if (!template || !base.revision) return base;
+    const parsed = fixtureRequestSchema.safeParse(request);
+    if (!parsed.success) throw new AuthoringError('INVALID_FIXTURE_REQUEST', parsed.error.issues.map((issue) => issue.path.join('.') + ': ' + issue.message).join('\n'));
+    let plan;
+    try { plan = planFixtures(template, parsed.data); }
+    catch (error) {
+      if (error instanceof FixtureError) throw new AuthoringError(error.code, error.message);
+      throw error;
+    }
+    const assets = await fixtureAssets(hooks.cache);
+    const reports: FixtureCellReport[] = [];
+    const findings: FixtureReport['diagnostics'] = [];
+    const skipped = [...plan.skipped];
+    const formats: string[] = [];
+    let image: AuthoringCheckResult['image'];
+    let renders = 0;
+    const affordable = () => renders < fixtureLimits.isolationRenders && Date.now() - started < fixtureBudgetMs;
+    for (const format of plan.formats) {
+      if (!plan.cells.length) break;
+      if (Date.now() - started >= fixtureBudgetMs) {
+        skipped.push({ format, reason: 'The fixture time budget ran out before this format; check it separately.' });
+        continue;
+      }
+      formats.push(format);
+      const preview = plan.preview?.printFormat === format ? plan.preview : undefined;
+      const previewRequest = (cells: FixtureCell[]): PreviewRequest | undefined => preview && cells.length ? {
+        target: { spreads: cells.map(({ spread }) => spread), columns: preview.columns },
+        bounds: preview.bounds, maxEdge: preview.maxEdge, format: preview.format, guides: preview.guides, labels: preview.labels } : undefined;
+      const outcome = new Map<string, FixtureCellReport>();
+      const unresolved = (cells: FixtureCell[], message: string) => {
+        for (const cell of cells) outcome.set(cell.spread, { ...cellReport(cell, format, []), state: 'not-isolated', message });
+      };
+      const run = async (cells: FixtureCell[], shown?: FixtureCell[]): Promise<void> => {
+        if (!cells.length) return;
+        signal.throwIfAborted();
+        const result = await checked(session, signal, { expectedRevision: base.revision! }, true,
+          fixtureDraft(template, format, cells, assets, previewRequest(shown ?? [])));
+        if (result.revision !== base.revision || result.diagnostics.some(({ code }) => code === 'revision-conflict' || code === 'source-changed')) {
+          throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while rendering fixtures. Check again.');
+        }
+        if (result.state === 'ready') {
+          const found = fixtureFindings(result.diagnostics, cells, format);
+          findings.push(...found);
+          for (const cell of cells) outcome.set(cell.spread, cellReport(cell, format, found));
+          if (result.image) image = result.image;
+          return;
+        }
+        const failures = fixtureFindings(result.diagnostics.filter(({ code }) => code === 'layout-render-failed'), cells, format);
+        if (failures.length) {
+          findings.push(...failures);
+          const failed = new Map(failures.map((finding) => [finding.fixture.layout + '/' + finding.fixture.case, finding.message]));
+          for (const cell of cells) {
+            const message = failed.get(cell.layout + '/' + cell.case);
+            if (message !== undefined) outcome.set(cell.spread, { ...cellReport(cell, format, failures), state: 'failed', message });
+          }
+          const rest = cells.filter(({ spread }) => !outcome.has(spread));
+          if (!rest.length) return;
+          if (!affordable()) return unresolved(rest, 'Rendered together with a failing fixture; the isolation budget ran out.');
+          renders++;
+          return run(rest, shown?.filter((cell) => rest.includes(cell)));
+        }
+        // The fixture book failed without naming a layout, for example in anchors(): bisect within the budget.
+        const message = result.diagnostics[0]?.message ?? 'The fixture book could not be rendered.';
+        if (cells.length === 1) {
+          outcome.set(cells[0].spread, { ...cellReport(cells[0], format, []), state: 'failed', errors: 1, codes: ['fixture-render-failed'], message });
+          findings.push({ code: 'fixture-render-failed', stage: 'render', severity: 'error', message,
+            location: { where: 'Fixture · ' + cells[0].label }, fixture: { layout: cells[0].layout, case: cells[0].case, format } });
+          return;
+        }
+        if (!affordable()) return unresolved(cells, 'A fixture book containing this fixture failed: ' + message);
+        renders += 2;
+        const half = Math.ceil(cells.length / 2);
+        await run(cells.slice(0, half));
+        await run(cells.slice(half));
+      };
+      await run(plan.cells, preview?.cells);
+      // An image is still useful when isolation removed failing fixtures from the requested sheet.
+      const shown = preview?.cells.filter(({ spread }) => ['passed', 'warnings', 'errors'].includes(outcome.get(spread)?.state ?? ''));
+      if (preview && !image && shown?.length && Date.now() - started < fixtureBudgetMs) {
+        const result = await checked(session, signal, { expectedRevision: base.revision }, true,
+          fixtureDraft(template, format, shown, assets, previewRequest(shown)));
+        if (result.revision !== base.revision) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while rendering fixtures. Check again.');
+        if (result.state === 'ready' && result.image) image = result.image;
+      }
+      reports.push(...plan.cells.map((cell) => outcome.get(cell.spread)!));
+    }
+    const count = (state: FixtureCellReport['state']) => reports.filter((report) => report.state === state).length;
+    const report: FixtureReport = {
+      synthetic: true, committed: false, revision: base.revision,
+      matrix: { layouts: plan.layouts, formats, cases: plan.cases },
+      coverage: { planned: reports.length, rendered: reports.length - count('failed') - count('not-isolated'),
+        failed: count('failed'), notIsolated: count('not-isolated'), skipped },
+      cells: reports, diagnostics: findings.slice(0, fixtureLimits.diagnostics),
+      diagnosticsTruncated: findings.length > fixtureLimits.diagnostics, notEvaluated: fixtureNotEvaluated,
+    };
+    get(session.handle);
+    return { ...base, checks: { ...base.checks, fixtures: !reports.length ? 'not-run' as const : count('not-isolated') ? 'failed' as const : 'completed' as const },
+      fixtures: report, ...(image ? { image } : {}) };
+  };
   return async (name: string, args: Record<string, any>, signal: AbortSignal): Promise<Record<string, unknown>> => {
     if (name === 'list_projects') {
       const session = hooks.session();
@@ -239,6 +353,7 @@ export function createAuthoringService(hooks: Hooks) {
     const session = get(args.project);
     if (name === 'check_book') {
       if (args.preview?.target?.page && !args.expectedRevision) throw new AuthoringError('REVISION_REQUIRED', 'Page-number previews require expectedRevision; spread IDs can be used without it.');
+      if (args.fixtures) return fixtureCheck(session, signal, args.fixtures, args.expectedRevision, args.typescript);
       if (!args.draft) return checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview,
         ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true);
       return draftCheck(session, signal, args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript);
@@ -304,6 +419,7 @@ export function createAuthoringService(hooks: Hooks) {
           workflow: ['Edit template/ TSX, CSS and assets directly with workspace tools.', 'Edit existing texts/ Markdown directly.',
             'Call check_book with a spread preview after edits; images include whole-book text flow.',
             'Preview a new or unused layout before saving it: call check_book with draft.operations (an insert_spread with a ref) and target the preview at its $ref.',
+            'Stress-test layouts with check_book fixtures: synthetic long, empty, portrait-photo and malformed-file content per format, with a coverage matrix and a bannered fixture contact sheet.',
             'Use apply_project_changes for project.json/photos.json; never edit these manifests while the app is open.',
             'Copy new content into inbox/ and call import_sources. Then assign returned IDs with a command batch.',
             'To start or extend a template, call get_authoring_context with includeExamples and copy the closest example layout.'],
@@ -312,7 +428,9 @@ export function createAuthoringService(hooks: Hooks) {
           apiReference: await readFile(hooks.docs, 'utf8'),
           ...(args.includeExamples ? { examples: await templateExamples(hooks.docs) } : {}),
           capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
-            maxPreviewEdge: 1600, typescript: true, printPreflight: false, draftPreview: true, fixtures: false, contactSheets: true,
+            maxPreviewEdge: 1600, typescript: true, printPreflight: false, draftPreview: true, contactSheets: true,
+            fixtures: { cases: [...fixtureCases], maxLayouts: fixtureLimits.layouts, maxFormats: fixtureLimits.formats,
+              maxFixturesPerFormat: fixtureLimits.cellsPerFormat, maxPreviewFixtures: fixtureLimits.previewCells },
             elementInspection: true, detailPreviews: true, maxContactSheetSpreads: 12,
             templateApi: { contract: 1, capabilities: [...templateCapabilities], exports: [...runtimeExports] },
             diagnostics: 'Stable codes with spread/box/element/source locations, measured details and suggested fixes.',

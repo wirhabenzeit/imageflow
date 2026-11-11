@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { makePreviewRequestSchema } from './preview';
 import { projectOperationsSchema, spreadReference } from './project-commands';
 import { makeInspectionSchema } from './inspection';
+import { fixtureRequestSchema } from './fixtures';
 
 const project = z.string().min(1).max(128).describe('Stable project handle returned by list_projects.');
 const revision = z.string().regex(/^[a-f0-9]{64}$/, 'Expected a SHA-256 input revision.');
@@ -47,7 +48,12 @@ export const mcpToolSchemas = {
     typescript: z.boolean().optional().describe('Type-check template sources against the installed runtime in a bounded worker. Rendering still runs when types fail.'),
     draft: z.strictObject({ operations: projectOperationsSchema }).optional()
       .describe('Unsaved command batch, using the apply_project_changes operations, to render on top of the saved book. Nothing is saved.'),
+    fixtures: fixtureRequestSchema.optional()
+      .describe('Render layouts, including unused ones, with synthetic content in separate fixture books per format and report a coverage matrix. Nothing is saved.'),
   }).superRefine((request, context) => {
+    if (request.fixtures && (request.preview || request.inspect || request.draft)) {
+      context.addIssue({ code: 'custom', path: ['fixtures'], message: 'Fixture checks use fixtures.preview for images and cannot be combined with preview, inspect or draft.' });
+    }
     if (request.preview && 'page' in request.preview.target && !request.expectedRevision) {
       context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'Page-number previews require the inspected input revision.' });
     }
@@ -80,7 +86,7 @@ export const mcpTools: { name: McpToolName; description: string; readOnly: boole
   { name: 'list_projects', readOnly: true, description: 'List projects authorized by the connected ImageFlow app and obtain their stable handles and input revisions.' },
   { name: 'get_authoring_context', readOnly: true, description: 'Read template declarations, authoring guidance, the installed template API capabilities and selected template or Markdown source files for one authorized project. includeExamples adds complete example templates to start from or copy layouts out of.' },
   { name: 'inspect_book', readOnly: true, description: 'Inspect saved spreads, sources or parameters. The elements view requires spread and measures box/element bounds in millimetres, computed typography, editable paths and assigned sources after whole-book text flow. Use the returned revision for checks and commands.' },
-  { name: 'check_book', readOnly: true, description: 'Check whole-book layout and return revision-tagged diagnostics and optional native artwork. Set typescript:true for installed-runtime type checking; type errors do not suppress usable images. Preview target supports page, spread, spread+box/element close-ups, or spreads:[IDs] contact sheets (at most 12). inspect requests bounded measured element geometry and typography. draft.operations renders unsaved changes; $aliases from inserted spreads work in preview and inspect targets. Coverage reports checks not run.' },
+  { name: 'check_book', readOnly: true, description: 'Check whole-book layout and return revision-tagged diagnostics and optional native artwork. Set typescript:true for installed-runtime type checking; type errors do not suppress usable images. Preview target supports page, spread, spread+box/element close-ups, or spreads:[IDs] contact sheets (at most 12); guides/labels add opt-in trim, safe-area and box/element overlays. Layout errors carry the spread and template source line; text that runs out of its box or overlaps other text is reported per block. inspect requests bounded measured element geometry and typography. draft.operations renders unsaved changes; $aliases from inserted spreads work in preview and inspect targets. fixtures renders layouts (also unused ones) with synthetic typical, long, empty, portrait-photo and malformed-file content per format, reports tested/skipped coverage and returns a bannered fixture contact sheet that is never the saved book. Coverage reports checks not run.' },
   { name: 'apply_project_changes', readOnly: false, description: 'Apply an atomic, revision-checked project command batch through ImageFlow. A unique idempotencyKey makes retries safe. dryRun validates without saving. One applied batch creates one named Undo entry.' },
   { name: 'import_sources', readOnly: false, description: 'Import up to 20 files copied into this project’s inbox/ folder. Requires the current input revision and a unique idempotencyKey. Returns registered source IDs and import outcomes.' },
 ];
