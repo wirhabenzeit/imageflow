@@ -13,7 +13,7 @@ import { markdownToHtml } from './markdown';
 import { parameterWarnings, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import { flow } from './text-flow';
-import { bookIndex, chooseFormat, runtime, setTemplateAssets, setTemplateFiles, SpreadView, templateInfo, templateSchema } from './template';
+import { bookIndex, chooseFormat, runtime, setTemplateAssets, setTemplateFiles, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
@@ -151,8 +151,31 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
       { code: 'parameter-invalid', element: id, suggestion: parameterFix });
   }
   // Templates report problems with their input, such as a file they cannot parse, on the node concerned.
+  // Structured findings (`issue(...)`) carry their own code and location; repeated identical nodes report once.
+  const reported = new Set<string>();
   for (const node of sheet.querySelectorAll<HTMLElement>('[data-issue]')) {
-    if (node.dataset.issue) warnings.push(issue(node.dataset.issue, { code: 'template-issue', ...ownerOf(node) }));
+    if (!node.dataset.issue) continue;
+    let finding: Issue;
+    let severity: 'error' | 'warning' = 'warning';
+    if (node.dataset.issueInfo !== undefined) {
+      let info: unknown;
+      try { info = JSON.parse(node.dataset.issueInfo); } catch { info = undefined; }
+      const parsed = templateIssueSchema.safeParse(info);
+      if (!parsed.success) {
+        finding = issue('The layout reports an invalid finding: ' + (parsed.error?.issues[0]?.message ?? 'not JSON') + '.', {
+          code: 'template-issue-invalid', ...ownerOf(node), suggestion: 'Pass issue() a lowercase code and a message.' });
+      } else {
+        const { code, message, box, element, parameter, file, details, suggestion } = parsed.data;
+        severity = parsed.data.severity;
+        const owner = box ? { box } : element ? { element } : ownerOf(node);
+        finding = issue(message, { code: 'template:' + code, ...owner, ...(parameter ? { parameter } : {}), ...(file ? { source: file } : {}),
+          ...(details ? { details } : {}), ...(suggestion ? { suggestion } : {}) });
+      }
+    } else finding = issue(node.dataset.issue, { code: 'template-issue', ...ownerOf(node) });
+    const key = severity + JSON.stringify(finding);
+    if (reported.has(key)) continue;
+    reported.add(key);
+    (severity === 'error' ? errors : warnings).push(finding);
   }
   const unknown = new Set([...sheet.querySelectorAll<HTMLElement>('[data-edit]')]
     .flatMap((node) => node.dataset.edit!.split(' ').filter(Boolean))

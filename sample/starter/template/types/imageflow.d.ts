@@ -162,6 +162,11 @@ type BoxContext<B> = B extends { type: 'photo' }
   ? { params: ValuesOf<B>; photo: Photo | null }
   : { params: ValuesOf<B>; text: FlowPosition | null };
 
+type BoxIds<S extends SpreadDeclaration, T extends 'photo' | 'markdown'> =
+  { [K in keyof S['boxes'] & string]: NonNullable<S['boxes']>[K] extends { type: T } ? K : never }[keyof S['boxes'] & string];
+/** Column count of a Markdown box, also as a numeric string such as an enum option `'2'`. */
+export type Columns = number | `${number}`;
+
 type ParameterKeys<T> = T extends { parameters?: infer P } ? keyof NonNullable<P> & string : never;
 type NestedPaths<Group extends string, R> = { [K in keyof R & string]: `${Group}.${K}.${ParameterKeys<R[K]>}` }[keyof R & string];
 /** A parameter that `edit` can point at: `heading`, `document.paper`, `elements.grid.firstWeekday`, or `boxes.hero.showCaption`. */
@@ -190,6 +195,12 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   edit(...paths: EditPath<S, D>[]): EditMarker;
   /** Page count and the anchors all spreads declare: `ctx.book.anchor('map')?.page`. */
   book: BookContext;
+  /** `PhotoBox` limited to this layout's photo box IDs: `<ctx.PhotoBox id="hero" />` fails type checking for unknown IDs. */
+  PhotoBox(props: Styling & EditMarker & { id: BoxIds<S, 'photo'> }): ImageFlowElement;
+  /** `MarkdownBox` limited to this layout's Markdown box IDs. */
+  MarkdownBox(props: Styling & EditMarker & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
+  /** `Element` limited to this layout's element IDs. */
+  Element(props: Styling & EditMarker & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
 };
 
 /** The render context of a spread declared without `spreadFor`. */
@@ -204,6 +215,9 @@ export type UntypedRenderContext = {
   mode: 'edit' | 'export';
   edit(...paths: string[]): EditMarker;
   book: BookContext;
+  PhotoBox: typeof PhotoBox;
+  MarkdownBox: typeof MarkdownBox;
+  Element: typeof Element;
 };
 
 /**
@@ -216,10 +230,20 @@ export type SpreadDefinition = SpreadDeclaration & {
   render(context: UntypedRenderContext): ImageFlowNode;
   anchors?(context: AnchorContext): readonly AnchorDeclaration[];
 };
+/** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
+export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components';
+/** The features this app provides. */
+export const capabilities: readonly Capability[];
+
 export type TemplateDeclaration = {
   id: string;
   version: string;
   contract: 1;
+  /**
+   * Features this template needs, such as `['anchors', 'geometry']`. An app without one of them reports which,
+   * instead of failing in a layout. Apps older than this field ignore it.
+   */
+  requires?: readonly Capability[];
   /**
    * Declare one `format`, or several named `formats` the user chooses between in Book settings (`defaultFormat`,
    * else the first, is used until they do). Layouts adapt through `ctx.format`, `ctx.formatId`, and the
@@ -278,12 +302,80 @@ export function PhotoBox(props: Styling & EditMarker & { id: string }): ImageFlo
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.
  * In the editor, clicking it edits the box's parameters and any others it is marked with: `{...ctx.edit('textSize')}`.
  */
-export function MarkdownBox(props: Styling & EditMarker & { id: string; columns?: number }): ImageFlowElement;
+export function MarkdownBox(props: Styling & EditMarker & { id: string; columns?: Columns }): ImageFlowElement;
 /**
  * Generated content with parameters, such as a calendar grid. In the editor, clicking it edits the element's
  * parameters and any others it is marked with: `<Element id="grid" {...ctx.edit('month')}>`.
  */
 export function Element(props: Styling & EditMarker & { id: string; children?: ImageFlowNode }): ImageFlowElement;
+// Reusable declarations
+
+/**
+ * Box declarations to reuse across layouts. The ID stays where the box is declared, so it keeps its saved identity:
+ * `boxes: { hero: box.photo('Main photo', { caption }), body: box.markdown('Story', { flowOrder: 1 }) }`.
+ */
+export const box: {
+  photo<const P extends Parameters = {}>(label: string, parameters?: P): { type: 'photo'; label: string; parameters: P };
+  markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P }):
+    { type: 'markdown'; label: string; parameters: P; flowOrder?: number };
+};
+
+// Geometry
+
+/**
+ * A rectangle in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the
+ * trim width), y from the top trim edge. Place a node with `style={geometry.css(rect)}` inside `<Spread>`.
+ */
+export type Rect = { x: number; y: number; width: number; height: number };
+/**
+ * `trim`: the page as cut. `safe`: the trim minus the format's safe insets (outside or binding by side). `bleed`: the
+ * outer edges extended into the bleed; the edge at the fold stays at the fold, because a page's binding bleed shows
+ * the facing page.
+ */
+export type Area = 'trim' | 'safe' | 'bleed';
+export const geometry: {
+  /** One page of the spread. Works for single first and last pages too. */
+  page(format: ResolvedFormat, side: 'left' | 'right', area?: Area): Rect;
+  /** Both pages. Its `safe` area keeps only the outer, top and bottom insets. */
+  spread(format: ResolvedFormat, area?: Area): Rect;
+  /** Shrinks a rectangle by millimetres on every side, or on the named sides. */
+  inset(rect: Rect, by: number | { top?: number; right?: number; bottom?: number; left?: number }): Rect;
+  /** Equal cells in reading order. Gaps in millimetres are between cells only. */
+  grid(rect: Rect, options: { columns: number; rows?: number; gap?: number; columnGap?: number; rowGap?: number }): Rect[];
+  /**
+   * Design coordinates: positions on a fixed design canvas, such as 290 × 290 units, scaled to the chosen trim,
+   * horizontally with its width and vertically with its height. Type sizes do not scale. `width`/`height` convert
+   * a design length to millimetres.
+   */
+  design(format: ResolvedFormat, canvas: { width: number; height: number }): {
+    left(x: number, y: number, width: number, height: number): Rect;
+    right(x: number, y: number, width: number, height: number): Rect;
+    width(value: number): number;
+    height(value: number): number;
+  };
+  /** Absolute positioning for a rectangle, in millimetres. */
+  css(rect: Rect): CSSProperties;
+};
+
+// Template findings
+
+/**
+ * A finding about the template's input, such as an assigned file it cannot parse. `file` is the file ID of a file
+ * parameter. Reported in the Book check and by `check_book` as `template:<code>` on the given box or element, or
+ * else on the one that contains the node. `error` blocks print export; the default is `warning`.
+ */
+export type TemplateIssue = {
+  code: string; message: string; severity?: 'error' | 'warning';
+  box?: string; element?: string; parameter?: string; file?: string;
+  details?: Record<string, string | number>; suggestion?: string;
+};
+/**
+ * Attributes that report a finding. Spread them onto a rendered node; a hidden node works in export:
+ * `<span hidden {...issue({ code: 'gpx-invalid', message, element: 'route', parameter: 'track', file: track })} />`.
+ * The plain `data-issue="…"` attribute still works and reports a `template-issue` warning.
+ */
+export function issue(found: TemplateIssue): { 'data-issue': string; 'data-issue-info': string };
+
 /** URL of a file in `template/assets/`. */
 export function asset(path: string): string;
 /**

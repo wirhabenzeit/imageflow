@@ -4,7 +4,8 @@ import type * as Declared from '../sample/starter/template/types/imageflow';
 import type { PrintFormat, ResolvedFormat } from './format';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
-import type { Anchor, AnchorDeclaration, BookContext, RenderContext, runtime } from './template';
+import type { Anchor, AnchorDeclaration, BookContext, RenderContext, runtime, TemplateIssue } from './template';
+import type { Capability, runtimeExports } from './runtime-exports';
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assignable<A, B> = [A] extends [B] ? true : false;
@@ -19,4 +20,8 @@ export const declaredTypesMatchRuntime: [
   Same<Declared.Anchor, Anchor>,
   Same<Declared.AnchorDeclaration, AnchorDeclaration>,
   Same<keyof Declared.BookContext, keyof BookContext>,
-] = [true, true, true, true, true, true, true, true, true];
+  // The bundler exposes exactly the runtime's exports.
+  Same<keyof typeof runtime, typeof runtimeExports[number]>,
+  Same<Declared.TemplateIssue, TemplateIssue>,
+  Same<Declared.Capability, Capability>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true];

@@ -10,6 +10,8 @@ import { declarationConflicts } from './layouts';
 import { p, parametersSchema, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import type { BoxDefinition, SpreadDefinition, TemplateInfo } from './desktop';
+import { geometry } from './geometry';
+import { capabilities, runtimeExports } from './runtime-exports';
 
 export { inch, mm, p, pt };
 export type { PrintFormat, ResolvedFormat, Span } from './format';
@@ -29,6 +31,10 @@ export type RenderContext = {
   edit: (...paths: string[]) => EditMarker;
   // The whole book as seen from this spread: page count and the anchors every spread declares.
   book: BookContext;
+  // The platform components again, so the declarations can type-check box and element IDs per layout.
+  PhotoBox: typeof PhotoBox;
+  MarkdownBox: typeof MarkdownBox;
+  Element: typeof Element;
 };
 export type EditMarker = { 'data-edit'?: string };
 
@@ -112,7 +118,7 @@ const elementEditor = z.object({
 const elements = z.record(identifier, z.object({ label: z.string().min(1), parameters: parametersSchema, editor: elementEditor.optional() })
   .refine(({ parameters, editor }) => !editor || editor.parameters.every((key) => Object.hasOwn(parameters, key)),
     'An element editor can only edit parameters its element declares.')).default({});
-const box = z.object({
+const boxSchema = z.object({
   type: z.enum(['photo', 'markdown']), label: z.string().min(1), parameters: parametersSchema, flowOrder: z.int().positive().optional(),
 });
 
@@ -120,7 +126,7 @@ const definition = z.object({
   label: z.string().min(1),
   span: z.enum(['spread', 'left', 'right']).default('spread'),
   parameters: parametersSchema,
-  boxes: z.record(identifier, box).default({}),
+  boxes: z.record(identifier, boxSchema).default({}),
   elements,
   render: z.custom<(context: RenderContext) => ReactNode>((value) => typeof value === 'function', 'Expected a render function.'),
   anchors: z.custom<(context: AnchorContext) => unknown>((value) => typeof value === 'function', 'Expected an anchors function.').optional(),
@@ -134,6 +140,15 @@ export const templateSchema = z.object({
   id: identifier,
   version: z.string().min(1),
   contract: z.literal(1),
+  // Features beyond the first contract-1 release. Apps that predate `requires` ignore it; their bundler still
+  // rejects imports of helpers they do not export.
+  requires: z.array(z.string()).optional().superRefine((required, context) => {
+    const missing = (required ?? []).filter((name) => !(capabilities as readonly string[]).includes(name));
+    if (missing.length) {
+      context.addIssue({ code: 'custom', message: 'This template requires ImageFlow features this app does not provide: ' +
+        missing.join(', ') + '. Update ImageFlow, or remove them from requires. This app provides: ' + capabilities.join(', ') + '.' });
+    }
+  }),
   format: formatSchema.optional(),
   formats: z.record(identifier, formatSchema).optional(),
   defaultFormat: identifier.optional(),
@@ -161,7 +176,7 @@ export function chooseFormat(template: DeclaredTemplate, chosen?: string): Templ
   };
 }
 export type TemplateDeclaration = {
-  id: string; version: string; contract: 1; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
+  id: string; version: string; contract: 1; requires?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
   spreads: Record<string, Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | 'elements'> & {
     span?: Span; parameters?: Parameters;
@@ -321,7 +336,35 @@ export function file(id: string): { name: string; extension: string; text: strin
   return found?.text === undefined ? undefined : { name: found.name, extension: found.extension, text: found.text };
 }
 
-export const runtime = { defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset, file };
+// Reusable box declarations. The ID stays explicit where the declaration is used: `boxes: { hero: box.photo('Hero') }`.
+export const box = {
+  photo: (label: string, parameters: Parameters = {}) => ({ type: 'photo' as const, label, parameters }),
+  markdown: (label: string, options: { flowOrder?: number; parameters?: Parameters } = {}) => ({
+    type: 'markdown' as const, label, parameters: options.parameters ?? {}, ...(options.flowOrder !== undefined ? { flowOrder: options.flowOrder } : {}),
+  }),
+};
+
+// A structured finding a template reports about its input, such as a file it cannot parse. Spread the result onto
+// a rendered node (a hidden one works in export). The Book check reports it once per spread with code
+// `template:<code>`, on the given box or element, or else on the box or element that contains the node.
+export type TemplateIssue = {
+  code: string; message: string; severity?: 'error' | 'warning';
+  box?: string; element?: string; parameter?: string; file?: string;
+  details?: Record<string, string | number>; suggestion?: string;
+};
+export const templateIssueSchema = z.strictObject({
+  code: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/, 'Use a lowercase code such as gpx-invalid.'),
+  message: z.string().min(1).max(1000), severity: z.enum(['error', 'warning']).default('warning'),
+  box: identifier.optional(), element: identifier.optional(), parameter: identifier.optional(), file: z.string().max(256).optional(),
+  details: z.record(z.string(), z.union([z.string().max(1000), z.number()])).optional(), suggestion: z.string().max(1000).optional(),
+});
+export function issue(found: TemplateIssue): { 'data-issue': string; 'data-issue-info': string } {
+  return { 'data-issue': found.message, 'data-issue-info': JSON.stringify(found) };
+}
+
+export const runtime = {
+  defineTemplate, spreadFor, p, mm, pt, inch, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
+} satisfies Record<typeof runtimeExports[number], unknown>;
 
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
 export function SpreadView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false }: {
@@ -349,7 +392,7 @@ export function SpreadView({ book, template, format, spread, page, index, positi
     document: resolveParams(template.parameters, book.project.params),
     boxes, elements, page, format, formatId: template.formatId, mode: book.mode,
     edit: (...paths) => book.mode === 'edit' && paths.length ? { 'data-edit': paths.join(' ') } : {},
-    book: bookContext(index, spread.id),
+    book: bookContext(index, spread.id), PhotoBox, MarkdownBox, Element,
   });
   return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, lazyPhotos }}>{content}</SpreadData.Provider>;
 }

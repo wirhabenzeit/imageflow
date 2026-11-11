@@ -134,6 +134,10 @@ try {
   assert.equal(await trackLine(), 0);
   assert.match(await messages('warnings'), /Broken ride\.gpx is not valid GPX; the route is left out\./);
   assert.equal((await status()).errors.length, 0);
+  // The template reports it with issue(): a stable code on the route element, its file parameter and the file, once.
+  const gpx = (await status()).warnings.filter(({ code }) => code === 'template:gpx-invalid');
+  assert.deepEqual(gpx.map(({ spread, element, parameter, source, suggestion }) => ({ spread, element, parameter, source, hint: !!suggestion })),
+    [{ spread: 'road', element: 'route', parameter: 'track', source: imported, hint: true }]);
   assert.deepEqual((await section.getByRole('combobox', { name: 'GPX track' }).locator('option').allTextContents()).sort(),
     ['Broken ride.gpx', 'None', 'senja-road.gpx']);
   // Undo removes the assignment but keeps the registered file, so it can be chosen again.
