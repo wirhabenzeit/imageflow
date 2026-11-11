@@ -1,0 +1,89 @@
+/* Editor-only colors: book, thumbnail, artwork and export frames do not inherit these. */
+.studio, .if-editor {
+  --edge: #d8d8d8;
+  --muted: #626262;
+  --accent: #007aff;
+  --text: #292929;
+  --panel-surface: #f5f5f5;
+  --sidebar-surface: #efefef;
+  --inspector-surface: #f7f7f7;
+  --canvas-surface: #dedede;
+  --sources-surface: #f3f3f3;
+  --footer-surface: #f1f1f1;
+  --control-surface: #fff;
+  --control-border: #c7c7c7;
+  --control-fill: linear-gradient(#fff, #f7f7f7);
+  --field-surface: #fff;
+  --popup-surface: #fafafa;
+  --toolbar-fill: linear-gradient(#f8f8f8, #ededed);
+  --icon-color: #585858;
+  --hover-border: #b4b4b4;
+  --hover-surface: #e7e7e7;
+  --subtle-hover: #0000000a;
+  --segment-surface: #e6e6e6;
+  --segment-selected: #fff;
+  --segment-hover: #ffffff50;
+  --selection-surface: #e0eaf5;
+  --selection-border: #aec3d9;
+  --in-view: #b0c1d4;
+  --focus-ring: #0069d9;
+  --primary-fill: linear-gradient(#1992ff, #007aff);
+  --primary-border: #0070ed;
+  --menu-highlight: #007aff;
+  --editor-marked-surface: #0069d9;
+  --error-text: #7c2720;
+  --error-surface: #f6d6d0;
+  --warning-text: #6b5212;
+  --warning-surface: #f5e8c6;
+  --info-text: #316396;
+  --info-surface: #e5edf8;
+  --flash-surface: #e4eefb;
+  --subtle-border: #0000000d;
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='12' viewBox='0 0 8 12'%3E%3Cpath d='m2 4 2-2 2 2M2 8l2 2 2-2' fill='none' stroke='%23666' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --ui-font: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+.studio { color-scheme: light dark; }
+@media (prefers-color-scheme: dark) {
+  .studio, .if-editor {
+    --edge: #494949;
+    --muted: #b6b6b6;
+    --accent: #65b5ff;
+    --text: #ececec;
+    --panel-surface: #252525;
+    --sidebar-surface: #2b2b2b;
+    --inspector-surface: #2e2e2e;
+    --canvas-surface: #1e1e1e;
+    --sources-surface: #292929;
+    --footer-surface: #303030;
+    --control-surface: #3b3b3b;
+    --control-border: #686868;
+    --control-fill: linear-gradient(#484848, #3b3b3b);
+    --field-surface: #242424;
+    --popup-surface: #353535;
+    --toolbar-fill: linear-gradient(#383838, #303030);
+    --icon-color: #d2d2d2;
+    --hover-border: #999;
+    --hover-surface: #414141;
+    --subtle-hover: #ffffff12;
+    --segment-surface: #393939;
+    --segment-selected: #626262;
+    --segment-hover: #ffffff14;
+    --selection-surface: #244c70;
+    --selection-border: #5795d2;
+    --in-view: #54799c;
+    --focus-ring: #76bdff;
+    --primary-fill: linear-gradient(#1271db, #0a5bc5);
+    --primary-border: #338ce8;
+    --menu-highlight: #1768bc;
+    --editor-marked-surface: #1768bc;
+    --error-text: #ffb5aa;
+    --error-surface: #542d2a;
+    --warning-text: #f5d77c;
+    --warning-surface: #4c3b16;
+    --info-text: #a3d1ff;
+    --info-surface: #203f59;
+    --flash-surface: #27425f;
+    --subtle-border: #ffffff18;
+    --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='12' viewBox='0 0 8 12'%3E%3Cpath d='m2 4 2-2 2 2M2 8l2 2 2-2' fill='none' stroke='%23ccc' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+}

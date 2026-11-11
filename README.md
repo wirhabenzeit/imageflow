@@ -48,6 +48,8 @@ The draft exports single-page or spread PDFs. The starter book targets the White
 
 [Authoring feedback foundations](docs/authoring-foundations.md) describes the internal revision-checked book checks and page artwork capture being prepared for MCP, including the current limits.
 
+The editor follows the macOS Light/Dark appearance automatically, including changes while it is open. Book artwork, thumbnails and proof/print output retain their authored paper, photo and text colors. The starter calendar and route editors support both appearances; existing project-owned custom editors keep their authored light appearance unless their template opts into the host theme.
+
 On macOS the toolbar shares a title bar with the native window controls. The toolbar shows the project name, local save state, Undo/Redo, and **Export…** (Print or Proof). Book check is labeled in the bottom status bar; errors disable Print while Proof remains available. New, Open and Reload are in the File menu with ⌘N, ⌘O and ⌘R.
 
 Sidebars slide open and closed (or switch immediately with Reduce Motion enabled). Toggle either sidebar with the toolbar buttons or **View → Show/Hide Sidebar / Show/Hide Inspector** (⌥⌘1 / ⌥⌘2). Drag the inner dividers to resize; focus a divider and use Left/Right to adjust it by 10 pixels. Double-click or press Home to restore its default width. Panel sizes and visibility are remembered on this computer, separately from the project. Selecting artwork leaves a hidden Inspector closed. The canvas, thumbnails and layout previews refit to the available width.

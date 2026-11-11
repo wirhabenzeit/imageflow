@@ -308,6 +308,19 @@ elements: { grid: {
 - **Failures:** if the component throws while rendering, in an event handler or in async work, the dialog shows the error and offers only Cancel. The editor counts as loaded once the component has mounted.
 - **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors can read files of file parameters with `file()`; remote resources such as map tiles are not available. The starter has two reference examples: the calendar editor (month and marked days) and the route map's **Frame route** editor, which keeps the viewport as three ordinary number parameters (`centerX`, `centerY`, `zoom`) and edits them together by dragging, scrolling, buttons or arrow keys. It draws only the GPX track, without a basemap, so export stays offline.
 
+#### Appearance in custom editors
+
+The app follows the system appearance. Custom editor frames remain light by default for compatibility with existing project-owned CSS. To follow the app appearance, put `data-imageflow-appearance="system"` on the custom editor’s root element and use the host’s CSS variables for its surfaces and text:
+
+```tsx
+<div data-imageflow-appearance="system" style={{
+  color: 'var(--if-editor-text)',
+  background: 'var(--if-editor-background)',
+}}>…</div>
+```
+
+Available variables: `--if-editor-background`, `--if-editor-text`, `--if-editor-muted`, `--if-editor-control`, `--if-editor-border`, `--if-editor-selection`, `--if-editor-accent`, `--if-editor-focus`, `--if-editor-marked-background` and `--if-editor-marked-text`. They update live without recreating the editor or committing its draft. The starter calendar and route editors demonstrate both surfaces and selected states. Theme variables are scoped to the editor host; use explicit authored colors for book artwork. Never apply editor appearance styles to `.if-sheet`, print output, or template artwork.
+
 ### File parameters
 
 A parameter can refer to a file the user adds to the project, for input that is not photos or Markdown, such as a GPX track for a map:

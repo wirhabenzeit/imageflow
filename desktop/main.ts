@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, protocol } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol } from 'electron';
 import type { IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
@@ -606,13 +606,16 @@ function createWindow() {
   // Automated checks set IMAGEFLOW_HIDE_WINDOW so test runs do not flash windows on screen.
   const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
   const editor = new BrowserWindow({
-    width: 1520, height: 950, minWidth: 940, minHeight: 650, show: !hidden, backgroundColor: '#f5f5f5',
+    width: 1520, height: 950, minWidth: 940, minHeight: 650, show: !hidden, backgroundColor: nativeTheme.shouldUseDarkColors ? '#252525' : '#f5f5f5',
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 20 } } : {}),
     webPreferences: {
       sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'),
       backgroundThrottling: !hidden,
     },
   });
+  const updateBackground = () => editor.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#252525' : '#f5f5f5');
+  nativeTheme.on('updated', updateBackground);
+  editor.once('closed', () => nativeTheme.removeListener('updated', updateBackground));
   window = editor;
   editor.webContents.on('will-frame-navigate', (event) => {
     const url = new URL(event.url);
