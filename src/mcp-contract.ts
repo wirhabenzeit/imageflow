@@ -26,6 +26,7 @@ export const mcpToolSchemas = {
   get_authoring_context: z.strictObject({
     project,
     includeSource: z.array(relativePath(['template', 'texts'])).max(8).optional(),
+    includeExamples: z.boolean().optional().describe('Also return the complete example templates shipped with the app.'),
   }),
   inspect_book: z.strictObject({
     project,
@@ -77,7 +78,7 @@ export type McpToolArguments = { [Name in McpToolName]: z.output<typeof mcpToolS
 
 export const mcpTools: { name: McpToolName; description: string; readOnly: boolean }[] = [
   { name: 'list_projects', readOnly: true, description: 'List projects authorized by the connected ImageFlow app and obtain their stable handles and input revisions.' },
-  { name: 'get_authoring_context', readOnly: true, description: 'Read template declarations, authoring guidance and selected template or Markdown source files for one authorized project.' },
+  { name: 'get_authoring_context', readOnly: true, description: 'Read template declarations, authoring guidance, the installed template API capabilities and selected template or Markdown source files for one authorized project. includeExamples adds complete example templates to start from or copy layouts out of.' },
   { name: 'inspect_book', readOnly: true, description: 'Inspect saved spreads, sources or parameters. The elements view requires spread and measures box/element bounds in millimetres, computed typography, editable paths and assigned sources after whole-book text flow. Use the returned revision for checks and commands.' },
   { name: 'check_book', readOnly: true, description: 'Check whole-book layout and return revision-tagged diagnostics and optional native artwork. Set typescript:true for installed-runtime type checking; type errors do not suppress usable images. Preview target supports page, spread, spread+box/element close-ups, or spreads:[IDs] contact sheets (at most 12). inspect requests bounded measured element geometry and typography. draft.operations renders unsaved changes; $aliases from inserted spreads work in preview and inspect targets. Coverage reports checks not run.' },
   { name: 'apply_project_changes', readOnly: false, description: 'Apply an atomic, revision-checked project command batch through ImageFlow. A unique idempotencyKey makes retries safe. dryRun validates without saving. One applied batch creates one named Undo entry.' },
