@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import net from 'node:net';
+import { syncBuiltinESMExports } from 'node:module';
 import { test } from 'node:test';
 import { build } from 'esbuild';
 import sharp from 'sharp';
@@ -363,6 +364,80 @@ test('release retires ownership after the project folder or lock file disappears
     const third = await acquireProjectLock(folder);
     await third();
   } finally { await rm(root, { recursive: true }); }
+});
+
+test('release retires its proof when a malformed lock record must be preserved', async () => {
+  const { root, folder } = await fixture();
+  try {
+    const lock = await acquireProjectLock(folder);
+    const path = join(folder, '.imageflow/writer.lock');
+    const owner = JSON.parse(await readFile(path, 'utf8'));
+    await writeFile(path, 'malformed ownership evidence');
+    await assert.rejects(lock(), /ownership was retired.*Preserve/);
+    assert.equal(await readFile(path, 'utf8'), 'malformed ownership evidence');
+    await assert.rejects(lstat(owner.endpoint), { code: 'ENOENT' });
+    await lock();
+    assert.equal(await lock.tryRelocate(folder), false);
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('a permission failure reading the old record still retires the proof without deleting evidence', async () => {
+  const { root, folder } = await fixture();
+  const open = fs.open;
+  try {
+    const lock = await acquireProjectLock(folder);
+    const path = join(folder, '.imageflow/writer.lock');
+    const bytes = await readFile(path);
+    const owner = JSON.parse(bytes.toString('utf8'));
+    let denied = false;
+    fs.open = async (...args) => {
+      if (args[0] === path) {
+        denied = true;
+        throw Object.assign(new Error('Permission denied'), { code: 'EACCES' });
+      }
+      return open(...args);
+    };
+    syncBuiltinESMExports();
+    await assert.rejects(lock(), /ownership was retired/);
+    assert.equal(denied, true);
+    fs.open = open;
+    syncBuiltinESMExports();
+    assert.deepEqual(await readFile(path), bytes);
+    await assert.rejects(lstat(owner.endpoint), { code: 'ENOENT' });
+    const replacement = await acquireProjectLock(folder);
+    await replacement();
+  } finally { fs.open = open; syncBuiltinESMExports(); await rm(root, { recursive: true }); }
+});
+
+test('a symlink replacing the internal directory cannot strand a live ownership proof', async () => {
+  const { root, folder } = await fixture();
+  try {
+    const lock = await acquireProjectLock(folder);
+    const internal = join(folder, '.imageflow');
+    const evidence = join(folder, 'preserved-locks');
+    const bytes = await readFile(join(internal, 'writer.lock'));
+    const owner = JSON.parse(bytes.toString('utf8'));
+    await rename(internal, evidence);
+    await symlink(evidence, internal);
+    await assert.rejects(lock(), /ownership was retired/);
+    assert.equal((await lstat(internal)).isSymbolicLink(), true);
+    assert.deepEqual(await readFile(join(evidence, 'writer.lock')), bytes);
+    await assert.rejects(lstat(owner.endpoint), { code: 'ENOENT' });
+  } finally { await rm(root, { recursive: true }); }
+});
+
+test('an invalid unrelated relocation candidate leaves the current owner exclusive', async () => {
+  const { root, folder } = await fixture();
+  const other = join(root, 'Other book');
+  const lock = await acquireProjectLock(folder);
+  try {
+    await mkdir(join(other, '.imageflow'), { recursive: true });
+    const path = join(other, '.imageflow/writer.lock');
+    await writeFile(path, 'invalid unrelated metadata');
+    assert.equal(await lock.tryRelocate(other), false);
+    assert.equal(await readFile(path, 'utf8'), 'invalid unrelated metadata');
+    await assert.rejects(acquireProjectLock(folder), /already open for editing/);
+  } finally { await lock(); await rm(root, { recursive: true }); }
 });
 
 test('a moved project can be left for another book and reopened while the same process remains alive', async () => {

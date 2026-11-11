@@ -353,38 +353,39 @@ export async function acquireProjectLock(folder: string): Promise<ProjectLock> {
         }
       }
     } catch (error) {
-      if (code(error) !== 'ENOENT') throw error;
+      if (code(error) !== 'ENOENT') {
+        throw new Error('Project ownership was retired, but its writer record could not be checked or removed. Preserve the remaining .imageflow lock evidence before repairing this project.', { cause: error });
+      }
+    } finally {
+      // Releasing this capability always retires its proof, even when disk metadata needs manual repair.
+      released = true;
+      await proof!.close();
     }
-    // A renamed/deleted project may still contain the old record. Retiring the private endpoint makes it reclaimable.
-    await proof!.close();
-    released = true;
   };
   return Object.assign(release, {
     async tryRelocate(newFolder: string) {
       if (released) return false;
-      const candidate = await realpath(newFolder).catch((error: unknown) => {
-        if (code(error) !== 'ENOENT') throw error;
-        return undefined;
-      });
-      if (!candidate) return false;
-      const candidateInternal = await internalFolder(candidate, false);
-      if (!candidateInternal) return false;
-      const candidatePath = join(candidateInternal, 'writer.lock');
-      const current = await readOwner(candidatePath).catch((error: unknown) => {
-        if (code(error) !== 'ENOENT') throw error;
-        return undefined;
-      });
-      if (!current || !matchesOwner(current)) return false;
-      const previousExists = await lstat(location).catch((error: unknown) => {
-        if (code(error) !== 'ENOENT') throw error;
-        return undefined;
-      });
-      if (previousExists && await realpath(location).catch(() => undefined) !== candidate) return false;
-      if (released) return false;
-      location = candidate;
-      internal = candidateInternal;
-      path = candidatePath;
-      return true;
+      try {
+        const candidate = await realpath(newFolder);
+        const candidateInternal = await internalFolder(candidate, false);
+        if (!candidateInternal) return false;
+        const candidatePath = join(candidateInternal, 'writer.lock');
+        const current = await readOwner(candidatePath);
+        if (!matchesOwner(current)) return false;
+        const previousExists = await lstat(location).catch((error: unknown) => {
+          if (code(error) !== 'ENOENT') throw error;
+          return undefined;
+        });
+        if (previousExists && await realpath(location) !== candidate) return false;
+        if (released) return false;
+        location = candidate;
+        internal = candidateInternal;
+        path = candidatePath;
+        return true;
+      } catch {
+        // An unrelated candidate is validated by its own writable-open attempt. Keep our current proof intact.
+        return false;
+      }
     },
   });
 }
