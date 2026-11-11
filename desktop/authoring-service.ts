@@ -104,7 +104,8 @@ export function createAuthoringService(hooks: Hooks) {
     if (!session || session.handle !== handle) throw new AuthoringError('PROJECT_CLOSED', 'This project is no longer open. Call list_projects for current handles.');
     return session;
   };
-  const checkOnce = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest, fresh: boolean, draft?: CheckDraft) => {
+  const checkOnce = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest, fresh: boolean, draft?: CheckDraft,
+    cacheMode: 'complete' | 'draft-base' = 'complete') => {
     signal.throwIfAborted();
     const before = await contextInputs(session.inputs, signal);
     const matches = cachedCheck?.session === session && before.inputs && cachedCheck.inputs.revision === before.inputs.revision &&
@@ -112,7 +113,8 @@ export function createAuthoringService(hooks: Hooks) {
     if (!matches) cachedCheck = undefined;
     // expectedRevision is checked before reuse. It constrains the inputs without changing a no-preview render.
     const expectedMatches = !request.expectedRevision || request.expectedRevision === before.inputs?.revision;
-    if (!fresh && !draft && !request.preview && !request.inspect && !request.typescript && expectedMatches && cachedCheck) {
+    // A draft can use cached declarations and defer its requested type check to the subsequent draft render.
+    if (!fresh && !draft && !request.preview && !request.inspect && (!request.typescript || cacheMode === 'draft-base') && expectedMatches && cachedCheck) {
       get(session.handle);
       return { result: structuredClone(cachedCheck.result), watcherInvalidated: false };
     }
@@ -129,18 +131,19 @@ export function createAuthoringService(hooks: Hooks) {
       throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while checking. Check again.');
     }
     // A draft result describes unsaved state and must never answer a later check of the saved book.
-    if (result.state === 'ready' && after.inputs && !draft && !request.inspect) {
+    if (result.state === 'ready' && after.inputs && !draft && !request.inspect && !request.typescript) {
       const { image: _image, ...baseline } = result;
       cachedCheck = { session, inputs: after.inputs, result: structuredClone(baseline) };
     }
     return { result, watcherInvalidated: false };
   };
-  const checked = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest = {}, fresh = false, draft?: CheckDraft) => {
-    const first = await checkOnce(session, signal, request, fresh, draft);
+  const checked = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest = {}, fresh = false, draft?: CheckDraft,
+    cacheMode: 'complete' | 'draft-base' = 'complete') => {
+    const first = await checkOnce(session, signal, request, fresh, draft, cacheMode);
     if (!first.watcherInvalidated) return first.result;
     signal.throwIfAborted();
     cachedCheck = undefined;
-    const retried = await checkOnce(session, signal, request, true, draft);
+    const retried = await checkOnce(session, signal, request, true, draft, cacheMode);
     if (retried.watcherInvalidated) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while checking. Check again.');
     return retried.result;
   };
@@ -171,11 +174,10 @@ export function createAuthoringService(hooks: Hooks) {
   // loaded, revision-verified book that is rendered, with the template declarations of that revision.
   const draftCheck = async (session: ProjectSession, signal: AbortSignal, expectedRevision: string, operations: unknown,
     preview: PreviewRequest | undefined, inspect?: InspectionRequest, typescript?: boolean) => {
-    const base = await checked(session, signal, { expectedRevision });
+    const base = await checked(session, signal, { expectedRevision, ...(typescript ? { typescript } : {}) }, false, undefined, 'draft-base');
     // A draft may repair a saved book whose render fails, as long as its template loaded at this revision.
     const template = base.revision === expectedRevision ? base.render?.template ?? base.template : undefined;
-    if (!template) return { ...(typescript ? await checked(session, signal, { expectedRevision, typescript }, true) : base),
-      draft: { applied: false, committed: false } };
+    if (!template) return { ...base, draft: { applied: false, committed: false } };
     const draft: CheckDraft = (book) => {
       let planned;
       try { planned = applyProjectCommands(book, template, operations); }
@@ -202,7 +204,17 @@ export function createAuthoringService(hooks: Hooks) {
           references: planned.references, reflow: planned.reflow },
       };
     };
-    return checked(session, signal, { expectedRevision, typescript }, true, draft);
+    const result = await checked(session, signal, { expectedRevision,
+      ...(typescript && !base.typecheck ? { typescript } : {}) }, true, draft);
+    // Draft commands change project data, never template code. Reuse this request's type results only after
+    // the draft check verifies the same revision; changed inputs must discard them just as in checkProject.
+    if (base.typecheck && result.revision === base.revision &&
+        !result.diagnostics.some(({ code }) => code === 'source-changed' || code === 'revision-conflict')) {
+      result.typecheck = base.typecheck;
+      result.checks.typescript = base.checks.typescript;
+      result.diagnostics.unshift(...base.diagnostics.filter(({ code }) => code.startsWith('typescript-')));
+    }
+    return result;
   };
   return async (name: string, args: Record<string, any>, signal: AbortSignal): Promise<Record<string, unknown>> => {
     if (name === 'list_projects') {
