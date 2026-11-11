@@ -1,6 +1,7 @@
 import type { PrintFormat, PrintSide, Span } from './format';
 import type { Parameters } from './parameters';
 import type { ProjectFiles } from './project';
+import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
 
 export const desktopScheme = 'imageflow';
 export const editorURL = desktopScheme + '://editor/';
@@ -10,6 +11,7 @@ export const channels = {
   open: 'project:open', save: 'project:save', import: 'project:import',
   command: 'project:command', changed: 'project:changed',
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
+  check: 'project:check', cancelCheck: 'project:cancel-check',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'sample' | 'reload';
@@ -23,6 +25,7 @@ export type ProjectSummary = ProjectFiles & {
   texts: Record<string, string>;
 };
 export type Result<T> = { value: T } | { error: string };
+export type ProjectChange = Result<ProjectSummary> | { building: true };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions.
 export type ImportRequest = {
   kind: 'photo' | 'markdown' | 'file'; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string };
@@ -35,8 +38,10 @@ export type DesktopApi = {
   pathsForFiles(files: File[]): string[];
   exportBook(id: string, mode: ExportMode): Promise<Result<{ warnings: Issue[]; errors: Issue[] } | null>>;
   cancelExport(): Promise<void>;
+  checkBook(id: string, request: AuthoringCheckRequest): Promise<Result<AuthoringCheckResult>>;
+  cancelCheck(): Promise<void>;
   onCommand(listener: (command: Command) => void): () => void;
-  onProjectChanged(listener: (result: Result<ProjectSummary>) => void): () => void;
+  onProjectChanged(listener: (result: ProjectChange) => void): () => void;
   onProgress(listener: (stage: string) => void): () => void;
 };
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, renderOrigin } from './desktop';
-import type { BookGeometry, Command, ImportRequest, Issue, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
+import type { BookGeometry, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { BookFrame } from './BookFrame';
 import { revealIn } from './reveal';
 import { EditPopover } from './EditPopover';
@@ -10,7 +10,7 @@ import { ElementEditorDialog } from './ElementEditor';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
-import { assignmentCounts, newSpread, sourceUsage } from './editing';
+import { assignmentCounts, newSpread, readEdit, resolveEditPath, sourceUsage } from './editing';
 import { moveContent, swapContent } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
@@ -22,7 +22,18 @@ import { keptMime, photoMime, sourceList, sourceTitle, textMime } from './source
 import type { SourceKind, SourceRef } from './source-items';
 import { pageSequence, resolveFormat } from './format';
 import type { ResolvedFormat } from './format';
-import type { ProjectFiles } from './project';
+import type { ProjectFiles, SpreadState } from './project';
+
+type InlineContext = {
+  project: ProjectFiles['project']; spread: SpreadState; template: TemplateInfo; target: BookGeometry['targets'][number];
+};
+
+function inlineValues({ project, spread, template, target }: InlineContext) {
+  return JSON.stringify([spread.definition, target.edits.map((path) => {
+    const field = resolveEditPath(template, spread.definition, path);
+    return [field, field && readEdit(project, spread, field)];
+  })]);
+}
 
 // The editor shell must survive a template whose format cannot be resolved; the render reports why.
 function formatOf(template?: TemplateInfo) {
@@ -62,10 +73,16 @@ const Icon = ({ name }: { name: keyof typeof icons }) => <svg viewBox="0 0 16 16
 export function App() {
   const api = window.imageflow;
   const [summary, setSummary] = useState<ProjectSummary>();
+  const [projectInstance, setProjectInstance] = useState(0);
   const current = useRef<ProjectSummary>(undefined);
   const [spreadId, setSpreadId] = useState('');
   const [template, setTemplate] = useState<TemplateInfo>();
   const [render, setRender] = useState<RenderStatus>();
+  const [reload, setReload] = useState<'loading' | 'rendering' | { error: string }>();
+  const reloading = useRef(false);
+  const inputGeneration = useRef(0);
+  const candidateId = useRef<string>(undefined);
+  const readyId = useRef<string>(undefined);
   // The last finished render. The Inspector keeps showing its flow positions while an edit re-renders, so lines
   // like "Flow 1 of 2" do not vanish for a moment and shift the panel.
   const [lastReady, setLastReady] = useState<RenderStatus>();
@@ -74,7 +91,7 @@ export function App() {
   const [inView, setInView] = useState<string[]>([]);
   const [hovered, setHovered] = useState<string>();
   const [hoveredTarget, setHoveredTarget] = useState<string>();
-  const [editing, setEditing] = useState<{ spread: string; key: string }>();
+  const [editing, setEditing] = useState<{ spread: string; key: string; held?: InlineContext }>();
   // Crop mode for one photo box. After a commit, `settling` holds the project id the edit started from; the
   // overlay stays until the book has re-rendered, so the frame does not flash back to the old crop.
   // The selected photo, whose crop drags and pinches adjust. `layout` is the spread's layout when it was selected:
@@ -111,18 +128,65 @@ export function App() {
     const pages = sequence?.spreads[i]?.page;
     return pages?.left && pages?.right ? pages.left + '–' + pages.right : String(pages?.left ?? pages?.right ?? '');
   });
-  const writable = !!summary && !summary.readOnly;
+  const writable = !!summary && !summary.readOnly && !reload;
+  const canvasReady = render?.state === 'ready' && !reload;
+  const holdPreview = reload === 'loading' || typeof reload === 'object';
+  const generation = inputGeneration.current;
+
+  function clearCanvasEditors() {
+    setCropping(undefined);
+    setHovered(undefined);
+    setHoveredTarget(undefined);
+    setDropTarget(undefined);
+    setHighlight(undefined);
+    setFocusBox(undefined);
+    pendingMove.current = undefined;
+    setMoving(undefined);
+  }
+
+  function beginReload() {
+    inputGeneration.current++;
+    reloading.current = true;
+    candidateId.current = undefined;
+    readyId.current = undefined;
+    holdInlineEditor();
+    clearCanvasEditors();
+    setRender(undefined);
+    setReload('loading');
+  }
+
+  function adoptReload(next: ProjectSummary) {
+    const before = current.current;
+    if (before && (JSON.stringify(before.project) !== JSON.stringify(next.project) ||
+        JSON.stringify(before.photoIndex) !== JSON.stringify(next.photoIndex))) {
+      history.current = { past: [], future: [] };
+    }
+    adopt(next);
+    setReload('rendering');
+  }
 
   function adopt(next: ProjectSummary, reset = false, selected?: string) {
     current.current = next;
+    candidateId.current = next.id;
+    readyId.current = undefined;
     if (reset) {
+      inputGeneration.current++;
+      reloading.current = false;
       history.current = { past: [], future: [] };
       setTemplate(undefined);
       setSelectedSource(undefined);
       setQuick(undefined);
       setLastReady(undefined);
-      setCropping(undefined);
       setEditing(undefined);
+      setElementEditor(undefined);
+      setGeometry(undefined);
+      setThumbs(undefined);
+      setCheck(undefined);
+      setReload(undefined);
+      setProjectInstance((previous) => previous + 1);
+      clearCanvasEditors();
+      pendingReveal.current = undefined;
+      revealedThumb.current = '';
       canvas.current?.scrollTo({ top: 0 });
     }
     setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0].id :
@@ -148,10 +212,11 @@ export function App() {
   }
 
   // `notice` may be a function, read after the change ran, for notices that describe what the change found.
-  function edit(change: Edit, notice?: string | (() => string), selected?: string) {
+  function edit(change: Edit, notice?: string | (() => string), selected?: string, canvasId?: string) {
     enqueue(async () => {
       const before = current.current;
-      if (!api || !before || before.readOnly) return;
+      if (!api || !before || before.readOnly || reloading.current || generation !== inputGeneration.current ||
+          (canvasId && (before.id !== canvasId || readyId.current !== canvasId))) return;
       const files = structuredClone({ project: before.project, photoIndex: before.photoIndex });
       change(files);
       if (template) files.project.template.version = template.version;
@@ -159,6 +224,7 @@ export function App() {
           JSON.stringify(files.photoIndex) === JSON.stringify(before.photoIndex)) return;
       const result = await api.saveProject(before.id, files);
       if ('error' in result) throw new Error(result.error);
+      if (current.current !== before) return;
       history.current.past.push({ project: before.project, photoIndex: before.photoIndex });
       history.current.future = [];
       adopt(result.value, false, selected);
@@ -166,19 +232,25 @@ export function App() {
     });
   }
 
+  function editCanvas(change: Edit, notice?: string | (() => string)) {
+    if (summary && readyId.current === summary.id) edit(change, notice, undefined, summary.id);
+  }
+
   function undo(direction: 'undo' | 'redo') {
+    const generation = inputGeneration.current;
     enqueue(async () => {
       const before = current.current;
       const [source, destination] = direction === 'undo'
         ? [history.current.past, history.current.future]
         : [history.current.future, history.current.past];
       const prior = source.at(-1);
-      if (!api || !before || !prior || before.readOnly) return;
+      if (!api || !before || !prior || before.readOnly || reloading.current || generation !== inputGeneration.current) return;
       const files = structuredClone(prior);
       files.project.texts = { ...before.project.texts, ...files.project.texts };
       files.photoIndex = { ...before.photoIndex, ...files.photoIndex };
       const result = await api.saveProject(before.id, files);
       if ('error' in result) throw new Error(result.error);
+      if (current.current !== before) return;
       source.pop();
       destination.push({ project: before.project, photoIndex: before.photoIndex });
       adopt(result.value);
@@ -186,14 +258,16 @@ export function App() {
     });
   }
 
-  function importFiles(request: ImportRequest) {
+  function importFiles(request: ImportRequest, canvasId?: string) {
+    const generation = inputGeneration.current;
     enqueue(async () => {
       const before = current.current;
-      if (!api || !before || before.readOnly) return;
+      if (!api || !before || before.readOnly || reloading.current || generation !== inputGeneration.current ||
+          (canvasId && (before.id !== canvasId || readyId.current !== canvasId))) return;
       setBusy('Importing files…');
       const result = await api.importFiles(before.id, request);
       if ('error' in result) throw new Error(result.error);
-      if (!result.value) return;
+      if (!result.value || current.current !== before) return;
       if (request.target) {
         history.current.past.push({ project: before.project, photoIndex: before.photoIndex });
         history.current.future = [];
@@ -212,14 +286,15 @@ export function App() {
   // Adds a file for a file parameter to the project's registry and resolves to its ID; the caller assigns it as
   // a normal edit, so Undo removes the assignment and keeps the file.
   function importParameterFile(accept: string[]) {
+    const generation = inputGeneration.current;
     return new Promise<string | undefined>((resolve) => enqueue(async () => {
       try {
         const before = current.current;
-        if (!api || !before || before.readOnly) return resolve(undefined);
+        if (!api || !before || before.readOnly || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
         setBusy('Importing file…');
         const result = await api.importFiles(before.id, { kind: 'file', accept });
         if ('error' in result) throw new Error(result.error);
-        if (!result.value) return resolve(undefined);
+        if (!result.value || current.current !== before) return resolve(undefined);
         adopt(result.value.summary);
         resolve(result.value.imported[0]);
       } catch (error) {
@@ -240,7 +315,7 @@ export function App() {
       if (!api) return;
       const before = current.current;
       if (command === 'export' || command === 'print') {
-        if (!before) return;
+        if (!before || readyId.current !== before.id) return;
         setBusy('Preparing export…');
         setExporting(true);
         const result = await api.exportBook(before.id, command === 'print' ? 'print' : 'proof');
@@ -254,25 +329,46 @@ export function App() {
         if (before.id === current.current?.id) setCheck({ id: before.id, errors, warnings });
         return;
       }
+      if (command === 'reload') {
+        if (!before) return;
+        beginReload();
+        const generation = inputGeneration.current;
+        try {
+          const result = await api.openProject(command);
+          if (generation !== inputGeneration.current || current.current !== before) return;
+          if ('error' in result) setReload({ error: result.error });
+          else if (result.value) adoptReload(result.value);
+          else setReload({ error: 'Could not reload the project.' });
+        } catch (error) {
+          if (generation === inputGeneration.current && current.current === before) {
+            setReload({ error: error instanceof Error ? error.message : 'Could not reload the project.' });
+          }
+        }
+        return;
+      }
       setBusy(command === 'new' ? 'Creating project…' : 'Opening project…');
       const result = await api.openProject(command);
       if ('error' in result) throw new Error(result.error);
-      if (result.value) adopt(result.value, command !== 'reload');
+      if (result.value) adopt(result.value, true);
     });
   }
 
   const onCommand = useEffectEvent((command: Command) => { if (!busy) act(command); });
+  const onProjectChanged = useEffectEvent((change: ProjectChange) => {
+    if ('building' in change) beginReload();
+    else if ('error' in change) {
+      if (!reloading.current) beginReload();
+      setReload({ error: change.error });
+    } else {
+      if (!reloading.current) beginReload();
+      adoptReload(change.value);
+      setError('');
+    }
+  });
   useEffect(() => {
     if (!api) return;
     const command = api.onCommand((command) => onCommand(command));
-    const changed = api.onProjectChanged((result) => {
-      if ('error' in result) setError(result.error);
-      else {
-        adopt(result.value);
-        setError('');
-        setNotice('Project files reloaded');
-      }
-    });
+    const changed = api.onProjectChanged((change) => onProjectChanged(change));
     const progress = api.onProgress(setBusy);
     // In dev mode a full page reload or main-process restart would drop the open project; reopen it.
     if (import.meta.env.DEV) {
@@ -282,12 +378,26 @@ export function App() {
   }, [api]);
 
   // The book frame renders every spread, so its status doubles as the book check.
+  const acceptCandidate = (id: string) => candidateId.current === id;
   function bookStatus(status: RenderStatus, id: string) {
-    if (id !== current.current?.id) return;
+    if (!acceptCandidate(id)) return;
     setRender(status);
-    if (status.state === 'ready') setLastReady(status);
-    setCropping((previous) => previous?.settling && previous.settling !== id ? undefined : previous);
-    if (status.template) setTemplate(status.template);
+    if (status.state === 'ready') {
+      readyId.current = id;
+      if (reloading.current) setNotice('Project files reloaded');
+      reloading.current = false;
+      setReload(undefined);
+      setLastReady(status);
+      setTemplate(status.template);
+      setCropping((previous) => previous?.settling && previous.settling !== id ? undefined : previous);
+    } else {
+      candidateId.current = undefined;
+      readyId.current = undefined;
+      if (reloading.current) setReload({ error: status.message });
+      else inputGeneration.current++;
+      holdInlineEditor();
+      clearCanvasEditors();
+    }
     setCheck(status.state === 'ready' ? { id, errors: status.errors, warnings: status.warnings } :
       { id, errors: [{ message: status.message }], warnings: [] });
   }
@@ -385,14 +495,14 @@ export function App() {
   }
 
   function assign(spread: string, box: string, source: SourceRef) {
-    edit(({ project }) => {
+    editCanvas(({ project }) => {
       const state = project.spreads.find(({ id }) => id === spread);
       if (state) state.boxes[box] = { params: state.boxes[box]?.params ?? {}, ...(source.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
     });
   }
 
   // Moves content a spread keeps outside its layout into one of its boxes; content already there is kept instead.
-  function place(spread: string, from: string, to: string) {
+  function place(spread: string, from: string, to: string, fromCanvas = false) {
     if (!summary || !template) return;
     const state = spreads.find(({ id }) => id === spread);
     const moving = state?.boxes[from];
@@ -400,7 +510,8 @@ export function App() {
     if (!moving || !label) return;
     const kind = moving.photo ? 'photo' : 'text';
     let swapped: string | undefined;
-    edit(({ project }) => {
+    const apply = fromCanvas ? editCanvas : edit;
+    apply(({ project }) => {
       const current = project.spreads.find(({ id }) => id === spread);
       if (current) swapped = moveContent(current, from, to);
     }, () => sourceTitle(summary, kind, (moving.photo ?? moving.text)!) + ' placed in ' + label +
@@ -417,6 +528,7 @@ export function App() {
     const y = event.clientY - bounds.top;
     const inside = (rect: Rect, above = 0) => x >= rect.x && x <= rect.x + rect.width && y >= rect.y - above && y <= rect.y + rect.height;
     const sheet = geometry.sheets.find((rect) => inside(rect, bookLayout.book.gap))?.spread;
+    if (readyId.current !== summary?.id) return { sheet };
     const wanted = types?.includes(photoMime) ? 'photo' : types?.includes(textMime) ? 'markdown' : undefined;
     const box = geometry.boxes.findLast((rect) => rect.type !== 'element' && (!wanted || rect.type === wanted) && inside(rect));
     // The smallest edit target under the pointer wins, unless a smaller box sits on top of it.
@@ -433,7 +545,7 @@ export function App() {
   const closeEditor = useCallback(() => setEditing(undefined), []);
   // Tab moves between the edit targets of a spread in reading order.
   function stepEditor(direction: 1 | -1) {
-    if (!editing || !geometry) return;
+    if (!editing || !geometry || readyId.current !== summary?.id) return;
     const order = geometry.targets.filter(({ spread }) => spread === editing.spread)
       .sort((a, b) => Math.abs(a.y - b.y) > 4 ? a.y - b.y : a.x - b.x);
     const at = order.findIndex((target) => targetKey(target) === editing.key);
@@ -442,6 +554,24 @@ export function App() {
   }
   const editTarget = editing && geometry?.targets.find((target) => targetKey(target) === editing.key);
   const editSpread = editing && spreads.find(({ id }) => id === editing.spread);
+  const liveInline = summary && template && editSpread && editTarget &&
+    { project: summary.project, spread: editSpread, template, target: editTarget };
+  const resumeInline = !!(canvasReady && editing?.held && liveInline && inlineValues(liveInline) === inlineValues(editing.held));
+  const inline = resumeInline ? liveInline : editing?.held ?? liveInline;
+  function holdInlineEditor() {
+    if (editing && !editing.held && liveInline) setEditing({ ...editing, held: liveInline });
+  }
+  useEffect(() => {
+    if (resumeInline && readyId.current === summary?.id) setEditing((open) => open && { ...open, held: undefined });
+  }, [resumeInline, summary?.id]);
+
+  function editInline(change: Edit, notice?: string) {
+    if (!liveInline || (editing?.held && !resumeInline)) return;
+    edit((files) => {
+      const active = files.project.spreads.find(({ id }) => id === liveInline.spread.id);
+      if (active?.definition === liveInline.spread.definition) change(files);
+    }, notice);
+  }
   const editOwner = editTarget && /^boxes\.([^.]+)\./.exec(editTarget.edits[0])?.[1];
   const editElement = editTarget?.edits.map((path) => /^elements\.([^.]+)\./.exec(path)?.[1]).find(Boolean);
   const editPhotoBox = editOwner && geometry?.boxes.some(({ spread, id, type }) => spread === editing.spread && id === editOwner && type === 'photo')
@@ -455,6 +585,7 @@ export function App() {
   const cropPlacement = cropping && placementIn(cropState, cropping.layout);
   const cropBox = cropping && template?.spreads[cropping.layout]?.boxes[cropping.box];
   function cropBlocked(spread: string, box: string) {
+    if (readyId.current !== summary?.id) return 'The book preview is updating.';
     const state = spreads.find(({ id }) => id === spread)?.boxes[box];
     const frame = geometry?.boxes.find((rect) => rect.spread === spread && rect.id === box);
     if (!state?.photo || !summary?.photos[state.photo] || !summary.photoSizes[state.photo]) return 'Add a photo to this box first.';
@@ -466,7 +597,7 @@ export function App() {
     return state && template?.spreads[state.definition]?.elements[element]?.editor;
   }
   function openElementEditor(spread: string, element: string) {
-    if (!editorOf(spread, element)) return false;
+    if (readyId.current !== summary?.id || !editorOf(spread, element)) return false;
     setEditing(undefined);
     select(spread, false);
     setElementEditor({ spread, element });
@@ -488,7 +619,8 @@ export function App() {
   // Saves the selected photo's crop; the photo stays selected. The edit compares with the project when it applies,
   // so an unchanged crop saves nothing.
   function saveCrop(placement: Placement) {
-    if (!cropping || cropping.settling || !cropFrame || !cropPhoto || !summary) return;
+    if (!cropping || cropping.settling || !cropFrame || !cropPhoto || !summary || reloading.current ||
+        generation !== inputGeneration.current) return;
     const size = summary.photoSizes[cropPhoto];
     const aspect = cropFrame.width / cropFrame.height;
     const normal = (value: Placement) => JSON.stringify(placementOf(getCrop(size, value, aspect), value.zoom));
@@ -497,8 +629,8 @@ export function App() {
     edit(({ project }) => {
       const state = project.spreads.find(({ id }) => id === spread);
       const target = state?.boxes[box];
-      // The selection ends when the layout changes; never save a crop into a layout it was not made for.
-      if (!target?.photo || state?.definition !== layout) return;
+      // Repeated crop edits can queue while an earlier crop renders. Check that this is still the same photo and layout.
+      if (target?.photo !== cropPhoto || state?.definition !== layout) return;
       setPlacement(target, layout, fits ? centered : placement);
     }, 'Crop updated');
     setCropping({ ...cropping, saved: summary.id });
@@ -525,7 +657,7 @@ export function App() {
   const [moving, setMoving] = useState<{ photo: string; x: number; y: number }>();
   const moveDrag = useEffectEvent((event: PointerEvent) => {
     const start = pendingMove.current;
-    if (!start) return;
+    if (!start || readyId.current !== summary?.id) return;
     if (!moving && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
     setMoving({ photo: start.photo, x: event.clientX, y: event.clientY });
     const { box } = locate(event, [photoMime]);
@@ -551,7 +683,7 @@ export function App() {
     const target = { spread: box.spread, box: box.id };
     const label = template?.spreads[spreads.find(({ id }) => id === target.spread)?.definition ?? '']?.boxes[target.box]?.label ?? target.box;
     let swapped: string | undefined;
-    edit(({ project }) => {
+    editCanvas(({ project }) => {
       const from = project.spreads.find(({ id }) => id === start.spread);
       const to = project.spreads.find(({ id }) => id === target.spread);
       if (from?.boxes[start.box]?.photo === start.photo && to) swapped = swapContent(from, start.box, to, target.box);
@@ -587,20 +719,20 @@ export function App() {
     layouts.current = new Map(spreads.map(({ id, definition }) => [id, definition]));
     if (!changed.size) return;
     setCropping((crop) => crop && changed.has(crop.spread) ? undefined : crop);
-    setEditing((open) => open && changed.has(open.spread) ? undefined : open);
+    setEditing((open) => open && !open.held && changed.has(open.spread) ? undefined : open);
   }, [spreads]);
 
   function drop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     setDropTarget(undefined);
-    if (!api || !writable || busy || !summary) return;
+    if (!api || !writable || busy || !summary || readyId.current !== summary.id) return;
     const { box } = locate(event);
     // Kept content dropped on its own spread moves; dropped on another spread it is another use of its source.
     const kept = event.dataTransfer.getData(keptMime);
     if (kept && box && box.type !== 'element') {
       const origin = JSON.parse(kept) as { spread: string; box: string };
       if (origin.spread === box.spread) {
-        place(origin.spread, origin.box, box.id);
+        place(origin.spread, origin.box, box.id, true);
         select(box.spread, false);
         return;
       }
@@ -618,7 +750,7 @@ export function App() {
     const kind = box?.type === 'markdown' ? 'markdown' : box?.type === 'photo' ? 'photo' :
       paths.every((path) => /\.md$/i.test(path)) ? 'markdown' : 'photo';
     if (box) select(box.spread, false);
-    importFiles({ kind, paths, target: box && box.type !== 'element' ? { spread: box.spread, box: box.id } : undefined });
+    importFiles({ kind, paths, target: box && box.type !== 'element' ? { spread: box.spread, box: box.id } : undefined }, summary.id);
   }
 
   // Clicking a box shows its source in the source inspector; double-clicking opens Quick Look.
@@ -673,9 +805,14 @@ export function App() {
   const spreadSelected = !selectedSource;
   const selectedSheet = spreadSelected ? geometry?.sheets.find(({ spread: id }) => id === spread?.id) : undefined;
   const hoveredSheet = hovered !== spread?.id ? geometry?.sheets.find(({ spread: id }) => id === hovered) : undefined;
-  const issue = error || (render?.state === 'error' ? render.message : '');
-  // While an edit re-renders, export stays available from the last finished render; a failed render disables it.
-  const canExport = (render ?? lastReady)?.state === 'ready' && !busy;
+  const previewError = typeof reload === 'object' ? reload.error : render?.state === 'error' ? render.message : '';
+  const issue = previewError || error;
+  const previewNotice = previewError ? (geometry ? 'Showing the last successful preview' : 'Book preview unavailable') :
+    !canvasReady ? 'Building book preview…' : '';
+  const blockedInline = editing?.held && !resumeInline && (canvasReady
+    ? 'This field changed while you were editing. Close it and open the field again to continue.'
+    : 'Editing is paused while the preview is out of date.');
+  const canExport = canvasReady && !busy;
   const counts = summary ? assignmentCounts(summary.project, template?.spreads) : {};
   const format = formatOf(template);
   // A saved format the template's named formats no longer include; the Book check reports it and print export is
@@ -690,20 +827,20 @@ export function App() {
       <div className="toolbar-actions">
         <div className="brand"><span className="brand-icon" aria-hidden="true">◫</span> ImageFlow</div>
         {summary && <div className="history">
-          <button disabled={!history.current.past.length || !!busy} onClick={() => undo('undo')}>Undo</button>
-          <button disabled={!history.current.future.length || !!busy} onClick={() => undo('redo')}>Redo</button>
+          <button disabled={!writable || !history.current.past.length || !!busy} onClick={() => undo('undo')}>Undo</button>
+          <button disabled={!writable || !history.current.future.length || !!busy} onClick={() => undo('redo')}>Redo</button>
         </div>}
       </div>
       <div className="toolbar-actions">
         <button disabled={!api || !!busy} onClick={() => act('new')}>New project…</button>
         <button disabled={!api || !!busy} onClick={() => act('open')}>Open project…</button>
-        <button disabled={!summary || !!busy} onClick={() => act('reload')}>Reload</button>
+        <button disabled={!summary || !!busy || typeof reload === 'string'} onClick={() => act('reload')}>Reload</button>
         <button disabled={!canExport} onClick={() => act('export')}>Export proof PDF</button>
         <button className="primary" disabled={!canExport} onClick={() => act('print')}>Export print PDF</button>
         {exporting && <button onClick={() => void api?.cancelExport()}>Cancel export</button>}
       </div>
     </header>
-    <div className={summary ? 'workspace' : 'workspace welcome-workspace'}>
+    <div key={projectInstance} className={summary ? 'workspace' : 'workspace welcome-workspace'}>
       <aside className="project-panel" aria-label="Project">
         <div className="project-head">
           <p className="eyebrow">Project</p>
@@ -763,7 +900,8 @@ export function App() {
                   </span>
                 </button>;
               })}
-              <BookFrame project={summary.id} view="thumbs" title="Spread thumbnails" onGeometry={setThumbs} />
+              <BookFrame project={summary.id} view="thumbs" title="Spread thumbnails" onGeometry={setThumbs}
+                hold={holdPreview} accept={acceptCandidate} />
             </div>
           </div>
           {template && <div className="format">
@@ -776,7 +914,7 @@ export function App() {
         <div ref={canvasWrap} className="canvas-wrap">
           <main ref={canvas} className="canvas" aria-label="Book preview" onScroll={measureView}
             onDragOver={(event) => {
-              if (!writable || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime)) return;
+              if (!writable || !canvasReady || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime)) return;
               event.preventDefault();
               const { box } = locate(event, event.dataTransfer.types);
               setDropTarget(box ? box.spread + ':' + box.id : undefined);
@@ -788,8 +926,9 @@ export function App() {
                 // A click that ended a photo move is not a click.
                 if (moved.current) return;
                 const { sheet, top, target } = locate(event);
-                if (!sheet) return;
+                if (!sheet || !spreads.some(({ id }) => id === sheet)) return;
                 select(sheet, false);
+                if (blockedInline) return;
                 if (top) setFocusBox({ box: top.id, at: Date.now() });
                 // What is drawn on top decides. Its own parameters are in the Inspector, so a photo's primary action is
                 // selecting it to drag and pinch, and an element's is its own editor. A smaller click-to-edit node on
@@ -827,7 +966,7 @@ export function App() {
                 setHoveredTarget(target && targetKey(target));
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
               <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus}
-                viewport={viewport} />
+                viewport={viewport} hold={holdPreview} accept={acceptCandidate} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const i = spreads.findIndex((item) => item.id === id);
                 if (i < 0) return null;
@@ -862,15 +1001,15 @@ export function App() {
                 {cropBox && Object.keys(cropBox.parameters).length > 0 && <div className="crop-params">
                   <Fields schema={cropBox.parameters} values={cropState?.params ?? {}} update={(key, value) => edit(({ project }) => {
                     const state = project.spreads.find(({ id }) => id === cropping.spread);
-                    if (!state) return;
-                    state.boxes[cropping.box] ??= { params: {} };
+                    if (state?.definition !== cropping.layout || state.boxes[cropping.box]?.photo !== cropPhoto) return;
                     state.boxes[cropping.box].params[key] = value;
                   }, cropBox.parameters[key].label + ' updated')} />
                 </div>}
               </CropEditor>}
-              {editing && editTarget && editSpread && template && summary && <EditPopover key={editing.key}
-                project={summary.project} spread={editSpread} template={template} edits={editTarget.edits} anchor={editTarget}
-                bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={!writable} edit={edit} close={closeEditor} step={stepEditor}
+              {editing && inline && summary && <EditPopover key={editing.key}
+                project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} anchor={inline.target}
+                bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={summary.readOnly} blocked={blockedInline || undefined}
+                edit={editInline} close={closeEditor} step={stepEditor}
                 actions={editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)
                   ? <button type="button" onClick={() => startCrop(editing.spread, editPhotoBox)}>Adjust crop…</button>
                   : editElement && editorOf(editing.spread, editElement)
@@ -884,9 +1023,8 @@ export function App() {
                 'Launch the desktop app to open an ImageFlow project.'}</p>
               {api && <button className="primary" disabled={!!busy} onClick={() => act('sample')}>Try the Senja sample</button>}
             </div>}
-            {summary && !geometry && render?.state !== 'error' && <div className="preview-message" role="status">Rendering book…</div>}
-            {summary && render?.state === 'error' && <div className="preview-message">Book preview unavailable</div>}
           </main>
+          {summary && previewNotice && <div className={geometry ? 'preview-state' : 'preview-message'} role="status">{previewNotice}</div>}
           {summary && <label className="guides-toggle"><input type="checkbox" checked={showGuides}
             onChange={(event) => setShowGuides(event.target.checked)} /> Guides</label>}
         </div>
@@ -898,7 +1036,8 @@ export function App() {
             if (paths.length) importFiles({ kind: paths.every((path) => /\.md$/i.test(path)) ? 'markdown' : 'photo', paths });
           }} />}
       </div>
-      {summary && spread && <Inspector summary={summary} spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
+      {summary && spread && <Inspector summary={writable || summary.readOnly ? summary : { ...summary, readOnly: true }}
+        spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} inspectSource={choose} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
         adjustCrop={(box) => { reveal(spread.id); startCrop(spread.id, box); }}
@@ -908,8 +1047,9 @@ export function App() {
     </div>
     {summary && template && elementEditor && spreads.some(({ id }) => id === elementEditor.spread) &&
       <ElementEditorDialog key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
-        spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={!writable}
-        edit={edit} close={() => setElementEditor(undefined)} />}
+        spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
+        blocked={previewNotice || undefined}
+        edit={editCanvas} close={() => setElementEditor(undefined)} />}
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     <footer className="status-bar">

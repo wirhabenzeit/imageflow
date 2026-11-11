@@ -12,9 +12,9 @@ type Value = Values[string];
 const scopeLabel = { spread: '', document: 'Book', element: '', box: '' } as const;
 
 // Opens over a node the template marked with `ctx.edit(...)`, and edits those parameters in place.
-export function EditPopover({ project, spread, template, edits, anchor, bounds, readOnly, edit, close, step, actions }: {
+export function EditPopover({ project, spread, template, edits, anchor, bounds, readOnly, blocked, edit, close, step, actions }: {
   project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; anchor: Rect; bounds: { width: number };
-  readOnly: boolean; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
+  readOnly: boolean; blocked?: string; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
   actions?: ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -28,7 +28,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
   function apply(changes: Record<string, Value>) {
     const valid = targets.filter(({ path, param }) => path in changes && isParameterValue(param, changes[path]) &&
       changes[path] !== readEdit(project, spread, targets.find((target) => target.path === path)!));
-    if (!valid.length || readOnly) return;
+    if (!valid.length || readOnly || blocked) return;
     edit(({ project: files }) => { for (const target of valid) writeEdit(files, spread.id, target, changes[target.path]); },
       valid.map(({ param }) => param.label).join(', ') + ' updated');
     setDrafts((previous) => ({ ...previous, ...Object.fromEntries(valid.map(({ path }) => [path, changes[path]])) }));
@@ -46,11 +46,13 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
   const commit = () => apply(drafts);
   const latest = useRef(commit);
   latest.current = commit;
+  const paused = useRef(blocked);
+  paused.current = blocked;
 
   // Clicking outside applies typed values and closes.
   useEffect(() => {
     function outside(event: PointerEvent) {
-      if (panel.current?.contains(event.target as Node)) return;
+      if (paused.current || panel.current?.contains(event.target as Node)) return;
       latest.current();
       close();
     }
@@ -70,7 +72,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
     const top = below + height > visibleBottom && anchor.y - height - 10 > 0 ? anchor.y - height - 10 : below;
     const left = Math.max(8, Math.min(anchor.x, bounds.width - element.offsetWidth - 8));
     setPlacement({ left, top });
-  }, [anchor.x, anchor.y, anchor.width, anchor.height, bounds.width, targets.length]);
+  }, [anchor.x, anchor.y, anchor.width, anchor.height, bounds.width, targets.length, blocked]);
 
   // Focus once placed: the popover is hidden while it measures itself, and hidden fields cannot take focus.
   const focused = useRef(false);
@@ -85,7 +87,8 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
     if (event.key === 'Escape') {
       event.preventDefault();
       close();
-    } else if (event.key === 'Enter' && (!multiline || event.metaKey || event.ctrlKey)) {
+    } else if (blocked) return;
+    else if (event.key === 'Enter' && (!multiline || event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       commit();
       close();
@@ -114,7 +117,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
       <span>{heading}</span>
       <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)" onClick={() => { commit(); close(); }}>×</button>
     </div>
-    <fieldset disabled={readOnly}>
+    <fieldset disabled={readOnly || !!blocked}>
       {targets.map((target, i) => <div className="ep-field" key={target.path}>
         {targets.length > 1 && target.param.type !== 'boolean' && <span className="ep-label">{target.param.label}
           {scopeLabel[target.scope] && <span className="muted"> · {scopeLabel[target.scope]}</span>}</span>}
@@ -123,7 +126,8 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
           apply={(value) => apply({ [target.path]: value })} />
       </div>)}
     </fieldset>
-    {actions && !readOnly && <div className="ep-actions">{actions}</div>}
+    {actions && !readOnly && !blocked && <div className="ep-actions">{actions}</div>}
+    {blocked && <p className="ep-hint muted" role="status">{blocked}</p>}
     {readOnly && <p className="ep-hint muted">Sample projects are read-only.</p>}
   </div>;
 }

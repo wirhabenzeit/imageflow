@@ -64,6 +64,8 @@ html:has(.if-book), html:has(.if-book) body { overflow: hidden; }
 }
 .if-print-page:last-child { break-after: auto; }
 .if-print-page > .if-sheet { position: absolute; top: 0; }
+html:has(.if-artwork) { overflow: hidden; }
+.if-artwork { position: fixed; left: 0; top: 0; background: #fff; }
 @media print {
   body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }

@@ -17,6 +17,8 @@ import { chooseFormat, runtime, setTemplateAssets, setTemplateFiles, SpreadView,
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, layoutChoices } from './layouts';
+import { parsePreviewRequest, PreviewError } from './preview';
+import type { PreviewMetadata } from './preview';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -245,27 +247,72 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
   new ResizeObserver(fit).observe(root);
 }
 
+// Both PDF pages and artwork captures start from a fully flowed sheet and use the same bleed offsets.
+function sheetCrop(format: ResolvedFormat, side: PrintSide, bounds: PreviewMetadata['bounds']) {
+  const { trim, bleed, pageWidth, spreadWidth, height } = format;
+  const widthMm = side === 'spread' ? spreadWidth : pageWidth;
+  const rightOffset = trim.width + bleed.outside;
+  if (bounds === 'bleed') return { x: side === 'right' ? rightOffset - bleed.binding : 0, y: 0, widthMm, heightMm: height };
+  return {
+    x: side === 'right' ? rightOffset : bleed.outside, y: bleed.top,
+    widthMm: trim.width * (side === 'spread' ? 2 : 1), heightMm: trim.height,
+  };
+}
+
+function croppedSheet(sheet: HTMLElement, crop: ReturnType<typeof sheetCrop>, pixels?: { width: number; height: number }) {
+  const page = document.createElement('div');
+  page.className = 'if-print-page';
+  page.style.width = cssMM(crop.widthMm);
+  page.style.height = cssMM(crop.heightMm);
+  const clone = sheet.cloneNode(true) as HTMLElement;
+  let scaleX = 1;
+  let scaleY = 1;
+  if (pixels) {
+    // Lay out the artwork in millimetres, then fit the crop to the integer raster dimensions.
+    scaleX = pixels.width / (crop.widthMm * 96 / 25.4);
+    scaleY = pixels.height / (crop.heightMm * 96 / 25.4);
+    page.classList.add('if-artwork');
+    page.style.width = pixels.width + 'px';
+    page.style.height = pixels.height + 'px';
+    clone.style.transformOrigin = '0 0';
+    clone.style.transform = 'scale(' + scaleX + ', ' + scaleY + ')';
+    clone.style.top = cssMM(-crop.y * scaleY);
+  }
+  clone.style.left = cssMM(-crop.x * scaleX);
+  page.append(clone);
+  return page;
+}
+
 function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat) {
   const style = document.createElement('style');
-  const { outputWidth, height, trim, bleed } = format;
+  const { outputWidth, height } = format;
   style.textContent = '@page { size: ' + cssMM(outputWidth) + ' ' + cssMM(height) + '; margin: 0; }';
   document.head.append(style);
   const pages = document.createDocumentFragment();
   for (const [index, sheet] of sheets.entries()) {
     for (const side of sequence.spreads[index].sides) {
-      const offset = side === 'right' ? trim.width + bleed.outside - bleed.binding : 0;
-      const page = document.createElement('div');
-      page.className = 'if-print-page';
-      page.style.width = cssMM(outputWidth);
-      page.style.height = cssMM(height);
-      const clone = sheet.cloneNode(true) as HTMLElement;
-      clone.style.left = cssMM(-offset);
-      page.append(clone);
-      pages.append(page);
+      pages.append(croppedSheet(sheet, sheetCrop(format, side, 'bleed')));
     }
   }
   root.hidden = true;
   document.body.append(pages);
+}
+
+function artworkTarget(spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, target: ReturnType<typeof parsePreviewRequest>['target']) {
+  if ('page' in target) {
+    const index = sequence.spreads.findIndex(({ page }) => page.left === target.page || page.right === target.page);
+    if (index < 0) throw new PreviewError('preview-target-not-found', 'Page ' + target.page + ' does not exist in this book.');
+    const side = sequence.spreads[index].page.left === target.page ? 'left' : 'right';
+    return { index, side, page: { [side]: target.page }, spread: spreads[index].id } as const;
+  }
+  const index = spreads.findIndex(({ id }) => id === target.spread);
+  if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' does not exist in this book.');
+  const { span, page } = sequence.spreads[index];
+  const side = target.side ?? span;
+  if (side === 'spread') return { index, side, page, spread: target.spread };
+  const number = page[side];
+  if (!number) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' has no ' + side + ' page.');
+  return { index, side, page: { [side]: number }, spread: target.spread };
 }
 
 // Waits for fonts and photos so measurements and text flow see final metrics.
@@ -453,6 +500,9 @@ export async function startRender(root: HTMLElement) {
     const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
     const { chains, positions } = textAssignments(book, template);
     const edit = book.mode === 'edit';
+    const check = !edit && query.get('view') === 'check';
+    const artwork = !edit && query.get('view') === 'artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
+    const target = artwork && artworkTarget(spreads, sequence, artwork.target);
     // The editor renders the whole book twice: as scrolling spreads and as sidebar thumbnails.
     const view: BookView = query.get('view') === 'thumbs' ? 'thumbs' : query.get('view') === 'layouts' ? 'layouts' : 'book';
     if (edit && view !== 'book') {
@@ -539,7 +589,20 @@ export async function startRender(root: HTMLElement) {
       // Report ready once the photos on screen are decoded, so swapping in this frame shows them.
       await Promise.allSettled(load().map((img) => img.decode()));
     }
-    else {
+    else if (artwork && target) {
+      const { index, side, page, spread } = target;
+      const { bounds, maxEdge } = artwork;
+      const crop = sheetCrop(format, side, bounds);
+      const { widthMm, heightMm } = crop;
+      const scale = maxEdge / Math.max(widthMm, heightMm);
+      const width = Math.max(1, Math.round(widthMm * scale));
+      const height = Math.max(1, Math.round(heightMm * scale));
+      const frame = croppedSheet(sheets[index], crop, { width, height });
+      root.hidden = true;
+      document.body.append(frame);
+      await settle([...frame.querySelectorAll<HTMLImageElement>('img')]);
+      window.imageflowPreview = { state: 'ready', metadata: { width, height, widthMm, heightMm, bounds, spread, side, page } };
+    } else if (!check) {
       makePrintPages(root, sheets, sequence, format);
       await Promise.allSettled([...document.querySelectorAll<HTMLImageElement>('.if-print-page img')].map((img) => img.decode()));
     }
@@ -550,6 +613,7 @@ export async function startRender(root: HTMLElement) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The template could not be rendered.';
+    if (error instanceof PreviewError) window.imageflowPreview = { state: 'error', code: error.code };
     root.hidden = true;
     publish({ state: 'error', message, template: info });
   }

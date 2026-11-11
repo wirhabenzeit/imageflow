@@ -15,6 +15,8 @@ const api: DesktopApi = {
   pathsForFiles: (files) => files.map((file) => webUtils.getPathForFile(file)).filter(Boolean),
   exportBook: (id, mode) => ipcRenderer.invoke(channels.export, id, mode),
   cancelExport: () => ipcRenderer.invoke(channels.cancel),
+  checkBook: (id, request) => ipcRenderer.invoke(channels.check, id, request),
+  cancelCheck: () => ipcRenderer.invoke(channels.cancelCheck),
   onCommand: (listener) => listen(channels.command, listener),
   onProjectChanged: (listener) => listen(channels.changed, listener),
   onProgress: (listener) => listen(channels.progress, listener),

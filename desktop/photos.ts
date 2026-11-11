@@ -10,8 +10,8 @@ export type ProjectPhoto = Photo & { original: string; cache: string; key: strin
 
 export async function photoDetails(original: string) {
   if (!photoExtensions.has(extname(original).toLowerCase())) throw new Error('Use JPEG, PNG, or WebP images.');
-  const info = await stat(original);
-  if (!info.isFile() || info.size > 50 * 1024 * 1024) throw new Error('Photos must be files up to 50 MB.');
+  const info = await stat(original, { bigint: true });
+  if (!info.isFile() || info.size > 50n * 1024n * 1024n) throw new Error('Photos must be files up to 50 MB.');
   const metadata = await sharp(original).metadata();
   if (!metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still image.');
   const turned = (metadata.orientation ?? 1) >= 5;
@@ -20,7 +20,7 @@ export async function photoDetails(original: string) {
     height: turned ? metadata.width : metadata.height,
     alpha: !!metadata.hasAlpha,
     passthrough: metadata.format === 'jpeg' && !metadata.icc && metadata.space === 'srgb' && (metadata.orientation ?? 1) === 1,
-    key: createHash('sha256').update([original, info.ino, info.size, info.mtimeMs, 'rendition-1'].join(':')).digest('hex'),
+    key: createHash('sha256').update([original, info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs, 'rendition-2'].join(':')).digest('hex'),
   };
 }
 

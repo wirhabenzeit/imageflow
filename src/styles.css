@@ -124,9 +124,7 @@ body { margin: 0; }
 
 /* Book frames: one iframe per render, absolutely placed; the parent sets heights from reported geometry. */
 .book-frame { position: absolute; left: 0; top: 0; width: 100%; height: 0; border: 0; pointer-events: none; background: transparent; }
-/* A frame rendering the next edit waits behind the current one. Not opacity 0: Chromium skips painting a fully
-   transparent frame, so it would paint only when revealed and flash blank for a moment. At 1% it is painted
-   while it waits and appears complete. */
+/* Keep the candidate painted in Chromium so its first visible frame is ready when it is promoted. */
 .book-frame-pending { opacity: .01; }
 
 /* Canvas: the whole book in one scrolling column */
@@ -146,6 +144,8 @@ body { margin: 0; }
 .box-highlight { border: 2px solid #e7b347; background: #efc97633; }
 .guides-toggle { position: absolute; bottom: 10px; right: 18px; z-index: 2; border-radius: 4px; background: #fcfbf6; padding: 2px 6px; font-size: 12px; box-shadow: 0 1px 3px #0002; }
 .preview-message { position: absolute; top: 45%; left: 50%; transform: translateX(-50%); padding: 10px 14px; border-radius: 6px; background: #f6f4ed; }
+.preview-state { position: absolute; top: 10px; right: 18px; z-index: 2; pointer-events: none;
+  padding: 4px 8px; border-radius: 4px; background: #fcfbf6; box-shadow: 0 1px 3px #0002; font-size: 12px; }
 
 /* Source inspector */
 .sources { min-width: 0; border-top: 1px solid var(--edge); display: grid; grid-template-rows: auto 132px; }

@@ -22,8 +22,9 @@ function editingContext(template: TemplateInfo, spread: SpreadState, element: st
 // Hosts a template-supplied element editor. The template's component runs in a frame on the render origin and
 // can only report a draft; this dialog owns Cancel/Done, focus, read-only mode, validation, and saving the draft
 // as one edit (one Undo step).
-export function ElementEditorDialog({ project, template, spread, element, readOnly, edit, close }: {
+export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, edit, close }: {
   project: string; template: TemplateInfo; spread: SpreadState; element: string; readOnly: boolean;
+  blocked?: string;
   edit: (change: Edit, notice?: string) => void; close: () => void;
 }) {
   const definition = template.spreads[spread.definition]?.elements[element];
@@ -51,7 +52,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   function done(latest?: Values) {
     if (latest) draft.current = { ...draft.current, ...latest };
     const changes = Object.entries(draft.current);
-    if (failed || stale) return;
+    if (failed || stale || blocked) return;
     if (readOnly || !editor || !definition || !changes.length) return dialog.current?.close();
     const invalid = changes.filter(([key, value]) => !editor.parameters.includes(key) || !isParameterValue(definition.parameters[key], value));
     if (invalid.length) {
@@ -104,10 +105,11 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
       {(definition?.label ?? element) + ' changed while this editor was open. Cancel and open the editor again to continue from the current values.'}
     </p>}
     {error && !stale && <p className="ee-status error-text" role="alert">{error}</p>}
+    {blocked && !stale && <p className="ee-status muted" role="status">{blocked}</p>}
     <footer className="ee-footer">
       <span className="muted">Esc cancels · ⌘↩ saves</span>
       <button type="button" onClick={() => dialog.current?.close()}>Cancel</button>
-      <button type="button" className="primary" disabled={readOnly || failed || stale} onClick={() => done()}>Done</button>
+      <button type="button" className="primary" disabled={readOnly || failed || stale || !!blocked} onClick={() => done()}>Done</button>
     </footer>
   </dialog>;
 }

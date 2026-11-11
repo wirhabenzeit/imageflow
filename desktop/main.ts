@@ -7,19 +7,23 @@ import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } 
 import { basename, dirname, extname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { channels, desktopScheme, editorURL, renderOrigin } from '../src/desktop';
-import type { Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result } from '../src/desktop';
+import type { Command, ExportMode, ImportRequest, OpenAction, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
 import type { ProjectFiles, RenderProject } from '../src/project';
 import { printBook, saveProof } from './export';
-import { assetTypes, importIntoProject, loadProject, projectSummary, renderData, updateProject } from './project';
+import { assetTypes, importIntoProject, loadProject, projectSummary, readProjectManifest, renderData, updateProject } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions, photoFile } from './photos';
 import { bundledFontNames } from './fonts';
+import { isProjectInputPath } from './revisions';
+import { checkProject } from './check';
+import { captureBookPreview, checkBookRender } from './preview';
 
 let window: BrowserWindow | null = null;
 let active: { id: string; book: OpenProject } | undefined;
 let busy = false;
 let exportJob: AbortController | undefined;
+let checkJob: AbortController | undefined;
 let watcher: FSWatcher | undefined;
 let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 const observedChanges = new Set<string>();
@@ -121,8 +125,16 @@ function activate(book: OpenProject): ProjectSummary {
   const previous = active;
   const id = randomUUID();
   active = { id, book };
+  // The editor keeps its last ready frames while newer candidates render. Those frames still request lazy photos.
+  const retained = new Set([id, previous?.id]);
+  for (const frame of window?.webContents.mainFrame.framesInSubtree ?? []) {
+    const url = frame.url;
+    if (url.startsWith(renderOrigin + '/')) retained.add(viewPath.exec(new URL(url).pathname)?.[1]);
+  }
+  for (const [sessionId, { mode }] of sessions) {
+    if (mode === 'edit' && !retained.has(sessionId)) sessions.delete(sessionId);
+  }
   sessions.set(id, { book, mode: 'edit' });
-  if (previous) sessions.delete(previous.id);
   return projectSummary(book, id);
 }
 
@@ -136,8 +148,8 @@ function stopWatch() {
 
 async function fingerprint(path: string) {
   try {
-    const info = await stat(path);
-    return [info.ino, info.size, info.mtimeMs].join(':');
+    const info = await stat(path, { bigint: true });
+    return [info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
   } catch {
     return '';
   }
@@ -147,36 +159,69 @@ function watchProject(book: OpenProject) {
   stopWatch();
   if (book.readOnly) return;
   const folder = book.folder;
+  let checkingChanges = false;
+  function scheduleReload(delay = 220) {
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(reload, delay);
+  }
   function reload() {
-    if (active?.book.folder !== folder || !window) return;
-    if (busy) {
-      reloadTimer = setTimeout(reload, 250);
+    const current = active;
+    const owner = window;
+    if (current?.book.folder !== folder || !owner || !observedChanges.size) return;
+    if (busy || checkingChanges) {
+      scheduleReload(250);
       return;
     }
-    const owner = window;
-    busy = true;
+    const runningWatcher = watcher;
+    const watching = () => !owner.isDestroyed() && watcher === runningWatcher;
+    const notify = (change: ProjectChange) => {
+      if (watching()) owner.webContents.send(channels.changed, change);
+    };
     const files = [...observedChanges];
     observedChanges.clear();
+    checkingChanges = true;
     void (async () => {
       const external = await Promise.all(files.map(async (file) => {
+        if (file === 'project.json' || file === 'photos.json') {
+          // The event may arrive after an in-app save or manual reload already adopted these exact bytes.
+          const source = await readProjectManifest(folder, file).catch(() => undefined);
+          return !source || !current.book.manifests[file].equals(source);
+        }
         const imported = importedWrites.get(file);
-        if (imported && await fingerprint(join(folder, file)) === imported) return false;
-        importedWrites.delete(file);
-        return true;
+        return !imported || await fingerprint(join(folder, file)) !== imported;
       }));
+      if (!watching()) return;
+      // Comparing receipts must not block edits. Recheck the events if an edit started or changed the active book.
+      if (busy || active !== current) {
+        for (const file of files) observedChanges.add(file);
+        scheduleReload(250);
+        return;
+      }
       if (!external.some(Boolean)) return;
-      const next = await loadProject(folder, cache);
-      if (!owner.isDestroyed() && active?.book.folder === folder) owner.webContents.send(channels.changed, { value: activate(next) });
+      busy = true;
+      try {
+        notify({ building: true });
+        const next = await loadProject(folder, cache).then((book) => ({ book }), (error: unknown) => ({ error: errorMessage(error) }));
+        if (!watching() || active !== current) return;
+        if (observedChanges.size) {
+          // A newer edit arrived during the build. The debounced reload will read it and resolve the building state.
+          for (const [i, file] of files.entries()) if (external[i]) observedChanges.add(file);
+          return;
+        }
+        for (const [i, file] of files.entries()) if (external[i]) importedWrites.delete(file);
+        notify('error' in next ? { error: next.error } : { value: activate(next.book) });
+      } finally {
+        busy = false;
+      }
     })().catch((error: unknown) => {
-      if (!owner.isDestroyed()) owner.webContents.send(channels.changed, { error: errorMessage(error) });
-    }).finally(() => { busy = false; });
+      notify({ error: errorMessage(error) });
+    }).finally(() => { checkingChanges = false; });
   }
   try {
     watcher = watch(folder, { recursive: true }, (_event, file) => {
-      if (!file || !/^(template|texts|photos|files)\//.test(file) || file.endsWith('.DS_Store')) return;
+      if (!file || !isProjectInputPath(file)) return;
       observedChanges.add(file);
-      clearTimeout(reloadTimer);
-      reloadTimer = setTimeout(reload, 220);
+      scheduleReload();
     });
     watcher.on('error', (error) => {
       window?.webContents.send(channels.changed, { error: 'Project watcher stopped. ' + error.message });
@@ -231,7 +276,7 @@ async function openProject(owner: BrowserWindow, action: OpenAction): Promise<Pr
   }
   if (!book || owner.isDestroyed()) return null;
   const summary = activate(book);
-  watchProject(book);
+  if (action !== 'reload' || !watcher) watchProject(book);
   if (devState) await writeFile(devState, JSON.stringify({ folder: book.folder, readOnly: book.readOnly })).catch(() => {});
   return summary;
 }
@@ -286,8 +331,10 @@ async function importFiles(owner: BrowserWindow, id: string, request: ImportRequ
         .map((entry) => join(entry.parentPath, entry.name)));
     } else files.push(path);
   }
+  const destination = join(book.folder, request.kind === 'photo' ? 'photos' : request.kind === 'file' ? 'files' : 'texts');
+  const createdDirectory = !await fingerprint(destination);
   const { book: next, imported, copied } = await importIntoProject(book, request, [...new Set(files)]);
-  for (const file of copied) {
+  for (const file of createdDirectory ? [destination, ...copied] : copied) {
     importedWrites.set(relative(book.folder, file), await fingerprint(file));
   }
   if (owner.isDestroyed()) return null;
@@ -324,6 +371,32 @@ async function exportBook(owner: BrowserWindow, projectId: string, mode: ExportM
   }
 }
 
+async function checkBook(projectId: string, request: unknown) {
+  const book = currentBook(projectId);
+  const job = new AbortController();
+  const timeout = setTimeout(() => job.abort(new Error('The authoring check timed out.')), 90_000);
+  checkJob = job;
+  try {
+    return await checkProject(book, cache, request, async (snapshot, preview, signal) => {
+      const id = randomUUID();
+      sessions.set(id, { book: snapshot, mode: 'export' });
+      try {
+        const url = renderOrigin + '/render/' + id;
+        if (preview) {
+          const image = await captureBookPreview(url, preview, signal);
+          return { status: image.status, preview: image };
+        }
+        return { status: await checkBookRender(url, signal) };
+      } finally {
+        sessions.delete(id);
+      }
+    }, job.signal);
+  } finally {
+    clearTimeout(timeout);
+    checkJob = undefined;
+  }
+}
+
 function menuCommand(label: string, accelerator: string | undefined, command: Command): MenuItemConstructorOptions {
   return { label, accelerator, click: () => window?.webContents.send(channels.command, command) };
 }
@@ -349,8 +422,9 @@ function createWindow() {
   editor.on('closed', () => {
     stopWatch();
     exportJob?.abort();
+    checkJob?.abort();
     window = null;
-    if (active) sessions.delete(active.id);
+    for (const [id, { mode }] of sessions) if (mode === 'edit') sessions.delete(id);
     active = undefined;
   });
   void editor.loadURL(editorURL).catch((error: unknown) => console.error('ImageFlow could not open', error));
@@ -375,6 +449,9 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.export, (event, id: string, mode: ExportMode) =>
     fromEditor(event, (owner) => exportBook(owner, id, mode)));
   ipcMain.handle(channels.cancel, (event) => { if (editorOwner(event)) exportJob?.abort(); });
+  ipcMain.handle(channels.check, (event, id: string, request: unknown) =>
+    fromEditor(event, () => checkBook(id, request)));
+  ipcMain.handle(channels.cancelCheck, (event) => { if (editorOwner(event)) checkJob?.abort(); });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu' },
