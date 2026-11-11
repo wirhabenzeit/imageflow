@@ -48,7 +48,7 @@ The draft exports single-page or spread PDFs. The starter book targets the White
 
 [Authoring feedback foundations](docs/authoring-foundations.md) describes the internal revision-checked book checks and page artwork capture being prepared for MCP, including the current limits.
 
-The editor and custom template editor dialogs follow the macOS Light/Dark appearance automatically, including changes while they are open. Custom editors use the host's theme colors, as demonstrated by the starter calendar and route editors. Book artwork, thumbnails and proof/print output retain their authored paper, photo and text colors.
+**ImageFlow → Settings…** (⌘,) contains app preferences. Appearance offers **Light**, **Dark**, and **System** (the default); changes apply immediately and are remembered on this computer, independently of the book. System follows macOS, including changes while the app is open. Custom template editor dialogs follow the app appearance using the host's theme colors, as demonstrated by the starter calendar and route editors. Book artwork, thumbnails and proof/print output retain their authored paper, photo and text colors.
 
 On macOS the toolbar shares a title bar with the native window controls. The toolbar shows the project name, local save state, Undo/Redo, and **Export…** (Print or Proof). Book check is labeled in the bottom status bar; errors disable Print while Proof remains available. New, Open and Reload are in the File menu with ⌘N, ⌘O and ⌘R.
 

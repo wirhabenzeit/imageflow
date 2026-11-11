@@ -8,7 +8,7 @@ import { _electron } from 'playwright-core';
 import sharp from 'sharp';
 import { menuAction, exportAction } from './ui-actions.mjs';
 
-// Change nativeTheme only inside this isolated test process, never the user's macOS preference.
+// Change app settings only inside this isolated profile, never the user's macOS preference.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'appearance-'));
 const book = join(work, 'Book');
@@ -23,7 +23,8 @@ try {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath });
   }, book);
   async function appearance(mode) {
-    await app.evaluate(({ nativeTheme }, mode) => { nativeTheme.themeSource = mode; }, mode);
+    const result = await w.evaluate((appearance) => window.imageflow.updateSettings({ appearance }), mode);
+    assert.deepEqual(result, { value: { appearance: mode } });
     await w.waitForFunction((mode) => matchMedia('(prefers-color-scheme: dark)').matches === (mode === 'dark') &&
       getComputedStyle(document.querySelector('.studio')).backgroundColor === (mode === 'dark' ? 'rgb(37, 37, 37)' : 'rgb(245, 245, 245)'), mode).catch(async (error) => {
       console.log(await app.evaluate(({ nativeTheme }) => ({ source: nativeTheme.themeSource, dark: nativeTheme.shouldUseDarkColors })));

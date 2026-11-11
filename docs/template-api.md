@@ -310,7 +310,7 @@ elements: { grid: {
 
 #### Appearance in custom editors
 
-Custom editor frames follow the system appearance automatically, including changes while a dialog is open. No appearance attribute or opt-in is needed. Editors must support both light and dark appearances: inherit the host's text and background colors, and use its CSS variables for custom surfaces, controls and states:
+Custom editor frames follow the app's appearance automatically, including changes while a dialog is open. The app's Settings offer Light, Dark, or System (the default, following macOS). No appearance attribute or opt-in is needed. Editors must support both light and dark appearances: inherit the host's text and background colors, and use its CSS variables for custom surfaces, controls and states:
 
 ```tsx
 <div style={{

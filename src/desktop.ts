@@ -2,6 +2,7 @@ import type { PrintFormat, PrintSide, Span } from './format';
 import type { Parameters } from './parameters';
 import type { ProjectFiles } from './project';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
+import type { AppSettings } from './settings';
 
 export const desktopScheme = 'imageflow';
 export const editorURL = desktopScheme + '://editor/';
@@ -13,13 +14,14 @@ export const channels = {
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
   check: 'project:check', cancelCheck: 'project:cancel-check',
   panelVisibility: 'editor:panel-visibility',
+  settings: 'app:settings', updateSettings: 'app:update-settings',
   history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
 } as const;
 
 export type OpenAction = 'open' | 'new' | 'sample' | 'reload';
 export type ExportMode = 'proof' | 'print';
-export type Command = OpenAction | 'agent-settings' | 'toggle-project' | 'toggle-inspector' | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'undo' | 'redo';
+export type Command = OpenAction | 'settings' | 'agent-settings' | 'toggle-project' | 'toggle-inspector' | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'undo' | 'redo';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState;
@@ -38,6 +40,8 @@ export type ImportRequest = {
 };
 
 export type DesktopApi = {
+  getSettings(): Promise<Result<AppSettings>>;
+  updateSettings(patch: Partial<AppSettings>): Promise<Result<AppSettings>>;
   setPanelVisibility(state: { sidebar: boolean; inspector: boolean }): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;
   saveProject(id: string, files: ProjectFiles, label?: string): Promise<Result<ProjectSummary>>;

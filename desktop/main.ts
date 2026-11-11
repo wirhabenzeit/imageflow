@@ -22,6 +22,7 @@ import { checkTemplateTypes } from './typecheck';
 import type { CheckDraft } from './check';
 import { captureBookPreview, checkBookRender } from './preview';
 import { ProjectSession } from './project-session';
+import { SettingsStore } from './settings';
 import { createAuthoringService, AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
 import { AuthoringQueue } from './authoring-queue';
@@ -55,6 +56,7 @@ let reloadTimer: ReturnType<typeof setTimeout> | undefined;
 const observedChanges = new Set<string>();
 const importedWrites = new ImportReceipts();
 let cache: string;
+let settings: SettingsStore;
 const sessions = new Map<string, { book: OpenProject; mode: RenderProject['mode'] }>();
 // `npm run dev` serves the editor and render pages from a Vite dev server for hot reloading. The custom protocol
 // proxies those requests, so origins, IPC checks, and frame messaging match the built app.
@@ -653,6 +655,9 @@ function createWindow() {
 }
 
 void app.whenReady().then(async () => {
+  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'));
+  await settings.load();
+  nativeTheme.themeSource = settings.value.appearance;
   cache = await mkdtemp(join(app.getPath('temp'), 'imageflow-cache-'));
   powerMonitor.on('resume', () => { projectSession?.inputs.invalidate(); });
   if (!app.isPackaged && process.env.IMAGEFLOW_BENCHMARK === '1') {
@@ -664,6 +669,7 @@ void app.whenReady().then(async () => {
     event.preventDefault();
     quitCleanup ??= (async () => {
       await closingProject;
+      await settings.settled();
       await rm(cache, { recursive: true, force: true });
     })().catch((error) => console.error('ImageFlow could not finish cleanup', error)).finally(() => {
       quitReady = true;
@@ -679,6 +685,16 @@ void app.whenReady().then(async () => {
     }
   });
   ipcMain.handle(channels.open, (event, action: OpenAction) => fromEditor(event, (owner) => openProject(owner, action)));
+  ipcMain.handle(channels.settings, (event) => editorOwner(event)
+    ? { value: settings.value } : { error: 'Request is only available to the editor.' });
+  ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {
+    if (!editorOwner(event)) return { error: 'Request is only available to the editor.' };
+    try {
+      const value = await settings.update(patch);
+      nativeTheme.themeSource = value.appearance;
+      return { value };
+    } catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.handle(channels.save, (event, id: string, files: ProjectFiles, label?: string) =>
     fromEditor(event, async () => {
       currentBook(id);
@@ -725,6 +741,8 @@ void app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu', submenu: [
       { role: 'about' }, { type: 'separator' },
+      menuCommand('Settings…', 'CmdOrCtrl+,', 'settings'),
+      { type: 'separator' },
       menuCommand('Agent Connections…', undefined, 'agent-settings'),
       { type: 'separator' }, { role: 'services' }, { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
