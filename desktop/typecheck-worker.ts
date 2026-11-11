@@ -29,7 +29,7 @@ function check(): TypecheckResult {
       const next = join(actual, entry.name), canonical = realpathSync(next);
       if (!inside(root, canonical)) throw new Error('A template source points outside template/.');
       if (statSync(canonical).isDirectory()) { readSources(next, depth + 1); continue; }
-      if (!/\.(?:ts|tsx|js|jsx)$/.test(entry.name)) continue;
+      if (!/\.(?:[cm]?ts|tsx|[cm]?js|jsx|json)$/.test(entry.name)) continue;
       // Project copies support external editors; checking uses the installed runtime's authoritative declarations.
       if (/^types\/(?:imageflow|jsx-runtime|files)\.d\.ts$/.test(slash(relative(root, next)))) continue;
       if (sources.has(canonical)) continue;
@@ -45,7 +45,7 @@ function check(): TypecheckResult {
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
     jsx: ts.JsxEmit.ReactJSX, strict: true, noEmit: true, skipLibCheck: false, types: [],
-    allowJs: true, checkJs: false, noUncheckedSideEffectImports: true,
+    allowJs: true, checkJs: false, noUncheckedSideEffectImports: true, resolveJsonModule: true, allowImportingTsExtensions: true,
     lib: ['lib.es2022.d.ts', 'lib.dom.d.ts', 'lib.dom.iterable.d.ts'],
   };
   const host = ts.createCompilerHost(options);
@@ -77,7 +77,8 @@ function check(): TypecheckResult {
     if (!name.startsWith('./') && !name.startsWith('../')) return undefined;
     return ts.resolveModuleName(name, containingFile, options, host).resolvedModule;
   });
-  const program = ts.createProgram([...sources.keys(), join(types, 'assets.d.ts')], options, host);
+  // JSON participates only when imported; tsconfig.json remains editor configuration, never a compiler input.
+  const program = ts.createProgram([...sources.keys()].filter((path) => !path.endsWith('.json')).concat(join(types, 'assets.d.ts')), options, host);
   const findings = ts.getPreEmitDiagnostics(program);
   const diagnostics: AuthoringDiagnostic[] = findings.slice(0, maxDiagnostics).map((finding) => {
     const position = finding.file && finding.start !== undefined ? finding.file.getLineAndCharacterOfPosition(finding.start) : undefined;
@@ -87,7 +88,8 @@ function check(): TypecheckResult {
       message: ts.flattenDiagnosticMessageText(finding.messageText, '\n'), details: { typescriptCode: finding.code },
       ...(path ? { location: { path, ...(position ? { line: position.line + 1, column: position.character + 1 } : {}) } } : {}) };
   });
-  return { diagnostics, files: [...sources.keys()].map((path) => slash(relative(folder, path))).sort(),
+  return { diagnostics, files: program.getSourceFiles().map((file) => file.fileName).filter((path) => inside(root, path))
+    .map((path) => slash(relative(folder, path))).sort(),
     totalDiagnostics: findings.length, truncated: findings.length > maxDiagnostics, elapsedMs: 0 };
 }
 

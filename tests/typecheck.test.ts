@@ -46,6 +46,28 @@ test('type errors retain exact locations while project declaration copies cannot
   assert.equal(await readFile(entry, 'utf8'), "import { mm, nonexistent } from 'imageflow';\nconst size: number = 'wrong';\nmm('wrong');\nexport default {};\n");
 });
 
+test('JSON, text and explicit module imports accepted by the bundler also typecheck', async (t) => {
+  const { folder, entry, check } = await fixture(t);
+  const sources = {
+    'data.json': '{"title":"Book"}', 'note.txt': 'Caption',
+    'helper.mts': 'export const n: number = 1;', 'helper.cts': 'export const c: number = 2;',
+    'script.mjs': 'export const m = 3;', 'script.cjs': 'exports.j = 4;',
+    'tsconfig.json': '{ invalid editor config that must not be checked',
+  };
+  await Promise.all(Object.entries(sources).map(([name, source]) => writeFile(join(folder, 'template', name), source)));
+  await writeFile(entry, "import data from './data.json'; import note from './note.txt'; import { n } from './helper.mts'; import { c } from './helper.cts'; import { m } from './script.mjs'; import { j } from './script.cjs';\nconst title: string = data.title; const caption: string = note; export default {title, caption, n, c, m, j};\n");
+  await build({ entryPoints: [entry], bundle: true, write: false, format: 'esm', tsconfigRaw: {}, logLevel: 'silent' });
+  const result = await check();
+  assert.deepEqual(result.diagnostics, []);
+  for (const name of ['data.json', 'helper.mts', 'helper.cts', 'script.mjs', 'script.cjs']) assert.ok(result.files.includes('template/' + name));
+  assert.ok(!result.files.includes('template/tsconfig.json'));
+  await writeFile(join(folder, 'template/helper.mts'), 'export const n: number = "wrong";');
+  await writeFile(join(folder, 'template/data.json'), '{"title":123}');
+  const errors = (await check()).diagnostics;
+  assert.ok(errors.some(({ location, details }) => location?.path === 'template/helper.mts' && details?.typescriptCode === 2322));
+  assert.ok(errors.some(({ location, details }) => location?.path === 'template/index.tsx' && details?.typescriptCode === 2322));
+});
+
 test('React default exposes runtime hooks while named exports match the template loader', async (t) => {
   const { entry, check } = await fixture(t);
   await writeFile(entry, "import React from 'react';\nexport function Editor() { const [value, setValue] = React.useState(1); React.useEffect(() => setValue(2), []); return <span>{value}</span>; }\n");
