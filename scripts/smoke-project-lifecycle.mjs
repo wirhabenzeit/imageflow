@@ -9,6 +9,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'lifecycle-smoke-'));
 const first = join(work, 'first');
 const second = join(work, 'second');
+const third = join(work, 'third');
 const moved = join(work, 'moved');
 await mkdir(join(first, 'template'), { recursive: true });
 await writeFile(join(first, 'template/index.tsx'), `import {defineTemplate,mm,Spread} from 'imageflow';
@@ -20,6 +21,7 @@ spreads:{base:{label:'Base',render:()=> <Spread><p>Lifecycle test</p></Spread>}}
 await writeFile(join(first, 'project.json'), JSON.stringify({ schemaVersion:1, title:'First', template:{id:'lifecycle',version:'1'}, spreads:[{id:'one',definition:'base'}] }));
 await writeFile(join(first, 'photos.json'), '{}');
 await cp(first, second, { recursive:true });
+await cp(first, third, { recursive:true });
 const app = await _electron.launch({ executablePath:electron, args:[join(root,'.build/desktop'),'--user-data-dir='+join(work,'profile')], env:{...process.env,IMAGEFLOW_HIDE_WINDOW:'1'} });
 let closed = false;
 app.on('close', () => { closed = true; });
@@ -37,6 +39,15 @@ try {
   await open(second);
   await open(moved);
   await rm(moved, { recursive:true, force:true });
+  await open(second);
+  const lockPath = join(second, '.imageflow/writer.lock');
+  const oldOwner = JSON.parse(await readFile(lockPath, 'utf8'));
+  await writeFile(lockPath, 'damaged ownership evidence');
+  await open(third);
+  assert.equal(await readFile(lockPath, 'utf8'), 'damaged ownership evidence');
+  await assert.rejects(stat(oldOwner.endpoint), { code:'ENOENT' });
+  // The test owns this fixture; removing its preserved damaged record permits reopening it.
+  await rm(lockPath);
   const book = await open(second);
 
   // Enabling a connection can be in flight before it is assigned to the window's active connection.

@@ -37,7 +37,9 @@ async function fixture(t: TestContext) {
     photoIndex: {}, assets: { files: new Map(), urls: {} }, photos: new Map(), texts: {}, files: {}, problems: [],
     manifests: { 'project.json': Buffer.alloc(0), 'photos.json': Buffer.alloc(0) },
   };
-  return new ProjectSession(await writeManifests(book));
+  const session = new ProjectSession(await writeManifests(book));
+  t.after(() => session.close());
+  return session;
 }
 
 test('UI and agent saves share named Undo and Redo entries', async (t) => {
@@ -131,4 +133,13 @@ test('imported source registries and files survive earlier Undo and Redo', async
   assert.equal(session.book.files.route.text, '<gpx/>');
   assert.equal(session.book.photos.has('image'), true);
   assert.deepEqual(session.book.problems, []);
+});
+
+test('closing a project session closes its input index', async (t) => {
+  const session = await fixture(t);
+  const inputs = session.inputs;
+  await inputs.capture();
+  session.close();
+  session.close();
+  await assert.rejects(inputs.capture());
 });

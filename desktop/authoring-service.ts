@@ -8,8 +8,8 @@ import { applyProjectCommands, ProjectCommandError } from '../src/project-comman
 import { pageSequence } from '../src/format';
 import { keptOutside } from '../src/layouts';
 import { sourceUsage } from '../src/editing';
-import { captureProjectInputs, captureProjectRevision, ProjectRevisionError } from './revisions';
-import type { ProjectInputCapture } from './revisions';
+import { ProjectRevisionError } from './revisions';
+import type { ProjectInputCapture, ProjectInputIndex } from './revisions';
 import { loadProject, readProjectDocument } from './project';
 import { photoExtensions } from './photos';
 import type { OpenProject } from './project';
@@ -23,7 +23,7 @@ type Hooks = {
   session: () => ProjectSession | undefined;
   cache: string;
   docs: string;
-  check: (book: OpenProject, request: AuthoringCheckRequest, signal: AbortSignal) => Promise<AuthoringCheckResult>;
+  check: (book: OpenProject, request: AuthoringCheckRequest, signal: AbortSignal, index?: ProjectInputIndex) => Promise<AuthoringCheckResult>;
   changed: (book: OpenProject) => void;
   recovery: (message: string) => void;
   import: (request: ImportRequest, paths: string[], base: OpenProject) => Promise<{ imported: string[] }>;
@@ -42,8 +42,8 @@ async function contained(root: string, path: string, allowed: string[]) {
   return actual;
 }
 
-async function contextInputs(folder: string, signal: AbortSignal): Promise<{ inputs?: ProjectInputCapture; failure?: string }> {
-  try { return { inputs: await captureProjectInputs(folder, { signal }) }; }
+async function contextInputs(index: ProjectInputIndex, signal: AbortSignal): Promise<{ inputs?: ProjectInputCapture; failure?: string }> {
+  try { return { inputs: await index.capture({ signal }) }; }
   catch (error) {
     signal.throwIfAborted();
     if (!(error instanceof ProjectRevisionError)) throw error;
@@ -95,39 +95,90 @@ function sameDocuments(before: PromiseSettledResult<{ source: Buffer }>[], after
 }
 
 export function createAuthoringService(hooks: Hooks) {
+  let cachedCheck: { session: ProjectSession; inputs: ProjectInputCapture; result: AuthoringCheckResult } | undefined;
   const get = (handle: unknown) => {
     const session = hooks.session();
     if (!session || session.handle !== handle) throw new AuthoringError('PROJECT_CLOSED', 'This project is no longer open. Call list_projects for current handles.');
     return session;
   };
-  const checked = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest = {}) => {
-    const result = await hooks.check(session.book, request, signal);
+  const checkOnce = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest, fresh: boolean) => {
+    signal.throwIfAborted();
+    const before = await contextInputs(session.inputs, signal);
+    const matches = cachedCheck?.session === session && before.inputs && cachedCheck.inputs.revision === before.inputs.revision &&
+      cachedCheck.inputs.observation === before.inputs.observation;
+    if (!matches) cachedCheck = undefined;
+    // expectedRevision is checked before reuse. It constrains the inputs without changing a no-preview render.
+    const expectedMatches = !request.expectedRevision || request.expectedRevision === before.inputs?.revision;
+    if (!fresh && !request.preview && expectedMatches && cachedCheck) {
+      get(session.handle);
+      return { result: structuredClone(cachedCheck.result), watcherInvalidated: false };
+    }
+    if (fresh) cachedCheck = undefined;
+    const result = await hooks.check(session.book, request, signal, session.inputs);
     get(session.handle);
-    return result;
+    const after = await contextInputs(session.inputs, signal);
+    if (before.failure !== after.failure || before.inputs?.revision !== after.inputs?.revision ||
+        before.inputs?.observation !== after.inputs?.observation || result.revision !== (after.inputs?.revision ?? null)) {
+      if (before.inputs && after.inputs && before.inputs.revision === after.inputs.revision &&
+          before.inputs.metadataObservation === after.inputs.metadataObservation && before.inputs.observation !== after.inputs.observation) {
+        return { result, watcherInvalidated: true };
+      }
+      throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while checking. Check again.');
+    }
+    if (result.state === 'ready' && after.inputs) {
+      const { image: _image, ...baseline } = result;
+      cachedCheck = { session, inputs: after.inputs, result: structuredClone(baseline) };
+    }
+    return { result, watcherInvalidated: false };
+  };
+  const checked = async (session: ProjectSession, signal: AbortSignal, request: AuthoringCheckRequest = {}, fresh = false) => {
+    const first = await checkOnce(session, signal, request, fresh);
+    if (!first.watcherInvalidated) return first.result;
+    signal.throwIfAborted();
+    cachedCheck = undefined;
+    const retried = await checkOnce(session, signal, request, true);
+    if (retried.watcherInvalidated) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while checking. Check again.');
+    return retried.result;
   };
   const revision = async (session: ProjectSession, expected: unknown, signal: AbortSignal) => {
-    const current = await captureProjectInputs(session.book.folder, { signal });
+    const current = await session.inputs.capture({ signal });
     if (current.revision !== expected) throw new AuthoringError('REVISION_CONFLICT', 'Inputs changed. Inspect or check the book again before editing.', { currentRevision: current.revision });
     return current;
+  };
+  const prepareMutation = async (session: ProjectSession, expected: unknown, signal: AbortSignal) => {
+    for (let attempt = 0; ; attempt++) {
+      const inputs = await revision(session, expected, signal);
+      const report = await checked(session, signal, { expectedRevision: inputs.revision }, attempt > 0);
+      if (report.state !== 'ready' || !report.render) return { report };
+      const fresh = await loadProject(session.book.folder, hooks.cache, session.book.readOnly);
+      const loaded = await revision(session, expected, signal);
+      if (loaded.observation === inputs.observation) return { inputs, report, fresh };
+      if (attempt === 0 && loaded.revision === inputs.revision && loaded.metadataObservation === inputs.metadataObservation) {
+        signal.throwIfAborted();
+        cachedCheck = undefined;
+        continue;
+      }
+      throw new AuthoringError('SOURCE_CHANGED', 'Files changed while preparing the command. Check again.');
+    }
   };
   return async (name: string, args: Record<string, any>, signal: AbortSignal): Promise<Record<string, unknown>> => {
     if (name === 'list_projects') {
       const session = hooks.session();
       if (!session) return { projects: [] };
       let current: string | null = null;
-      try { current = await captureProjectRevision(session.book.folder, { signal }); } catch { signal.throwIfAborted(); }
+      try { current = (await session.inputs.capture({ signal })).revision; } catch { signal.throwIfAborted(); }
       return { projects: [{ project: session.handle, title: session.book.project.title, folder: session.book.folder,
         writable: !session.book.readOnly, revision: current, history: session.history }], scope: 'The currently open, authorized book. Handles expire when closed or reopened.' };
     }
     const session = get(args.project);
     if (name === 'check_book') {
       if (args.preview?.target?.page && !args.expectedRevision) throw new AuthoringError('REVISION_REQUIRED', 'Page-number previews require expectedRevision; spread IDs can be used without it.');
-      return checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview });
+      return checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview }, true);
     }
     if (name === 'get_authoring_context' || name === 'inspect_book') {
       const report = await checked(session, signal);
       const folder = session.book.folder;
-      const before = await contextInputs(folder, signal);
+      const before = await contextInputs(session.inputs, signal);
       if (report.revision !== (before.inputs?.revision ?? null)) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while preparing context. Check again.');
       const reportedFailure = report.diagnostics.find(({ code }) => ['source-missing', 'source-outside-project', 'source-unreadable'].includes(code));
       if (before.failure && reportedFailure && before.failure !== JSON.stringify([reportedFailure.code, reportedFailure.location?.path])) {
@@ -212,7 +263,7 @@ export function createAuthoringService(hooks: Hooks) {
       }
       await verifySources?.();
       const documentsAfter = await readDocuments();
-      const after = await contextInputs(folder, signal);
+      const after = await contextInputs(session.inputs, signal);
       if (!sameDocuments(documents, documentsAfter) || before.failure !== after.failure ||
           before.inputs?.revision !== after.inputs?.revision || before.inputs?.observation !== after.inputs?.observation) {
         throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while inspecting. Retry for current context.');
@@ -229,7 +280,6 @@ export function createAuthoringService(hooks: Hooks) {
       return { ...receipt.result, replayed: true };
     }
     if (session.receipts.size >= 1000) throw new AuthoringError('SESSION_LIMIT', 'This project session has reached 1000 requests. Reopen the book for a new handle.');
-    const inputs = await revision(session, args.expectedRevision, signal);
     const commit = async (save: () => Promise<unknown>) => {
       try { return { value: await save() }; }
       catch (error) {
@@ -241,11 +291,8 @@ export function createAuthoringService(hooks: Hooks) {
         return { recovery: result };
       }
     };
-    const report = await checked(session, signal, { expectedRevision: inputs.revision });
-    if (report.state !== 'ready' || !report.render) return { ...report, committed: false };
-    const fresh = await loadProject(session.book.folder, hooks.cache, session.book.readOnly);
-    const loaded = await revision(session, args.expectedRevision, signal);
-    if (loaded.observation !== inputs.observation) throw new AuthoringError('SOURCE_CHANGED', 'Files changed while preparing the command. Check again.');
+    const { inputs, report, fresh } = await prepareMutation(session, args.expectedRevision, signal);
+    if (!fresh || !inputs || !report.render) return { ...report, committed: false };
     signal.throwIfAborted();
     let result: Record<string, unknown>;
     if (name === 'apply_project_changes') {
@@ -285,7 +332,7 @@ export function createAuthoringService(hooks: Hooks) {
     result.revision = null;
     session.receipts.set(args.idempotencyKey, { request, result });
     hooks.changed(session.book);
-    try { result.revision = await captureProjectRevision(session.book.folder); }
+    try { result.revision = (await session.inputs.capture()).revision; }
     catch { result.notice = 'The edit was committed, but files changed before a new revision could be captured. Check the book again.'; }
     result.history = session.history;
     return result;

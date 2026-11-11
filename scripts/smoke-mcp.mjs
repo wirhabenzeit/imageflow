@@ -137,6 +137,35 @@ try {
   await title.blur();
   await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Saved');
   await ready();
+  // A UI save that lands while the agent is requesting its lease must not be rejected by agent busy state.
+  revision=(await good('list_projects')).projects[0].revision;
+  await app.evaluate(({BrowserWindow}) => {
+    const contents=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL()==='imageflow://editor/').webContents;
+    const send=contents.send;
+    globalThis.leaseGate={waiting:false,release:null};
+    contents.send=function(channel,...args) {
+      if (channel==='project:agent-lease') {
+        contents.send=send;
+        globalThis.leaseGate.waiting=true;
+        globalThis.leaseGate.release=()=>send.call(contents,channel,...args);
+        return;
+      }
+      return send.call(contents,channel,...args);
+    };
+  });
+  const waitingAgent=call('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'lease-race',label:'Agent title',operations:[{op:'set_title',title:'Must not replace human save'}]});
+  for (let attempts=0;;attempts++) {
+    if (await app.evaluate(()=>globalThis.leaseGate.waiting)) break;
+    assert.ok(attempts<100,'agent requested its editing lease');
+    await new Promise(resolve=>setTimeout(resolve,10));
+  }
+  await title.fill('Human save during agent handoff');
+  await title.blur();
+  await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Saved');
+  assert.equal(JSON.parse(await readFile(join(folder,'project.json'),'utf8')).title,'Human save during agent handoff');
+  await app.evaluate(()=>globalThis.leaseGate.release());
+  assert.ok(['REVISION_CONFLICT','EDIT_IN_PROGRESS'].includes((await waitingAgent).data.error.code));
+  await ready();
   revision=(await good('list_projects')).projects[0].revision;
   const imported=await good('import_sources',{project,expectedRevision:revision,idempotencyKey:'photo-import',kind:'photo',paths:['inbox/green.png']});
   assert.equal(imported.sources.length,1);
@@ -154,6 +183,7 @@ try {
   await writeFile(entry,authored+'\nconst broken = ;');
   const broken=await call('check_book',{project,preview:{target:{spread:'first'},maxEdge:300}});
   assert.equal(broken.response.isError,true);
+  assert.ok(broken.data.checks,JSON.stringify(broken.data));
   assert.equal(broken.data.checks.bundle,'failed');
   assert.ok(broken.data.diagnostics[0].location.line);
   await window.locator('.status-error').waitFor();

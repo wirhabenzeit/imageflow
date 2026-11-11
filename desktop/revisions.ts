@@ -14,7 +14,12 @@ type ExistingInput = { kind: 'file' | 'directory'; actual: string; info: BigIntS
 type InputState = { kind: 'missing' } | ExistingInput;
 type Entry = { input: Input; state: InputState; digest?: string; children?: string[] };
 type CaptureOptions = { signal?: AbortSignal; attempts?: 1 | 2 | 3 };
-export type ProjectInputCapture = { revision: ProjectRevision; observation: string };
+export type ProjectInputCapture = { revision: ProjectRevision; observation: string; metadataObservation: string };
+export type InputIndexMetrics = { captures: number; filesHashed: number; bytesHashed: number; cacheHits: number;
+  photoFilesHashed: number; photoBytesHashed: number };
+type IndexedDigest = { state: ExistingInput; digest: string };
+type IndexState = { entries: Map<string, IndexedDigest>; generation: number; closed: boolean; metrics: InputIndexMetrics };
+const maximumIndexedFiles = 8192;
 
 const ignoredName = (name: string) => name === '.DS_Store' || name === '.imageflow' ||
   name.startsWith('.imageflow-write-') || /(?:\.sw[opx]|\.tmp|~)$/.test(name);
@@ -86,7 +91,7 @@ function sameState(a: InputState, b: InputState) {
 }
 
 async function readInput(root: string, input: Input, state: ExistingInput,
-  signal: AbortSignal | undefined, keepBytes: boolean) {
+  signal: AbortSignal | undefined, keepBytes: boolean, metrics?: InputIndexMetrics) {
   const changed = () => new ProjectRevisionError('source-changed', input.path);
   try {
     const handle = await open(state.actual, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -94,10 +99,22 @@ async function readInput(root: string, input: Input, state: ExistingInput,
       if (!sameFile(state.info, await handle.stat({ bigint: true })) ||
           !sameState(state, await inspect(root, input))) throw changed();
       const hash = createHash('sha256');
+      if (metrics) {
+        metrics.filesHashed++;
+        if (input.folder === 'photos') metrics.photoFilesHashed++;
+      }
+      const hashBytes = (bytes: Buffer | string) => {
+        hash.update(bytes);
+        if (metrics) {
+          const length = typeof bytes === 'string' ? Buffer.byteLength(bytes) : bytes.length;
+          metrics.bytesHashed += length;
+          if (input.folder === 'photos') metrics.photoBytesHashed += length;
+        }
+      };
       const bytes = keepBytes ? await handle.readFile({ signal }) : undefined;
-      if (bytes) hash.update(bytes);
+      if (bytes) hashBytes(bytes);
       else {
-        for await (const chunk of handle.createReadStream({ autoClose: false, signal })) hash.update(chunk);
+        for await (const chunk of handle.createReadStream({ autoClose: false, signal })) hashBytes(chunk);
       }
       if (!sameFile(state.info, await handle.stat({ bigint: true }))) throw changed();
       return { digest: hash.digest('hex'), bytes };
@@ -105,7 +122,7 @@ async function readInput(root: string, input: Input, state: ExistingInput,
       await handle.close();
     }
   } catch (error) {
-    signal?.throwIfAborted();
+    if (signal?.aborted) throw error;
     if (error instanceof ProjectRevisionError) throw error;
     if (isMissing(error) || (error as NodeJS.ErrnoException).code === 'ELOOP') throw changed();
     throw new ProjectRevisionError('source-unreadable', input.path, { cause: error });
@@ -129,8 +146,13 @@ function readManifest(bytes: Buffer): unknown {
   }
 }
 
-async function capture(folder: string, signal?: AbortSignal): Promise<ProjectInputCapture> {
+async function capture(folder: string, signal?: AbortSignal, index?: IndexState): Promise<ProjectInputCapture> {
   signal?.throwIfAborted();
+  const generation = index?.generation;
+  if (index) {
+    if (index.closed) throw new ProjectRevisionError('source-changed');
+    index.metrics.captures++;
+  }
   let root: string;
   try {
     root = await realpath(folder);
@@ -146,7 +168,24 @@ async function capture(folder: string, signal?: AbortSignal): Promise<ProjectInp
     if (keepBytes && state.kind !== 'file') {
       throw new ProjectRevisionError(state.kind === 'missing' ? 'source-missing' : 'source-unreadable', input.path);
     }
-    const result = state.kind === 'file' ? await readInput(root, input, state, signal, keepBytes) : undefined;
+    // Reuse content only after fresh path containment and metadata checks; manifests still supply their bytes.
+    const cached = !keepBytes && index?.entries.get(input.path);
+    let result: { digest: string; bytes?: Buffer } | undefined;
+    if (state.kind === 'file') {
+      if (cached && sameState(cached.state, state)) {
+        result = { digest: cached.digest };
+        index!.metrics.cacheHits++;
+        index!.entries.delete(input.path);
+        index!.entries.set(input.path, cached);
+      } else {
+        result = await readInput(root, input, state, signal, keepBytes, index?.metrics);
+        if (index && (index.closed || index.generation !== generation)) throw new ProjectRevisionError('source-changed', input.path);
+        if (index && !keepBytes) {
+          index.entries.set(input.path, { state, digest: result.digest });
+          while (index.entries.size > maximumIndexedFiles) index.entries.delete(index.entries.keys().next().value!);
+        }
+      }
+    }
     const entry: Entry = { input, state, digest: result?.digest };
     entries.set(input.path, entry);
     return { entry, bytes: result?.bytes };
@@ -197,7 +236,53 @@ async function capture(folder: string, signal?: AbortSignal): Promise<ProjectInp
   }
   if (await realpath(folder).catch(() => undefined) !== root) throw new ProjectRevisionError('source-changed');
   signal?.throwIfAborted();
-  return { revision: hash.digest('hex'), observation: observation.digest('hex') };
+  const metadataObservation = observation.copy().digest('hex');
+  if (index) {
+    if (index.closed || index.generation !== generation) throw new ProjectRevisionError('source-changed');
+    // Even a reverted edit observed by the watcher invalidates an in-flight result.
+    observation.update('generation:' + generation);
+    for (const path of index.entries.keys()) if (!entries.has(path)) index.entries.delete(path);
+  }
+  return { revision: hash.digest('hex'), observation: observation.digest('hex'), metadataObservation };
+}
+
+/** One bounded digest index per open project. Watchers invalidate it immediately, while every capture
+ * also reconciles metadata and directory membership so missed events cannot silently reuse changed files. */
+export class ProjectInputIndex {
+  private readonly state: IndexState = { entries: new Map(), generation: 0, closed: false,
+    metrics: { captures: 0, filesHashed: 0, bytesHashed: 0, cacheHits: 0, photoFilesHashed: 0, photoBytesHashed: 0 } };
+  private pending: Promise<unknown> = Promise.resolve();
+  constructor(readonly folder: string) {}
+
+  get metrics(): InputIndexMetrics { return { ...this.state.metrics }; }
+
+  invalidate(path?: string) {
+    if (this.state.closed || (path !== undefined && !isProjectInputPath(path))) return;
+    this.state.generation++;
+    for (const name of this.state.entries.keys()) {
+      if (path === undefined || name === path || name.startsWith(path + sep)) this.state.entries.delete(name);
+    }
+  }
+
+  capture({ signal, attempts = 2 }: CaptureOptions = {}): Promise<ProjectInputCapture> {
+    // Concurrent UI/MCP checks share completed digests instead of each starting a cold multi-GB scan.
+    const task = this.pending.then(async () => {
+      for (let attempt = 1; ; attempt++) {
+        try { return await capture(this.folder, signal, this.state); }
+        catch (error) {
+          if (this.state.closed || !(error instanceof ProjectRevisionError) || error.code !== 'source-changed' || attempt >= attempts) throw error;
+        }
+      }
+    });
+    this.pending = task.catch(() => {});
+    return task;
+  }
+
+  close() {
+    this.invalidate();
+    this.state.closed = true;
+    this.state.entries.clear();
+  }
 }
 
 // Compare both values around an operation. The revision identifies content, and the local observation also detects

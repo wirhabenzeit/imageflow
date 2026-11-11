@@ -3,6 +3,8 @@ import type { ProjectFiles } from '../src/project';
 import type { HistoryState } from '../src/desktop';
 import { updateProject } from './project';
 import type { OpenProject } from './project';
+import { ProjectInputIndex } from './revisions';
+import { CheckRenditionCache } from './check-cache';
 
 type Entry = { files: ProjectFiles; label: string };
 const filesOf = (book: ProjectFiles): ProjectFiles => structuredClone({ project: book.project, photoIndex: book.photoIndex });
@@ -12,10 +14,24 @@ const same = (a: ProjectFiles, b: ProjectFiles) => JSON.stringify(a.project) ===
 /** One app-owned history shared by UI saves, agent batches and imports onto a spread. */
 export class ProjectSession {
   readonly handle = randomUUID();
+  readonly inputs: ProjectInputIndex;
+  readonly renditions = new CheckRenditionCache();
   private past: Entry[] = [];
   private future: Entry[] = [];
   readonly receipts = new Map<string, { request: string; result: Record<string, unknown> }>();
-  constructor(public book: OpenProject) {}
+  constructor(public book: OpenProject) {
+    this.inputs = new ProjectInputIndex(book.folder);
+  }
+
+  close() {
+    this.inputs.close();
+    return this.renditions.close();
+  }
+
+  private invalidateManifests(book: ProjectFiles) {
+    if (JSON.stringify(this.book.project) !== JSON.stringify(book.project)) this.inputs.invalidate('project.json');
+    if (JSON.stringify(this.book.photoIndex) !== JSON.stringify(book.photoIndex)) this.inputs.invalidate('photos.json');
+  }
 
   get history(): HistoryState {
     return { undo: this.past.at(-1)?.label, redo: this.future.at(-1)?.label };
@@ -23,6 +39,7 @@ export class ProjectSession {
 
   adoptExternal(book: OpenProject) {
     if (!same(this.book, book)) {
+      this.invalidateManifests(book);
       this.past = [];
       this.future = [];
     }
@@ -35,6 +52,7 @@ export class ProjectSession {
       if (this.past.length > 100) this.past.shift();
       this.future = [];
     }
+    this.invalidateManifests(book);
     this.book = book;
   }
 
@@ -57,6 +75,7 @@ export class ProjectSession {
     const next = await updateProject(this.book, files, true);
     source.pop();
     destination.push({ files: filesOf(this.book), label: entry.label });
+    this.invalidateManifests(next);
     this.book = next;
     return next;
   }

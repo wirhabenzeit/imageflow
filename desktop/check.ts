@@ -7,6 +7,8 @@ import type { RenderStatus } from '../src/desktop';
 import type { PreviewRequest } from '../src/preview';
 import { PreviewError } from '../src/preview';
 import { captureProjectInputs, ProjectRevisionError } from './revisions';
+import type { ProjectInputIndex } from './revisions';
+import type { CheckRenditionCache } from './check-cache';
 import { loadProject, TemplateCompileError } from './project';
 import type { OpenProject } from './project';
 import type { BookPreview } from './preview';
@@ -21,7 +23,8 @@ type RenderCheck = (book: OpenProject, preview: PreviewRequest | undefined, sign
  * Inputs are checked again after rendering; changed inputs invalidate the entire result.
  */
 export async function checkProject(
-  source: OpenProject, fallbackCache: string, request: unknown, render: RenderCheck, signal: AbortSignal,
+  source: OpenProject, fallbackCache: string, request: unknown, render: RenderCheck, signal: AbortSignal, index?: ProjectInputIndex,
+  renditions?: CheckRenditionCache,
 ): Promise<AuthoringCheckResult> {
   const result: AuthoringCheckResult = {
     state: 'error', revision: null, diagnostics: [],
@@ -35,14 +38,16 @@ export async function checkProject(
   }
   let phase: 'project' | 'template' | 'render' = 'project';
   let privateCache: string | undefined;
+  let retainedCache = false;
   let inputs: Awaited<ReturnType<typeof captureProjectInputs>> | undefined;
+  const capture = () => index ? index.capture({ signal }) : captureProjectInputs(source.folder, { signal });
   const inputsMatch = async () => {
-    const current = await captureProjectInputs(source.folder, { signal });
+    const current = await capture();
     return inputs && current.revision === inputs.revision && current.observation === inputs.observation;
   };
   try {
     signal.throwIfAborted();
-    inputs = await captureProjectInputs(source.folder, { signal });
+    inputs = await capture();
     result.revision = inputs.revision;
     if (parsed.data.expectedRevision && parsed.data.expectedRevision !== result.revision) {
       result.diagnostics.push({ code: 'revision-conflict', stage: 'project', severity: 'error',
@@ -56,6 +61,8 @@ export async function checkProject(
     if (!await inputsMatch()) {
       throw new ProjectRevisionError('source-changed');
     }
+    const photoKeys = new Set([...book.photos.values()].map((photo) => photo.key));
+    await renditions?.seed(privateCache, photoKeys);
     result.checks.bundle = 'passed';
     phase = 'render';
     const checked = await render(book, parsed.data.preview, signal);
@@ -75,6 +82,7 @@ export async function checkProject(
       const { bytes, mimeType, status: _status, ...metadata } = checked.preview;
       result.image = { ...metadata, mimeType, data: Buffer.from(bytes).toString('base64') };
     }
+    retainedCache = await renditions?.retain(privateCache, photoKeys) ?? false;
     return result;
   } catch (error) {
     // Cancellation must not replace a compiler/source/render failure that already occurred.
@@ -115,6 +123,6 @@ export async function checkProject(
     return result;
   } finally {
     // The app also removes its cache root at shutdown. Cleanup must not replace a useful check result.
-    if (privateCache) await rm(privateCache, { recursive: true, force: true }).catch(() => {});
+    if (privateCache && !retainedCache) await rm(privateCache, { recursive: true, force: true }).catch(() => {});
   }
 }

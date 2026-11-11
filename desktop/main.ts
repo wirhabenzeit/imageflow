@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, protocol } from 'electron';
 import type { IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
@@ -16,6 +16,7 @@ import type { OpenProject } from './project';
 import { photoExtensions, photoFile } from './photos';
 import { bundledFontNames } from './fonts';
 import { isProjectInputPath } from './revisions';
+import type { ProjectInputIndex } from './revisions';
 import { checkProject } from './check';
 import { captureBookPreview, checkBookRender } from './preview';
 import { ProjectSession } from './project-session';
@@ -151,7 +152,10 @@ async function fromEditor<T>(event: IpcMainInvokeEvent, run: (owner: BrowserWind
 
 function activate(book: OpenProject, external = false): ProjectSummary {
   if (closing) throw new AuthoringError('PROJECT_CLOSED', 'The project window closed.');
-  if (!projectSession || projectSession.book.folder !== book.folder) projectSession = new ProjectSession(book);
+  if (!projectSession || projectSession.book.folder !== book.folder) {
+    projectSession?.close();
+    projectSession = new ProjectSession(book);
+  }
   else if (external) projectSession.adoptExternal(book);
   else projectSession.book = book;
   const previous = active;
@@ -191,6 +195,7 @@ function watchProject(book: OpenProject) {
   stopWatch();
   if (book.readOnly) return;
   const folder = book.folder;
+  const inputs = projectSession?.inputs;
   let checkingChanges = false;
   function scheduleReload(delay = 220) {
     clearTimeout(reloadTimer);
@@ -229,6 +234,15 @@ function watchProject(book: OpenProject) {
         scheduleReload(250);
         return;
       }
+      for (const [i, file] of files.entries()) {
+        if (!external[i]) {
+          const receipt = importedWrites.get(file);
+          if (receipt) {
+            importedWrites.consume(file, receipt);
+            if (observedChanges.has(file)) importedWrites.observe(file);
+          }
+        }
+      }
       if (!external.some(Boolean)) return;
       busy = true;
       try {
@@ -250,16 +264,29 @@ function watchProject(book: OpenProject) {
     }).finally(() => { checkingChanges = false; });
   }
   try {
-    watcher = watch(folder, { recursive: true }, (_event, file) => {
-      if (!file || !isProjectInputPath(file)) return;
+    const installed = watch(folder, { recursive: true }, (_event, file) => {
+      if (watcher !== installed || projectSession?.inputs !== inputs) return;
+      if (!file) {
+        inputs?.invalidate();
+        observedChanges.add('template');
+        scheduleReload();
+        return;
+      }
+      if (!isProjectInputPath(file)) return;
+      inputs?.invalidate(file);
+      importedWrites.observe(file);
       observedChanges.add(file);
       scheduleReload();
     });
-    watcher.on('error', (error) => {
+    watcher = installed;
+    installed.on('error', (error) => {
+      if (watcher !== installed) return;
+      inputs?.invalidate();
       window?.webContents.send(channels.changed, { error: 'Project watcher stopped. ' + error.message });
       stopWatch();
     });
   } catch (error) {
+    inputs?.invalidate();
     window?.webContents.send(channels.changed, { error: 'Project watcher could not start. ' + errorMessage(error) });
   }
 }
@@ -322,10 +349,13 @@ async function openProject(owner: BrowserWindow, action: OpenAction): Promise<Pr
   if (owner.isDestroyed()) { await loaded.release?.(); return null; }
   if (!loaded.keepLock) {
     try { await unlockProject?.(); }
-    catch (error) { await loaded.release?.(); throw error; }
+    catch (error) { console.warn('ImageFlow preserved the previous project lock after cleanup failed:', errorMessage(error)); }
     unlockProject = loaded.release;
   }
-  if (action !== 'reload') projectSession = new ProjectSession(loaded.book);
+  if (action !== 'reload') {
+    projectSession?.close();
+    projectSession = new ProjectSession(loaded.book);
+  }
   const summary = activate(loaded.book, action === 'reload');
   if (action !== 'reload' || !watcher) watchProject(loaded.book);
   if (devState) await writeFile(devState, JSON.stringify({ folder: loaded.book.folder, readOnly: loaded.book.readOnly })).catch(() => {});
@@ -388,7 +418,8 @@ async function importFiles(owner: BrowserWindow, id: string, request: ImportRequ
   const createdDirectory = !await fingerprint(destination);
   const { book: next, imported, copied } = await importIntoProject(book, request, [...new Set(files)]);
   for (const file of createdDirectory ? [destination, ...copied] : copied) {
-    importedWrites.set(relative(book.folder, file), await fingerprint(file));
+    const path = relative(book.folder, file);
+    importedWrites.set(path, await fingerprint(file), observedChanges.has(path));
   }
   if (owner.isDestroyed()) return null;
   projectSession!.adoptExternal(book);
@@ -426,7 +457,9 @@ async function exportBook(owner: BrowserWindow, projectId: string, mode: ExportM
   }
 }
 
-async function checkOpenBook(book: OpenProject, request: AuthoringCheckRequest, externalSignal?: AbortSignal) {
+async function checkOpenBook(book: OpenProject, request: AuthoringCheckRequest, externalSignal?: AbortSignal,
+  inputs: ProjectInputIndex | undefined = projectSession?.book.folder === book.folder ? projectSession.inputs : undefined) {
+  const renditions = projectSession?.inputs === inputs ? projectSession?.renditions : undefined;
   const job = new AbortController();
   const timeout = setTimeout(() => job.abort(new Error('The authoring check timed out.')), 90_000);
   checkJobs.add(job);
@@ -445,7 +478,7 @@ async function checkOpenBook(book: OpenProject, request: AuthoringCheckRequest, 
       } finally {
         sessions.delete(id);
       }
-    }, externalSignal ? AbortSignal.any([job.signal, externalSignal]) : job.signal);
+    }, externalSignal ? AbortSignal.any([job.signal, externalSignal]) : job.signal, inputs, renditions);
   } finally {
     clearTimeout(timeout);
     if (checkJob === job) checkJob = undefined;
@@ -526,15 +559,20 @@ async function enableMcp() {
         return await queue.run(async (queuedSignal) => {
           requestSignal = queuedSignal;
           const mutation = name === 'apply_project_changes' || name === 'import_sources';
-          // Reserve the writer before asking the renderer for its editing lease.
-          if (mutation) busy = true;
+          let locked = false;
           try {
             if (mutation) await agentLease(queuedSignal);
             queuedSignal.throwIfAborted();
+            if (mutation) {
+              // Allow already-enqueued UI saves to finish before claiming the writer.
+              if (busy) throw new AuthoringError('EDIT_IN_PROGRESS', 'An editor operation started. Let it finish, then retry.');
+              busy = true;
+              locked = true;
+            }
             return await service(name, args, queuedSignal);
           } finally {
             if (mutation) {
-              busy = false;
+              if (locked) busy = false;
               if (window && !window.isDestroyed()) window.webContents.send(channels.agentRelease);
             }
           }
@@ -596,6 +634,7 @@ function createWindow() {
       finally {
         for (const [id, { mode }] of sessions) if (mode === 'edit') sessions.delete(id);
         active = undefined;
+        projectSession?.close();
         projectSession = undefined;
       }
     })().catch((error) => console.error('ImageFlow could not close its project', error));
@@ -605,6 +644,10 @@ function createWindow() {
 
 void app.whenReady().then(async () => {
   cache = await mkdtemp(join(app.getPath('temp'), 'imageflow-cache-'));
+  powerMonitor.on('resume', () => { projectSession?.inputs.invalidate(); });
+  if (!app.isPackaged && process.env.IMAGEFLOW_BENCHMARK === '1') {
+    Object.defineProperty(globalThis, 'imageflowBenchmarkInputs', { value: () => projectSession?.inputs.metrics });
+  }
   app.on('before-quit', () => { quitting = true; });
   app.on('will-quit', (event) => {
     if (quitReady) return;

@@ -7,7 +7,7 @@ import { mock, test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
 import { photoDetails, photoFile } from '../desktop/photos';
-import { captureProjectInputs, captureProjectRevision, ProjectRevisionError } from '../desktop/revisions';
+import { captureProjectInputs, captureProjectRevision, ProjectInputIndex, ProjectRevisionError } from '../desktop/revisions';
 
 const project = {
   schemaVersion: 1,
@@ -223,4 +223,102 @@ test('an in-place photo edit with restored mtime uses a fresh thumbnail', async 
   const afterThumb = await photoFile({ ...after, original, cache }, 'thumb');
   assert.notEqual(afterThumb, beforeThumb);
   assert.notDeepEqual(await readFile(afterThumb), await readFile(beforeThumb));
+});
+
+test('warm captures and title/template edits read no unchanged photo bytes', async (t) => {
+  const folder = await makeProject(t);
+  const index = new ProjectInputIndex(folder);
+  t.after(() => index.close());
+  const first = await index.capture();
+  assert.equal(first.revision, await captureProjectRevision(folder));
+  const initial = index.metrics;
+  assert.equal(initial.photoBytesHashed, Buffer.byteLength('photo bytes'));
+  assert.deepEqual(await index.capture(), first);
+  await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, title: 'Edited title' }));
+  index.invalidate('project.json');
+  await index.capture();
+  await writeFile(join(folder, 'template/styles.css'), newCss);
+  index.invalidate('template/styles.css');
+  const edited = await index.capture();
+  assert.notEqual(edited.revision, first.revision);
+  assert.equal(index.metrics.photoBytesHashed, initial.photoBytesHashed);
+  assert.ok(index.metrics.cacheHits > 0);
+});
+
+test('metadata reconciliation catches an unwatched equal-size photo edit with restored mtime', async (t) => {
+  const folder = await makeProject(t);
+  const index = new ProjectInputIndex(folder);
+  t.after(() => index.close());
+  const path = join(folder, 'photos/image.jpg');
+  const timestamp = new Date('2024-02-20T00:00:00.000Z');
+  await utimes(path, timestamp, timestamp);
+  const before = await index.capture();
+  await replacePreservingTime(path, 'photo bytes', 'other bytes');
+  const after = await index.capture();
+  assert.notEqual(before.revision, after.revision);
+  assert.notEqual(before.observation, after.observation);
+  assert.equal(index.metrics.photoFilesHashed, 2);
+  await index.capture();
+  assert.equal(index.metrics.photoFilesHashed, 2);
+});
+
+test('cached inputs still reject escaped symlinks and discover new template files without events', async (t) => {
+  const folder = await makeProject(t);
+  const index = new ProjectInputIndex(folder);
+  t.after(() => index.close());
+  const before = await index.capture();
+  await writeFile(join(folder, 'template/added.ts'), 'export const heading = "New";');
+  assert.notEqual((await index.capture()).revision, before.revision);
+  await rm(join(folder, 'photos/image.jpg'));
+  await symlink('../texts/note.md', join(folder, 'photos/image.jpg'));
+  await assert.rejects(index.capture(), { code: 'source-outside-project', path: 'photos/image.jpg' });
+  assert.equal(index.metrics.photoFilesHashed, 1);
+});
+
+test('watcher invalidation rejects a running capture even if file contents did not change', async (t) => {
+  const folder = await makeProject(t);
+  const index = new ProjectInputIndex(folder);
+  t.after(() => index.close());
+  const initial = await index.capture();
+  const open = fs.open;
+  const patchedOpen = mock.method(fs, 'open', async (...args: Parameters<typeof open>) => {
+    const handle = await open(...args);
+    if (args[0] === join(folder, 'project.json')) index.invalidate('template/styles.css');
+    return handle;
+  });
+  syncBuiltinESMExports();
+  try { await assert.rejects(index.capture({ attempts: 1 }), { code: 'source-changed' }); }
+  finally { patchedOpen.mock.restore(); syncBuiltinESMExports(); }
+  const after = await index.capture();
+  assert.equal(after.revision, initial.revision);
+  assert.notEqual(after.observation, initial.observation);
+  assert.equal(index.metrics.photoFilesHashed, 1);
+});
+
+test('unknown watcher events clear cached digests and concurrent checks share one cold scan', async (t) => {
+  const folder = await makeProject(t);
+  const index = new ProjectInputIndex(folder);
+  t.after(() => index.close());
+  const [one, two] = await Promise.all([index.capture(), index.capture()]);
+  assert.deepEqual(one, two);
+  assert.equal(index.metrics.photoFilesHashed, 1);
+  index.invalidate();
+  const reconciled = await index.capture();
+  assert.equal(reconciled.revision, one.revision);
+  assert.notEqual(reconciled.observation, one.observation);
+  assert.equal(index.metrics.photoFilesHashed, 2);
+});
+
+test('removed sources are evicted and retired sessions cannot reuse their index', async (t) => {
+  const folder = await makeProject(t);
+  const index = new ProjectInputIndex(folder);
+  await index.capture();
+  await writeFile(join(folder, 'photos.json'), '{}');
+  await index.capture();
+  await writeFile(join(folder, 'photos.json'), JSON.stringify(photos));
+  await index.capture();
+  assert.equal(index.metrics.photoFilesHashed, 2);
+  await assert.rejects(index.capture({ signal: AbortSignal.abort() }), { name: 'AbortError' });
+  index.close();
+  await assert.rejects(index.capture(), { code: 'source-changed' });
 });
