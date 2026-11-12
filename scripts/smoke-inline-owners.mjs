@@ -34,10 +34,12 @@ try {
   const storyPhoto = `<ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />`;
   const probe = (label, value) => `{ label: '${label}', parameters: { value: p.string({ label: 'Value', default: '${value}' }) } }`;
   const probed = source
-    .replace(titleParameters, titleParameters + `
+    .replace(titleParameters, titleParameters.replace('heading, ', "heading, showExtra: p.boolean({ label: 'Show extra', default: false }), ") + `
       elements: { firstProbe: ${probe('First probe', 'first')}, secondProbe: ${probe('Second probe', 'second')}, hiddenProbe: ${probe('Hidden probe', 'hidden')} },`)
     .replace(titleText, titleText + `
           <ctx.Text parameter="subtitle" className="subtitle" rect={at.right(margin, 30, page - 2 * margin, 20)} />
+          {ctx.params.showExtra && <div {...ctx.edit('subtitle', 'showExtra')} style={ctx.geometry.css(at.right(150, 5, 100, 10))}>extra</div>}
+          <div {...ctx.edit('subtitle', 'showExtra')} style={ctx.geometry.css(at.right(150, 270, 100, 10))}>stable</div>
           <ctx.Element id="firstProbe" rect={at.right(margin, 270, 60, 10)}>{ctx.elements.firstProbe.params.value}</ctx.Element>
           <ctx.Element id="secondProbe" rect={at.right(margin, 270, 60, 10)}>{ctx.elements.secondProbe.params.value}</ctx.Element>`)
     .replace(storyParameters, "parameters: { heading, textSize, extraProbe: p.string({ label: 'Extra probe', default: 'extra' }) },")
@@ -53,7 +55,7 @@ try {
   const list = w.locator('.inspector').getByRole('region', { name: 'On this spread' });
   // Standalone ctx.Text nodes are listed first, in reading order, and open from the keyboard.
   const entries = await list.getByRole('button').evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label')));
-  assert.deepEqual(entries, ['Edit Heading', 'Edit Subtitle', 'Edit First probe', 'Edit Second probe', 'Edit Hidden probe']);
+  assert.deepEqual(entries, ['Edit Heading', 'Edit Subtitle', 'Edit Subtitle, Show extra', 'Edit First probe', 'Edit Second probe', 'Edit Hidden probe']);
   await list.getByRole('button', { name: 'Edit Subtitle', exact: true }).focus();
   await w.keyboard.press('Enter');
   const subtitle = w.getByRole('dialog', { name: 'Edit Subtitle' });
@@ -100,6 +102,26 @@ try {
   await w.getByRole('dialog', { name: 'Edit Subtitle' }).waitFor();
   await anchoredAt(subtitles.nth(0));
   await w.keyboard.press('Escape');
+
+  // A node with the same fields appearing earlier on the sheet renumbers the occurrences while an editor is open.
+  // The editor stays on the node it opened at and keeps the text typed but not yet applied.
+  const marked = frame.locator('[data-spread="title"] [data-edit="subtitle showExtra"]');
+  assert.equal(await marked.count(), 1);
+  const stable = await centre(marked.first());
+  await w.mouse.click(stable.x, stable.y);
+  const both = w.getByRole('dialog', { name: 'Edit Subtitle, Show extra' });
+  await both.waitFor();
+  await anchoredAt(marked.first());
+  await both.getByRole('textbox', { name: 'Subtitle' }).fill('Not applied yet');
+  await both.getByRole('checkbox', { name: 'Show extra' }).click();
+  await saved('Show extra updated');
+  await ready();
+  await marked.nth(1).waitFor();
+  assert.equal(await both.getByRole('textbox', { name: 'Subtitle' }).inputValue(), 'Not applied yet');
+  await anchoredAt(marked.nth(1));
+  // Escape cancels the typing.
+  await w.keyboard.press('Escape');
+  assert.equal((await read()).spreads[0].params.subtitle, 'Typed from the list');
 
   // The second of two elements at the same place edits its own value, not the first one's.
   await list.getByRole('button', { name: 'Edit Second probe', exact: true }).click();

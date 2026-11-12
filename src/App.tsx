@@ -688,18 +688,18 @@ export function App() {
   const attachedEdits = (target: Target | undefined, owner: Owner) =>
     target?.edits.filter((path) => !path.startsWith((owner.type === 'element' ? 'elements.' : 'boxes.') + owner.id + '.')) ?? [];
   const ownerKey = (spread: string, id: string) => spread + '|#' + id;
-  // A marked node is found by its key; if a re-render shifted the occurrence numbers of its field, by where it was.
+  // A marked node is found by its key when the editor opens, and afterwards by where it was, since a re-render can
+  // shift the occurrence numbers of its field. `editing.key` stays the editor session's identity throughout, so the
+  // popover and its unsaved drafts are kept while the node it is anchored to is renamed.
   const editAnchor = useRef<{ key: string; at: TargetAnchor }>(undefined);
   const editTarget: Target | undefined = editing && (editing.owner ? ownerTarget(editing.spread, editing.owner)
     : geometry && resolveTarget(geometry.targets, editing.key, editAnchor.current?.key === editing.key ? editAnchor.current.at : undefined));
-  // The key of the node the open editor is anchored to, which can differ from the one it opened with after a shift.
+  // The key of the node the open editor is anchored to now, for its outline and for Tab.
   const editKey = editing && !editing.owner && editTarget ? targetKey(editTarget) : editing?.key;
   useEffect(() => {
     if (!editing || editing.owner) editAnchor.current = undefined;
-    else if (editTarget && geometry && editKey === editing.key) editAnchor.current = { key: editing.key, at: targetAnchor(editTarget, geometry.targets) };
-    // Renamed to the node it is now anchored to, so the next render finds it by key again.
-    else if (editKey && editKey !== editing.key) setEditing((open) => open && !open.owner && open.key === editing.key ? { ...open, key: editKey } : open);
-  }, [editing, editTarget, editKey, geometry]);
+    else if (editTarget) editAnchor.current = { key: editing.key, at: targetAnchor(editTarget) };
+  }, [editing, editTarget]);
   const editSpread = editing && spreads.find(({ id }) => id === editing.spread);
   const liveInline = summary && template && editSpread && editTarget &&
     { project: summary.project, spread: editSpread, template, target: editTarget };
