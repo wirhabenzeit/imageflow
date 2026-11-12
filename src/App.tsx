@@ -1280,8 +1280,8 @@ export function App() {
                 </div>}
               </CropEditor>}
               {editing && inline && summary && <EditPopover key={editing.session}
-                project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} anchor={inline.target}
-                bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={summary.readOnly} blocked={blockedInline || undefined}
+                project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} host={canvasWrap.current}
+                readOnly={summary.readOnly} blocked={blockedInline || undefined}
                 edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}
                 actions={!editing.owner && editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)
                   ? <button type="button" onClick={() => startCrop(editing.spread, editPhotoBox)}>Adjust crop…</button>

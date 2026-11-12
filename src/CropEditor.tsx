@@ -188,7 +188,8 @@ export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel
       onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}>
       <img src={src} alt="" draggable={false} style={{ left: left - frame.x, top: top - frame.y, ...image }} />
     </div>
-    {!settling && toolbarHost && createPortal(<div ref={toolbar} className="crop-toolbar" role="toolbar" aria-label="Photo">
+    {!settling && toolbarHost && createPortal(<div ref={toolbar} className="item-controls crop-toolbar" role="toolbar" aria-label="Photo"
+      onPointerDown={(event) => event.stopPropagation()}>
       <button type="button" aria-label="Zoom out" onClick={zoomButton(1 / 1.25)}><Icon name="minus" /></button>
       <input type="range" aria-label="Zoom" min={0} max={Math.log(maxZoom)} step={0.01} value={Math.log(placement.zoom)}
         onChange={(event) => {
