@@ -152,6 +152,10 @@ export type SpreadDeclaration = {
   boxes?: Record<string, BoxDeclaration>;
   elements?: Record<string, ElementDeclaration>;
 };
+/** Rejects properties a declaration does not have, such as a misspelt `flowOrdr`, in object literals and helpers alike. */
+type Exact<T, Allowed> = { [X in Exclude<keyof T, keyof Allowed>]: never };
+type ElementsChecked<E> = { [K in keyof E]: Exact<E[K], ElementDeclaration> };
+type BoxesChecked<B> = { [K in keyof B]: Exact<B[K], BoxDeclaration> };
 
 // Anchors
 
@@ -333,8 +337,8 @@ export type SpreadBuilder<D extends Parameters> = <
   /** `left` or `right` for a single page at the start or end of the book. Default `spread`. */
   span?: Span;
   parameters?: P;
-  boxes?: B;
-  elements?: E;
+  boxes?: B & BoxesChecked<B>;
+  elements?: E & ElementsChecked<E>;
   render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D>): ImageFlowNode;
   /** Places other spreads can refer to through `ctx.book`, declared from this spread's values. */
   anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[];
@@ -371,9 +375,14 @@ type Missing<D, Typed> = Exclude<keyof Typed, keyof D> & string;
 type TypedWith<T> = typeof typedDocument extends keyof T ? NonNullable<T[typeof typedDocument & keyof T]> : {};
 type DocumentCheck<S, D> = {
   // Untyped spreads (`any`) are not checked.
-  [K in keyof S]: 0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never] ? unknown
-    : { [typedDocument]: `Declare document parameter ${Missing<D, TypedWith<S[K]>>} in the template's parameters, or remove it from spreadFor()` };
+  [K in keyof S]: (0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never] ? unknown
+    : { [typedDocument]: `Declare document parameter ${Missing<D, TypedWith<S[K]>>} in the template's parameters, or remove it from spreadFor()` })
+    & SpreadChecked<S[K]>;
 };
+/** A spread written as a plain object gets the same unknown-property checks as one from the builder. */
+type SpreadChecked<T> = 0 extends 1 & T ? unknown : Exact<T, SpreadDefinition<any>>
+  & (T extends { boxes: infer B } ? { boxes: BoxesChecked<B> } : unknown)
+  & (T extends { elements: infer E } ? { elements: ElementsChecked<E> } : unknown);
 
 /**
  * Declares the template. Prefer `spreads` as a function: its `spread` builder types every layout's `ctx.document`
@@ -387,11 +396,18 @@ type DocumentCheck<S, D> = {
  *       }),
  *     });
  */
+// Two signatures rather than a union: TypeScript cannot infer the spreads through a union of a record and a
+// function, and would then check neither against the document parameters.
 export function defineTemplate<
   const D extends Parameters = {},
   const F extends string = never,
   const S extends Record<string, SpreadDefinition<any>> = {},
->(template: TemplateBase<D> & FormatChoice<F> & { spreads: (S & DocumentCheck<S, D>) | ((tools: TemplateTools<D>) => S) }): TemplateDeclaration;
+>(template: TemplateBase<D> & FormatChoice<F> & { spreads: (tools: TemplateTools<D>) => S & DocumentCheck<S, D> }): TemplateDeclaration;
+export function defineTemplate<
+  const D extends Parameters = {},
+  const F extends string = never,
+  const S extends Record<string, SpreadDefinition<any>> = {},
+>(template: TemplateBase<D> & FormatChoice<F> & { spreads: S & DocumentCheck<S, D> }): TemplateDeclaration;
 
 /**
  * Returns a `spread` builder typed with these document parameters, for spreads declared outside `defineTemplate`,
