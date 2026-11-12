@@ -3,6 +3,8 @@ import type { ImportMode } from './source-locations';
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, gridRows, renderOrigin } from './desktop';
+import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
+import type { TargetAnchor } from './edit-targets';
 import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { PanelDivider, useCanvasLayout, usePanels } from './panels';
 import { ActionMenu } from './ActionMenu';
@@ -655,14 +657,13 @@ export function App() {
     const top = wanted ? box : geometry.boxes.findLast((rect) => inside(rect));
     return { sheet, box, element, top, target: target && (!box || area(target) <= area(box)) ? target : undefined };
   }
-  const targetKey = (target: { spread: string; edits: string[] }) => target.spread + '|' + target.edits.join(' ');
   const closeEditor = useCallback(() => setEditing(undefined), []);
   // Tab moves between the edit targets of a spread in reading order.
   function stepEditor(direction: 1 | -1) {
     if (!editing || !geometry || readyId.current !== summary?.id) return;
     const order = geometry.targets.filter(({ spread }) => spread === editing.spread)
       .sort((a, b) => Math.abs(a.y - b.y) > 4 ? a.y - b.y : a.x - b.x);
-    const at = order.findIndex((target) => targetKey(target) === editing.key);
+    const at = order.findIndex((target) => targetKey(target) === editKey);
     const next = order[(at + direction + order.length) % order.length];
     setEditing(next ? { spread: next.spread, key: targetKey(next) } : undefined);
   }
@@ -675,20 +676,30 @@ export function App() {
     const own = geometry?.targets.find((target) => target.spread === spread && target.owner?.type === type && target.owner.id === owner.id);
     if (own) return own;
     const rect = geometry?.boxes.find((box) => box.spread === spread && box.id === owner.id && (box.type === 'element') === (type === 'element'));
-    if (rect) return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, spread, edits: [], owner: { type, id: owner.id } };
+    if (rect) return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, spread, edits: [], occurrence: 0, owner: { type, id: owner.id } };
     const sheet = geometry?.sheets.find((item) => item.spread === spread);
     const layout = template?.spreads[spreads.find(({ id }) => id === spread)?.definition ?? ''];
     const declared = type === 'element' ? layout?.elements[owner.id] : layout?.boxes[owner.id];
     if (!sheet || !declared) return undefined;
-    return { x: sheet.x + 12, y: sheet.y + 12, width: 0, height: 0, spread, owner: { type, id: owner.id }, hidden: true,
+    return { x: sheet.x + 12, y: sheet.y + 12, width: 0, height: 0, spread, occurrence: 0, owner: { type, id: owner.id }, hidden: true,
       edits: Object.keys(declared.parameters).map((key) => (type === 'element' ? 'elements.' : 'boxes.') + owner.id + '.' + key) };
   }
   // Parameters a template marked on a box besides its own, such as a spread setting shown in its caption.
   const attachedEdits = (target: Target | undefined, owner: Owner) =>
     target?.edits.filter((path) => !path.startsWith((owner.type === 'element' ? 'elements.' : 'boxes.') + owner.id + '.')) ?? [];
   const ownerKey = (spread: string, id: string) => spread + '|#' + id;
+  // A marked node is found by its key; if a re-render shifted the occurrence numbers of its field, by where it was.
+  const editAnchor = useRef<{ key: string; at: TargetAnchor }>(undefined);
   const editTarget: Target | undefined = editing && (editing.owner ? ownerTarget(editing.spread, editing.owner)
-    : geometry?.targets.find((target) => targetKey(target) === editing.key));
+    : geometry && resolveTarget(geometry.targets, editing.key, editAnchor.current?.key === editing.key ? editAnchor.current.at : undefined));
+  // The key of the node the open editor is anchored to, which can differ from the one it opened with after a shift.
+  const editKey = editing && !editing.owner && editTarget ? targetKey(editTarget) : editing?.key;
+  useEffect(() => {
+    if (!editing || editing.owner) editAnchor.current = undefined;
+    else if (editTarget && geometry && editKey === editing.key) editAnchor.current = { key: editing.key, at: targetAnchor(editTarget, geometry.targets) };
+    // Renamed to the node it is now anchored to, so the next render finds it by key again.
+    else if (editKey && editKey !== editing.key) setEditing((open) => open && !open.owner && open.key === editing.key ? { ...open, key: editKey } : open);
+  }, [editing, editTarget, editKey, geometry]);
   const editSpread = editing && spreads.find(({ id }) => id === editing.spread);
   const liveInline = summary && template && editSpread && editTarget &&
     { project: summary.project, spread: editSpread, template, target: editTarget };
@@ -1196,9 +1207,9 @@ export function App() {
               }} />}
               {geometry?.targets.filter((target) => {
                 const key = targetKey(target);
-                return !cropping && (key === hoveredTarget || key === editing?.key);
+                return !cropping && (key === hoveredTarget || key === editKey);
               }).map((target) => <div key={targetKey(target)} aria-hidden="true"
-                className={'edit-target' + (targetKey(target) === editing?.key ? ' active' : '')}
+                className={'edit-target' + (targetKey(target) === editKey ? ' active' : '')}
                 style={{ left: target.x - 4, top: target.y - 3, width: target.width + 8, height: target.height + 6 }} />)}
               {moving && summary?.photos[moving.photo] && <img className="photo-move-ghost" src={summary.photos[moving.photo]} alt=""
                 style={{ left: moving.x, top: moving.y }} />}
