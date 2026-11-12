@@ -1,4 +1,5 @@
 import { sourcePath } from './source-locations';
+import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
 import * as jsx from 'react/jsx-runtime';
 import { flushSync } from 'react-dom';
@@ -769,7 +770,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   root.className = 'if-editor';
   // The project's file registry for file controls. An import adds to it, so it is state the host can update.
   let projectFiles = book.project.files;
-  let updateFiles: ((files: Record<string, string>) => void) | undefined;
+  let updateFiles: ((files: Record<string, SourceReference>) => void) | undefined;
 
   // The draft lives outside React so set() followed directly by commit() sends the newest values, before React
   // has rendered them. Every message is posted in order, and commit carries the draft as well.
@@ -799,10 +800,10 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   // the project's files, so `file(id)` and the file controls see the new file at once.
   let requests = 0;
   const pending = new Map<number, (id: string | undefined) => void>();
-  const importFile = (accept: readonly string[]) => {
+  const importFile = (accept: readonly string[], mode?: ImportMode) => {
     if (readOnly || failed || !Array.isArray(accept)) return Promise.resolve(undefined);
     const request = ++requests;
-    post({ type: 'editor-import', request, accept: accept.filter((extension) => typeof extension === 'string') });
+    post({ type: 'editor-import', request, accept: accept.filter((extension) => typeof extension === 'string'), mode });
     return new Promise<string | undefined>((resolve) => pending.set(request, resolve));
   };
   window.addEventListener('message', (event) => {
@@ -864,7 +865,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       post({ type: 'editor-ready' });
       return () => { update = undefined; updateFiles = undefined; };
     }, []);
-    const context = React.useMemo(() => ({ files, importFile: readOnly ? undefined : (accept: string[]) => importFile(accept) }), [files]);
+    const context = React.useMemo(() => ({ files, defaultMode: book.project.importMode ?? 'copy', importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
     return React.createElement(ProjectFilesContext.Provider, { value: context },
       React.createElement(EditorValues.Provider, { value: values },
         React.createElement(editor!.component, { values, set, document, format, readOnly, commit, cancel, Control, importFile })));

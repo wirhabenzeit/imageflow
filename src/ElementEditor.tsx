@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import type { ImportMode } from './source-locations';
 import { renderOrigin } from './desktop';
 import type { TemplateInfo } from './desktop';
 import type { Edit } from './Inspector';
@@ -9,7 +10,7 @@ import { ControlList, Field } from './Fields';
 
 type EditorMessage =
   | { type: 'editor-ready' } | { type: 'editor-draft'; values: Values } | { type: 'editor-size'; height: number }
-  | { type: 'editor-commit'; values: Values } | { type: 'editor-flushed'; request: number; values: Values } | { type: 'editor-cancel' } | { type: 'editor-import'; request: number; accept: unknown }
+  | { type: 'editor-commit'; values: Values } | { type: 'editor-flushed'; request: number; values: Values } | { type: 'editor-cancel' } | { type: 'editor-import'; request: number; accept: unknown; mode?: unknown }
   | { state: 'error'; message: string };
 
 // What the dialog works on: every parameter of the element, with its declaration and resolved value (the saved
@@ -31,7 +32,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   project: string; template: TemplateInfo; spread: SpreadState; element: string; readOnly: boolean;
   blocked?: string;
   edit: (change: Edit, notice?: string) => void; close: () => void;
-  importFile?: (accept: string[]) => Promise<{ id: string; project: string } | undefined>;
+  importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
 }) {
   const definition = template.spreads[spread.definition]?.elements[element];
   const editor = definition?.editor;
@@ -137,7 +138,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
       const reply = (imported?: { id: string; project: string }) => frame.current?.contentWindow?.postMessage(
         { type: 'editor-imported', request: data.request, ...imported }, renderOrigin);
       if (readOnly || failed || stale || !importFile || !accept.length) reply();
-      else void importFile(accept).then(reply, () => reply());
+      else void importFile(accept, data.mode === 'copy' || data.mode === 'link' ? data.mode : undefined).then(reply, () => reply());
     } else if (data.type === 'editor-size') {
       setHeight(Math.max(120, Math.min(data.height, window.innerHeight * 0.7)));
     } else if (data.type === 'editor-flushed') {

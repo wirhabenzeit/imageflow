@@ -108,7 +108,7 @@ function contentState(summary: ProjectSummary, spread: SpreadState, id: string, 
   const state = spread.boxes[id];
   if (kind === 'photo') return state?.photo ? summary.photoIndex[state.photo]?.title || (summary.photos[state.photo] ? state.photo : 'Missing photo') : 'Empty';
   if (!state?.text) return 'No text';
-  const name = summary.project.texts[state.text]?.split('/').pop() ?? 'Missing text';
+  const name = summary.project.texts[state.text] ? sourcePath(summary.project.texts[state.text]).split('/').pop() : 'Missing text';
   return flow && flow.parts > 1 ? name + ' · ' + flow.part + ' of ' + flow.parts : name;
 }
 
