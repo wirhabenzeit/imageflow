@@ -143,7 +143,9 @@ export type BookGeometry = {
   boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean })[];
   // Nodes a template marked with `ctx.edit(...)`, and boxes and elements with parameters. `owner` is the box or
   // element the node is, so targets that share a rectangle stay apart; standalone marked nodes have none.
-  targets: (Rect & { spread: string; edits: string[]; owner?: { type: 'box' | 'element'; id: string } })[];
+  // `occurrence` counts the earlier nodes on the sheet that edit the same fields, so repeated uses of a field, such
+  // as a heading shown twice, are separate targets that edit the same saved value.
+  targets: (Rect & { spread: string; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string } })[];
 };
 // A preflight finding. `spread` is the spread id and `where` its readable location, such as "Pages 6–7 · Photo grid".
 // The optional fields give agents a stable `code`, the box/element/source involved, measured values and a repair hint.

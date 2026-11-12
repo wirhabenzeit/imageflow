@@ -15,7 +15,7 @@ import { markdownToHtml } from './markdown';
 import { isParameterValue, parameterWarnings, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import { flow } from './text-flow';
-import { declarationWarnings } from './declaration-check';
+import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
 import { bookIndex, chooseFormat, normalizeTemplate, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup } from './template';
@@ -23,12 +23,14 @@ import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
 import type { VariantTags } from './layouts';
+import { numberOccurrences } from './edit-targets';
 import { parsePreviewRequest, PreviewError } from './preview';
 import type { PreviewMetadata, PagePreviewMetadata } from './preview';
 import { inspectionSchema } from './inspection';
 import type { ElementInspection, ElementMeasurement } from './inspection';
 import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import { Field, ProjectFilesContext } from './Fields';
+import { editorChanges, unknownControl } from './editor-changes';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -428,11 +430,12 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
           };
         });
       }),
-      targets: sheets.flatMap(({ spread, sheet }) => [...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
+      // Nodes that edit the same fields on a sheet, such as a heading shown twice, are told apart by occurrence.
+      targets: sheets.flatMap(({ spread, sheet }) => numberOccurrences([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
         spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node),
         ...(node.dataset.box ? { owner: { type: 'box' as const, id: node.dataset.box } }
           : node.dataset.element ? { owner: { type: 'element' as const, id: node.dataset.element } } : {}),
-      }))),
+      })))),
     };
     post(geometry);
   }
@@ -815,11 +818,22 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   const commit = () => { if (!failed) post({ type: 'editor-commit', values: changed ? claimed(draft) : {} }); };
   const cancel = () => post({ type: 'editor-cancel' });
   let update: ((values: Values) => void) | undefined;
+  // A change set() cannot apply (another parameter, or an invalid value) is ignored, as untyped template code would
+  // otherwise lose it silently. Each problem is reported once: in the console for the author, and to the dialog,
+  // which shows it without blocking Done.
+  const reported = new Set<string>();
+  const warn = (message: string) => {
+    if (reported.has(message)) return;
+    reported.add(message);
+    console.warn('ImageFlow: ' + message);
+    post({ type: 'editor-warning', message });
+  };
   const set = (changes: Values) => {
     if (readOnly || failed) return;
-    const allowed = Object.entries(changes).filter(([key]) => editor.parameters.includes(key));
-    if (!allowed.length) return;
-    draft = { ...draft, ...Object.fromEntries(allowed) };
+    const { allowed, rejected } = editorChanges(element.parameters, editor.parameters, changes);
+    for (const { message } of rejected) warn(message);
+    if (!Object.keys(allowed).length) return;
+    draft = { ...draft, ...allowed };
     changed = true;
     post({ type: 'editor-draft', values: claimed(draft) });
     update?.(draft);
@@ -878,7 +892,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   function Control({ parameter, label }: { parameter: string; label?: string }) {
     const values = React.useContext(EditorValues);
     const param = editor!.parameters.includes(parameter) && Object.hasOwn(element!.parameters, parameter) ? element!.parameters[parameter] : undefined;
-    if (!param) throw new Error('Control ' + parameter + ' is not one of the parameters this editor edits.');
+    if (!param) throw new Error(unknownControl(parameter, editor!.parameters));
     const value = isParameterValue(param, values[parameter]) ? values[parameter] : param.default;
     return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
       React.createElement(Field, { param: label ? { ...param, label } : param, value, change: (next) => set({ [parameter]: next }) }));
@@ -1117,8 +1131,16 @@ export async function startRender(root: HTMLElement) {
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
+    // A control the generated controls could hide for good is fine on a spread that also marks it as editable on
+    // the page: the marked node is the way to show it again (placeControlWarnings).
+    const rendered = [...root.querySelectorAll<HTMLElement>('.if-spread-container[data-spread]')].flatMap((container) => {
+      const spread = spreads.find(({ id }) => id === container.dataset.spread);
+      return spread ? [{ spread: spread.id, layout: spread.definition, marked: new Set([...container.querySelectorAll<HTMLElement>('[data-edit]')]
+        .flatMap((node) => node.dataset.edit!.split(' ').filter(Boolean))) }] : [];
+    });
     const warnings: Issue[] = [
-      ...declaration.map(({ code, message: text, path, details, suggestion }) => ({ ...message(text), code, details: { ...details, path }, suggestion })),
+      ...placeControlWarnings(declaration, rendered).map(({ code, message: text, path, details, suggestion, spread }) =>
+        ({ ...(spread ? located(spread, text) : message(text)), code, details: { ...details, path }, suggestion })),
       ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
