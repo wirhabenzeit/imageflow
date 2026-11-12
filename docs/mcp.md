@@ -1,6 +1,6 @@
 # Local agent connection
 
-ImageFlow exposes its open book to local MCP clients through a stdio bridge. The app owns project validation, persistence and Undo. The bridge forwards tool calls to the running app and returns page images as MCP image content.
+ImageFlow exposes its open authorized books to local MCP clients through a stdio bridge. The app owns project validation, persistence and Undo. The bridge forwards tool calls to the running app and returns page images as MCP image content.
 
 ## Connect
 
@@ -24,7 +24,7 @@ Agents need no separate Node.js installation. Every configuration starts the bri
 
 The configuration contains absolute paths, and `~` above stands for your home folder. If you move ImageFlow.app, add it to your agents again. The Claude Desktop extension then reports the moved app when it starts.
 
-**Access:** open an editable book and select **Allow agents to use the open book**. Keep ImageFlow open while using its tools. Settings is a separate window, so the book stays editable while it is open.
+**Access:** open an editable book and select **Allow agents to use open books**. Keep ImageFlow open while using its tools. Settings is a separate window, so the book stays editable while it is open.
 
 The pane shows attached client names. Clearing the checkbox closes their app connections and removes the connection file. Selecting it again creates new credentials at the same path. An installed bridge reads the current connection file before each call, so agents reconnect without being set up again.
 
@@ -304,3 +304,7 @@ Source consistency uses content revisions, filesystem metadata and watcher gener
 `tests/mcp-connection.test.ts` exercises token rejection, private file/socket permissions, argument/path validation, request/response limits, cancellation, revocation, reconnection and SDK client tool discovery/image delivery. `scripts/smoke-mcp.mjs` exercises a real running ImageFlow instance with the official SDK client. `scripts/smoke-authoring-fixtures.mjs` renders unused layouts as fixtures in two formats, including a layout that throws on empty content, and every layout and case of the starter template. Desktop preview/reload smoke tests cover later-page flow, proof agreement, single-page ends, asymmetric bleed and recovery after template errors.
 
 See [the large-book benchmark](authoring-performance.md) for the reproducible 300-photo authoring workload, measured timings and hash-byte counts. The benchmark script generates its large fixture under `.build/`; originals are not committed to the repository.
+
+## Multiple documents
+
+The connection belongs to the app. `list_projects` lists all open authorized books. Every subsequent request selects a stable open-book handle with `project`; changing window focus never redirects a request. Each document has its own queue, history, pending-editor lease, revisions and cleanup. Closing one document expires its handle and cancels its requests, leaving other books and the connection available. Reopening an already-open package focuses it without expiring its handle. Closing and reopening creates a new handle.

@@ -9,6 +9,13 @@ function listen<T>(channel: string, listener: (value: T) => void) {
 }
 
 const api: DesktopApi = {
+  currentProject: () => ipcRenderer.invoke(channels.current),
+  onAppError: (listener) => listen(channels.appError, listener),
+  recentDocuments: () => ipcRenderer.invoke(channels.recents),
+  onRecentsChanged: (listener) => listen(channels.recentsChanged, listener),
+  recentDocument: (id, action) => ipcRenderer.invoke(channels.recentAction, id, action),
+  chooseStarter: (id) => ipcRenderer.invoke(channels.chooseStarter, id),
+  documentAction: (action, id) => ipcRenderer.invoke(channels.documentAction, action, id),
   getSettings: () => ipcRenderer.invoke(channels.settings),
   updateSettings: (patch) => ipcRenderer.invoke(channels.updateSettings, patch),
   onSettingsChanged: (listener) => listen(channels.settingsChanged, listener),

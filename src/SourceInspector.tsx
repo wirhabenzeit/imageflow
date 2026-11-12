@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
 import type { SourceUsage } from './editing';
@@ -37,6 +37,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
   summary: ProjectSummary; source: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   writable: boolean; edit: (change: Edit, notice?: string) => void; select: (spread: string) => void; quickLook: () => void;
 }) {
+  const [openError, setOpenError] = useState('');
   const text = source.kind === 'text' ? summary.texts[source.id] : undefined;
   const html = useMemo(() => text === undefined ? undefined : markdownToHtml(text), [text]);
 
@@ -90,6 +91,11 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     <details open><summary>Placed on</summary>
       <Placements summary={summary} template={template} usage={usage} render={render} source={source} select={select} />
     </details>
+    {!summary.readOnly && <button type="button" onClick={() => {
+      setOpenError('');
+      void window.imageflow?.documentAction('text', source.id).then((result) => { if ('error' in result) setOpenError(result.error); });
+    }}>Edit Text Source…</button>}
+    {openError && <p role="alert" className="error-text">{openError}</p>}
     {html !== undefined && <details open><summary>Preview</summary>
       <button type="button" className="si-text-preview" title="Quick Look (Space)" onClick={quickLook}>
         <div className="ql-markdown" dangerouslySetInnerHTML={{ __html: html }} />

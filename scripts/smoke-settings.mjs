@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { menuAction } from './ui-actions.mjs';
+import { testBook, menuAction } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'settings-'));
@@ -16,7 +16,7 @@ async function launch() {
   const page = await app.firstWindow();
   page.setDefaultTimeout(20000);
   await page.emulateMedia({ colorScheme: null });
-  await page.locator('.welcome').waitFor();
+  await page.locator('.start-window').waitFor();
   return page;
 }
 async function openSettings() {
@@ -75,9 +75,9 @@ try {
   await checkAppearance(settings, 'dark');
 
   // Book controls remain usable while Settings is open, and Settings cannot perform project operations.
-  const book = join(work, 'Book');
+  const book = join(work, 'Book.imageflow');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, book);
-  await menuAction(app, 'New project…');
+  page = await testBook(app, book, true);
   await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   // The photo grid's Gap is a spread setting the page does not show, so it is in the sidebar.
   await page.locator('.spread-thumb').nth(3).click();

@@ -7,10 +7,15 @@ import type { AppSettings, SettingsPane } from './settings';
 
 export const desktopScheme = 'imageflow';
 export const editorURL = desktopScheme + '://editor/';
+export const startURL = desktopScheme + '://editor/start';
+export const starterURL = desktopScheme + '://editor/new';
 export const settingsURL = desktopScheme + '://editor/settings';
 export const renderOrigin = desktopScheme + '://render';
 
 export const channels = {
+  current: 'document:current', appError: 'app:error',
+  recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
+  chooseStarter: 'app:choose-starter', documentAction: 'document:action',
   open: 'project:open', save: 'project:save', import: 'project:import',
   command: 'project:command', changed: 'project:changed',
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
@@ -47,7 +52,16 @@ export type ImportRequest = {
   kind: 'photo' | 'markdown' | 'file'; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string };
 };
 
+export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string };
+
 export type DesktopApi = {
+  currentProject(): Promise<Result<ProjectSummary>>;
+  onAppError(listener: (message: string) => void): () => void;
+  recentDocuments(): Promise<Result<RecentDocument[]>>;
+  onRecentsChanged(listener: () => void): () => void;
+  recentDocument(id: string, action: 'open' | 'locate' | 'remove'): Promise<Result<null>>;
+  chooseStarter(id?: string): Promise<void>;
+  documentAction(action: 'reveal' | 'template' | 'text', id?: string): Promise<Result<void>>;
   getSettings(): Promise<Result<AppSettings>>;
   updateSettings(patch: Partial<AppSettings>): Promise<Result<AppSettings>>;
   onSettingsChanged(listener: (settings: AppSettings) => void): () => void;

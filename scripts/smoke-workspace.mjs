@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { menuAction } from './ui-actions.mjs';
+import { testBook, menuAction } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'workspace-'));
@@ -14,16 +14,16 @@ let first = true;
 async function launch() {
   app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
-  const w = await app.firstWindow();
+  let w = await app.firstWindow();
   w.setDefaultTimeout(20000);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 900));
   await app.evaluate(({ dialog }, filePath) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath });
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
-  }, join(work, 'Book'));
-  await w.locator('.welcome').waitFor();
-  assert.equal(await w.getByRole('button', { name: 'Export', exact: true }).isDisabled(), true);
-  await menuAction(app, first ? 'New project…' : 'Open project…');
+  }, join(work, 'Book.imageflow'));
+  await w.locator('.start-window').waitFor();
+  assert.equal(await w.getByRole('button', { name: 'Open…', exact: true }).isEnabled(), true);
+  w = await testBook(app, join(work, 'Book.imageflow'), first);
   first = false;
   await w.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   return w;

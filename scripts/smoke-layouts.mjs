@@ -1,4 +1,4 @@
-import { menuAction } from './ui-actions.mjs';
+import { testBook, menuAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -9,13 +9,13 @@ import { _electron } from 'playwright-core';
 // Layout switching (#22): a spread keeps one state for all its layouts; the layout picks what is shown.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'layouts-'));
-const project = join(work, 'Book');
+const project = join(work, 'Book.imageflow');
 const read = async () => JSON.parse(await readFile(join(project, 'project.json'), 'utf8'));
 const settlements = async () => (await read()).spreads.find(({ id }) => id === 'settlements');
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
-  const w = await app.firstWindow();
+  const w = await testBook(app, project, true);
   w.setDefaultTimeout(20000);
   // Register before the app's message listener so a preview can be held deterministically.
   await w.addInitScript(() => {
@@ -72,7 +72,7 @@ try {
   };
   const kept = () => w.locator('.inspector').getByText(/^Saved outside this layout/).textContent();
 
-  await rerendered(() => menuAction(app, 'New project…'));
+  await w.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   const layoutReady = async (spread) => {
     await w.waitForFunction((spread) => {
       const frame = document.querySelector('iframe.book-frame-layouts[data-current][data-ready]:not([aria-hidden])');

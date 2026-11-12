@@ -330,6 +330,21 @@ test('the original lock capability follows a renamed folder and releases ownersh
   } finally { await rm(root, { recursive: true }); }
 });
 
+test('a Finder duplicate with a copied live lock obtains an independent writer', async () => {
+  const { root, folder } = await fixture();
+  const copy = join(root, 'Duplicate.imageflow');
+  const original = await acquireProjectLock(folder);
+  let duplicate: ProjectLock | undefined;
+  try {
+    await cp(folder, copy, { recursive: true });
+    duplicate = await acquireProjectLock(copy);
+    await assert.rejects(acquireProjectLock(folder), /already open for editing/);
+    await assert.rejects(acquireProjectLock(copy), /already open for editing/);
+    await duplicate();
+    await assert.rejects(acquireProjectLock(folder), /already open for editing/);
+  } finally { await duplicate?.(); await original(); await rm(root, { recursive: true }); }
+});
+
 test('relocation refuses copied lock files and hard-linked candidates while the original folder exists', async () => {
   const { root, folder } = await fixture();
   const candidate = join(root, 'Candidate');
