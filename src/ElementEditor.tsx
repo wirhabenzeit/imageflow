@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ImportMode } from './source-locations';
 import { renderOrigin } from './desktop';
 import type { TemplateInfo } from './desktop';
@@ -7,11 +7,7 @@ import { isParameterValue, resolveParams } from './parameters';
 import type { SpreadState, Values } from './project';
 import { controlLayout } from './controls';
 import { ControlList, Field } from './Fields';
-
-type EditorMessage =
-  | { type: 'editor-ready' } | { type: 'editor-draft'; values: Values } | { type: 'editor-size'; height: number }
-  | { type: 'editor-commit'; values: Values } | { type: 'editor-flushed'; request: number; values: Values } | { type: 'editor-cancel' } | { type: 'editor-import'; request: number; accept: unknown; mode?: unknown }
-  | { state: 'error'; message: string };
+import { useEditorFrame } from './editor-frame';
 
 // What the dialog works on: every parameter of the element, with its declaration and resolved value (the saved
 // value, else the template default). Comparing this tells whether a draft was based on values that have since
@@ -42,14 +38,6 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   // The editor's draft as last reported, and the generated controls' own draft, for showing conditional controls.
   const [frameDraft, setFrameDraft] = useState<Values>({});
   const [local, setLocal] = useState<Values>({});
-  const [height, setHeight] = useState(240);
-  const [ready, setReady] = useState(false);
-  const [error, setError] = useState('');
-  const [failed, setFailed] = useState(false);
-  // Done waits for the frame to finish typing in progress: a field in the frame keeps typed text until it loses
-  // focus, which clicking Done out here does not cause. The request being waited for, if any.
-  const [flushing, setFlushing] = useState<number>();
-  const flushes = useRef(0);
   // The editor opened on this context. If it changes while the editor is open (Reload, Undo, a template edit),
   // the draft is based on stale data and saving it would silently overwrite the newer values.
   const [opened] = useState(() => editingContext(template, spread, element));
@@ -58,6 +46,23 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const [source] = useState(() => renderOrigin + '/render/' + project + '?view=editor&spread=' + encodeURIComponent(spread.id) +
     '&element=' + encodeURIComponent(element) + (readOnly ? '&readonly' : ''));
   const title = editor?.label ?? 'Edit ' + (definition?.label ?? element);
+  const values = (reported: unknown): Values => reported && typeof reported === 'object' ? reported as Values : {};
+  const { height, ready, error, setError, failed, flushing, flush } = useEditorFrame(frame, {
+    draft(reported) {
+      draft.current = { ...draft.current, ...values(reported) };
+      setFrameDraft(draft.current);
+    },
+    done: (reported) => done(values(reported)),
+    cancel: () => dialog.current?.close(),
+    import(data) {
+      const accept = Array.isArray(data.accept) ? data.accept.filter((value): value is string => typeof value === 'string') : [];
+      // The import starts a new render session; the frame reads the new file from it.
+      const reply = (imported?: { id: string; project: string }) => frame.current?.contentWindow?.postMessage(
+        { type: 'editor-imported', request: data.request, ...imported }, renderOrigin);
+      if (readOnly || failed || stale || !importFile || !accept.length) reply();
+      else void importFile(accept, data.mode === 'copy' || data.mode === 'link' ? data.mode : undefined).then(reply, () => reply());
+    },
+  });
 
   useEffect(() => {
     if (dialog.current && !dialog.current.open) dialog.current.showModal();
@@ -89,70 +94,16 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     dialog.current?.close();
   }
 
-  // Asks the frame to apply what is being typed and reply with its complete draft; only that reply saves. A frame
-  // still loading has nothing typed to apply. A frame that does not answer in time saves nothing: the dialog stays
-  // open with its draft, and Done can be tried again. A late answer to an earlier request is ignored.
   function requestDone() {
-    const target = frame.current?.contentWindow;
     if (failed || stale || blocked) return;
-    if (!ready || !target) return done();
-    const request = ++flushes.current;
-    setFlushing(request);
-    setError('');
-    target.postMessage({ type: 'editor-flush', request }, renderOrigin);
+    if (!flush()) done();
   }
-  useEffect(() => {
-    if (flushing === undefined) return;
-    const timeout = setTimeout(() => {
-      setFlushing(undefined);
-      setError('The editor did not respond, so nothing was saved. Try Done again, or Cancel.');
-    }, 5000);
-    return () => clearTimeout(timeout);
-  }, [flushing]);
 
   // The generated controls' values reach the frame, so the editor previews the whole draft (such as a calendar
   // drawn from the week start chosen below it). The frame shows them but never sends them back.
   useEffect(() => {
     if (ready && Object.keys(local).length) frame.current?.contentWindow?.postMessage({ type: 'editor-values', values: local }, renderOrigin);
   }, [ready, local]);
-
-  const receive = useEffectEvent((event: MessageEvent<EditorMessage>) => {
-    if (event.origin !== renderOrigin || event.source !== frame.current?.contentWindow || !event.data) return;
-    const data = event.data;
-    if ('state' in data) {
-      if (data.state === 'error') {
-        setFlushing(undefined);
-        setFailed(true);
-        setError(data.message);
-      }
-    } else if (data.type === 'editor-ready') {
-      setReady(true);
-      frame.current?.focus();
-    } else if (data.type === 'editor-draft') {
-      draft.current = { ...draft.current, ...data.values };
-      setFrameDraft(draft.current);
-      if (!failed) setError('');
-    } else if (data.type === 'editor-import') {
-      const accept = Array.isArray(data.accept) ? data.accept.filter((value): value is string => typeof value === 'string') : [];
-      // The import starts a new render session; the frame reads the new file from it.
-      const reply = (imported?: { id: string; project: string }) => frame.current?.contentWindow?.postMessage(
-        { type: 'editor-imported', request: data.request, ...imported }, renderOrigin);
-      if (readOnly || failed || stale || !importFile || !accept.length) reply();
-      else void importFile(accept, data.mode === 'copy' || data.mode === 'link' ? data.mode : undefined).then(reply, () => reply());
-    } else if (data.type === 'editor-size') {
-      setHeight(Math.max(120, Math.min(data.height, window.innerHeight * 0.7)));
-    } else if (data.type === 'editor-flushed') {
-      if (data.request !== flushing) return;
-      setFlushing(undefined);
-      done(data.values);
-    } else if (data.type === 'editor-commit') done(data.values);
-    else if (data.type === 'editor-cancel') dialog.current?.close();
-  });
-  useEffect(() => {
-    const listener = (event: MessageEvent) => receive(event);
-    window.addEventListener('message', listener);
-    return () => window.removeEventListener('message', listener);
-  }, []);
 
   return <dialog ref={dialog} className="element-editor" aria-label={title} onClose={close}>
     <header className="ee-header">
