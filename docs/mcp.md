@@ -40,7 +40,7 @@ The connection file contains a local Unix socket address and a random access tok
 
 Call `list_projects` and use the returned `project` handle explicitly in subsequent requests. A handle remains stable across edits and reloads. Opening another book, reopening a book, or restarting the app creates a new handle.
 
-Read `get_authoring_context` for template declarations, supported operations, source paths and the installed template API. An agent with workspace access can edit files inside `template/` and existing Markdown files inside `texts/`. While the book is open, change project state through `apply_project_changes` or the UI. Register new content through `import_sources`.
+Read `get_authoring_context` for template declarations, supported operations, source paths and the installed template API. Its `template` lists `layoutFamilies`, and each layout's `family` and `variant` tags: variants of a family are ordinary layouts, switched by layout ID with the `switch_layout` operation. An agent with workspace access can edit files inside `template/` and existing Markdown files inside `texts/`. While the book is open, change project state through `apply_project_changes` or the UI. Register new content through `import_sources`.
 
 Call `check_book` after source edits. It refreshes inputs from disk, bundles the template, resolves the whole book and returns diagnostics. Request a page or spread image when checking its composition. A template error leaves the last successful artwork visible in the app with a stale indication. Correcting the source triggers another reload.
 

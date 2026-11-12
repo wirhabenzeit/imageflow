@@ -1,7 +1,7 @@
 // Compile-time checks of the authoring types, run by `npm run build` (`tsc -p tests/types`). Each
 // `@ts-expect-error` is a declaration a template author must be told about; the build fails if it compiles.
 import { box, defineTemplate, mm, p, printFormat, Spread, spreadFor } from 'imageflow';
-import type { ElementEditorProps } from 'imageflow';
+import type { ElementEditorProps, LayoutPickerProps } from 'imageflow';
 
 const format = printFormat({ label: 'F', trim: { width: mm(100), height: mm(100) }, bleed: mm(0), safe: mm(5),
   pageCount: { min: 2, max: 20, step: 2 }, ends: 'inside-covers' });
@@ -161,4 +161,44 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: {
 defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
   // @ts-expect-error
   a: spread({ label: 'A', elements: { e: { label: 'E', parameters: route, editor: { parameters: ['zoom'], component: PaperEditor } } }, render: () => <Spread /> }),
+}) });
+
+// Layout families: a layout may only join a family the template declares, through the builder or a plain object.
+const GridPicker = ({ variants, current, choose, find }: LayoutPickerProps) =>
+  <div>{variants.map(({ id, label }) => <button key={id} aria-pressed={id === current} onClick={() => choose(find({ size: label }) ?? id)}>{label}</button>)}</div>;
+defineTemplate({ id: 't', version: '1', contract: 1, format, requires: ['layout-families'],
+  layoutFamilies: { grid: { label: 'Photo grid', picker: { label: 'Grid size', component: GridPicker } } },
+  spreads: ({ spread }) => ({
+    four: spread({ label: '2×2', family: 'grid', variant: { size: '2x2' }, render: () => <Spread /> }),
+    nine: spread({ label: '3×3', family: 'grid', variant: { size: '3x3' }, render: () => <Spread /> }),
+  }) });
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, layoutFamilies: { grid: { label: 'Photo grid' } },
+  spreads: ({ spread }) => ({
+    four: spread({ label: '2×2', family: 'grid', render: () => <Spread /> }),
+    nine: spread({ label: '3×3', family: 'grids', render: () => <Spread /> }),
+  }) });
+defineTemplate({ id: 't', version: '1', contract: 1, format, layoutFamilies: { grid: { label: 'Photo grid' } }, spreads: {
+  four: { label: '2×2', family: 'grid', render: () => <Spread /> },
+  nine: { label: '3×3', family: 'grid', render: () => <Spread /> },
+} });
+defineTemplate({ id: 't', version: '1', contract: 1, format, layoutFamilies: { grid: { label: 'Photo grid' } }, spreads: {
+  // TypeScript reports the record at its first entry.
+  // @ts-expect-error
+  four: { label: '2×2', family: 'grid', render: () => <Spread /> },
+  nine: { label: '3×3', family: 'grids', render: () => <Spread /> },
+} });
+// Without layoutFamilies, no family can be named.
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
+  four: spread({ label: '2×2', family: 'grid', render: () => <Spread /> }),
+}) });
+// A picker is a component of LayoutPickerProps, and tags are strings, numbers or booleans.
+defineTemplate({ id: 't', version: '1', contract: 1, format,
+  // @ts-expect-error
+  layoutFamilies: { grid: { label: 'Photo grid', picker: { component: (props: { values: string[] }) => props.values.length } } },
+  spreads: { four: { label: '2×2', family: 'grid', render: () => <Spread /> } } });
+defineTemplate({ id: 't', version: '1', contract: 1, format, layoutFamilies: { grid: { label: 'Photo grid' } }, spreads: ({ spread }) => ({
+  // @ts-expect-error
+  four: spread({ label: '2×2', family: 'grid', variant: { size: [2, 2] }, render: () => <Spread /> }),
 }) });

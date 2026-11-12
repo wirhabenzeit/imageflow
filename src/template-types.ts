@@ -5,7 +5,7 @@ import type { PrintFormat, printFormat, ResolvedFormat } from './format';
 import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
-import type { Anchor, AnchorDeclaration, BookContext, Element, IssueMarker, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
+import type { Anchor, AnchorDeclaration, BookContext, Element, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
   Text, TextTag } from './template';
 import type { Capability, runtimeExports } from './runtime-exports';
 
@@ -37,4 +37,7 @@ export const declaredTypesMatchRuntime: [
   Same<keyof Declared.BoundGeometry, keyof BoundGeometry>,
   Same<keyof Parameters<typeof Declared.printFormat>[0], keyof Parameters<typeof printFormat>[0]>,
   Assignable<ReturnType<typeof Declared.printFormat>, PrintFormat>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  // A picker receives exactly the props the runtime passes.
+  Same<keyof Declared.LayoutPickerProps, keyof LayoutPickerProps>,
+  Same<Declared.LayoutVariant, LayoutVariant>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

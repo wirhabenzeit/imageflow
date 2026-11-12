@@ -1,5 +1,5 @@
 import { asset, box, defineTemplate, Element, file, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
-import type { ElementEditorProps, ImageFlowNode, Photo, Rect, RenderContext } from 'imageflow';
+import type { ElementEditorProps, ImageFlowNode, LayoutPickerProps, Photo, Rect, RenderContext } from 'imageflow';
 import './styles.css';
 
 // Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page.
@@ -253,18 +253,65 @@ function CalendarEditor({ values, set, readOnly }: CalendarEditorProps) {
   </div>;
 }
 
+// The photo grid comes in two sizes, declared as two ordinary layouts of the `grid` family. Their box IDs are fixed:
+// the 2×2 boxes stay in the upper left of the 3×3 grid, so switching sizes keeps those photos where they were and
+// keeps the other five outside the 2×2 layout until the spread switches back.
+const gridSizes = {
+  '2x2': { columns: 2, ids: ['hero', 'second', 'third', 'fourth'] },
+  '3x3': { columns: 3, ids: ['hero', 'second', 'fifth', 'third', 'fourth', 'sixth', 'seventh', 'eighth', 'ninth'] },
+} as const;
+const cellLabels = { 2: ['Upper left', 'Upper right', 'Lower left', 'Lower right'],
+  3: ['Top left', 'Top middle', 'Top right', 'Middle left', 'Centre', 'Middle right', 'Bottom left', 'Bottom middle', 'Bottom right'] };
+const gridBoxes = <const S extends keyof typeof gridSizes>(size: S) => {
+  const { columns, ids } = gridSizes[size];
+  return box.photos(ids, (_id, i) => cellLabels[columns][i]);
+};
+const gridParameters = { heading, gutter: p.integer({ label: 'Gap', default: 6, min: 2, max: 20, unit: 'mm' }) };
+type GridLayout<S extends keyof typeof gridSizes> = { label: string; parameters: typeof gridParameters; boxes: ReturnType<typeof gridBoxes<S>> };
+// One render function per size, typed like the builder types each layout's own context.
+const photoGrid = <const S extends keyof typeof gridSizes>(size: S) => (ctx: RenderContext<GridLayout<S>, typeof documentParameters>) => {
+  const { columns, ids } = gridSizes[size];
+  const at = ctx.geometry.design(canvas);
+  // The gap is drawn on the design page too, so it scales with the format like the cells.
+  const cells = ctx.geometry.grid(at.right(20, 20, page - 40, page - 40),
+    { columns, rows: columns, columnGap: at.width(ctx.params.gutter), rowGap: at.height(ctx.params.gutter) });
+  return <Paper context={ctx}>
+    <ctx.Text parameter="heading" as="h2" rect={at.left(margin, 196, page - 2 * margin, 64)} />
+    {ids.map((id, i) => <ctx.PhotoBox id={id} key={id} rect={cells[i]} />)}
+  </Paper>;
+};
+
+// The grid family's picker: one "Grid size" choice drawn as small grids. It chooses by the variants' tags, so a new
+// size needs only a new layout with its tag.
+function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerProps) {
+  return <div className="variant-picker" role="radiogroup" aria-label="Grid size">
+    {variants.map(({ id, variant }) => {
+      const size = String(variant.size);
+      const columns = Object.hasOwn(gridSizes, size) ? gridSizes[size as keyof typeof gridSizes].columns : 1;
+      return <button key={id} type="button" role="radio" aria-checked={id === current} disabled={readOnly} onClick={() => choose(id)}>
+        <span className="variant-grid" style={{ gridTemplateColumns: 'repeat(' + columns + ', 1fr)' }} aria-hidden="true">
+          {Array.from({ length: columns * columns }, (_, i) => <span key={i} />)}
+        </span>
+        {size.replace('x', ' × ')}
+      </button>;
+    })}
+  </div>;
+}
+
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.4.0',
+  version: '0.5.0',
   contract: 1,
   requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper',
-    'editor-native-controls'],
+    'editor-native-controls', 'layout-families'],
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
     landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
   },
   defaultFormat: 'square',
   parameters: documentParameters,
+  // Layouts that are variants of one design. The sidebar shows the grid once, and its picker chooses the size.
+  layoutFamilies: { grid: { label: 'Photo grid', picker: { label: 'Grid size', component: GridSizePicker } } },
   // `spread` types each layout's context from its own declarations and the document parameters above.
   spreads: ({ spread }) => ({
     title: spread({
@@ -314,20 +361,16 @@ export default defineTemplate({
         </Paper>;
       },
     }),
+    // `grid` keeps its ID from before the family existed, so saved books open unchanged as the 2×2 variant.
     grid: spread({
-      label: 'Photo grid',
-      parameters: { heading, gutter: p.integer({ label: 'Gap', default: 6, min: 2, max: 20, unit: 'mm' }) },
-      boxes: { hero: box.photo('Upper left'), second: box.photo('Upper right'), third: box.photo('Lower left'), fourth: box.photo('Lower right') },
-      render: (ctx) => {
-        const at = ctx.geometry.design(canvas);
-        // The gap is drawn on the design page too, so it scales with the format like the cells.
-        const cells = ctx.geometry.grid(at.right(20, 20, page - 40, page - 40),
-          { columns: 2, rows: 2, columnGap: at.width(ctx.params.gutter), rowGap: at.height(ctx.params.gutter) });
-        return <Paper context={ctx}>
-          <ctx.Text parameter="heading" as="h2" rect={at.left(margin, 196, page - 2 * margin, 64)} />
-          {(['hero', 'second', 'third', 'fourth'] as const).map((id, i) => <ctx.PhotoBox id={id} key={id} rect={cells[i]} />)}
-        </Paper>;
-      },
+      label: 'Photo grid 2×2', family: 'grid', variant: { size: '2x2' },
+      parameters: gridParameters, boxes: gridBoxes('2x2'),
+      render: photoGrid('2x2'),
+    }),
+    grid9: spread({
+      label: 'Photo grid 3×3', family: 'grid', variant: { size: '3x3' },
+      parameters: gridParameters, boxes: gridBoxes('3x3'),
+      render: photoGrid('3x3'),
     }),
     pair: spread({
       label: 'Two photos',

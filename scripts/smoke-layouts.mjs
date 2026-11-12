@@ -116,10 +116,11 @@ try {
     await layoutReady(spread);
     assert.equal(await pickerHasNoOverlap(), true);
   }
-  await button('Photo grid 6–7').click();
+  await button('Photo grid 2×2 6–7').click();
   await w.locator('[data-spread="settlements"][aria-current="page"]').waitFor();
 
-  // Only layouts with the same footprint are offered: no single title or closing page for a full spread.
+  // Only layouts with the same footprint are offered: no single title or closing page for a full spread. The grid
+  // family has its own picker, so its 2×2 and 3×3 variants are one preview, named after the family.
   assert.deepEqual(await picker.getByRole('radio').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label'))),
     ['Photo and story', 'Panorama', 'Photo grid', 'Two photos', 'Text spread', 'Calendar spread', 'Contents']);
 
@@ -171,8 +172,43 @@ try {
   // B → C (no photo boxes) → A: the replacement and removal hold, the other photos and their crops return.
   await rerendered(() => layout('Text spread').click());
   assert.equal(await kept(), 'Saved outside this layout · 3 photos');
-  await rerendered(() => layout('Photo grid').click());
-  assert.equal(await statusLine(), 'Photo grid · 3 photos shown again');
+  // The family's preview opens its picker, which starts on the first variant for a spread outside the family.
+  const pickerDialog = w.getByRole('dialog', { name: 'Grid size' });
+  const pickerFrame = w.frameLocator('dialog.layout-picker-dialog iframe');
+  const gridSize = (name) => pickerFrame.getByRole('radio', { name, exact: true });
+  // Waits until the picker reported ready and its frame took its content height: the dialog is centred, so it moves
+  // while the frame grows, and a click before then can miss.
+  const pickerReady = async () => {
+    await pickerDialog.waitFor();
+    await w.waitForFunction(() => {
+      const dialog = document.querySelector('dialog.layout-picker-dialog');
+      const frame = dialog?.querySelector('iframe');
+      const state = (window.__pickerHeights ??= []);
+      state.push(frame?.style.height);
+      if (state.length > 4) state.shift();
+      const settled = !dialog?.textContent.includes('Loading the picker') && state.length === 4 &&
+        state.every((height) => height && height !== '240px' && height === state[0]);
+      if (settled) window.__pickerHeights = [];
+      return settled;
+    }, null, { polling: 100 });
+  };
+  // A click right after the out-of-process frame settles can still miss it, so choose until the picker shows the choice.
+  const chooseSize = async (name) => {
+    for (let attempt = 0; attempt < 10 && await gridSize(name).getAttribute('aria-checked') !== 'true'; attempt++) {
+      await gridSize(name).click();
+      await w.waitForTimeout(300);
+    }
+    assert.equal(await gridSize(name).getAttribute('aria-checked'), 'true');
+  };
+  // The picker reports its draft asynchronously; the dialog then says what Done would do.
+  const pickerSays = (text) => w.waitForFunction((expected) =>
+    document.querySelector('.layout-picker-dialog .layout-picker-consequence')?.textContent === expected, text);
+  await layout('Photo grid').click();
+  await pickerReady();
+  assert.equal(await gridSize('2 × 2').getAttribute('aria-checked'), 'true');
+  await pickerSays('Photo grid 2×2 · 3 photos shown again');
+  await rerendered(() => pickerDialog.getByRole('button', { name: 'Done', exact: true }).click());
+  assert.equal(await statusLine(), 'Photo grid 2×2 · 3 photos shown again');
   state = await settlements();
   assert.deepEqual(Object.fromEntries(Object.entries(state.boxes).map(([id, box]) => [id, box.photo])),
     { hero: replacement, second: undefined, third: 'cottage', fourth: 'light' });
@@ -183,6 +219,30 @@ try {
   await rerendered(() => menuAction(app, 'Reload'));
   assert.deepEqual(await settlements(), state);
   assert.deepEqual((await status()).errors, []);
+
+  // The picker switches between variants as an ordinary layout switch: the 2×2 photos stay in the upper left of the
+  // 3×3 grid, Cancel changes nothing, Done is one Undo step, and the five new boxes are empty.
+  await button('Grid size…').click();
+  await pickerReady();
+  await chooseSize('3 × 3');
+  await pickerSays('Photo grid 3×3 · 3 photos carried over');
+  await pickerDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await pickerDialog.waitFor({ state: 'detached' });
+  assert.deepEqual(await settlements(), state);
+  await button('Grid size…').click();
+  await pickerReady();
+  assert.equal(await gridSize('2 × 2').getAttribute('aria-checked'), 'true');
+  await chooseSize('3 × 3');
+  await pickerSays('Photo grid 3×3 · 3 photos carried over');
+  await rerendered(() => pickerDialog.getByRole('button', { name: 'Done', exact: true }).click());
+  assert.equal(await statusLine(), 'Photo grid 3×3 · 3 photos carried over');
+  assert.equal((await settlements()).definition, 'grid9');
+  assert.equal(await frame.locator('[data-spread="settlements"] [data-box]').count(), 9);
+  assert.equal(await layout('Photo grid').getAttribute('aria-checked'), 'true');
+  assert.equal(await picker.getByRole('radio').count(), 7);
+  assert.deepEqual((await status()).warnings, []);
+  await rerendered(() => button('Undo').click());
+  assert.deepEqual(await settlements(), state);
 
   // Kept content: Place in… moves it into an empty box, or swaps with what a box shows; it never appears twice.
   const title = async (photo) => JSON.parse(await readFile(join(project, 'photos.json'), 'utf8'))[photo].title;

@@ -13,5 +13,7 @@ export const capabilities = [
   'spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-records',
   // `controls` on spreads, boxes and elements; `Control` and `importFile` in custom element editors.
   'editor-controls', 'editor-native-controls',
+  // `layoutFamilies`, with `family` and `variant` on layouts, and a family's own layout picker.
+  'layout-families',
 ] as const;
 export type Capability = typeof capabilities[number];
