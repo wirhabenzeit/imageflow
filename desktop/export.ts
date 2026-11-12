@@ -3,7 +3,7 @@ import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, rgb } from 'pdf-lib';
 import type { PDFObject } from 'pdf-lib';
-import { formatSchema, pdfPoints, resolveFormat } from '../src/format';
+import { formatSchema, pdfPoints, resolveFormat, trimBox } from '../src/format';
 import { parseDocument } from '../src/project';
 import { issueText } from '../src/desktop';
 import type { ExportMode, Issue, RenderStatus } from '../src/desktop';
@@ -82,7 +82,8 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
     if (mode === 'print' && status.errors.length) throw new Error(status.errors.map(issueText).join('\n'));
     if (!status.units.length) throw new Error('The book has no spreads yet. Add a spread before exporting.');
     const format = parseDocument(formatSchema, status.template.format, 'Print format');
-    const { outputWidth, height, trim, bleed } = resolveFormat(format);
+    const resolved = resolveFormat(format);
+    const { outputWidth, height } = resolved;
     progress('Printing PDF…');
     const pdf = await PDFDocument.load(await window.webContents.printToPDF({
       pageSize: { width: outputWidth / 25.4, height: height / 25.4 },
@@ -99,11 +100,11 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
       if (Math.abs(actual.width - widthPt) > 0.5 || Math.abs(actual.height - heightPt) > 0.5) {
         throw new Error('Chromium produced an unexpected size on PDF page ' + (index + 1) + '.');
       }
-      const leftBleed = side === 'right' ? bleed.binding : bleed.outside;
+      const box = trimBox(resolved, side);
       page.setMediaBox(0, 0, widthPt, heightPt);
       page.setCropBox(0, 0, widthPt, heightPt);
       page.setBleedBox(0, 0, widthPt, heightPt);
-      page.setTrimBox(pdfPoints(leftBleed), pdfPoints(bleed.bottom), pdfPoints(trim.width * (side === 'spread' ? 2 : 1)), pdfPoints(trim.height));
+      page.setTrimBox(pdfPoints(box.x), pdfPoints(box.y), pdfPoints(box.width), pdfPoints(box.height));
       if (mode === 'proof' && status.errors.some((issue) => isUnavailableSource(issue) &&
           (!issue.spread || issue.spread === status.units[index].spread))) {
         page.drawRectangle({ x: 0, y: 0, width: widthPt, height: 22, color: rgb(1, .91, .86), opacity: .96 });

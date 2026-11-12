@@ -1,9 +1,11 @@
 import { sourcePath } from './source-locations';
 import { z } from 'zod';
 import type { TemplateInfo } from './desktop';
+import type { PrintFormat } from './format';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import { describeLayoutChange, discardContent, layoutChoices, planLayoutChange, swapContent, switchLayout } from './layouts';
+import { hasFacingPages, spanFits } from './format';
 import { isParameterValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import { identifier } from './project';
@@ -97,6 +99,9 @@ export function applyProjectCommands(
     throw new ProjectCommandError(code, message, operationIndex);
   }
   const allSpreads = () => project.spreads.map(({ id }) => id);
+  // The book's format as the batch has changed it so far: a select_format earlier in the batch applies to the
+  // commands after it.
+  let format: Pick<PrintFormat, 'label' | 'structure'> = template.format;
   function changed(message: string, spreads: string[], affectsFlow = false) {
     changes.push(message);
     for (const spread of spreads) affected.add(spread);
@@ -203,6 +208,7 @@ export function applyProjectCommands(
         break;
       case 'select_format':
         if (!Object.hasOwn(template.formats, operation.format)) fail('FORMAT_NOT_FOUND', 'Unknown print format ' + operation.format + '.');
+        format = { label: template.formats[operation.format], structure: template.structures?.[operation.format] ?? template.format.structure };
         if (project.format !== operation.format) {
           project.format = operation.format;
           changed('Selected print format ' + operation.format, allSpreads(), true);
@@ -229,6 +235,10 @@ export function applyProjectCommands(
       case 'insert_spread': {
         const spread = { ...newSpread(operation.definition), params: operation.params, boxes: operation.boxes, elements: operation.elements };
         validateInitialSpread(spread);
+        if (!spanFits(template.spreads[operation.definition].span, format)) {
+          fail('INCOMPATIBLE_LAYOUT', 'Layout ' + operation.definition + ' does not fit the book\'s format ' + format.label + (hasFacingPages(format)
+            ? ', which has facing pages. Insert a spread layout.' : ', which has no facing pages. Insert a single-page layout.'));
+        }
         registerSpread(spread, operation.ref);
         insertAfter(spread, operation.after);
         changed('Inserted spread ' + spread.id, allSpreads(), true);
@@ -262,8 +272,11 @@ export function applyProjectCommands(
       case 'switch_layout': {
         const spread = findSpread(operation.spread);
         findLayout(operation.definition);
-        if (!layoutChoices(template.spreads, spread.definition).includes(operation.definition)) {
-          fail('INCOMPATIBLE_LAYOUT', 'A layout switch must keep the same page footprint.');
+        if (!layoutChoices(template.spreads, spread.definition, format).includes(operation.definition)) {
+          fail('INCOMPATIBLE_LAYOUT', spanFits(template.spreads[operation.definition].span, format)
+            ? 'A layout switch must keep the same page footprint.'
+            : 'Layout ' + operation.definition + ' does not fit the book\'s format ' + format.label + (hasFacingPages(format)
+              ? ', which has facing pages. Choose a spread layout.' : ', which has no facing pages. Choose a single-page layout.'));
         }
         if (spread.definition === operation.definition) break;
         const plan = planLayoutChange(spread, operation.definition, template.spreads);

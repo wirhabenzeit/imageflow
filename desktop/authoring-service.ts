@@ -7,7 +7,7 @@ import type { AuthoringCheckRequest, AuthoringCheckResult } from '../src/authori
 import type { AuthoringDiagnostic } from '../src/authoring';
 import type { ImportRequest } from '../src/desktop';
 import { applyProjectCommands, ProjectCommandError } from '../src/project-commands';
-import { pageSequence } from '../src/format';
+import { pageLabel, pageSequence } from '../src/format';
 import { keptOutside } from '../src/layouts';
 import { sourceUsage } from '../src/editing';
 import { ProjectRevisionError } from './revisions';
@@ -20,7 +20,7 @@ import { photoExtensions } from './photos';
 import type { OpenProject } from './project';
 import type { ProjectSession } from './project-session';
 import { CommittedProjectSaveError } from './persistence';
-import { FixtureError, fixtureCases, fixtureLimits, fixtureRequestSchema, planFixtures } from '../src/fixtures';
+import { FixtureError, fixtureCases, fixtureFits, fixtureLimits, fixtureRequestSchema, planFixtures } from '../src/fixtures';
 import type { FixtureCell } from '../src/fixtures';
 import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
 import { cellReport, fixtureAssets, fixtureDraft, fixtureFindings, fixtureNotEvaluated } from './fixtures';
@@ -267,7 +267,10 @@ export function createAuthoringService(hooks: Hooks) {
         continue;
       }
       formats.push(format);
-      const preview = plan.preview?.printFormat === format ? plan.preview : undefined;
+      // Each format renders the layouts that fit it (planFixtures reports the rest as skipped).
+      const fitting = plan.cells.filter((cell) => fixtureFits(template, cell.layout, format));
+      const planned = plan.preview?.printFormat === format ? plan.preview : undefined;
+      const preview = planned && { ...planned, cells: planned.cells.filter((cell) => fitting.some(({ spread }) => spread === cell.spread)) };
       const previewRequest = (cells: FixtureCell[]): PreviewRequest | undefined => preview && cells.length ? {
         target: { spreads: cells.map(({ spread }) => spread), columns: preview.columns },
         bounds: preview.bounds, maxEdge: preview.maxEdge, format: preview.format, guides: preview.guides, labels: preview.labels } : undefined;
@@ -321,7 +324,7 @@ export function createAuthoringService(hooks: Hooks) {
         await run(cells.slice(0, half), undefined, reason);
         await run(cells.slice(half), undefined, reason);
       };
-      await run(plan.cells, preview?.cells);
+      await run(fitting, preview?.cells);
       // An image is still useful when isolation removed failing fixtures from the requested sheet.
       const shown = preview?.cells.filter(({ spread }) => ['passed', 'warnings', 'errors'].includes(outcome.get(spread)?.state ?? ''));
       if (preview && !image && shown?.length && Date.now() - started < fixtureBudgetMs) {
@@ -330,7 +333,7 @@ export function createAuthoringService(hooks: Hooks) {
         if (result.revision !== base.revision) throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while rendering fixtures. Check again.');
         if (result.state === 'ready' && result.image) image = result.image;
       }
-      reports.push(...plan.cells.map((cell) => outcome.get(cell.spread)!));
+      reports.push(...fitting.map((cell) => outcome.get(cell.spread)!));
     }
     const count = (state: FixtureCellReport['state']) => reports.filter((report) => report.state === state).length;
     const report: FixtureReport = {
@@ -446,7 +449,7 @@ export function createAuthoringService(hooks: Hooks) {
       } else {
         const offset = args.offset ?? 0, limit = args.limit ?? 30;
         const sequence = template && project && pageSequence(project.spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
-        const labels = project?.spreads.map((_, i) => Object.values(sequence?.spreads[i].page ?? {}).join('–')) ?? [];
+        const labels = project?.spreads.map((_, i) => pageLabel(sequence?.spreads[i].page ?? {})) ?? [];
         const usage = project ? sourceUsage(project, labels, template?.spreads) : { photo: {}, text: {} };
         const view = args.view ?? 'summary';
         const records = view === 'sources' ? [
