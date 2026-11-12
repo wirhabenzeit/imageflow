@@ -1,5 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
 import type { IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
@@ -7,7 +8,8 @@ import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } 
 import { basename, dirname, extname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { channels, desktopScheme, editorURL, renderOrigin, settingsURL } from '../src/desktop';
-import type { Command, ExportMode, ImportRequest, OpenAction, ProjectChange, ProjectSummary, Result, McpSettings } from '../src/desktop';
+import type { Command, ExportMode, ImportRequest, OpenAction, ProjectChange, ProjectSummary, Result, McpClientTarget, McpSettings } from '../src/desktop';
+import { mcpTools } from '../src/mcp-contract';
 import { identifier } from '../src/project';
 import type { ProjectFiles, RenderProject } from '../src/project';
 import { printBook, saveProof } from './export';
@@ -25,15 +27,18 @@ import { ProjectSession } from './project-session';
 import { SettingsStore } from './settings';
 import { createAuthoringService, AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
+import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex } from './mcp-setup';
 import { AuthoringQueue } from './authoring-queue';
 import { authoringErrorResult } from './authoring-errors';
 import { ImportReceipts } from './import-receipts';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
 import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
+import type { SettingsPane } from '../src/settings';
 
 let window: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
+let settingsPane: SettingsPane = 'general';
 let active: { id: string; book: OpenProject } | undefined;
 let busy = false;
 let projectSession: ProjectSession | undefined;
@@ -503,14 +508,57 @@ async function checkOpenBook(book: OpenProject, request: AuthoringCheckRequest, 
   }
 }
 
+const mcpDescriptorPath = () => join(app.getPath('userData'), 'mcp-connection.json');
+
+function mcpLaunch() {
+  // Packaging unpacks the bridge next to app.asar so ImageFlow's executable can run it as a plain Node script.
+  const appPath = app.getAppPath();
+  const bridge = join(appPath.endsWith('.asar') ? appPath + '.unpacked' : appPath, 'mcp-bridge.cjs');
+  return bridgeLaunch(process.execPath, bridge, mcpDescriptorPath());
+}
+
 function mcpSettings(): McpSettings {
-  return { enabled: !!mcpConnection, clients: mcpClients, ...(mcpConnection ? {
-    config: { command: 'node', args: [join(app.getAppPath(), 'mcp-bridge.cjs'), '--connection', mcpConnection.descriptorPath] },
-  } : {}) };
+  const launch = mcpLaunch();
+  return { enabled: !!mcpConnection, clients: mcpClients, launch, claudeCode: claudeCodeCommand(launch) };
+}
+
+function openWith(bundleId: string, file: string) {
+  return new Promise<void>((resolve, reject) => {
+    execFile('/usr/bin/open', ['-b', bundleId, file], (error) => { if (error) reject(error); else resolve(); });
+  });
+}
+
+async function installMcp(target: McpClientTarget) {
+  const launch = mcpLaunch();
+  if (target === 'claude') {
+    const file = join(app.getPath('userData'), 'ImageFlow.mcpb');
+    await writeFile(file, claudeExtension({ launch, version: app.getVersion(), tools: mcpTools }));
+    if (process.platform === 'darwin') {
+      try { await openWith('com.anthropic.claudefordesktop', file); }
+      catch {
+        shell.showItemInFolder(file);
+        throw new Error('Claude Desktop was not found. Install it, then open ImageFlow.mcpb from the folder shown in Finder.');
+      }
+    } else {
+      const failure = await shell.openPath(file);
+      if (failure) throw new Error(failure);
+    }
+    return 'Claude Desktop opened its extension installer. Choose Install there.';
+  }
+  if (target === 'codex') {
+    const codex = await findCodex();
+    if (!codex) throw new Error('Neither the ChatGPT desktop app nor the Codex CLI was found. Install one, or add the configuration under Other agents manually.');
+    await addToCodex(codex, launch);
+    return 'Added ImageFlow to ChatGPT and Codex. Start a new task in ChatGPT or Codex to load its tools.';
+  }
+  throw new Error('Unknown agent.');
 }
 
 function publishMcpSettings() {
-  if (window && !window.isDestroyed()) window.webContents.send(channels.mcpChanged, mcpSettings());
+  const settings = mcpSettings();
+  for (const owner of [window, settingsWindow]) {
+    if (owner && !owner.isDestroyed()) owner.webContents.send(channels.mcpChanged, settings);
+  }
 }
 
 async function disableMcp() {
@@ -549,7 +597,7 @@ async function agentLease(signal: AbortSignal) {
 
 async function enableMcp() {
   const owner = window;
-  if (!owner || owner.isDestroyed() || closing || quitting) throw new Error('Open ImageFlow before enabling the connection.');
+  if (!owner || owner.isDestroyed() || closing || quitting) throw new Error('Open the ImageFlow window before turning on agent access.');
   const queue = new AuthoringQueue({ ready: () => !busy && !closing && !quitting, maxPending: 32 });
   const service = createAuthoringService({
     session: () => projectSession, cache, docs: join(app.getAppPath(), 'docs', 'template-api.md'),
@@ -567,7 +615,7 @@ async function enableMcp() {
     },
   });
   const connection = await createMcpConnection({
-    descriptorPath: join(app.getPath('userData'), 'mcp-connection.json'),
+    descriptorPath: mcpDescriptorPath(),
     onClientsChanged: (clients) => { mcpClients = clients; publishMcpSettings(); },
     onCall: async (name, args, signal) => {
       mcpCalls++;
@@ -617,9 +665,12 @@ function followAppearance(owner: BrowserWindow) {
   owner.once('closed', () => nativeTheme.removeListener('updated', updateBackground));
 }
 
-function showSettings() {
+/** Opens Settings, switching to `pane` when given. Without one, an open window keeps its current pane. */
+function showSettings(pane?: SettingsPane) {
   const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
+  settingsPane = pane ?? (settingsWindow && !settingsWindow.isDestroyed() ? settingsPane : 'general');
   if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (pane) settingsWindow.webContents.send(channels.settingsPane, pane);
     if (!hidden) { settingsWindow.show(); settingsWindow.focus(); }
     return;
   }
@@ -747,8 +798,18 @@ void app.whenReady().then(async () => {
     if (direction !== 'undo' && direction !== 'redo') throw new Error('Unknown history action.');
     return activate(await projectSession!.undo(direction));
   }));
+  ipcMain.handle(channels.showSettings, (event, pane: SettingsPane) => {
+    if (editorOwner(event) && (pane === 'general' || pane === 'agents')) showSettings(pane);
+  });
+  ipcMain.handle(channels.settingsPane, (event) => settingsOwner(event) ? settingsPane : 'general');
+  ipcMain.handle(channels.fitSettings, (event, height: number) => {
+    const owner = settingsOwner(event);
+    if (!owner || typeof height !== 'number' || !Number.isFinite(height)) return;
+    const [width] = owner.getContentSize();
+    owner.setContentSize(width, Math.round(Math.min(Math.max(height, 120), 760)), process.platform === 'darwin');
+  });
   ipcMain.handle(channels.mcp, async (event, enabled?: boolean) => {
-    if (!editorOwner(event)) return { error: 'Request is only available to the editor.' };
+    if (!editorOwner(event) && !settingsOwner(event)) return { error: 'Request is only available to the editor or Settings.' };
     try {
       if (enabled !== undefined && typeof enabled !== 'boolean') throw new Error('Invalid connection setting.');
       const update = connectionSettingsQueue.then(async () => {
@@ -759,6 +820,11 @@ void app.whenReady().then(async () => {
       await update;
       return { value: mcpSettings() };
     } catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.mcpInstall, async (event, target: McpClientTarget) => {
+    if (!settingsOwner(event)) return { error: 'Request is only available to Settings.' };
+    try { return { value: await installMcp(target) }; }
+    catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.on(channels.agentLeaseReply, (event, id: string, allowed: boolean) => {
     if (event.sender === window?.webContents && event.senderFrame === window.webContents.mainFrame) agentLeases.get(id)?.(allowed === true);
@@ -783,9 +849,9 @@ void app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu', submenu: [
       { role: 'about' }, { type: 'separator' },
-      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: showSettings },
+      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
       { type: 'separator' },
-      menuCommand('Agent Connections…', undefined, 'agent-settings'),
+      { label: 'Agent Connections…', click: () => showSettings('agents') },
       { type: 'separator' }, { role: 'services' }, { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
     ] },

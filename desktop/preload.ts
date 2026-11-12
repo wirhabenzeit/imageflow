@@ -12,12 +12,17 @@ const api: DesktopApi = {
   getSettings: () => ipcRenderer.invoke(channels.settings),
   updateSettings: (patch) => ipcRenderer.invoke(channels.updateSettings, patch),
   onSettingsChanged: (listener) => listen(channels.settingsChanged, listener),
+  showSettings: (pane) => ipcRenderer.invoke(channels.showSettings, pane),
+  settingsPane: () => ipcRenderer.invoke(channels.settingsPane),
+  onSettingsPane: (listener) => listen(channels.settingsPane, listener),
+  fitSettings: (height) => ipcRenderer.invoke(channels.fitSettings, height),
   setPanelVisibility: (state) => ipcRenderer.invoke(channels.panelVisibility, state),
   openProject: (action) => ipcRenderer.invoke(channels.open, action),
   saveProject: (id, files, label) => ipcRenderer.invoke(channels.save, id, files, label),
   history: (id, direction) => ipcRenderer.invoke(channels.history, id, direction),
   mcpSettings: (enabled) => ipcRenderer.invoke(channels.mcp, enabled),
   onMcpChanged: (listener) => listen(channels.mcpChanged, listener),
+  installMcp: (target) => ipcRenderer.invoke(channels.mcpInstall, target),
   onAgentLease: (listener) => listen<string>(channels.agentLease, (id) => {
     ipcRenderer.send(channels.agentLeaseReply, id, listener(id));
   }),

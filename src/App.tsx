@@ -6,7 +6,7 @@ import { PanelDivider, usePanels } from './panels';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
-import { McpPanel } from './McpPanel';
+import { AgentStatus } from './AgentStatus';
 import { revealIn } from './reveal';
 import { EditPopover } from './EditPopover';
 import { CropEditor } from './CropEditor';
@@ -306,7 +306,6 @@ export function App() {
   const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, importFile: importParameterFile }), [summary?.project.files]);
 
   function act(command: Command) {
-    if (command === 'agent-settings') return;
     if (command === 'toggle-project' || command === 'toggle-inspector') {
       togglePanel(command === 'toggle-project' ? 'left' : 'right');
       return;
@@ -1095,7 +1094,7 @@ export function App() {
       <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
         {issue || busy || notice || (summary ? 'Project preview · Proof export' : 'ImageFlow for macOS')}
       </span>
-      <McpPanel api={api} />
+      <AgentStatus api={api} />
       {summary && <BookCheckIndicator check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}
     </footer>
   </div></ProjectFilesContext.Provider>;

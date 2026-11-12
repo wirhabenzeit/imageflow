@@ -67,14 +67,14 @@ async function readDescriptor(path: string): Promise<McpDescriptor> {
     file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const info = await file.stat();
     if (!info.isFile() || info.size > 4096 || (info.mode & 0o077) !== 0) {
-      throw new McpConnectionError('connection-descriptor-invalid', 'The ImageFlow connection file must be a private regular file. Re-enable the connection in ImageFlow.');
+      throw new McpConnectionError('connection-descriptor-invalid', 'The ImageFlow connection file must be a private regular file. In ImageFlow, turn agent access off and on again.');
     }
     const parsed = mcpDescriptorSchema.safeParse(JSON.parse(await file.readFile('utf8')));
     if (!parsed.success || !isAbsolute(parsed.data.socket)) throw new Error('Invalid connection descriptor.');
     return parsed.data;
   } catch (error) {
     if (error instanceof McpConnectionError) throw error;
-    throw new McpConnectionError('connection-unavailable', 'ImageFlow’s local connection is unavailable. Open ImageFlow, enable the connection, and use its current setup path.');
+    throw new McpConnectionError('connection-unavailable', 'ImageFlow is not accepting agents. Open a book in ImageFlow, choose Connect an agent… and turn on agent access.');
   } finally {
     await file?.close();
   }
@@ -124,7 +124,7 @@ export async function createMcpConnection(options: {
         const token = hello.success ? Buffer.from(hello.data.token) : Buffer.alloc(0);
         const expected = Buffer.from(descriptor.token);
         if (!hello.success || token.length !== expected.length || !timingSafeEqual(token, expected)) {
-          replyError({ code: 'connection-unauthorized', message: 'This ImageFlow connection is not authorized. Re-enable it and use the current setup path.' });
+          replyError({ code: 'connection-unauthorized', message: 'This ImageFlow connection is no longer authorized. In ImageFlow, turn agent access off and on again.' });
           socket.end();
           return;
         }
@@ -269,7 +269,7 @@ export class McpAppClient {
         if (frame.type === 'result') call.resolve(frame.result);
         else call.reject(new McpConnectionError(frame.error.code, frame.error.message));
       }, fail);
-      socket.on('error', () => fail(new McpConnectionError('connection-unavailable', 'ImageFlow’s local connection closed. Open ImageFlow and enable the connection again.')));
+      socket.on('error', () => fail(new McpConnectionError('connection-unavailable', 'ImageFlow’s agent connection closed. Open ImageFlow and turn on agent access again.')));
       socket.once('close', () => {
         clearTimeout(timer);
         reject(new McpConnectionError('connection-closed', 'The ImageFlow connection closed.'));

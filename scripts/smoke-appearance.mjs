@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { menuAction, exportAction } from './ui-actions.mjs';
+import { menuAction, exportAction, agentSettings, closeSettings } from './ui-actions.mjs';
 
 // Change app settings only inside this isolated profile, never the user's macOS preference.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -110,9 +110,11 @@ try {
   await w.waitForTimeout(180);
   await w.screenshot({ path: join(root, '.build', 'appearance-quicklook-dark.png') });
   await w.getByRole('button', { name: 'Close Quick Look' }).click();
-  await menuAction(app, 'Agent Connections…');
-  assert.equal(await w.locator('.mcp-dialog').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(37, 37, 37)');
-  await w.getByRole('dialog', { name: 'Connect your agent' }).getByRole('button', { name: 'Close', exact: true }).click();
+  const agents = await agentSettings(app);
+  assert.equal(await agents.locator('.settings-window').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(37, 37, 37)');
+  await agents.getByText('Claude Code and other agents').click();
+  await agents.screenshot({ path: join(root, '.build', 'appearance-agents-dark.png') });
+  await closeSettings(app);
   // An open template editor follows appearance changes without discarding its uncommitted draft.
   async function calendar() {
     await w.locator('[data-spread="march"].spread-thumb').click();
