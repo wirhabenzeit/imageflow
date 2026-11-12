@@ -11,7 +11,7 @@ import { ControlList, Field } from './Fields';
 type EditorMessage =
   | { type: 'editor-ready' } | { type: 'editor-draft'; values: Values } | { type: 'editor-size'; height: number }
   | { type: 'editor-commit'; values: Values } | { type: 'editor-flushed'; request: number; values: Values } | { type: 'editor-cancel' } | { type: 'editor-import'; request: number; accept: unknown; mode?: unknown }
-  | { state: 'error'; message: string };
+  | { type: 'editor-warning'; message: unknown } | { state: 'error'; message: string };
 
 // What the dialog works on: every parameter of the element, with its declaration and resolved value (the saved
 // value, else the template default). Comparing this tells whether a draft was based on values that have since
@@ -46,6 +46,9 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const [failed, setFailed] = useState(false);
+  // Problems the editor reported without failing, such as set() naming a parameter it does not edit. They do not
+  // block Done; they tell the template author why a change had no effect.
+  const [warnings, setWarnings] = useState<string[]>([]);
   // Done waits for the frame to finish typing in progress: a field in the frame keeps typed text until it loses
   // focus, which clicking Done out here does not cause. The request being waited for, if any.
   const [flushing, setFlushing] = useState<number>();
@@ -139,6 +142,9 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
         { type: 'editor-imported', request: data.request, ...imported }, renderOrigin);
       if (readOnly || failed || stale || !importFile || !accept.length) reply();
       else void importFile(accept, data.mode === 'copy' || data.mode === 'link' ? data.mode : undefined).then(reply, () => reply());
+    } else if (data.type === 'editor-warning') {
+      const message = typeof data.message === 'string' ? data.message.slice(0, 500) : '';
+      if (message) setWarnings((previous) => previous.includes(message) || previous.length >= 5 ? previous : [...previous, message]);
     } else if (data.type === 'editor-size') {
       setHeight(Math.max(120, Math.min(data.height, window.innerHeight * 0.7)));
     } else if (data.type === 'editor-flushed') {
@@ -166,6 +172,10 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     </p>}
     {error && !stale && <p className="ee-status error-text" role="alert">{error}</p>}
     {blocked && !stale && <p className="ee-status muted" role="status">{blocked}</p>}
+    {warnings.length > 0 && <div className="ee-status ee-warnings" role="status">
+      <strong>The editor asked for changes it cannot make:</strong>
+      <ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+    </div>}
     {generated.length > 0 && <fieldset className="ee-fields" disabled={readOnly || failed || stale}>
       <ControlList nodes={generated} field={(node, param) => <Field key={node.key} param={param} value={current[node.key]}
         description={node.description} change={(next) => setLocal((previous) => ({ ...previous, [node.key]: next }))} />} />

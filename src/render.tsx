@@ -28,6 +28,7 @@ import { inspectionSchema } from './inspection';
 import type { ElementInspection, ElementMeasurement } from './inspection';
 import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import { Field, ProjectFilesContext } from './Fields';
+import { editorChanges, unknownControl } from './editor-changes';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -813,11 +814,22 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   const commit = () => { if (!failed) post({ type: 'editor-commit', values: changed ? claimed(draft) : {} }); };
   const cancel = () => post({ type: 'editor-cancel' });
   let update: ((values: Values) => void) | undefined;
+  // A change set() cannot apply (another parameter, or an invalid value) is ignored, as untyped template code would
+  // otherwise lose it silently. Each problem is reported once: in the console for the author, and to the dialog,
+  // which shows it without blocking Done.
+  const reported = new Set<string>();
+  const warn = (message: string) => {
+    if (reported.has(message)) return;
+    reported.add(message);
+    console.warn('ImageFlow: ' + message);
+    post({ type: 'editor-warning', message });
+  };
   const set = (changes: Values) => {
     if (readOnly || failed) return;
-    const allowed = Object.entries(changes).filter(([key]) => editor.parameters.includes(key));
-    if (!allowed.length) return;
-    draft = { ...draft, ...Object.fromEntries(allowed) };
+    const { allowed, rejected } = editorChanges(element.parameters, editor.parameters, changes);
+    for (const { message } of rejected) warn(message);
+    if (!Object.keys(allowed).length) return;
+    draft = { ...draft, ...allowed };
     changed = true;
     post({ type: 'editor-draft', values: claimed(draft) });
     update?.(draft);
@@ -876,7 +888,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   function Control({ parameter, label }: { parameter: string; label?: string }) {
     const values = React.useContext(EditorValues);
     const param = editor!.parameters.includes(parameter) && Object.hasOwn(element!.parameters, parameter) ? element!.parameters[parameter] : undefined;
-    if (!param) throw new Error('Control ' + parameter + ' is not one of the parameters this editor edits.');
+    if (!param) throw new Error(unknownControl(parameter, editor!.parameters));
     const value = isParameterValue(param, values[parameter]) ? values[parameter] : param.default;
     return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
       React.createElement(Field, { param: label ? { ...param, label } : param, value, change: (next) => set({ [parameter]: next }) }));
