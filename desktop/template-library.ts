@@ -91,6 +91,7 @@ export type ImportPlan =
   | { kind: 'new' | 'newer' | 'same'; info: TemplateInfo; current?: LibraryEntry }
   | { kind: 'changed' | 'older'; info: TemplateInfo; current: LibraryEntry };
 export type ImportResult = LibraryImportResult;
+export type ResolvedTemplate = Awaited<ReturnType<TemplateLibrary['resolve']>>;
 
 function entryFrom(info: TemplateInfo | undefined, fallback: { id: string; version?: string }, extra: Omit<LibraryEntry,
   'id' | 'version' | 'label' | 'formats' | 'layouts' | 'openingSpreads'>): LibraryEntry {
@@ -198,6 +199,20 @@ export class TemplateLibrary {
   /** Where a usable entry's template source is, with its declarations and, for a built-in, its sample book. */
   async resolve(id: string) {
     await this.writes;
+    return this.resolveNow(id);
+  }
+
+  /**
+   * Runs `use` with an entry while no import or removal can change the library, so whatever `use` copies from
+   * `folder` matches the version, hash and declarations it is given, even if the entry is replaced meanwhile.
+   */
+  async withTemplate<T>(id: string, use: (template: ResolvedTemplate) => Promise<T>): Promise<T> {
+    const task = this.writes.then(async () => use(await this.resolveNow(id)));
+    this.writes = task.then(() => {}, () => {});
+    return task;
+  }
+
+  private async resolveNow(id: string) {
     await this.loadBuiltIns();
     const user = (await this.userEntries()).find(({ entry }) => entry.id === id);
     const builtIn = this.builtIns.get(id);
