@@ -427,7 +427,7 @@ export function createAuthoringService(hooks: Hooks) {
             'Use apply_project_changes for project.json/photos.json; never edit these manifests while the app is open.',
             'Copy new content into inbox/ and call import_sources. Then assign returned IDs with a command batch.',
             'To start or extend a template, call get_authoring_context with includeExamples and copy the closest example layout.',
-            'Layout families group variants of one design (template.layoutFamilies; family and variant on each layout). Switch variants with switch_layout and the layout ID.'],
+            'Use a layout family when layouts are variants of one design (template.layoutFamilies; family and variant on each layout); pickers should choose by variant tags, not hard-coded IDs. Switch variants with switch_layout and the layout ID.'],
           template, diagnostics, checks: report.checks, sources,
           templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
           apiReference: await readFile(hooks.docs, 'utf8'),

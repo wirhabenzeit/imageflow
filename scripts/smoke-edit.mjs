@@ -501,12 +501,12 @@ try {
   assert.equal((await read()).spreads[1].boxes.hero.photo, 'segla');
 
   // #10: a rejected value in one spread's field does not appear in another spread with the same field.
-  await thumb('Photo grid 6–7');
+  await thumb('Photo grid 2×2 6–7');
   const gap = w.getByRole('spinbutton', { name: 'Gap', exact: true });
   await gap.fill('99');
   await gap.press('Tab');
   await w.locator('.inspector .error-text').filter({ hasText: 'within the field' }).waitFor();
-  await thumb('Photo grid 20–21');
+  await thumb('Photo grid 2×2 20–21');
   await w.waitForFunction(() => !document.querySelector('.inspector .error-text'));
   assert.equal(await gap.inputValue(), '6');
   assert.equal((await read()).spreads[3].params.gutter, undefined);

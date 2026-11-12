@@ -32,6 +32,7 @@ The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided b
 | `file-input.tsx` | An optional CSV file input, parsed by the template, with a structured finding for bad lines. |
 | `editing-levels.tsx` | Editing UI at three levels: generated controls, arranged `controls` with a condition, and a custom editor using `Control`. |
 | `responsive.tsx` | Two formats and one layout that arranges itself by the shape of the chosen format. |
+| `layout-family.tsx` | A layout family of three variants (grid size × text box, one combination missing) with a picker of two independent choices. |
 
 Agents receive them with `get_authoring_context` and `includeExamples`. To start a template, copy `minimal.tsx` (or the closest example) and add layouts. To extend one, copy a single layout and its declarations. The starter template is the complete reference book, not a required starting point.
 
@@ -59,6 +60,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, requires: ['anchor
 | `box-records` | `box.photos`. |
 | `editor-controls` | `controls` on spreads, boxes and elements. |
 | `editor-native-controls` | `Control` and `importFile` in element editors, and the element's other parameters in the editor dialog. |
+| `layout-families` | `layoutFamilies`, `family` and `variant` on layouts, and a family's own layout picker. |
 
 `capabilities` lists what the installed app provides, and `get_authoring_context` reports it as `capabilities.templateApi`. Apps older than `requires` ignore it, but their bundler still rejects an import of a helper they lack. An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
 
@@ -232,6 +234,38 @@ A spread can switch to any layout of the template with the same page footprint: 
 Selecting a layout is one edit: Undo restores the previous layout with everything it showed. Pointing at a layout in the picker shows what switching would do, for example *2 photos carried over · 2 photos kept outside this layout · text will reflow*. A selected photo or open edit popover on the spread closes when its layout changes, and an open element editor reports that its values changed, so nothing is saved into a layout it was not opened for.
 
 State that no layout of the template declares (after the template drops a box, element or parameter) stays in `project.json` and is reported in the Book check rather than removed.
+
+### Layout families
+
+Layouts that are variants of one design, such as a photo grid in 2×2 and 3×3, can form a **layout family**. Every variant is still an ordinary layout with its own ID and a fixed set of boxes, so everything in [Switching layouts](#switching-layouts) applies unchanged: choosing a variant is a layout switch, with the same carried, kept and restored content, per-layout crops, rejected-value fallbacks and one Undo step. Families change only how the choice is presented.
+
+```tsx
+function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerProps) {
+  return <div role="radiogroup" aria-label="Grid size">
+    {variants.map(({ id, variant }) => <button key={id} type="button" role="radio" aria-checked={id === current}
+      disabled={readOnly} onClick={() => choose(id)}>{variant.size}</button>)}
+  </div>;
+}
+
+defineTemplate({
+  …, requires: ['layout-families'],
+  layoutFamilies: { grid: { label: 'Photo grid', picker: { label: 'Grid size', component: GridSizePicker } } },
+  spreads: ({ spread }) => ({
+    grid: spread({ label: 'Photo grid 2×2', family: 'grid', variant: { size: '2x2' }, boxes: box.photos(['a', 'b', 'c', 'd'], …), render: … }),
+    grid9: spread({ label: 'Photo grid 3×3', family: 'grid', variant: { size: '3x3' }, boxes: box.photos(['a', 'b', 'e', 'c', 'd', 'f', 'g', 'h', 'i'], …), render: … }),
+  }),
+});
+```
+
+- **Declaring:** `layoutFamilies` declares each family by ID with a `label` and an optional `picker`. A layout joins one with `family`. `variant` holds free-form tags (strings, numbers or booleans) that tell the variants apart; ImageFlow gives them no meaning and passes them to the picker.
+- **Rules, checked when the template loads:** the family is declared (TypeScript also rejects an unknown family); a family has at least two variants; its variants have the same `span`; tags are on every variant of a family or on none, and no two variants have the same tags; a layout with tags belongs to a family.
+- **Box IDs carry the content.** Choose the variants' box IDs so shared content lands where it belongs. The starter's 3×3 grid declares the 2×2 grid's four boxes in its upper-left cells, so growing the grid keeps those photos in place, and shrinking it keeps the other five outside the layout until the spread returns to 3×3.
+- **Sidebar:** a family with a picker is one layout preview, named after the family and showing the spread's current variant (or the first one). Clicking it opens the picker; so does the button next to the layout name while the spread uses one of the variants. A family without a picker shows a preview per variant, next to each other.
+- **The picker** runs in a sandboxed frame with the template's CSS, hosted like an [element editor](#element-editors): ImageFlow owns the dialog, Cancel and Done, Escape and ⌘↩, and shows what the chosen variant would carry over and keep before Done. It receives `variants` (each with `id`, `label` and its `variant` tags), `current` (the variant chosen in the draft), `saved` (the spread's layout), `choose(id)`, `find(tags)` (the first variant whose tags include all the given ones, or `undefined`), `document`, `format`, `readOnly`, `commit()` and `cancel()`.
+- **Only declared variants:** `choose` with anything other than a variant ID of the family changes nothing and the dialog says which IDs it accepts; Done checks the draft again before switching. A picker with several independent choices decides itself what a combination without a variant does, for example by disabling that option or choosing the nearest variant: `find({ size: '3x3', text: true }) ?? find({ size: '3x3' })`. Prefer tags over hard-coded IDs, so a new variant needs only a new layout.
+- **Changes from elsewhere:** if the spread's layout or the family's declarations change while the picker is open, the dialog says so and refuses to switch.
+- **Agents and commands** keep switching layouts by ID with `switch_layout`. `get_authoring_context` reports `layoutFamilies`, and `family` and `variant` on each layout, so agents see the same grouping.
+- **Scope today:** a finite list of explicitly declared variants, shown in a dialog. The set of boxes is never derived from parameters, and unbounded counts (rows 1 to n) are not supported. Hosting the picker inline in the sidebar may follow.
 
 ## Render function
 
