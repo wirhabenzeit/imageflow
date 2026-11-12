@@ -10,5 +10,7 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["src", "desktop", "tests", "vite.config.ts"]
+  "include": ["src", "desktop", "tests", "vite.config.ts"],
+  // Template-side type checks with the starter's own settings: `tsc -p tests/types`.
+  "exclude": ["tests/types"]
 }
