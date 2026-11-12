@@ -279,3 +279,19 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: doc, sp
   a: { label: 'A', parameters: scopedLayout, elements: { e: { label: 'E', parameters: route,
     editor: { parameters: ['zoom'], spread: ['title'], component: Scoped } } }, render: () => <Spread /> },
 } });
+// Opening spreads name declared layouts and set parameters with plain values, with spreads as a function or a record.
+defineTemplate({ id: 't', version: '1', contract: 1, format, requires: ['opening-spreads'],
+  spreads: ({ spread }) => ({ a: spread({ label: 'A', parameters: foo, render: () => <Spread /> }) }),
+  openingSpreads: [{ layout: 'a', params: { foo: 'x' } }, { layout: 'a' }] });
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, spreads: { a: imported },
+  openingSpreads: [{ layout: 'a' }] });
+// A layout that is not declared is reported, in either form.
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }),
+  openingSpreads: [{ layout: 'b' }] });
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, spreads: { a: imported }, openingSpreads: [{ layout: 'b' }] });
+// Parameter values are strings, numbers or booleans.
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, spreads: { a: imported },
+  // @ts-expect-error
+  openingSpreads: [{ layout: 'a', params: { foo: ['x'] } }] });

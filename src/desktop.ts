@@ -1,10 +1,11 @@
 import type { PrintFormat, PrintSide, Span } from './format';
 import type { Parameters } from './parameters';
 import type { ControlItem } from './controls';
-import type { ProjectFiles } from './project';
+import type { ProjectFiles, Values } from './project';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
 import type { ImportMode, SourceStatus } from './source-locations';
 import type { AppSettings, SettingsPane } from './settings';
+import type { LibraryEntry, LibraryImportResult, NewBookChoice } from './library';
 
 export const desktopScheme = 'imageflow';
 export const editorURL = desktopScheme + '://editor/';
@@ -25,6 +26,8 @@ export const channels = {
   panelVisibility: 'editor:panel-visibility', bookMenu: 'editor:book-menu',
   settings: 'app:settings', updateSettings: 'app:update-settings', settingsChanged: 'app:settings-changed',
   showSettings: 'app:show-settings', settingsPane: 'app:settings-pane', fitSettings: 'app:fit-settings',
+  library: 'library:list', libraryChanged: 'library:changed', libraryImport: 'library:import', libraryRemove: 'library:remove',
+  libraryExport: 'library:export',
   history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed', mcpInstall: 'mcp:install',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
 } as const;
@@ -75,7 +78,17 @@ export type DesktopApi = {
   recentDocuments(): Promise<Result<RecentDocument[]>>;
   onRecentsChanged(listener: () => void): () => void;
   recentDocument(id: string, action: 'open' | 'locate' | 'remove'): Promise<Result<null>>;
-  chooseStarter(id?: string): Promise<void>;
+  // The New Book picker's choice; nothing cancels.
+  chooseStarter(choice?: NewBookChoice): Promise<void>;
+  // The template library, and changes to it from any window.
+  library(): Promise<Result<LibraryEntry[]>>;
+  onLibraryChanged(listener: () => void): () => void;
+  // Asks for template folders or .imageflow-template files to import; from Settings or the New Book picker.
+  importTemplates(): Promise<Result<LibraryImportResult[]>>;
+  // Asks to move an imported template to the Trash; false when the user cancels.
+  removeTemplate(id: string): Promise<Result<boolean>>;
+  // Asks where to save a library entry as an .imageflow-template file; the file, or null when the user cancels.
+  exportTemplate(id: string): Promise<Result<string | null>>;
   documentAction(action: 'reveal' | 'template' | 'text', id?: string): Promise<Result<void>>;
   getSettings(): Promise<Result<AppSettings>>;
   updateSettings(patch: Partial<AppSettings>): Promise<Result<AppSettings>>;
@@ -122,10 +135,14 @@ export type SpreadDefinition = {
   family?: string; variant?: Record<string, string | number | boolean>;
 };
 export type TemplateInfo = {
+  // The template's identity and its library metadata; `id` is absent in summaries from apps that predate it.
+  id?: string; label?: string; description?: string;
   version: string; parameters: Parameters; spreads: Record<string, SpreadDefinition>;
   // Families of layouts, by ID. `picker` is set when the family supplies its own picker (the component stays in the
   // render frame).
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string } }>;
+  // The spreads a new book from this template starts with; empty when it starts without spreads.
+  openingSpreads?: { layout: string; params: Values }[];
   // The format in use, its ID, and the labels of all formats the template offers.
   format: PrintFormat; formatId: string; formats: Record<string, string>;
 };

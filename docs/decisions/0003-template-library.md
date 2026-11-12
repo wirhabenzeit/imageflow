@@ -1,6 +1,13 @@
 # 0003: A template library for new projects
 
-Status: proposed, 2026-11-11. Not implemented.
+Status: accepted with changes, 2026-11-12; see #63. Implemented, including sharing with `.imageflow-template` files.
+
+Changes made while planning #63, which override the text below where they differ:
+
+- **One entry per template ID.** Importing a newer version replaces the entry, and the old one goes to the Trash. An older version, or the same version with other files, asks first. The library is a hidden folder, `Templates/<id>/template/` plus `library.json`, with no *Reveal in Finder*.
+- **No thumbnails.** The picker and the Templates pane show the label, description, version, formats and layouts.
+- **Starting content.** Books may have no spreads. A template may declare `openingSpreads`, and a book made from it starts with them. Only the built-in starter has sample content, offered as *Include sample photos, texts and spreads*.
+- **Commands.** A top-level *Template* menu holds *Import Templates…*, *Save Template to Library*, *Manage Templates…* and *Open Template Folder*. Import accepts several folders at once.
 
 ## Context
 

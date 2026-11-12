@@ -1084,11 +1084,12 @@ export async function startRender(root: HTMLElement) {
       throw new DeclarationError('Template' + (first.path ? ' → ' + first.path.split('.').join(' → ') : '') + ': ' + first.message, issues);
     }
     const template = chooseFormat(declared.data, book.project.format);
+    // Known before the ID check, so a failed load still reports the declared ID (the template library reads it).
+    info = templateInfo(template);
     if (template.id !== book.project.template.id) {
       throw new DeclarationError('The template ID does not match project.json.', [{ path: 'id',
         message: 'The template declares ID ' + template.id + ', but project.json uses ' + book.project.template.id + '.' }]);
     }
-    info = templateInfo(template);
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
     if (book.mode === 'edit' && query.get('view') === 'editor') {
@@ -1157,8 +1158,10 @@ export async function startRender(root: HTMLElement) {
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
     ];
-    const errors: Issue[] = sequence.issues.map((text) => ({ ...message(text), code: 'page-sequence',
-      suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format.' }));
+    // A book without spreads is valid while it is being started, but there is nothing to print yet.
+    const errors: Issue[] = spreads.length ? sequence.issues.map((text) => ({ ...message(text), code: 'page-sequence',
+      suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format.' })) : [{
+      ...message('The book has no spreads yet.'), code: 'book-empty', suggestion: 'Add a spread with insert_spread, or with Add Spread in the editor.' }];
     // The preview falls back to the default format, but printing at a size nobody chose is blocked.
     if (template.unknownChoice) {
       errors.push({ ...message('The template no longer offers the format ' + book.project.format + ' saved with this book. The preview uses ' +

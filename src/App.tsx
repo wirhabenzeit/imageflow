@@ -20,7 +20,7 @@ import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
-import { assignmentCounts, newSpread, readEdit, resolveEditPath, sourceUsage } from './editing';
+import { assignmentCounts, firstSpreadLayouts, newSpread, openingSpreadStates, readEdit, resolveEditPath, sourceUsage } from './editing';
 import { moveContent, swapContent } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
@@ -77,6 +77,26 @@ function Guides({ sheet, format }: { sheet: Rect; format: ResolvedFormat }) {
   </div>;
 }
 
+
+// An empty book asks for its first spread: the template's opening spreads, or one layout that can start a book.
+function EmptyBook({ template, writable, start }: { template?: TemplateInfo; writable: boolean; start: (layout?: string) => void }) {
+  const layouts = template ? firstSpreadLayouts(template.spreads, template.format) : [];
+  const opening = template?.openingSpreads ?? [];
+  return <section className="empty-book" aria-labelledby="empty-book-title">
+    <div className="empty-book-art" aria-hidden="true"><span /><span /></div>
+    <h2 id="empty-book-title">This book has no spreads yet</h2>
+    {!template ? <p className="muted">Loading the template…</p> : !writable ? <p className="muted">Spreads can be added once the book can be edited.</p> : <>
+      <p className="muted">{opening.length ? 'Start with the spreads this template suggests, or pick a layout for the first spread.' :
+        'Pick a layout for the first spread. You can switch layouts and add more spreads later.'}</p>
+      {opening.length > 0 && <button className="primary" onClick={() => start()}>
+        Add {opening.length === 1 ? 'the opening spread' : 'the ' + opening.length + ' opening spreads'}</button>}
+      {layouts.length > 0 ? <div className="empty-book-layouts" role="group" aria-label="Layouts for the first spread">
+        {layouts.map((id) => <button key={id} onClick={() => start(id)}>
+          {template.spreads[id].label}</button>)}
+      </div> : <p className="error-text">This template has no layout that can start a book.</p>}
+    </>}
+  </section>;
+}
 
 export function App() {
   const api = window.imageflow;
@@ -181,9 +201,11 @@ export function App() {
   const canChangeBook = writable && !busy && !exporting;
   const canReorder = canChangeBook && !!template;
   const canMoveSpread = (id: string, target: number) => !!template && !!spreadOrder(spreads, id, target, template);
-  const canAdd = canChangeBook && !!spread && !!template && Object.values(template.spreads).some(({ span }) => span === 'spread');
+  // An empty book adds its first spread; otherwise a spread-wide layout is needed.
+  const canAdd = canChangeBook && !!template && (!spread ? firstSpreadLayouts(template.spreads, template.format).length > 0
+    : Object.values(template.spreads).some(({ span }) => span === 'spread'));
   const canDuplicate = canChangeBook && !!template && spreadSelected && !!spread;
-  const canDelete = canChangeBook && spreadSelected && !!spread && spreads.length > 1;
+  const canDelete = canChangeBook && spreadSelected && !!spread;
   const canMoveUp = canReorder && spreadSelected && !!spread && canMoveSpread(spread.id, index - 1);
   const canMoveDown = canReorder && spreadSelected && !!spread && canMoveSpread(spread.id, index + 1);
   useEffect(() => {
@@ -256,8 +278,9 @@ export function App() {
       revealedThumb.current = '';
       canvas.current?.scrollTo({ top: 0, left: 0 });
     }
-    setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0].id :
-      next.project.spreads.find(({ id }) => id === previous)?.id ?? next.project.spreads[0].id));
+    // A book may have no spreads yet; then nothing is selected.
+    setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0]?.id :
+      next.project.spreads.find(({ id }) => id === previous)?.id ?? next.project.spreads[0]?.id) ?? '');
     if (selected) pendingReveal.current = selected;
     setRender(undefined);
     setSummary(next);
@@ -628,8 +651,23 @@ export function App() {
     }, () => 'Spread moved to ' + destination, id);
   }
 
+  // Starts an empty book: with one layout, or with the template's opening spreads.
+  function start(layout?: string) {
+    if (!template || spreads.length) return;
+    const added = layout ? [newSpread(layout)] : openingSpreadStates(template);
+    if (!added.length) return;
+    edit(({ project }) => {
+      if (project.spreads.length) return false;
+      project.spreads = added;
+    }, layout ? 'Added ' + (template.spreads[layout]?.label ?? layout) : "Added the template's opening spreads", added[0].id);
+  }
+
   function add(duplicate = false) {
-    if (!template || !spread) return;
+    if (!template) return;
+    if (!spread) {
+      if (!duplicate) start(firstSpreadLayouts(template.spreads, template.format)[0]);
+      return;
+    }
     const entry = Object.entries(template.spreads).find(([, value]) => value.span === 'spread');
     if (!entry && !duplicate) return;
     const next = duplicate ? { ...structuredClone(spread), id: crypto.randomUUID() } : newSpread(entry![0]);
@@ -1068,7 +1106,7 @@ export function App() {
   const blockedInline = editing?.held && !resumeInline && (canvasReady
     ? 'This field changed while you were editing. Close it and open the field again to continue.'
     : 'Editing is paused while the preview is out of date.');
-  const canExport = canvasReady && !busy;
+  const canExport = canvasReady && !busy && spreads.length > 0;
   const counts = summary ? assignmentCounts(summary.project, template?.spreads) : {};
   const format = formatOf(template);
   // A saved format the template's named formats no longer include; the Book check reports it and print export is
@@ -1191,6 +1229,7 @@ export function App() {
               const { box } = locate(event, event.dataTransfer.types);
               setDropTarget(box ? box.spread + ':' + box.id : undefined);
             }} onDragLeave={() => setDropTarget(undefined)} onDrop={drop}>
+            {summary && !spreads.length && <EmptyBook template={template} writable={writable && !busy} start={start} />}
             {summary && <div ref={stage} className="stage"
               // A grid fills the canvas width; the frame reports the height of all its rows.
               style={{ width: columns ? '100%' : undefined, height: geometry?.height,

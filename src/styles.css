@@ -142,6 +142,15 @@ body { margin: 0; }
 .safe-guide { border: 1px dashed #1d987d; }
 .box-highlight { border: 2px solid #e7b347; background: #efc97633; }
 .preview-message { position: absolute; top: 45%; left: 50%; transform: translateX(-50%); padding: 10px 14px; border-radius: 6px; background: var(--panel-surface); }
+/* An empty book: a pair of blank pages and the layouts that can start it. */
+.empty-book { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px 16px; text-align: center; z-index: 1; }
+.empty-book h2 { font: 400 26px/1.15 Georgia, serif; letter-spacing: -.02em; margin: 4px 0 0; }
+.empty-book p { margin: 0; max-width: 420px; }
+.empty-book-art { display: flex; margin-bottom: 8px; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .14)); }
+.empty-book-art span { width: 64px; height: 84px; background: var(--panel-surface); border: 1px dashed var(--edge); }
+.empty-book-art span:first-child { border-right-style: solid; border-radius: 2px 0 0 2px; }
+.empty-book-art span:last-child { border-left: 0; border-radius: 0 2px 2px 0; }
+.empty-book-layouts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 520px; margin-top: 4px; }
 .preview-state { position: absolute; top: 10px; right: 18px; z-index: 2; pointer-events: none;
   padding: 4px 8px; border-radius: 4px; background: var(--control-surface); box-shadow: 0 1px 3px #0002; font-size: 12px; }
 
@@ -643,6 +652,28 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .starter-description strong { font-size: 15px; color: var(--text); }
 .starter-description small { font-size: 11px; }
 .starter-picker footer { display: flex; gap: 8px; justify-content: flex-end; }
+.starter-picker footer .spacer { flex: 1; }
+.starter-choices { display: grid; gap: 8px; align-content: start; }
+.starter-choice.unavailable { opacity: .6; }
+.starter-version { font-weight: 400; font-size: 12px; color: var(--muted); }
+.studio .starter-art > :first-child { font-size: 17px; line-height: 1.05; overflow-wrap: break-word; hyphens: auto; }
+.starter-sample, .starter-start, .starter-notice { margin: -8px 0 0; }
+/* Settings → Templates: the library list scrolls inside the window's height limit. */
+.template-settings { display: grid; gap: 12px; width: 484px; }
+.template-intro { margin: 0; }
+.template-list { list-style: none; margin: 0; padding: 0; max-height: 380px; overflow: auto; border: 1px solid var(--edge); border-radius: 8px; }
+.template-list > li { padding: 10px 12px; border-top: 1px solid var(--edge); }
+.template-list > li:first-child { border-top: 0; }
+.template-list > li.unavailable strong { color: var(--muted); }
+.template-list .settings-note { margin-top: 3px; }
+.template-row { display: flex; align-items: baseline; gap: 6px; font-size: 13px; }
+.template-source { margin-left: auto; font-size: 11px; color: var(--muted); }
+.studio .template-row button { min-height: 0; padding: 2px 8px; font-size: 11px; }
+.template-actions { display: flex; align-items: center; gap: 12px; }
+.template-actions .settings-note { margin: 0; }
+.template-results { max-height: 160px; overflow: auto; }
+.template-results p { margin: 0 0 4px; }
+.template-details { margin: 0 0 6px; padding-left: 18px; font-size: 11px; color: var(--muted); }
 .book-loading { margin: auto; padding: 60px; color: var(--muted); }
 .source-manager, .save-copy-dialog { color: var(--text); background: var(--popup-surface); border: 1px solid var(--edge); border-radius: 12px; padding: 24px; max-height: 85vh; box-shadow: 0 20px 80px #0005; }
 .source-manager { width: min(1000px, 90vw); }

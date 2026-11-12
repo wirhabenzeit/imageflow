@@ -62,6 +62,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, requires: ['anchor
 | `editor-native-controls` | `Control` and `importFile` in element editors, and the element's other parameters in the editor dialog. |
 | `layout-families` | `layoutFamilies`, `family` and `variant` on layouts, and a family's own layout picker. |
 | `editor-spread-parameters` | `spread` on an element editor: layout parameters edited together with the element's, with `setSpread` and `<Control scope="spread">`. |
+| `opening-spreads` | `openingSpreads`, the spreads a new book starts with. |
 
 `capabilities` lists what the installed app provides, and `get_authoring_context` reports it as `capabilities.templateApi`. Apps older than `requires` ignore it, but their bundler still rejects an import of a helper they lack. An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
 
@@ -76,6 +77,9 @@ import './styles.css';
 export default defineTemplate({
   id: 'senja-starter',
   version: '0.1.0',
+  // Shown in the template library and the New Book picker.
+  label: 'Senja journal',
+  description: 'Full-bleed photos with a field-notes text column.',
   contract: 1,
   requires: ['spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-helpers', 'typed-components'],
 
@@ -214,6 +218,32 @@ Arbitrary dimensions within declared limits, rather than named presets, are not 
 ### Spread spans
 
 Spread definitions render two facing pages by default. For formats with `ends: 'single-pages'`, a definition can declare `span: 'right'` (usable as the first page) or `span: 'left'` (usable as the last page); the inactive half is shown as an inside cover and not exported. Formats with `ends: 'inside-covers'` use full spreads throughout.
+
+### Template library
+
+New books are made from the templates in the library: the built-in starter and the templates imported with **Template → Import Templates…**, **Save Template to Library**, or **Settings → Templates**. Import loads the template like a book would and refuses one that fails to load. The library keeps one entry per `id`, compared by `version` as dot-separated numbers: a newer version replaces the entry, while an older version, or the same version with other files, asks first. So bump `version` when you change a template you have shared. `label` (up to 80 characters) and `description` (up to 300) are what the library shows; without a label it shows the ID. A book copies its template when it is created, and `project.json` records the source's hash as `template.hash`; the library is never read while a book renders.
+
+To share a template, export it as an `.imageflow-template` file: **Template → Export Template…** saves the open book's template, and **Export…** in **Settings → Templates** saves a library entry, built-in ones included. The file is a zip of the template's files, leaving out dotfiles and `node_modules/`, and exporting the same files always gives the same bytes. Importing it, from **Import Templates…** or by opening it in Finder, gives the same hash as the folder it came from. A zip made with Finder's **Compress** works too, when it holds the template folder or its contents. Files with paths outside the template, links, encrypted entries or damaged data are refused before anything is written.
+
+### Opening spreads
+
+`openingSpreads` lists the spreads a new book starts with, in order. The editor offers them in an empty book now, and new books get them once books can be created from any template (#63). Each entry names a layout and may set some of that layout's own parameters:
+
+```ts
+defineTemplate({
+  …,
+  requires: ['opening-spreads'],
+  spreads: ({ spread }) => ({ title: spread({ span: 'right', … }), story: spread({ … }), closing: spread({ span: 'left', … }) }),
+  openingSpreads: [{ layout: 'title' }, { layout: 'story', params: { heading: 'Day one' } }, { layout: 'closing' }],
+});
+```
+
+- The template fails to load if an entry names a layout that `spreads` does not declare, sets a parameter the layout does not have, or sets a value the parameter does not allow. TypeScript reports an undeclared layout as a property missing from `spreads`.
+- Single pages must sit at a book end that every declared format allows: a `right` page only first and a `left` page only last, in formats with `ends: 'single-pages'`.
+- The opening spreads don't need to meet the format's page count. Books are built up from them.
+- Without `openingSpreads`, a new book starts with no spreads. A book with no spreads is valid: the editor shows an empty state that offers the opening spreads, if the template has any, and every layout that can start a book. The Book check reports `book-empty` as an error, so neither proof nor print export is possible yet. Deleting the last spread also leaves an empty book.
+
+The starter declares a title page, one *Photo and story* spread and the closing page.
 
 ### Switching layouts
 

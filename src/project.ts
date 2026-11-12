@@ -26,7 +26,9 @@ export const projectSchema = z.object({
   schemaVersion: z.literal(1),
   title: label,
   importMode: importModeSchema.optional(),
-  template: z.object({ id: identifier, version: label }),
+  // `hash` is the template source's hash when the book was created from the template library; it tells a later
+  // template update whether the book's copy was edited since.
+  template: z.object({ id: identifier, version: label, hash: z.string().regex(/^[a-f0-9]{64}$/).optional() }),
   // The template format chosen in Book settings; templates with one format ignore it.
   format: identifier.optional(),
   params: values,
@@ -40,7 +42,7 @@ export const projectSchema = z.object({
     params: values,
     boxes: z.record(identifier, box).default({}),
     elements: z.record(identifier, z.object({ params: values })).default({}),
-  })).min(1).refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
+  })).refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
 });
 
 export const photoIndexSchema = z.record(identifier, z.object({
