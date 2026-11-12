@@ -9,9 +9,16 @@ const format = printFormat({
 });
 
 const patterns = ['dots', 'stripes', 'grid'] as const;
+const backdropParameters = {
+  pattern: p.enum({ label: 'Pattern', default: 'dots', options: patterns }),
+  tint: p.color({ label: 'Tint', default: '#c9d6cf' }),
+  opacity: p.number({ label: 'Opacity', default: .6, min: .1, max: 1, step: .05 }),
+};
 // Level 3: a picker the generated controls cannot draw, plus ImageFlow's own colour control for `tint`. The dialog
-// saves both with Done; the element's other parameters appear below this editor as generated controls.
-function PatternEditor({ values, set, readOnly, Control }: ElementEditorProps) {
+// saves both with Done; the element's other parameters appear below this editor as generated controls. The props
+// are typed from the declaration, so `set({ pattern: 'waves' })` or `<Control parameter="opacity" />` fails type
+// checking: `waves` is not an option, and `opacity` is not one of this editor's parameters.
+function PatternEditor({ values, set, readOnly, Control }: ElementEditorProps<typeof backdropParameters, 'pattern' | 'tint'>) {
   return <div>
     <div role="radiogroup" aria-label="Pattern" style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
       {patterns.map((pattern) => <button key={pattern} type="button" role="radio" aria-checked={values.pattern === pattern}
@@ -73,11 +80,7 @@ export default defineTemplate({
         // in the same dialog.
         backdrop: {
           label: 'Backdrop',
-          parameters: {
-            pattern: p.enum({ label: 'Pattern', default: 'dots', options: patterns }),
-            tint: p.color({ label: 'Tint', default: '#c9d6cf' }),
-            opacity: p.number({ label: 'Opacity', default: .6, min: .1, max: 1, step: .05 }),
-          },
+          parameters: backdropParameters,
           editor: { label: 'Edit backdrop', parameters: ['pattern', 'tint'], component: PatternEditor },
         },
       },

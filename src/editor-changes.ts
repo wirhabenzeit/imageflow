@@ -1,0 +1,59 @@
+import { isParameterValue } from './parameters';
+import type { Parameter, Parameters } from './parameters';
+import type { Values } from './project';
+
+/** A change a custom editor asked for that was not applied, with a message naming what it can do instead. */
+export type RejectedChange = { key: string; message: string };
+
+const show = (value: unknown) => typeof value === 'string' ? JSON.stringify(value) : String(value);
+const list = (keys: readonly string[]) => keys.length ? keys.join(', ') : 'no parameters';
+
+// What a valid value looks like, for the message about an invalid one.
+function expected(param: Parameter) {
+  switch (param.type) {
+    case 'boolean': return 'true or false';
+    case 'integer':
+    case 'number': {
+      const kind = param.type === 'integer' ? 'a whole number' : 'a number';
+      if (param.min !== undefined && param.max !== undefined) return kind + ' from ' + param.min + ' to ' + param.max;
+      if (param.min !== undefined) return kind + ' of at least ' + param.min;
+      if (param.max !== undefined) return kind + ' of at most ' + param.max;
+      return kind;
+    }
+    case 'string': return param.maxLength === undefined ? 'a string' : 'a string of at most ' + param.maxLength + ' characters';
+    case 'enum': return 'one of ' + param.options.map(show).join(', ');
+    case 'color': return 'a colour such as "#243b30"';
+    case 'date': return 'an ISO date such as "2027-03-01"' + (param.min ? ', from ' + param.min : '') + (param.max ? ', until ' + param.max : '');
+    case 'file': return 'a file ID, or "" for none';
+  }
+}
+
+/**
+ * Splits the changes a custom editor passes to `set()` into those it may make, the editor's own parameters with
+ * valid values, and those that are ignored, each with a message saying why. Untyped template code can pass
+ * anything, so `changes` is not trusted to be an object.
+ */
+export function editorChanges(parameters: Parameters, owned: readonly string[], changes: unknown): { allowed: Values; rejected: RejectedChange[] } {
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
+    return { allowed: {}, rejected: [{ key: '', message: 'set() expects an object of parameter values, such as set({ ' + (owned[0] ?? 'parameter') + ': … }).' }] };
+  }
+  const allowed: Values = {};
+  const rejected: RejectedChange[] = [];
+  for (const [key, value] of Object.entries(changes)) {
+    const param = Object.hasOwn(parameters, key) ? parameters[key] : undefined;
+    if (!owned.includes(key)) {
+      rejected.push({ key, message: 'set() ignored ' + key + ': ' + (param
+        ? 'it is not one of this editor\'s parameters, so it is edited by the generated controls. This editor edits ' + list(owned) + '.'
+        : 'the element has no such parameter. This editor edits ' + list(owned) + '.') });
+    } else if (!param || !isParameterValue(param, value)) {
+      rejected.push({ key, message: 'set() ignored ' + key + ': ' + show(value) + ' is not a valid value' +
+        (param ? '; ' + param.label + ' takes ' + expected(param) : '') + '.' });
+    } else allowed[key] = value as Values[string];
+  }
+  return { allowed, rejected };
+}
+
+/** The message for `<Control parameter>` naming a parameter the editor does not own. */
+export function unknownControl(parameter: unknown, owned: readonly string[]) {
+  return 'Control ' + show(parameter) + ' is not one of the parameters this editor edits. Use one of: ' + list(owned) + '.';
+}

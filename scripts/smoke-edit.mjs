@@ -139,7 +139,7 @@ try {
   const calendarFile = join(project, 'template', 'index.tsx');
   const calendarSource = await readFile(calendarFile, 'utf8');
   const withControl = calendarSource
-    .replace('function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {', 'function CalendarEditor({ values, set, readOnly, Control }: ElementEditorProps) {')
+    .replace('function CalendarEditor({ values, set, readOnly }: CalendarEditorProps) {', 'function CalendarEditor({ values, set, readOnly, Control }: CalendarEditorProps) {')
     .replace('  return <div className="calendar-editor">\n', `  return <div className="calendar-editor" onBlurCapture={(event) => {
       const value = (event.target as HTMLInputElement).value;
       if (value === 'slow') for (const end = Date.now() + 6500; Date.now() < end;);
@@ -275,8 +275,8 @@ try {
 
   // set() followed directly by commit() saves the values just set, not the previous render's.
   const withEditor = (code) => templateSource.replace(
-    'function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {',
-    'function CalendarEditor({ values, set, readOnly, commit }: ElementEditorProps) {\n' + code);
+    'function CalendarEditor({ values, set, readOnly }: CalendarEditorProps) {',
+    'function CalendarEditor({ values, set, readOnly, commit }: CalendarEditorProps) {\n' + code);
   const jump = `  const jump = <button type="button" onClick={() => { set({ month: '2027-04-01', marked: '9' }); commit(); }}>Jump to April</button>;
   const explode = <button type="button" onClick={() => { throw new Error('handler exploded'); }}>Explode</button>;`;
   await rerendered(() => writeFile(templateFile, withEditor(jump).replace(

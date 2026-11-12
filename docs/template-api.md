@@ -353,24 +353,27 @@ Each box and element is edited where it is on the page, with one editor per task
 An element can supply its own editor for parameters that generated controls handle poorly, such as marking days in a calendar or panning a map:
 
 ```tsx
-function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {
+const calendar = { month, firstWeekday, marked };
+function CalendarEditor({ values, set, readOnly }: ElementEditorProps<typeof calendar, 'month' | 'marked'>) {
   // Render any UI; call set({ ... }) to change the draft. The editor previews the draft itself.
 }
 
 elements: { grid: {
   label: 'Calendar grid',
-  parameters: { month, firstWeekday, marked },
+  parameters: calendar,
   editor: { label: 'Edit calendar', parameters: ['month', 'marked'], component: CalendarEditor },
 } },
 ```
 
 - **Opening it:** clicking the element opens the editor in a dialog, and so does the element's entry in the sidebar's list.
 - **One editor for the element:** parameters the editor lists are edited only by it. The element's other parameters appear below it in the same dialog as generated controls (arranged by the element's `controls`), in the same draft, so Done saves the whole element as one edit. The editor's `values` follow those controls as the user changes them, so its preview always shows the whole draft. Done first applies anything still being typed in the editor's frame, including in `<Control>` fields, and saves only once the frame confirms. If the editor fails while applying, or does not answer within a few seconds, nothing is saved and the dialog stays open with its draft.
+- **Typed props:** `ElementEditorProps<P, K, D>` types the props from the element's parameters `P`, the IDs the editor lists `K`, and optionally the template's document parameters `D`. `values` and `document` then have each parameter's type (an enum's options, a number, a string), `set` accepts only the editor's own parameters with values of their type, and `Control` only the editor's own parameters, so `set({ zoon: 2 })`, `set({ size: 'huge' })` for an enum without that option, or `<Control parameter="opacity" />` for a parameter the generated controls edit fail type checking. An editor typed for other parameters than its declaration lists fails too. Declare the parameters as a constant to write `typeof calendar`; an editor written inline in `editor.component` is not typed from the declaration, so annotate its props the same way. `ElementEditorProps` without type arguments keeps the untyped props.
 - **Sandbox:** the component runs in a frame on the render origin with the template's CSS, like the book previews. It receives `values` (all of the element's parameters, with the draft applied), `set(changes)`, `document`, `format`, `readOnly`, `commit()`, `cancel()`, `Control` and `importFile`. It cannot change project data itself.
 - **ImageFlow's controls inside:** `<Control parameter="track" />` draws the app's own control for one of the editor's parameters, bound to the draft: the same field, slider, choice or file chooser (with import) as the generated controls, with their validation and accessibility, in the editor's appearance. Compose it with your own UI instead of rebuilding file handling or form controls. `label` overrides the parameter's label.
 - **Files:** `importFile(accept)` asks the app to import a file into the project and resolves to its file ID, or `undefined` when the user cancels; `<Control>` for a file parameter uses it for its **Choose…** button. Assign the ID with `set`, so Done saves it and Cancel discards the assignment; the imported file stays in the project. `file(id)` reads the new file at once.
 - **What ImageFlow owns:** the dialog, Cancel and Done, Escape and ⌘↩, focus, read-only mode, validation against the parameter schema, and saving. One editing session is one undoable edit; Cancel leaves the saved values unchanged.
 - **Draft and commit:** `set()` takes effect immediately, so `set({ ... }); commit()` in one handler saves those changes; `values` catches up on the next render.
+- **Changes `set()` cannot make:** a key that is not one of the editor's parameters, or a value the parameter does not allow (an enum value outside its options, a number out of range), is not applied. The other changes in the same call are. Each such problem is reported once, in the frame's console and in the dialog, with the parameters the editor edits or the values the parameter takes; it does not block Done. `<Control>` for a parameter the editor does not own fails the editor with a message listing the ones it does.
 - **Changes from elsewhere:** if what the editor works on changes while it is open (a saved value after Reload or Undo, or a template edit that changes a default or a declaration of the parameters it handles), the dialog says so and refuses to save; the user reopens the editor on the current values.
 - **Failures:** if the component throws while rendering, in an event handler or in async work, the dialog shows the error and offers only Cancel. The editor counts as loaded once the component has mounted.
 - **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors can read files of file parameters with `file()`; remote resources such as map tiles are not available. The starter has two reference examples: the calendar editor (month and marked days, with **Week starts** as a generated control below it) and the route map's **Edit route** editor. Choosing a track and framing it are one task, so that editor owns the GPX `track` (drawn with `<Control parameter="track" />`, including import) and the viewport, kept as three ordinary number parameters (`centerX`, `centerY`, `zoom`) and edited together by dragging, scrolling, buttons or arrow keys. It draws only the GPX track, without a basemap, so export stays offline.

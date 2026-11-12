@@ -347,6 +347,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .ee-header h2 { margin: 0; font-size: 15px; }
 .element-editor-frame { display: block; width: 100%; border: 0; background: var(--control-surface); }
 .ee-status { margin: 0; padding: 8px 16px; font-size: 12px; }
+.ee-warnings { color: var(--warning-text); background: var(--warning-surface); }
+.ee-warnings ul { margin: 4px 0 0; padding-left: 18px; }
 .ee-footer { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--edge); }
 .ee-footer .muted { flex: 1; font-size: 11px; }
 .pc-file select { flex: 1; min-width: 0; }
