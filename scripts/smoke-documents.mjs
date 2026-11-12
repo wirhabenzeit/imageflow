@@ -6,6 +6,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { clickClosingWindow } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/documents-smoke-')));
@@ -76,9 +77,7 @@ try {
   if (process.platform === 'darwin') await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/new').getParentWindow().emit('sheet-begin');
   });
-  const pickerClosed = picker.waitForEvent('close');
-  await picker.getByRole('button', { name: 'Continue…' }).click();
-  await pickerClosed;
+  await clickClosingWindow(picker, picker.getByRole('button', { name: 'Continue…' }));
   if (process.platform === 'darwin') {
     await app.evaluate(() => new Promise((resolve) => setImmediate(resolve)));
     assert.equal(await app.evaluate(() => globalThis.newBookSaveCalls), 0, 'Wait for native sheet dismissal before opening Save');
@@ -101,14 +100,13 @@ try {
     const modal = await nextPicker;
     watch(modal);
     await modal.getByRole('heading', { name: 'Choose a template' }).waitFor();
-    const closed = modal.waitForEvent('close');
     if (cancelWithButton) {
-      // Cancel destroys its own window. Electron can close the CDP target before acknowledging mouse-up.
-      await modal.getByRole('button', { name: 'Cancel', exact: true }).click().catch((error) => {
-        if (!modal.isClosed() || !error.message.includes('Target page, context or browser has been closed')) throw error;
-      });
-    } else await modal.close();
-    await closed;
+      await clickClosingWindow(modal, modal.getByRole('button', { name: 'Cancel', exact: true }));
+    } else {
+      const closed = modal.waitForEvent('close');
+      await modal.close();
+      await closed;
+    }
     assert.deepEqual(await cancelled, { value: null });
     assert.equal(await app.evaluate(() => globalThis.newBookSaveCalls), 1, 'Cancelling a template never opens Save');
     assert.equal((await current(one)).project.title, 'First');

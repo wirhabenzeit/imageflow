@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
+import { clickClosingWindow } from './ui-actions.mjs';
 
 // The template library: import from Settings, live updates in an open New Book picker, removal, a failed import,
 // creating books from a library template and from the built-in starter without its sample, and Save Template to Library.
@@ -47,6 +48,7 @@ try {
 
   // An open New Book picker follows changes made in Settings.
   const created = start.evaluate(() => window.imageflow.openProject('new'));
+  void created.catch(() => {});
   const picker = await windowAt('imageflow://editor/new');
   await picker.getByRole('heading', { name: 'Choose a template' }).waitFor();
   await picker.getByRole('radio', { name: /Photobook/ }).waitFor();
@@ -94,7 +96,7 @@ try {
   await picker.getByText('The book starts with 3 spreads from the template.').waitFor();
   const book = join(work, 'Journey.imageflow');
   await saveAs(book);
-  await picker.getByRole('button', { name: 'Continue…' }).click();
+  await clickClosingWindow(picker, picker.getByRole('button', { name: 'Continue…' }));
   assert.deepEqual(await created, { value: null });
   const project = JSON.parse(await readFile(join(book, 'project.json'), 'utf8'));
   assert.equal(project.title, 'Journey');
@@ -141,12 +143,13 @@ try {
 
   // The built-in starter without its sample book: the template's opening spreads and no photos.
   const second = editor.evaluate(() => window.imageflow.openProject('new'));
+  void second.catch(() => {});
   const modal = await windowAt('imageflow://editor/new', new Set([picker]));
   await modal.getByRole('radio', { name: /Photobook/ }).check();
   await modal.getByRole('checkbox', { name: 'Include sample photos, texts and spreads' }).uncheck();
   const plain = join(work, 'Plain.imageflow');
   await saveAs(plain);
-  await modal.getByRole('button', { name: 'Continue…' }).click();
+  await clickClosingWindow(modal, modal.getByRole('button', { name: 'Continue…' }));
   assert.deepEqual(await second, { value: null });
   const starter = JSON.parse(await readFile(join(plain, 'project.json'), 'utf8'));
   assert.equal(starter.template.id, 'imageflow-starter');
@@ -160,6 +163,9 @@ try {
   assert.equal((await app.evaluate(() => globalThis.messages))[0].message, 'Travel journal 1.0.0 was added to the library.');
   await list.getByText('Travel journal', { exact: true }).waitFor();
   console.log('Template library smoke test passed.');
+} catch (error) {
+  console.error('Template library workflow failed:', error);
+  throw error;
 } finally {
   await app.close();
 }

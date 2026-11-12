@@ -3,6 +3,16 @@ import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const activePages = new WeakMap();
 
+// A native window can disappear before Electron acknowledges the click that closes it.
+export async function clickClosingWindow(page, button) {
+  const closed = page.waitForEvent('close');
+  void closed.catch(() => {});
+  await button.click().catch((error) => {
+    if (!page.isClosed() || !error.message.includes('Target page, context or browser has been closed')) throw error;
+  });
+  await closed;
+}
+
 // Fixtures use real document opening; package creation and picker behavior have their own workflow test.
 export async function testBook(app, path, create = false) {
   if (create) await cp(fileURLToPath(new URL('../sample/starter', import.meta.url)), path, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
