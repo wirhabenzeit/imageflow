@@ -103,7 +103,11 @@ export function App() {
   const [hovered, setHovered] = useState<string>();
   const [hoveredTarget, setHoveredTarget] = useState<string>();
   // The inline editor that is open: for a marked node (a target), or for a box or element itself (`owner`).
-  const [editing, setEditing] = useState<{ spread: string; key: string; held?: InlineContext; owner?: Owner }>();
+  // `session` names one opening of an editor: it stays while the node the editor is anchored to is renamed (`key`), so
+  // the popover and its unsaved drafts are kept, and changes when the user opens another target.
+  const [editing, setEditing] = useState<{ spread: string; key: string; session: number; held?: InlineContext; owner?: Owner }>();
+  const editorSessions = useRef(0);
+  const openEditing = (next: { spread: string; key: string; owner?: Owner }) => setEditing({ ...next, session: ++editorSessions.current });
   // Crop mode for one photo box. After a commit, `settling` holds the project id the edit started from; the
   // overlay stays until the book has re-rendered, so the frame does not flash back to the old crop.
   // The selected photo, whose crop drags and pinches adjust. `layout` is the spread's layout when it was selected:
@@ -665,7 +669,8 @@ export function App() {
       .sort((a, b) => Math.abs(a.y - b.y) > 4 ? a.y - b.y : a.x - b.x);
     const at = order.findIndex((target) => targetKey(target) === editKey);
     const next = order[(at + direction + order.length) % order.length];
-    setEditing(next ? { spread: next.spread, key: targetKey(next) } : undefined);
+    if (next) openEditing({ spread: next.spread, key: targetKey(next) });
+    else setEditing(undefined);
   }
   // A box or element is edited through the node it renders: its own target, found by identity (other targets can
   // share its rectangle), when it has parameters or marks; else its rectangle with nothing marked, for the
@@ -688,18 +693,23 @@ export function App() {
   const attachedEdits = (target: Target | undefined, owner: Owner) =>
     target?.edits.filter((path) => !path.startsWith((owner.type === 'element' ? 'elements.' : 'boxes.') + owner.id + '.')) ?? [];
   const ownerKey = (spread: string, id: string) => spread + '|#' + id;
-  // A marked node is found by its key when the editor opens, and afterwards by where it was, since a re-render can
-  // shift the occurrence numbers of its field. `editing.key` stays the editor session's identity throughout, so the
-  // popover and its unsaved drafts are kept while the node it is anchored to is renamed.
-  const editAnchor = useRef<{ key: string; at: TargetAnchor }>(undefined);
+  // A marked node is found by its key when the editor opens, and afterwards by where it was on its sheet, since a
+  // re-render can shift the occurrence numbers of its field. The anchor belongs to one editor session: opening
+  // another target, also by Tab, starts from its key again.
+  const editAnchor = useRef<{ session: number; at: TargetAnchor }>(undefined);
+  const editSheet = editing && geometry?.sheets.find(({ spread }) => spread === editing.spread);
   const editTarget: Target | undefined = editing && (editing.owner ? ownerTarget(editing.spread, editing.owner)
-    : geometry && resolveTarget(geometry.targets, editing.key, editAnchor.current?.key === editing.key ? editAnchor.current.at : undefined));
-  // The key of the node the open editor is anchored to now, for its outline and for Tab.
+    : geometry && resolveTarget(geometry.targets, editing.key,
+      editAnchor.current?.session === editing.session ? editAnchor.current.at : undefined, editSheet));
+  // The key of the node the open editor is anchored to, for its outline and for Tab, until `editing` catches up.
   const editKey = editing && !editing.owner && editTarget ? targetKey(editTarget) : editing?.key;
   useEffect(() => {
     if (!editing || editing.owner) editAnchor.current = undefined;
-    else if (editTarget) editAnchor.current = { key: editing.key, at: targetAnchor(editTarget) };
-  }, [editing, editTarget]);
+    else if (editTarget && editSheet) editAnchor.current = { session: editing.session, at: targetAnchor(editTarget, editSheet) };
+    // Same session, renamed to the node it is now at, so that no other node owns the key it opened with.
+    if (editing && !editing.owner && editKey && editKey !== editing.key)
+      setEditing((open) => open && open.session === editing.session ? { ...open, key: editKey } : open);
+  }, [editing, editTarget, editSheet, editKey]);
   const editSpread = editing && spreads.find(({ id }) => id === editing.spread);
   const liveInline = summary && template && editSpread && editTarget &&
     { project: summary.project, spread: editSpread, template, target: editTarget };
@@ -781,7 +791,7 @@ export function App() {
     if (owner.type === 'element' && openElementEditor(spread, owner.id)) return;
     deselectPhoto();
     select(spread, false);
-    setEditing({ spread, key: ownerKey(spread, owner.id), owner });
+    openEditing({ spread, key: ownerKey(spread, owner.id), owner });
   }
   // Opens the popover of a node the template marked, such as a ctx.Text heading, from the sidebar's list.
   function openTarget(target: Target) {
@@ -791,7 +801,7 @@ export function App() {
     }
     deselectPhoto();
     select(target.spread, false);
-    setEditing({ spread: target.spread, key: targetKey(target) });
+    openEditing({ spread: target.spread, key: targetKey(target) });
   }
   function editorOf(spread: string, element: string) {
     const state = spreads.find(({ id }) => id === spread);
@@ -1167,7 +1177,7 @@ export function App() {
                   path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')) ||
                   (target.owner?.id === top.id && (target.owner.type === 'element') === (top.type === 'element'))));
                 if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
-                else if (target) setEditing({ spread: target.spread, key: targetKey(target) });
+                else if (target) openEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
                 // Double-clicking a Markdown box shows its text in Quick Look.
@@ -1240,7 +1250,7 @@ export function App() {
                     }, notice)} />
                 </div>}
               </CropEditor>}
-              {editing && inline && summary && <EditPopover key={editing.key}
+              {editing && inline && summary && <EditPopover key={editing.session}
                 project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} anchor={inline.target}
                 bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={summary.readOnly} blocked={blockedInline || undefined}
                 edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}

@@ -77,11 +77,16 @@ try {
     const rect = await locator.boundingBox();
     return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
   };
+  // The outline follows the book's geometry, which a resize updates a moment later, so this waits for it to settle.
   const anchoredAt = async (node) => {
     await w.waitForFunction(() => !!document.querySelector('.edit-target.active'));
-    const [active, expected] = [await centre(w.locator('.edit-target.active')), await centre(node)];
-    assert.ok(Math.abs(active.x - expected.x) < 6 && Math.abs(active.y - expected.y) < 6,
-      `editor anchored at ${JSON.stringify(active)}, expected ${JSON.stringify(expected)}`);
+    let active, expected;
+    for (let tries = 0; tries < 20; tries++) {
+      [active, expected] = [await centre(w.locator('.edit-target.active')), await centre(node)];
+      if (Math.abs(active.x - expected.x) < 6 && Math.abs(active.y - expected.y) < 6) return;
+      await w.waitForTimeout(250);
+    }
+    assert.fail(`editor anchored at ${JSON.stringify(active)}, expected ${JSON.stringify(expected)}`);
   };
   await subtitles.nth(1).scrollIntoViewIfNeeded();
   await w.waitForTimeout(150);
@@ -119,7 +124,19 @@ try {
   await marked.nth(1).waitFor();
   assert.equal(await both.getByRole('textbox', { name: 'Subtitle' }).inputValue(), 'Not applied yet');
   await anchoredAt(marked.nth(1));
-  // Escape cancels the typing.
+  await both.getByRole('textbox', { name: 'Subtitle' }).fill('Typed from the list');
+  // Resizing the window moves and scales the sheets; the editor stays on the lower node.
+  const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
+  for (const width of [size[0] - 360, size[0]]) {
+    await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setContentSize(width, 900), width);
+    await w.waitForTimeout(800);
+    await anchoredAt(marked.nth(1));
+  }
+  // Opening the node that now holds the number the editor opened with opens it, rather than staying put.
+  const appeared = await centre(marked.nth(0));
+  await w.mouse.click(appeared.x, appeared.y);
+  await w.getByRole('dialog', { name: 'Edit Subtitle, Show extra' }).waitFor();
+  await anchoredAt(marked.nth(0));
   await w.keyboard.press('Escape');
   assert.equal((await read()).spreads[0].params.subtitle, 'Typed from the list');
 
