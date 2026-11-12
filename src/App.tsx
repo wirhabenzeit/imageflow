@@ -30,7 +30,7 @@ import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
 import { keptMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
 import type { SourceKind, SourceRef } from './source-items';
-import { pageSequence, resolveFormat } from './format';
+import { hasFacingPages, pageLabel, pageSequence, pagesText, resolveFormat, sheetPages } from './format';
 import type { ResolvedFormat } from './format';
 import type { ProjectFiles, SpreadState } from './project';
 import { spreadOrder } from './spread-order';
@@ -66,17 +66,17 @@ function Guides({ sheet, format }: { sheet: Rect; format: ResolvedFormat }) {
   const { trim, bleed, safe, spreadWidth, height } = format;
   const x = sheet.width / spreadWidth;
   const y = sheet.height / height;
+  const pages = sheetPages(format);
   return <div className="guides" aria-hidden="true" style={{ left: sheet.x, top: sheet.y, width: sheet.width, height: sheet.height }}>
-    <div className="trim-guide" style={{ left: bleed.outside * x, top: bleed.top * y, width: trim.width * 2 * x, height: trim.height * y }} />
-    <div className="gutter-guide" style={{ left: sheet.width / 2, top: 0, height: sheet.height }} />
-    {[0, 1].map((half) => <div className="safe-guide" key={half} style={{
-      left: (bleed.outside + half * trim.width + (half ? safe.binding : safe.outside)) * x,
+    <div className="trim-guide" style={{ left: pages[0].trimX * x, top: bleed.top * y, width: trim.width * pages.length * x, height: trim.height * y }} />
+    {pages.length > 1 && <div className="gutter-guide" style={{ left: sheet.width / 2, top: 0, height: sheet.height }} />}
+    {pages.map(({ side, trimX, safeLeft, safeRight }) => <div className="safe-guide" key={side} style={{
+      left: (trimX + safeLeft) * x,
       top: (bleed.top + safe.top) * y,
-      width: (trim.width - safe.binding - safe.outside) * x, height: (trim.height - safe.top - safe.bottom) * y,
+      width: (trim.width - safeLeft - safeRight) * x, height: (trim.height - safe.top - safe.bottom) * y,
     }} />)}
   </div>;
 }
-
 
 // An empty book asks for its first spread: the template's opening spreads, or one layout that can start a book.
 function EmptyBook({ template, writable, start }: { template?: TemplateInfo; writable: boolean; start: (layout?: string) => void }) {
@@ -174,10 +174,7 @@ export function App() {
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
   const sequence = template && pageSequence(spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
-  const pageLabels = spreads.map((_, i) => {
-    const pages = sequence?.spreads[i]?.page;
-    return pages?.left && pages?.right ? pages.left + '–' + pages.right : String(pages?.left ?? pages?.right ?? '');
-  });
+  const pageLabels = spreads.map((_, i) => pageLabel(sequence?.spreads[i]?.page ?? {}));
   const writable = !!summary && !summary.readOnly && !reload && !agentWorking;
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
@@ -620,7 +617,7 @@ export function App() {
       if (!ordered) return false;
       project.spreads = ordered;
       const pages = pageSequence(ordered.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format).spreads[target].page;
-      destination = pages.left && pages.right ? 'pages ' + pages.left + '–' + pages.right : 'page ' + (pages.left ?? pages.right);
+      destination = pagesText(pages).toLowerCase();
     }, () => 'Spread moved to ' + destination, id);
   }
 
@@ -641,7 +638,9 @@ export function App() {
       if (!duplicate) start(firstSpreadLayouts(template.spreads, template.format)[0]);
       return;
     }
-    const entry = Object.entries(template.spreads).find(([, value]) => value.span === 'spread');
+    // A new spread, or a new page without facing pages, uses the first layout of that footprint.
+    const wanted = hasFacingPages(template.format) ? 'spread' : 'page';
+    const entry = Object.entries(template.spreads).find(([, value]) => value.span === wanted);
     if (!entry && !duplicate) return;
     const next = duplicate ? { ...structuredClone(spread), id: crypto.randomUUID() } : newSpread(entry![0]);
     edit(({ project }) => {

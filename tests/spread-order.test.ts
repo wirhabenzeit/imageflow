@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mm, printFormat } from '../src/format';
+import type { FacingFormat } from '../src/format';
 import { spreadOrder } from '../src/spread-order';
 import { chooseFormat, templateInfo, templateSchema } from '../src/template';
 import { projectSchema } from '../src/project';
@@ -15,6 +16,7 @@ const template = templateInfo(chooseFormat(templateSchema.parse({
     closing: { label: 'Closing', span: 'left', render: () => null },
   },
 })));
+const facing = template.format as FacingFormat;
 const spreads = projectSchema.parse({ schemaVersion: 1, title: 'Order', template: { id: 'ordering', version: '1' },
   spreads: ['opening', 'body', 'body', 'body', 'closing'].map((definition, i) => ({ id: 's' + i, definition })),
 }).spreads;
@@ -45,7 +47,7 @@ test('unchanged, missing and out-of-range moves offer no edit', () => {
 test('full-spread books can reorder into either end', () => {
   const full = spreads.map((spread) => ({ ...spread, definition: 'body' }));
   for (const delivery of ['pages', 'spreads'] as const) {
-    const format = { ...template.format, structure: { ...template.format.structure, ends: 'inside-covers' as const, delivery } };
+    const format = { ...facing, structure: { ...facing.structure, ends: 'inside-covers' as const, delivery } };
     assert.deepEqual(spreadOrder(full, 's4', 0, { ...template, format })?.map(({ id }) => id), ['s4', 's0', 's1', 's2', 's3']);
     assert.deepEqual(spreadOrder(full, 's0', 4, { ...template, format })?.map(({ id }) => id), ['s1', 's2', 's3', 's4', 's0']);
   }
@@ -67,6 +69,6 @@ test('existing placement errors do not block unrelated moves or trade away valid
 });
 
 test('single pages incompatible with the delivery format do not freeze full-spread moves', () => {
-  const format = { ...template.format, structure: { ...template.format.structure, delivery: 'spreads' as const } };
+  const format = { ...facing, structure: { ...facing.structure, delivery: 'spreads' as const } };
   assert.deepEqual(spreadOrder(spreads, 's1', 3, { ...template, format })?.map(({ id }) => id), ['s0', 's2', 's3', 's1', 's4']);
 });

@@ -33,7 +33,7 @@ export type PagePreviewMetadata = {
   bounds: 'trim' | 'bleed';
   spread: string;
   side: PrintSide;
-  page: { left?: number; right?: number };
+  page: { left?: number; right?: number; number?: number };
   // Axis-aligned crop, in millimetres from the full sheet's outer bleed corner.
   detail?: { box?: string; element?: string; xMm: number; yMm: number };
   // Present when the image carries requested guide or label overlays rather than clean artwork.

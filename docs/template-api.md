@@ -63,6 +63,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, requires: ['anchor
 | `layout-families` | `layoutFamilies`, `family` and `variant` on layouts, and a family's own layout picker. |
 | `editor-spread-parameters` | `spread` on an element editor: layout parameters edited together with the element's, with `setSpread` and `<Control scope="spread">`. |
 | `opening-spreads` | `openingSpreads`, the spreads a new book starts with. |
+| `single-pages` | Formats without facing pages (`facingPages: false`) and `span: 'page'` layouts. |
 
 `capabilities` lists what the installed app provides, and `get_authoring_context` reports it as `capabilities.templateApi`. Apps older than `requires` ignore it, but their bundler still rejects an import of a helper they lack. An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
 
@@ -215,9 +216,48 @@ Changing the format re-renders the book: assignments, crops and text sources sta
 
 Arbitrary dimensions within declared limits, rather than named presets, are not supported yet.
 
+#### Formats without facing pages
+
+Wall calendars, cards, loose print series and posters have no facing pages. Declare them with `facingPages: false`, and every unit of the book is one page: the editor, the thumbnails, the Book check and both exports work page by page instead of spread by spread. The name follows print convention (InDesign's *Facing Pages* setting).
+
+```tsx
+requires: ['single-pages'],
+format: printFormat({
+  label: 'Wall calendar · A4 portrait',
+  trim: { width: mm(210), height: mm(297) },
+  facingPages: false,
+  bleed: mm(3),                                   // or { all: mm(3), left: mm(5) }
+  safe: { top: mm(8), bottom: mm(8), left: mm(8), right: mm(8) },
+  pageCount: { min: 13, max: 13, step: 1 },
+}),
+```
+
+In `PrintFormat` the flag is `structure.facingPages`, and the format's schema depends on it:
+
+| | `facingPages: true` (default) | `facingPages: false` |
+|---|---|---|
+| `bleed`, `safe` sides | `top`, `bottom`, `outside`, `binding` | `top`, `bottom`, `left`, `right` |
+| `delivery` | `'pages'` or `'spreads'` | not allowed: always one page per PDF page |
+| `ends` | `'single-pages'` or `'inside-covers'` | not allowed |
+| `pageCount.step` | `2` or `4` | `1`, `2` or `4` |
+
+The `all` shorthand of `bleed` and `safe` works in both. A side name of the other kind is a schema error with a hint. Geometry is validated the same way: without facing pages, the PDF page is the trim plus the left and right bleed wide, and the safe insets must leave space inside the trim.
+
+Layouts for these formats use `span: 'page'` (see [Spread spans](#spread-spans)). In a format without facing pages, `ctx.format` and `ctx.geometry` describe one page: `ctx.format.facingPages` is `false`, `bleed` and `safe` have `left` and `right`, `spreadWidth` is the page width, `ctx.geometry.page(area?)` takes no side and `ctx.geometry.spread()` throws. `ctx.page` is `{ number }`, anchors report `side: 'page'`, and `ctx.book.pages` counts pages as usual. `<Spread>` sets `--bleed-left`, `--bleed-right`, `--safe-left` and `--safe-right` instead of the outside and binding variables. The export has one PDF page per unit, with bleed on all four sides and a TrimBox inset by the bleed on each edge.
+
 ### Spread spans
 
-Spread definitions render two facing pages by default. For formats with `ends: 'single-pages'`, a definition can declare `span: 'right'` (usable as the first page) or `span: 'left'` (usable as the last page); the inactive half is shown as an inside cover and not exported. Formats with `ends: 'inside-covers'` use full spreads throughout.
+`span` says which pages a layout occupies, and so which formats it fits:
+
+| `span` | Fits | Pages |
+|---|---|---|
+| `'spread'` | formats with facing pages | two facing pages |
+| `'right'`, `'left'` | formats with facing pages, `ends: 'single-pages'` and `delivery: 'pages'` | a single first page (`right`) or last page (`left`); the inactive half is shown as an inside cover and not exported |
+| `'page'` | formats without facing pages (`facingPages: false`) | one page |
+
+`span` defaults to `'page'` when no format of the template has facing pages, and to `'spread'` otherwise, so a calendar template does not repeat it on every layout. A layout whose `span` fits none of the template's formats loads with a `declaration-span-unused` warning. Formats with `ends: 'inside-covers'` use full spreads throughout.
+
+A template may offer formats of both kinds side by side. The layout picker, new spreads and fixtures use only the layouts that fit the chosen format. A book that switches to a format its layouts do not fit still previews (a page layout is drawn on a spread, a spread layout on one page), but the Book check reports a `page-sequence` error naming each such spread or page, and print export is blocked until its layouts are switched; proof export still works. The picker of a mismatched spread offers the layouts that fit the new format. Switching back to the earlier format restores the book; assignments, crops and text sources are kept, as with any format change. Opening spreads are checked against the formats of the default format's kind, because a new book starts in the default format.
 
 ### Template library
 
@@ -312,7 +352,7 @@ type RenderContext = {
     text?: { title?: string; part: number; parts: number } | null;  // flow position for Markdown boxes
   }>;
   elements: Record<ElementId, { params: ElementParams }>;
-  page: { left?: number; right?: number };  // page numbers of this spread
+  page: { left?: number; right?: number; number?: number };  // page numbers: left/right, or number without facing pages
   format: ResolvedFormat;                   // trim, bleed, safe area in mm, for the chosen format
   formatId: string;                         // the chosen key of `formats`, or 'default'
   mode: 'edit' | 'export';
@@ -372,11 +412,11 @@ contents: spread({
 
 ```ts
 type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
-type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' };
+type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
 ```
 
 - **One render pass.** Page numbers depend only on spread order and layout spans, never on rendered content. ImageFlow calls every spread's `anchors` with its resolved `params` and `document` values before any spread renders, so every layout reads the same anchors. Like `render`, `anchors` must be a pure function of its input. An `anchors` function that throws or returns an invalid declaration is a render error naming the layout.
-- **Pages follow the book.** Inserting, moving, removing or switching a spread renumbers every anchor, as it does the folios. `side` picks the page of a two-page spread and defaults to the first. A single left or right page has only one page, whichever side is named.
+- **Pages follow the book.** Inserting, moving, removing or switching a spread renumbers every anchor, as it does the folios. `side` picks the page of a two-page spread and defaults to the first. A single left or right page has only one page, whichever side is named. Without facing pages every unit is one page: `side` is ignored and the anchor's `side` is `'page'`.
 - **Repeated layouts.** Anchors belong to spread instances, so a layout used five times declares five anchors with the same ID. `anchors(id)` lists all of them in page order. `anchor(id)` is for an ID that one spread declares.
 - **Book check.** `anchor(id)` warns `anchor-missing` when no spread declares the ID, and `anchor-ambiguous` when several do. In that case it returns the first. Both warnings are on the spread that asked. `anchors(id)` returning an empty list is not a finding.
 - **Previews.** Layout-picker previews read the anchors of the book as saved, so a contents layout previews with real pages.
@@ -501,17 +541,18 @@ A plain `data-issue="…"` attribute still works. It reports a `template-issue` 
 
 ## Geometry helpers
 
-`geometry` computes rectangles in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the trim width), y from the top trim edge. Pass a rectangle to a platform component's `rect` prop (`PhotoBox`, `MarkdownBox`, `Element`, `Text`), or `geometry.css(rect)` to any node's `style`, to position it absolutely inside `<Spread>`. Properties in `style` win over the ones `rect` sets, so `rect={area} style={{ height: 'auto' }}` lets a block grow.
+`geometry` computes rectangles in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the trim width), y from the top trim edge. In a format without facing pages the sheet is one page, and x starts at its left trim edge. Pass a rectangle to a platform component's `rect` prop (`PhotoBox`, `MarkdownBox`, `Element`, `Text`), or `geometry.css(rect)` to any node's `style`, to position it absolutely inside `<Spread>`. Properties in `style` win over the ones `rect` sets, so `rect={area} style={{ height: 'auto' }}` lets a block grow.
 
-`ctx.geometry` holds the same helpers with the spread's format already applied: `ctx.geometry.page(side, area?)`, `ctx.geometry.spread(area?)` and `ctx.geometry.design(canvas)`, plus `inset`, `grid` and `css`. The functions below remain available for helpers outside `render`. The helpers return plain numbers, so ordinary CSS and inline styles stay available, and nothing scales type.
+`ctx.geometry` holds the same helpers with the spread's format already applied: `ctx.geometry.page(side, area?)` (`ctx.geometry.page(area?)` without facing pages), `ctx.geometry.spread(area?)` and `ctx.geometry.design(canvas)`, plus `inset`, `grid` and `css`. The functions below remain available for helpers outside `render`. The helpers return plain numbers, so ordinary CSS and inline styles stay available, and nothing scales type.
 
 | Helper | Returns |
 | --- | --- |
 | `page(format, side, area?)` | One page. `area` is `trim` (default), `safe` (the format's safe insets, with the binding inset next to the fold) or `bleed` (outer edges extended into the bleed; the fold edge stays at the fold, because a page's binding bleed shows the facing page). Works for single first and last pages. |
-| `spread(format, area?)` | Both pages. Its `safe` area keeps only the outer, top and bottom insets. |
+| `page(format, area?)` | The page of a format without facing pages: `trim`, `safe` (left and right insets) or `bleed` (all four edges). With facing pages a side is required. |
+| `spread(format, area?)` | Both pages. Its `safe` area keeps only the outer, top and bottom insets. Throws without facing pages. |
 | `inset(rect, mm \| { top, right, bottom, left })` | A smaller rectangle. |
 | `grid(rect, { columns, rows?, gap?, columnGap?, rowGap? })` | Equal cells in reading order, with gaps between cells only. |
-| `design(format, { width, height })` | Design coordinates. `left(x, y, w, h)` and `right(…)` map a fixed design canvas to a page, scaling x with the trim width and y with the trim height. `width(v)` and `height(v)` convert design lengths such as gaps. |
+| `design(format, { width, height })` | Design coordinates. `left(x, y, w, h)` and `right(…)` map a fixed design canvas to a page (`page(…)` without facing pages), scaling x with the trim width and y with the trim height. `width(v)` and `height(v)` convert design lengths such as gaps. |
 | `css(rect)` | `{ position: 'absolute', left, top, width, height }` in `mm`. |
 
 ```tsx
@@ -574,7 +615,11 @@ The platform validates the rendered result (computed styles and the exported PDF
 --trim-width; --trim-height;          /* one page */
 --bleed-top; --bleed-bottom; --bleed-outside;
 --safe-top; --safe-bottom; --safe-outside; --safe-binding;
+/* without facing pages, instead of the outside and binding variables: */
+--bleed-left; --bleed-right; --safe-left; --safe-right;
 ```
+
+Without facing pages the content box is one trim (`--trim-width` by `--trim-height`) and there is no gutter.
 
 The spread's content box is the two trims side by side (`2 × --trim-width` by `--trim-height`), with the gutter at 50 %. Coordinates are relative to the trim; the platform adds the bleed outside. Utility classes extend an element into the bleed: `.bleed` (all outer edges it touches), `.left-page`, `.right-page` (position a full page, including its outer bleed).
 

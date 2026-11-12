@@ -1,6 +1,8 @@
 import { isParameterValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import type { SpreadState, Values } from './project';
+import { hasFacingPages, spanFits } from './format';
+import type { PrintFormat, Span } from './format';
 
 // Switching layouts. A spread keeps one state for all its layouts, keyed by the IDs the template declares: a box,
 // element or parameter ID means the same thing in every layout that declares it. The layout only decides which of
@@ -8,7 +10,7 @@ import type { SpreadState, Values } from './project';
 
 export type Layout = {
   label: string;
-  span: 'spread' | 'left' | 'right';
+  span: Span;
   parameters: Parameters;
   boxes: Record<string, { type: 'photo' | 'markdown'; label: string; parameters: Parameters }>;
   elements: Record<string, { label: string; parameters: Parameters }>;
@@ -61,10 +63,17 @@ export function declarationConflicts(layouts: Layouts) {
 
 // The layouts a spread can switch to: those with the same page footprint. Changing between a full spread and a
 // single page changes the book's pagination and is not a layout switch. A spread whose layout the template no
-// longer has may choose any.
-export function layoutChoices(layouts: Layouts, current: string) {
+// longer has may choose any. With the book's format, layouts that do not fit it are left out, and a spread whose
+// layout does not fit (the book switched to a format of the other kind) may choose any layout that does: a page
+// layout without facing pages, a spread layout with them. The current layout is always a choice.
+export function layoutChoices(layouts: Layouts, current: string, format?: Pick<PrintFormat, 'structure'>) {
   const span = own(layouts, current)?.span;
-  return Object.keys(layouts).filter((id) => !span || layouts[id].span === span);
+  const fits = (id: string) => !format || spanFits(layouts[id].span, format);
+  if (format && span && !spanFits(span, format)) {
+    const wanted: Span = hasFacingPages(format) ? 'spread' : 'page';
+    return Object.keys(layouts).filter((id) => id === current || layouts[id].span === wanted);
+  }
+  return Object.keys(layouts).filter((id) => id === current || ((!span || layouts[id].span === span) && fits(id)));
 }
 
 // Layout families. Every variant is an ordinary layout with its own ID and boxes, so switching between variants
@@ -123,8 +132,8 @@ export function familyProblems(layouts: Layouts, families: LayoutFamilies = {}) 
 // The layouts the sidebar previews for a spread, from those it can switch to (`layoutChoices`), in declaration
 // order. A family with a picker shows one preview: the spread's own layout when it is a variant, else the first
 // variant. Other families keep a preview per variant, moved together to where the family first appears.
-export function layoutPreviews(layouts: Layouts, current: string, families: LayoutFamilies = {}) {
-  const choices = layoutChoices(layouts, current);
+export function layoutPreviews(layouts: Layouts, current: string, families: LayoutFamilies = {}, format?: Pick<PrintFormat, 'structure'>) {
+  const choices = layoutChoices(layouts, current, format);
   const shown: string[] = [];
   const done = new Set<string>();
   for (const id of choices) {

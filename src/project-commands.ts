@@ -4,6 +4,7 @@ import type { TemplateInfo } from './desktop';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import { describeLayoutChange, discardContent, layoutChoices, planLayoutChange, swapContent, switchLayout } from './layouts';
+import { hasFacingPages, spanFits } from './format';
 import { isParameterValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import { identifier } from './project';
@@ -229,6 +230,10 @@ export function applyProjectCommands(
       case 'insert_spread': {
         const spread = { ...newSpread(operation.definition), params: operation.params, boxes: operation.boxes, elements: operation.elements };
         validateInitialSpread(spread);
+        if (!spanFits(template.spreads[operation.definition].span, template.format)) {
+          fail('INCOMPATIBLE_LAYOUT', 'Layout ' + operation.definition + ' does not fit the book\'s format ' + template.format.label + (hasFacingPages(template.format)
+            ? ', which has facing pages. Insert a spread layout.' : ', which has no facing pages. Insert a single-page layout.'));
+        }
         registerSpread(spread, operation.ref);
         insertAfter(spread, operation.after);
         changed('Inserted spread ' + spread.id, allSpreads(), true);
@@ -262,8 +267,11 @@ export function applyProjectCommands(
       case 'switch_layout': {
         const spread = findSpread(operation.spread);
         findLayout(operation.definition);
-        if (!layoutChoices(template.spreads, spread.definition).includes(operation.definition)) {
-          fail('INCOMPATIBLE_LAYOUT', 'A layout switch must keep the same page footprint.');
+        if (!layoutChoices(template.spreads, spread.definition, template.format).includes(operation.definition)) {
+          fail('INCOMPATIBLE_LAYOUT', spanFits(template.spreads[operation.definition].span, template.format)
+            ? 'A layout switch must keep the same page footprint.'
+            : 'Layout ' + operation.definition + ' does not fit the book\'s format ' + template.format.label + (hasFacingPages(template.format)
+              ? ', which has facing pages. Choose a spread layout.' : ', which has no facing pages. Choose a single-page layout.'));
         }
         if (spread.definition === operation.definition) break;
         const plan = planLayoutChange(spread, operation.definition, template.spreads);

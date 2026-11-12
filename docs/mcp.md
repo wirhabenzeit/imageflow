@@ -83,7 +83,7 @@ Address a physical page with a spread ID and side.
 }
 ```
 
-Omit `side` to capture the whole spread. A single-page opening or closing layout produces its available side. Requesting its inactive side returns a target error. A target of `{ "page": 3 }` uses physical book numbering and also requires `expectedRevision`.
+Omit `side` to capture the whole spread. A single-page opening or closing layout produces its available side. Requesting its inactive side returns a target error. In a format without facing pages every spread ID is one page: omit `side`, and the metadata reports `side: "page"` and `page: { "number": n }`; `get_authoring_context` reports each format's `facingPages` and each layout's `span`. A target of `{ "page": 3 }` uses physical book numbering and also requires `expectedRevision`.
 
 The defaults are trim bounds, PNG and 1000 pixels on the longest edge. Set `bounds` to `bleed` for output bleed, or `format` to `jpeg`. The longest edge may be between 1 and 1600 pixels. Images contain clean export-mode artwork after whole-book text flow, including the actual continuation on later pages. Metadata includes pixel and millimetre dimensions, spread identity, side, page numbers and rendering bounds. Image bytes appear once in an MCP image block. The text and structured result carry the image metadata.
 

@@ -1,8 +1,8 @@
 import { createContext, useContext, useLayoutEffect, useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
-import { cssMM, formatSchema, inch, mm, printFormat, pt, spanAllowedAt } from './format';
-import type { PrintFormat, ResolvedFormat, Span } from './format';
+import { cssMM, formatSchema, hasFacingPages, inch, mm, printFormat, pt, spanAllowedAt, spanFits } from './format';
+import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
 import { identifier, values } from './project';
 import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
 import { getCrop, placementIn } from './spread';
@@ -27,7 +27,8 @@ export type RenderContext = {
   document: Values;
   boxes: Record<string, { params: Values; photo?: Photo | null; text?: FlowPosition | null }>;
   elements: Record<string, { params: Values }>;
-  page: { left?: number; right?: number };
+  // Page numbers: `left` and `right` on a spread, `number` on a page of a format without facing pages.
+  page: UnitPages;
   format: ResolvedFormat;
   // The chosen named format, or 'default' for a template with a single format.
   formatId: string;
@@ -54,7 +55,8 @@ const issueOn = (marker: IssueMarker) => ({ 'data-issue': marker['data-issue'], 
 // anchor's page in the same single render: pages depend only on spread order and layout spans.
 export type AnchorContext = { params: Values; document: Values };
 export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
-export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' };
+// `side` is 'page' in a format without facing pages, where a unit has one page and a declared side is ignored.
+export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
 export type BookContext = {
   pages: number;
   // The anchor declared with this ID, if exactly one spread declares it. With several, the first; the check warns.
@@ -77,7 +79,7 @@ export class SpreadError extends Error {
 export type AnchorLookup = { spread: string; anchor: string; found: number };
 export type BookIndex = { pages: number; anchors: Anchor[]; lookups?: Map<string, AnchorLookup> };
 
-export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: RenderContext['page'] }[] }): BookIndex {
+export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: UnitPages }[] }): BookIndex {
   const document = resolveParams(template.parameters, book.project.params);
   const anchors = book.project.spreads.flatMap((spread, i) => {
     const definition = template.spreads[spread.definition];
@@ -90,11 +92,13 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
       throw new SpreadError(definition.label + ' declares invalid anchors: ' +
         declared.error.issues.map((issue) => (issue.path.join('.') || 'anchors') + ' ' + issue.message).join('; ') + '.', spread.id);
     }
-    const { left, right } = sequence.spreads[i].page;
+    const { left, right, number } = sequence.spreads[i].page;
     return declared.data.map(({ id, title, side }): Anchor => {
+      const named = title !== undefined ? { title } : {};
+      if (number !== undefined) return { id, ...named, spread: spread.id, page: number, side: 'page' };
       // A single-page spread has only one page, whichever side the declaration names.
       const resolved = !left ? 'right' : !right ? 'left' : side ?? 'left';
-      return { id, ...(title !== undefined ? { title } : {}), spread: spread.id, page: (resolved === 'left' ? left : right)!, side: resolved };
+      return { id, ...named, spread: spread.id, page: (resolved === 'left' ? left : right)!, side: resolved };
     });
   });
   // A spread may declare its right-page anchor before its left-page one. The sort is stable within a page.
@@ -177,7 +181,8 @@ const boxSchema = z.object({
 
 const definition = z.object({
   label: z.string().min(1),
-  span: z.enum(['spread', 'left', 'right']).default('spread'),
+  // Defaults to 'page' when no format of the template has facing pages, else to 'spread' (see withSpans).
+  span: z.enum(['spread', 'left', 'right', 'page']).default('spread'),
   parameters: parametersSchema,
   boxes: z.record(identifier, boxSchema).default({}),
   elements,
@@ -210,8 +215,20 @@ const definition = z.object({
 // The spreads a new book starts with, in order. Each names a layout and may set some of its own parameters.
 const openingSpread = z.strictObject({ layout: identifier, params: values });
 
+// A layout's span defaults to 'page' when every declared format lacks facing pages, so a calendar template does not
+// repeat it on every layout, and to 'spread' otherwise. Applied before validation, so every rule sees the span.
+const plainRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+function withSpans(template: unknown) {
+  if (!plainRecord(template) || !plainRecord(template.spreads)) return template;
+  const formats = plainRecord(template.formats) ? Object.values(template.formats) : [template.format];
+  const single = formats.length > 0 && formats.every((format) => plainRecord(format) && plainRecord(format.structure) && format.structure.facingPages === false);
+  const span = single ? 'page' : 'spread';
+  return { ...template, spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, definition]) =>
+    [id, plainRecord(definition) && definition.span === undefined ? { ...definition, span } : definition])) };
+}
+
 // A template declares one print format, or several named formats the user chooses between in Book settings.
-export const templateSchema = z.object({
+export const templateSchema = z.preprocess(withSpans, z.object({
   id: identifier,
   version: z.string().min(1),
   // Shown in the template library and the New Book picker; the ID is shown without a label.
@@ -246,15 +263,16 @@ export const templateSchema = z.object({
 }).refine(({ format, formats }) => !format !== !formats, 'Declare either format or formats.')
   .refine(({ formats }) => !formats || Object.keys(formats).length > 0, 'Declare at least one format.')
   .refine(({ formats, defaultFormat }) => !defaultFormat || (!!formats && Object.hasOwn(formats, defaultFormat)),
-    'defaultFormat must name one of the formats.');
+    'defaultFormat must name one of the formats.'));
 export type DeclaredTemplate = z.infer<typeof templateSchema>;
 type OpeningSpread = z.infer<typeof openingSpread>;
 
 // Opening spreads must name declared layouts, set only those layouts' own parameters to allowed values, and form a
-// sequence every declared format accepts: single pages only at the book ends the format allows.
-function openingSpreadProblems({ spreads, openingSpreads, format, formats }: {
+// sequence every declared format of the default format's kind accepts: single pages only at the book ends the format
+// allows, and only page layouts without facing pages. A template offering both kinds starts books in the default one.
+function openingSpreadProblems({ spreads, openingSpreads, format, formats, defaultFormat }: {
   spreads: Record<string, { span: Span; parameters: Parameters }>; openingSpreads?: OpeningSpread[];
-  format?: PrintFormat; formats?: Record<string, PrintFormat>;
+  format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
 }) {
   const problems: { path: (string | number)[]; message: string }[] = [];
   if (!openingSpreads) return problems;
@@ -275,12 +293,20 @@ function openingSpreadProblems({ spreads, openingSpreads, format, formats }: {
   });
   const declared = openingSpreads.map(({ layout }) => Object.hasOwn(spreads, layout) ? spreads[layout] : undefined);
   if (declared.some((definition) => !definition)) return problems;
-  const choices = formats ? Object.entries(formats) : format ? [['default', format] as const] : [];
+  const all = formats ? Object.entries(formats) : format ? [['default', format] as const] : [];
+  const first = formats && defaultFormat && Object.hasOwn(formats, defaultFormat) ? formats[defaultFormat] : all[0]?.[1];
+  const choices = all.filter(([, choice]) => !first || hasFacingPages(choice) === hasFacingPages(first));
   for (const [id, choice] of choices) {
     declared.forEach((definition, index) => {
       if (spanAllowedAt(definition!.span, index, declared.length, choice)) return;
       const where = formats ? 'format ' + id : 'the format';
-      const ends = choice.structure.delivery === 'pages' && choice.structure.ends === 'single-pages';
+      if (!spanFits(definition!.span, choice)) {
+        problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Layout ' + openingSpreads[index].layout + (hasFacingPages(choice)
+          ? " is a single page (span: 'page'), but " + where + ' has facing pages.'
+          : ' is for facing pages, but ' + where + " has none. Use a layout with span: 'page'.") });
+        return;
+      }
+      const ends = hasFacingPages(choice) && choice.structure.delivery === 'pages' && choice.structure.ends === 'single-pages';
       problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Layout ' + openingSpreads[index].layout + ' is a single ' +
         definition!.span + ' page. ' + (ends ? 'In ' + where + ' it can only be the ' + (definition!.span === 'right' ? 'first' : 'last') +
           ' opening spread.' : where[0].toUpperCase() + where.slice(1) + ' has no single pages at the book ends.') });
@@ -329,6 +355,7 @@ export const defineTemplate = (template: TemplateDeclaration) => normalizeTempla
 export function templateInfo(template: Template): TemplateInfo {
   return {
     format: template.format, formatId: template.formatId, formats: template.formatChoices,
+    facingPages: Object.fromEntries(Object.entries(template.formats ?? { default: template.format }).map(([id, format]) => [id, hasFacingPages(format)])),
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
     parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
@@ -365,15 +392,19 @@ const place = (rect: Rect | undefined, style: CSSProperties | undefined) => rect
 
 export function Spread({ className, style, children, ...marker }: Styling & IssueMarker & { children?: ReactNode }) {
   const { format } = useSpread();
-  const { trim, bleed, safe } = format;
+  const { trim } = format;
+  // Inset variables follow the format's own side names: outside and binding with facing pages, left and right without.
+  const sides = format.facingPages
+    ? { '--bleed-outside': cssMM(format.bleed.outside), '--safe-outside': cssMM(format.safe.outside), '--safe-binding': cssMM(format.safe.binding) }
+    : { '--bleed-left': cssMM(format.bleed.left), '--bleed-right': cssMM(format.bleed.right),
+      '--safe-left': cssMM(format.safe.left), '--safe-right': cssMM(format.safe.right) };
   const geometry = {
     '--trim-width': cssMM(trim.width), '--trim-height': cssMM(trim.height),
-    '--bleed-top': cssMM(bleed.top), '--bleed-bottom': cssMM(bleed.bottom), '--bleed-outside': cssMM(bleed.outside),
-    '--safe-top': cssMM(safe.top), '--safe-bottom': cssMM(safe.bottom),
-    '--safe-outside': cssMM(safe.outside), '--safe-binding': cssMM(safe.binding),
-  } as CSSProperties;
+    '--bleed-top': cssMM(format.bleed.top), '--bleed-bottom': cssMM(format.bleed.bottom),
+    '--safe-top': cssMM(format.safe.top), '--safe-bottom': cssMM(format.safe.bottom), ...sides,
+  } as unknown as CSSProperties;
   return (
-    <div className="if-sheet" style={{ width: cssMM(format.spreadWidth), height: cssMM(format.height) }}>
+    <div className="if-sheet" data-pages={format.facingPages ? undefined : 'single'} style={{ width: cssMM(format.spreadWidth), height: cssMM(format.height) }}>
       <div className={['if-spread', className].filter(Boolean).join(' ')} style={{ ...style, ...geometry }} {...issueOn(marker)}>
         {children}
       </div>
@@ -589,7 +620,8 @@ export function SpreadView({ book, template, format, spread, page, index, positi
     ...values, page, format, formatId: template.formatId, mode: book.mode,
     // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
     edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
-    book: bookContext(index, spread.id), geometry: boundGeometry(format), PhotoBox, MarkdownBox, Element, Text,
+    book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !spanFits(definition.span, template.format) }),
+    PhotoBox, MarkdownBox, Element, Text,
   });
   return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, documentParameters: template.parameters, values, lazyPhotos }}>
     {content}</SpreadData.Provider>;

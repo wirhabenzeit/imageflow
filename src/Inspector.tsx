@@ -24,7 +24,7 @@ function LayoutPicker({ summary, spread, template, choose, openPicker }: {
   const [geometry, setGeometry] = useState<BookGeometry>();
   const [pointed, setPointed] = useState<string>();
   const families = template.layoutFamilies ?? {};
-  const choices = layoutPreviews(template.spreads, spread.definition, families);
+  const choices = layoutPreviews(template.spreads, spread.definition, families, template.format);
   const familyOf = (id: string) => pickerFamily(template.spreads, id, families);
   const name = (id: string) => familyOf(id) ? families[familyOf(id)!].label : template.spreads[id].label;
   // The retained preview and its hit targets must describe the same set of layouts until the next frame is ready.
@@ -44,7 +44,7 @@ function LayoutPicker({ summary, spread, template, choose, openPicker }: {
         const grouped = !family && item.family !== undefined && Object.hasOwn(families, item.family) ? families[item.family].label : undefined;
         return <button key={id} type="button" role="radio" disabled={pending} aria-checked={id === spread.definition} aria-label={name(id)}
           aria-describedby={shown === id ? 'layout-consequence' : undefined} aria-haspopup={family ? 'dialog' : undefined}
-          title={(grouped ? grouped + ' · ' : '') + name(id) + (item.span === 'spread' ? '' : ' · single ' + item.span + ' page')}
+          title={(grouped ? grouped + ' · ' : '') + name(id) + (item.span === 'spread' || item.span === 'page' ? '' : ' · single ' + item.span + ' page')}
           className={'layout-option' + (family ? ' layout-family' : '')}
           style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
           onMouseEnter={() => setPointed(id)} onFocus={() => setPointed(id)} onBlur={() => setPointed(undefined)}

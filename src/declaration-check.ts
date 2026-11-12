@@ -5,21 +5,31 @@ import type { Parameters } from './parameters';
 // not errors, so a contract-1 template that loaded before keeps loading. The authoring types reject the same
 // mistakes at compile time; this covers untyped templates and spreads typed separately with spreadFor().
 export type DeclarationWarning = {
-  code: 'declaration-unknown-property' | 'declaration-document-mismatch' | 'declaration-control-cycle';
+  code: 'declaration-unknown-property' | 'declaration-document-mismatch' | 'declaration-control-cycle' | 'declaration-span-unused';
   message: string; path: string; details: Record<string, string>; suggestion: string;
 };
 
 // Known keys come from the schema that validates the declaration, so they cannot drift from it. The walk follows
 // objects, records, discriminated unions (parameters by `type`) and optional or default wrappers.
 type Def = {
-  type: string; shape?: Record<string, Schema>; valueType?: Schema; innerType?: Schema; in?: Schema;
+  type: string; shape?: Record<string, Schema>; valueType?: Schema; innerType?: Schema; in?: Schema; out?: Schema;
   options?: Schema[]; discriminator?: string; values?: unknown[];
 };
 export type Schema = { _zod: { def: Def } };
-function unwrap(schema: Schema): Def {
+// A schema that picks its shape from the value it validates, such as a print format by `facingPages`, names the
+// schema to walk for a value here.
+const chosenShapes = new WeakMap<object, (value: unknown) => Schema>();
+export function walkShape<T extends object>(schema: T, choose: (value: unknown) => Schema) {
+  chosenShapes.set(schema, choose);
+  return schema;
+}
+function unwrap(schema: Schema, value?: unknown): Def {
+  const chosen = chosenShapes.get(schema);
+  if (chosen) return unwrap(chosen(value), value);
   const def = schema._zod.def;
-  if (def.innerType) return unwrap(def.innerType);
-  if (def.type === 'pipe' && def.in) return unwrap(def.in);
+  if (def.innerType) return unwrap(def.innerType, value);
+  // A preprocessed schema (a transform piped into the schema) is walked as the schema it feeds.
+  if (def.type === 'pipe' && def.in) return unwrap(def.in._zod.def.type === 'transform' && def.out ? def.out : def.in, value);
   return def;
 }
 // The union member a value belongs to, by its discriminator, such as a parameter's `type`.
@@ -52,7 +62,7 @@ export function closest(name: string, known: string[]) {
 
 function unknownKeys(value: unknown, schema: Schema, path: string[], found: DeclarationWarning[]) {
   if (!plain(value)) return;
-  let def = unwrap(schema);
+  let def = unwrap(schema, value);
   if (def.type === 'record' && def.valueType) {
     for (const [key, child] of Object.entries(value)) unknownKeys(child, def.valueType, [...path, key], found);
     return;
@@ -110,8 +120,33 @@ export function declarationWarnings(declared: unknown, schema: Schema): Declarat
   unknownKeys(declared, schema, [], found);
   if (plain(declared)) documentMismatches(declared, found);
   if (plain(declared)) controlCycleWarnings(declared, found);
+  if (plain(declared)) spanWarnings(declared, found);
   // A misspelling repeated in many layouts is reported for each; cap the list like schema errors.
   return found.slice(0, 50);
+}
+
+// Layouts no declared format can use: single-page layouts (`span: 'page'`) need a format without facing pages, the
+// others one with them. `span` defaults to 'page' when no format has facing pages, so that case only arises when a
+// layout states its span.
+function spanWarnings(declared: Record<string, unknown>, found: DeclarationWarning[]) {
+  if (!plain(declared.spreads)) return;
+  const formats = plain(declared.formats) ? Object.values(declared.formats) : [declared.format];
+  const facing = formats.map((format) => !plain(format) || !plain(format.structure) || format.structure.facingPages !== false);
+  const anyFacing = facing.includes(true), anySingle = facing.includes(false);
+  for (const [id, definition] of Object.entries(declared.spreads)) {
+    if (!plain(definition)) continue;
+    const span = definition.span ?? (anyFacing ? 'spread' : 'page');
+    if (span === 'page' ? anySingle : anyFacing) continue;
+    found.push({
+      code: 'declaration-span-unused', path: 'spreads.' + id + '.span',
+      message: 'spreads → ' + id + ': ' + (span === 'page'
+        ? "the layout is a single page (span: 'page'), but every format of the template has facing pages. No book can use it."
+        : 'the layout is for facing pages (span: ' + JSON.stringify(span) + '), but no format of the template has facing pages. No book can use it.'),
+      details: { spread: id, span: String(span) },
+      suggestion: span === 'page' ? 'Add a format with facingPages: false, or give the layout a facing span.'
+        : "Set span: 'page' on the layout, or add a format with facing pages.",
+    });
+  }
 }
 
 // Conditional controls that can hide each other for good (controlCycles), at spread, box and element scope. This runs

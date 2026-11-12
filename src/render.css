@@ -11,6 +11,8 @@
   width: calc(var(--trim-width) * 2);
   height: var(--trim-height);
 }
+/* Without facing pages the sheet is one page. */
+.if-sheet[data-pages="single"] > .if-spread { left: var(--bleed-left); width: var(--trim-width); }
 .if-spread .left-page, .if-spread .right-page {
   position: absolute;
   top: calc(-1 * var(--bleed-top));
