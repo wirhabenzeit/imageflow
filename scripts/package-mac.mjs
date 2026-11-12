@@ -35,11 +35,20 @@ try {
         UTTypeDescription: 'ImageFlow Book',
         UTTypeConformsTo: ['com.apple.package'],
         UTTypeTagSpecification: { 'public.filename-extension': ['imageflow'] },
+      }, {
+        UTTypeIdentifier: 'ch.wirhabenzeit.imageflow.template',
+        UTTypeDescription: 'ImageFlow Template',
+        UTTypeConformsTo: ['public.zip-archive', 'public.data'],
+        UTTypeTagSpecification: { 'public.filename-extension': ['imageflow-template'] },
       }],
       CFBundleDocumentTypes: [{
         CFBundleTypeName: 'ImageFlow Book', CFBundleTypeRole: 'Editor', LSHandlerRank: 'Owner',
         LSItemContentTypes: ['ch.wirhabenzeit.imageflow.book'], LSTypeIsPackage: true,
         CFBundleTypeIconFile: 'ImageFlow.icns',
+      }, {
+        // Opening a template file imports it into the template library.
+        CFBundleTypeName: 'ImageFlow Template', CFBundleTypeRole: 'Viewer', LSHandlerRank: 'Owner',
+        LSItemContentTypes: ['ch.wirhabenzeit.imageflow.template'], CFBundleTypeIconFile: 'ImageFlow.icns',
       }],
     },
     // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar.

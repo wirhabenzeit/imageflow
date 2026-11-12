@@ -32,6 +32,7 @@ import type { SettingsPane } from '../src/settings';
 import { mcpTools } from '../src/mcp-contract';
 import { starters } from '../src/starters';
 import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-library';
+import { isTemplateArchive, templateArchiveExtension, writeTemplateArchive } from './template-archive';
 import type { ImportPlan } from './template-library';
 import { describeImport } from '../src/library';
 import type { LibraryImportResult, NewBookChoice } from '../src/library';
@@ -84,7 +85,7 @@ app.on('open-file', (event, path) => {
   else void openFromSystem(path);
 });
 app.on('second-instance', (_event, argv) => {
-  const paths = argv.filter(isDocument);
+  const paths = argv.filter(isSystemFile);
   if (!ready) pendingOpenFiles.push(...paths);
   else if (paths.length) for (const path of paths) void openFromSystem(path);
   else if (lastDocument && !lastDocument.closing) focus(lastDocument.window);
@@ -354,7 +355,14 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
   try { return await task; }
   finally { if (opening.get(identity) === task) opening.delete(identity); }
 }
+// Books and `.imageflow-template` files are what the system hands the app; a template file is imported.
+const isSystemFile = (path: string) => isDocument(path) || isTemplateArchive(path);
 async function openFromSystem(path: string) {
+  if (isTemplateArchive(path)) {
+    void library.import(path, (plan) => confirmReplace(undefined, plan)).then((result) => reportImports(lastDocument?.window ?? startWindow ?? undefined, [result], true))
+      .catch((error) => report(startWindow ?? lastDocument?.window, error));
+    return;
+  }
   try { await openDocument(path); }
   catch (error) { report(startWindow ?? lastDocument?.window, error); }
 }
@@ -470,8 +478,9 @@ async function confirmReplace(owner: BrowserWindow | undefined, plan: ImportPlan
 /** Imports template folders the user chooses. Templates are code, so the panel says to import only trusted ones. */
 async function importTemplates(owner: BrowserWindow | undefined): Promise<LibraryImportResult[]> {
   const options = { title: 'Import Templates', buttonLabel: 'Import',
-    message: 'Choose template folders. Templates contain code: only import templates from people you trust.',
-    properties: ['openDirectory', 'multiSelections'] as ('openDirectory' | 'multiSelections')[] };
+    message: 'Choose template folders or .imageflow-template files. Templates contain code: only import templates from people you trust.',
+    filters: [{ name: 'ImageFlow Template', extensions: [templateArchiveExtension.slice(1)] }],
+    properties: ['openDirectory', 'openFile', 'multiSelections'] as ('openDirectory' | 'openFile' | 'multiSelections')[] };
   const choice = owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
   if (choice.canceled) return [];
   const results: LibraryImportResult[] = [];
@@ -490,6 +499,22 @@ async function reportImports(owner: BrowserWindow | undefined, results: LibraryI
   };
   const { response } = owner && !owner.isDestroyed() ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
   if (response === 1) showSettings('templates');
+}
+
+/** Asks where to save a template file. The name says which template and version it holds. */
+async function chooseTemplateFile(owner: BrowserWindow, name: string) {
+  const choice = await dialog.showSaveDialog(owner, { title: 'Export Template', buttonLabel: 'Export',
+    defaultPath: join(app.getPath('documents'), name.replace(/[/\\:]/g, '-') + templateArchiveExtension),
+    filters: [{ name: 'ImageFlow Template', extensions: [templateArchiveExtension.slice(1)] }] });
+  return choice.canceled || !choice.filePath ? undefined
+    : isTemplateArchive(choice.filePath) ? choice.filePath : choice.filePath + templateArchiveExtension;
+}
+
+/** Exports the open book's own template, as it is now, so it can be shared without the book. */
+async function exportBookTemplate(document: DocumentSession) {
+  const { id, version } = document.book.project.template;
+  const file = await chooseTemplateFile(document.window, id + ' ' + version);
+  if (file) await writeTemplateArchive(await templateFolder(document.book.folder), file);
 }
 
 async function saveTemplate(document: DocumentSession) {
@@ -534,7 +559,7 @@ function updateMenus() {
   const document = focusedDocument();
   const menu = Menu.getApplicationMenu();
   for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector',
-    'layout-vertical', 'layout-grid', 'grid-rows', ...gridRows.map((rows) => 'grid-rows-' + rows), 'reveal-book', 'open-template', 'save-template']) {
+    'layout-vertical', 'layout-grid', 'grid-rows', ...gridRows.map((rows) => 'grid-rows-' + rows), 'reveal-book', 'open-template', 'save-template', 'export-template']) {
     const item = menu?.getMenuItemById(id);
     if (item) item.enabled = !!document && !document.closing;
   }
@@ -837,6 +862,18 @@ void app.whenReady().then(async () => {
     try { return { value: await importTemplates(owner) }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
+  ipcMain.handle(channels.libraryExport, async (event, id: unknown) => {
+    const owner = settingsOwner(event);
+    if (!owner || typeof id !== 'string') return { error: 'Request is only available to Settings.' };
+    try {
+      const entry = (await library.list()).find((item) => item.id === id);
+      if (!entry) throw new Error('This template is no longer in the library.');
+      const file = await chooseTemplateFile(owner, entry.label + ' ' + entry.version);
+      if (!file) return { value: null };
+      await library.export(id, file);
+      return { value: file };
+    } catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.handle(channels.libraryRemove, async (event, id: unknown) => {
     const owner = settingsOwner(event);
     if (!owner || typeof id !== 'string') return { error: 'Request is only available to Settings.' };
@@ -936,6 +973,10 @@ void app.whenReady().then(async () => {
         const document = focusedDocument(owner);
         if (document) void saveTemplate(document).catch((error) => report(document.window, error));
       } },
+      { id: 'export-template', label: 'Export Template…', click: (_item, owner) => {
+        const document = focusedDocument(owner);
+        if (document) void exportBookTemplate(document).catch((error) => report(document.window, error));
+      } },
       { label: 'Manage Templates…', click: () => showSettings('templates') },
       { type: 'separator' },
       { id: 'open-template', label: 'Open Template Folder', click: (_item, owner) => {
@@ -955,7 +996,7 @@ void app.whenReady().then(async () => {
     { role: 'windowMenu' },
   ]));
   ready = true;
-  const paths = [...new Set([...pendingOpenFiles.splice(0), ...process.argv.filter(isDocument)])];
+  const paths = [...new Set([...pendingOpenFiles.splice(0), ...process.argv.filter(isSystemFile)])];
   if (paths.length) for (const path of paths) await openFromSystem(path);
   else if (devState) {
     try {

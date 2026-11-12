@@ -66,6 +66,15 @@ try {
   assert.deepEqual(await readdir(library), ['travel'], 'a failed import leaves nothing in the library');
   await picker.getByRole('radio', { name: /Travel journal/ }).waitFor();
 
+  // Export a library entry to share it: the file holds the template's files.
+  const shared = join(work, 'Travel journal.imageflow-template');
+  await saveAs(shared);
+  await settings.getByRole('button', { name: 'Export Travel journal' }).click();
+  await settings.getByText('Exported to ' + shared + '.').waitFor();
+  const archive = await readFile(shared);
+  assert.equal(archive.subarray(0, 4).toString('latin1'), 'PK\x03\x04');
+  assert.ok(archive.includes('index.tsx'));
+
   // Removal asks first, then the template disappears from the picker too.
   await answer(1);
   await settings.getByRole('button', { name: 'Move Travel journal to the Trash' }).click();
@@ -77,8 +86,8 @@ try {
   await picker.getByRole('radio', { name: /Travel journal/ }).waitFor({ state: 'detached' });
   assert.deepEqual(await readdir(library).catch(() => []), []);
 
-  // Import again from the picker itself, then create a book from it: the template's opening spreads, no content.
-  await choose([travel]);
+  // Import the shared file from the picker itself, then create a book from it: the template's opening spreads, no content.
+  await choose([shared]);
   await picker.getByRole('button', { name: 'Import Templates…' }).click();
   await picker.getByRole('radio', { name: /Travel journal/ }).check();
   assert.equal(await picker.getByRole('checkbox').count(), 0, 'only a template with a sample book offers it');
@@ -101,10 +110,17 @@ try {
   await editor.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   assert.equal(await editor.locator('.spread-thumb').count(), 3);
 
-  // Save Template to Library: the unchanged template is already there; a new version replaces it.
-  await answer(0);
+  // Export Template… writes the book's own template.
+  const fromBook = join(work, 'From book.imageflow-template');
+  await saveAs(fromBook);
   await editor.bringToFront();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/').focus());
+  await menu('Export Template…');
+  for (let start = Date.now(); !(await stat(fromBook).catch(() => undefined)) && Date.now() - start < 10000;) await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.deepEqual(await readFile(fromBook), archive, 'the book has the same template, so the same file');
+
+  // Save Template to Library: the unchanged template is already there; a new version replaces it.
+  await answer(0);
   await menu('Save Template to Library');
   await app.evaluate(() => new Promise((resolve) => { const wait = () => globalThis.messages.length ? resolve() : setTimeout(wait, 50); wait(); }));
   assert.equal((await app.evaluate(() => globalThis.messages))[0].message, 'Travel journal 1.0.0 is already in the library.');
@@ -136,6 +152,13 @@ try {
   assert.equal(starter.template.id, 'imageflow-starter');
   assert.deepEqual(starter.spreads.map(({ definition }) => definition), ['title', 'story', 'closing']);
   assert.deepEqual(JSON.parse(await readFile(join(plain, 'photos.json'), 'utf8')), {});
+
+  // Opening a template file from Finder imports it.
+  await answer(0);
+  await app.evaluate(({ app }, path) => app.emit('open-file', { preventDefault() {} }, path), shared);
+  await app.evaluate(() => new Promise((resolve) => { const wait = () => globalThis.messages.length ? resolve() : setTimeout(wait, 50); wait(); }));
+  assert.equal((await app.evaluate(() => globalThis.messages))[0].message, 'Travel journal 1.0.0 was added to the library.');
+  await list.getByText('Travel journal', { exact: true }).waitFor();
   console.log('Template library smoke test passed.');
 } finally {
   await app.close();

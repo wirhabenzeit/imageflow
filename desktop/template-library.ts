@@ -3,6 +3,7 @@ import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node
 import { join, relative, sep } from 'node:path';
 import type { TemplateInfo } from '../src/desktop';
 import type { LibraryEntry, LibraryImportResult } from '../src/library';
+import { extractTemplateArchive, isTemplateArchive, writeTemplateArchive } from './template-archive';
 
 // The template library: templates a new book can be created from. A book copies its template when it is created,
 // so nothing here is read while a book renders, and removing or replacing an entry never changes an existing book.
@@ -222,12 +223,28 @@ export class TemplateLibrary {
   }
 
   /**
-   * Imports a template folder. `confirm` decides when the import would replace an entry with the same or a later
-   * version. An entry it replaces goes to the Trash.
+   * Imports a template folder or an `.imageflow-template` file. `confirm` decides when the import would replace an
+   * entry with the same or a later version. An entry it replaces goes to the Trash.
    */
   async import(source: string, confirm: (plan: ImportPlan) => Promise<boolean>): Promise<ImportResult> {
+    if (!isTemplateArchive(source)) return this.importFolder(source, source, confirm);
+    // A file is unpacked into a hidden folder of the library first, and imported from there like a folder.
+    const unpacked = join(this.root, '.unpack-' + randomUUID());
+    try {
+      await mkdir(this.root, { recursive: true });
+      await extractTemplateArchive(source, unpacked);
+      return await this.importFolder(unpacked, source, confirm);
+    } catch (error) {
+      return { source, status: 'failed', message: error instanceof Error ? error.message : String(error),
+        details: error instanceof TemplateImportError ? error.details : [] };
+    } finally {
+      await rm(unpacked, { recursive: true, force: true });
+    }
+  }
+
+  private async importFolder(folder: string, source: string, confirm: (plan: ImportPlan) => Promise<boolean>): Promise<ImportResult> {
     let plan: ImportPlan & { hash: string };
-    try { plan = await this.plan(source); }
+    try { plan = await this.plan(folder); }
     catch (error) {
       return { source, status: 'failed', message: error instanceof Error ? error.message : String(error),
         details: error instanceof TemplateImportError ? error.details : [] };
@@ -237,7 +254,7 @@ export class TemplateLibrary {
     if (plan.kind === 'same') return { source, status: 'unchanged', ...named };
     if ((plan.kind === 'changed' || plan.kind === 'older') && !await confirm(plan)) return { source, status: 'cancelled', ...named };
     const replaced = !!plan.current && plan.current.source === 'imported';
-    const task = this.writes.then(() => this.commit(source, info, plan.hash));
+    const task = this.writes.then(() => this.commit(folder, source, info, plan.hash));
     this.writes = task.catch(() => {});
     try { await task; }
     catch (error) {
@@ -250,12 +267,12 @@ export class TemplateLibrary {
 
   // Copies into a staging folder inside the library, checks the copy again, and swaps it in. A failure leaves the
   // library as it was.
-  private async commit(source: string, info: TemplateInfo, hash: string) {
+  private async commit(folder: string, source: string, info: TemplateInfo, hash: string) {
     const id = info.id!;
     await mkdir(this.root, { recursive: true });
     const staging = join(this.root, '.staging-' + randomUUID());
     try {
-      const files = await copyTemplate(source, join(staging, 'template'));
+      const files = await copyTemplate(folder, join(staging, 'template'));
       // The source may have changed since it was validated; the copy is what the library keeps.
       if (await templateHash(join(staging, 'template'), files) !== hash) {
         throw new TemplateImportError('The template changed while it was being imported. Import it again.');
@@ -275,6 +292,15 @@ export class TemplateLibrary {
     } finally {
       await rm(staging, { recursive: true, force: true });
     }
+  }
+
+  /** Writes a library entry, imported or built-in, to an `.imageflow-template` file. */
+  async export(id: string, file: string) {
+    await this.writes;
+    await this.loadBuiltIns();
+    const found = (await this.userEntries()).find(({ entry }) => entry.id === id) ?? this.builtIns.get(id);
+    if (!found) throw new Error('This template is no longer in the library.');
+    await writeTemplateArchive(found.folder, file);
   }
 
   /** Moves an imported template to the Trash. Built-in templates cannot be removed. */
