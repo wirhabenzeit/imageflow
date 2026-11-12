@@ -148,7 +148,8 @@ test('a group that hides its own control loads with a warning, and cycles are wa
   assert.ok(templateSchema.safeParse(cyclic).success);
   assert.deepEqual(declarationWarnings(cyclic, templateSchema as unknown as Schema).map(({ code, path, details }) => [code, path, details]),
     [['declaration-control-cycle', 'spreads.main.boxes.hero.controls', { controls: 'show, kind', layout: 'main', edit: 'boxes.hero.' }]]);
-  assert.deepEqual(withoutReachableControls(declarationWarnings(cyclic, templateSchema as unknown as Schema), new Set(['main|boxes.hero.kind'])), []);
+  // A box's or element's own parameters follow its controls in a marked node's popover too, so marking them is no way back.
+  assert.equal(withoutReachableControls(declarationWarnings(cyclic, templateSchema as unknown as Schema), new Set(['main|boxes.hero.kind'])).length, 1);
 });
 
 test('malformed controls reach the schema error instead of crashing the cycle check', () => {

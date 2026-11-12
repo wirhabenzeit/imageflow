@@ -116,8 +116,8 @@ export function declarationWarnings(declared: unknown, schema: Schema): Declarat
 
 // Conditional controls that can hide each other for good (controlCycles), at spread, box and element scope. This runs
 // on the declaration as exported, before schema validation, so a controls list the schema rejects is skipped here
-// and reported by the schema instead. `details.edit` is the scope's edit-path prefix, so the Book check can drop
-// the warning for a layout that marks one of these parameters as editable on the page (render.tsx).
+// and reported by the schema instead. `details.edit` is the scope's edit-path prefix (empty for the layout's own
+// parameters), so the Book check can drop the warning for a layout that marks one of them on the page (render.tsx).
 function controlCycleWarnings(declared: Record<string, unknown>, found: DeclarationWarning[]) {
   if (!plain(declared.spreads)) return;
   const check = (scope: unknown, path: string[], layout: string, edit: string) => {
@@ -133,9 +133,8 @@ function controlCycleWarnings(declared: Record<string, unknown>, found: Declarat
           ? 'control ' + names + ' is in a group that is shown only depending on ' + names + '. Once hidden, the generated controls cannot show it again.'
           : 'controls ' + names + ' are each shown only depending on another of them. Once all are hidden, the generated controls cannot show them again.'),
         details: { controls: names, layout, edit },
-        suggestion: cycle.length === 1
-          ? 'Move ' + names + ' out of the group, or mark it as editable on the page with ctx.edit or ctx.Text.'
-          : 'Make one of ' + names + ' unconditional, or mark one as editable on the page with ctx.edit or ctx.Text.',
+        suggestion: (cycle.length === 1 ? 'Move ' + names + ' out of the group' : 'Make one of ' + names + ' unconditional') +
+          (edit ? '.' : ', or mark ' + (cycle.length === 1 ? 'it' : 'one') + ' as editable on the page with ctx.edit or ctx.Text.'),
       });
     }
   };
@@ -150,8 +149,10 @@ function controlCycleWarnings(declared: Record<string, unknown>, found: Declarat
 }
 
 // Drops control-cycle warnings for layouts that mark one of the controls' parameters as editable on the page, which
-// is a way to show them again. `marked` holds `layout|edit path` for every marked node the Book check rendered.
+// is a way to show them again. `marked` holds `layout|edit path` for every marked node the Book check rendered. Only
+// layout (spread) parameters count: a marked node's popover always shows those, while a box's or element's own
+// parameters there follow the same `controls` and conditions, so marking them opens no way back (EditPopover).
 export function withoutReachableControls(warnings: DeclarationWarning[], marked: ReadonlySet<string>) {
-  return warnings.filter(({ code, details }) => code !== 'declaration-control-cycle' ||
-    !details.controls.split(', ').some((key) => marked.has(details.layout + '|' + details.edit + key)));
+  return warnings.filter(({ code, details }) => code !== 'declaration-control-cycle' || details.edit !== '' ||
+    !details.controls.split(', ').some((key) => marked.has(details.layout + '|' + key)));
 }
