@@ -506,7 +506,8 @@ export function App() {
   }
   useEffect(() => {
     measureView();
-    if (pendingReveal.current) reveal(pendingReveal.current);
+    // After a layout change, wait for geometry in the requested layout; the frame first reports the old one.
+    if (pendingReveal.current && (geometry?.rows ?? 0) === rows) reveal(pendingReveal.current);
   }, [geometry]);
   // A new layout keeps the selected spread in view once the book has been laid out again.
   const laidOut = useRef(rows);
@@ -1102,7 +1103,9 @@ export function App() {
               setDropTarget(box ? box.spread + ':' + box.id : undefined);
             }} onDragLeave={() => setDropTarget(undefined)} onDrop={drop}>
             {summary && <div ref={stage} className="stage"
-              style={{ width: geometry?.rows ? geometry.width : undefined, height: geometry?.rows ? canvasHeight : geometry?.height,
+              // The stage leaves the grid width as soon as Vertical is chosen, so the frame lays out the column at the
+              // canvas width rather than the old grid's.
+              style={{ width: rows && geometry?.rows ? geometry.width : undefined, height: geometry?.rows ? canvasHeight : geometry?.height,
                 cursor: hoveredTarget ? 'pointer' : undefined,
                 '--aspect': format ? format.spreadWidth / format.height : undefined } as CSSProperties}
               onClick={(event) => {

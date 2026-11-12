@@ -126,13 +126,16 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
     const stage = element.offsetParent as HTMLElement | null;
     const visibleTop = view && stage ? view.scrollTop - stage.offsetTop : -Infinity;
     const visibleBottom = view && stage ? view.scrollTop + view.clientHeight - stage.offsetTop : Infinity;
+    // A grid scrolls sideways, so the stage can be much wider than the part on screen.
+    const visibleLeft = view && stage ? Math.max(0, view.scrollLeft - stage.offsetLeft) : 0;
+    const visibleRight = view && stage ? Math.min(bounds.width, view.scrollLeft + view.clientWidth - stage.offsetLeft) : bounds.width;
     const height = element.offsetHeight;
     const below = anchor.y + anchor.height + 10;
     const above = anchor.y - height - 10;
     const top = below + height <= visibleBottom ? below
       : above >= Math.max(0, visibleTop) ? above
       : Math.max(Math.max(0, visibleTop) + 8, Math.min(anchor.y + 10, visibleBottom - height - 8));
-    const left = Math.max(8, Math.min(anchor.x, bounds.width - element.offsetWidth - 8));
+    const left = Math.max(visibleLeft + 8, Math.min(anchor.x, visibleRight - element.offsetWidth - 8));
     setPlacement({ left, top });
   }, [anchor.x, anchor.y, anchor.width, anchor.height, bounds.width, visible.length, blocked, !!children]);
 
