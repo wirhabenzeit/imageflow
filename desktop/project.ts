@@ -9,6 +9,7 @@ import type { FixtureMarking, PhotoIndex, Project, ProjectFile, ProjectFiles, Re
 import { renderOrigin } from '../src/desktop';
 import type { ImportRequest, ProjectSummary } from '../src/desktop';
 import { photoDetails, photoExtensions } from './photos';
+import { renditionCacheFor } from './rendition-cache';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
 import { runtimeExports } from '../src/runtime-exports';
@@ -24,7 +25,7 @@ function isInside(directory: string, path: string) {
   return rel !== '' && rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel);
 }
 
-async function containedPath(root: string, path: string, folder?: string) {
+export async function containedPath(root: string, path: string, folder?: string) {
   const base = folder ? resolve(root, folder) : root;
   const candidate = resolve(root, path);
   if (isAbsolute(path) || !isInside(base, candidate)) {
@@ -215,7 +216,7 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
     await Promise.all(entries.slice(i, i + 8).map(async ([id, { path, ...metadata }]) => {
       try {
         const original = await containedPath(book.folder, path, 'photos');
-        photos.set(id, { ...metadata, ...await photoDetails(original), original, cache: book.cache });
+        photos.set(id, { ...metadata, ...await photoDetails(original), original, cache: renditionCacheFor(book.cache) });
       } catch (error) {
         problems.push('Photo ' + id + ' · ' + (error instanceof Error ? error.message : String(error)));
       }

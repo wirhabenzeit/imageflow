@@ -25,6 +25,8 @@ import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { SettingsPane } from '../src/settings';
 import { mcpTools } from '../src/mcp-contract';
 import { starters } from '../src/starters';
+import { templateFolder, textSourcePath } from './document-actions';
+import { configureRenditionCache, pruneRenditions } from './rendition-cache';
 
 let settingsWindow: BrowserWindow | null = null;
 let startWindow: BrowserWindow | null = null;
@@ -43,7 +45,7 @@ const documents = new Map<number, DocumentSession>();
 const identities = new Map<string, DocumentSession>();
 const opening = new Map<string, Promise<DocumentSession>>();
 const closing = new Set<Promise<void>>();
-const covers = new Map<DocumentSession, { timer?: ReturnType<typeof setTimeout>; job?: AbortController; task?: Promise<void> }>();
+const covers = new Map<DocumentSession, { dirty: boolean; timer?: ReturnType<typeof setTimeout>; job?: AbortController; task?: Promise<void> }>();
 const pickers = new Map<number, { window: BrowserWindow; resolve: (id?: string) => void }>();
 const pendingOpenFiles: string[] = [];
 let ready = false;
@@ -165,6 +167,15 @@ function report(owner: BrowserWindow | null | undefined, error: unknown) {
 function sampleFolder(name = 'whitewall') {
   return devSample ? join(devSample, name) : app.isPackaged ? join(process.resourcesPath, 'sample', name) : join(app.getAppPath(), 'sample', name);
 }
+async function openDocumentLocation(document: DocumentSession, action: 'reveal' | 'template' | 'text', id?: string) {
+  if (action === 'reveal') { shell.showItemInFolder(document.book.folder); return; }
+  const source = action === 'text' && id ? document.book.project.texts[id] : undefined;
+  const path = action === 'template' ? await templateFolder(document.book.folder)
+    : source ? await textSourcePath(document.book.folder, source) : undefined;
+  if (!path) throw new Error('Choose a text source first.');
+  const error = await shell.openPath(path);
+  if (error) throw new Error(error);
+}
 function windowOptions() {
   return { sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'), backgroundThrottling: !hidden };
 }
@@ -189,33 +200,41 @@ function track(task: Promise<void>) {
   closing.add(task);
   void task.catch((error) => console.error('ImageFlow could not finish document cleanup', error)).finally(() => closing.delete(task));
 }
+function markCoverDirty(document: DocumentSession) {
+  const work = covers.get(document);
+  if (work) { work.dirty = true; clearTimeout(work.timer); work.job?.abort(); }
+  else covers.set(document, { dirty: true });
+}
+function captureCover(document: DocumentSession, book: OpenProject, closing = false) {
+  const state = covers.get(document) ?? { dirty: true };
+  covers.set(document, state);
+  state.job?.abort();
+  const job = new AbortController();
+  state.job = job;
+  state.task = (async () => {
+    const id = randomUUID();
+    sessions.set(id, { book, mode: 'export' });
+    try {
+      const cover = await captureBookPreview(renderOrigin + '/render/' + id,
+        { target: { page: 1 }, maxEdge: 320, format: 'jpeg' }, job.signal);
+      if (document.book !== book || (!closing && document.closing) || job.signal.aborted) return;
+      await recents.refresh(book.folder, book.project.title, 'data:image/jpeg;base64,' + Buffer.from(cover.bytes).toString('base64'));
+      state.dirty = false;
+      publishRecents();
+    } catch (error) {
+      if (!job.signal.aborted) console.warn('ImageFlow could not update a recent-book cover', error);
+    }
+    finally { sessions.delete(id); }
+  })();
+  return state.task;
+}
 function scheduleCover(document: DocumentSession, book: OpenProject) {
   if (book.readOnly || document.closing) return;
-  let work = covers.get(document);
-  if (!work) { work = {}; covers.set(document, work); }
-  clearTimeout(work.timer);
-  work.job?.abort();
-  const state = work;
+  markCoverDirty(document);
+  const state = covers.get(document)!;
   state.timer = setTimeout(() => {
     if (document.closing || document.book !== book) return;
-    const job = new AbortController();
-    state.job = job;
-    state.task = (async () => {
-      const id = randomUUID();
-      sessions.set(id, { book, mode: 'export' });
-      try {
-        await recents.refresh(book.folder, book.project.title);
-        publishRecents();
-        const cover = await captureBookPreview(renderOrigin + '/render/' + id,
-          { target: { page: 1 }, maxEdge: 320, format: 'jpeg' }, job.signal);
-        if (document.book !== book || document.closing || job.signal.aborted) return;
-        await recents.refresh(book.folder, book.project.title, 'data:image/jpeg;base64,' + Buffer.from(cover.bytes).toString('base64'));
-        publishRecents();
-      } catch (error) {
-        if (!job.signal.aborted) console.warn('ImageFlow could not update a recent-book cover', error);
-      }
-      finally { sessions.delete(id); }
-    })();
+    void captureCover(document, book);
   }, 1000);
 }
 async function saveDevState() {
@@ -262,7 +281,7 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
       document = new DocumentSession(editor, book, cache, sessions, release, (next) => {
         if (document && !next.readOnly) {
           void recents.refresh(next.folder, next.project.title).then(publishRecents).catch((error) => console.warn('ImageFlow could not update recent books', error));
-          scheduleCover(document, next);
+          markCoverDirty(document);
         }
       });
       const current = document;
@@ -271,13 +290,18 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
       identities.set(identity, document);
       lastDocument = document;
       editor.on('focus', () => { lastDocument = current; updateMenus(); });
+      editor.on('blur', () => { if (covers.get(current)?.dirty) scheduleCover(current, current.book); });
       editor.on('closed', () => {
         documents.delete(webContentsId);
         const work = covers.get(current);
-        if (work) { clearTimeout(work.timer); work.job?.abort(); covers.delete(current); }
+        if (work) { clearTimeout(work.timer); work.job?.abort(); }
         const task = (async () => {
-          try { await current.close(); await work?.task; }
+          try {
+            await current.close(); await work?.task;
+            if (work?.dirty && !quitting) await captureCover(current, current.book, true);
+          }
           finally {
+            covers.delete(current);
             if (identities.get(identity) === current) identities.delete(identity);
             if (lastDocument === current) lastDocument = [...documents.values()].at(-1);
             await saveDevState();
@@ -503,6 +527,8 @@ void app.whenReady().then(async () => {
   await Promise.all([settings.load(), recents.load()]);
   nativeTheme.themeSource = settings.value.appearance;
   cache = await mkdtemp(join(app.getPath('temp'), 'imageflow-cache-'));
+  const renditions = await configureRenditionCache(cache, join(app.getPath('userData'), 'Cache', 'renditions'));
+  await pruneRenditions(renditions).catch((error) => console.warn('ImageFlow could not prune image previews', error));
   powerMonitor.on('resume', () => { for (const document of documents.values()) document.projectSession.inputs.invalidate(); });
   app.on('browser-window-focus', () => updateMenus());
   if (!app.isPackaged && process.env.IMAGEFLOW_BENCHMARK === '1') {
@@ -519,6 +545,7 @@ void app.whenReady().then(async () => {
       await Promise.allSettled([...closing]);
       await Promise.all([settings.settled(), recents.settled()]);
       await rm(cache, { recursive: true, force: true });
+      await pruneRenditions(renditions).catch((error) => console.warn('ImageFlow could not prune image previews', error));
     })().catch((error) => console.error('ImageFlow could not finish cleanup', error)).finally(() => { quitReady = true; app.quit(); });
   });
   protocol.handle(desktopScheme, async (request) => {
@@ -549,8 +576,9 @@ void app.whenReady().then(async () => {
       const entry = await recents.get(id);
       if (action === 'remove') { await recents.remove(id); publishRecents(); }
       else if (action === 'open') {
-        if ((await documentIdentity(entry.path)).identity !== entry.identity) throw new Error('This location contains a different book. Use Locate… to select the document.');
-        await openDocument(entry.path);
+        const document = await openDocument(entry.path);
+        await recents.remember(document.book.folder, document.book.project.title, entry.id);
+        publishRecents();
       }
       else if (action === 'locate') {
         const choice = await dialog.showOpenDialog(owner, { title: 'Locate ' + entry.title, properties: ['openFile'],
@@ -565,14 +593,7 @@ void app.whenReady().then(async () => {
     } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.documentAction, (event, action: 'reveal' | 'template' | 'text', id?: string) => fromEditor(event, async (document) => {
-    if (action === 'reveal') { shell.showItemInFolder(document.book.folder); return; }
-    const source = action === 'template' ? 'template' : action === 'text' && id ? document.book.project.texts[id] : undefined;
-    if (!source) throw new Error('Choose a text source first.');
-    const path = await realpath(join(document.book.folder, source));
-    const rel = relative(document.book.folder, path);
-    if (isAbsolute(rel) || rel === '..' || rel.startsWith('../')) throw new Error('This source is outside the book.');
-    const error = await shell.openPath(path);
-    if (error) throw new Error(error);
+    await openDocumentLocation(document, action, id);
   }));
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {
@@ -656,7 +677,10 @@ void app.whenReady().then(async () => {
       menuCommand('Export Print PDF…', undefined, 'print'),
       { type: 'separator' },
       { id: 'reveal-book', label: 'Reveal in Finder', click: (_item, owner) => { const document = focusedDocument(owner); if (document) shell.showItemInFolder(document.book.folder); } },
-      { id: 'open-template', label: 'Open Template Folder', click: (_item, owner) => { const document = focusedDocument(owner); if (document) void shell.openPath(join(document.book.folder, 'template')); } },
+      { id: 'open-template', label: 'Open Template Folder', click: (_item, owner) => {
+        const document = focusedDocument(owner);
+        if (document) void document.run(() => openDocumentLocation(document, 'template')).then((result) => { if ('error' in result) report(document.window, result.error); });
+      } },
       { type: 'separator' }, { role: 'close' },
     ] },
     { label: 'Edit', submenu: [

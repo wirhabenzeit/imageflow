@@ -1,0 +1,37 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import sharp from 'sharp';
+import { configureRenditionCache, pruneRenditions, renditionCacheFor } from '../desktop/rendition-cache';
+import { photoDetails, photoFile } from '../desktop/photos';
+
+test('editor renditions survive relaunch while check caches remain private, and oldest renditions are bounded', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-renditions-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const cache = join(root, 'persistent');
+  await configureRenditionCache('launch-one', cache);
+  assert.equal(renditionCacheFor('private-check'), 'private-check');
+  const original = join(root, 'photo.jpg');
+  await sharp({ create: { width: 400, height: 300, channels: 3, background: 'teal' } }).jpeg().toFile(original);
+  const photo = { ...await photoDetails(original), original, cache: renditionCacheFor('launch-one') };
+  const first = await photoFile(photo, 'thumb');
+  const info = await lstat(first);
+  await configureRenditionCache('launch-two', cache);
+  const second = await photoFile({ ...photo, cache: renditionCacheFor('launch-two') }, 'thumb');
+  assert.equal(first, second);
+  assert.equal((await lstat(second)).ino, info.ino, 'Reopening reuses the already rendered file');
+  const old = join(cache, 'a'.repeat(64) + '-preview.jpg');
+  await writeFile(old, 'old preview'); await utimes(old, 1, 1);
+  await mkdir(join(cache, '.render-in-progress'));
+  await writeFile(join(cache, 'unrelated'), 'keep');
+  const alias = join(cache, 'b'.repeat(64) + '-thumb.jpg');
+  await symlink(original, alias);
+  await pruneRenditions(cache, info.size);
+  assert.equal((await readdir(cache)).includes('a'.repeat(64) + '-preview.jpg'), false);
+  assert.equal((await lstat(first)).ino, info.ino);
+  assert.ok((await lstat(alias)).isSymbolicLink());
+  assert.ok((await lstat(join(cache, '.render-in-progress'))).isDirectory());
+  assert.equal(await readFile(join(cache, 'unrelated'), 'utf8'), 'keep');
+});

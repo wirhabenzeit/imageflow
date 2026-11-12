@@ -27,7 +27,11 @@ export async function createDocument(destination: string, starter: string) {
     project.title = basename(folder).slice(0, -documentExtension.length);
     await writeFile(file, JSON.stringify(project, null, 2) + '\n');
     // Reserve the destination exclusively. Never replace a user's existing book, even an empty package.
-    await mkdir(folder);
+    try { await mkdir(folder); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`A book named “${basename(folder)}” already exists there. Choose another name.`, { cause: error });
+      throw error;
+    }
     reserved = true;
     await rename(staging, folder);
     reserved = false;
@@ -38,11 +42,12 @@ export async function createDocument(destination: string, starter: string) {
   }
 }
 
-const recentSchema = z.array(z.object({
+const maximumCoverLength = 300_000;
+const recentEntrySchema = z.object({
   id: z.string().uuid(), path: z.string(), identity: z.string(), title: z.string(), openedAt: z.string(),
-  cover: z.string().max(300_000).optional(),
-})).max(20);
-type Entry = z.infer<typeof recentSchema>[number];
+  cover: z.string().max(maximumCoverLength).optional(),
+});
+type Entry = z.infer<typeof recentEntrySchema>;
 
 /** Recents and small derived cover images belong to the app, never to the document. */
 export class RecentDocuments {
@@ -50,7 +55,17 @@ export class RecentDocuments {
   private writes = Promise.resolve();
   constructor(private file: string) {}
   async load() {
-    try { this.entries = recentSchema.parse(JSON.parse(await readFile(this.file, 'utf8'))); }
+    try {
+      const values = z.array(z.unknown()).parse(JSON.parse(await readFile(this.file, 'utf8')));
+      this.entries = values.flatMap((value) => {
+        // Covers are disposable; a malformed cover must not discard the document or other recents.
+        if (value && typeof value === 'object' && 'cover' in value && (typeof value.cover !== 'string' || value.cover.length > maximumCoverLength)) {
+          value = { ...value, cover: undefined };
+        }
+        const parsed = recentEntrySchema.safeParse(value);
+        return parsed.success ? [parsed.data] : [];
+      }).slice(0, 20);
+    }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('ImageFlow could not read recent books.', error);
     }
@@ -76,7 +91,7 @@ export class RecentDocuments {
   async refresh(path: string, title: string, cover?: string) {
     await this.update(() => {
       const entry = this.entries.find((entry) => entry.path === path);
-      if (entry) { entry.title = title; if (cover) entry.cover = cover; }
+      if (entry) { entry.title = title; if (cover && cover.length <= maximumCoverLength) entry.cover = cover; }
     });
   }
   remove(id: string) { return this.update(() => { this.entries = this.entries.filter((entry) => entry.id !== id); }); }
@@ -90,8 +105,10 @@ export class RecentDocuments {
     await this.writes;
     return Promise.all(this.entries.map(async (entry) => {
       try {
+        if (!isDocument(entry.path)) return { ...entry, available: false };
         const current = await documentIdentity(entry.path);
-        return { ...entry, available: current.identity === entry.identity };
+        const manifest = await stat(join(current.folder, 'project.json'));
+        return { ...entry, available: manifest.isFile() };
       } catch { return { ...entry, available: false }; }
     }));
   }

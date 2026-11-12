@@ -10,7 +10,7 @@ This is a clean-slate release. Writable folder projects without the extension ar
 
 New Book uses one shared starter catalogue and picker, whether entered through the start window or the File menu. It copies the selected starter into a staged package and reserves the destination exclusively before publishing it. Existing destinations are never replaced. Each book owns its template, fonts, Markdown, photos, and file inputs. Installing or updating a starter cannot affect existing books. The current catalogue contains the existing photobook starter; #27 can add the calendar through the same picker.
 
-`.imageflow/` inside the package is **not** disposable: it contains writer ownership and recoverable save journals. Photo renditions are stored in an app-owned temporary cache outside the document. Recents and small derived cover previews live in the app data folder. Removing a recent entry does not delete its book.
+`.imageflow/` inside the package is **not** disposable: it contains writer ownership and recoverable save journals. Ordinary editor photo renditions persist in the app data folder under `Cache/renditions`, pruned to 512 MB at launch and quit; validation jobs retain private temporary caches. Recents and small derived cover previews live in the app data folder. Covers are captured initially and refreshed after edits when a book loses focus or closes, rather than after every edit. Removing a recent entry does not delete its book. A valid package at its saved recent path can reopen after restore or remount changes its filesystem identity; opening refreshes that identity.
 
 ## Runtime ownership
 

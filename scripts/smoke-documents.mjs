@@ -17,6 +17,12 @@ const errors = [];
 let client;
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 app.process().stderr.on('data', (data) => errors.push(String(data)));
+await app.evaluate(({ app }) => {
+  globalThis.reviewCoverRenders = 0;
+  app.on('browser-window-created', (_event, window) => window.webContents.on('did-finish-load', () => {
+    if (window.webContents.getURL().includes('/render/')) globalThis.reviewCoverRenders++;
+  }));
+});
 function watch(page) { page.setDefaultTimeout(25000); page.on('pageerror', (error) => errors.push(error.message)); }
 async function ready(page) { watch(page); await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor(); }
 async function current(page) { return (await page.evaluate(() => window.imageflow.currentProject())).value; }
@@ -67,6 +73,20 @@ try {
   await assert.rejects(stat(join(first, '.imageflow/photos')), { code: 'ENOENT' });
   await one.screenshot({ path: join(root, '.build/documents-editor.png') });
   await start.waitForFunction(async () => (await window.imageflow.recentDocuments()).value.some((book) => !!book.cover));
+  const initialCovers = await app.evaluate(() => globalThis.reviewCoverRenders);
+  await save(one, 'Cover update pending');
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  assert.equal(await app.evaluate(() => globalThis.reviewCoverRenders), initialCovers, 'Editing does not render a cover in the background');
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/').emit('blur'));
+  for (let attempt = 0; await app.evaluate(() => globalThis.reviewCoverRenders) === initialCovers; attempt++) {
+    assert.ok(attempt < 150, 'Losing focus refreshes the pending cover');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  await one.evaluate(async () => {
+    const { value } = await window.imageflow.currentProject();
+    await window.imageflow.history(value.id, 'undo');
+  });
+  await one.reload(); await ready(one);
   await cp(first, second, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
   await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, second);
   const two = await launchAction(one, 'open');
@@ -140,6 +160,21 @@ try {
   assert.ok(recent.value.some((book) => book.title === 'Still working'));
   await chooser.locator('.recent-cover img').first().waitFor();
   await chooser.screenshot({ path: join(root, '.build/documents-recents.png') });
+  // A restore at the same path has a new inode, but still opens directly from Recents.
+  const secondRecent = recent.value.find((book) => book.path === second);
+  const backup = join(work, 'Before restore.imageflow');
+  await rename(second, backup);
+  await cp(backup, second, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  assert.notEqual((await stat(backup)).ino, (await stat(second)).ino);
+  assert.equal((await chooser.evaluate(() => window.imageflow.recentDocuments())).value.find((book) => book.path === second).available, true);
+  const beforeRestore = new Set(app.windows());
+  const restored = await chooser.evaluate((id) => window.imageflow.recentDocument(id, 'open'), secondRecent.id);
+  assert.ok(!restored.error, JSON.stringify(restored));
+  const reopened = app.windows().find((page) => !beforeRestore.has(page) && page.url() === 'imageflow://editor/');
+  await ready(reopened);
+  assert.equal((await current(reopened)).project.title, 'Still working');
+  assert.equal((await chooser.evaluate(() => window.imageflow.recentDocuments())).value.find((book) => book.path === second).id, secondRecent.id);
+  await reopened.close();
   const moved = join(work, 'Moved.imageflow');
   await rename(second, moved);
   await chooser.reload();
