@@ -45,6 +45,9 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const [failed, setFailed] = useState(false);
+  // Done waits for the frame to finish typing in progress: a field in the frame keeps typed text until it loses
+  // focus, which clicking Done out here does not cause.
+  const [saving, setSaving] = useState(false);
   // The editor opened on this context. If it changes while the editor is open (Reload, Undo, a template edit),
   // the draft is based on stale data and saving it would silently overwrite the newer values.
   const [opened] = useState(() => editingContext(template, spread, element));
@@ -64,6 +67,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const generated = definition ? controlLayout(definition.parameters, definition.controls, current, owned) : [];
 
   function done(latest?: Values) {
+    setSaving(false);
     if (latest) draft.current = { ...draft.current, ...latest };
     const changes = [...Object.entries(draft.current), ...Object.entries(local)];
     if (failed || stale || blocked) return;
@@ -83,6 +87,26 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     }, (definition.label ?? element) + ' updated');
     dialog.current?.close();
   }
+
+  // Asks the frame to apply what is being typed and reply with its complete draft, which then saves. A frame that
+  // does not answer (it is still loading, or stopped) has nothing typed to apply.
+  function requestDone() {
+    const target = frame.current?.contentWindow;
+    if (!ready || failed || !target) return done();
+    setSaving(true);
+    target.postMessage({ type: 'editor-flush' }, renderOrigin);
+  }
+  useEffect(() => {
+    if (!saving) return;
+    const timeout = setTimeout(() => done(), 2000);
+    return () => clearTimeout(timeout);
+  }, [saving]);
+
+  // The generated controls' values reach the frame, so the editor previews the whole draft (such as a calendar
+  // drawn from the week start chosen below it). The frame shows them but never sends them back.
+  useEffect(() => {
+    if (ready && Object.keys(local).length) frame.current?.contentWindow?.postMessage({ type: 'editor-values', values: local }, renderOrigin);
+  }, [ready, local]);
 
   const receive = useEffectEvent((event: MessageEvent<EditorMessage>) => {
     if (event.origin !== renderOrigin || event.source !== frame.current?.contentWindow || !event.data) return;
@@ -136,7 +160,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     <footer className="ee-footer">
       <span className="muted">Esc cancels · ⌘↩ saves</span>
       <button type="button" onClick={() => dialog.current?.close()}>Cancel</button>
-      <button type="button" className="primary" disabled={readOnly || failed || stale || !!blocked} onClick={() => done()}>Done</button>
+      <button type="button" className="primary" disabled={readOnly || failed || stale || !!blocked || saving} onClick={requestDone}>Done</button>
     </footer>
   </dialog>;
 }

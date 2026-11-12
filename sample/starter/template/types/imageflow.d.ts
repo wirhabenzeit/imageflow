@@ -147,7 +147,8 @@ export type Controls<K extends string = string> = readonly ControlItem<K>[];
 export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parameters?: Parameters; flowOrder?: number; controls?: Controls };
 /**
  * Props of a template-supplied element editor. `values` holds all of the element's parameters with the draft
- * applied; `set` changes the editor's own parameters in the draft. ImageFlow validates and saves the draft when
+ * applied, including changes in the dialog's generated controls as the user makes them, so the editor can preview
+ * the whole element; `set` changes the editor's own parameters in the draft. ImageFlow validates and saves the draft when
  * the user clicks Done (or calls `commit`), as one undoable edit; `cancel` discards it.
  */
 export type ElementEditorProps = {
@@ -192,9 +193,11 @@ export type SpreadDeclaration = {
   boxes?: Record<string, BoxDeclaration>;
   elements?: Record<string, ElementDeclaration>;
 };
+/** Rejects properties a declaration does not have, such as a misspelt `flowOrdr`, in object literals and helpers alike. */
+type Exact<T, Allowed> = { [X in Exclude<keyof T, keyof Allowed>]: never };
 /** Types each element's `controls` and `editor.parameters` with that element's own parameter IDs. */
-type ElementsChecked<E> = { [K in keyof E]: { controls?: Controls<ParameterKeys<E[K]>>; editor?: ElementEditor<ParameterKeys<E[K]>> } };
-type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K]>> } };
+type ElementsChecked<E> = { [K in keyof E]: { controls?: Controls<ParameterKeys<E[K]>>; editor?: ElementEditor<ParameterKeys<E[K]>> } & Exact<E[K], ElementDeclaration> };
+type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K]>> } & Exact<B[K], BoxDeclaration> };
 
 // Anchors
 
@@ -416,9 +419,14 @@ type Missing<D, Typed> = Exclude<keyof Typed, keyof D> & string;
 type TypedWith<T> = typeof typedDocument extends keyof T ? NonNullable<T[typeof typedDocument & keyof T]> : {};
 type DocumentCheck<S, D> = {
   // Untyped spreads (`any`) are not checked.
-  [K in keyof S]: 0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never] ? unknown
-    : { [typedDocument]: `Declare document parameter ${Missing<D, TypedWith<S[K]>>} in the template's parameters, or remove it from spreadFor()` };
+  [K in keyof S]: (0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never] ? unknown
+    : { [typedDocument]: `Declare document parameter ${Missing<D, TypedWith<S[K]>>} in the template's parameters, or remove it from spreadFor()` })
+    & SpreadChecked<S[K]>;
 };
+/** A spread written as a plain object gets the same unknown-property checks as one from the builder. */
+type SpreadChecked<T> = 0 extends 1 & T ? unknown : Exact<T, SpreadDefinition<any>>
+  & (T extends { boxes: infer B } ? { boxes: BoxesChecked<B> } : unknown)
+  & (T extends { elements: infer E } ? { elements: ElementsChecked<E> } : unknown);
 
 /**
  * Declares the template. Prefer `spreads` as a function: its `spread` builder types every layout's `ctx.document`
@@ -432,11 +440,18 @@ type DocumentCheck<S, D> = {
  *       }),
  *     });
  */
+// Two signatures rather than a union: TypeScript cannot infer the spreads through a union of a record and a
+// function, and would then check neither against the document parameters.
 export function defineTemplate<
   const D extends Parameters = {},
   const F extends string = never,
   const S extends Record<string, SpreadDefinition<any>> = {},
->(template: TemplateBase<D> & FormatChoice<F> & { spreads: (S & DocumentCheck<S, D>) | ((tools: TemplateTools<D>) => S) }): TemplateDeclaration;
+>(template: TemplateBase<D> & FormatChoice<F> & { spreads: (tools: TemplateTools<D>) => S & DocumentCheck<S, D> }): TemplateDeclaration;
+export function defineTemplate<
+  const D extends Parameters = {},
+  const F extends string = never,
+  const S extends Record<string, SpreadDefinition<any>> = {},
+>(template: TemplateBase<D> & FormatChoice<F> & { spreads: S & DocumentCheck<S, D> }): TemplateDeclaration;
 
 /**
  * Returns a `spread` builder typed with these document parameters, for spreads declared outside `defineTemplate`,
