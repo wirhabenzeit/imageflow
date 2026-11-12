@@ -31,7 +31,11 @@ export const channels = {
 
 export type OpenAction = 'open' | 'new' | 'sample' | 'reload';
 export type ExportMode = 'proof' | 'print';
-export type Command = OpenAction | 'toggle-project' | 'toggle-inspector' | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo';
+// The main canvas shows spreads in one vertical column, or in a grid of `rows` rows that scrolls sideways.
+export type CanvasLayout = { mode: 'vertical' | 'grid'; rows: number };
+export const gridRows = [1, 2, 3, 4] as const;
+export type LayoutCommand = 'layout-vertical' | 'layout-grid' | `grid-rows-${typeof gridRows[number]}`;
+export type Command = OpenAction | 'toggle-project' | 'toggle-inspector' | LayoutCommand | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState;
@@ -78,7 +82,8 @@ export type DesktopApi = {
   onSettingsPane(listener: (pane: SettingsPane) => void): () => void;
   // Settings sizes its native window to the current pane's content height.
   fitSettings(height: number): Promise<void>;
-  setPanelVisibility(state: { sidebar: boolean; inspector: boolean }): Promise<void>;
+  // The window's panel and canvas layout state, so the View menu can show it.
+  setPanelVisibility(state: { sidebar: boolean; inspector: boolean; layout?: CanvasLayout }): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;
   saveProject(id: string, files: ProjectFiles, label?: string): Promise<Result<ProjectSummary>>;
   history(id: string, direction: 'undo' | 'redo'): Promise<Result<ProjectSummary>>;
@@ -124,9 +129,10 @@ export const bookLayout: Record<BookView, { pad: number; gap: number; columns?: 
   layouts: { pad: 6, gap: 26, columns: 2, columnGap: 12 },
 };
 export type Rect = { x: number; y: number; width: number; height: number };
-// Posted by a book frame after layout. Coordinates are relative to the frame document.
+// Posted by a book frame after layout. Coordinates are relative to the frame document. `rows` is set when the
+// book view is laid out as a grid; `width` is then the width of all columns, which can exceed the frame.
 export type BookGeometry = {
-  type: 'geometry'; height: number;
+  type: 'geometry'; width: number; height: number; rows?: number;
   sheets: (Rect & { spread: string })[];
   // `upright` is false when template CSS rotates or skews the box, so its rectangle is only a bounding box.
   boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean })[];

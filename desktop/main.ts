@@ -10,8 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join, relative, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { channels, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
-import type { Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction } from '../src/desktop';
+import { channels, gridRows, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
+import type { CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { assetTypes, loadProject, renderData } from './project';
 import type { OpenProject } from './project';
@@ -392,7 +392,8 @@ async function openProject(owner: BrowserWindow, action: OpenAction, document?: 
 function updateMenus() {
   const document = focusedDocument();
   const menu = Menu.getApplicationMenu();
-  for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector', 'reveal-book', 'open-template']) {
+  for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector',
+    'layout-vertical', 'layout-grid', 'grid-rows', ...gridRows.map((rows) => 'grid-rows-' + rows), 'reveal-book', 'open-template']) {
     const item = menu?.getMenuItemById(id);
     if (item) item.enabled = !!document && !document.closing;
   }
@@ -400,6 +401,12 @@ function updateMenus() {
   const inspector = menu?.getMenuItemById('inspector');
   if (sidebar) sidebar.label = document?.sidebar ? 'Hide Sidebar' : 'Show Sidebar';
   if (inspector) inspector.label = document?.inspector ? 'Hide Inspector' : 'Show Inspector';
+  // Radio items check themselves when clicked; the window's own layout decides which stays checked. Checking one
+  // item of a radio group unchecks the others.
+  const layout = document?.layout ?? { mode: 'vertical', rows: 2 };
+  const check = (id: string) => { const item = menu?.getMenuItemById(id); if (item) item.checked = true; };
+  check(layout.mode === 'grid' ? 'layout-grid' : 'layout-vertical');
+  check('grid-rows-' + layout.rows);
 }
 function menuCommand(label: string, accelerator: string | undefined, command: Command, id: string = command): MenuItemConstructorOptions {
   return { label, id, accelerator, click: (_item, owner) => {
@@ -703,11 +710,15 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) => fromEditor(event, (document) => document.checkOpenBook(document.currentBook(id), request)));
   ipcMain.handle(channels.cancelCheck, (event) => { editorOwner(event)?.cancelCheck(); });
-  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean }) => {
+  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean; layout?: CanvasLayout }) => {
     const document = editorOwner(event);
     if (!document || typeof state?.sidebar !== 'boolean' || typeof state?.inspector !== 'boolean') return;
     document.sidebar = state.sidebar;
     document.inspector = state.inspector;
+    const layout = state.layout;
+    if (layout && (layout.mode === 'vertical' || layout.mode === 'grid') && gridRows.some((rows) => rows === layout.rows)) {
+      document.layout = { mode: layout.mode, rows: layout.rows };
+    }
     updateMenus();
   });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
@@ -750,6 +761,11 @@ void app.whenReady().then(async () => {
     { label: 'View', submenu: [
       menuCommand('Hide Sidebar', 'Alt+CmdOrCtrl+1', 'toggle-project', 'sidebar'),
       menuCommand('Hide Inspector', 'Alt+CmdOrCtrl+2', 'toggle-inspector', 'inspector'),
+      { type: 'separator' },
+      { ...menuCommand('Vertical', undefined, 'layout-vertical'), type: 'radio' },
+      { ...menuCommand('Grid', undefined, 'layout-grid'), type: 'radio' },
+      { label: 'Grid Rows', id: 'grid-rows', submenu: gridRows.map((rows) =>
+        ({ ...menuCommand(rows === 1 ? '1 Row' : rows + ' Rows', undefined, `grid-rows-${rows}`), type: 'radio' as const })) },
     ] },
     { role: 'windowMenu' },
   ]));

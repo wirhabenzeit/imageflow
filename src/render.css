@@ -32,6 +32,17 @@ html:has(.if-book), html:has(.if-book) body { overflow: hidden; }
   padding: var(--if-pad);
 }
 .if-view-thumbs, .if-view-layouts { padding-bottom: var(--if-gap); }
+/* Grid mode of the book view: spreads fill each column top to bottom, then continue to the right, so book order
+   follows the sideways scroll. Each row's height is set by the frame height (see layoutBook). */
+.if-book.if-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(var(--if-rows), max-content);
+  grid-auto-columns: max-content;
+  justify-items: start;
+  align-content: start;
+  width: max-content;
+}
 .if-view-layouts {
   display: grid;
   grid-template-columns: repeat(var(--if-columns), max-content);

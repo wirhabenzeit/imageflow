@@ -2,9 +2,9 @@ import { SourceManager, SaveCopy } from './SourceManager';
 import type { ImportMode } from './source-locations';
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
-import { bookLayout, renderOrigin } from './desktop';
-import type { BookGeometry, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
-import { PanelDivider, usePanels } from './panels';
+import { bookLayout, gridRows, renderOrigin } from './desktop';
+import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
+import { PanelDivider, useCanvasLayout, usePanels } from './panels';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
@@ -44,6 +44,9 @@ function inlineValues({ project, spread, template, target }: InlineContext) {
     return [field, field && readEdit(project, spread, field)];
   })]);
 }
+
+const isGridRows = (command: Command): command is `grid-rows-${typeof gridRows[number]}` =>
+  gridRows.some((count) => command === `grid-rows-${count}`);
 
 // The editor shell must survive a template whose format cannot be resolved; the render reports why.
 function formatOf(template?: TemplateInfo) {
@@ -130,9 +133,13 @@ export function App() {
   const [agentWorking, setAgentWorking] = useState(false);
   const pendingTasks = useRef(0);
   const workspace = useRef<HTMLDivElement>(null);
+  const [layout, setLayout] = useCanvasLayout(summary?.folder);
+  const rows = layout.mode === 'grid' ? layout.rows : 0;
+  // The canvas height a grid fills; measured with the canvas.
+  const [canvasHeight, setCanvasHeight] = useState(0);
   useEffect(() => {
-    void api?.setPanelVisibility({ sidebar: !panels.leftHidden, inspector: !panels.rightHidden });
-  }, [api, panels.leftHidden, panels.rightHidden]);
+    void api?.setPanelVisibility({ sidebar: !panels.leftHidden, inspector: !panels.rightHidden, layout });
+  }, [api, panels.leftHidden, panels.rightHidden, layout]);
   const spreads = summary?.project.spreads ?? [];
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
@@ -202,7 +209,7 @@ export function App() {
       clearCanvasEditors();
       pendingReveal.current = undefined;
       revealedThumb.current = '';
-      canvas.current?.scrollTo({ top: 0 });
+      canvas.current?.scrollTo({ top: 0, left: 0 });
     }
     setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0].id :
       next.project.spreads.find(({ id }) => id === previous)?.id ?? next.project.spreads[0].id));
@@ -323,6 +330,14 @@ export function App() {
       togglePanel(command === 'toggle-project' ? 'left' : 'right');
       return;
     }
+    if (command === 'layout-vertical' || command === 'layout-grid') {
+      changeLayout({ ...layout, mode: command === 'layout-grid' ? 'grid' : 'vertical' });
+      return;
+    }
+    if (isGridRows(command)) {
+      changeLayout({ mode: 'grid', rows: Number(command.slice('grid-rows-'.length)) });
+      return;
+    }
     if (command === 'undo' || command === 'redo') return undo(command);
     if (command === 'import-photos' || command === 'import-folder' || command === 'import-texts') {
       return importFiles({ kind: command === 'import-texts' ? 'markdown' : 'photo', folder: command === 'import-folder' });
@@ -369,7 +384,8 @@ export function App() {
     });
   }
 
-  const onCommand = useEffectEvent((command: Command) => { if (command.startsWith('toggle-') || (!busy && !agentLocked.current)) act(command); });
+  const viewCommand = (command: Command) => command.startsWith('toggle-') || command.startsWith('layout-') || command.startsWith('grid-rows-');
+  const onCommand = useEffectEvent((command: Command) => { if (viewCommand(command) || (!busy && !agentLocked.current)) act(command); });
   const onProjectChanged = useEffectEvent((change: ProjectChange) => {
     if ('building' in change) beginReload();
     else if ('error' in change) {
@@ -443,7 +459,8 @@ export function App() {
     for (const { spread } of list as Issue[]) if (spread) spreadIssues.set(spread, level);
   }
 
-  // Scrolls the book so a spread is fully visible. Waits for the next layout if the spread is new.
+  // Scrolls the book so a spread is fully visible: down the column, or sideways through a grid. Waits for the next
+  // layout if the spread is new.
   function reveal(id: string) {
     const sheet = geometry?.sheets.find(({ spread }) => spread === id);
     const view = canvas.current;
@@ -452,17 +469,26 @@ export function App() {
       return;
     }
     pendingReveal.current = undefined;
-    const top = stage.current.offsetTop + sheet.y;
     const label = bookLayout.book.gap;
+    const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    if (geometry?.rows) {
+      const left = stage.current.offsetLeft + sheet.x;
+      if (left >= view.scrollLeft && left + sheet.width <= view.scrollLeft + view.clientWidth) return;
+      view.scrollTo({ left: Math.max(0, left - Math.max(label, (view.clientWidth - sheet.width) / 2)), behavior });
+      return;
+    }
+    const top = stage.current.offsetTop + sheet.y;
     if (top - label >= view.scrollTop && top + sheet.height <= view.scrollTop + view.clientHeight) return;
-    view.scrollTo({ top: Math.max(0, top - Math.max(label, (view.clientHeight - sheet.height) / 2)), behavior: 'smooth' });
+    view.scrollTo({ top: Math.max(0, top - Math.max(label, (view.clientHeight - sheet.height) / 2)), behavior });
   }
-  // The part of the book frame that is on screen, in frame coordinates. The book frame loads photos near it.
+  // The part of the book frame that is on screen, in frame coordinates, and the grid rows the frame should use. The
+  // book frame loads photos near the visible part.
   function viewport() {
     const view = canvas.current;
     if (!view || !stage.current) return undefined;
     const top = view.scrollTop - stage.current.offsetTop;
-    return { top, bottom: top + view.clientHeight };
+    const left = view.scrollLeft - stage.current.offsetLeft;
+    return { top, bottom: top + view.clientHeight, left, right: left + view.clientWidth, rows };
   }
   function measureView() {
     const view = canvas.current;
@@ -472,23 +498,49 @@ export function App() {
         frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
       }
     }
-    if (!view || !stage.current || !geometry) return;
-    const top = view.scrollTop - stage.current.offsetTop;
-    const bottom = top + view.clientHeight;
-    const ids = geometry.sheets.filter(({ y, height }) => y < bottom && y + height > top).map(({ spread }) => spread);
+    if (view) setCanvasHeight(view.clientHeight);
+    if (!range || !geometry) return;
+    const ids = geometry.sheets.filter(({ x, y, width, height }) => y < range.bottom && y + height > range.top &&
+      x < range.right && x + width > range.left).map(({ spread }) => spread);
     setInView((previous) => previous.join() === ids.join() ? previous : ids);
   }
   useEffect(() => {
     measureView();
     if (pendingReveal.current) reveal(pendingReveal.current);
   }, [geometry]);
+  // A new layout keeps the selected spread in view once the book has been laid out again.
+  const laidOut = useRef(rows);
+  useEffect(() => {
+    if (laidOut.current === rows) return;
+    laidOut.current = rows;
+    if (spreadId) pendingReveal.current = spreadId;
+    measureView();
+  }, [rows]);
+  function changeLayout(next: CanvasLayout) {
+    setLayout((previous) => previous.mode === next.mode && previous.rows === next.rows ? previous : next);
+  }
   const onResize = useEffectEvent(() => measureView());
+  // In a grid, a vertical wheel or trackpad gesture scrolls sideways when nothing under the pointer scrolls vertically.
+  const onWheel = useEffectEvent((event: WheelEvent) => {
+    const view = canvas.current;
+    if (!view || !geometry?.rows || event.defaultPrevented || event.ctrlKey || event.shiftKey) return;
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    for (let node = event.target instanceof Element ? event.target : null; node && node !== view; node = node.parentElement) {
+      if (node.scrollHeight > node.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(node).overflowY)) return;
+    }
+    if (view.scrollHeight > view.clientHeight + 1 || view.scrollWidth <= view.clientWidth) return;
+    event.preventDefault();
+    view.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? view.clientWidth : 1);
+  });
   useEffect(() => {
     const listener = () => onResize();
+    const wheel = (event: WheelEvent) => onWheel(event);
     window.addEventListener('resize', listener);
     const observer = new ResizeObserver(listener);
     if (canvas.current) observer.observe(canvas.current);
-    return () => { window.removeEventListener('resize', listener); observer.disconnect(); };
+    canvas.current?.addEventListener('wheel', wheel, { passive: false });
+    const view = canvas.current;
+    return () => { window.removeEventListener('resize', listener); observer.disconnect(); view?.removeEventListener('wheel', wheel); };
   }, [projectInstance]);
   // The sidebar follows the selection when you select another spread, not on every re-render after an edit,
   // so a list you scrolled elsewhere stays where you left it.
@@ -1042,7 +1094,7 @@ export function App() {
       {!panels.leftHidden ? <PanelDivider side="left" width={panels.left} resize={resizePanel} onResizing={setResizing} /> : <div />}
       <div className="workspace-center">
         <div ref={canvasWrap} className="canvas-wrap">
-          <main ref={canvas} className="canvas" aria-label="Book preview" onScroll={measureView}
+          <main ref={canvas} className={'canvas' + (geometry?.rows ? ' canvas-grid' : '')} aria-label="Book preview" onScroll={measureView}
             onDragOver={(event) => {
               if (!writable || !canvasReady || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime)) return;
               event.preventDefault();
@@ -1050,7 +1102,8 @@ export function App() {
               setDropTarget(box ? box.spread + ':' + box.id : undefined);
             }} onDragLeave={() => setDropTarget(undefined)} onDrop={drop}>
             {summary && <div ref={stage} className="stage"
-              style={{ height: geometry?.height, cursor: hoveredTarget ? 'pointer' : undefined,
+              style={{ width: geometry?.rows ? geometry.width : undefined, height: geometry?.rows ? canvasHeight : geometry?.height,
+                cursor: hoveredTarget ? 'pointer' : undefined,
                 '--aspect': format ? format.spreadWidth / format.height : undefined } as CSSProperties}
               onClick={(event) => {
                 // A click that ended a photo move is not a click.
@@ -1087,7 +1140,7 @@ export function App() {
                 setHoveredTarget(target && targetKey(target));
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
               <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus}
-                viewport={viewport} hold={holdPreview} accept={acceptCandidate} />
+                viewport={viewport} fill={rows ? canvasHeight : undefined} hold={holdPreview} accept={acceptCandidate} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const i = spreads.findIndex((item) => item.id === id);
                 if (i < 0) return null;
@@ -1161,8 +1214,15 @@ export function App() {
             {!summary && <p className="book-loading" role="status">{error || 'Opening book…'}</p>}
           </main>
           {summary && previewNotice && <div className={geometry ? 'preview-state' : 'preview-message'} role="status">{previewNotice}</div>}
-          {summary && <label className="guides-toggle"><input type="checkbox" checked={showGuides}
-            onChange={(event) => setShowGuides(event.target.checked)} /> Guides</label>}
+          {summary && <div className="canvas-controls">
+            <select className="layout-toggle" aria-label="Canvas layout" title="Canvas layout" value={rows ? 'grid-rows-' + rows : 'layout-vertical'}
+              onChange={(event) => act(event.target.value as Command)}>
+              <option value="layout-vertical">Vertical</option>
+              {gridRows.map((count) => <option key={count} value={'grid-rows-' + count}>Grid · {count} {count === 1 ? 'row' : 'rows'}</option>)}
+            </select>
+            <label className="guides-toggle"><input type="checkbox" checked={showGuides}
+              onChange={(event) => setShowGuides(event.target.checked)} /> Guides</label>
+          </div>}
         </div>
         {summary && <Sources summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={choose}
