@@ -53,14 +53,29 @@ try {
   await start.getByRole('heading', { name: 'ImageFlow', exact: true }).waitFor();
   assert.equal(start.url(), 'imageflow://editor/start');
   await start.screenshot({ path: join(root, '.build/documents-start.png') });
-  await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, first);
+  await app.evaluate(({ dialog }, filePath) => {
+    globalThis.newBookSaveCalls = 0;
+    dialog.showSaveDialog = async () => { globalThis.newBookSaveCalls++; return { canceled: false, filePath }; };
+  }, first);
   const pickerPromise = app.waitForEvent('window');
   await start.getByRole('button', { name: 'New Book…', exact: true }).click();
   const picker = await pickerPromise;
   watch(picker);
   await picker.getByRole('heading', { name: 'Choose a starter' }).waitFor();
   await picker.screenshot({ path: join(root, '.build/documents-starter.png') });
+  // macOS may finish dismissing a modal sheet after its BrowserWindow has closed. Keep that native handoff
+  // pending so the mocked save dialog cannot conceal an attempt to open it too early.
+  if (process.platform === 'darwin') await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/new').getParentWindow().emit('sheet-begin');
+  });
+  const pickerClosed = picker.waitForEvent('close');
   await picker.getByRole('button', { name: 'Continue…' }).click();
+  await pickerClosed;
+  if (process.platform === 'darwin') {
+    await app.evaluate(() => new Promise((resolve) => setImmediate(resolve)));
+    assert.equal(await app.evaluate(() => globalThis.newBookSaveCalls), 0, 'Wait for native sheet dismissal before opening Save');
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/start').emit('sheet-end'));
+  }
   let one;
   for (let attempt = 0; attempt < 250; attempt++) {
     one = app.windows().find((page) => page.url() === 'imageflow://editor/');
@@ -70,6 +85,17 @@ try {
   assert.ok(one);
   await ready(one);
   assert.equal((await current(one)).project.title, 'First');
+  for (const cancelWithButton of [true, false]) {
+    const nextPicker = app.waitForEvent('window');
+    const cancelled = one.evaluate(() => window.imageflow.openProject('new'));
+    const modal = await nextPicker;
+    watch(modal);
+    await modal.getByRole('heading', { name: 'Choose a starter' }).waitFor();
+    if (cancelWithButton) await modal.getByRole('button', { name: 'Cancel', exact: true }).click(); else await modal.close();
+    assert.deepEqual(await cancelled, { value: null });
+    assert.equal(await app.evaluate(() => globalThis.newBookSaveCalls), 1, 'Cancelling a template never opens Save');
+    assert.equal((await current(one)).project.title, 'First');
+  }
   await assert.rejects(stat(join(first, '.imageflow/photos')), { code: 'ENOENT' });
   await one.screenshot({ path: join(root, '.build/documents-editor.png') });
   await start.waitForFunction(async () => (await window.imageflow.recentDocuments()).value.some((book) => !!book.cover));

@@ -51,7 +51,7 @@ const identities = new Map<string, DocumentSession>();
 const opening = new Map<string, Promise<DocumentSession>>();
 const closing = new Set<Promise<void>>();
 const covers = new Map<DocumentSession, { dirty: boolean; timer?: ReturnType<typeof setTimeout>; job?: AbortController; task?: Promise<void> }>();
-const pickers = new Map<number, { window: BrowserWindow; resolve: (id?: string) => void }>();
+const pickers = new Map<number, { window: BrowserWindow; select: (id?: string) => void }>();
 const pendingOpenFiles: string[] = [];
 let ready = false;
 let lastDocument: DocumentSession | undefined;
@@ -356,8 +356,28 @@ async function chooseStarter(owner: BrowserWindow): Promise<string | undefined> 
     parent: owner, modal: true, webPreferences: windowOptions() });
   secureWindow(picker);
   picker.webContents.on('will-frame-navigate', (event) => event.preventDefault());
-  const result = new Promise<string | undefined>((resolve) => { pickers.set(owner.id, { window: picker, resolve }); });
-  picker.once('closed', () => { pickers.get(owner.id)?.resolve(); pickers.delete(owner.id); });
+  const result = new Promise<string | undefined>((resolve) => {
+    let selection: string | undefined;
+    let closed = false;
+    let sheetOpen = false;
+    let finishing = false;
+    const finish = () => {
+      if (!closed || sheetOpen || finishing) return;
+      finishing = true;
+      owner.off('sheet-begin', beginSheet);
+      owner.off('sheet-end', endSheet);
+      owner.off('closed', ownerClosed);
+      // The next native panel must start outside the modal window's close callback.
+      setImmediate(() => { pickers.delete(owner.id); resolve(owner.isDestroyed() ? undefined : selection); });
+    };
+    const beginSheet = () => { sheetOpen = true; };
+    const endSheet = () => { sheetOpen = false; finish(); };
+    const ownerClosed = () => { selection = undefined; closed = true; sheetOpen = false; finish(); };
+    if (process.platform === 'darwin') { owner.on('sheet-begin', beginSheet); owner.on('sheet-end', endSheet); }
+    owner.once('closed', ownerClosed);
+    picker.once('closed', () => { closed = true; finish(); });
+    pickers.set(owner.id, { window: picker, select: (id) => { selection = id; picker.close(); } });
+  });
   picker.once('ready-to-show', () => { if (!hidden) picker.show(); });
   await picker.loadURL(starterURL);
   return result;
@@ -581,8 +601,7 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.chooseStarter, (event, id?: string) => {
     const picker = [...pickers.values()].find((entry) => trusted(event, entry.window, starterURL));
     if (!picker || (id !== undefined && !starters.some((entry) => entry.id === id))) return;
-    picker.resolve(id);
-    picker.window.close();
+    picker.select(id);
   });
   ipcMain.handle(channels.recents, async (event) => startOwner(event) ? { value: await recents.list() } : { error: 'Request is only available to the start window.' });
   ipcMain.handle(channels.recentAction, async (event, id: string, action: 'open' | 'locate' | 'remove') => {
