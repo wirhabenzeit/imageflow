@@ -32,6 +32,7 @@ The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided b
 | `file-input.tsx` | An optional CSV file input, parsed by the template, with a structured finding for bad lines. |
 | `editing-levels.tsx` | Editing UI at three levels: generated controls, arranged `controls` with a condition, and a custom editor using `Control`. |
 | `responsive.tsx` | Two formats and one layout that arranges itself by the shape of the chosen format. |
+| `layout-family.tsx` | A layout family of three variants (grid size × text box, one combination missing) with a picker of two independent choices. |
 
 Agents receive them with `get_authoring_context` and `includeExamples`. To start a template, copy `minimal.tsx` (or the closest example) and add layouts. To extend one, copy a single layout and its declarations. The starter template is the complete reference book, not a required starting point.
 
@@ -59,6 +60,8 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, requires: ['anchor
 | `box-records` | `box.photos`. |
 | `editor-controls` | `controls` on spreads, boxes and elements. |
 | `editor-native-controls` | `Control` and `importFile` in element editors, and the element's other parameters in the editor dialog. |
+| `layout-families` | `layoutFamilies`, `family` and `variant` on layouts, and a family's own layout picker. |
+| `editor-spread-parameters` | `spread` on an element editor: layout parameters edited together with the element's, with `setSpread` and `<Control scope="spread">`. |
 | `opening-spreads` | `openingSpreads`, the spreads a new book starts with. |
 
 `capabilities` lists what the installed app provides, and `get_authoring_context` reports it as `capabilities.templateApi`. Apps older than `requires` ignore it, but their bundler still rejects an import of a helper they lack. An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
@@ -254,6 +257,38 @@ Selecting a layout is one edit: Undo restores the previous layout with everythin
 
 State that no layout of the template declares (after the template drops a box, element or parameter) stays in `project.json` and is reported in the Book check rather than removed.
 
+### Layout families
+
+Layouts that are variants of one design, such as a photo grid in 2×2 and 3×3, can form a **layout family**. Every variant is still an ordinary layout with its own ID and a fixed set of boxes, so everything in [Switching layouts](#switching-layouts) applies unchanged: choosing a variant is a layout switch, with the same carried, kept and restored content, per-layout crops, rejected-value fallbacks and one Undo step. Families change only how the choice is presented.
+
+```tsx
+function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerProps) {
+  return <div role="radiogroup" aria-label="Grid size">
+    {variants.map(({ id, variant }) => <button key={id} type="button" role="radio" aria-checked={id === current}
+      disabled={readOnly} onClick={() => choose(id)}>{variant.size}</button>)}
+  </div>;
+}
+
+defineTemplate({
+  …, requires: ['layout-families'],
+  layoutFamilies: { grid: { label: 'Photo grid', picker: { label: 'Grid size', component: GridSizePicker } } },
+  spreads: ({ spread }) => ({
+    grid: spread({ label: 'Photo grid 2×2', family: 'grid', variant: { size: '2x2' }, boxes: box.photos(['a', 'b', 'c', 'd'], …), render: … }),
+    grid9: spread({ label: 'Photo grid 3×3', family: 'grid', variant: { size: '3x3' }, boxes: box.photos(['a', 'b', 'e', 'c', 'd', 'f', 'g', 'h', 'i'], …), render: … }),
+  }),
+});
+```
+
+- **Declaring:** `layoutFamilies` declares each family by ID with a `label` and an optional `picker`. A layout joins one with `family`. `variant` holds free-form tags (strings, numbers or booleans) that tell the variants apart; ImageFlow gives them no meaning and passes them to the picker.
+- **Rules, checked when the template loads:** the family is declared (TypeScript also rejects an unknown family); a family has at least two variants; its variants have the same `span`; tags are on every variant of a family or on none, and no two variants have the same tags; a layout with tags belongs to a family.
+- **Box IDs carry the content.** Choose the variants' box IDs so shared content lands where it belongs. The starter's 3×3 grid declares the 2×2 grid's four boxes in its upper-left cells, so growing the grid keeps those photos in place, and shrinking it keeps the other five outside the layout until the spread returns to 3×3.
+- **Sidebar:** a family with a picker is one layout preview, named after the family and showing the spread's current variant (or the first one). Clicking it opens the picker; so does the button next to the layout name while the spread uses one of the variants. A family without a picker shows a preview per variant, next to each other.
+- **The picker** runs in a sandboxed frame with the template's CSS, hosted like an [element editor](#element-editors): ImageFlow owns the dialog, Cancel and Done, Escape and ⌘↩, and shows what the chosen variant would carry over and keep before Done. It receives `variants` (each with `id`, `label` and its `variant` tags), `current` (the variant chosen in the draft), `saved` (the spread's layout), `choose(id)`, `find(tags)` (the first variant whose tags include all the given ones, or `undefined`), `document`, `format`, `readOnly`, `commit()` and `cancel()`.
+- **Only declared variants:** `choose` with anything other than a variant ID of the family changes nothing and the dialog says which IDs it accepts; Done checks the draft again before switching. A picker with several independent choices decides itself what a combination without a variant does, for example by disabling that option or choosing the nearest variant: `find({ size: '3x3', text: true }) ?? find({ size: '3x3' })`. Prefer tags over hard-coded IDs, so a new variant needs only a new layout.
+- **Changes from elsewhere:** if the spread's layout or the family's declarations change while the picker is open, the dialog says so and refuses to switch.
+- **Agents and commands** keep switching layouts by ID with `switch_layout`. `get_authoring_context` reports `layoutFamilies`, and `family` and `variant` on each layout, so agents see the same grouping.
+- **Scope today:** a finite list of explicitly declared variants, shown in a dialog. The set of boxes is never derived from parameters, and unbounded counts (rows 1 to n) are not supported. Hosting the picker inline in the sidebar may follow.
+
 ## Render function
 
 `render(context)` is called per spread instance and must be a pure function of its input: no state, effects, timers, randomness, or data fetching.
@@ -354,9 +389,11 @@ Saved data and its editing UI are separate. Parameters declare what is saved: ID
 
    An entry is a parameter ID, `{ parameter, label?, description?, when? }`, or `{ group, description?, controls, when? }`. `when` names other parameters of the same scope and the values they must have (all must match; an array matches any of its values). For boxes, pass `controls` as `box.photo(label, parameters, { controls })` or in `box.markdown`'s options.
    - A parameter left out of `controls` gets no generated control. It keeps its value, its validation and its project commands, so use this for values only a custom editor or an agent sets.
+   - `controls: []` shows no generated controls for the scope while keeping every declaration. A group needs at least one entry.
    - A condition only hides a control. The value stays saved and validated, and comes back when the condition holds again. Conditions are presentation: they never remove a declaration or change a saved ID.
    - Click-to-edit follows the box's or element's `controls` for its own parameters. A parameter a node explicitly shows with `ctx.edit` or `ctx.Text` is always editable on that node.
    - The authoring types check entry IDs against the scope's parameters. Loading the template reports unknown or repeated IDs, a parameter a custom editor owns, conditions on unknown parameters, on the control's own value, or on values the parameter can never have.
+   - Controls that can hide themselves for good load with a `declaration-control-cycle` warning in the Book check: a control inside a group shown only depending on that control (a group shown while `show` is on that contains `show`), or controls whose conditions depend on each other (A shown only when B is on, B only when A is on). For layout (spread) parameters, the warning is given per spread: a spread that marks one of them on the page with `ctx.edit` or `ctx.Text` gets none, since that node's popover always shows it, while another spread of the same layout that marks none of them (for example because its values hide the marked node) gets the warning on itself. Marking a box's or element's own parameter does not count: its popover follows the same `controls` and conditions.
 3. **A custom editor** for an element, below.
 
 #### Where editing happens
@@ -365,8 +402,8 @@ Each box and element is edited where it is on the page, with one editor per task
 
 - **Photo boxes:** clicking a placed photo selects it to drag and pinch. Its toolbar holds **Replace photo**, **Remove**, the crop as numbers, the box's own parameters, and any other parameters the template marks the box with (such as a spread setting shown in its caption). An empty photo box (or one whose frame the template rotates) opens a popover with **Choose photo** and the same settings.
 - **Markdown boxes:** clicking one opens a popover with its text (assign, import, show), its place in the text flow, its parameters and any parameters the template marks it with.
-- **Elements:** an element with a custom editor opens it, with the element's other parameters below it in the same dialog. Spread parameters marked on such an element stay in the sidebar, since the dialog edits only the element. Any other element opens a popover with its generated controls.
-- **Marked nodes:** a node marked with `ctx.Text` or `ctx.edit` opens a popover for those parameters. A node smaller than the box under it wins, so a heading over a photo edits the heading.
+- **Elements:** an element with a custom editor opens it, with the element's other parameters below it in the same dialog. Spread parameters the editor declares in `spread` are edited there too; other spread parameters marked on such an element stay in the sidebar. Any other element opens a popover with its generated controls.
+- **Marked nodes:** a node marked with `ctx.Text` or `ctx.edit` opens a popover for those parameters. A node smaller than the box under it wins, so a heading over a photo edits the heading. A parameter may be shown by several nodes, such as `ctx.Text parameter="heading"` on both pages: each is its own place to edit, the popover opens at the one clicked and Tab reaches each, while all of them edit the same saved value. The sidebar lists the parameter once.
 - **The sidebar** holds the spread's layout, the spread parameters nothing on the page edits, content kept for other layouts, and a list of what the page edits: marked nodes such as `ctx.Text` headings (in reading order), then the declared boxes and elements. The list shows what each holds and opens the same editors, so empty, overlapping and keyboard users reach everything. Boxes and elements are told apart by identity, never by position, so two at the same place each edit their own values. A box or element the layout does not render right now opens at the spread's corner with its declared parameters. Book parameters are in Book settings.
 
 ### Element editors
@@ -374,27 +411,31 @@ Each box and element is edited where it is on the page, with one editor per task
 An element can supply its own editor for parameters that generated controls handle poorly, such as marking days in a calendar or panning a map:
 
 ```tsx
-function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {
+const calendar = { month, firstWeekday, marked };
+function CalendarEditor({ values, set, readOnly }: ElementEditorProps<typeof calendar, 'month' | 'marked'>) {
   // Render any UI; call set({ ... }) to change the draft. The editor previews the draft itself.
 }
 
 elements: { grid: {
   label: 'Calendar grid',
-  parameters: { month, firstWeekday, marked },
+  parameters: calendar,
   editor: { label: 'Edit calendar', parameters: ['month', 'marked'], component: CalendarEditor },
 } },
 ```
 
 - **Opening it:** clicking the element opens the editor in a dialog, and so does the element's entry in the sidebar's list.
+- **Layout parameters with it:** a task can need a layout (spread) parameter too, such as a title shown with a calendar. List those in `spread`: `editor: { parameters: ['month', 'marked'], spread: ['title'], component }`. The editor reads all layout parameters as `spread`, changes the listed ones with `setSpread(changes)` or `<Control parameter="title" scope="spread" />`, and Done saves them in the same edit as the element's. They stay layout parameters: saved data, MCP's `set_parameter` and other layouts that declare them are unchanged; only where they are edited moves. A listed parameter gets no sidebar control and may not appear in the layout's `controls`; each one belongs to one editor. Document settings stay read-only to editors. Requires `editor-spread-parameters`.
 - **One editor for the element:** parameters the editor lists are edited only by it. The element's other parameters appear below it in the same dialog as generated controls (arranged by the element's `controls`), in the same draft, so Done saves the whole element as one edit. The editor's `values` follow those controls as the user changes them, so its preview always shows the whole draft. Done first applies anything still being typed in the editor's frame, including in `<Control>` fields, and saves only once the frame confirms. If the editor fails while applying, or does not answer within a few seconds, nothing is saved and the dialog stays open with its draft.
-- **Sandbox:** the component runs in a frame on the render origin with the template's CSS, like the book previews. It receives `values` (all of the element's parameters, with the draft applied), `set(changes)`, `document`, `format`, `readOnly`, `commit()`, `cancel()`, `Control` and `importFile`. It cannot change project data itself.
+- **Typed props:** `ElementEditorProps<P, K, D, S, SK>` types the props from the element's parameters `P`, the IDs the editor lists `K`, optionally the template's document parameters `D`, the layout parameters `S`, and the layout IDs the editor lists `SK`. `spread`, `setSpread` and `Control` with `scope="spread"` use those layout types and owned IDs. `values` and `document` then have each parameter's type (an enum's options, a number, a string), `set` accepts only the editor's own parameters with values of their type, and `Control` only the editor's own parameters, so `set({ zoon: 2 })`, `set({ size: 'huge' })` for an enum without that option, or `<Control parameter="opacity" />` for a parameter the generated controls edit fail type checking. An editor typed for other parameters than its declaration lists fails too. Declare the parameters as a constant to write `typeof calendar`; an editor written inline in `editor.component` is not typed from the declaration, so annotate its props the same way. `ElementEditorProps` without type arguments keeps the untyped props.
+- **Sandbox:** the component runs in a frame on the render origin with the template's CSS, like the book previews. It receives `values` (all of the element's parameters, with the draft applied), `set(changes)`, `spread` and `setSpread(changes)` (above), `document`, `format`, `readOnly`, `commit()`, `cancel()`, `Control` and `importFile`. It cannot change project data itself.
 - **ImageFlow's controls inside:** `<Control parameter="track" />` draws the app's own control for one of the editor's parameters, bound to the draft: the same field, slider, choice or file chooser (with import) as the generated controls, with their validation and accessibility, in the editor's appearance. Compose it with your own UI instead of rebuilding file handling or form controls. `label` overrides the parameter's label.
 - **Files:** `importFile(accept)` asks the app to import a file into the project and resolves to its file ID, or `undefined` when the user cancels; `<Control>` for a file parameter uses it for its **Choose…** button. Assign the ID with `set`, so Done saves it and Cancel discards the assignment; the imported file stays in the project. `file(id)` reads the new file at once.
 - **What ImageFlow owns:** the dialog, Cancel and Done, Escape and ⌘↩, focus, read-only mode, validation against the parameter schema, and saving. One editing session is one undoable edit; Cancel leaves the saved values unchanged.
 - **Draft and commit:** `set()` takes effect immediately, so `set({ ... }); commit()` in one handler saves those changes; `values` catches up on the next render.
+- **Changes `set()` and `setSpread()` cannot make:** a key that is not one of the editor's parameters, or a value the parameter does not allow (an enum value outside its options, a number out of range), is not applied. The other changes in the same call are. Each such problem is reported once, in the frame's console and in the dialog, with the parameters the editor edits or the values the parameter takes; it does not block Done. `<Control>` for a parameter the editor does not own fails the editor with a message listing the ones it does.
 - **Changes from elsewhere:** if what the editor works on changes while it is open (a saved value after Reload or Undo, or a template edit that changes a default or a declaration of the parameters it handles), the dialog says so and refuses to save; the user reopens the editor on the current values.
 - **Failures:** if the component throws while rendering, in an event handler or in async work, the dialog shows the error and offers only Cancel. The editor counts as loaded once the component has mounted.
-- **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors can read files of file parameters with `file()`; remote resources such as map tiles are not available. The starter has two reference examples: the calendar editor (month and marked days, with **Week starts** as a generated control below it) and the route map's **Edit route** editor. Choosing a track and framing it are one task, so that editor owns the GPX `track` (drawn with `<Control parameter="track" />`, including import) and the viewport, kept as three ordinary number parameters (`centerX`, `centerY`, `zoom`) and edited together by dragging, scrolling, buttons or arrow keys. It draws only the GPX track, without a basemap, so export stays offline.
+- **Scope today:** the element's parameters and the layout parameters it lists, shown in a dialog (`presentation: 'dialog'`); a sidebar placement is not available yet. Editors can read files of file parameters with `file()`; remote resources such as map tiles are not available. The starter has two reference examples: the calendar editor (month and marked days, the layout's **Calendar title** through `spread`, and **Week starts** as a generated control below it) and the route map's **Edit route** editor. Choosing a track and framing it are one task, so that editor owns the GPX `track` (drawn with `<Control parameter="track" />`, including import) and the viewport, kept as three ordinary number parameters (`centerX`, `centerY`, `zoom`) and edited together by dragging, scrolling, buttons or arrow keys. It draws only the GPX track, without a basemap, so export stays offline.
 
 #### Appearance in custom editors
 

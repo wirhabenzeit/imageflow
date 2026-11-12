@@ -15,19 +15,22 @@ import { markdownToHtml } from './markdown';
 import { isParameterValue, parameterWarnings, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import { flow } from './text-flow';
-import { declarationWarnings } from './declaration-check';
+import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
 import { bookIndex, chooseFormat, normalizeTemplate, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
-import { declaredInTemplate, layoutChoices } from './layouts';
+import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
+import type { VariantTags } from './layouts';
+import { numberOccurrences } from './edit-targets';
 import { parsePreviewRequest, PreviewError } from './preview';
 import type { PreviewMetadata, PagePreviewMetadata } from './preview';
 import { inspectionSchema } from './inspection';
 import type { ElementInspection, ElementMeasurement } from './inspection';
 import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import { Field, ProjectFilesContext } from './Fields';
+import { editorChanges, unknownControl } from './editor-changes';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -427,11 +430,12 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
           };
         });
       }),
-      targets: sheets.flatMap(({ spread, sheet }) => [...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
+      // Nodes that edit the same fields on a sheet, such as a heading shown twice, are told apart by occurrence.
+      targets: sheets.flatMap(({ spread, sheet }) => numberOccurrences([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
         spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node),
         ...(node.dataset.box ? { owner: { type: 'box' as const, id: node.dataset.box } }
           : node.dataset.element ? { owner: { type: 'element' as const, id: node.dataset.element } } : {}),
-      }))),
+      })))),
     };
     post(geometry);
   }
@@ -721,7 +725,8 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   const format = resolveFormat(template.format);
   const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
   // A preview is the spread itself in another layout: switching only changes which of its content is shown.
-  const previews = layoutChoices(template.spreads, spreads[index].definition).map((definition) => ({
+  // A family with its own picker shows one preview, which stands for the family.
+  const previews = layoutPreviews(template.spreads, spreads[index].definition, template.layoutFamilies).map((definition) => ({
     definition, span: template.spreads[definition].span, spread: { ...spreads[index], definition, id: definition },
   }));
   // Previews read the anchors of the book as saved, so a contents layout shows the real pages.
@@ -787,21 +792,27 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
 // changes project data itself.
 function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, elementId: string, readOnly: boolean) {
   const spread = book.project.spreads.find(({ id }) => id === spreadId);
-  const element = spread && template.spreads[spread.definition]?.elements[elementId];
+  const layout = spread && template.spreads[spread.definition];
+  const element = layout?.elements[elementId];
   const editor = element?.editor;
-  if (!spread || !element || !editor) throw new Error('This element has no editor.');
+  if (!spread || !layout || !element || !editor) throw new Error('This element has no editor.');
   const saved = resolveParams(element.parameters, spread.elements[elementId]?.params ?? {});
+  const savedSpread = resolveParams(layout.parameters, spread.params);
+  const ownedSpread = editor.spread ?? [];
   const document = resolveParams(template.parameters, book.project.params);
   const format = resolveFormat(template.format);
   const claimed = (values: Values) => Object.fromEntries(editor.parameters.map((key) => [key, values[key]]));
+  const claimedSpread = (values: Values) => Object.fromEntries(ownedSpread.map((key) => [key, values[key]]));
   root.className = 'if-editor';
   // The project's file registry for file controls. An import adds to it, so it is state the host can update.
   let projectFiles = book.project.files;
   let updateFiles: ((files: Record<string, SourceReference>) => void) | undefined;
 
   // The draft lives outside React so set() followed directly by commit() sends the newest values, before React
-  // has rendered them. Every message is posted in order, and commit carries the draft as well.
+  // has rendered them. Every message is posted in order, and commit carries the draft as well. The element's and
+  // the layout's parameters are separate drafts, since the same ID can name a parameter in each scope.
   let draft: Values = saved;
+  let spreadDraft: Values = savedSpread;
   let changed = false;
   let failed = false;
   const fail = (error: unknown) => {
@@ -810,18 +821,35 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     const reason = error instanceof Error ? error.message : String(error);
     post({ state: 'error', message: 'The editor stopped working: ' + reason });
   };
-  const commit = () => { if (!failed) post({ type: 'editor-commit', values: changed ? claimed(draft) : {} }); };
+  const drafts = () => changed ? { values: claimed(draft), spread: claimedSpread(spreadDraft) } : { values: {}, spread: {} };
+  const commit = () => { if (!failed) post({ type: 'editor-commit', ...drafts() }); };
   const cancel = () => post({ type: 'editor-cancel' });
-  let update: ((values: Values) => void) | undefined;
-  const set = (changes: Values) => {
-    if (readOnly || failed) return;
-    const allowed = Object.entries(changes).filter(([key]) => editor.parameters.includes(key));
-    if (!allowed.length) return;
-    draft = { ...draft, ...Object.fromEntries(allowed) };
-    changed = true;
-    post({ type: 'editor-draft', values: claimed(draft) });
-    update?.(draft);
+  let update: ((values: { element: Values; spread: Values }) => void) | undefined;
+  // A change set() cannot apply (another parameter, or an invalid value) is ignored, as untyped template code would
+  // otherwise lose it silently. Each problem is reported once: in the console for the author, and to the dialog,
+  // which shows it without blocking Done.
+  const reported = new Set<string>();
+  const warn = (message: string) => {
+    if (reported.has(message)) return;
+    reported.add(message);
+    console.warn('ImageFlow: ' + message);
+    post({ type: 'editor-warning', message });
   };
+  const changes = (scope: 'element' | 'spread', next: Values) => {
+    if (readOnly || failed) return;
+    const owned = scope === 'element' ? editor.parameters : ownedSpread;
+    const parameters = scope === 'element' ? element.parameters : layout.parameters;
+    const { allowed, rejected } = editorChanges(parameters, owned, next, scope);
+    for (const { message } of rejected) warn(message);
+    if (!Object.keys(allowed).length) return;
+    if (scope === 'element') draft = { ...draft, ...allowed };
+    else spreadDraft = { ...spreadDraft, ...allowed };
+    changed = true;
+    post({ type: 'editor-draft', values: claimed(draft), spread: claimedSpread(spreadDraft) });
+    update?.({ element: draft, spread: spreadDraft });
+  };
+  const set = (next: Values) => changes('element', next);
+  const setSpread = (next: Values) => changes('spread', next);
 
   // File imports run in the app, which owns the project; it answers with the new file's ID. The frame then reloads
   // the project's files, so `file(id)` and the file controls see the new file at once.
@@ -842,7 +870,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       if (typeof request !== 'number') return;
       try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
       catch (error) { fail(error); }
-      if (!failed) post({ type: 'editor-flushed', request, values: changed ? claimed(draft) : {} });
+      if (!failed) post({ type: 'editor-flushed', request, ...drafts() });
       return;
     }
     if (event.data?.type === 'editor-values') {
@@ -852,7 +880,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
         Object.hasOwn(element.parameters, key) && isParameterValue(element.parameters[key], value));
       if (!others.length) return;
       draft = { ...draft, ...Object.fromEntries(others) };
-      update?.(draft);
+      update?.({ element: draft, spread: spreadDraft });
       return;
     }
     if (event.data?.type !== 'editor-imported') return;
@@ -871,19 +899,20 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     }).catch(fail);
   });
 
-  const EditorValues = React.createContext<Values>(draft);
-  // The app's control for one of this editor's parameters, writing to the draft like `set`.
-  function Control({ parameter, label }: { parameter: string; label?: string }) {
-    const values = React.useContext(EditorValues);
-    const param = editor!.parameters.includes(parameter) && Object.hasOwn(element!.parameters, parameter) ? element!.parameters[parameter] : undefined;
-    if (!param) throw new Error('Control ' + parameter + ' is not one of the parameters this editor edits.');
+  const EditorValues = React.createContext({ element: draft, spread: spreadDraft });
+  // The app's control for one of this editor's parameters, writing to the draft like `set` (or `setSpread`).
+  function Control({ parameter, label, scope = 'element' }: { parameter: string; label?: string; scope?: 'element' | 'spread' }) {
+    const values = React.useContext(EditorValues)[scope === 'spread' ? 'spread' : 'element'];
+    const [owned, declared] = scope === 'spread' ? [ownedSpread, layout!.parameters] : [editor!.parameters, element!.parameters];
+    const param = owned.includes(parameter) && Object.hasOwn(declared, parameter) ? declared[parameter] : undefined;
+    if (!param) throw new Error(unknownControl(parameter, owned, scope));
     const value = isParameterValue(param, values[parameter]) ? values[parameter] : param.default;
     return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
-      React.createElement(Field, { param: label ? { ...param, label } : param, value, change: (next) => set({ [parameter]: next }) }));
+      React.createElement(Field, { param: label ? { ...param, label } : param, value, change: (next) => changes(scope === 'spread' ? 'spread' : 'element', { [parameter]: next }) }));
   }
 
   function Host() {
-    const [values, setValues] = React.useState<Values>(draft);
+    const [values, setValues] = React.useState({ element: draft, spread: spreadDraft });
     const [files, setFiles] = React.useState(projectFiles);
     React.useEffect(() => {
       update = setValues;
@@ -895,12 +924,100 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     const context = React.useMemo(() => ({ files, defaultMode: book.project.importMode ?? 'copy', importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
     return React.createElement(ProjectFilesContext.Provider, { value: context },
       React.createElement(EditorValues.Provider, { value: values },
-        React.createElement(editor!.component, { values, set, document, format, readOnly, commit, cancel, Control, importFile })));
+        React.createElement(editor!.component, { values: values.element, set, spread: values.spread, setSpread, document, format, readOnly,
+          commit, cancel, Control, importFile })));
   }
 
   // Errors from the component's event handlers and async work do not reach React's error handling.
   window.addEventListener('error', (event) => {
     // Browsers report a benign layout notice through the same event.
+    if (!event.error && /^ResizeObserver loop/.test(event.message)) return;
+    fail(event.error ?? event.message);
+  });
+  window.addEventListener('unhandledrejection', (event) => fail(event.reason));
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancel();
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      commit();
+    }
+  });
+  new ResizeObserver(() => post({ type: 'editor-size', height: Math.ceil(root.getBoundingClientRect().height) })).observe(root);
+  const react = createRoot(root, { onUncaughtError: fail, onCaughtError: fail });
+  flushSync(() => react.render(React.createElement(Host)));
+}
+
+// Runs a layout family's picker. Its draft is one of the family's layout IDs; the frame reports it, its height, and
+// commit or cancel to the app, which checks the choice and switches the layout. The frame changes nothing itself.
+function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, familyId: string, initial: string,
+  readOnly: boolean) {
+  const spread = book.project.spreads.find(({ id }) => id === spreadId);
+  const family = template.layoutFamilies && Object.hasOwn(template.layoutFamilies, familyId) ? template.layoutFamilies[familyId] : undefined;
+  const picker = family?.picker;
+  if (!spread || !family || !picker) throw new Error('This layout family has no picker.');
+  const ids = familyLayouts(template.spreads, familyId);
+  const variants = ids.map((id) => ({ id, label: template.spreads[id].label, variant: { ...template.spreads[id].variant } }));
+  const document = resolveParams(template.parameters, book.project.params);
+  const format = resolveFormat(template.format);
+  root.className = 'if-editor';
+  const start = [initial, spread.definition].find((id) => ids.includes(id)) ?? ids[0];
+
+  // The draft lives outside React so choose() followed directly by commit() sends the newest choice.
+  let draft = start;
+  let failed = false;
+  const fail = (error: unknown) => {
+    if (failed) return;
+    failed = true;
+    const reason = error instanceof Error ? error.message : String(error);
+    post({ state: 'error', message: 'The picker stopped working: ' + reason });
+  };
+  const reported = new Set<string>();
+  let update: ((id: string) => void) | undefined;
+  const choose = (id: string) => {
+    if (readOnly || failed) return;
+    if (typeof id !== 'string' || !ids.includes(id)) {
+      // Reported once per value, like an unknown parameter in an element editor; the draft stays as it was.
+      const name = String(id);
+      if (!reported.has(name)) {
+        reported.add(name);
+        post({ type: 'editor-notice', message: 'The picker chose ' + name + ', which is not a layout of ' + family.label + '. It can choose ' + ids.join(', ') + '.' });
+      }
+      return;
+    }
+    draft = id;
+    post({ type: 'editor-draft', values: { layout: draft } });
+    update?.(draft);
+  };
+  const find = (tags: VariantTags) => {
+    const wanted = Object.entries(tags ?? {});
+    return variants.find(({ variant }) => wanted.every(([key, value]) => Object.hasOwn(variant, key) && variant[key] === value))?.id;
+  };
+  const commit = () => { if (!failed) post({ type: 'editor-commit', values: { layout: draft } }); };
+  const cancel = () => post({ type: 'editor-cancel' });
+  window.addEventListener('message', (event) => {
+    if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'editor-flush') return;
+    const request = event.data.request;
+    if (typeof request !== 'number') return;
+    try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
+    catch (error) { fail(error); }
+    if (!failed) post({ type: 'editor-flushed', request, values: { layout: draft } });
+  });
+
+  function Host() {
+    const [current, setCurrent] = React.useState(draft);
+    React.useEffect(() => {
+      update = setCurrent;
+      post({ type: 'editor-ready' });
+      return () => { update = undefined; };
+    }, []);
+    return React.createElement(picker!.component, {
+      variants, current, saved: spread!.definition, choose, find, document, format, readOnly, commit, cancel,
+    });
+  }
+
+  window.addEventListener('error', (event) => {
     if (!event.error && /^ResizeObserver loop/.test(event.message)) return;
     fail(event.error ?? event.message);
   });
@@ -980,6 +1097,10 @@ export async function startRender(root: HTMLElement) {
       renderEditor(root, book, template, query.get('spread') ?? '', query.get('element') ?? '', query.has('readonly'));
       return;
     }
+    if (book.mode === 'edit' && query.get('view') === 'layout-picker') {
+      renderLayoutPicker(root, book, template, query.get('spread') ?? '', query.get('family') ?? '', query.get('layout') ?? '', query.has('readonly'));
+      return;
+    }
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
     const { chains, positions } = textAssignments(book, template);
@@ -1024,8 +1145,16 @@ export async function startRender(root: HTMLElement) {
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
+    // A control the generated controls could hide for good is fine on a spread that also marks it as editable on
+    // the page: the marked node is the way to show it again (placeControlWarnings).
+    const rendered = [...root.querySelectorAll<HTMLElement>('.if-spread-container[data-spread]')].flatMap((container) => {
+      const spread = spreads.find(({ id }) => id === container.dataset.spread);
+      return spread ? [{ spread: spread.id, layout: spread.definition, marked: new Set([...container.querySelectorAll<HTMLElement>('[data-edit]')]
+        .flatMap((node) => node.dataset.edit!.split(' ').filter(Boolean))) }] : [];
+    });
     const warnings: Issue[] = [
-      ...declaration.map(({ code, message: text, path, details, suggestion }) => ({ ...message(text), code, details: { ...details, path }, suggestion })),
+      ...placeControlWarnings(declaration, rendered).map(({ code, message: text, path, details, suggestion, spread }) =>
+        ({ ...(spread ? located(spread, text) : message(text)), code, details: { ...details, path }, suggestion })),
       ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),

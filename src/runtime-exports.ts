@@ -13,6 +13,10 @@ export const capabilities = [
   'spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-records',
   // `controls` on spreads, boxes and elements; `Control` and `importFile` in custom element editors.
   'editor-controls', 'editor-native-controls',
+  // `layoutFamilies`, with `family` and `variant` on layouts, and a family's own layout picker.
+  'layout-families',
+  // `spread` on an element editor: layout parameters it edits together with the element's own.
+  'editor-spread-parameters',
   // `openingSpreads`: the spreads a new book starts with.
   'opening-spreads',
 ] as const;

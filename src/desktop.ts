@@ -103,19 +103,24 @@ export type DesktopApi = {
   onProgress(listener: (stage: string) => void): () => void;
 };
 
-// `editor` describes a template-supplied editor for some of the element's parameters (the component itself
-// stays in the render frame).
+// `editor` describes a template-supplied editor for some of the element's parameters, and for the layout (spread)
+// parameters it lists in `spread` (the component itself stays in the render frame).
 // `controls` arranges the generated controls of a scope's parameters (src/controls.ts).
 export type ElementDefinition = {
-  label: string; parameters: Parameters; controls?: ControlItem[]; editor?: { label?: string; parameters: string[]; presentation: 'dialog' };
+  label: string; parameters: Parameters; controls?: ControlItem[]; editor?: { label?: string; parameters: string[]; spread?: string[]; presentation: 'dialog' };
 };
 export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; parameters: Parameters; flowOrder?: number; controls?: ControlItem[] };
+// `family` names the layout family this layout is a variant of; `variant` holds the template's tags for it.
 export type SpreadDefinition = {
   label: string; span: Span; parameters: Parameters; controls?: ControlItem[];
   boxes: Record<string, BoxDefinition>; elements: Record<string, ElementDefinition>;
+  family?: string; variant?: Record<string, string | number | boolean>;
 };
 export type TemplateInfo = {
   version: string; parameters: Parameters; spreads: Record<string, SpreadDefinition>;
+  // Families of layouts, by ID. `picker` is set when the family supplies its own picker (the component stays in the
+  // render frame).
+  layoutFamilies?: Record<string, { label: string; picker?: { label?: string } }>;
   // The spreads a new book from this template starts with; empty when it starts without spreads.
   openingSpreads?: { layout: string; params: Values }[];
   // The format in use, its ID, and the labels of all formats the template offers.
@@ -140,7 +145,9 @@ export type BookGeometry = {
   boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean })[];
   // Nodes a template marked with `ctx.edit(...)`, and boxes and elements with parameters. `owner` is the box or
   // element the node is, so targets that share a rectangle stay apart; standalone marked nodes have none.
-  targets: (Rect & { spread: string; edits: string[]; owner?: { type: 'box' | 'element'; id: string } })[];
+  // `occurrence` counts the earlier nodes on the sheet that edit the same fields, so repeated uses of a field, such
+  // as a heading shown twice, are separate targets that edit the same saved value.
+  targets: (Rect & { spread: string; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string } })[];
 };
 // A preflight finding. `spread` is the spread id and `where` its readable location, such as "Pages 6–7 · Photo grid".
 // The optional fields give agents a stable `code`, the box/element/source involved, measured values and a repair hint.

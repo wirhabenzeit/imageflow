@@ -12,8 +12,15 @@ export type Layout = {
   parameters: Parameters;
   boxes: Record<string, { type: 'photo' | 'markdown'; label: string; parameters: Parameters }>;
   elements: Record<string, { label: string; parameters: Parameters }>;
+  // The layout family this layout is a variant of, and the template's own tags for it, which a picker reads.
+  family?: string;
+  variant?: VariantTags;
 };
 export type Layouts = Record<string, Layout>;
+export type VariantTags = Record<string, string | number | boolean>;
+// Layouts that are variants of one design, such as a 2×2 and a 3×3 photo grid. A family may supply a picker, which
+// chooses one of its variants; the choice is an ordinary layout switch.
+export type LayoutFamilies = Record<string, { label: string; picker?: { label?: string } }>;
 
 const own = <T,>(record: Record<string, T>, key: string) => Object.hasOwn(record, key) ? record[key] : undefined;
 const typeName = (param: Parameter) => param.type === 'enum' ? 'an enum' : param.type === 'integer' ? 'an integer' : 'a ' + param.type;
@@ -58,6 +65,86 @@ export function declarationConflicts(layouts: Layouts) {
 export function layoutChoices(layouts: Layouts, current: string) {
   const span = own(layouts, current)?.span;
   return Object.keys(layouts).filter((id) => !span || layouts[id].span === span);
+}
+
+// Layout families. Every variant is an ordinary layout with its own ID and boxes, so switching between variants
+// follows the rules above unchanged; the family only groups them and says how the choice is presented.
+
+// The variants of a family, in declaration order.
+export function familyLayouts(layouts: Layouts, family: string) {
+  return Object.keys(layouts).filter((id) => layouts[id].family === family);
+}
+
+// Declarations that break the family rules, with the path they belong to. A family must be declared and have at
+// least two variants of one page footprint; within a family, tags are given for every variant or none, and no two
+// variants share them, so a picker can tell them apart.
+export function familyProblems(layouts: Layouts, families: LayoutFamilies = {}) {
+  const problems: { path: (string | number)[]; message: string }[] = [];
+  const declared = Object.keys(families);
+  for (const [id, layout] of Object.entries(layouts)) {
+    if (layout.family !== undefined && !Object.hasOwn(families, layout.family)) {
+      problems.push({ path: ['spreads', id, 'family'], message: 'Layout ' + id + ' is in family ' + layout.family + ', which layoutFamilies does not declare. ' +
+        (declared.length ? 'Declared families: ' + declared.join(', ') + '.' : 'Declare it in layoutFamilies.') });
+    }
+    if (layout.variant !== undefined && layout.family === undefined) {
+      problems.push({ path: ['spreads', id, 'variant'], message: 'Layout ' + id + ' has variant tags but no family. Tags describe a variant within its family; add family, or remove variant.' });
+    }
+  }
+  for (const [family, { label }] of Object.entries(families)) {
+    const ids = familyLayouts(layouts, family);
+    if (ids.length < 2) {
+      problems.push({ path: ['layoutFamilies', family], message: 'Family ' + family + ' (' + label + ') has ' + (ids.length ? 'only layout ' + ids[0] : 'no layouts') +
+        '. A family groups at least two layouts; set family: \'' + family + '\' on each of its variants.' });
+      continue;
+    }
+    const spans = [...new Set(ids.map((id) => layouts[id].span))];
+    if (spans.length > 1) {
+      problems.push({ path: ['layoutFamilies', family], message: 'The layouts of family ' + family + ' have different page footprints (' +
+        ids.map((id) => id + ': ' + layouts[id].span).join(', ') + '). Switching between variants must keep the pages, so give them the same span.' });
+    }
+    const tagged = ids.filter((id) => layouts[id].variant !== undefined);
+    if (tagged.length && tagged.length < ids.length) {
+      problems.push({ path: ['layoutFamilies', family], message: 'In family ' + family + ', ' + tagged.join(', ') + ' declare variant tags but ' +
+        ids.filter((id) => !tagged.includes(id)).join(', ') + ' do not. Tag every variant, or none.' });
+    }
+    const seen = new Map<string, string>();
+    for (const id of tagged) {
+      const key = JSON.stringify(Object.entries(layouts[id].variant!).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+      const first = seen.get(key);
+      if (first) {
+        problems.push({ path: ['spreads', id, 'variant'], message: 'Layouts ' + first + ' and ' + id + ' of family ' + family +
+          ' have the same variant tags, so a picker cannot tell them apart. Give each variant its own tags.' });
+      } else seen.set(key, id);
+    }
+  }
+  return problems;
+}
+
+// The layouts the sidebar previews for a spread, from those it can switch to (`layoutChoices`), in declaration
+// order. A family with a picker shows one preview: the spread's own layout when it is a variant, else the first
+// variant. Other families keep a preview per variant, moved together to where the family first appears.
+export function layoutPreviews(layouts: Layouts, current: string, families: LayoutFamilies = {}) {
+  const choices = layoutChoices(layouts, current);
+  const shown: string[] = [];
+  const done = new Set<string>();
+  for (const id of choices) {
+    const family = layouts[id].family;
+    if (family === undefined || !Object.hasOwn(families, family)) {
+      shown.push(id);
+      continue;
+    }
+    if (done.has(family)) continue;
+    done.add(family);
+    const variants = choices.filter((choice) => layouts[choice].family === family);
+    shown.push(...(families[family].picker ? [variants.includes(current) ? current : variants[0]] : variants));
+  }
+  return shown;
+}
+
+// The family with a picker that a previewed layout stands for, if any.
+export function pickerFamily(layouts: Layouts, id: string, families: LayoutFamilies = {}) {
+  const family = own(layouts, id)?.family;
+  return family !== undefined && own(families, family)?.picker ? family : undefined;
 }
 
 type Kind = 'photo' | 'text';

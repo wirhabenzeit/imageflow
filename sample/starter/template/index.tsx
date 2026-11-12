@@ -1,5 +1,5 @@
 import { asset, box, defineTemplate, Element, file, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
-import type { ElementEditorProps, ImageFlowNode, Photo, Rect, RenderContext } from 'imageflow';
+import type { ElementEditorProps, ImageFlowNode, LayoutPickerProps, Photo, Rect, RenderContext } from 'imageflow';
 import './styles.css';
 
 // Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page.
@@ -126,10 +126,18 @@ function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Vi
 // The route map's own editor: choose or import the GPX track with ImageFlow's file control, then drag to move,
 // scroll or use the buttons to zoom, so the inset can show part of the route. Choosing the track and framing it is
 // one task, so one editor owns all four parameters and Done saves them together.
+const routeParameters = {
+  track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
+  centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01 }),
+  centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01 }),
+  zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1 }),
+};
+// Typed from the element's declaration: `set` and `Control` accept only these four parameters, with their value types.
+type RouteEditorProps = ElementEditorProps<typeof routeParameters, 'track' | 'centerX' | 'centerY' | 'zoom'>;
 let routeDrag: { x: number; y: number; start: Viewport; width: number } | undefined;
-function RouteEditor({ values, set, readOnly, Control }: ElementEditorProps) {
-  const viewport = routeWindow({ centerX: Number(values.centerX), centerY: Number(values.centerY), zoom: Number(values.zoom) });
-  const source = file(String(values.track));
+function RouteEditor({ values, set, readOnly, Control }: RouteEditorProps) {
+  const viewport = routeWindow(values);
+  const source = file(values.track);
   let line = '';
   let problem = source ? '' : 'Choose a GPX track to draw the route.';
   if (source) {
@@ -214,43 +222,100 @@ function CalendarGrid({ date, firstWeekday, marked = '', toggle }: {
   </>;
 }
 
-// The calendar's own editor: step through months and click days to mark them. It runs in ImageFlow's editor
-// dialog and only proposes values; ImageFlow validates and saves them when the user clicks Done.
-function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {
-  const month = String(values.month);
+// The calendar's own editor: step through months and click days to mark them, and title the page. It runs in
+// ImageFlow's editor dialog and only proposes values; ImageFlow validates and saves them when the user clicks Done.
+// The title is a layout parameter rather than one of the grid's, edited here because naming the month belongs to
+// the same task; `scope="spread"` gives it ImageFlow's own text field.
+const calendarParameters = {
+  month: p.date({ label: 'Month', default: '2027-01-01', precision: 'month' }),
+  firstWeekday: p.enum({ label: 'Week starts', default: 'monday', options: ['monday', 'sunday'], labels: { monday: 'Monday', sunday: 'Sunday' } }),
+  marked: p.string({ label: 'Marked days', default: '', maxLength: 200 }),
+};
+const calendarLayoutParameters = { title: p.string({ label: 'Calendar title', default: '', maxLength: 80, placeholder: 'Shown above the calendar' }) };
+type CalendarEditorProps = ElementEditorProps<typeof calendarParameters, 'month' | 'marked', {}, typeof calendarLayoutParameters, 'title'>;
+function CalendarEditor({ values, set, readOnly, Control }: CalendarEditorProps) {
+  const month = values.month;
   const shift = (step: number) => {
     const date = new Date(month + 'T00:00:00Z');
     date.setUTCMonth(date.getUTCMonth() + step, 1);
     set({ month: date.toISOString().slice(0, 10), marked: '' });
   };
   const toggle = (day: number) => {
-    const days = markedDays(String(values.marked));
+    const days = markedDays(values.marked);
     if (!days.delete(day)) days.add(day);
     set({ marked: [...days].sort((a, b) => a - b).join(',') });
   };
   return <div className="calendar-editor">
+    <Control parameter="title" scope="spread" />
     <div className="calendar-editor-nav">
       <button type="button" aria-label="Previous month" disabled={readOnly} onClick={() => shift(-1)}>‹</button>
       <button type="button" aria-label="Next month" disabled={readOnly} onClick={() => shift(1)}>›</button>
       <span>{readOnly ? '' : 'Click days to mark them. Changing the month clears the marks.'}</span>
     </div>
-    <CalendarGrid date={month} firstWeekday={values.firstWeekday === 'sunday' ? 'sunday' : 'monday'} marked={String(values.marked)}
+    <CalendarGrid date={month} firstWeekday={values.firstWeekday} marked={values.marked}
       toggle={readOnly ? undefined : toggle} />
+  </div>;
+}
+
+// The photo grid comes in two sizes, declared as two ordinary layouts of the `grid` family. Their box IDs are fixed:
+// the 2×2 boxes stay in the upper left of the 3×3 grid, so switching sizes keeps those photos where they were and
+// keeps the other five outside the 2×2 layout until the spread switches back.
+const gridSizes = {
+  '2x2': { columns: 2, ids: ['hero', 'second', 'third', 'fourth'] },
+  '3x3': { columns: 3, ids: ['hero', 'second', 'fifth', 'third', 'fourth', 'sixth', 'seventh', 'eighth', 'ninth'] },
+} as const;
+const cellLabels = { 2: ['Upper left', 'Upper right', 'Lower left', 'Lower right'],
+  3: ['Top left', 'Top middle', 'Top right', 'Middle left', 'Centre', 'Middle right', 'Bottom left', 'Bottom middle', 'Bottom right'] };
+const gridBoxes = <const S extends keyof typeof gridSizes>(size: S) => {
+  const { columns, ids } = gridSizes[size];
+  return box.photos(ids, (_id, i) => cellLabels[columns][i]);
+};
+const gridParameters = { heading, gutter: p.integer({ label: 'Gap', default: 6, min: 2, max: 20, unit: 'mm' }) };
+type GridLayout<S extends keyof typeof gridSizes> = { label: string; parameters: typeof gridParameters; boxes: ReturnType<typeof gridBoxes<S>> };
+// One render function per size, typed like the builder types each layout's own context.
+const photoGrid = <const S extends keyof typeof gridSizes>(size: S) => (ctx: RenderContext<GridLayout<S>, typeof documentParameters>) => {
+  const { columns, ids } = gridSizes[size];
+  const at = ctx.geometry.design(canvas);
+  // The gap is drawn on the design page too, so it scales with the format like the cells.
+  const cells = ctx.geometry.grid(at.right(20, 20, page - 40, page - 40),
+    { columns, rows: columns, columnGap: at.width(ctx.params.gutter), rowGap: at.height(ctx.params.gutter) });
+  return <Paper context={ctx}>
+    <ctx.Text parameter="heading" as="h2" rect={at.left(margin, 196, page - 2 * margin, 64)} />
+    {ids.map((id, i) => <ctx.PhotoBox id={id} key={id} rect={cells[i]} />)}
+  </Paper>;
+};
+
+// The grid family's picker: one "Grid size" choice drawn as small grids. It chooses by the variants' tags, so a new
+// size needs only a new layout with its tag.
+function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerProps) {
+  return <div className="variant-picker" role="radiogroup" aria-label="Grid size">
+    {variants.map(({ id, variant }) => {
+      const size = String(variant.size);
+      const columns = Object.hasOwn(gridSizes, size) ? gridSizes[size as keyof typeof gridSizes].columns : 1;
+      return <button key={id} type="button" role="radio" aria-checked={id === current} disabled={readOnly} onClick={() => choose(id)}>
+        <span className="variant-grid" style={{ gridTemplateColumns: 'repeat(' + columns + ', 1fr)' }} aria-hidden="true">
+          {Array.from({ length: columns * columns }, (_, i) => <span key={i} />)}
+        </span>
+        {size.replace('x', ' × ')}
+      </button>;
+    })}
   </div>;
 }
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.4.0',
+  version: '0.6.0',
   contract: 1,
   requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper',
-    'editor-native-controls', 'opening-spreads'],
+    'editor-native-controls', 'layout-families', 'editor-spread-parameters', 'opening-spreads'],
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
     landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
   },
   defaultFormat: 'square',
   parameters: documentParameters,
+  // Layouts that are variants of one design. The sidebar shows the grid once, and its picker chooses the size.
+  layoutFamilies: { grid: { label: 'Photo grid', picker: { label: 'Grid size', component: GridSizePicker } } },
   // `spread` types each layout's context from its own declarations and the document parameters above.
   spreads: ({ spread }) => ({
     title: spread({
@@ -287,12 +352,7 @@ export default defineTemplate({
       boxes: { hero: captioned('Panorama photo') },
       elements: { route: {
         label: 'Route map',
-        parameters: {
-          track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
-          centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01 }),
-          centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01 }),
-          zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1 }),
-        },
+        parameters: routeParameters,
         editor: { label: 'Edit route', parameters: ['track', 'centerX', 'centerY', 'zoom'], component: RouteEditor },
       } },
       render: (ctx) => {
@@ -305,20 +365,16 @@ export default defineTemplate({
         </Paper>;
       },
     }),
+    // `grid` keeps its ID from before the family existed, so saved books open unchanged as the 2×2 variant.
     grid: spread({
-      label: 'Photo grid',
-      parameters: { heading, gutter: p.integer({ label: 'Gap', default: 6, min: 2, max: 20, unit: 'mm' }) },
-      boxes: { hero: box.photo('Upper left'), second: box.photo('Upper right'), third: box.photo('Lower left'), fourth: box.photo('Lower right') },
-      render: (ctx) => {
-        const at = ctx.geometry.design(canvas);
-        // The gap is drawn on the design page too, so it scales with the format like the cells.
-        const cells = ctx.geometry.grid(at.right(20, 20, page - 40, page - 40),
-          { columns: 2, rows: 2, columnGap: at.width(ctx.params.gutter), rowGap: at.height(ctx.params.gutter) });
-        return <Paper context={ctx}>
-          <ctx.Text parameter="heading" as="h2" rect={at.left(margin, 196, page - 2 * margin, 64)} />
-          {(['hero', 'second', 'third', 'fourth'] as const).map((id, i) => <ctx.PhotoBox id={id} key={id} rect={cells[i]} />)}
-        </Paper>;
-      },
+      label: 'Photo grid 2×2', family: 'grid', variant: { size: '2x2' },
+      parameters: gridParameters, boxes: gridBoxes('2x2'),
+      render: photoGrid('2x2'),
+    }),
+    grid9: spread({
+      label: 'Photo grid 3×3', family: 'grid', variant: { size: '3x3' },
+      parameters: gridParameters, boxes: gridBoxes('3x3'),
+      render: photoGrid('3x3'),
     }),
     pair: spread({
       label: 'Two photos',
@@ -356,20 +412,18 @@ export default defineTemplate({
     }),
     calendar: spread({
       label: 'Calendar spread',
+      parameters: calendarLayoutParameters,
       boxes: { hero: box.photo('Calendar photo') },
       elements: { grid: {
         label: 'Calendar grid',
-        parameters: {
-          month: p.date({ label: 'Month', default: '2027-01-01', precision: 'month' }),
-          firstWeekday: p.enum({ label: 'Week starts', default: 'monday', options: ['monday', 'sunday'], labels: { monday: 'Monday', sunday: 'Sunday' } }),
-          marked: p.string({ label: 'Marked days', default: '', maxLength: 200 }),
-        },
-        editor: { label: 'Edit calendar', parameters: ['month', 'marked'], component: CalendarEditor },
+        parameters: calendarParameters,
+        editor: { label: 'Edit calendar', parameters: ['month', 'marked'], spread: ['title'], component: CalendarEditor },
       } },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx} bled={{ left: true }}>
           <ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />
+          {ctx.params.title && <h2 className="calendar-title" style={ctx.geometry.css(at.right(40, 36, 210, 24))}>{ctx.params.title}</h2>}
           <ctx.Element id="grid" className="calendar-grid" rect={at.right(40, 70, 210, 170)}>
             <CalendarGrid date={ctx.elements.grid.params.month} firstWeekday={ctx.elements.grid.params.firstWeekday}
               marked={ctx.elements.grid.params.marked} />

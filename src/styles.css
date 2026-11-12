@@ -219,6 +219,9 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 
 /* Layout picker: the template renders the spread in each layout; buttons sit under a transparent frame. */
 .field-label { font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+.layout-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.layout-heading button.link { all: unset; cursor: default; font-size: 12px; color: var(--accent); white-space: nowrap; }
+.layout-heading button.link:focus-visible { outline: 2px solid var(--accent); }
 .layout-picker { position: relative; margin: 0 -6px; }
 .layout-picker:not(.placed) { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 0 6px; }
 .layout-picker .book-frame { z-index: 1; }
@@ -356,6 +359,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .ee-header h2 { margin: 0; font-size: 15px; }
 .element-editor-frame { display: block; width: 100%; border: 0; background: var(--control-surface); }
 .ee-status { margin: 0; padding: 8px 16px; font-size: 12px; }
+.ee-warnings { color: var(--warning-text); background: var(--warning-surface); }
+.ee-warnings ul { margin: 4px 0 0; padding-left: 18px; }
 .ee-footer { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--edge); }
 .ee-footer .muted { flex: 1; font-size: 11px; }
 .pc-file select { flex: 1; min-width: 0; }

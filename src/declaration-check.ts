@@ -1,10 +1,11 @@
+import { controlCycles, controlsSchema } from './controls';
 import type { Parameters } from './parameters';
 
 // Findings about a template declaration that the schema accepts but that are probably mistakes. They are warnings,
 // not errors, so a contract-1 template that loaded before keeps loading. The authoring types reject the same
 // mistakes at compile time; this covers untyped templates and spreads typed separately with spreadFor().
 export type DeclarationWarning = {
-  code: 'declaration-unknown-property' | 'declaration-document-mismatch';
+  code: 'declaration-unknown-property' | 'declaration-document-mismatch' | 'declaration-control-cycle';
   message: string; path: string; details: Record<string, string>; suggestion: string;
 };
 
@@ -108,6 +109,60 @@ export function declarationWarnings(declared: unknown, schema: Schema): Declarat
   const found: DeclarationWarning[] = [];
   unknownKeys(declared, schema, [], found);
   if (plain(declared)) documentMismatches(declared, found);
+  if (plain(declared)) controlCycleWarnings(declared, found);
   // A misspelling repeated in many layouts is reported for each; cap the list like schema errors.
   return found.slice(0, 50);
+}
+
+// Conditional controls that can hide each other for good (controlCycles), at spread, box and element scope. This runs
+// on the declaration as exported, before schema validation, so a controls list the schema rejects is skipped here
+// and reported by the schema instead. `details.edit` is the scope's edit-path prefix (empty for the layout's own
+// parameters), so the Book check can drop the warning for a layout that marks one of them on the page (render.tsx).
+function controlCycleWarnings(declared: Record<string, unknown>, found: DeclarationWarning[]) {
+  if (!plain(declared.spreads)) return;
+  const check = (scope: unknown, path: string[], layout: string, edit: string) => {
+    if (!plain(scope) || scope.controls === undefined) return;
+    const controls = controlsSchema.safeParse(scope.controls);
+    if (!controls.success) return;
+    for (const cycle of controlCycles(controls.data)) {
+      const names = cycle.join(', ');
+      const where = path.join(' → ') + ': ';
+      found.push({
+        code: 'declaration-control-cycle', path: [...path, 'controls'].join('.'),
+        message: where + (cycle.length === 1
+          ? 'control ' + names + ' is in a group that is shown only depending on ' + names + '. Once hidden, the generated controls cannot show it again.'
+          : 'controls ' + names + ' are each shown only depending on another of them. Once all are hidden, the generated controls cannot show them again.'),
+        details: { controls: names, layout, edit },
+        suggestion: (cycle.length === 1 ? 'Move ' + names + ' out of the group' : 'Make one of ' + names + ' unconditional') +
+          (edit ? '.' : ', or mark ' + (cycle.length === 1 ? 'it' : 'one') + ' as editable on the page with ctx.edit or ctx.Text.'),
+      });
+    }
+  };
+  for (const [id, definition] of Object.entries(declared.spreads)) {
+    if (!plain(definition)) continue;
+    check(definition, ['spreads', id], id, '');
+    for (const group of ['boxes', 'elements'] as const) {
+      const scopes = definition[group];
+      if (plain(scopes)) for (const [key, scope] of Object.entries(scopes)) check(scope, ['spreads', id, group, key], id, group + '.' + key + '.');
+    }
+  }
+}
+
+// Where control-cycle warnings apply in a rendered book. A layout (spread) parameter is reachable on a spread that
+// marks it on the page (ctx.edit, ctx.Text), since a marked node's popover always shows layout parameters; whether a
+// spread marks it can depend on its own values, so this is decided per spread, not per layout. A cycle among layout
+// parameters is therefore reported once for each spread using the layout that marks none of them, located on that
+// spread, and not at all when every such spread marks one. Box and element parameters follow the same `controls` and
+// conditions in a marked node's popover, so marking them opens no way back: those warnings, and warnings about
+// layouts no spread uses, stay as they are.
+export type RenderedSpread = { spread: string; layout: string; marked: ReadonlySet<string> };
+export function placeControlWarnings(warnings: DeclarationWarning[], rendered: RenderedSpread[]): (DeclarationWarning & { spread?: string })[] {
+  return warnings.flatMap((warning) => {
+    const { code, details } = warning;
+    if (code !== 'declaration-control-cycle' || details.edit !== '') return [warning];
+    const instances = rendered.filter(({ layout }) => layout === details.layout);
+    if (!instances.length) return [warning];
+    const keys = details.controls.split(', ');
+    return instances.filter(({ marked }) => !keys.some((key) => marked.has(key))).map(({ spread }) => ({ ...warning, spread }));
+  });
 }

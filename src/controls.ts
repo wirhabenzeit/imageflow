@@ -23,7 +23,8 @@ const controlItem: z.ZodType<ControlItem> = z.lazy(() => z.union([
   z.strictObject({ parameter: identifier, label: text.optional(), description: z.string().max(1000).optional(), when: condition.optional() }),
   z.strictObject({ group: text, description: z.string().max(1000).optional(), controls: z.array(controlItem).min(1), when: condition.optional() }),
 ]));
-export const controlsSchema = z.array(controlItem).min(1).optional();
+// An empty list is allowed: it shows no generated controls while keeping every declaration. A group needs controls.
+export const controlsSchema = z.array(controlItem).optional();
 
 const keyOf = (item: Exclude<ControlItem, { group: string }>) => typeof item === 'string' ? item : item.parameter;
 
@@ -60,6 +61,58 @@ export function controlProblems(parameters: Parameters, controls: ControlItem[] 
   };
   if (controls) walk(controls);
   return problems;
+}
+
+// Controls whose conditions depend on each other, such as A shown only when B is on and B only when A is on, or a
+// control inside a group that is shown only depending on that control. Once all of them are hidden, the generated
+// controls cannot show them again. That is not always a mistake: a marked edit target (`ctx.edit`, `ctx.Text`) or an
+// agent can still set the values, so these are warnings, not problems. A control whose own `when` names itself has
+// no other reading and stays a problem (controlProblems).
+export function controlCycles(controls: ControlItem[] | undefined): string[][] {
+  const depends = new Map<string, Set<string>>();
+  // Controls an enclosing group hides depending on the control itself.
+  const hidden = new Set<string>();
+  const walk = (items: ControlItem[], inherited: Condition[]) => {
+    for (const item of items) {
+      if (typeof item === 'object' && 'group' in item) {
+        walk(item.controls, item.when ? [...inherited, item.when] : inherited);
+        continue;
+      }
+      const key = keyOf(item);
+      const conditions = typeof item === 'object' && item.when ? [...inherited, item.when] : inherited;
+      const keys = depends.get(key) ?? new Set<string>();
+      for (const when of conditions) for (const other of Object.keys(when)) if (other !== key) keys.add(other);
+      if (inherited.some((when) => Object.hasOwn(when, key))) hidden.add(key);
+      depends.set(key, keys);
+    }
+  };
+  if (controls) walk(controls, []);
+  // Strongly connected components of two or more controls (Tarjan), in declaration order.
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const stack: string[] = [];
+  const cycles: string[][] = [];
+  const visit = (key: string) => {
+    index.set(key, index.size);
+    low.set(key, index.get(key)!);
+    stack.push(key);
+    for (const next of depends.get(key) ?? []) {
+      if (!depends.has(next)) continue;
+      if (!index.has(next)) {
+        visit(next);
+        low.set(key, Math.min(low.get(key)!, low.get(next)!));
+      } else if (stack.includes(next)) low.set(key, Math.min(low.get(key)!, index.get(next)!));
+    }
+    if (low.get(key) !== index.get(key)) return;
+    const component: string[] = [];
+    let member: string;
+    do { member = stack.pop()!; component.unshift(member); } while (member !== key);
+    if (component.length > 1 || hidden.has(key)) cycles.push(component);
+  };
+  for (const key of depends.keys()) if (!index.has(key)) visit(key);
+  const order = [...depends.keys()];
+  return cycles.map((cycle) => cycle.sort((a, b) => order.indexOf(a) - order.indexOf(b)))
+    .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
 }
 
 export function matches(when: Condition | undefined, values: Values) {
