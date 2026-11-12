@@ -17,20 +17,49 @@ async function launch() {
   page.setDefaultTimeout(20000);
   await page.emulateMedia({ colorScheme: null });
   await page.locator('.start-window').waitFor();
+  // Record the real presentation path while keeping test Settings windows offscreen.
+  await app.evaluate(({ app }) => {
+    globalThis.settingsSizing = [];
+    app.on('browser-window-created', (_event, owner) => {
+      const resize = owner.setContentSize.bind(owner), show = owner.show.bind(owner), focus = owner.focus.bind(owner);
+      owner.setContentSize = (width, height, animate) => {
+        if (owner.getTitle() === 'Settings') globalThis.settingsSizing.push({ id: owner.id, kind: 'resize', height, animate });
+        resize(width, height, animate);
+      };
+      owner.show = () => {
+        if (owner.getTitle() === 'Settings') globalThis.settingsSizing.push({ id: owner.id, kind: 'show', height: owner.getContentSize()[1] });
+        else show();
+      };
+      owner.focus = () => { if (owner.getTitle() !== 'Settings') focus(); };
+    });
+  });
   return page;
 }
-async function openSettings() {
+async function openSettings(command = 'Settings…') {
   const existing = app.windows().find((page) => page.url() === settingsURL);
   const created = existing ? undefined : app.waitForEvent('window');
-  await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.flatMap((item) => item.submenu?.items ?? []).find((item) => item.label === 'Settings…').click());
+  await app.evaluate(({ Menu }, command) => {
+    delete process.env.IMAGEFLOW_HIDE_WINDOW;
+    Menu.getApplicationMenu().items.flatMap((item) => item.submenu?.items ?? []).find((item) => item.label === command).click();
+  }, command);
   const page = existing ?? await created;
   page.setDefaultTimeout(20000);
   await page.emulateMedia({ colorScheme: null });
   await page.getByRole('main', { name: 'Settings', exact: true }).waitFor();
-  await page.waitForFunction(() => !!document.querySelector('input[name="appearance"]:checked')).catch(async (error) => {
-    console.error(await page.locator('body').innerText(), await page.evaluate(() => window.imageflow.getSettings()));
-    throw error;
-  });
+  if (command === 'Settings…') await page.locator('input[name="appearance"]:checked').waitFor();
+  else await page.getByRole('tab', { name: 'Agents', selected: true }).waitFor();
+  await page.waitForFunction(() => innerHeight === Math.min(760, Math.max(120, Math.ceil(document.querySelector('.settings-window > div').getBoundingClientRect().height))));
+  const height = await page.evaluate(() => innerHeight);
+  const ownerId = await (await app.browserWindow(page)).evaluate((owner) => owner.id);
+  const events = await app.evaluate((_electron, id) => globalThis.settingsSizing.filter((event) => event.id === id), ownerId);
+  const firstShow = events.findIndex((event) => event.kind === 'show');
+  assert.ok(firstShow >= 0, 'Settings is shown after it has painted and been sized');
+  if (!existing) {
+    assert.equal(events[firstShow].height, height, 'The first visible size already fits the selected pane');
+    assert.ok(events.slice(0, firstShow).every((event) => event.animate === false), 'Initial sizing never animates');
+    assert.ok(events.slice(firstShow + 1).every((event) => event.kind !== 'resize'), 'Opening does not resize the visible window');
+  }
+  await app.evaluate(() => { process.env.IMAGEFLOW_HIDE_WINDOW = '1'; });
   return page;
 }
 async function closeWindow(page) {
@@ -58,6 +87,14 @@ try {
     return { title: owner.getTitle(), modal: owner.isModal(), parent: !!owner.getParentWindow(), resizable: owner.isResizable() };
   }, settingsURL);
   assert.deepEqual(native, { title: 'Settings', modal: false, parent: false, resizable: false });
+  const generalHeight = await settings.evaluate(() => innerHeight);
+  await settings.getByRole('tab', { name: 'Agents' }).click();
+  await settings.waitForFunction((height) => innerHeight > height, generalHeight);
+  await closeWindow(settings);
+  settings = await openSettings('Agent Connections…');
+  assert.ok(await settings.evaluate(() => innerHeight) > generalHeight, 'Direct Agents opens at its larger size');
+  await closeWindow(settings);
+  settings = await openSettings();
   assert.equal(await openSettings(), settings, 'Settings reuses its existing window.');
   assert.equal(app.windows().filter((page) => page.url() === settingsURL).length, 1);
   assert.equal(await page.getByRole('dialog', { name: 'Settings', exact: true }).count(), 0);

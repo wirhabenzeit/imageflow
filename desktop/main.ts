@@ -34,6 +34,7 @@ import { templateFolder, textSourcePath } from './document-actions';
 import { configureRenditionCache, pruneRenditions } from './rendition-cache';
 
 let settingsWindow: BrowserWindow | null = null;
+const settingsPresentation = new WeakMap<BrowserWindow, { painted: boolean; sized: boolean }>();
 let startWindow: BrowserWindow | null = null;
 let settingsPane: SettingsPane = 'general';
 let mcpConnection: Awaited<ReturnType<typeof createMcpConnection>> | undefined;
@@ -625,13 +626,18 @@ function followAppearance(owner: BrowserWindow) {
   owner.once('closed', () => nativeTheme.removeListener('updated', updateBackground));
 }
 
+function revealSettings(owner: BrowserWindow) {
+  const state = settingsPresentation.get(owner);
+  if (state?.painted && state.sized && !process.env.IMAGEFLOW_HIDE_WINDOW) { owner.show(); owner.focus(); }
+}
+
 /** Opens Settings, switching to `pane` when given. Without one, an open window keeps its current pane. */
 function showSettings(pane?: SettingsPane) {
   const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
   settingsPane = pane ?? (settingsWindow && !settingsWindow.isDestroyed() ? settingsPane : 'general');
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     if (pane) settingsWindow.webContents.send(channels.settingsPane, pane);
-    if (!hidden) { settingsWindow.show(); settingsWindow.focus(); }
+    revealSettings(settingsWindow);
     return;
   }
   const preferences = new BrowserWindow({
@@ -645,11 +651,13 @@ function showSettings(pane?: SettingsPane) {
     },
   });
   settingsWindow = preferences;
+  const presentation = { painted: false, sized: false };
+  settingsPresentation.set(preferences, presentation);
   followAppearance(preferences);
   preferences.webContents.on('will-frame-navigate', (event) => event.preventDefault());
   preferences.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   preferences.on('page-title-updated', (event) => event.preventDefault());
-  preferences.once('ready-to-show', () => { if (!hidden) preferences.show(); });
+  preferences.once('ready-to-show', () => { presentation.painted = true; revealSettings(preferences); });
   preferences.once('closed', () => { if (settingsWindow === preferences) settingsWindow = null; });
   void preferences.loadURL(settingsURL).catch((error: unknown) => console.error('ImageFlow could not open Settings', error));
 }
@@ -799,8 +807,15 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.fitSettings, (event, height: number) => {
     const owner = settingsOwner(event);
     if (!owner || typeof height !== 'number' || !Number.isFinite(height)) return;
-    const [width] = owner.getContentSize();
-    owner.setContentSize(width, Math.round(Math.min(Math.max(height, 120), 760)), process.platform === 'darwin');
+    const presentation = settingsPresentation.get(owner);
+    if (!presentation) return;
+    const firstFit = !presentation.sized;
+    const [width, currentHeight] = owner.getContentSize();
+    const nextHeight = Math.round(Math.min(Math.max(height, 120), 760));
+    // The first measured size must be applied before showing, without a native resize animation.
+    if (nextHeight !== currentHeight) owner.setContentSize(width, nextHeight, !firstFit && owner.isVisible() && process.platform === 'darwin');
+    presentation.sized = true;
+    if (firstFit) revealSettings(owner);
   });
   ipcMain.handle(channels.mcp, async (event, enabled?: boolean) => {
     if (!appOwner(event)) return { error: 'Request is only available to an app window.' };
