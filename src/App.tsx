@@ -278,11 +278,13 @@ export function App() {
         pendingTasks.current--;
       }
     });
+    return queue.current;
   }
 
   // `notice` may be a function, read after the change ran, for notices that describe what the change found.
   function edit(change: (files: ProjectFiles) => void | false, notice?: string | (() => string), selected?: string, canvasId?: string) {
-    enqueue(async () => {
+    let applied = false;
+    return enqueue(async () => {
       const before = current.current;
       if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current ||
           (canvasId && (before.id !== canvasId || readyId.current !== canvasId))) return;
@@ -290,14 +292,15 @@ export function App() {
       if (change(files) === false) return;
       if (template) files.project.template.version = template.version;
       if (JSON.stringify(files.project) === JSON.stringify(before.project) &&
-          JSON.stringify(files.photoIndex) === JSON.stringify(before.photoIndex)) return;
+          JSON.stringify(files.photoIndex) === JSON.stringify(before.photoIndex)) { applied = true; return; }
       const label = (typeof notice === 'function' ? notice() : notice) ?? 'Project edit';
       const result = await api.saveProject(before.id, files, label);
       if ('error' in result) throw new Error(result.error);
       if (current.current !== before) return;
       adopt(result.value, false, selected);
       setNotice((typeof notice === 'function' ? notice() : notice) ?? 'Saved');
-    });
+      applied = true;
+    }).then(() => applied);
   }
 
   function editCanvas(change: Edit, notice?: string | (() => string)) {
@@ -1336,8 +1339,8 @@ export function App() {
     {summary && template && elementEditor && spreads.some(({ id }) => id === elementEditor.spread) &&
       <ElementEditorDialog host={canvasWrap.current} key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
-        blocked={agentWorking ? 'Agent is updating the book…' : previewError || undefined}
-        edit={edit} close={() => setElementEditor(undefined)} importFile={importProjectFile} />}
+        blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
+        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile} />}
     {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&
       <LayoutPickerDialog key={layoutPicker.spread + ':' + layoutPicker.family} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === layoutPicker.spread)!} family={layoutPicker.family} layout={layoutPicker.layout}

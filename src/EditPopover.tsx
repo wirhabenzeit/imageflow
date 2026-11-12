@@ -176,7 +176,11 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
   });
   return createPortal(<div ref={panel} className="item-controls edit-popover" role="dialog" aria-label={'Edit ' + (title ?? visible.map(({ label }) => label).join(', '))}
     onKeyDown={keys} onPointerDown={(event) => event.stopPropagation()}
-    onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+    onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}
+    onMouseMove={(event) => event.stopPropagation()} onMouseLeave={(event) => event.stopPropagation()}
+    onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
+    onDragLeave={(event) => event.stopPropagation()}
+    onDrop={(event) => { event.preventDefault(); event.stopPropagation(); }}>
     <div className="ep-head">
       <span>{heading}</span>
       <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)" onClick={() => { commit(); close(); }}><Icon name="close" /></button>

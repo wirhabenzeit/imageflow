@@ -40,6 +40,25 @@ try {
   await popover.waitFor();
   const input = popover.getByRole('textbox', { name: 'Heading' });
   assert.equal(await input.evaluate((el) => el === document.activeElement), true);
+  // Portalled controls must not send hover or drop events to the React canvas ancestors.
+  await w.mouse.move(0, 0);
+  const underneath = await frame.locator('[data-spread="title"] [data-edit="subtitle"]').boundingBox();
+  await popover.dispatchEvent('mousemove', { clientX: underneath.x + 5, clientY: underneath.y + 5 });
+  assert.equal(await w.locator('.edit-target:not(.active)').count(), 0, 'Panel movement does not highlight artwork behind it');
+  const beforeDrop = await read();
+  const photoUnderPanel = await frame.locator('[data-spread="arriving"] [data-box="hero"]').boundingBox();
+  const incomingPhoto = await w.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.setData('application/x-imageflow-photo', 'shore');
+    return transfer;
+  });
+  const dropOnPanel = { dataTransfer: incomingPhoto, clientX: photoUnderPanel.x + 5, clientY: photoUnderPanel.y + 5 };
+  await popover.dispatchEvent('dragover', dropOnPanel);
+  assert.equal(await w.locator('.box-highlight').count(), 0, 'A panel is not a canvas drop target');
+  await popover.dispatchEvent('drop', dropOnPanel);
+  await w.waitForTimeout(250);
+  assert.deepEqual(await read(), beforeDrop, 'Dropping on a panel never changes the underlying photo');
+  await incomingPhoto.dispose();
   await input.fill('North of the Arctic');
   await input.press('Meta+Enter');
   await popover.waitFor({ state: 'detached' });
@@ -175,8 +194,8 @@ try {
   await editorDialog.getByRole('button', { name: 'Close', exact: true }).click();
   await editorDialog.getByRole('alert').filter({ hasText: 'has not finished the current field' }).waitFor({ timeout: 8000 });
   assert.equal((await read()).spreads[7].params.title, undefined);
-  await editorDialog.getByRole('button', { name: 'Close', exact: true }).press('Escape');
-  await editorDialog.waitFor({ state: 'detached' });
+  await editorDialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await editorDialog.waitFor({ state: 'detached', timeout: 1500 });
 
   // The host independently rejects malformed or out-of-scope frame reports before writing project data.
   await openCalendarEditor();
@@ -198,6 +217,48 @@ try {
   await waitBook();
   await undoCalendar();
 
+  // One outside click performs its action after flushing, including Undo of the field just typed.
+  await openCalendarEditor();
+  await calendarEditor.getByRole('textbox', { name: 'Calendar title' }).fill('Undo this typing');
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await editorDialog.waitFor({ state: 'detached' });
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  await waitBook();
+  assert.equal((await read()).spreads[7].params.title, undefined);
+  await openCalendarEditor();
+  await w.locator('.spread-thumb[data-spread="title"]').click();
+  await editorDialog.waitFor({ state: 'detached' });
+  assert.equal(await w.locator('.spread-thumb[data-spread="title"]').getAttribute('aria-current'), 'page');
+  await openCalendarEditor();
+  await w.getByRole('tab', { name: /^Texts/ }).click();
+  await editorDialog.waitFor({ state: 'detached' });
+  assert.equal(await w.getByRole('tab', { name: /^Texts/ }).getAttribute('aria-selected'), 'true');
+  await w.getByRole('tab', { name: /^Photos/ }).click();
+
+  // A rejected save is acknowledged to the editor, which visibly stops and can be reopened on saved values.
+  await openCalendarEditor();
+  await app.evaluate(({ ipcMain }) => {
+    const original = ipcMain._invokeHandlers.get('project:save');
+    if (!original) throw new Error('Missing project save handler');
+    ipcMain.removeHandler('project:save');
+    ipcMain.handle('project:save', () => {
+      ipcMain.removeHandler('project:save');
+      ipcMain.handle('project:save', original);
+      return { error: 'Simulated save failure' };
+    });
+  });
+  await editorDialog.getByRole('radio', { name: 'Sunday' }).click();
+  await editorDialog.getByRole('alert').filter({ hasText: 'The last change could not be saved' }).waitFor();
+  assert.equal(await editorDialog.getByRole('radio', { name: 'Sunday' }).isDisabled(), true);
+  assert.equal((await read()).spreads[7].elements.grid.params.firstWeekday, undefined);
+  await closeEditor();
+  await openCalendarEditor();
+  await editorDialog.getByRole('radio', { name: 'Sunday' }).click();
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
+  await waitCalendar((s) => s.elements.grid.params.firstWeekday === 'sunday' && s.elements.grid.params.marked === '14');
+  await closeEditor();
+  await undoCalendar(2);
+
   const menu = (label) => menuAction(app, label);
   const rerendered = async (change) => {
     const old = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
@@ -208,6 +269,34 @@ try {
     }, old, { timeout: 30000 });
     await waitBook();
   };
+  // A watcher reload pauses the editor until the unrelated template change finishes, then editing resumes.
+  const reloadTemplate = join(project, 'template', 'index.tsx');
+  const beforeReload = await readFile(reloadTemplate, 'utf8');
+  assert.ok(beforeReload.includes("'Paper tone'"));
+  await openCalendarEditor();
+  const reloadPreview = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  // Hold the real watcher notification path open long enough to attempt an edit during rebuilding.
+  await owner.evaluate((window) => window.webContents.send('project:changed', { building: true }));
+  await editorDialog.getByRole('status').filter({ hasText: 'Editing is paused while the book reloads' }).waitFor();
+  assert.equal(await editorDialog.getByRole('radio', { name: 'Sunday' }).isDisabled(), true);
+  assert.equal(await w.locator('.element-editor-frame').evaluate((frame) => frame.inert), true);
+  await editorDialog.getByRole('radio', { name: 'Sunday' }).evaluate((button) => button.click());
+  assert.equal((await read()).spreads[7].elements.grid.params.firstWeekday, undefined);
+  await writeFile(reloadTemplate, beforeReload.replace("'Paper tone'", "'Paper tone (reload test)'"));
+  await w.waitForFunction((url) => {
+    const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return frame && frame.getAttribute('src') !== url;
+  }, reloadPreview, { timeout: 30000 });
+  await waitBook();
+  assert.equal(await editorDialog.getByRole('radio', { name: 'Sunday' }).isDisabled(), false);
+  await editorDialog.getByRole('radio', { name: 'Sunday' }).click();
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
+  await waitCalendar((s) => s.elements.grid.params.firstWeekday === 'sunday' && s.elements.grid.params.marked === '14');
+  assert.equal(await editorDialog.getByRole('alert').count(), 0);
+  await closeEditor();
+  await undoCalendar(2);
+  await rerendered(() => writeFile(reloadTemplate, beforeReload));
+
   const beforeExternal = await readFile(join(project, 'project.json'), 'utf8');
   await openCalendarEditor();
   const external = JSON.parse(beforeExternal);

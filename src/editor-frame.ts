@@ -31,12 +31,14 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
   // focus, which clicking Done out here does not cause. The request being waited for, if any.
   const [flushing, setFlushing] = useState<number>();
   const flushes = useRef(0);
+  const [flushTimedOut, setFlushTimedOut] = useState(false);
 
   useEffect(() => {
     if (flushing === undefined) return;
     const timeout = setTimeout(() => {
       setFlushing(undefined);
       setError(flushError);
+      setFlushTimedOut(true);
     }, 5000);
     return () => clearTimeout(timeout);
   }, [flushing, flushError]);
@@ -84,10 +86,11 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
     if (!ready || !target) return false;
     const request = ++flushes.current;
     setFlushing(request);
+    setFlushTimedOut(false);
     setError('');
     target.postMessage({ type: 'editor-flush', request }, renderOrigin);
     return true;
   }
 
-  return { height, ready, error, setError, failed, flushing, flush };
+  return { height, ready, error, setError, failed, flushing, flushTimedOut, flush };
 }
