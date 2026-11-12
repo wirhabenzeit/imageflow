@@ -51,7 +51,17 @@ async function openSettings(command = 'Settings…') {
   await page.waitForFunction(() => innerHeight === Math.min(760, Math.max(120, Math.ceil(document.querySelector('.settings-window > div').getBoundingClientRect().height))));
   const height = await page.evaluate(() => innerHeight);
   const ownerId = await (await app.browserWindow(page)).evaluate((owner) => owner.id);
-  const events = await app.evaluate((_electron, id) => globalThis.settingsSizing.filter((event) => event.id === id), ownerId);
+  // A sized DOM can be ready before Electron's ready-to-show event arrives on a slower runner.
+  const events = await app.evaluate((_electron, id) => new Promise((resolve, reject) => {
+    const deadline = Date.now() + 20000;
+    const poll = () => {
+      const events = globalThis.settingsSizing.filter((event) => event.id === id);
+      if (events.some((event) => event.kind === 'show')) return resolve(events);
+      if (Date.now() >= deadline) return reject(new Error('Settings was not shown after painting and sizing'));
+      setTimeout(poll, 20);
+    };
+    poll();
+  }), ownerId);
   const firstShow = events.findIndex((event) => event.kind === 'show');
   assert.ok(firstShow >= 0, 'Settings is shown after it has painted and been sized');
   if (!existing) {
