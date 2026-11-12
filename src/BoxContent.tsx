@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { Icon } from './Icon';
 import { ActionMenu } from './ActionMenu';
 import { Field } from './Fields';
 import { sourcePath } from './source-locations';
@@ -117,7 +118,7 @@ function CropPhotoActions({ summary, assigned, label, choose, remove, fields }: 
     return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', keys, true); };
   }, [open]);
   return <div ref={root} className="crop-actions">
-    <ActionMenu className="crop-more" label={<><span aria-hidden="true">⋯</span><span className="visually-hidden">More photo actions</span></>}>
+    <ActionMenu className="crop-more" label={<><Icon name="cog" size={16} /><span className="visually-hidden">More photo actions</span></>}>
       <button type="button" onClick={() => setOpen('photos')}>Replace photo…</button>
       <button type="button" disabled={!assigned} onClick={remove}>Remove photo</button>
       {fields && <button type="button" onClick={() => setOpen('values')}>Crop values…</button>}

@@ -39,7 +39,7 @@ export const spreadCommands = ['add-spread', 'duplicate-spread', 'move-spread-up
 export type SpreadCommand = typeof spreadCommands[number];
 export type BookMenuState = { enabled: Record<SpreadCommand, boolean>; editing: boolean; writable: boolean; busy: boolean;
   formats: Record<string, string>; format?: string };
-export type Command = SpreadCommand | 'book-settings' | 'book-check' | `book-format:${string}` | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | LayoutCommand | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo';
+export type Command = SpreadCommand | 'book-settings' | 'book-check' | `book-format:${string}` | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState;
@@ -88,7 +88,7 @@ export type DesktopApi = {
   fitSettings(height: number): Promise<void>;
   // The window's panel and canvas layout state, so the View menu can show it.
   setBookMenuState(state: BookMenuState): Promise<void>;
-  setPanelVisibility(state: { sidebar: boolean; inspector: boolean; sources?: boolean; layout?: CanvasLayout }): Promise<void>;
+  setPanelVisibility(state: { sidebar: boolean; inspector: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout }): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;
   saveProject(id: string, files: ProjectFiles, label?: string): Promise<Result<ProjectSummary>>;
   history(id: string, direction: 'undo' | 'redo'): Promise<Result<ProjectSummary>>;

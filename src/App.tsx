@@ -163,8 +163,8 @@ export function App() {
   const [layout, setLayout] = useCanvasLayout(summary?.folder);
   const columns = layout.mode === 'grid' ? layout.columns : 0;
   useEffect(() => {
-    void api?.setPanelVisibility({ sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, layout });
-  }, [api, panels.leftHidden, panels.rightHidden, panels.bottomHidden, layout]);
+    void api?.setPanelVisibility({ sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout });
+  }, [api, panels.leftHidden, panels.rightHidden, panels.bottomHidden, showGuides, layout]);
   const spreads = summary?.project.spreads ?? [];
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
@@ -389,6 +389,7 @@ export function App() {
       togglePanel(command === 'toggle-project' ? 'left' : command === 'toggle-inspector' ? 'right' : 'bottom');
       return;
     }
+    if (command === 'toggle-guides') { setShowGuides((value) => !value); return; }
     if (command === 'layout-vertical' || command === 'layout-grid') {
       changeLayout({ ...layout, mode: command === 'layout-grid' ? 'grid' : 'vertical' });
       return;
@@ -1301,15 +1302,6 @@ export function App() {
             {!summary && <p className="book-loading" role="status">{error || 'Opening book…'}</p>}
           </main>
           {summary && previewNotice && <div className={geometry ? 'preview-state' : 'preview-message'} role="status">{previewNotice}</div>}
-          {summary && <div className="canvas-controls">
-            <select className="layout-toggle" aria-label="Canvas layout" title="Canvas layout" value={columns ? 'grid-columns-' + columns : 'layout-vertical'}
-              onChange={(event) => act(event.target.value as Command)}>
-              <option value="layout-vertical">Vertical</option>
-              {gridColumns.map((count) => <option key={count} value={'grid-columns-' + count}>Grid · {count} {count === 1 ? 'column' : 'columns'}</option>)}
-            </select>
-            <label className="guides-toggle"><input type="checkbox" checked={showGuides}
-              onChange={(event) => setShowGuides(event.target.checked)} /> Guides</label>
-          </div>}
         </div>
         {summary && (!panels.bottomHidden ? <PanelDivider side="bottom" size={panels.bottom} maximum={bottomMaximum} resize={resizePanel} onResizing={setResizing} /> : <div />)}
         <div className="sources-host" inert={panels.bottomHidden} aria-hidden={panels.bottomHidden}>

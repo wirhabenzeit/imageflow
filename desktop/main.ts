@@ -469,6 +469,8 @@ function installMenu(formats: Record<string, string>) {
       { ...menuCommand('Grid', undefined, 'layout-grid'), type: 'radio' },
       { label: 'Grid Columns', id: 'grid-columns', submenu: gridColumns.map((columns) =>
         ({ ...menuCommand(columns === 1 ? '1 Column' : columns + ' Columns', undefined, `grid-columns-${columns}`), type: 'radio' as const })) },
+      { type: 'separator' },
+      { ...menuCommand('Show Guides', undefined, 'toggle-guides', 'guides'), type: 'checkbox' },
     ] },
     { role: 'windowMenu' },
   ]));
@@ -482,7 +484,7 @@ function updateMenus() {
   if (Menu.getApplicationMenu()?.getMenuItemById('book-format') &&
       JSON.stringify(Object.entries(state?.formats ?? {})) !== formatMenuKey) installMenu(state?.formats ?? {});
   const menu = Menu.getApplicationMenu();
-  for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector', 'sources',
+  for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector', 'sources', 'guides',
     'layout-vertical', 'layout-grid', 'grid-columns', ...gridColumns.map((columns) => 'grid-columns-' + columns), 'reveal-book', 'open-template', 'book-settings', 'book-check', 'book-format', ...spreadCommands]) {
     const item = menu?.getMenuItemById(id);
     if (item) item.enabled = !!document && !document.closing;
@@ -508,6 +510,8 @@ function updateMenus() {
       if (item.id === `book-format:${state?.format}`) item.checked = true;
     }
   }
+  const guides = menu?.getMenuItemById('guides');
+  if (guides) guides.checked = document?.guides ?? false;
   const sidebar = menu?.getMenuItemById('sidebar');
   const inspector = menu?.getMenuItemById('inspector');
   if (sidebar) sidebar.label = document?.sidebar ? 'Hide Sidebar' : 'Show Sidebar';
@@ -832,12 +836,13 @@ void app.whenReady().then(async () => {
       formats: Object.fromEntries(Object.entries(state.formats).filter(([, label]) => typeof label === 'string')) };
     updateMenus();
   });
-  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean; sources?: boolean; layout?: CanvasLayout }) => {
+  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout }) => {
     const document = editorOwner(event);
     if (!document || typeof state?.sidebar !== 'boolean' || typeof state?.inspector !== 'boolean') return;
     document.sidebar = state.sidebar;
     document.inspector = state.inspector;
     if (typeof state.sources === 'boolean') document.sources = state.sources;
+    if (typeof state.guides === 'boolean') document.guides = state.guides;
     const layout = state.layout;
     if (layout && (layout.mode === 'vertical' || layout.mode === 'grid') && gridColumns.some((columns) => columns === layout.columns)) {
       document.layout = { mode: layout.mode, columns: layout.columns };

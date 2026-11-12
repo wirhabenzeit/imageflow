@@ -141,7 +141,6 @@ body { margin: 0; }
 .gutter-guide { border-left: 1px solid #e35563; }
 .safe-guide { border: 1px dashed #1d987d; }
 .box-highlight { border: 2px solid #e7b347; background: #efc97633; }
-.guides-toggle { position: absolute; bottom: 10px; right: 18px; z-index: 2; border-radius: 4px; background: var(--control-surface); padding: 2px 6px; font-size: 12px; box-shadow: 0 1px 3px #0002; }
 .preview-message { position: absolute; top: 45%; left: 50%; transform: translateX(-50%); padding: 10px 14px; border-radius: 6px; background: var(--panel-surface); }
 .preview-state { position: absolute; top: 10px; right: 18px; z-index: 2; pointer-events: none;
   padding: 4px 8px; border-radius: 4px; background: var(--control-surface); box-shadow: 0 1px 3px #0002; font-size: 12px; }
@@ -491,7 +490,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .studio .ee-footer button { min-width: 68px; }
 .source-item, .kept-thumb, .studio :is(.si-preview, .box-photo-thumb) { border-color: var(--control-border); }
 .source-title { font-weight: 500; }
-.guides-toggle, .preview-state { background: var(--popup-surface); border: 1px solid var(--subtle-border); }
+.preview-state { background: var(--popup-surface); border: 1px solid var(--subtle-border); }
 @media (prefers-reduced-motion: reduce) {
   .inspector details > summary::before { transition: none; }
   .quicklook[open], .edit-popover, .inspector details.flash { animation: none; }
@@ -582,7 +581,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .canvas-wrap { container-type: size; }
 .crop-toolbar { width: max-content; max-width: calc(100% - 24px); flex-wrap: wrap; justify-content: center; }
 .crop-actions { font-size: 12px; }
-.crop-more > summary { list-style: none; cursor: default; padding: 0 8px; font-size: 20px; line-height: 26px; border-radius: 4px; }
+.crop-more > summary { list-style: none; cursor: default; display: flex; align-items: center; justify-content: center; padding: 0 6px; min-width: 28px; min-height: 28px; border-radius: 4px; }
 .crop-more > summary::-webkit-details-marker { display: none; }
 .crop-more > summary:hover { background: var(--subtle-hover); }
 .crop-more .action-menu-choices, .crop-action-panel { position: absolute; right: 8px; bottom: calc(100% + 8px); width: 280px; max-width: calc(100cqw - 32px);
@@ -662,11 +661,6 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .source-photo:has(.source-storage) { grid-template-rows: minmax(0, 1fr) 22px 15px; }
 .source-photo .source-storage { padding: 0 6px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .source-text:has(.source-storage) { grid-template-rows: auto minmax(0, 1fr) auto auto; }
-
-/* Canvas layout: Vertical stacks spreads in one column; Grid fills each row left to right and scrolls vertically. */
-.canvas-controls { position: absolute; bottom: 10px; right: 18px; z-index: 2; display: flex; align-items: center; gap: 6px; }
-.canvas-controls .guides-toggle { position: static; }
-.layout-toggle { font-size: 12px; border-radius: 4px; padding: 1px 4px; background: var(--popup-surface); border: 1px solid var(--subtle-border); box-shadow: 0 1px 3px #0002; color: inherit; }
 
 /* The Sources panel grows upward; its fixed-size tiles wrap into additional rows. */
 .sources-host { min-width: 0; min-height: 0; }

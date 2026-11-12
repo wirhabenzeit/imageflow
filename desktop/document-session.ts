@@ -74,6 +74,7 @@ export class DocumentSession {
   sidebar = true;
   inspector = true;
   sources = true;
+  guides = false;
   menuState?: BookMenuState;
   layout: CanvasLayout = { mode: 'vertical', columns: 2 };
 

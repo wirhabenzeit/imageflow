@@ -61,8 +61,7 @@ try {
   }, null, { polling: 100 });
   const gridColumns = async (columns) => {
     await frame.locator('.if-book.if-grid').waitFor();
-    await w.waitForFunction((columns) => document.querySelector('.canvas.canvas-grid') &&
-      document.querySelector('.layout-toggle')?.value === 'grid-columns-' + columns, columns);
+    await w.locator('.canvas.canvas-grid').waitFor();
     await frame.locator('.if-book').evaluate((node, columns) => new Promise((resolve) => {
       const check = () => node.style.getPropertyValue('--if-columns') === String(columns) ? resolve() : requestAnimationFrame(check);
       check();
@@ -78,7 +77,13 @@ try {
   };
 
   // Vertical by default.
-  assert.equal(await w.locator('.layout-toggle').inputValue(), 'layout-vertical');
+  assert.equal(await w.locator('.canvas-controls, .layout-toggle, .guides-toggle').count(), 0);
+  assert.equal(await w.locator('.guides').count(), 0);
+  await menuAction(app, 'Show Guides');
+  await w.locator('.guides').first().waitFor();
+  assert.equal(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('guides').checked), true);
+  await menuAction(app, 'Show Guides');
+  await w.locator('.guides').first().waitFor({ state: 'detached' });
   assert.deepEqual(await checked(), { 'layout-vertical': true, 'layout-grid': false, 'grid-columns-1': false, 'grid-columns-2': true, 'grid-columns-3': false, 'grid-columns-4': false });
   assert.equal(await frame.locator('.if-book.if-grid').count(), 0);
 
@@ -100,8 +105,8 @@ try {
   const sheet = await frame.locator('.if-spread-container').first().boundingBox();
   assert.ok(Math.abs(selection.x - sheet.x) < 2 && Math.abs(selection.width - sheet.width) < 2);
 
-  // Three columns from the canvas control, then from the menu's columns submenu.
-  await w.locator('.layout-toggle').selectOption('grid-columns-3');
+  // Change the column count through the View menu's columns submenu.
+  await chooseColumns(w, 3);
   await gridColumns(3);
   rects = await sheets();
   assert.ok(Math.abs(rects[0].y - rects[2].y) < 1 && rects[3].y > rects[0].y, 'Three spreads per row');
