@@ -61,7 +61,7 @@ try {
   await start.getByRole('button', { name: 'New Book…', exact: true }).click();
   const picker = await pickerPromise;
   watch(picker);
-  await picker.getByRole('heading', { name: 'Choose a starter' }).waitFor();
+  await picker.getByRole('heading', { name: 'Choose a template' }).waitFor();
   await picker.screenshot({ path: join(root, '.build/documents-starter.png') });
   // macOS may finish dismissing a modal sheet after its BrowserWindow has closed. Keep that native handoff
   // pending so the mocked save dialog cannot conceal an attempt to open it too early.
@@ -90,7 +90,7 @@ try {
     const cancelled = one.evaluate(() => window.imageflow.openProject('new'));
     const modal = await nextPicker;
     watch(modal);
-    await modal.getByRole('heading', { name: 'Choose a starter' }).waitFor();
+    await modal.getByRole('heading', { name: 'Choose a template' }).waitFor();
     if (cancelWithButton) await modal.getByRole('button', { name: 'Cancel', exact: true }).click(); else await modal.close();
     assert.deepEqual(await cancelled, { value: null });
     assert.equal(await app.evaluate(() => globalThis.newBookSaveCalls), 1, 'Cancelling a template never opens Save');

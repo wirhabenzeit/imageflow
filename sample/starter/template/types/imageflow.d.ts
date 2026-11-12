@@ -364,6 +364,8 @@ export const capabilities: readonly Capability[];
 export type TemplateDeclaration = {
   id: string;
   version: string;
+  label?: string;
+  description?: string;
   contract: 1;
   requires?: readonly Capability[];
   format?: PrintFormat;
@@ -402,9 +404,14 @@ export type SpreadBuilder<D extends Parameters> = <
 export type TemplateTools<D extends Parameters> = { spread: SpreadBuilder<D> };
 
 type TemplateBase<D extends Parameters> = {
-  /** Stable template ID; `project.json` refers to it. */
+  /** Stable template ID; `project.json` refers to it, and the template library keeps one entry per ID. */
   id: string;
+  /** Compared as dot-separated numbers, such as `1.2.0`, when a template is imported into the library. */
   version: string;
+  /** The template's name in the template library and the New Book picker, up to 80 characters. Defaults to the ID. */
+  label?: string;
+  /** One or two sentences for the template library, up to 300 characters. */
+  description?: string;
   contract: 1;
   /**
    * Features this template needs, such as `['anchors', 'geometry']`. An app without one of them reports which,
