@@ -6,7 +6,8 @@ import type { PrintFormat, ResolvedFormat, Span } from './format';
 import { identifier, values } from './project';
 import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
 import { getCrop, placementIn } from './spread';
-import { declarationConflicts } from './layouts';
+import { declarationConflicts, familyProblems } from './layouts';
+import type { VariantTags } from './layouts';
 import { isParameterValue, p, parametersSchema, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import type { BoxDefinition, SpreadDefinition, TemplateInfo } from './desktop';
@@ -125,18 +126,41 @@ export type FlowPosition = { part: number; parts: number; title?: string };
 // An element may supply its own editor for some of its parameters. The component runs in a sandboxed frame
 // and edits a draft; ImageFlow owns the dialog, validation, saving and Undo.
 export type ElementEditorProps = {
-  values: Values; set: (changes: Values) => void; document: Values; format: ResolvedFormat;
+  values: Values; set: (changes: Values) => void;
+  // The layout's (spread) parameters: all of them to read, and `setSpread` for the ones the editor declares.
+  spread: Values; setSpread: (changes: Values) => void;
+  document: Values; format: ResolvedFormat;
   readOnly: boolean; commit: () => void; cancel: () => void;
   // The app's own control for one of the editor's parameters, bound to the draft, and the file import it uses.
-  Control: (props: { parameter: string; label?: string }) => ReactNode;
+  // `scope: 'spread'` names one of the layout parameters the editor declares instead of an element parameter.
+  Control: (props: { parameter: string; label?: string; scope?: 'element' | 'spread' }) => ReactNode;
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };
+// A layout family's picker chooses one of the family's variants. It runs in a sandboxed frame like an element
+// editor; its draft is a layout ID, and ImageFlow applies it on Done as an ordinary layout switch.
+export type LayoutVariant = { id: string; label: string; variant: VariantTags };
+export type LayoutPickerProps = {
+  variants: LayoutVariant[]; current: string; saved: string; choose: (id: string) => void;
+  find: (tags: VariantTags) => string | undefined;
+  document: Values; format: ResolvedFormat; readOnly: boolean; commit: () => void; cancel: () => void;
+};
+const layoutFamily = z.object({
+  label: z.string().min(1),
+  picker: z.object({
+    label: z.string().min(1).optional(),
+    component: z.custom<(props: LayoutPickerProps) => ReactNode>((value) => typeof value === 'function', 'Expected a picker component.'),
+  }).optional(),
+});
 const elementEditor = z.object({
   label: z.string().min(1).optional(),
-  parameters: z.array(identifier).min(1),
+  // The element's own parameters the editor edits, and the layout's (spread) parameters it edits with them. The
+  // editor is still the element's: its scope stays this spread, and document settings are read-only to it.
+  parameters: z.array(identifier),
+  spread: z.array(identifier).optional(),
   component: z.custom<(props: ElementEditorProps) => ReactNode>((value) => typeof value === 'function', 'Expected an editor component.'),
   presentation: z.literal('dialog').default('dialog'),
-});
+}).refine(({ parameters, spread }) => parameters.length + (spread?.length ?? 0) > 0,
+  'An element editor needs at least one parameter to edit, of the element or of the layout (spread).');
 // `controls` arranges a scope's generated controls; see src/controls.ts. Problems are reported at the scope.
 const checkControls = (context: z.RefinementCtx, parameters: Parameters, controls: ControlItem[] | undefined, owned?: readonly string[]) => {
   for (const message of controlProblems(parameters, controls, owned)) context.addIssue({ code: 'custom', message, path: ['controls'] });
@@ -160,7 +184,25 @@ const definition = z.object({
   controls: controlsSchema,
   render: z.custom<(context: RenderContext) => ReactNode>((value) => typeof value === 'function', 'Expected a render function.'),
   anchors: z.custom<(context: AnchorContext) => unknown>((value) => typeof value === 'function', 'Expected an anchors function.').optional(),
-}).superRefine(({ parameters, controls }, context) => checkControls(context, parameters, controls)).refine(({ boxes }) => {
+  // The layout family this layout is a variant of, and free-form tags a family's picker reads to tell variants apart.
+  family: identifier.optional(),
+  variant: z.record(identifier, z.union([z.string().max(200), z.number(), z.boolean()])).optional(),
+}).superRefine(({ parameters, controls, elements }, context) => {
+  // Layout parameters an element editor edits: declared here, edited by one editor only, and without a generated
+  // control of their own, like the element parameters an editor owns.
+  const owners = new Map<string, string>();
+  for (const [id, { editor }] of Object.entries(elements)) {
+    for (const key of editor?.spread ?? []) {
+      const path = ['elements', id, 'editor', 'spread'];
+      if (!Object.hasOwn(parameters, key)) {
+        context.addIssue({ code: 'custom', path, message: 'Element ' + id + "'s editor edits layout parameter " + key + ', which this layout does not declare.' });
+      } else if (owners.has(key)) {
+        context.addIssue({ code: 'custom', path, message: 'Layout parameter ' + key + ' is edited by the editors of both ' + owners.get(key) + ' and ' + id + '. Give it to one editor.' });
+      } else owners.set(key, id);
+    }
+  }
+  checkControls(context, parameters, controls, [...owners.keys()]);
+}).refine(({ boxes }) => {
   const order = Object.values(boxes).filter(({ type }) => type === 'markdown').map(({ flowOrder }) => flowOrder);
   return order.length < 2 || (!order.includes(undefined) && new Set(order).size === order.length);
 }, 'Markdown boxes need unique flowOrder values.');
@@ -189,12 +231,16 @@ export const templateSchema = z.object({
   formats: z.record(identifier, formatSchema).optional(),
   defaultFormat: identifier.optional(),
   parameters: parametersSchema,
+  // Layouts that are variants of one design, by family ID. Each variant names its family with `family`.
+  layoutFamilies: z.record(identifier, layoutFamily).optional(),
   spreads: z.record(identifier, definition).refine((spreads) => Object.keys(spreads).length > 0, 'Declare a spread.')
     // An ID means the same box or parameter in every layout, so switching layouts can carry its content.
     .superRefine((spreads, context) => {
       for (const message of declarationConflicts(spreads)) context.addIssue({ code: 'custom', message });
     }),
   openingSpreads: z.array(openingSpread).optional(),
+}).superRefine(({ spreads, layoutFamilies }, context) => {
+  for (const { path, message } of familyProblems(spreads, layoutFamilies)) context.addIssue({ code: 'custom', message, path });
 }).superRefine((template, context) => {
   for (const issue of openingSpreadProblems(template)) context.addIssue({ code: 'custom', ...issue });
 }).refine(({ format, formats }) => !format !== !formats, 'Declare either format or formats.')
@@ -267,6 +313,7 @@ const spreadBuilder = <T,>(definition: T) => definition;
 export type TemplateDeclaration = {
   id: string; version: string; label?: string; description?: string; contract: 1; requires?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
+  layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
   openingSpreads?: { layout: string; params?: Values }[];
 };
@@ -285,11 +332,15 @@ export function templateInfo(template: Template): TemplateInfo {
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
     parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
+    layoutFamilies: Object.fromEntries(Object.entries(template.layoutFamilies ?? {}).map(([id, { label, picker }]) => [id, {
+      label, ...(picker ? { picker: { ...(picker.label ? { label: picker.label } : {}) } } : {}),
+    }])),
     // Functions (render, editor components) stay in the render frame; the editor gets plain declarations.
     spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, anchors: _anchors, elements, ...info }]) => [id, {
       ...info,
       elements: Object.fromEntries(Object.entries(elements).map(([key, { editor, ...element }]) => [key, {
-        ...element, ...(editor ? { editor: { label: editor.label, parameters: editor.parameters, presentation: editor.presentation } } : {}),
+        ...element, ...(editor ? { editor: { label: editor.label, parameters: editor.parameters,
+          ...(editor.spread?.length ? { spread: editor.spread } : {}), presentation: editor.presentation } } : {}),
       }])),
     }])),
   };
