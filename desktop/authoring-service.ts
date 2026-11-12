@@ -270,7 +270,7 @@ export function createAuthoringService(hooks: Hooks) {
       // Each format renders the layouts that fit it (planFixtures reports the rest as skipped).
       const fitting = plan.cells.filter((cell) => fixtureFits(template, cell.layout, format));
       const planned = plan.preview?.printFormat === format ? plan.preview : undefined;
-      const preview = planned && { ...planned, cells: planned.cells.filter((cell) => fitting.includes(cell)) };
+      const preview = planned && { ...planned, cells: planned.cells.filter((cell) => fitting.some(({ spread }) => spread === cell.spread)) };
       const previewRequest = (cells: FixtureCell[]): PreviewRequest | undefined => preview && cells.length ? {
         target: { spreads: cells.map(({ spread }) => spread), columns: preview.columns },
         bounds: preview.bounds, maxEdge: preview.maxEdge, format: preview.format, guides: preview.guides, labels: preview.labels } : undefined;
