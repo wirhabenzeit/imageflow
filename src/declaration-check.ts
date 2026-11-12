@@ -1,5 +1,4 @@
-import { controlCycles } from './controls';
-import type { ControlItem } from './controls';
+import { controlCycles, controlsSchema } from './controls';
 import type { Parameters } from './parameters';
 
 // Findings about a template declaration that the schema accepts but that are probably mistakes. They are warnings,
@@ -115,28 +114,44 @@ export function declarationWarnings(declared: unknown, schema: Schema): Declarat
   return found.slice(0, 50);
 }
 
-// Conditional controls that can hide each other for good (controlCycles), at spread, box and element scope.
+// Conditional controls that can hide each other for good (controlCycles), at spread, box and element scope. This runs
+// on the declaration as exported, before schema validation, so a controls list the schema rejects is skipped here
+// and reported by the schema instead. `details.edit` is the scope's edit-path prefix, so the Book check can drop
+// the warning for a layout that marks one of these parameters as editable on the page (render.tsx).
 function controlCycleWarnings(declared: Record<string, unknown>, found: DeclarationWarning[]) {
   if (!plain(declared.spreads)) return;
-  const check = (scope: unknown, path: string[]) => {
-    if (!plain(scope) || !Array.isArray(scope.controls)) return;
-    for (const cycle of controlCycles(scope.controls as ControlItem[])) {
+  const check = (scope: unknown, path: string[], layout: string, edit: string) => {
+    if (!plain(scope) || scope.controls === undefined) return;
+    const controls = controlsSchema.safeParse(scope.controls);
+    if (!controls.success) return;
+    for (const cycle of controlCycles(controls.data)) {
       const names = cycle.join(', ');
+      const where = path.join(' → ') + ': ';
       found.push({
         code: 'declaration-control-cycle', path: [...path, 'controls'].join('.'),
-        message: path.join(' → ') + ': controls ' + names + ' are each shown only depending on another of them. ' +
-          'Once all are hidden, the generated controls cannot show them again.',
-        details: { controls: names },
-        suggestion: 'Make one of ' + names + ' unconditional, or make sure something else edits it, such as a marked edit target or a custom editor.',
+        message: where + (cycle.length === 1
+          ? 'control ' + names + ' is in a group that is shown only depending on ' + names + '. Once hidden, the generated controls cannot show it again.'
+          : 'controls ' + names + ' are each shown only depending on another of them. Once all are hidden, the generated controls cannot show them again.'),
+        details: { controls: names, layout, edit },
+        suggestion: cycle.length === 1
+          ? 'Move ' + names + ' out of the group, or mark it as editable on the page with ctx.edit or ctx.Text.'
+          : 'Make one of ' + names + ' unconditional, or mark one as editable on the page with ctx.edit or ctx.Text.',
       });
     }
   };
   for (const [id, definition] of Object.entries(declared.spreads)) {
     if (!plain(definition)) continue;
-    check(definition, ['spreads', id]);
+    check(definition, ['spreads', id], id, '');
     for (const group of ['boxes', 'elements'] as const) {
       const scopes = definition[group];
-      if (plain(scopes)) for (const [key, scope] of Object.entries(scopes)) check(scope, ['spreads', id, group, key]);
+      if (plain(scopes)) for (const [key, scope] of Object.entries(scopes)) check(scope, ['spreads', id, group, key], id, group + '.' + key + '.');
     }
   }
+}
+
+// Drops control-cycle warnings for layouts that mark one of the controls' parameters as editable on the page, which
+// is a way to show them again. `marked` holds `layout|edit path` for every marked node the Book check rendered.
+export function withoutReachableControls(warnings: DeclarationWarning[], marked: ReadonlySet<string>) {
+  return warnings.filter(({ code, details }) => code !== 'declaration-control-cycle' ||
+    !details.controls.split(', ').some((key) => marked.has(details.layout + '|' + details.edit + key)));
 }

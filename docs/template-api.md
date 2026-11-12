@@ -336,8 +336,8 @@ Saved data and its editing UI are separate. Parameters declare what is saved: ID
    - `controls: []` shows no generated controls for the scope while keeping every declaration. A group needs at least one entry.
    - A condition only hides a control. The value stays saved and validated, and comes back when the condition holds again. Conditions are presentation: they never remove a declaration or change a saved ID.
    - Click-to-edit follows the box's or element's `controls` for its own parameters. A parameter a node explicitly shows with `ctx.edit` or `ctx.Text` is always editable on that node.
-   - The authoring types check entry IDs against the scope's parameters. Loading the template reports unknown or repeated IDs, a parameter a custom editor owns, conditions on unknown parameters, on the control's own value (directly or through an enclosing group, such as a group shown only while `show` is on that contains `show`), or on values the parameter can never have.
-   - Controls whose conditions depend on each other (A shown only when B is on, B only when A is on) load with a `declaration-control-cycle` warning in the Book check: once all are hidden, the generated controls cannot show them again. Keep one of them unconditional unless a marked edit target or a custom editor also edits it.
+   - The authoring types check entry IDs against the scope's parameters. Loading the template reports unknown or repeated IDs, a parameter a custom editor owns, conditions on unknown parameters, on the control's own value, or on values the parameter can never have.
+   - Controls that can hide themselves for good load with a `declaration-control-cycle` warning in the Book check: a control inside a group shown only depending on that control (a group shown while `show` is on that contains `show`), or controls whose conditions depend on each other (A shown only when B is on, B only when A is on). The warning is dropped for a layout that also marks one of those parameters on the page with `ctx.edit` or `ctx.Text`, since that node can show them again.
 3. **A custom editor** for an element, below.
 
 #### Where editing happens

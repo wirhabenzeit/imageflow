@@ -15,7 +15,7 @@ import { markdownToHtml } from './markdown';
 import { isParameterValue, parameterWarnings, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import { flow } from './text-flow';
-import { declarationWarnings } from './declaration-check';
+import { declarationWarnings, withoutReachableControls } from './declaration-check';
 import type { Schema } from './declaration-check';
 import { bookIndex, chooseFormat, normalizeTemplate, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup } from './template';
@@ -1024,8 +1024,16 @@ export async function startRender(root: HTMLElement) {
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
+    // A control the generated controls could hide for good is fine when the layout also marks it as editable on the
+    // page: the marked node is the way to show it again.
+    const marked = new Set([...root.querySelectorAll<HTMLElement>('.if-spread-container[data-spread]')].flatMap((container) => {
+      const layout = spreads.find(({ id }) => id === container.dataset.spread)?.definition;
+      return layout === undefined ? [] : [...container.querySelectorAll<HTMLElement>('[data-edit]')]
+        .flatMap((node) => node.dataset.edit!.split(' ').filter(Boolean).map((path) => layout + '|' + path));
+    }));
     const warnings: Issue[] = [
-      ...declaration.map(({ code, message: text, path, details, suggestion }) => ({ ...message(text), code, details: { ...details, path }, suggestion })),
+      ...withoutReachableControls(declaration, marked)
+        .map(({ code, message: text, path, details, suggestion }) => ({ ...message(text), code, details: { ...details, path }, suggestion })),
       ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),

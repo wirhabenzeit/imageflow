@@ -44,12 +44,11 @@ export function controlProblems(parameters: Parameters, controls: ControlItem[] 
       }
     }
   };
-  // `inherited` are the enclosing groups: a control is shown only while every one of their conditions holds too.
-  const walk = (items: ControlItem[], inherited: { group: string; when: Condition }[]) => {
+  const walk = (items: ControlItem[]) => {
     for (const item of items) {
       if (typeof item === 'object' && 'group' in item) {
         checkCondition(item.when, 'Group ' + item.group);
-        walk(item.controls, item.when ? [...inherited, { group: item.group, when: item.when }] : inherited);
+        walk(item.controls);
         continue;
       }
       const key = keyOf(item);
@@ -58,23 +57,21 @@ export function controlProblems(parameters: Parameters, controls: ControlItem[] 
       else if (listed.has(key)) problems.push('Control ' + key + ' is listed twice.');
       listed.add(key);
       if (typeof item === 'object') checkCondition(item.when, 'Control ' + key, key);
-      const hiding = inherited.find(({ when }) => Object.hasOwn(when, key));
-      if (hiding) {
-        problems.push('Control ' + key + ' is in group ' + hiding.group + ', which is shown only depending on ' + key +
-          ', so it could never be shown again once hidden. Move ' + key + ' out of the group.');
-      }
     }
   };
-  if (controls) walk(controls, []);
+  if (controls) walk(controls);
   return problems;
 }
 
-// Controls whose conditions depend on each other, such as A shown only when B is on and B only when A is on. Once
-// all of them are hidden, the generated controls cannot show them again. That is not always a mistake: a marked
-// edit target, a custom editor or an agent can still set the values, so these are warnings, not problems. A control
-// depending on itself, directly or through a group, is a problem instead (controlProblems).
+// Controls whose conditions depend on each other, such as A shown only when B is on and B only when A is on, or a
+// control inside a group that is shown only depending on that control. Once all of them are hidden, the generated
+// controls cannot show them again. That is not always a mistake: a marked edit target (`ctx.edit`, `ctx.Text`) or an
+// agent can still set the values, so these are warnings, not problems. A control whose own `when` names itself has
+// no other reading and stays a problem (controlProblems).
 export function controlCycles(controls: ControlItem[] | undefined): string[][] {
   const depends = new Map<string, Set<string>>();
+  // Controls an enclosing group hides depending on the control itself.
+  const hidden = new Set<string>();
   const walk = (items: ControlItem[], inherited: Condition[]) => {
     for (const item of items) {
       if (typeof item === 'object' && 'group' in item) {
@@ -85,6 +82,7 @@ export function controlCycles(controls: ControlItem[] | undefined): string[][] {
       const conditions = typeof item === 'object' && item.when ? [...inherited, item.when] : inherited;
       const keys = depends.get(key) ?? new Set<string>();
       for (const when of conditions) for (const other of Object.keys(when)) if (other !== key) keys.add(other);
+      if (inherited.some((when) => Object.hasOwn(when, key))) hidden.add(key);
       depends.set(key, keys);
     }
   };
@@ -109,7 +107,7 @@ export function controlCycles(controls: ControlItem[] | undefined): string[][] {
     const component: string[] = [];
     let member: string;
     do { member = stack.pop()!; component.unshift(member); } while (member !== key);
-    if (component.length > 1) cycles.push(component);
+    if (component.length > 1 || hidden.has(key)) cycles.push(component);
   };
   for (const key of depends.keys()) if (!index.has(key)) visit(key);
   const order = [...depends.keys()];

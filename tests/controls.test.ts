@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { controlCycles, controlLayout, controlProblems, layoutFields, matches } from '../src/controls';
-import { declarationWarnings } from '../src/declaration-check';
+import { declarationWarnings, withoutReachableControls } from '../src/declaration-check';
 import type { Schema } from '../src/declaration-check';
 import { mm, printFormat } from '../src/format';
 import { p } from '../src/parameters';
@@ -98,17 +98,15 @@ test('the template schema validates controls at spread, box and element scope an
     ['spreads.main.boxes.hero.controls.0.controls', 'spreads.main.controls', 'spreads.main.elements.stamp.controls'].sort());
 });
 
-test('a control inside a group that depends on it is a problem, through any number of groups', () => {
-  assert.deepEqual(controlProblems(parameters, [{ group: 'Options', when: { show: true }, controls: ['show', 'tilt'] }]), [
-    'Control show is in group Options, which is shown only depending on show, so it could never be shown again once hidden. Move show out of the group.',
-  ]);
-  assert.deepEqual(controlProblems(parameters, [
+test('a control inside a group that depends on it is a warning, not a problem, through any number of groups', () => {
+  // A marked edit target can still show it again, so loading the template must not fail.
+  assert.deepEqual(controlProblems(parameters, [{ group: 'Options', when: { show: true }, controls: ['show', 'tilt'] }]), []);
+  assert.deepEqual(controlCycles([{ group: 'Options', when: { show: true }, controls: ['show', 'tilt'] }]), [['show']]);
+  assert.deepEqual(controlCycles([
     { group: 'Outer', when: { kind: 'text' }, controls: [{ group: 'Inner', controls: [{ parameter: 'kind', label: 'Kind' }, 'text'] }] },
-  ]), [
-    'Control kind is in group Outer, which is shown only depending on kind, so it could never be shown again once hidden. Move kind out of the group.',
-  ]);
+  ]), [['kind']]);
   // Depending on a control outside the group is the ordinary case.
-  assert.deepEqual(controlProblems(parameters, ['show', { group: 'Options', when: { show: true }, controls: ['kind'] }]), []);
+  assert.deepEqual(controlCycles(['show', { group: 'Options', when: { show: true }, controls: ['kind'] }]), []);
 });
 
 test('controls that hide each other are reported as cycles, groups included', () => {
@@ -129,10 +127,18 @@ test('an empty controls list is valid and shows no generated controls', () => {
   assert.deepEqual(controlLayout(parameters, [], values), []);
 });
 
-test('the template schema rejects a group that hides its own control, and warns about cycles', () => {
-  const bad = declare({ parameters, controls: [{ group: 'Options', when: { show: true }, controls: ['show'] }] });
-  assert.equal(bad.success, false);
-  assert.deepEqual(bad.error!.issues.map(({ path }) => path.join('.')), ['spreads.main.controls']);
+test('a group that hides its own control loads with a warning, and cycles are warned about at every scope', () => {
+  const grouped = {
+    id: 't', version: '1', contract: 1, format, spreads: { main: { label: 'Main', render: () => null, parameters,
+      controls: [{ group: 'Options', when: { show: true }, controls: ['show', 'tilt'] }] } },
+  };
+  assert.ok(templateSchema.safeParse(grouped).success);
+  assert.deepEqual(declarationWarnings(grouped, templateSchema as unknown as Schema).map(({ code, path, details }) => [code, path, details]),
+    [['declaration-control-cycle', 'spreads.main.controls', { controls: 'show', layout: 'main', edit: '' }]]);
+  // A layout that marks show on the page, such as ctx.edit('show'), offers a way back: no warning for it.
+  const warnings = declarationWarnings(grouped, templateSchema as unknown as Schema);
+  assert.deepEqual(withoutReachableControls(warnings, new Set(['main|show'])), []);
+  assert.equal(withoutReachableControls(warnings, new Set(['other|show', 'main|tilt'])).length, 1);
   const cyclic = {
     id: 't', version: '1', contract: 1, format, spreads: { main: { label: 'Main', render: () => null, boxes: {
       hero: { type: 'photo', label: 'Hero', parameters: { show: parameters.show, kind: parameters.kind },
@@ -140,7 +146,15 @@ test('the template schema rejects a group that hides its own control, and warns 
     } } },
   };
   assert.ok(templateSchema.safeParse(cyclic).success);
-  const warnings = declarationWarnings(cyclic, templateSchema as unknown as Schema);
-  assert.deepEqual(warnings.map(({ code, path, details }) => [code, path, details.controls]),
-    [['declaration-control-cycle', 'spreads.main.boxes.hero.controls', 'show, kind']]);
+  assert.deepEqual(declarationWarnings(cyclic, templateSchema as unknown as Schema).map(({ code, path, details }) => [code, path, details]),
+    [['declaration-control-cycle', 'spreads.main.boxes.hero.controls', { controls: 'show, kind', layout: 'main', edit: 'boxes.hero.' }]]);
+  assert.deepEqual(withoutReachableControls(declarationWarnings(cyclic, templateSchema as unknown as Schema), new Set(['main|boxes.hero.kind'])), []);
+});
+
+test('malformed controls reach the schema error instead of crashing the cycle check', () => {
+  for (const controls of [[{ group: 'Options' }], 'show', [{ group: 'Options', controls: 'show' }], [42]]) {
+    const declared = { id: 't', version: '1', contract: 1, format, spreads: { main: { label: 'Main', render: () => null, parameters, controls } } };
+    assert.deepEqual(declarationWarnings(declared, templateSchema as unknown as Schema).filter(({ code }) => code === 'declaration-control-cycle'), []);
+    assert.equal(templateSchema.safeParse(declared).success, false);
+  }
 });
