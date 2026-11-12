@@ -9,7 +9,7 @@ import { ControlList, Field } from './Fields';
 
 type EditorMessage =
   | { type: 'editor-ready' } | { type: 'editor-draft'; values: Values } | { type: 'editor-size'; height: number }
-  | { type: 'editor-commit'; values: Values } | { type: 'editor-cancel' } | { type: 'editor-import'; request: number; accept: unknown }
+  | { type: 'editor-commit'; values: Values } | { type: 'editor-flushed'; request: number; values: Values } | { type: 'editor-cancel' } | { type: 'editor-import'; request: number; accept: unknown }
   | { state: 'error'; message: string };
 
 // What the dialog works on: every parameter of the element, with its declaration and resolved value (the saved
@@ -46,8 +46,9 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const [error, setError] = useState('');
   const [failed, setFailed] = useState(false);
   // Done waits for the frame to finish typing in progress: a field in the frame keeps typed text until it loses
-  // focus, which clicking Done out here does not cause.
-  const [saving, setSaving] = useState(false);
+  // focus, which clicking Done out here does not cause. The request being waited for, if any.
+  const [flushing, setFlushing] = useState<number>();
+  const flushes = useRef(0);
   // The editor opened on this context. If it changes while the editor is open (Reload, Undo, a template edit),
   // the draft is based on stale data and saving it would silently overwrite the newer values.
   const [opened] = useState(() => editingContext(template, spread, element));
@@ -67,7 +68,6 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const generated = definition ? controlLayout(definition.parameters, definition.controls, current, owned) : [];
 
   function done(latest?: Values) {
-    setSaving(false);
     if (latest) draft.current = { ...draft.current, ...latest };
     const changes = [...Object.entries(draft.current), ...Object.entries(local)];
     if (failed || stale || blocked) return;
@@ -88,19 +88,26 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     dialog.current?.close();
   }
 
-  // Asks the frame to apply what is being typed and reply with its complete draft, which then saves. A frame that
-  // does not answer (it is still loading, or stopped) has nothing typed to apply.
+  // Asks the frame to apply what is being typed and reply with its complete draft; only that reply saves. A frame
+  // still loading has nothing typed to apply. A frame that does not answer in time saves nothing: the dialog stays
+  // open with its draft, and Done can be tried again. A late answer to an earlier request is ignored.
   function requestDone() {
     const target = frame.current?.contentWindow;
-    if (!ready || failed || !target) return done();
-    setSaving(true);
-    target.postMessage({ type: 'editor-flush' }, renderOrigin);
+    if (failed || stale || blocked) return;
+    if (!ready || !target) return done();
+    const request = ++flushes.current;
+    setFlushing(request);
+    setError('');
+    target.postMessage({ type: 'editor-flush', request }, renderOrigin);
   }
   useEffect(() => {
-    if (!saving) return;
-    const timeout = setTimeout(() => done(), 2000);
+    if (flushing === undefined) return;
+    const timeout = setTimeout(() => {
+      setFlushing(undefined);
+      setError('The editor did not respond, so nothing was saved. Try Done again, or Cancel.');
+    }, 5000);
     return () => clearTimeout(timeout);
-  }, [saving]);
+  }, [flushing]);
 
   // The generated controls' values reach the frame, so the editor previews the whole draft (such as a calendar
   // drawn from the week start chosen below it). The frame shows them but never sends them back.
@@ -113,6 +120,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     const data = event.data;
     if ('state' in data) {
       if (data.state === 'error') {
+        setFlushing(undefined);
         setFailed(true);
         setError(data.message);
       }
@@ -132,6 +140,10 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
       else void importFile(accept).then(reply, () => reply());
     } else if (data.type === 'editor-size') {
       setHeight(Math.max(120, Math.min(data.height, window.innerHeight * 0.7)));
+    } else if (data.type === 'editor-flushed') {
+      if (data.request !== flushing) return;
+      setFlushing(undefined);
+      done(data.values);
     } else if (data.type === 'editor-commit') done(data.values);
     else if (data.type === 'editor-cancel') dialog.current?.close();
   });
@@ -160,7 +172,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     <footer className="ee-footer">
       <span className="muted">Esc cancels · ⌘↩ saves</span>
       <button type="button" onClick={() => dialog.current?.close()}>Cancel</button>
-      <button type="button" className="primary" disabled={readOnly || failed || stale || !!blocked || saving} onClick={requestDone}>Done</button>
+      <button type="button" className="primary" disabled={readOnly || failed || stale || !!blocked || flushing !== undefined} onClick={requestDone}>Done</button>
     </footer>
   </dialog>;
 }

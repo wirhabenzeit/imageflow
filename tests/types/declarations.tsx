@@ -66,3 +66,32 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: { ok: { la
 defineTemplate({ id: 't', version: '1', contract: 1, spreads: {} });
 // @ts-expect-error
 defineTemplate({ id: 't', version: '1', contract: 1, format, formats: { a: format }, spreads: {} });
+
+// Parameter objects written without `p` are checked by their `type`, wherever parameters are declared.
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
+  // @ts-expect-error
+  a: spread({ label: 'A', parameters: { note: { type: 'string', label: 'Note', default: '', mutliline: true } }, render: () => <Spread /> }),
+  // @ts-expect-error
+  b: spread({ label: 'B', boxes: { hero: { type: 'photo', label: 'Hero', parameters: { show: { type: 'boolean', label: 'Show', default: true, min: 1 } } } },
+    render: () => <Spread /> }),
+  // @ts-expect-error
+  c: spread({ label: 'C', elements: { e: { label: 'E', parameters: { size: { type: 'number', label: 'Size', default: 1, stp: 1 } } } }, render: () => <Spread /> }),
+  ok: spread({ label: 'OK', parameters: { note: { type: 'string', label: 'Note', default: '', multiline: true } }, render: () => <Spread /> }),
+}) });
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: { accent: { type: 'color', label: 'Accent', default: '#000', placeholdr: 'x' } },
+  spreads: {} });
+
+// A document parameter declared differently in the template than in spreadFor(): the layout could receive values its
+// type does not allow.
+const paper = spreadFor({ paper: p.enum({ label: 'Paper', default: 'warm', options: ['warm'] }) })({
+  label: 'Paper', render: (ctx) => <Spread>{ctx.document.paper === 'warm' ? 'warm' : 'never'}</Spread>,
+});
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: { paper: p.enum({ label: 'Paper', default: 'warm', options: ['warm', 'white'] }) },
+  // @ts-expect-error
+  spreads: { paper } });
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: { paper: p.number({ label: 'Paper', default: 1 }) }, spreads: ({ spread }) => ({ paper,
+  b: spread({ label: 'B', render: () => <Spread /> }) }) });
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: { paper: p.enum({ label: 'Paper', default: 'warm', options: ['warm'] }) },
+  spreads: { paper } });

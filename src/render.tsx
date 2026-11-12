@@ -807,9 +807,13 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1)) return;
     if (event.data?.type === 'editor-flush') {
-      // The app's Done: blurring applies a field that commits on blur, through set(), before the draft is sent.
-      (window.document.activeElement as HTMLElement | null)?.blur?.();
-      commit();
+      // The app's Done: blurring applies a field that commits on blur, through set(), before the draft is sent. A
+      // component that fails while applying reports the failure instead, and nothing is saved.
+      const request = event.data.request;
+      if (typeof request !== 'number') return;
+      try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
+      catch (error) { fail(error); }
+      if (!failed) post({ type: 'editor-flushed', request, values: changed ? claimed(draft) : {} });
       return;
     }
     if (event.data?.type === 'editor-values') {
