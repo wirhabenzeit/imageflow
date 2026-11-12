@@ -113,6 +113,16 @@ try {
   await w.locator('iframe.book-frame-layouts[data-current][data-ready]').waitFor();
   assert.deepEqual(await w.locator('.layout-option').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label'))), ['Cover', 'Month']);
 
+  // Adding inserts a page layout after the selected page; Undo removes it again.
+  const add = w.getByRole('button', { name: 'Add', exact: true });
+  assert.equal(await add.isDisabled(), false);
+  await add.click();
+  await w.waitForFunction(() => document.querySelectorAll('.spread-thumb').length === 4);
+  assert.deepEqual(JSON.parse(await readFile(join(project, 'project.json'), 'utf8')).spreads.map(({ definition }) => definition), ['cover', 'month', 'cover', 'month']);
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await w.waitForFunction(() => document.querySelectorAll('.spread-thumb').length === 3);
+  await w.locator(ready).waitFor();
+
   // Print export: one PDF page per unit, the trim box inset by the bleed on each edge.
   const print = await exported('Export print PDF', join(work, 'calendar.pdf'), 'Print PDF saved');
   assert.equal(print.getPageCount(), 3);

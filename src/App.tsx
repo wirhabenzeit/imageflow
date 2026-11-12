@@ -198,9 +198,9 @@ export function App() {
   const canChangeBook = writable && !busy && !exporting;
   const canReorder = canChangeBook && !!template;
   const canMoveSpread = (id: string, target: number) => !!template && !!spreadOrder(spreads, id, target, template);
-  // An empty book adds its first spread; otherwise a spread-wide layout is needed.
+  // An empty book adds its first spread; otherwise a spread-wide layout is needed, or a page layout without facing pages.
   const canAdd = canChangeBook && !!template && (!spread ? firstSpreadLayouts(template.spreads, template.format).length > 0
-    : Object.values(template.spreads).some(({ span }) => span === 'spread'));
+    : Object.values(template.spreads).some(({ span }) => span === (hasFacingPages(template.format) ? 'spread' : 'page')));
   const canDuplicate = canChangeBook && !!template && spreadSelected && !!spread;
   const canDelete = canChangeBook && spreadSelected && !!spread;
   const canMoveUp = canReorder && spreadSelected && !!spread && canMoveSpread(spread.id, index - 1);
