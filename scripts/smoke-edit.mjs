@@ -294,8 +294,8 @@ try {
 
   // set() followed directly by commit() saves the values just set, not the previous render's.
   const withEditor = (code) => templateSource.replace(
-    'function CalendarEditor({ values, set, readOnly, Control }: ElementEditorProps) {',
-    'function CalendarEditor({ values, set, readOnly, Control, commit }: ElementEditorProps) {\n' + code);
+    'function CalendarEditor({ values, set, readOnly, Control }: CalendarEditorProps) {',
+    'function CalendarEditor({ values, set, readOnly, Control, commit }: CalendarEditorProps) {\n' + code);
   const jump = `  const jump = <button type="button" onClick={() => { set({ month: '2027-04-01', marked: '9' }); commit(); }}>Jump to April</button>;
   const explode = <button type="button" onClick={() => { throw new Error('handler exploded'); }}>Explode</button>;`;
   await rerendered(() => writeFile(templateFile, withEditor(jump).replace(
@@ -319,6 +319,36 @@ try {
   assert.equal(await editorDialog.getByRole('button', { name: 'Done' }).isDisabled(), true);
   await closeEditor();
   assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
+
+  // Mixed valid/invalid writes in both scopes keep warnings visible after the draft updates, save only valid
+  // changes, and remain one undoable edit. Exercise real editor callbacks, including setSpread()+commit().
+  const warnSource = withEditor(`  const warn = <button type="button" onClick={() => {
+    set({ marked: '9', firstWeekday: 'sunday' } as any);
+    setSpread({ title: 'Scoped title', typo: 'bad' } as any);
+  }}>Try changes</button>;
+  const save = <button type="button" onClick={() => { setSpread({ title: 'Committed title' }); commit(); }}>Save title</button>;`)
+    .replace('readOnly, Control, commit }', 'readOnly, Control, commit, setSpread }')
+    .replace('<div className="calendar-editor-nav">', '<div className="calendar-editor-nav">{warn}{save}');
+  await rerendered(() => writeFile(templateFile, warnSource));
+  await openCalendarEditor();
+  await calendarEditor.getByRole('button', { name: 'Try changes' }).click();
+  const warnings = editorDialog.locator('.ee-warnings');
+  await warnings.getByText(/setSpread\(\) ignored typo/).waitFor();
+  assert.match(await warnings.textContent(), /set\(\) ignored firstWeekday/);
+  assert.equal(await warnings.locator('li').count(), 2);
+  assert.equal(await calendarEditor.getByRole('textbox', { name: 'Calendar title' }).inputValue(), 'Scoped title');
+  await calendarEditor.getByRole('button', { name: 'Try changes' }).click();
+  assert.equal(await warnings.locator('li').count(), 2, 'repeated problems are deduplicated');
+  await calendarEditor.getByRole('button', { name: 'Save title' }).click();
+  await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+  for (let start = Date.now(); (await read()).spreads[7].params.title !== 'Committed title' && Date.now() - start < 10000;) await w.waitForTimeout(50);
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01', marked: '9' });
+  assert.equal((await read()).spreads[7].params.title, 'Committed title');
+  assert.equal((await read()).spreads[7].params.typo, undefined);
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
+  assert.equal((await read()).spreads[7].params.title, undefined);
 
   // An editor that throws while rendering is reported instead of leaving a blank dialog.
   await rerendered(() => writeFile(templateFile, withEditor("  if (values.month) throw new Error('render exploded');")));

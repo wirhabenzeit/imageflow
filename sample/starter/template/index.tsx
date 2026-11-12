@@ -126,10 +126,18 @@ function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Vi
 // The route map's own editor: choose or import the GPX track with ImageFlow's file control, then drag to move,
 // scroll or use the buttons to zoom, so the inset can show part of the route. Choosing the track and framing it is
 // one task, so one editor owns all four parameters and Done saves them together.
+const routeParameters = {
+  track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
+  centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01 }),
+  centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01 }),
+  zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1 }),
+};
+// Typed from the element's declaration: `set` and `Control` accept only these four parameters, with their value types.
+type RouteEditorProps = ElementEditorProps<typeof routeParameters, 'track' | 'centerX' | 'centerY' | 'zoom'>;
 let routeDrag: { x: number; y: number; start: Viewport; width: number } | undefined;
-function RouteEditor({ values, set, readOnly, Control }: ElementEditorProps) {
-  const viewport = routeWindow({ centerX: Number(values.centerX), centerY: Number(values.centerY), zoom: Number(values.zoom) });
-  const source = file(String(values.track));
+function RouteEditor({ values, set, readOnly, Control }: RouteEditorProps) {
+  const viewport = routeWindow(values);
+  const source = file(values.track);
   let line = '';
   let problem = source ? '' : 'Choose a GPX track to draw the route.';
   if (source) {
@@ -218,15 +226,22 @@ function CalendarGrid({ date, firstWeekday, marked = '', toggle }: {
 // ImageFlow's editor dialog and only proposes values; ImageFlow validates and saves them when the user clicks Done.
 // The title is a layout parameter rather than one of the grid's, edited here because naming the month belongs to
 // the same task; `scope="spread"` gives it ImageFlow's own text field.
-function CalendarEditor({ values, set, readOnly, Control }: ElementEditorProps) {
-  const month = String(values.month);
+const calendarParameters = {
+  month: p.date({ label: 'Month', default: '2027-01-01', precision: 'month' }),
+  firstWeekday: p.enum({ label: 'Week starts', default: 'monday', options: ['monday', 'sunday'], labels: { monday: 'Monday', sunday: 'Sunday' } }),
+  marked: p.string({ label: 'Marked days', default: '', maxLength: 200 }),
+};
+const calendarLayoutParameters = { title: p.string({ label: 'Calendar title', default: '', maxLength: 80, placeholder: 'Shown above the calendar' }) };
+type CalendarEditorProps = ElementEditorProps<typeof calendarParameters, 'month' | 'marked', {}, typeof calendarLayoutParameters, 'title'>;
+function CalendarEditor({ values, set, readOnly, Control }: CalendarEditorProps) {
+  const month = values.month;
   const shift = (step: number) => {
     const date = new Date(month + 'T00:00:00Z');
     date.setUTCMonth(date.getUTCMonth() + step, 1);
     set({ month: date.toISOString().slice(0, 10), marked: '' });
   };
   const toggle = (day: number) => {
-    const days = markedDays(String(values.marked));
+    const days = markedDays(values.marked);
     if (!days.delete(day)) days.add(day);
     set({ marked: [...days].sort((a, b) => a - b).join(',') });
   };
@@ -237,7 +252,7 @@ function CalendarEditor({ values, set, readOnly, Control }: ElementEditorProps) 
       <button type="button" aria-label="Next month" disabled={readOnly} onClick={() => shift(1)}>›</button>
       <span>{readOnly ? '' : 'Click days to mark them. Changing the month clears the marks.'}</span>
     </div>
-    <CalendarGrid date={month} firstWeekday={values.firstWeekday === 'sunday' ? 'sunday' : 'monday'} marked={String(values.marked)}
+    <CalendarGrid date={month} firstWeekday={values.firstWeekday} marked={values.marked}
       toggle={readOnly ? undefined : toggle} />
   </div>;
 }
@@ -337,12 +352,7 @@ export default defineTemplate({
       boxes: { hero: captioned('Panorama photo') },
       elements: { route: {
         label: 'Route map',
-        parameters: {
-          track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
-          centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01 }),
-          centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01 }),
-          zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1 }),
-        },
+        parameters: routeParameters,
         editor: { label: 'Edit route', parameters: ['track', 'centerX', 'centerY', 'zoom'], component: RouteEditor },
       } },
       render: (ctx) => {
@@ -402,15 +412,11 @@ export default defineTemplate({
     }),
     calendar: spread({
       label: 'Calendar spread',
-      parameters: { title: p.string({ label: 'Calendar title', default: '', maxLength: 80, placeholder: 'Shown above the calendar' }) },
+      parameters: calendarLayoutParameters,
       boxes: { hero: box.photo('Calendar photo') },
       elements: { grid: {
         label: 'Calendar grid',
-        parameters: {
-          month: p.date({ label: 'Month', default: '2027-01-01', precision: 'month' }),
-          firstWeekday: p.enum({ label: 'Week starts', default: 'monday', options: ['monday', 'sunday'], labels: { monday: 'Monday', sunday: 'Sunday' } }),
-          marked: p.string({ label: 'Marked days', default: '', maxLength: 200 }),
-        },
+        parameters: calendarParameters,
         editor: { label: 'Edit calendar', parameters: ['month', 'marked'], spread: ['title'], component: CalendarEditor },
       } },
       render: (ctx) => {

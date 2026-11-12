@@ -9,7 +9,7 @@ export type FrameMessage =
   | { type: 'editor-commit'; values: unknown; spread?: unknown } | { type: 'editor-flushed'; request: number; values: unknown; spread?: unknown }
   | { type: 'editor-cancel' }
   | { type: 'editor-import'; request: number; accept: unknown; mode?: unknown } | { type: 'editor-notice'; message: unknown }
-  | { state: 'error'; message: string };
+  | { type: 'editor-warning'; message: unknown } | { state: 'error'; message: string };
 
 // The plumbing both editor dialogs share: listening to their own frame only, its readiness and height, a failure
 // it reports, and Done's flush round trip. A frame that does not answer a flush in time saves nothing: the dialog
@@ -20,6 +20,7 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
   // Done after a flush, or the frame's own commit(); both carry the frame's complete draft.
   done(values: unknown, spread?: unknown): void;
   cancel(): void;
+  warning?(message: unknown): void;
   import?(data: Extract<FrameMessage, { type: 'editor-import' }>): void;
 }) {
   const [height, setHeight] = useState(240);
@@ -55,6 +56,8 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
     } else if (data.type === 'editor-draft') {
       handlers.draft(data.values, data.spread);
       if (!failed) setError('');
+    } else if (data.type === 'editor-warning') {
+      handlers.warning?.(data.message);
     } else if (data.type === 'editor-notice') {
       if (!failed && typeof data.message === 'string') setError(data.message);
     } else if (data.type === 'editor-import') {

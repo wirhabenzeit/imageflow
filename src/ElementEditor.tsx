@@ -47,6 +47,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   // The editor's draft as last reported, and the generated controls' own draft, for showing conditional controls.
   const [frameDraft, setFrameDraft] = useState<Values>({});
   const [local, setLocal] = useState<Values>({});
+  const [warnings, setWarnings] = useState<string[]>([]);
   // The editor opened on this context. If it changes while the editor is open (Reload, Undo, a template edit),
   // the draft is based on stale data and saving it would silently overwrite the newer values.
   const [opened] = useState(() => editingContext(template, spread, element));
@@ -64,6 +65,10 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     },
     done: (reported, reportedSpread) => done(values(reported), values(reportedSpread)),
     cancel: () => dialog.current?.close(),
+    warning(reported) {
+      const message = typeof reported === 'string' ? reported.slice(0, 500) : '';
+      if (message) setWarnings((previous) => previous.includes(message) || previous.length >= 5 ? previous : [...previous, message]);
+    },
     import(data) {
       const accept = Array.isArray(data.accept) ? data.accept.filter((value): value is string => typeof value === 'string') : [];
       // The import starts a new render session; the frame reads the new file from it.
@@ -135,6 +140,10 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     </p>}
     {error && !stale && <p className="ee-status error-text" role="alert">{error}</p>}
     {blocked && !stale && <p className="ee-status muted" role="status">{blocked}</p>}
+    {warnings.length > 0 && <div className="ee-status ee-warnings" role="status">
+      <strong>The editor asked for changes it cannot make:</strong>
+      <ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+    </div>}
     {generated.length > 0 && <fieldset className="ee-fields" disabled={readOnly || failed || stale}>
       <ControlList nodes={generated} field={(node, param) => <Field key={node.key} param={param} value={current[node.key]}
         description={node.description} change={(next) => setLocal((previous) => ({ ...previous, [node.key]: next }))} />} />
