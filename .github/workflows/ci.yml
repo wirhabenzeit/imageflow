@@ -49,7 +49,7 @@ jobs:
       - name: Check Apple silicon runner
         run: node -e "if (process.arch !== 'arm64') throw new Error('Desktop CI requires an arm64 runner')"
       - name: Cache Electron downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .build/electron-cache

@@ -26,6 +26,13 @@ await app.evaluate(({ app }) => {
 function watch(page) { page.setDefaultTimeout(25000); page.on('pageerror', (error) => errors.push(error.message)); }
 async function ready(page) { watch(page); await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor(); }
 async function current(page) { return (await page.evaluate(() => window.imageflow.currentProject())).value; }
+function nextStarter() {
+  // A recent-book cover can create a hidden render window while New Book is opening.
+  return app.waitForEvent('window', { predicate: async (page) => {
+    try { await page.waitForURL('imageflow://editor/new'); return true; }
+    catch { return false; }
+  } });
+}
 async function launchAction(page, action) {
   const before = new Set(app.windows());
   const result = await page.evaluate((action) => window.imageflow.openProject(action), action);
@@ -57,7 +64,7 @@ try {
     globalThis.newBookSaveCalls = 0;
     dialog.showSaveDialog = async () => { globalThis.newBookSaveCalls++; return { canceled: false, filePath }; };
   }, first);
-  const pickerPromise = app.waitForEvent('window');
+  const pickerPromise = nextStarter();
   await start.getByRole('button', { name: 'New Book…', exact: true }).click();
   const picker = await pickerPromise;
   watch(picker);
@@ -86,8 +93,10 @@ try {
   await ready(one);
   assert.equal((await current(one)).project.title, 'First');
   for (const cancelWithButton of [true, false]) {
-    const nextPicker = app.waitForEvent('window');
+    const nextPicker = nextStarter();
     const cancelled = one.evaluate(() => window.imageflow.openProject('new'));
+    // Closing the app after another assertion fails rejects this pending IPC. Preserve the original failure.
+    void cancelled.catch(() => {});
     const modal = await nextPicker;
     watch(modal);
     await modal.getByRole('heading', { name: 'Choose a template' }).waitFor();
@@ -223,6 +232,9 @@ try {
   await stat(moved);
   assert.equal(errors.filter((message) => /TypeError|ReferenceError|Uncaught/.test(message)).length, 0, errors.join('\n'));
   console.log('ImageFlow package creation, independent windows, duplicate identity, autosave, undo, external edits, recents and recovery passed.');
+} catch (error) {
+  console.error('Document workflow failed:', error, errors.join('\n'));
+  throw error;
 } finally {
   await client?.close();
   await app.close();
