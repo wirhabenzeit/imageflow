@@ -803,7 +803,24 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     return new Promise<string | undefined>((resolve) => pending.set(request, resolve));
   };
   window.addEventListener('message', (event) => {
-    if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'editor-imported') return;
+    if (event.origin !== editorURL.slice(0, -1)) return;
+    if (event.data?.type === 'editor-flush') {
+      // The app's Done: blurring applies a field that commits on blur, through set(), before the draft is sent.
+      (window.document.activeElement as HTMLElement | null)?.blur?.();
+      commit();
+      return;
+    }
+    if (event.data?.type === 'editor-values') {
+      // The dialog's generated controls, for the element's other parameters: shown to the component, never claimed.
+      const values = event.data.values && typeof event.data.values === 'object' ? event.data.values as Values : {};
+      const others = Object.entries(values).filter(([key, value]) => !editor.parameters.includes(key) &&
+        Object.hasOwn(element.parameters, key) && isParameterValue(element.parameters[key], value));
+      if (!others.length) return;
+      draft = { ...draft, ...Object.fromEntries(others) };
+      update?.(draft);
+      return;
+    }
+    if (event.data?.type !== 'editor-imported') return;
     const resolve = pending.get(event.data.request);
     if (!resolve) return;
     pending.delete(event.data.request);

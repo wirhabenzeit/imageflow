@@ -147,7 +147,8 @@ export type Controls<K extends string = string> = readonly ControlItem<K>[];
 export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parameters?: Parameters; flowOrder?: number; controls?: Controls };
 /**
  * Props of a template-supplied element editor. `values` holds all of the element's parameters with the draft
- * applied; `set` changes the editor's own parameters in the draft. ImageFlow validates and saves the draft when
+ * applied, including changes in the dialog's generated controls as the user makes them, so the editor can preview
+ * the whole element; `set` changes the editor's own parameters in the draft. ImageFlow validates and saves the draft when
  * the user clicks Done (or calls `commit`), as one undoable edit; `cancel` discards it.
  */
 export type ElementEditorProps = {

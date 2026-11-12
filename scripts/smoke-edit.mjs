@@ -112,6 +112,45 @@ try {
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
   assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
 
+  // The dialog's generated controls and the editor share one draft: choosing Sunday below the editor redraws its
+  // calendar at once, and Cancel discards both.
+  await ready();
+  at = await center('[data-spread="march"] [data-element="grid"]');
+  await w.mouse.click(at.x, at.y);
+  await editorReady();
+  const firstWeekday = () => calendarEditor.locator('.days strong').first().textContent();
+  assert.equal(await firstWeekday(), 'Mo');
+  await editorDialog.getByRole('radio', { name: 'Sunday' }).click();
+  for (let i = 0; i < 50 && await firstWeekday() !== 'Su'; i++) await w.waitForTimeout(100);
+  assert.equal(await firstWeekday(), 'Su');
+  await editorDialog.getByRole('button', { name: 'Cancel' }).click();
+  await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
+
+  // A native control in the editor keeps typed text until it loses focus. The dialog's Done applies it first, so
+  // typing and clicking Done saves what was typed.
+  const calendarFile = join(project, 'template', 'index.tsx');
+  const calendarSource = await readFile(calendarFile, 'utf8');
+  const withControl = calendarSource
+    .replace('function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {', 'function CalendarEditor({ values, set, readOnly, Control }: ElementEditorProps) {')
+    .replace('  return <div className="calendar-editor">\n', '  return <div className="calendar-editor">\n    <Control parameter="marked" />\n');
+  assert.notEqual(withControl, calendarSource);
+  let previousRender = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  await writeFile(calendarFile, withControl);
+  await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, previousRender, { timeout: 30000 });
+  at = await center('[data-spread="march"] [data-element="grid"]');
+  await w.mouse.click(at.x, at.y);
+  await editorReady();
+  await calendarEditor.getByRole('textbox', { name: 'Marked days' }).fill('14');
+  await editorDialog.getByRole('button', { name: 'Done' }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Calendar grid updated');
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01', marked: '14' });
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  previousRender = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  await writeFile(calendarFile, calendarSource);
+  await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, previousRender, { timeout: 30000 });
+
   // A double-click (out of habit) opens it too and does not close it again; Escape inside it discards the draft.
   await ready();
   at = await center('[data-spread="march"] [data-element="grid"]');
