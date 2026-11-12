@@ -15,6 +15,7 @@ const duplicate = join(work, 'Duplicate.imageflow');
 const profile = join(work, 'profile');
 const errors = [];
 let client;
+let failed = false;
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 app.process().stderr.on('data', (data) => errors.push(String(data)));
 await app.evaluate(({ app }) => {
@@ -50,7 +51,7 @@ async function save(page, title) {
   assert.ok(result.value, JSON.stringify(result));
   // Native saves normally return directly to the editor; publish through Reload for this IPC-driven fixture.
   await page.evaluate(() => window.imageflow.openProject('reload'));
-  await page.reload();
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await ready(page);
   return result.value;
 }
@@ -128,7 +129,7 @@ try {
     const { value } = await window.imageflow.currentProject();
     await window.imageflow.history(value.id, 'undo');
   });
-  await one.reload(); await ready(one);
+  await one.reload({ waitUntil: 'domcontentloaded' }); await ready(one);
   await cp(first, second, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
   await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, second);
   const two = await launchAction(one, 'open');
@@ -219,7 +220,7 @@ try {
   await reopened.close();
   const moved = join(work, 'Moved.imageflow');
   await rename(second, moved);
-  await chooser.reload();
+  await chooser.reload({ waitUntil: 'domcontentloaded' });
   await chooser.getByRole('button', { name: 'Locate…' }).waitFor();
   const missing = (await chooser.evaluate(() => window.imageflow.recentDocuments())).value.find((book) => book.path === second);
   assert.equal(missing.available, false);
@@ -240,10 +241,26 @@ try {
   assert.equal(errors.filter((message) => /TypeError|ReferenceError|Uncaught/.test(message)).length, 0, errors.join('\n'));
   console.log('ImageFlow package creation, independent windows, duplicate identity, autosave, undo, external edits, recents and recovery passed.');
 } catch (error) {
+  failed = true;
   console.error('Document workflow failed:', error, errors.join('\n'));
   throw error;
 } finally {
-  await client?.close();
-  await app.close();
-  await rm(work, { recursive: true, force: true });
+  let timer;
+  try {
+    await Promise.race([
+      (async () => { await client?.close(); await app.close(); })(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          app.process().kill('SIGKILL');
+          reject(new Error('Document smoke cleanup did not finish within 10 seconds.'));
+        }, 10000);
+      }),
+    ]);
+  } catch (error) {
+    if (!failed) throw error;
+    console.error('Document workflow cleanup failed:', error);
+  } finally {
+    clearTimeout(timer);
+    await rm(work, { recursive: true, force: true });
+  }
 }
