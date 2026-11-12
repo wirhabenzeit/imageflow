@@ -376,8 +376,12 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
   return true;
 }
 
-// Stacks every sheet in a column, scaled to the frame width, and reports where sheets and boxes landed.
-function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView) {
+// Stacks every sheet in a column, scaled to the frame width, and reports where sheets and boxes landed. With `rows`
+// set (book view only), sheets instead fill a grid column by column, each scaled to its row's share of the frame
+// height (and no wider than the visible canvas), and the book grows sideways. Returns a function that switches
+// between the two.
+type GridRequest = { rows: number; width: number };
+function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, initial?: GridRequest) {
   const { pad, gap, columns = 1, columnGap = 0 } = bookLayout[view];
   root.style.setProperty('--if-pad', pad + 'px');
   root.style.setProperty('--if-gap', gap + 'px');
@@ -387,20 +391,30 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     const { x, y, width, height } = node.getBoundingClientRect();
     return { x: x + scrollX, y: y + scrollY, width, height };
   };
-  let width = -1;
+  let rows = view === 'book' ? initial?.rows ?? 0 : 0;
+  let visibleWidth = initial?.width ?? Infinity;
+  let laidOut = '';
   function fit() {
-    if (root.clientWidth === width) return;
-    width = root.clientWidth;
+    // A grid follows the frame height, a column the frame width.
+    const size = rows ? rows + 'x' + innerHeight + 'x' + visibleWidth : String(root.clientWidth);
+    if (size === laidOut) return;
+    laidOut = size;
+    root.classList.toggle('if-grid', rows > 0);
+    root.style.setProperty('--if-rows', String(rows || 1));
+    const width = root.clientWidth;
+    const row = (innerHeight - pad * 2 - gap * (rows - 1)) / Math.max(1, rows);
     for (const { sheet } of sheets) {
       const column = (width - pad * 2 - columnGap * (columns - 1)) / columns;
-      const scale = Math.max(0.01, Math.min(column / sheet.offsetWidth, 1));
+      const fitted = rows ? Math.min(row / sheet.offsetHeight, (visibleWidth - pad * 2) / sheet.offsetWidth) : column / sheet.offsetWidth;
+      const scale = Math.max(0.01, Math.min(fitted, 1));
       const slot = sheet.parentElement!;
       slot.style.width = sheet.offsetWidth * scale + 'px';
       slot.style.height = sheet.offsetHeight * scale + 'px';
       sheet.style.setProperty('--if-zoom', String(scale));
     }
+    const bounds = root.getBoundingClientRect();
     const geometry: BookGeometry = {
-      type: 'geometry', height: Math.ceil(root.getBoundingClientRect().height),
+      type: 'geometry', width: Math.ceil(bounds.width), height: Math.ceil(bounds.height), ...(rows ? { rows } : {}),
       sheets: sheets.map(({ spread, sheet }) => ({ spread, ...relative(sheet) })),
       boxes: sheets.flatMap(({ spread, sheet }) => {
         const scale = Number(sheet.style.getPropertyValue('--if-zoom')) || 1;
@@ -424,6 +438,13 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
   root.classList.add('if-book', 'if-view-' + view);
   fit();
   new ResizeObserver(fit).observe(root);
+  window.addEventListener('resize', fit);
+  return (next: GridRequest) => {
+    if (view !== 'book') return;
+    rows = next.rows;
+    visibleWidth = next.width;
+    fit();
+  };
 }
 
 type Failure = { message: string; stack?: string };
@@ -734,16 +755,22 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
 
 // Loads the photos of spreads within a screen of the visible range and unloads those more than three screens
 // away, so memory and the work per edit follow what is on screen rather than the length of the book.
-function photoLoader(root: HTMLElement, visible: () => { top: number; bottom: number } | undefined) {
+type Viewport = { top: number; bottom: number; left: number; right: number };
+// Loads the photos of spreads within a screen's distance of the visible area, in both directions, and unloads those
+// far from it.
+function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
   const containers = [...root.querySelectorAll<HTMLElement>('.if-spread-container')];
   return () => {
-    const range = visible() ?? { top: 0, bottom: screen.height };
+    const range = visible() ?? { top: 0, bottom: screen.height, left: 0, right: screen.width };
     const height = Math.max(1, range.bottom - range.top);
+    const width = Math.max(1, range.right - range.left);
     const loading: HTMLImageElement[] = [];
     for (const container of containers) {
-      const { top, bottom } = container.getBoundingClientRect();
-      const near = bottom > range.top - height && top < range.bottom + height;
-      const far = bottom < range.top - 3 * height || top > range.bottom + 3 * height;
+      const { top, bottom, left, right } = container.getBoundingClientRect();
+      const within = (distance: number) => bottom > range.top - distance * height && top < range.bottom + distance * height &&
+        right > range.left - distance * width && left < range.right + distance * width;
+      const near = within(1);
+      const far = !within(3);
       for (const img of container.querySelectorAll<HTMLImageElement>('img[data-src]')) {
         if (near && !img.getAttribute('src')) {
           img.src = img.dataset.src!;
@@ -894,13 +921,23 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
 
 export async function startRender(root: HTMLElement) {
   let info: TemplateInfo | undefined;
-  // The editor reports which part of the book frame is on screen. Listen before anything slow happens and ask
-  // once, because the editor's first report may otherwise arrive before this script runs.
-  let onScreen: { top: number; bottom: number } | undefined;
+  // The editor reports which part of the book frame is on screen, and how many grid rows the book view uses (0 for
+  // one column). Listen before anything slow happens and ask once, because the editor's first report may otherwise
+  // arrive before this script runs.
+  let onScreen: Viewport | undefined;
   let onScreenChange: (() => void) | undefined;
+  let grid: GridRequest = { rows: 0, width: Infinity };
+  let setGrid: ((grid: GridRequest) => void) | undefined;
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'viewport') return;
-    onScreen = { top: Number(event.data.top), bottom: Number(event.data.bottom) };
+    const { top, bottom, left, right } = event.data;
+    onScreen = { top: Number(top), bottom: Number(bottom), left: Number(left ?? 0), right: Number(right ?? innerWidth) };
+    const requested = { rows: Math.max(0, Math.min(8, Math.floor(Number(event.data.rows) || 0))),
+      width: Math.max(1, onScreen.right - onScreen.left) || Infinity };
+    if (requested.rows !== grid.rows || (requested.rows && requested.width !== grid.width)) {
+      grid = requested;
+      setGrid?.(grid);
+    }
     onScreenChange?.();
   });
   if (window.parent !== window) post({ type: 'viewport-request' });
@@ -1123,7 +1160,7 @@ export async function startRender(root: HTMLElement) {
       if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + inspect.spread + ' does not exist in this book.');
       inspection = inspectElements(sheets[index], spreads[index], template, format, inspect);
     }
-    if (edit) layoutBook(root, [...validated].map(([spread, { sheet }]) => ({ spread, sheet })), view);
+    if (edit) setGrid = layoutBook(root, [...validated].map(([spread, { sheet }]) => ({ spread, sheet })), view, grid);
     if (lazy) {
       const load = photoLoader(root, () => onScreen);
       let timer: ReturnType<typeof setTimeout> | undefined;

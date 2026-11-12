@@ -10,7 +10,7 @@ import type { FSWatcher } from 'node:fs';
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, extname, join, relative } from 'node:path';
 import { channels, desktopScheme, renderOrigin } from '../src/desktop';
-import type { ExportMode, ImportRequest, ProjectChange, ProjectSummary, Result } from '../src/desktop';
+import type { CanvasLayout, ExportMode, ImportRequest, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
 import type { RenderProject } from '../src/project';
 import { printBook, saveProof } from './export';
@@ -73,6 +73,7 @@ export class DocumentSession {
   private renderIds = new Set<string>();
   sidebar = true;
   inspector = true;
+  layout: CanvasLayout = { mode: 'vertical', rows: 2 };
 
   constructor(readonly window: BrowserWindow, book: OpenProject, private cache: string,
     private renders: RenderSessions, private unlockProject: ProjectLock | undefined,

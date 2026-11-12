@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { gridRows } from './desktop';
+import type { CanvasLayout } from './desktop';
 import type { PointerEvent } from 'react';
 
 type Side = 'left' | 'right';
@@ -41,4 +43,42 @@ export function PanelDivider({ side, width, resize, onResizing }: { side: Side; 
         event.preventDefault(); resize(side, width + (event.key === 'ArrowRight' ? 10 : -10) * (side === 'left' ? 1 : -1));
       }
     }} />;
+}
+
+// The canvas layout of each book window, remembered per book like the panel sizes. A book opened for the first
+// time starts with the layout used last.
+const layoutKey = 'imageflow.canvas-layout.v1';
+const defaultLayout: CanvasLayout = { mode: 'vertical', rows: 2 };
+type SavedLayouts = { last?: CanvasLayout; books?: Record<string, CanvasLayout> };
+function validLayout(value: unknown): CanvasLayout | undefined {
+  const layout = value as Partial<CanvasLayout> | undefined;
+  if (!layout || (layout.mode !== 'vertical' && layout.mode !== 'grid')) return undefined;
+  return { mode: layout.mode, rows: gridRows.includes(layout.rows as typeof gridRows[number]) ? layout.rows! : defaultLayout.rows };
+}
+function savedLayouts(): SavedLayouts {
+  try {
+    const saved = JSON.parse(localStorage.getItem(layoutKey) ?? '{}');
+    return saved && typeof saved === 'object' ? saved : {};
+  } catch { return {}; }
+}
+export function useCanvasLayout(book?: string) {
+  const [layout, setLayout] = useState<CanvasLayout>(() => validLayout(savedLayouts().last) ?? defaultLayout);
+  const [loaded, setLoaded] = useState<string>();
+  if (book && loaded !== book) {
+    // Adopt the book's own layout while rendering, so its first frame is already laid out that way.
+    const saved = savedLayouts();
+    setLoaded(book);
+    setLayout(validLayout(saved.books?.[book]) ?? validLayout(saved.last) ?? layout);
+  }
+  useEffect(() => {
+    if (!book || loaded !== book) return;
+    try {
+      const saved = savedLayouts();
+      const books = { ...saved.books, [book]: layout };
+      // Keep the most recent books only.
+      const recent = Object.fromEntries(Object.entries(books).filter(([key]) => key !== book).slice(-49).concat([[book, layout]]));
+      localStorage.setItem(layoutKey, JSON.stringify({ last: layout, books: recent }));
+    } catch { /* Preferences are optional. */ }
+  }, [book, loaded, layout]);
+  return [layout, setLayout] as const;
 }
