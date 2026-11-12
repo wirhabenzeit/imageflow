@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          # Check the oldest supported LTS line in package.json's engines.node.
+          node-version: '22.x'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:unit
+
+  desktop:
+    # Keep private-repository PRs from consuming macOS minutes.
+    if: github.event.repository.private == false || github.event_name == 'push'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      IMAGEFLOW_HIDE_WINDOW: '1'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+          cache: npm
+      - name: Check Apple silicon runner
+        run: node -e "if (process.arch !== 'arm64') throw new Error('Desktop CI requires an arm64 runner')"
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/electron-cache
+            ~/Library/Caches/electron
+          key: ${{ runner.os }}-${{ runner.arch }}-electron-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Install PDF test tools
+        run: brew install poppler
+      - run: npm run test:desktop
