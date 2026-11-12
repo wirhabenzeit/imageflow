@@ -195,9 +195,12 @@ export type SpreadDeclaration = {
 };
 /** Rejects properties a declaration does not have, such as a misspelt `flowOrdr`, in object literals and helpers alike. */
 type Exact<T, Allowed> = { [X in Exclude<keyof T, keyof Allowed>]: never };
+/** Rejects keys a parameter of its type does not have, such as `mutliline`, also in objects written without `p`. */
+type ParametersChecked<P> = { [K in keyof P]: Exact<P[K], Extract<Parameter, { type: P[K] extends { type: infer T } ? T : never }>> };
+type OwnParametersChecked<T> = T extends { parameters: infer P } ? { parameters: ParametersChecked<P> } : unknown;
 /** Types each element's `controls` and `editor.parameters` with that element's own parameter IDs. */
-type ElementsChecked<E> = { [K in keyof E]: { controls?: Controls<ParameterKeys<E[K]>>; editor?: ElementEditor<ParameterKeys<E[K]>> } & Exact<E[K], ElementDeclaration> };
-type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K]>> } & Exact<B[K], BoxDeclaration> };
+type ElementsChecked<E> = { [K in keyof E]: { controls?: Controls<ParameterKeys<E[K]>>; editor?: ElementEditor<ParameterKeys<E[K]>> } & Exact<E[K], ElementDeclaration> & OwnParametersChecked<E[K]> };
+type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K]>> } & Exact<B[K], BoxDeclaration> & OwnParametersChecked<B[K]> };
 
 // Anchors
 
@@ -378,7 +381,7 @@ export type SpreadBuilder<D extends Parameters> = <
   label: string;
   /** `left` or `right` for a single page at the start or end of the book. Default `spread`. */
   span?: Span;
-  parameters?: P;
+  parameters?: P & ParametersChecked<P>;
   /** Arranges the controls of this layout's own parameters in the sidebar. */
   controls?: Controls<keyof P & string>;
   boxes?: B & BoxesChecked<B>;
@@ -401,7 +404,7 @@ type TemplateBase<D extends Parameters> = {
    */
   requires?: readonly Capability[];
   /** Book settings, shown in Book settings and read through `ctx.document`. */
-  parameters?: D;
+  parameters?: D & ParametersChecked<D>;
 };
 /**
  * Declare one `format`, or several named `formats` the user chooses between in Book settings (`defaultFormat`,
@@ -412,6 +415,8 @@ type FormatChoice<F extends string> =
   | { format: PrintFormat; formats?: never; defaultFormat?: never }
   | { formats: { [K in F]: PrintFormat }; defaultFormat?: NoInfer<F>; format?: never };
 type Missing<D, Typed> = Exclude<keyof Typed, keyof D> & string;
+/** Parameters both declare whose template values a spread typed with `Typed` could not accept, such as a wider enum. */
+type Mismatched<D, Typed> = { [K in keyof Typed & keyof D]: [ParameterValue<D[K]>] extends [ParameterValue<Typed[K]>] ? never : K }[keyof Typed & keyof D] & string;
 /**
  * A spread typed with `spreadFor(document)` must not read document parameters the template does not declare: at
  * runtime they would be undefined.
@@ -419,12 +424,14 @@ type Missing<D, Typed> = Exclude<keyof Typed, keyof D> & string;
 type TypedWith<T> = typeof typedDocument extends keyof T ? NonNullable<T[typeof typedDocument & keyof T]> : {};
 type DocumentCheck<S, D> = {
   // Untyped spreads (`any`) are not checked.
-  [K in keyof S]: (0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never] ? unknown
+  [K in keyof S]: (0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never]
+    ? [Mismatched<D, TypedWith<S[K]>>] extends [never] ? unknown
+      : { [typedDocument]: `Document parameter ${Mismatched<D, TypedWith<S[K]>>} is declared differently in the template's parameters and in spreadFor()` }
     : { [typedDocument]: `Declare document parameter ${Missing<D, TypedWith<S[K]>>} in the template's parameters, or remove it from spreadFor()` })
     & SpreadChecked<S[K]>;
 };
 /** A spread written as a plain object gets the same unknown-property checks as one from the builder. */
-type SpreadChecked<T> = 0 extends 1 & T ? unknown : Exact<T, SpreadDefinition<any>>
+type SpreadChecked<T> = 0 extends 1 & T ? unknown : Exact<T, SpreadDefinition<any>> & OwnParametersChecked<T>
   & (T extends { boxes: infer B } ? { boxes: BoxesChecked<B> } : unknown)
   & (T extends { elements: infer E } ? { elements: ElementsChecked<E> } : unknown);
 
@@ -460,7 +467,7 @@ export function defineTemplate<
  *     export const document = { paper: p.enum({ label: 'Paper', default: 'warm', options: ['warm', 'white'] }) };
  *     export const spread = spreadFor(document);
  */
-export function spreadFor<const D extends Parameters>(document: D): SpreadBuilder<D>;
+export function spreadFor<const D extends Parameters>(document: D & ParametersChecked<D>): SpreadBuilder<D>;
 
 // Components
 
@@ -496,15 +503,15 @@ export function Element(props: Styling & Placement & EditMarker & IssueMarker & 
  * `boxes: { hero: box.photo('Main photo', { caption }), body: box.markdown('Story', { flowOrder: 1 }) }`.
  */
 export const box: {
-  photo<const P extends Parameters = {}>(label: string, parameters?: P, options?: { controls?: Controls<keyof P & string> }):
+  photo<const P extends Parameters = {}>(label: string, parameters?: P & ParametersChecked<P>, options?: { controls?: Controls<keyof P & string> }):
     { type: 'photo'; label: string; parameters: P; controls?: Controls<keyof P & string> };
-  markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P; controls?: Controls<keyof P & string> }):
+  markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string> }):
     { type: 'markdown'; label: string; parameters: P; flowOrder?: number; controls?: Controls<keyof P & string> };
   /**
    * Several photo boxes with explicit IDs, typed without casts: `boxes: box.photos(['one', 'two'], (id, i) => 'Photo ' + (i + 1))`.
    * The IDs are saved identities, so list them literally and never derive them from content.
    */
-  photos<const K extends string, const P extends Parameters = {}>(ids: readonly K[], label: (id: K, index: number) => string, parameters?: P):
+  photos<const K extends string, const P extends Parameters = {}>(ids: readonly K[], label: (id: K, index: number) => string, parameters?: P & ParametersChecked<P>):
     { [Id in K]: { type: 'photo'; label: string; parameters: P } };
 };
 
