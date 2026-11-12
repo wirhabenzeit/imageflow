@@ -79,7 +79,16 @@ async function closeWindow(page) {
 }
 async function checkAppearance(page, source) {
   await page.waitForFunction(async (appearance) => (await window.imageflow.getSettings()).value?.appearance === appearance, source);
-  assert.equal(await app.evaluate(({ nativeTheme }) => nativeTheme.themeSource), source);
+  // Reading the persisted setting can beat the update handler applying it to nativeTheme.
+  const applied = await app.evaluate(({ nativeTheme }, source) => new Promise((resolve) => {
+    const deadline = Date.now() + 20000;
+    const poll = () => {
+      if (nativeTheme.themeSource === source || Date.now() >= deadline) return resolve(nativeTheme.themeSource);
+      setTimeout(poll, 20);
+    };
+    poll();
+  }), source);
+  assert.equal(applied, source);
   const dark = await app.evaluate(({ nativeTheme }) => nativeTheme.shouldUseDarkColors);
   await page.waitForFunction((dark) => matchMedia('(prefers-color-scheme: dark)').matches === dark &&
     getComputedStyle(document.querySelector('.studio')).backgroundColor === (dark ? 'rgb(37, 37, 37)' : 'rgb(245, 245, 245)'), dark);
