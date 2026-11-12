@@ -92,7 +92,7 @@ export async function checkProject(
     phase = 'template';
     // A rejected check may have read changed photo bytes. Never let its renditions poison a later check.
     privateCache = await mkdtemp(join(fallbackCache, 'check-'));
-    const book = await loadProject(source.folder, privateCache, true);
+    const book = await loadProject(source.folder, privateCache, true, true);
     loaded = book;
     if (!await inputsMatch()) {
       throw new ProjectRevisionError('source-changed');

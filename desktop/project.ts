@@ -15,6 +15,7 @@ import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave 
 import { sourceEntries, sourcePath, sourceLinked, sourceFolder } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
+import { approveSource } from './source-access';
 import { runtimeExports } from '../src/runtime-exports';
 
 export const assetTypes: Record<string, string> = {
@@ -179,7 +180,7 @@ export type OpenProject = ProjectFiles & {
 export const maximumFileSize = 20 * 1024 * 1024;
 const fileName = (path: string) => basename(path).replace(/^fl-[0-9a-f-]{12}-/, '');
 
-export async function loadProject(path: string, fallback: string, readOnly = false): Promise<OpenProject> {
+export async function loadProject(path: string, fallback: string, readOnly = false, pinSources = false): Promise<OpenProject> {
   const folder = await realpath(path);
   await recoverProjectSave(folder, { readOnly });
   const [{ document: project, source: projectFile }, { document: photoIndex, source: photoFile }] = await Promise.all([
@@ -187,10 +188,10 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   ]);
   const assets = await bundleTemplate(folder);
   const cache = fallback;
-  return readContent({ folder, assets, cache, readOnly, project, photoIndex, manifests: { 'project.json': projectFile, 'photos.json': photoFile } });
+  return readContent({ folder, assets, cache, readOnly, project, photoIndex, manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
 }
 
-async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>): Promise<OpenProject> {
+async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>, pinSources = false): Promise<OpenProject> {
   const photos = new Map<string, ProjectPhoto>();
   const texts: Record<string, string> = {};
   const files: Record<string, ProjectFile> = {};
@@ -201,13 +202,16 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   const store = await SourceStore.forBook(book.folder, book.cache);
   for (let i = 0; i < entries.length; i += 8) {
     await Promise.all(entries.slice(i, i + 8).map(async (source) => {
-      const { status, stored } = await store.resolve(book.folder, source);
+      const { status, stored } = await store.resolve(book.folder, source, { pin: pinSources, cache: book.cache });
       sources[source.key] = status;
       if (status.problem && source.kind !== 'file') problems.push(source.kind + ' ' + source.id + ' · ' + status.problem);
       if (source.kind === 'photo') {
         if (stored) {
           const { path: _path, linked: _linked, ...metadata } = book.photoIndex[source.id];
-          photos.set(source.id, { ...metadata, ...await photoDetails(stored.snapshot), original: stored.snapshot, key: digestBytes(Buffer.from(stored.digest + ':rendition-3')),
+          const details = await photoDetails(stored.snapshot, null);
+          photos.set(source.id, { ...metadata, ...details, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
+            width: stored.width!, height: stored.height!, original: stored.snapshot,
+            key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
             cache: renditionCacheFor(book.cache), ...(status.problem ? { problem: status.problem } : {}) });
         }
       } else if (source.kind === 'markdown') {
@@ -301,6 +305,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       const path = join(book.folder, relativePath);
       const original = await realpath(file);
       const linked = mode === 'link' && !isInside(book.folder, original);
+      if (linked) await approveSource(book.folder, { key: request.kind + ':' + id, kind: request.kind, path: original, linked }, request.accept);
       if (!linked) { await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path); }
       if (request.kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)) };
       else registry[id] = linked ? { path: original, linked: true } : relativePath;

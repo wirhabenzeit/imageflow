@@ -1175,7 +1175,7 @@ export function App() {
       </div>
       {summary && (!panels.rightHidden ? <PanelDivider side="right" width={panels.right} resize={resizePanel} onResizing={setResizing} /> : <div />)}
       <div className={'inspector-host' + (panels.rightHidden ? ' is-collapsed' : '')} inert={panels.rightHidden} aria-hidden={panels.rightHidden || !summary}>
-      {summary && api && sourceManager && <SourceManager api={api} summary={summary} adopt={(next) => adopt(next)} close={() => setSourceManager(false)} />}
+      {summary && api && sourceManager && <SourceManager api={api} summary={summary} template={template} adopt={(next) => adopt(next)} close={() => setSourceManager(false)} />}
     {summary && api && saveCopy && <SaveCopy api={api} close={() => setSaveCopy(false)} />}
     {summary && spread && <Inspector summary={writable || summary.readOnly ? summary : { ...summary, readOnly: true }}
         spread={spread} source={selectedSource} template={template} render={render ?? lastReady}

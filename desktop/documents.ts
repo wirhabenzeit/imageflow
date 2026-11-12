@@ -16,12 +16,13 @@ export async function documentIdentity(path: string) {
   return { folder, identity: [info.dev, info.ino].join(':') };
 }
 
-export async function createDocument(destination: string, starter: string) {
+export async function createDocument(destination: string, starter: string | ((stage: string) => Promise<void>)) {
   const folder = join(await realpath(dirname(destination)), basename(documentPath(destination)));
   const staging = join(dirname(folder), '.imageflow-create-' + randomUUID());
   let reserved = false;
   try {
-    await cp(starter, staging, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+    if (typeof starter === 'string') await cp(starter, staging, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+    else { await mkdir(staging); await starter(staging); }
     const file = join(staging, 'project.json');
     const project = JSON.parse(await readFile(file, 'utf8'));
     project.title = basename(folder).slice(0, -documentExtension.length);

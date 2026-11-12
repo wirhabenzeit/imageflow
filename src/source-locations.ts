@@ -11,7 +11,7 @@ export type SourceKey = `${SourceKind}:${string}`;
 export const sourcePath = (source: SourceReference | { path: string }) => typeof source === 'string' ? source : source.path;
 export const sourceLinked = (source: SourceReference | { path: string; linked?: boolean }) => typeof source !== 'string' && 'linked' in source && source.linked === true;
 export type SourceEntry = { key: SourceKey; kind: SourceKind; id: string; path: string; linked: boolean };
-export type SourceStatus = SourceEntry & { state: 'available' | 'missing' | 'unreadable' | 'denied'; problem?: string; cached?: boolean; digest?: string };
+export type SourceStatus = SourceEntry & { state: 'available' | 'missing' | 'unreadable' | 'denied' | 'unapproved'; problem?: string; cached?: boolean; digest?: string };
 export const sourceFolder = (kind: SourceKind) => kind === 'photo' ? 'photos' : kind === 'markdown' ? 'texts' : 'files';
 export function sourceEntries(files: ProjectFiles): SourceEntry[] {
   return [

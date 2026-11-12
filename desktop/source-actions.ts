@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, extname, join } from 'node:path';
+import { copyFile, cp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import type { ProjectFiles } from '../src/project';
 import { sourceEntries, sourceFolder } from '../src/source-locations';
 import type { ImportMode, SourceEntry } from '../src/source-locations';
@@ -11,6 +11,7 @@ import type { OpenProject } from './project';
 import { CommittedProjectSaveError } from './persistence';
 import { captureProjectInputs } from './revisions';
 import { digestBytes, SourceStore, within } from './source-store';
+import { approveSource, approvedExtensions, transferSourceAccess } from './source-access';
 
 const filesOf = (book: OpenProject): ProjectFiles => structuredClone({ project: book.project, photoIndex: book.photoIndex });
 function reference(files: ProjectFiles, source: SourceEntry, path: string, linked: boolean) {
@@ -33,10 +34,11 @@ async function managedCopy(folder: string, source: SourceEntry, snapshot: string
 }
 
 /** Source identity and book metadata survive changing location. External files are never modified. */
-export async function relocateSource(book: OpenProject, key: string, selection?: string, copy = false) {
+export async function relocateSource(book: OpenProject, key: string, selection?: string, copy = false, accept?: string[]) {
   const source = sourceEntries(book).find((source) => source.key === key);
   if (!source) throw new Error('This source is no longer registered.');
   const chosen = selection ? { ...source, path: await realpath(selection), linked: true } : source;
+  if (selection) await approveSource(book.folder, chosen, accept ?? await approvedExtensions(book.folder, key));
   const store = await SourceStore.forBook(book.folder, book.cache);
   const resolved = await store.resolve(book.folder, chosen);
   if (resolved.status.state !== 'available' || !resolved.stored) throw new Error(resolved.status.problem ?? 'The selected source is unavailable.');
@@ -48,7 +50,7 @@ export async function relocateSource(book: OpenProject, key: string, selection?:
     reference(files, source, path, linked);
     const next = await updateProject(book, files, true);
     await store.settled();
-    return next;
+    return next === book ? await loadProject(book.folder, book.cache, book.readOnly) : next;
   } catch (error) {
     if (!(error instanceof CommittedProjectSaveError)) await Promise.all(copied.map((path) => rm(path, { force: true })));
     throw error;
@@ -106,9 +108,7 @@ export async function relinkFolder(book: OpenProject, directory: string) {
 export async function saveDocumentCopy(source: OpenProject, destination: string, includeAssets: boolean, importMode?: ImportMode) {
   const before = await captureProjectInputs(source.folder);
   const book = await loadProject(source.folder, source.cache, true);
-  const work = await realpath(await mkdtemp(join(source.cache, 'save-copy-')));
-  const stage = join(work, 'book');
-  try {
+  const result = await createDocument(destination, async (stage) => {
     await cp(book.folder, stage, { recursive: true, dereference: true, filter: async (path) => {
       if (basename(path) === '.imageflow') return false;
       const actual = await realpath(path);
@@ -120,9 +120,7 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
     for (const entry of sourceEntries(book)) {
       const { status, stored } = await store.resolve(book.folder, entry);
       if (includeAssets && status.state !== 'available') throw new Error('Cannot include all assets. Locate or restore ' + basename(entry.path) + '.');
-      if (!entry.linked && stored && status.state === 'available') {
-        await copyFile(stored.snapshot, join(stage, entry.path));
-      } else if (includeAssets && entry.linked && stored) {
+      if (includeAssets && entry.linked && stored) {
         reference(files, entry, await managedCopy(stage, entry, stored.snapshot, []), false);
       }
     }
@@ -131,6 +129,7 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
     await writeFile(join(stage, 'photos.json'), JSON.stringify(files.photoIndex, null, 2) + '\n');
     const after = await captureProjectInputs(source.folder);
     if (before.revision !== after.revision || before.observation !== after.observation) throw new Error('Sources changed while preparing the saved copy. Retry after the external save finishes.');
-    return await createDocument(destination, stage);
-  } finally { await rm(work, { recursive: true, force: true }); }
+  });
+  if (!includeAssets) await transferSourceAccess(book.folder, result, sourceEntries(book));
+  return result;
 }

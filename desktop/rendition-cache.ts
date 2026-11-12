@@ -1,5 +1,5 @@
 import { lstat, mkdir, readdir, realpath, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const renditionName = /^[a-f0-9]{64}-(?:thumb|preview|export)(?:-\d+)?\.(?:jpg|png)$/;
 let configured: { scratch: string; persistent: string } | undefined;
@@ -11,6 +11,9 @@ export async function configureRenditionCache(scratch: string, persistent: strin
   return configured.persistent;
 }
 export function renditionCacheFor(scratch: string) { return configured?.scratch === scratch ? configured.persistent : scratch; }
+export function isRenditionPath(path: string, scratch: string) {
+  return dirname(path) === renditionCacheFor(scratch) || dirname(path) === configured?.persistent;
+}
 
 /** Run between sessions. Leave unrelated files, staging directories and symlinks alone. */
 export async function pruneRenditions(folder: string, maximumBytes = 512 * 1024 * 1024) {

@@ -78,7 +78,7 @@ try {
   await settle();
   await w.waitForFunction(() => {
     const frame = document.querySelector('iframe.book-frame-layouts[data-current][data-ready]');
-    return frame?.getAttribute('src')?.includes('spread=staying') && !document.querySelector('[aria-label=Layout][aria-busy=true]');
+    return frame?.getAttribute('src')?.includes('spread=settlements') && !document.querySelector('[aria-label=Layout][aria-busy=true]');
   });
   const stable = await canvas();
   const fieldBefore = await w.locator('.inspector .field').first().boundingBox();

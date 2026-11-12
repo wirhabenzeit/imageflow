@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDocument, documentIdentity, RecentDocuments } from '../desktop/documents';
 import { templateFolder, textSourcePath } from '../desktop/document-actions';
+import { approveSource } from '../desktop/source-access';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-documents-')));
@@ -97,6 +98,25 @@ test('document editing actions reject escaped, executable and non-file Markdown 
   await rm(join(book, 'template'));
   await symlink(starter, join(book, 'template'));
   await assert.rejects(templateFolder(book), /real directory inside/);
+});
+
+test('linked text editing allows selected external Markdown while rejecting scripts, bundles and self-links', async (t) => {
+  const { root, starter } = await fixture(t);
+  const book = await createDocument(join(root, 'Linked'), starter);
+  const markdown = join(root, 'external.md');
+  await writeFile(markdown, '# External');
+  await assert.rejects(textSourcePath(book, { path: markdown, linked: true }), /approve access/);
+  await approveSource(book, { key: 'markdown:editor', kind: 'markdown', path: markdown, linked: true });
+  assert.equal(await textSourcePath(book, { path: markdown, linked: true }), markdown);
+  const script = join(root, 'run.command');
+  await writeFile(script, 'echo should-not-run');
+  const alias = join(root, 'script.md');
+  await symlink(script, alias);
+  const bundle = join(root, 'Bundle.md');
+  await mkdir(bundle);
+  for (const path of [script, alias, bundle, join(book, 'project.json')]) {
+    await assert.rejects(textSourcePath(book, { path, linked: true }));
+  }
 });
 
 test('document identity follows a move and aliases but distinguishes a Finder duplicate', async (t) => {

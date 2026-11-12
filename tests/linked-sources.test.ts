@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { chmod, cp, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import sharp from 'sharp';
-import { configureSourceStore } from '../desktop/source-store';
+import { configureSourceStore, pruneSourceCache, SourceStore } from '../desktop/source-store';
+import { approveSource, configureSourceAccess } from '../desktop/source-access';
+import { configureRenditionCache } from '../desktop/rendition-cache';
+import { photoFile } from '../desktop/photos';
+import { isUnavailableSource } from '../src/source-diagnostics';
 import { importIntoProject, loadProject, updateProject } from '../desktop/project';
 import { collectSources, relocateSource, relinkFolder, saveDocumentCopy } from '../desktop/source-actions';
 import { captureProjectInputs } from '../desktop/revisions';
@@ -19,6 +23,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const cache = join(root, 'cache');
   await Promise.all([mkdir(external), mkdir(cache)]);
   configureSourceStore(join(root, 'source-cache'));
+  configureSourceAccess(join(root, 'source-access'));
   await cp(resolve('sample/starter'), folder, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
   const photo = join(external, 'photo.png');
   const text = join(external, 'story.md');
@@ -44,6 +49,14 @@ test('document default links all three source kinds while per-import copy remain
   const copied = await importIntoProject(param.book, { kind: 'markdown', mode: 'copy' }, [other]);
   assert.equal(sourceEntries(copied.book).find((entry) => entry.id === copied.imported[0])?.linked, false);
   assert.equal(sourceEntries(copied.book).filter((entry) => entry.linked).length, 3);
+});
+
+test('proof source warnings and page marking use diagnostic codes rather than unrelated wording', () => {
+  assert.equal(isUnavailableSource({ code: 'template:missing-caption' }), false);
+  assert.equal(isUnavailableSource({ code: 'layout-error' }), false);
+  assert.equal(isUnavailableSource({}), false);
+  assert.equal(isUnavailableSource({ code: 'source-unavailable' }), true);
+  assert.equal(isUnavailableSource({ code: 'file-unreadable' }), true);
 });
 
 test('atomic external replacements refresh dimensions and revisions without changing IDs, crops or immutable snapshots', async (t) => {
@@ -121,6 +134,7 @@ test('relinking repairs an ID across undo and batch matching refuses ambiguous c
   await rename(f.text, moved);
   book = await relocateSource(book, entry.key, moved);
   session.record(book, 'Relink', false);
+  assert.equal(session.history.undo, 'Rename', 'Relinking does not consume an Undo step');
   const undone = await session.undo('undo');
   assert.equal(sourceEntries(undone).find((item) => item.key === entry.key)!.path, moved);
   const candidates = join(f.root, 'candidates');
@@ -130,6 +144,104 @@ test('relinking repairs an ID across undo and batch matching refuses ambiguous c
   const result = await relinkFolder(await loadProject(f.folder, f.cache), candidates);
   assert.equal(result.repaired, 0);
   assert.deepEqual(result.ambiguous, [entry.key]);
+});
+
+test('unapproved manifests cannot load, hash, collect, copy or share external bytes, including after a book is duplicated', async (t) => {
+  const f = await fixture(t);
+  const marker = 'dummy-private-fixture';
+  const secret = join(f.external, 'private.gpx');
+  await writeFile(secret, marker);
+  const files = structuredClone({ project: f.book.project, photoIndex: f.book.photoIndex });
+  files.project.files.unselected = { path: secret, linked: true };
+  files.project.texts.unselected = { path: f.text, linked: true };
+  files.photoIndex.unselected = { path: f.photo, linked: true };
+  const untrusted = await updateProject(f.book, files, true);
+  for (const kind of ['photo', 'markdown', 'file']) assert.equal(untrusted.sources![kind + ':unselected'].state, 'unapproved');
+  assert.equal(untrusted.files.unselected.text, undefined);
+  assert.equal(untrusted.texts.unselected, undefined);
+  assert.equal(untrusted.photos.has('unselected'), false);
+  const before = await captureProjectInputs(f.folder);
+  await writeFile(secret, 'changed-private-fixture');
+  assert.deepEqual(await captureProjectInputs(f.folder), before, 'Unapproved target bytes never enter the revision hash');
+  await assert.rejects(collectSources(untrusted), /Locate or restore/);
+  await assert.rejects(saveDocumentCopy(untrusted, join(f.root, 'Rejected.imageflow'), true), /Locate or restore/);
+  const withLinks = await saveDocumentCopy(untrusted, join(f.root, 'Links.imageflow'), false);
+  assert.equal((await loadProject(withLinks, f.cache)).sources!['file:unselected'].state, 'unapproved');
+  await assert.rejects(approveSource(f.folder, { key: 'file:unselected', kind: 'file', path: secret, linked: true }, ['.csv']), /accepted by the parameter/);
+  const repaired = await relocateSource(untrusted, 'file:unselected', secret, false, ['.gpx']);
+  assert.equal(repaired.files.unselected.text, 'changed-private-fixture');
+  configureSourceAccess(join(f.root, 'source-access')); // Restart reads approvals from app-owned state.
+  assert.equal((await loadProject(f.folder, f.cache)).files.unselected.text, 'changed-private-fixture');
+  const clone = join(f.root, 'Downloaded.imageflow');
+  await cp(f.folder, clone, { recursive: true });
+  assert.equal((await loadProject(clone, f.cache)).sources!['file:unselected'].state, 'unapproved');
+  await rm(secret); await symlink(f.file, secret);
+  assert.equal((await loadProject(f.folder, f.cache)).sources!['file:unselected'].state, 'unapproved', 'A symlink cannot redirect an approved locator');
+});
+
+test('owned photos avoid persistent originals, allow large originals, and use private job snapshots plus cached previews', async (t) => {
+  const f = await fixture(t);
+  await configureRenditionCache(f.cache, join(f.root, 'renditions'));
+  const index = f.book.photoIndex.shore;
+  const actual = join(f.folder, index.path);
+  assert.ok((await loadProject(f.folder, f.cache)).photos.get('shore')!.original.startsWith(f.folder));
+  const content = join(f.root, 'source-cache/content');
+  assert.ok((await readdir(content)).every((name) => !/\.(jpg|jpeg|png|webp)$/.test(name)), 'Normal open does not duplicate owned photos');
+  // A valid JPEG with trailing padding models a panorama above the import limit without huge test pixels.
+  const handle = await open(actual, 'r+');
+  await handle.truncate(51 * 1024 * 1024); await handle.close();
+  const book = await loadProject(f.folder, f.cache);
+  assert.equal(book.sources!['photo:shore'].state, 'available');
+  assert.ok((await captureProjectInputs(f.folder)).revision);
+  const preview = await photoFile(book.photos.get('shore')!, 'preview');
+  const jobCache = join(f.cache, 'job'); await mkdir(jobCache);
+  const pinned = await loadProject(f.folder, jobCache, true, true);
+  assert.ok(pinned.photos.get('shore')!.original.startsWith(jobCache));
+  assert.notEqual(pinned.photos.get('shore')!.original, actual);
+  const pinnedInfo = await stat(pinned.photos.get('shore')!.original);
+  assert.equal(pinnedInfo.size, 51 * 1024 * 1024);
+  const replacement = join(f.folder, 'replacement.jpg');
+  await sharp({ create: { width: 60, height: 40, channels: 3, background: 'blue' } }).jpeg().toFile(replacement);
+  await rename(replacement, actual);
+  await assert.rejects(photoFile(book.photos.get('shore')!, 'thumb'), /original photo changed/);
+  await rm(actual);
+  const missing = await loadProject(f.folder, f.cache);
+  assert.equal(missing.sources!['photo:shore'].state, 'missing');
+  assert.equal(missing.sources!['photo:shore'].cached, true);
+  assert.equal(missing.photos.get('shore')!.original, preview);
+  assert.equal(missing.photos.get('shore')!.width, book.photos.get('shore')!.width);
+});
+
+test('stores share concurrent updates and bounded cleanup preserves open inputs while evicting closed snapshots', async (t) => {
+  const f = await fixture(t);
+  let book = (await importIntoProject(f.book, { kind: 'markdown', mode: 'link' }, [f.text])).book;
+  book = (await importIntoProject(book, { kind: 'photo', mode: 'link' }, [f.photo])).book;
+  const one = await SourceStore.forBook(f.folder, f.cache);
+  const two = await SourceStore.forBook(f.folder, f.cache);
+  const entries = sourceEntries(book).filter((entry) => entry.linked);
+  await writeFile(f.text, '# A concurrent new edition');
+  await sharp({ create: { width: 70, height: 50, channels: 3, background: 'green' } }).png().toFile(f.photo);
+  const updates = await Promise.all(entries.map(async (entry, i) => {
+    const store = i ? one : two;
+    const result = await store.resolve(f.folder, entry); await store.settled();
+    return { key: entry.key, digest: result.status.digest };
+  }));
+  const index = JSON.parse(await readFile(join(f.root, 'source-cache/books', (await readdir(join(f.root, 'source-cache/books')))[0]), 'utf8'));
+  for (const update of updates) assert.equal(index[update.key].digest, update.digest, 'Both concurrent updates survive index publication');
+  const snapshots = [...one.pins];
+  const abandoned = join(f.root, 'source-cache/content/abandoned.tmp');
+  const active = join(f.root, 'source-cache/content/active.tmp');
+  await writeFile(abandoned, 'old interrupted write'); await utimes(abandoned, 1, 1);
+  await writeFile(active, 'current write');
+  await pruneSourceCache([f.folder], 0);
+  await assert.rejects(stat(abandoned), { code: 'ENOENT' });
+  await stat(active);
+  for (const path of snapshots) await stat(path);
+  await SourceStore.release(f.folder);
+  await pruneSourceCache([f.folder], 0);
+  for (const path of snapshots) await assert.rejects(stat(path), { code: 'ENOENT' });
+  const reopened = await loadProject(f.folder, f.cache);
+  assert.ok(entries.every((entry) => reopened.sources![entry.key].state === 'available'));
 });
 
 test('explicit Copy may import an already linked original as a separate owned source', async (t) => {

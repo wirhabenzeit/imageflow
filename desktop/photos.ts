@@ -6,12 +6,13 @@ import type { Photo } from '../src/project';
 
 export const photoExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 type Rendition = 'thumb' | 'preview' | 'export';
-export type ProjectPhoto = Photo & { original: string; cache: string; key: string; alpha: boolean; passthrough: boolean; problem?: string };
+export type ProjectPhoto = Photo & { original: string; cache: string; key: string; alpha: boolean; passthrough: boolean; problem?: string; observation?: string };
+const observation = (info: import('node:fs').BigIntStats) => [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
 
-export async function photoDetails(original: string) {
+export async function photoDetails(original: string, maximumBytes: number | null = 50 * 1024 * 1024) {
   if (!photoExtensions.has(extname(original).toLowerCase())) throw new Error('Use JPEG, PNG, or WebP images.');
   const info = await stat(original, { bigint: true });
-  if (!info.isFile() || info.size > 50n * 1024n * 1024n) throw new Error('Photos must be files up to 50 MB.');
+  if (!info.isFile() || (maximumBytes !== null && info.size > BigInt(maximumBytes))) throw new Error('Photos must be files up to 50 MB.');
   const metadata = await sharp(original).metadata();
   if (!metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still image.');
   const turned = (metadata.orientation ?? 1) >= 5;
@@ -20,6 +21,7 @@ export async function photoDetails(original: string) {
     height: turned ? metadata.width : metadata.height,
     alpha: !!metadata.hasAlpha,
     passthrough: metadata.format === 'jpeg' && !metadata.icc && metadata.space === 'srgb' && (metadata.orientation ?? 1) === 1,
+    observation: observation(info),
     key: createHash('sha256').update([original, info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs, 'rendition-2'].join(':')).digest('hex'),
   };
 }
@@ -28,9 +30,13 @@ const pending = new Map<string, Promise<string>>();
 
 // Export renditions are resampled to `width` pixels when the placement needs fewer pixels than the original has.
 export async function photoFile(photo: ProjectPhoto, rendition: Rendition, width?: number) {
-  if (await realpath(photo.original) !== photo.original) throw new Error('The original photo moved. Reload the project.');
   const resample = rendition === 'export' && width !== undefined && width < photo.width ? width : undefined;
-  if (rendition === 'export' && !resample && photo.passthrough) return photo.original;
+  const unchanged = async () => {
+    if (await realpath(photo.original) !== photo.original || (photo.observation && observation(await stat(photo.original, { bigint: true })) !== photo.observation)) {
+      throw new Error('The original photo changed. Reload the book.');
+    }
+  };
+  if (rendition === 'export' && !resample && photo.passthrough) { await unchanged(); return photo.original; }
   const extension = photo.alpha ? '.png' : '.jpg';
   const path = join(photo.cache, photo.key + '-' + rendition + (resample ? '-' + resample : '') + extension);
   if (pending.has(path)) return pending.get(path)!;
@@ -39,6 +45,7 @@ export async function photoFile(photo: ProjectPhoto, rendition: Rendition, width
       await access(path);
       return path;
     } catch {
+      await unchanged();
       await mkdir(photo.cache, { recursive: true });
       const staging = await mkdtemp(join(photo.cache, '.render-'));
       try {
@@ -52,6 +59,7 @@ export async function photoFile(photo: ProjectPhoto, rendition: Rendition, width
         if (photo.alpha) image.png(); else image.jpeg({ quality: rendition === 'export' ? 95 : 86, chromaSubsampling: rendition === 'export' ? '4:4:4' : '4:2:0' });
         const candidate = join(staging, 'photo' + extension);
         await image.toFile(candidate);
+        await unchanged();
         await rename(candidate, path);
         return path;
       } finally {

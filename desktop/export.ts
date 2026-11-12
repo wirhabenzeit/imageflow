@@ -7,6 +7,7 @@ import { formatSchema, pdfPoints, resolveFormat } from '../src/format';
 import { parseDocument } from '../src/project';
 import { issueText } from '../src/desktop';
 import type { ExportMode, Issue, RenderStatus } from '../src/desktop';
+import { isUnavailableSource } from '../src/source-diagnostics';
 
 const name = PDFName.of;
 
@@ -102,7 +103,7 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
       page.setCropBox(0, 0, widthPt, heightPt);
       page.setBleedBox(0, 0, widthPt, heightPt);
       page.setTrimBox(pdfPoints(leftBleed), pdfPoints(bleed.bottom), pdfPoints(trim.width * (side === 'spread' ? 2 : 1)), pdfPoints(trim.height));
-      if (mode === 'proof' && status.errors.some((issue) => ['source-unavailable', 'photo-missing', 'text-source-missing', 'file-unreadable', 'file-missing'].includes(issue.code ?? '') &&
+      if (mode === 'proof' && status.errors.some((issue) => isUnavailableSource(issue) &&
           (!issue.spread || issue.spread === status.units[index].spread))) {
         page.drawRectangle({ x: 0, y: 0, width: widthPt, height: 22, color: rgb(1, .91, .86), opacity: .96 });
         page.drawText('PROOF: ORIGINAL UNAVAILABLE - cached content or placeholder', { x: 8, y: 7, size: 8, color: rgb(.65, .08, .05) });

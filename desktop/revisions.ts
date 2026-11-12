@@ -6,6 +6,7 @@ import { access, open, readdir, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ProjectRevision, RevisionDiagnosticCode } from '../src/authoring';
 import { photoIndexSchema, projectSchema } from '../src/project';
+import { approvedSource } from './source-access';
 
 const manifests = ['project.json', 'photos.json'] as const;
 const contentFolders = ['template', 'texts', 'photos', 'files'] as const;
@@ -60,19 +61,21 @@ async function inspect(root: string, { path, folder, external }: Input): Promise
   const base = folder ? join(root, folder) : root;
   const candidate = external ?? resolve(root, path);
   const isTemplateRoot = path === 'template' && folder === 'template';
+  if (external && !await approvedSource(root, { key: path.slice(1).replace('/', ':'), kind: folder === 'photos' ? 'photo' : folder === 'texts' ? 'markdown' : 'file', path: external, linked: true })) return { kind: 'unavailable' };
   if (external ? !isAbsolute(external) : isAbsolute(path) || (!isTemplateRoot && !isInside(base, candidate))) {
     throw new ProjectRevisionError('source-outside-project', path);
   }
   try {
     const actual = await realpath(candidate);
+    if (external && actual !== external) return { kind: 'unavailable' };
     if (!external && (isTemplateRoot ? actual !== base : !isInside(base, actual))) {
       throw new ProjectRevisionError('source-outside-project', path);
     }
     const info = await stat(actual, { bigint: true });
     if (info.isFile()) {
       if (folder && folder !== 'template') {
-        const limit = folder === 'photos' ? 50 : folder === 'texts' ? 5 : 20;
-        if (info.size > BigInt(limit * 1024 * 1024)) return { kind: 'unavailable' };
+        const limit = folder === 'photos' ? external ? 50 : undefined : folder === 'texts' ? 5 : 20;
+        if (limit && info.size > BigInt(limit * 1024 * 1024)) return { kind: 'unavailable' };
         try { await access(actual, constants.R_OK); }
         catch { return { kind: 'unavailable' }; }
       }

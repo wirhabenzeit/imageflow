@@ -160,6 +160,31 @@ try {
   await writeFile(unused, photoBytes);
   await page.waitForFunction(async (id) => (await window.imageflow.currentProject()).value.sources['photo:' + id].state === 'available', unusedId);
   await reload(page);
+  // A shared manifest cannot approve a local file, even when its extension is valid for a parameter.
+  const unselected = join(external, 'NotChosen.gpx');
+  await writeFile(unselected, '<gpx><!-- private dummy fixture --></gpx>');
+  const manifestPath = join(folder, 'project.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.files.notchosen = { path: unselected, linked: true };
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+  await page.evaluate(() => window.imageflow.openProject('reload'));
+  await reload(page);
+  assert.equal((await current(page)).sources['file:notchosen'].state, 'unapproved');
+  const loadedFile = () => page.frameLocator('iframe.book-frame-book[data-current][data-ready]').locator('body').evaluate(async () =>
+    (await (await fetch(location.pathname + '/data')).json()).files.notchosen.text);
+  assert.equal(await loadedFile(), undefined);
+  const historyBeforeLocate = (await current(page)).history;
+  await app.evaluate(({ dialog }, filePath) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] }); }, unselected);
+  await menuAction(app, 'Manage Sources…');
+  const accessManager = page.getByRole('dialog', { name: 'Book sources' });
+  const unapprovedRow = accessManager.getByRole('row').filter({ hasText: 'NotChosen.gpx' });
+  await unapprovedRow.getByText('Locate to approve access', { exact: true }).waitFor();
+  await unapprovedRow.getByRole('button', { name: 'Locate…', exact: true }).click();
+  await unapprovedRow.getByText('Available', { exact: true }).waitFor();
+  assert.deepEqual((await current(page)).history, historyBeforeLocate, 'Locate does not add an empty Undo step');
+  await accessManager.getByRole('button', { name: 'Done', exact: true }).click();
+  await reload(page);
+  assert.match(await loadedFile(), /private dummy fixture/);
   // Save a Copy exposes collection as an explicit choice and opens an independent, portable document.
   const portable = join(work, 'Portable.imageflow');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, portable);
