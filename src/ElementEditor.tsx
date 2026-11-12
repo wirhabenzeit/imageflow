@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ImportMode } from './source-locations';
 import { renderOrigin } from './desktop';
 import type { TemplateInfo } from './desktop';
@@ -31,9 +31,9 @@ function editingContext(template: TemplateInfo, spread: SpreadState, element: st
 // as one edit (one Undo step). The element's other parameters are generated controls below the frame, in the same
 // draft, so the whole element is edited in one place. Layout parameters the editor declares are saved in the same
 // edit; they are the editor's own, so they get no generated control here or in the sidebar. File imports the editor asks for run here, in the app.
-export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, edit, close, importFile }: {
+export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, edit, close, importFile, host }: {
   project: string; template: TemplateInfo; spread: SpreadState; element: string; readOnly: boolean;
-  blocked?: string;
+  blocked?: string; host?: HTMLElement | null;
   edit: (change: Edit, notice?: string) => void; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
 }) {
@@ -42,6 +42,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const editor = definition?.editor;
   const dialog = useRef<HTMLDialogElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
+  const [placement, setPlacement] = useState<{ left: number; bottom: number; maxWidth: number; maxHeight: number }>();
   const draft = useRef<Values>({});
   const spreadDraft = useRef<Values>({});
   // The editor's draft as last reported, and the generated controls' own draft, for showing conditional controls.
@@ -79,9 +80,24 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     },
   });
 
+  // Native modal dialogs live above the normal page layout. Measure the canvas so they share the other item
+  // controls' bottom-center anchor, while keeping native focus handling and explicit Cancel/Done drafts.
+  useLayoutEffect(() => {
+    if (!host) return;
+    const measure = () => {
+      const bounds = host.getBoundingClientRect();
+      setPlacement({ left: bounds.left + bounds.width / 2, bottom: innerHeight - bounds.bottom + 16,
+        maxWidth: Math.max(0, bounds.width - 24), maxHeight: Math.max(0, bounds.height - 32) });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    window.addEventListener('resize', measure);
+    return () => { observer.disconnect(); window.removeEventListener('resize', measure); };
+  }, [host]);
   useEffect(() => {
-    if (dialog.current && !dialog.current.open) dialog.current.showModal();
-  }, []);
+    if (placement && dialog.current && !dialog.current.open) dialog.current.showModal();
+  }, [placement]);
 
   const owned = editor?.parameters ?? [];
   const saved = resolveParams(definition?.parameters ?? {}, spread.elements[element]?.params ?? {});
@@ -128,11 +144,15 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     if (ready && Object.keys(local).length) frame.current?.contentWindow?.postMessage({ type: 'editor-values', values: local }, renderOrigin);
   }, [ready, local]);
 
-  return <dialog ref={dialog} className="element-editor" aria-label={title} onClose={close}>
+  return <dialog ref={dialog} className="item-controls element-editor" style={placement} aria-label={title} onClose={close}
+    onKeyDown={(event) => {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); requestDone(); }
+    }}>
     <header className="ee-header">
       <h2>{title}</h2>
       {readOnly && <span className="muted">Sample projects are read-only.</span>}
     </header>
+    <div className="ee-body">
     <iframe ref={frame} className="element-editor-frame" title={title} src={source} style={{ height }} />
     {!ready && !error && <p className="ee-status muted">Loading the editor…</p>}
     {stale && <p className="ee-status error-text" role="alert">
@@ -148,6 +168,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
       <ControlList nodes={generated} field={(node, param) => <Field key={node.key} param={param} value={current[node.key]}
         description={node.description} change={(next) => setLocal((previous) => ({ ...previous, [node.key]: next }))} />} />
     </fieldset>}
+    </div>
     <footer className="ee-footer">
       <span className="muted">Esc cancels · ⌘↩ saves</span>
       <button type="button" onClick={() => dialog.current?.close()}>Cancel</button>

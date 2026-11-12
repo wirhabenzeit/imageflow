@@ -68,7 +68,7 @@ try {
     await editorDialog.waitFor();
     await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
     if (!sized) return;
-    // The dialog is centred, so it moves while the frame still grows; wait until its height has settled.
+    // The panel grows upward from the canvas bottom as the frame loads; wait for its height to settle.
     await w.waitForFunction(() => {
       const frame = document.querySelector('iframe.element-editor-frame');
       const state = (window.__frameHeights ??= []);
@@ -83,10 +83,36 @@ try {
   at = await center('[data-spread="march"] [data-element="grid"]');
   await w.mouse.click(at.x, at.y);
   await editorReady();
+  const editorPosition = async () => {
+    const panel = await editorDialog.boundingBox(), canvas = await w.locator('.canvas-wrap').boundingBox();
+    const footer = await editorDialog.locator('.ee-footer').boundingBox();
+    assert.ok(Math.abs(panel.x + panel.width / 2 - canvas.x - canvas.width / 2) < 2, 'Custom controls share the canvas center');
+    assert.ok(Math.abs(canvas.y + canvas.height - panel.y - panel.height - 16) < 2, 'Custom controls share the bottom inset');
+    assert.ok(panel.y >= canvas.y && panel.x >= canvas.x && panel.x + panel.width <= canvas.x + canvas.width, 'Custom editor fits inside the canvas');
+    assert.ok(footer.y >= panel.y && footer.y + footer.height <= panel.y + panel.height, 'Cancel and Done remain visible');
+  };
+  await editorPosition();
+  await calendarEditor.getByRole('textbox', { name: 'Calendar title' }).fill('Draft survives resizing');
+  await w.screenshot({ path: join(root, '.build', 'custom-controls-calendar.png'), animations: 'disabled' });
+  const owner = await app.browserWindow(w), windowSize = await owner.evaluate((window) => window.getContentSize());
+  await owner.evaluate((window) => window.setContentSize(940, 650));
+  await w.waitForFunction(() => innerWidth === 940);
+  await editorReady();
+  await editorPosition();
+  assert.ok(await editorDialog.locator('.ee-body').evaluate((node) => node.scrollHeight > node.clientHeight), 'Large custom editors scroll within a short canvas');
+  assert.equal(await calendarEditor.getByRole('textbox', { name: 'Calendar title' }).inputValue(), 'Draft survives resizing');
+  await editorDialog.locator('.ee-body').evaluate((node) => { node.scrollTop = node.scrollHeight; });
+  await editorPosition();
+  await w.screenshot({ path: join(root, '.build', 'custom-controls-small.png'), animations: 'disabled' });
+  await owner.evaluate((window, [width, height]) => window.setContentSize(width, height), windowSize);
+  await editorReady();
+  await editorPosition();
   assert.equal(await w.locator('.edit-popover').count(), 0);
   await editorDialog.getByRole('button', { name: 'Cancel' }).click();
   await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+  assert.equal((await read()).spreads[7].params.title, undefined, 'Cancel discards the resized editor draft');
   await ready();
+  at = await center('[data-spread="march"] [data-element="grid"]');
   await w.mouse.click(at.x, at.y);
   await editorReady();
   await editorDialog.locator('.ee-fields').getByRole('radio', { name: 'Sunday' }).click();

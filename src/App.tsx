@@ -1333,7 +1333,7 @@ export function App() {
       </div>
     </div>
     {summary && template && elementEditor && spreads.some(({ id }) => id === elementEditor.spread) &&
-      <ElementEditorDialog key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
+      <ElementEditorDialog host={canvasWrap.current} key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
         blocked={previewNotice || undefined}
         edit={editCanvas} close={() => setElementEditor(undefined)} importFile={importProjectFile} />}
