@@ -22,7 +22,7 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
   cancel(): void;
   warning?(message: unknown): void;
   import?(data: Extract<FrameMessage, { type: 'editor-import' }>): void;
-}) {
+}, flushError = 'The editor did not respond, so nothing was saved. Try Done again, or Cancel.') {
   const [height, setHeight] = useState(240);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
@@ -36,10 +36,10 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
     if (flushing === undefined) return;
     const timeout = setTimeout(() => {
       setFlushing(undefined);
-      setError('The editor did not respond, so nothing was saved. Try Done again, or Cancel.');
+      setError(flushError);
     }, 5000);
     return () => clearTimeout(timeout);
-  }, [flushing]);
+  }, [flushing, flushError]);
 
   const receive = useEffectEvent((event: MessageEvent<FrameMessage>) => {
     if (event.origin !== renderOrigin || event.source !== frame.current?.contentWindow || !event.data) return;
@@ -54,8 +54,8 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
       setReady(true);
       frame.current?.focus();
     } else if (data.type === 'editor-draft') {
-      handlers.draft(data.values, data.spread);
       if (!failed) setError('');
+      handlers.draft(data.values, data.spread);
     } else if (data.type === 'editor-warning') {
       handlers.warning?.(data.message);
     } else if (data.type === 'editor-notice') {

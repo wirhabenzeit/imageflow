@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Icon } from './Icon';
 import type { ImportMode } from './source-locations';
 import { renderOrigin } from './desktop';
 import type { TemplateInfo } from './desktop';
@@ -9,7 +11,7 @@ import { controlLayout } from './controls';
 import { ControlList, Field } from './Fields';
 import { useEditorFrame } from './editor-frame';
 
-// What the dialog works on: every parameter of the element, with its declaration and resolved value (the saved
+// What the editor works on: every parameter of the element, with its declaration and resolved value (the saved
 // value, else the template default). Comparing this tells whether a draft was based on values that have since
 // changed, whether through project data or through the template (a new default, a changed declaration).
 // The layout (spread) parameters the editor edits count too.
@@ -26,11 +28,8 @@ function editingContext(template: TemplateInfo, spread: SpreadState, element: st
     owned.map((key) => [key, layoutParameters[key], resolvedSpread[key]])]);
 }
 
-// Hosts a template-supplied element editor. The template's component runs in a frame on the render origin and
-// can only report a draft; this dialog owns Cancel/Done, focus, read-only mode, validation, and saving the draft
-// as one edit (one Undo step). The element's other parameters are generated controls below the frame, in the same
-// draft, so the whole element is edited in one place. Layout parameters the editor declares are saved in the same
-// edit; they are the editor's own, so they get no generated control here or in the sidebar. File imports the editor asks for run here, in the app.
+// Template components report values from an isolated frame. Apply each valid change through the app's save
+// queue, keeping the frame mounted while the book renders. Closing flushes any field still being typed.
 export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, edit, close, importFile, host }: {
   project: string; template: TemplateInfo; spread: SpreadState; element: string; readOnly: boolean;
   blocked?: string; host?: HTMLElement | null;
@@ -40,19 +39,23 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const layout = template.spreads[spread.definition];
   const definition = layout?.elements[element];
   const editor = definition?.editor;
-  const dialog = useRef<HTMLDialogElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
-  const [placement, setPlacement] = useState<{ left: number; bottom: number; maxWidth: number; maxHeight: number }>();
   const draft = useRef<Values>({});
   const spreadDraft = useRef<Values>({});
   // The editor's draft as last reported, and the generated controls' own draft, for showing conditional controls.
   const [frameDraft, setFrameDraft] = useState<Values>({});
   const [local, setLocal] = useState<Values>({});
   const [warnings, setWarnings] = useState<string[]>([]);
-  // The editor opened on this context. If it changes while the editor is open (Reload, Undo, a template edit),
-  // the draft is based on stale data and saving it would silently overwrite the newer values.
-  const [opened] = useState(() => editingContext(template, spread, element));
-  const stale = editingContext(template, spread, element) !== opened;
+  // Recognize our queued saves without accepting unrelated changes (Reload, Undo, or template edits).
+  const expected = useRef(spread);
+  const contexts = useRef([editingContext(template, spread, element)]);
+  const context = editingContext(template, spread, element);
+  const stale = !contexts.current.includes(context);
+  useLayoutEffect(() => {
+    const index = contexts.current.indexOf(context);
+    if (index > 0) contexts.current.splice(0, index);
+  }, [context]);
   // The frame keeps the project state it opened with; saving starts a new render elsewhere, not here.
   const [source] = useState(() => renderOrigin + '/render/' + project + '?view=editor&spread=' + encodeURIComponent(spread.id) +
     '&element=' + encodeURIComponent(element) + (readOnly ? '&readonly' : ''));
@@ -63,9 +66,10 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
       draft.current = { ...draft.current, ...values(reported) };
       spreadDraft.current = { ...spreadDraft.current, ...values(reportedSpread) };
       setFrameDraft(draft.current);
+      apply(draft.current, spreadDraft.current, local);
     },
     done: (reported, reportedSpread) => done(values(reported), values(reportedSpread)),
-    cancel: () => dialog.current?.close(),
+    cancel: close,
     warning(reported) {
       const message = typeof reported === 'string' ? reported.slice(0, 500) : '';
       if (message) setWarnings((previous) => previous.includes(message) || previous.length >= 5 ? previous : [...previous, message]);
@@ -78,64 +82,78 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
       if (readOnly || failed || stale || !importFile || !accept.length) reply();
       else void importFile(accept, data.mode === 'copy' || data.mode === 'link' ? data.mode : undefined).then(reply, () => reply());
     },
-  });
+  }, 'The editor has not finished the current field. Try closing again, or press Esc to close.');
 
-  // Native modal dialogs live above the normal page layout. Measure the canvas so they share the other item
-  // controls' bottom-center anchor, while keeping native focus handling and explicit Cancel/Done drafts.
-  useLayoutEffect(() => {
-    if (!host) return;
-    const measure = () => {
-      const bounds = host.getBoundingClientRect();
-      setPlacement({ left: bounds.left + bounds.width / 2, bottom: innerHeight - bounds.bottom + 16,
-        maxWidth: Math.max(0, bounds.width - 24), maxHeight: Math.max(0, bounds.height - 32) });
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(host);
-    window.addEventListener('resize', measure);
-    return () => { observer.disconnect(); window.removeEventListener('resize', measure); };
-  }, [host]);
+  const latestClose = useRef(requestClose);
+  latestClose.current = requestClose;
   useEffect(() => {
-    if (placement && dialog.current && !dialog.current.open) dialog.current.showModal();
-  }, [placement]);
+    const outside = (event: PointerEvent) => {
+      if (panel.current?.contains(event.target as Node)) return;
+      // Finish the frame's active field before another item can replace and unmount this editor.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      latestClose.current();
+    };
+    document.addEventListener('pointerdown', outside, true);
+    return () => document.removeEventListener('pointerdown', outside, true);
+  }, []);
 
   const owned = editor?.parameters ?? [];
   const saved = resolveParams(definition?.parameters ?? {}, spread.elements[element]?.params ?? {});
   const current = { ...saved, ...frameDraft, ...local };
   const generated = definition ? controlLayout(definition.parameters, definition.controls, current, owned) : [];
 
-  function done(latest?: Values, latestSpread?: Values) {
-    if (latest) draft.current = { ...draft.current, ...latest };
-    if (latestSpread) spreadDraft.current = { ...spreadDraft.current, ...latestSpread };
-    const changes = [...Object.entries(draft.current), ...Object.entries(local)];
-    const spreadChanges = Object.entries(spreadDraft.current);
-    if (failed || stale || blocked) return;
-    if (readOnly || !editor || !definition || !layout || !(changes.length || spreadChanges.length)) return dialog.current?.close();
+  function apply(reported: Values, reportedSpread: Values, generatedValues: Values) {
+    if (failed || stale || blocked || readOnly || !editor || !definition || !layout) return false;
+    const changes = [...Object.entries(reported), ...Object.entries(generatedValues)];
+    const spreadChanges = Object.entries(reportedSpread);
     const invalid = changes.filter(([key, value]) => !Object.hasOwn(definition.parameters, key) ||
-      owned.includes(key) !== Object.hasOwn(draft.current, key) || !isParameterValue(definition.parameters[key], value))
+      owned.includes(key) !== Object.hasOwn(reported, key) || !isParameterValue(definition.parameters[key], value))
       .map(([key]) => definition.parameters[key]?.label ?? key);
     const ownedSpread = editor.spread ?? [];
     invalid.push(...spreadChanges.filter(([key, value]) => !ownedSpread.includes(key) || !Object.hasOwn(layout.parameters, key) ||
       !isParameterValue(layout.parameters[key], value)).map(([key]) => layout.parameters[key]?.label ?? key));
     if (invalid.length) {
       setError('The editor produced values the template does not allow: ' + invalid.join(', ') + '.');
-      return;
+      return false;
     }
+    const previous = expected.current;
+    const elementValues = resolveParams(definition.parameters, previous.elements[element]?.params ?? {});
+    const layoutValues = resolveParams(layout.parameters, previous.params);
+    const changed = changes.filter(([key, value]) => elementValues[key] !== value);
+    const changedSpread = spreadChanges.filter(([key, value]) => layoutValues[key] !== value);
+    if (!changed.length && !changedSpread.length) return true;
+    const next = structuredClone(previous);
+    const update = (state: SpreadState) => {
+      if (changed.length) {
+        state.elements[element] ??= { params: {} };
+        Object.assign(state.elements[element].params, Object.fromEntries(changed));
+      }
+      Object.assign(state.params, Object.fromEntries(changedSpread));
+    };
+    update(next);
+    expected.current = next;
+    contexts.current.push(editingContext(template, next, element));
+    const before = editingContext(template, previous, element);
     edit(({ project: files }) => {
       const state = files.spreads.find(({ id }) => id === spread.id);
-      if (!state) return;
-      if (changes.length) {
-        state.elements[element] ??= { params: {} };
-        Object.assign(state.elements[element].params, Object.fromEntries(changes));
-      }
-      Object.assign(state.params, Object.fromEntries(spreadChanges));
+      // Check again when this queued edit runs, so an external change cannot be overwritten by an old frame.
+      if (!state || editingContext(template, state, element) !== before) return;
+      update(state);
     }, (definition.label ?? element) + ' updated');
-    dialog.current?.close();
+    return true;
   }
 
-  function requestDone() {
-    if (failed || stale || blocked) return;
-    if (!flush()) done();
+  function done(latest: Values, latestSpread: Values) {
+    draft.current = { ...draft.current, ...latest };
+    spreadDraft.current = { ...spreadDraft.current, ...latestSpread };
+    if (apply(draft.current, spreadDraft.current, local) || readOnly) close();
+  }
+
+  function requestClose() {
+    if (failed || stale || blocked || readOnly) return close();
+    if (flushing !== undefined) return;
+    if (!flush()) done({}, {});
   }
 
   // The generated controls' values reach the frame, so the editor previews the whole draft (such as a calendar
@@ -144,35 +162,40 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     if (ready && Object.keys(local).length) frame.current?.contentWindow?.postMessage({ type: 'editor-values', values: local }, renderOrigin);
   }, [ready, local]);
 
-  return <dialog ref={dialog} className="item-controls element-editor" style={placement} aria-label={title} onClose={close}
+  if (!host) return null;
+  return createPortal(<div ref={panel} className="item-controls element-editor" role="dialog" aria-label={title}
+    onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}
+    onDoubleClick={(event) => event.stopPropagation()}
     onKeyDown={(event) => {
-      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); requestDone(); }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
+      else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); requestClose(); }
     }}>
     <header className="ee-header">
       <h2>{title}</h2>
-      {readOnly && <span className="muted">Sample projects are read-only.</span>}
+      <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)"
+        disabled={flushing !== undefined} onClick={requestClose}><Icon name="close" /></button>
     </header>
     <div className="ee-body">
     <iframe ref={frame} className="element-editor-frame" title={title} src={source} style={{ height }} />
     {!ready && !error && <p className="ee-status muted">Loading the editor…</p>}
     {stale && <p className="ee-status error-text" role="alert">
-      {(definition?.label ?? element) + ' changed while this editor was open. Cancel and open the editor again to continue from the current values.'}
+      {(definition?.label ?? element) + ' changed while this editor was open. Close and open the editor again to continue from the current values.'}
     </p>}
     {error && !stale && <p className="ee-status error-text" role="alert">{error}</p>}
+    {readOnly && <p className="ee-status muted">Sample projects are read-only.</p>}
     {blocked && !stale && <p className="ee-status muted" role="status">{blocked}</p>}
     {warnings.length > 0 && <div className="ee-status ee-warnings" role="status">
       <strong>The editor asked for changes it cannot make:</strong>
       <ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
     </div>}
-    {generated.length > 0 && <fieldset className="ee-fields" disabled={readOnly || failed || stale}>
+    {generated.length > 0 && <fieldset className="ee-fields" disabled={readOnly || failed || stale || !!blocked}>
       <ControlList nodes={generated} field={(node, param) => <Field key={node.key} param={param} value={current[node.key]}
-        description={node.description} change={(next) => setLocal((previous) => ({ ...previous, [node.key]: next }))} />} />
+        description={node.description} change={(next) => {
+          const updated = { ...local, [node.key]: next };
+          setLocal(updated);
+          apply(draft.current, spreadDraft.current, updated);
+        }} />} />
     </fieldset>}
     </div>
-    <footer className="ee-footer">
-      <span className="muted">Esc cancels · ⌘↩ saves</span>
-      <button type="button" onClick={() => dialog.current?.close()}>Cancel</button>
-      <button type="button" className="primary" disabled={readOnly || failed || stale || !!blocked || flushing !== undefined} onClick={requestDone}>Done</button>
-    </footer>
-  </dialog>;
+  </div>, host);
 }

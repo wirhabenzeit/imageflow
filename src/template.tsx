@@ -124,7 +124,7 @@ function editTarget(book: RenderProject, prefix: string, parameters: Parameters 
 
 export type FlowPosition = { part: number; parts: number; title?: string };
 // An element may supply its own editor for some of its parameters. The component runs in a sandboxed frame
-// and edits a draft; ImageFlow owns the dialog, validation, saving and Undo.
+// and reports changes; ImageFlow owns the non-modal panel, validation, live saving and Undo.
 export type ElementEditorProps = {
   values: Values; set: (changes: Values) => void;
   // The layout's (spread) parameters: all of them to read, and `setSpread` for the ones the editor declares.

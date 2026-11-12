@@ -817,7 +817,11 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     post({ state: 'error', message: 'The editor stopped working: ' + reason });
   };
   const drafts = () => changed ? { values: claimed(draft), spread: claimedSpread(spreadDraft) } : { values: {}, spread: {} };
-  const commit = () => { if (!failed) post({ type: 'editor-commit', ...drafts() }); };
+  const commit = () => {
+    try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
+    catch (error) { fail(error); }
+    if (!failed) post({ type: 'editor-commit', ...drafts() });
+  };
   const cancel = () => post({ type: 'editor-cancel' });
   let update: ((values: { element: Values; spread: Values }) => void) | undefined;
   // A change set() cannot apply (another parameter, or an invalid value) is ignored, as untyped template code would
@@ -859,8 +863,8 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1)) return;
     if (event.data?.type === 'editor-flush') {
-      // The app's Done: blurring applies a field that commits on blur, through set(), before the draft is sent. A
-      // component that fails while applying reports the failure instead, and nothing is saved.
+      // Closing the panel finishes a field that applies on blur, through set(), before confirming the close.
+      // A failure is reported instead; earlier live changes remain saved.
       const request = event.data.request;
       if (typeof request !== 'number') return;
       try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }

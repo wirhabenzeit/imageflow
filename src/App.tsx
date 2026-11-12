@@ -843,6 +843,7 @@ export function App() {
   function openElementEditor(spread: string, element: string) {
     if (readyId.current !== summary?.id || !editorOf(spread, element)) return false;
     setEditing(undefined);
+    deselectPhoto();
     select(spread, false);
     setElementEditor({ spread, element });
     return true;
@@ -1335,8 +1336,8 @@ export function App() {
     {summary && template && elementEditor && spreads.some(({ id }) => id === elementEditor.spread) &&
       <ElementEditorDialog host={canvasWrap.current} key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
-        blocked={previewNotice || undefined}
-        edit={editCanvas} close={() => setElementEditor(undefined)} importFile={importProjectFile} />}
+        blocked={agentWorking ? 'Agent is updating the book…' : previewError || undefined}
+        edit={edit} close={() => setElementEditor(undefined)} importFile={importProjectFile} />}
     {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&
       <LayoutPickerDialog key={layoutPicker.spread + ':' + layoutPicker.family} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === layoutPicker.spread)!} family={layoutPicker.family} layout={layoutPicker.layout}

@@ -125,7 +125,7 @@ function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Vi
 
 // The route map's own editor: choose or import the GPX track with ImageFlow's file control, then drag to move,
 // scroll or use the buttons to zoom, so the inset can show part of the route. Choosing the track and framing it is
-// one task, so one editor owns all four parameters and Done saves them together.
+// one task, so one editor owns all four parameters and applies changes while it stays open.
 const routeParameters = {
   track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
   centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01 }),

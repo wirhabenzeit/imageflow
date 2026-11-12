@@ -345,11 +345,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 /* Template-supplied element editors */
 .element-editor { padding: 0; border: 0; border-radius: 12px; background: var(--control-surface); color: var(--text); box-shadow: 0 24px 80px #0007;
   width: min(560px, 90vw); font: 13px/1.45 var(--ui-font); }
-.element-editor.item-controls { position: fixed; top: auto; right: auto; margin: 0; width: 560px; overflow: hidden; }
-.element-editor.item-controls[open] { display: flex; flex-direction: column; }
-.element-editor.item-controls :is(.ee-header, .ee-footer) { flex: none; }
-.element-editor.item-controls .ee-footer { flex-wrap: wrap; }
-.element-editor.item-controls .ee-footer .muted { min-width: 0; flex: 1 1 120px; }
+.element-editor.item-controls { width: 560px; max-height: calc(100% - 32px); overflow: hidden; display: flex; flex-direction: column; }
+.element-editor.item-controls .ee-header { flex: none; }
 .ee-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .element-editor::backdrop { background: #00000033; }
 .ee-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--edge); }
