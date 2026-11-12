@@ -1,16 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Field, Fields } from './Fields';
+import { Fields } from './Fields';
 import type { BookGeometry, Issue, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
 import { BookFrame } from './BookFrame';
 import { revealIn } from './reveal';
-import type { ProjectFiles, SpreadState, Values } from './project';
-import type { Parameter, Parameters } from './parameters';
-import { isParameterValue } from './parameters';
-import { centered, placementIn, setPlacement } from './spread';
-import { readEdit, resolveEditPath, writeEdit } from './editing';
+import type { ProjectFiles, SpreadState } from './project';
 import { boxLabel, describeLayoutChange, discardContent, keptElements, keptOutside, layoutChoices, planLayoutChange, switchLayout } from './layouts';
 import { keptMime, photoMime, sourceTitle, textMime } from './source-items';
-import type { EditTarget } from './editing';
+import { readEdit, resolveEditPath } from './editing';
 import type { SourceUsage } from './editing';
 import { SourceInspector } from './SourceInspector';
 import type { SourceRef } from './source-items';
@@ -101,26 +97,43 @@ function KeptContent({ summary, spread, template, kept, label, settings, writabl
   </details>;
 }
 
-// Shows either the selected spread or the selected source, never both.
-export function Inspector({ summary, spread, source, template, render, usage, edit, importText, highlight, issues,
-  select, inspectSource, quickLook, focus, targets = [], adjustCrop, openEditor, place }: {
+// What a spread shows, for the list of its boxes and elements: a photo's title, a text's file, an element's editor.
+function contentState(summary: ProjectSummary, spread: SpreadState, id: string, kind: 'photo' | 'markdown' | 'element', template: TemplateInfo,
+  flow?: { part: number; parts: number }) {
+  if (kind === 'element') {
+    const editor = template.spreads[spread.definition]?.elements[id]?.editor;
+    return editor ? (editor.label ?? 'Custom editor') : 'Settings';
+  }
+  const state = spread.boxes[id];
+  if (kind === 'photo') return state?.photo ? summary.photoIndex[state.photo]?.title || (summary.photos[state.photo] ? state.photo : 'Missing photo') : 'Empty';
+  if (!state?.text) return 'No text';
+  const name = summary.project.texts[state.text]?.split('/').pop() ?? 'Missing text';
+  return flow && flow.parts > 1 ? name + ' · ' + flow.part + ' of ' + flow.parts : name;
+}
+
+// Shows either the selected spread or the selected source, never both. For a spread: its layout, the settings the
+// page does not already edit, content kept for other layouts, and a list of its boxes and elements. Boxes and
+// elements are edited where they are on the page; the list opens the same editors, also for empty, hidden or
+// overlapping ones, and from the keyboard.
+export function Inspector({ summary, spread, source, template, render, usage, edit, highlight, issues,
+  select, quickLook, focus, targets = [], open, openTarget, place }: {
   summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
-  edit: (change: Edit, notice?: string | (() => string)) => void; importText: (box: string) => void;
+  edit: (change: Edit, notice?: string | (() => string)) => void;
   highlight: (id?: string) => void; issues: string; select: (spread: string) => void;
-  inspectSource: (source: SourceRef) => void; quickLook: () => void; focus?: { box: string; at: number };
-  targets?: BookGeometry['targets']; adjustCrop: (box: string) => void; openEditor: (element: string) => void;
+  quickLook: () => void; focus?: { box: string; at: number };
+  targets?: BookGeometry['targets']; open: (owner: { type: 'photo' | 'markdown' | 'element'; id: string }) => void;
+  openTarget: (target: BookGeometry['targets'][number]) => void;
   place: (from: string, to: string) => void;
 }) {
-  const sections = useRef(new Map<string, HTMLElement>());
+  const items = useRef(new Map<string, HTMLElement>());
   const [flash, setFlash] = useState<string>();
-  // A click on a box in the book scrolls to its section here.
+  // A click on a box in the book points out its entry here.
   useEffect(() => {
     if (!focus || source) return;
-    const section = sections.current.get(focus.box);
-    if (!section) return;
-    if (section instanceof HTMLDetailsElement) section.open = true;
-    const panel = section.closest<HTMLElement>('.inspector');
-    if (panel) revealIn(panel, section, true);
+    const item = items.current.get(focus.box);
+    if (!item) return;
+    const panel = item.closest<HTMLElement>('.inspector');
+    if (panel) revealIn(panel, item, true);
     setFlash(focus.box);
     const timer = setTimeout(() => setFlash(undefined), 900);
     return () => clearTimeout(timer);
@@ -142,28 +155,27 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     return n ? n + ' ' + (n === 1 ? one : many) : '';
   }).filter(Boolean).join(', ');
   const keptSettings = template ? keptElements(spread, template.spreads) : [];
-  // Options a template attaches to a box or element with ctx.edit() appear in that box's or element's section,
-  // matching the popover you get by clicking it. Spread options claimed this way leave the Spread section.
-  const attached = new Map<string, EditTarget[]>();
-  const claimed = new Set<string>();
-  for (const { edits } of targets) {
-    const owner = edits.map((path) => /^(boxes|elements)\.([^.]+)\./.exec(path)).find(Boolean);
-    if (!owner) continue;
-    const prefix = owner[0];
-    const list = attached.get(prefix) ?? [];
-    for (const path of edits) {
-      const target = !path.startsWith(prefix) && resolveEditPath(template ?? { parameters: {}, spreads: {} }, spread.definition, path);
-      if (!target || list.some((item) => item.path === path)) continue;
-      list.push(target);
-      if (target.scope === 'spread') claimed.add(target.key);
-    }
-    attached.set(prefix, list);
-  }
-  const extras = (prefix: string) => (attached.get(prefix) ?? []).map((target) => {
-    const value = readEdit(summary.project, spread, target);
-    return <Field key={target.path} param={target.param} value={value}
-      change={(next) => edit(({ project }) => writeEdit(project, spread.id, target, next), target.param.label + ' updated')} />;
-  });
+  // Spread settings the page edits, through ctx.Text, ctx.edit or a box or element marked with them, are edited
+  // there and left out here. An element with its own editor opens that editor, which edits only the element, so
+  // settings marked on it stay here.
+  const claimed = new Set(targets.filter(({ owner }) => !(owner?.type === 'element' && definition?.elements[owner.id]?.editor))
+    .flatMap(({ edits }) => edits.filter((path) => !path.includes('.'))));
+  // Marked nodes that are not a box or element, such as a ctx.Text heading, in reading order: listed with the
+  // boxes and elements, so every editor on the page can be opened from the keyboard.
+  const marked = template ? targets.filter((target) => !target.owner)
+    .filter((target, i, all) => all.findIndex((other) => other.edits.join(' ') === target.edits.join(' ')) === i)
+    .sort((a, b) => Math.abs(a.y - b.y) > 4 ? a.y - b.y : a.x - b.x)
+    .flatMap((target) => {
+      const fields = target.edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((field) => !!field);
+      if (!fields.length) return [];
+      const value = readEdit(summary.project, spread, fields[0]);
+      return [{ target, label: fields.map(({ param }) => param.label).join(', '), value: typeof value === 'string' ? value : String(value ?? '') }];
+    }) : [];
+  const flow = render?.state === 'ready' ? render.flow : undefined;
+  const contents = definition ? [
+    ...Object.entries(definition.boxes).map(([id, box]) => ({ id, kind: box.type, label: box.label })),
+    ...Object.entries(definition.elements).map(([id, element]) => ({ id, kind: 'element' as const, label: element.label })),
+  ] : [];
   const header = <>
     <p className="eyebrow">Inspector</p>
     {issues && <div className="inspection-issues" role="alert">{issues}</div>}
@@ -196,110 +208,37 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
       {template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={spread} template={template}
         kept={kept} label={keptLabel} settings={keptSettings} writable={writable} place={place}
         discard={(box, name) => changeSpread((item) => discardContent(item, box), name + ' removed from this spread')} />}
-      {Object.entries(definition?.boxes ?? {}).map(([id, box]) => {
-        const state = spread.boxes[id];
-        const photoBox = box.type === 'photo';
-        const assigned = photoBox ? state?.photo : state?.text;
-        const choices: [string, string | undefined][] = Object.entries(summary.project.texts).map(([id, path]) => [id, path.split('/').pop()]);
-        const position = render?.state === 'ready' ? render.flow[spread.id + ':' + id] : undefined;
-        // The crop this layout shows: its own, or a fill around the focus of a crop set in another layout.
-        const placement = placementIn(state, spread.definition);
-        const ownCrop = !!state?.crops && Object.hasOwn(state.crops, spread.definition);
-        const moved = placement.zoom !== 1 || placement.centerX !== centered.centerX || placement.centerY !== centered.centerY;
-        return <details key={spread.id + ':' + id} open onMouseEnter={() => highlight(id)} onMouseLeave={() => highlight()}
-          ref={(element) => { if (element) sections.current.set(id, element); else sections.current.delete(id); }}
-          className={flash === id ? 'flash' : undefined}>
-          <summary>{box.label}</summary>
-          {photoBox ? <div className="box-photo">
-            {assigned && summary.photos[assigned]
-              ? <button type="button" className="box-photo-thumb" title="Show photo" onClick={() => inspectSource({ kind: 'photo', id: assigned })}>
-                  <img src={summary.photos[assigned]} alt="" />
-                </button>
-              : <span className="box-photo-empty">{assigned ? 'Missing' : 'Empty'}</span>}
-            <div className="box-photo-info">
-              <span className="box-photo-name">{assigned ? summary.photoIndex[assigned]?.title || assigned : 'No photo'}</span>
-              <span className="muted">{assigned ? 'Drag another photo onto the box, or:' : 'Drag a photo onto the box, or:'}</span>
-              {/* Keyboard path for assigning: the strip and canvas are drag-only. Choosing replaces the crop. */}
-              <select className="box-photo-pick" aria-label={(assigned ? 'Replace photo in ' : 'Choose photo for ') + box.label} value=""
-                onChange={(event) => {
-                  const photo = event.target.value;
-                  if (photo && photo !== assigned) changeSpread((item) => {
-                    item.boxes[id] = { params: item.boxes[id]?.params ?? {}, photo };
-                  }, (summary.photoIndex[photo]?.title || photo) + ' placed in ' + box.label);
-                }}>
-                <option value="">{assigned ? 'Replace photo…' : 'Choose photo…'}</option>
-                {Object.entries(summary.photoIndex).filter(([photo]) => photo !== assigned).map(([photo, entry]) =>
-                  <option key={photo} value={photo} disabled={!summary.photos[photo]}>
-                    {(entry.title || entry.path.split('/').pop()) + (summary.photos[photo] ? '' : ' (missing)')}</option>)}
-              </select>
-              {assigned && <button type="button" className="link" onClick={() => changeSpread((item) => {
-                if (item.boxes[id]) item.boxes[id] = { params: item.boxes[id].params };
-              }, 'Photo removed from ' + box.label)}>Remove</button>}
-            </div>
-          </div> : <label className="field">Markdown
-            <select aria-label={box.label + ' assignment'} value={assigned ?? ''} onChange={(event) => {
-              const value = event.target.value;
-              changeSpread((item) => {
-                item.boxes[id] = { params: item.boxes[id]?.params ?? {},
-                  ...(photoBox ? { photo: value || undefined } : { text: value || undefined }) };
-              });
-            }}>
-              <option value="">Unassigned</option>
-              {assigned && !choices.some(([id]) => id === assigned) && <option value={assigned}>Missing · {assigned}</option>}
-              {choices.map(([id, label]) => <option value={id} key={id}>{label ?? id}</option>)}
-            </select>
-          </label>}
-          {!photoBox && <div className="box-actions">
-            {assigned && summary.project.texts[assigned] &&
-              <button type="button" onClick={() => inspectSource({ kind: 'text', id: assigned })}>Show text</button>}
-            <button onClick={() => importText(id)}>Import Markdown…</button>
-          </div>}
-          {position && <p className="muted">Flow {position.part} of {position.parts}</p>}
-          {photoBox && assigned && <div className="crop-controls">
-            <p className="muted">{placement.zoom !== 1 ? 'Zoomed ' + placement.zoom.toFixed(1) + '×' : 'Fills the frame'}
-              {moved ? ' · moved' : ''}{moved && !ownCrop ? ' · from another layout' : ''}</p>
-            <div className="box-actions">
-              <button type="button" onClick={() => adjustCrop(id)} title="Or double-click the photo">Adjust crop…</button>
-              {moved && <button type="button" onClick={() => changeSpread((item) => {
-                if (item.boxes[id]?.photo) setPlacement(item.boxes[id], item.definition, centered);
-              }, 'Crop reset')}>Reset crop</button>}
-            </div>
-            <details className="crop-values"><summary>Crop values</summary>
-              {([['centerX', 'Horizontal'], ['centerY', 'Vertical'], ['zoom', 'Zoom']] as const).map(([key, label]) =>
-                <Field key={key}
-                  param={{ type: 'number', label, default: centered[key], min: key === 'zoom' ? 1 : 0, max: key === 'zoom' ? 20 : 1, step: .01 }}
-                  value={placement[key]}
-                  change={(value) => changeSpread((item) => {
-                    const box = item.boxes[id];
-                    if (box?.photo) setPlacement(box, item.definition, { ...placementIn(box, item.definition), [key]: value });
-                  })} />,
-              )}
-            </details>
-          </div>}
-          <Fields schema={box.parameters} controls={box.controls} values={state?.params ?? {}} update={(key, value) => changeSpread((item) => {
-            item.boxes[id] ??= { params: {} };
-            item.boxes[id].params[key] = value;
-          }, box.parameters[key].label + ' updated')} />
-          {extras('boxes.' + id + '.')}
-        </details>;
-      })}
-      {Object.entries(definition?.elements ?? {}).map(([id, element]) => (
-        <details key={spread.id + ':' + id} open onMouseEnter={() => highlight(id)} onMouseLeave={() => highlight()}
-          ref={(element) => { if (element) sections.current.set(id, element); else sections.current.delete(id); }}
-          className={flash === id ? 'flash' : undefined}>
-          <summary>{element.label}</summary>
-          {element.editor && <div className="box-actions">
-            <button type="button" onClick={() => openEditor(id)}>{(element.editor.label ?? 'Open editor') + '…'}</button>
-          </div>}
-          {/* Parameters a template-supplied editor owns are edited there, not with generated controls. */}
-          <Fields schema={element.parameters} controls={element.controls} exclude={element.editor?.parameters}
-            values={spread.elements[id]?.params ?? {}} update={(key, value) => changeSpread((item) => {
-            item.elements[id] ??= { params: {} };
-            item.elements[id].params[key] = value;
-          }, element.parameters[key].label + ' updated')} />
-          {extras('elements.' + id + '.')}
-        </details>
-      ))}
+      {template && (contents.length > 0 || marked.length > 0) && <section className="spread-contents" aria-label="On this spread">
+        <p className="field-label">On this spread</p>
+        <ul className="content-list">
+          {marked.map(({ target, label, value }) => <li key={spread.id + ':' + target.edits.join(' ')}>
+            <button type="button" className="content-item" aria-label={'Edit ' + label} onClick={() => openTarget(target)}>
+              <span className="content-thumb content-kind" aria-hidden="true">Aa</span>
+              <span className="content-text">
+                <span className="content-label">{label}</span>
+                <span className="content-state muted">{value || 'Empty'}</span>
+              </span>
+            </button>
+          </li>)}
+          {contents.map(({ id, kind, label }) => {
+            const photo = kind === 'photo' ? spread.boxes[id]?.photo : undefined;
+            return <li key={spread.id + ':' + id}>
+              <button type="button" className={'content-item' + (flash === id ? ' flash' : '')} aria-label={'Edit ' + label}
+                ref={(element) => { if (element) items.current.set(id, element); else items.current.delete(id); }}
+                onMouseEnter={() => highlight(id)} onMouseLeave={() => highlight()} onFocus={() => highlight(id)} onBlur={() => highlight()}
+                onClick={() => open({ type: kind, id })}>
+                {photo && summary.photos[photo]
+                  ? <img className="content-thumb" src={summary.photos[photo]} alt="" />
+                  : <span className="content-thumb content-kind" aria-hidden="true">{kind === 'photo' ? 'Photo' : kind === 'markdown' ? 'Text' : 'Item'}</span>}
+                <span className="content-text">
+                  <span className="content-label">{label}</span>
+                  <span className="content-state muted">{contentState(summary, spread, id, kind, template, flow?.[spread.id + ':' + id])}</span>
+                </span>
+              </button>
+            </li>;
+          })}
+        </ul>
+      </section>}
     </fieldset>
   </aside>;
 }

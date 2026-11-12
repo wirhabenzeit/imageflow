@@ -72,8 +72,9 @@ try {
   await right.focus();
   await w.keyboard.press('ArrowLeft');
   assert.equal(await right.getAttribute('aria-valuenow'), '286');
-  // Hover descriptions and long status messages must not move the canvas.
-  await w.locator('.spread-thumb').nth(1).click();
+  // Hover descriptions and long status messages must not move the canvas. The photo grid has a setting the page does
+  // not show (Gap), so its sidebar has a field.
+  await w.locator('.spread-thumb').nth(3).click();
   await settle();
   const stable = await canvas();
   const fieldBefore = await w.locator('.inspector .field').first().boundingBox();
@@ -84,6 +85,8 @@ try {
   assert.equal(await w.locator('#layout-consequence').getAttribute('aria-live'), null);
   await w.locator('.status').evaluate((node) => { node.textContent = 'A long status message '.repeat(80); });
   assert.deepEqual(await canvas(), stable);
+  await w.locator('.spread-thumb').nth(1).click();
+  await settle();
   // Both book geometry and overlay hit targets follow panel resizing.
   const sheet = await w.frameLocator('iframe.book-frame-book[data-current]').locator('[data-spread="arriving"] .if-sheet').boundingBox();
   await w.waitForFunction((width) => Math.abs(document.querySelector('.sheet-selection').getBoundingClientRect().width - width) < 2, sheet.width);

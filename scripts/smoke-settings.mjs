@@ -79,12 +79,14 @@ try {
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, book);
   await menuAction(app, 'New project…');
   await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
-  await page.locator('.spread-thumb').first().click();
-  const heading = page.getByRole('textbox', { name: 'Heading', exact: true });
-  await heading.fill('Edited with Settings open');
-  await heading.press('Tab');
-  await page.frameLocator('iframe.book-frame-book[data-current]').getByText('Edited with Settings open', { exact: true }).waitFor();
-  assert.equal(JSON.parse(await readFile(join(book, 'project.json'), 'utf8')).spreads[0].params.heading, 'Edited with Settings open');
+  // The photo grid's Gap is a spread setting the page does not show, so it is in the sidebar.
+  await page.locator('.spread-thumb').nth(3).click();
+  const gap = page.getByRole('spinbutton', { name: 'Gap', exact: true });
+  await gap.fill('9');
+  await gap.press('Tab');
+  await page.waitForFunction(() => document.querySelector('.status')?.textContent === 'Gap updated');
+  for (let i = 0; i < 50 && JSON.parse(await readFile(join(book, 'project.json'), 'utf8')).spreads[3].params.gutter !== 9; i++) await page.waitForTimeout(100);
+  assert.equal(JSON.parse(await readFile(join(book, 'project.json'), 'utf8')).spreads[3].params.gutter, 9);
   assert.equal(settings.isClosed(), false);
   assert.ok((await settings.evaluate(() => window.imageflow.openProject('sample'))).error);
 

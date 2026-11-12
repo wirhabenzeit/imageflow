@@ -338,6 +338,16 @@ Saved data and its editing UI are separate. Parameters declare what is saved: ID
    - The authoring types check entry IDs against the scope's parameters. Loading the template reports unknown or repeated IDs, a parameter a custom editor owns, conditions on unknown parameters, on the control's own value, or on values the parameter can never have.
 3. **A custom editor** for an element, below.
 
+#### Where editing happens
+
+Each box and element is edited where it is on the page, with one editor per task; the sidebar does not repeat their controls.
+
+- **Photo boxes:** clicking a placed photo selects it to drag and pinch. Its toolbar holds **Replace photo**, **Remove**, the crop as numbers, the box's own parameters, and any other parameters the template marks the box with (such as a spread setting shown in its caption). An empty photo box (or one whose frame the template rotates) opens a popover with **Choose photo** and the same settings.
+- **Markdown boxes:** clicking one opens a popover with its text (assign, import, show), its place in the text flow, its parameters and any parameters the template marks it with.
+- **Elements:** an element with a custom editor opens it, with the element's other parameters below it in the same dialog. Spread parameters marked on such an element stay in the sidebar, since the dialog edits only the element. Any other element opens a popover with its generated controls.
+- **Marked nodes:** a node marked with `ctx.Text` or `ctx.edit` opens a popover for those parameters. A node smaller than the box under it wins, so a heading over a photo edits the heading.
+- **The sidebar** holds the spread's layout, the spread parameters nothing on the page edits, content kept for other layouts, and a list of what the page edits: marked nodes such as `ctx.Text` headings (in reading order), then the declared boxes and elements. The list shows what each holds and opens the same editors, so empty, overlapping and keyboard users reach everything. Boxes and elements are told apart by identity, never by position, so two at the same place each edit their own values. A box or element the layout does not render right now opens at the spread's corner with its declared parameters. Book parameters are in Book settings.
+
 ### Element editors
 
 An element can supply its own editor for parameters that generated controls handle poorly, such as marking days in a calendar or panning a map:
@@ -354,7 +364,7 @@ elements: { grid: {
 } },
 ```
 
-- **Opening it:** clicking the element opens the editor in a dialog, and so does the editor's button in the element's Inspector section.
+- **Opening it:** clicking the element opens the editor in a dialog, and so does the element's entry in the sidebar's list.
 - **One editor for the element:** parameters the editor lists are edited only by it. The element's other parameters appear below it in the same dialog as generated controls (arranged by the element's `controls`), in the same draft, so Done saves the whole element as one edit. The editor's `values` follow those controls as the user changes them, so its preview always shows the whole draft. Done first applies anything still being typed in the editor's frame, including in `<Control>` fields, and saves only once the frame confirms. If the editor fails while applying, or does not answer within a few seconds, nothing is saved and the dialog stays open with its draft.
 - **Sandbox:** the component runs in a frame on the render origin with the template's CSS, like the book previews. It receives `values` (all of the element's parameters, with the draft applied), `set(changes)`, `document`, `format`, `readOnly`, `commit()`, `cancel()`, `Control` and `importFile`. It cannot change project data itself.
 - **ImageFlow's controls inside:** `<Control parameter="track" />` draws the app's own control for one of the editor's parameters, bound to the draft: the same field, slider, choice or file chooser (with import) as the generated controls, with their validation and accessibility, in the editor's appearance. Compose it with your own UI instead of rebuilding file handling or form controls. `label` overrides the parameter's label.

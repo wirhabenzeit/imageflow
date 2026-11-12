@@ -8,9 +8,10 @@ import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
 import { AgentStatus } from './AgentStatus';
 import { revealIn } from './reveal';
-import { EditPopover } from './EditPopover';
+import { EditPopover, MarkedFields } from './EditPopover';
 import { CropEditor } from './CropEditor';
 import { ElementEditorDialog } from './ElementEditor';
+import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
@@ -28,8 +29,11 @@ import { pageSequence, resolveFormat } from './format';
 import type { ResolvedFormat } from './format';
 import type { ProjectFiles, SpreadState } from './project';
 
+type Owner = { type: 'photo' | 'markdown' | 'element'; id: string };
+// `hidden`: the box or element is declared but not on the page, so the editor opens at the spread's corner.
+type Target = BookGeometry['targets'][number] & { hidden?: boolean };
 type InlineContext = {
-  project: ProjectFiles['project']; spread: SpreadState; template: TemplateInfo; target: BookGeometry['targets'][number];
+  project: ProjectFiles['project']; spread: SpreadState; template: TemplateInfo; target: Target;
 };
 
 function inlineValues({ project, spread, template, target }: InlineContext) {
@@ -89,7 +93,8 @@ export function App() {
   const [inView, setInView] = useState<string[]>([]);
   const [hovered, setHovered] = useState<string>();
   const [hoveredTarget, setHoveredTarget] = useState<string>();
-  const [editing, setEditing] = useState<{ spread: string; key: string; held?: InlineContext }>();
+  // The inline editor that is open: for a marked node (a target), or for a box or element itself (`owner`).
+  const [editing, setEditing] = useState<{ spread: string; key: string; held?: InlineContext; owner?: Owner }>();
   // Crop mode for one photo box. After a commit, `settling` holds the project id the edit started from; the
   // overlay stays until the book has re-rendered, so the frame does not flash back to the old crop.
   // The selected photo, whose crop drags and pinches adjust. `layout` is the spread's layout when it was selected:
@@ -553,10 +558,11 @@ export function App() {
     if (readyId.current !== summary?.id) return { sheet };
     const wanted = types?.includes(photoMime) ? 'photo' : types?.includes(textMime) ? 'markdown' : undefined;
     const box = geometry.boxes.findLast((rect) => rect.type !== 'element' && (!wanted || rect.type === wanted) && inside(rect));
-    // The smallest edit target under the pointer wins, unless a smaller box sits on top of it.
+    // The smallest edit target under the pointer wins, unless a smaller box sits on top of it. Of equal ones, such
+    // as two elements at the same place, the one drawn on top (later in the document) wins, like `top` below.
     const area = (rect: Rect) => rect.width * rect.height;
-    const target = wanted ? undefined : geometry.targets.filter((rect) => inside(rect))
-      .sort((a, b) => area(a) - area(b))[0];
+    const target = wanted ? undefined : geometry.targets.map((rect, order) => ({ rect, order })).filter(({ rect }) => inside(rect))
+      .sort((a, b) => Math.abs(area(a.rect) - area(b.rect)) < 1 ? b.order - a.order : area(a.rect) - area(b.rect))[0]?.rect;
     const element = wanted ? undefined : geometry.boxes.findLast((rect) => rect.type === 'element' && inside(rect));
     // The box or element drawn on top: geometry lists them in document order, so a later one covers an earlier
     // one (an inset map over a full-bleed photo). Templates that reorder with z-index are not accounted for.
@@ -574,7 +580,29 @@ export function App() {
     const next = order[(at + direction + order.length) % order.length];
     setEditing(next ? { spread: next.spread, key: targetKey(next) } : undefined);
   }
-  const editTarget = editing && geometry?.targets.find((target) => targetKey(target) === editing.key);
+  // A box or element is edited through the node it renders: its own target, found by identity (other targets can
+  // share its rectangle), when it has parameters or marks; else its rectangle with nothing marked, for the
+  // platform's part of the editor. One the layout leaves off the page opens at the spread's corner with its
+  // declared parameters.
+  function ownerTarget(spread: string, owner: Owner): Target | undefined {
+    const type = owner.type === 'element' ? 'element' : 'box';
+    const own = geometry?.targets.find((target) => target.spread === spread && target.owner?.type === type && target.owner.id === owner.id);
+    if (own) return own;
+    const rect = geometry?.boxes.find((box) => box.spread === spread && box.id === owner.id && (box.type === 'element') === (type === 'element'));
+    if (rect) return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, spread, edits: [], owner: { type, id: owner.id } };
+    const sheet = geometry?.sheets.find((item) => item.spread === spread);
+    const layout = template?.spreads[spreads.find(({ id }) => id === spread)?.definition ?? ''];
+    const declared = type === 'element' ? layout?.elements[owner.id] : layout?.boxes[owner.id];
+    if (!sheet || !declared) return undefined;
+    return { x: sheet.x + 12, y: sheet.y + 12, width: 0, height: 0, spread, owner: { type, id: owner.id }, hidden: true,
+      edits: Object.keys(declared.parameters).map((key) => (type === 'element' ? 'elements.' : 'boxes.') + owner.id + '.' + key) };
+  }
+  // Parameters a template marked on a box besides its own, such as a spread setting shown in its caption.
+  const attachedEdits = (target: Target | undefined, owner: Owner) =>
+    target?.edits.filter((path) => !path.startsWith((owner.type === 'element' ? 'elements.' : 'boxes.') + owner.id + '.')) ?? [];
+  const ownerKey = (spread: string, id: string) => spread + '|#' + id;
+  const editTarget: Target | undefined = editing && (editing.owner ? ownerTarget(editing.spread, editing.owner)
+    : geometry?.targets.find((target) => targetKey(target) === editing.key));
   const editSpread = editing && spreads.find(({ id }) => id === editing.spread);
   const liveInline = summary && template && editSpread && editTarget &&
     { project: summary.project, spread: editSpread, template, target: editTarget };
@@ -587,6 +615,27 @@ export function App() {
     if (resumeInline && readyId.current === summary?.id) setEditing((open) => open && { ...open, held: undefined });
   }, [resumeInline, summary?.id]);
 
+  // Flow positions of the last finished render, kept while an edit re-renders so "Flow 1 of 2" does not flicker.
+  const readyFlow = render?.state === 'ready' ? render.flow : lastReady?.state === 'ready' ? lastReady.flow : undefined;
+  // Edits one spread, if it still exists when the edit applies.
+  function changeSpreadAt(id: string, update: (spread: SpreadState) => void, notice?: string) {
+    edit(({ project }) => {
+      const state = project.spreads.find((item) => item.id === id);
+      if (state) update(state);
+    }, notice);
+  }
+  // The same for the spread an inline editor is open on, and only while it shows the layout it opened in.
+  function changeSpreadInline(update: (spread: SpreadState) => void, notice?: string) {
+    editInline(({ project }) => {
+      const state = project.spreads.find((item) => item.id === liveInline?.spread.id);
+      if (state) update(state);
+    }, notice);
+  }
+  function ownerLabel(spread: SpreadState, owner: Owner) {
+    const layout = template?.spreads[spread.definition];
+    return (owner.type === 'element' ? layout?.elements[owner.id]?.label : layout?.boxes[owner.id]?.label) ?? owner.id;
+  }
+
   function editInline(change: Edit, notice?: string) {
     if (!liveInline || (editing?.held && !resumeInline)) return;
     edit((files) => {
@@ -596,7 +645,7 @@ export function App() {
   }
   const editOwner = editTarget && /^boxes\.([^.]+)\./.exec(editTarget.edits[0])?.[1];
   const editElement = editTarget?.edits.map((path) => /^elements\.([^.]+)\./.exec(path)?.[1]).find(Boolean);
-  const editPhotoBox = editOwner && geometry?.boxes.some(({ spread, id, type }) => spread === editing.spread && id === editOwner && type === 'photo')
+  const editPhotoBox = editOwner && geometry?.boxes.some(({ spread, id, type }) => spread === editing?.spread && id === editOwner && type === 'photo')
     ? editOwner : undefined;
 
   // Crop mode: the frame comes from the rendered book, the photo size and crop from the project.
@@ -606,13 +655,46 @@ export function App() {
   const cropPhoto = cropState?.photo;
   const cropPlacement = cropping && placementIn(cropState, cropping.layout);
   const cropBox = cropping && template?.spreads[cropping.layout]?.boxes[cropping.box];
+  const cropAttached = cropping && template ? attachedEdits(ownerTarget(cropping.spread, { type: 'photo', id: cropping.box }), { type: 'photo', id: cropping.box }) : [];
   function cropBlocked(spread: string, box: string) {
     if (readyId.current !== summary?.id) return 'The book preview is updating.';
     const state = spreads.find(({ id }) => id === spread)?.boxes[box];
     const frame = geometry?.boxes.find((rect) => rect.spread === spread && rect.id === box);
     if (!state?.photo || !summary?.photos[state.photo] || !summary.photoSizes[state.photo]) return 'Add a photo to this box first.';
     if (!frame) return 'The book is still rendering.';
-    if (!frame.upright) return 'The template rotates or mirrors this frame; use the crop values in the Inspector.';
+    if (!frame.upright) return 'The template rotates or mirrors this frame; use its crop values.';
+  }
+  // Opens the editor of a box or element where it is on the page. A placed photo is selected to drag and pinch,
+  // with its other settings in the crop toolbar; an element with its own editor opens that; anything else opens its
+  // popover. The sidebar's list of a spread's boxes and elements opens the same editors, also for empty ones.
+  function openOwner(spread: string, owner: Owner) {
+    if (readyId.current !== summary?.id) {
+      setNotice('The book preview is updating; try again in a moment.');
+      return;
+    }
+    if (owner.type === 'photo') {
+      const blocked = cropBlocked(spread, owner.id);
+      if (!blocked) {
+        startCrop(spread, owner.id);
+        return;
+      }
+      // A placed photo that cannot be selected says why; its popover offers the crop as numbers.
+      if (boxSource(spread, owner.id)) setNotice(blocked);
+    }
+    if (owner.type === 'element' && openElementEditor(spread, owner.id)) return;
+    deselectPhoto();
+    select(spread, false);
+    setEditing({ spread, key: ownerKey(spread, owner.id), owner });
+  }
+  // Opens the popover of a node the template marked, such as a ctx.Text heading, from the sidebar's list.
+  function openTarget(target: Target) {
+    if (readyId.current !== summary?.id) {
+      setNotice('The book preview is updating; try again in a moment.');
+      return;
+    }
+    deselectPhoto();
+    select(target.spread, false);
+    setEditing({ spread: target.spread, key: targetKey(target) });
   }
   function editorOf(spread: string, element: string) {
     const state = spreads.find(({ id }) => id === spread);
@@ -962,22 +1044,13 @@ export function App() {
                 select(sheet, false);
                 if (blockedInline) return;
                 if (top) setFocusBox({ box: top.id, at: Date.now() });
-                // What is drawn on top decides. Its own parameters are in the Inspector, so a photo's primary action is
-                // selecting it to drag and pinch, and an element's is its own editor. A smaller click-to-edit node on
-                // top (a heading over a photo) keeps its popover.
-                const own = !target || (!!top && target.edits.every((path) =>
-                  path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')));
-                if (top?.type === 'photo' && own) {
-                  const blocked = cropBlocked(top.spread, top.id);
-                  if (!blocked) {
-                    startCrop(top.spread, top.id);
-                    return;
-                  }
-                  // A placed photo that cannot be selected says why; its parameters still open below.
-                  if (boxSource(top.spread, top.id)) setNotice(blocked);
-                }
-                if (top?.type === 'element' && own && openElementEditor(top.spread, top.id)) return;
-                if (target) setEditing({ spread: target.spread, key: targetKey(target) });
+                // What is drawn on top decides: a box or element opens its own editor there (see openOwner). A smaller
+                // click-to-edit node on top, such as a heading over a photo, opens its popover instead.
+                const own = !target || (!!top && (target.edits.every((path) =>
+                  path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')) ||
+                  (target.owner?.id === top.id && (target.owner.type === 'element') === (top.type === 'element'))));
+                if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
+                else if (target) setEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
                 // Double-clicking a Markdown box shows its text in Quick Look.
@@ -1029,7 +1102,13 @@ export function App() {
                 inchesPerPixel={format && cropSheet ? format.spreadWidth / cropSheet.width / 25.4 : undefined}
                 resolution={template?.format.output.resolution} save={saveCrop} close={deselectPhoto}
                 toolbarHost={canvasWrap.current}>
-                {/* The box's own parameters (such as Show caption) sit with the photo; they are also in the Inspector. */}
+                {/* The box's photo and its own parameters (such as Show caption) sit with the selected photo. Replacing or
+                    removing the photo ends the selection. */}
+                {cropState && summary && <div className="crop-params crop-content">
+                  <PhotoContent summary={summary} spread={spreads.find(({ id }) => id === cropping.spread)!} box={cropping.box} compact values
+                    label={cropBox?.label ?? cropping.box} assigned={deselectPhoto}
+                    change={(update, notice) => changeSpreadAt(cropping.spread, update, notice)} />
+                </div>}
                 {cropBox && Object.keys(cropBox.parameters).length > 0 && <div className="crop-params">
                   <Fields schema={cropBox.parameters} controls={cropBox.controls} values={cropState?.params ?? {}} update={(key, value) => edit(({ project }) => {
                     const state = project.spreads.find(({ id }) => id === cropping.spread);
@@ -1037,16 +1116,31 @@ export function App() {
                     state.boxes[cropping.box].params[key] = value;
                   }, cropBox.parameters[key].label + ' updated')} />
                 </div>}
+                {cropAttached.length > 0 && <div className="crop-params">
+                  <MarkedFields project={summary.project} spread={spreads.find(({ id }) => id === cropping.spread)!} template={template!}
+                    edits={cropAttached} edit={(change, notice) => edit((files) => {
+                      if (files.project.spreads.find(({ id }) => id === cropping.spread)?.definition === cropping.layout) change(files);
+                    }, notice)} />
+                </div>}
               </CropEditor>}
               {editing && inline && summary && <EditPopover key={editing.key}
                 project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} anchor={inline.target}
                 bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={summary.readOnly} blocked={blockedInline || undefined}
-                edit={editInline} close={closeEditor} step={stepEditor}
-                actions={editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)
+                edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}
+                actions={!editing.owner && editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)
                   ? <button type="button" onClick={() => startCrop(editing.spread, editPhotoBox)}>Adjust crop…</button>
                   : editElement && editorOf(editing.spread, editElement)
                     ? <button type="button" onClick={() => openElementEditor(editing.spread, editElement)}>
-                      {(editorOf(editing.spread, editElement)!.label ?? 'Open editor') + '…'}</button> : undefined} />}
+                      {(editorOf(editing.spread, editElement)!.label ?? 'Open editor') + '…'}</button> : undefined}>
+                {inline.target.hidden && <p className="ep-hint muted">Not on the page in this layout right now; its settings are kept.</p>}
+                {editing.owner?.type === 'photo' && <PhotoContent summary={summary} spread={inline.spread} box={editing.owner.id}
+                  label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose} values={!!boxSource(editing.spread, editing.owner.id)}
+                  adjustCrop={cropBlocked(editing.spread, editing.owner.id) ? undefined : () => startCrop(editing.spread, editing.owner!.id)} />}
+                {editing.owner?.type === 'markdown' && <TextContent summary={summary} spread={inline.spread} box={editing.owner.id}
+                  label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose}
+                  flow={readyFlow?.[editing.spread + ':' + editing.owner.id]}
+                  importText={() => importFiles({ kind: 'markdown', target: { spread: editing.spread, box: editing.owner!.id } })} />}
+              </EditPopover>}
             </div>}
             {!summary && <div className="welcome">
               <span className="welcome-icon" aria-hidden="true">◫</span>
@@ -1075,12 +1169,11 @@ export function App() {
       <div className={'inspector-host' + (panels.rightHidden ? ' is-collapsed' : '')} inert={panels.rightHidden} aria-hidden={panels.rightHidden || !summary}>
       {summary && spread && <Inspector summary={writable || summary.readOnly ? summary : { ...summary, readOnly: true }}
         spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
-        usage={usage} inspectSource={choose} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
+        usage={usage} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
-        adjustCrop={(box) => { reveal(spread.id); startCrop(spread.id, box); }}
-        openEditor={(element) => openElementEditor(spread.id, element)} place={(from, to) => place(spread.id, from, to)}
-        edit={edit} highlight={setHighlight} issues={issue} select={select}
-        importText={(box) => importFiles({ kind: 'markdown', target: { spread: spread.id, box } })} />}
+        open={(owner) => { reveal(spread.id); openOwner(spread.id, owner); }}
+        openTarget={(target) => { reveal(spread.id); openTarget(target); }} place={(from, to) => place(spread.id, from, to)}
+        edit={edit} highlight={setHighlight} issues={issue} select={select} />}
       </div>
     </div>
     {summary && template && elementEditor && spreads.some(({ id }) => id === elementEditor.spread) &&

@@ -553,3 +553,28 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 /* The element's other parameters, below its custom editor in the same dialog and draft. */
 .ee-fields { margin: 0; padding: 8px 18px 4px; border: 0; border-top: 1px solid var(--control-border); min-width: 0; display: grid; gap: 2px; }
 .ee-fields .field { margin: 6px 0; display: grid; gap: 3px; font-size: 12px; }
+
+/* The spread's boxes and elements in the sidebar. Each opens its editor on the page. */
+.spread-contents { margin: 12px 0 4px; }
+.content-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.studio .content-item { all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 9px;
+  align-items: center; padding: 4px 6px; border-radius: 6px; cursor: default; }
+.studio .content-item:hover { background: var(--subtle-hover); }
+.studio .content-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.content-item.flash { animation: section-flash .9s ease-out; }
+.content-thumb { width: 36px; height: 36px; object-fit: cover; border: 1px solid var(--control-border); border-radius: 4px; display: block; box-sizing: border-box; }
+.content-kind { display: grid; place-items: center; border-style: dashed; font-size: 9px; color: var(--muted); }
+.content-text { display: grid; min-width: 0; font-size: 12px; }
+.content-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.content-state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+/* A box's own content (photo or text) at the top of its popover. */
+.edit-popover .box-content { display: grid; gap: 6px; }
+.edit-popover .box-content .box-photo { margin: 0; }
+/* In the crop toolbar: the photo's replace and remove controls, and its crop as numbers, in one row. */
+.crop-content .box-content.compact { display: flex; align-items: center; gap: 8px; }
+.crop-content .box-photo-pick { max-width: 150px; }
+.crop-content button.link { all: unset; cursor: default; color: var(--accent); font-size: 12px; }
+.crop-content .crop-values { position: relative; font-size: 12px; }
+.crop-content .crop-values-fields { position: absolute; bottom: calc(100% + 14px); left: 0; width: 190px; display: grid; gap: 2px; padding: 6px 10px;
+  background: var(--popup-surface); border: 1px solid var(--control-border); border-radius: 8px; box-shadow: 0 6px 20px #0002; }
+.crop-content .crop-values-fields .field { margin: 4px 0; display: grid; gap: 3px; }

@@ -57,8 +57,8 @@ try {
   await sub.waitFor({ state: 'detached' });
   assert.notEqual((await read()).spreads[0].params.subtitle, 'discard me');
   
-  // Calendar: clicking the element opens its template-supplied editor (#15); its other parameter (week start) keeps
-  // its generated control in the Inspector, which the click scrolls to.
+  // Calendar: clicking the element opens its template-supplied editor (#15). Its other parameter (week start) is a
+  // generated control below the editor in the same dialog, saved together with Done.
   await w.getByRole('button', { name: 'Calendar spread 14–15', exact: true }).click();
   const editorDialog = w.getByRole('dialog', { name: 'Edit calendar' });
   const calendarEditor = w.frameLocator('iframe.element-editor-frame');
@@ -86,8 +86,13 @@ try {
   assert.equal(await w.locator('.edit-popover').count(), 0);
   await editorDialog.getByRole('button', { name: 'Cancel' }).click();
   await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
-  const gridSection = w.locator('.inspector details').filter({ has: w.locator(':scope > summary', { hasText: /^Calendar grid$/ }) });
-  await gridSection.getByRole('radio', { name: 'Sunday' }).click();
+  await ready();
+  await w.mouse.click(at.x, at.y);
+  await editorReady();
+  await editorDialog.locator('.ee-fields').getByRole('radio', { name: 'Sunday' }).click();
+  // The dialog's draft is not saved until Done.
+  assert.equal((await read()).spreads[7].elements.grid?.params?.firstWeekday ?? 'monday', 'monday');
+  await editorDialog.getByRole('button', { name: 'Done' }).click();
   for (let i = 0; i < 50 && (await read()).spreads[7].elements.grid?.params?.firstWeekday !== 'sunday'; i++) await w.waitForTimeout(100);
   assert.equal((await read()).spreads[7].elements.grid.params.firstWeekday, 'sunday');
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
@@ -316,11 +321,14 @@ try {
   await w.locator('.status-bar').click();
   await w.waitForFunction(() => !document.querySelector('.edit-popover'));
 
-  // Clicking a text box edits its own options (columns) plus the body size the template marks it with.
+  // Clicking a text box opens its editor: its text, its own options (columns) and the body size the template marks
+  // it with.
   at = await center('[data-spread="arriving"] [data-box="body"]');
   await w.mouse.click(at.x, at.y);
-  const story = w.getByRole('dialog', { name: 'Edit Columns, Body size' });
+  const story = w.getByRole('dialog', { name: 'Edit Story' });
   await story.waitFor();
+  assert.equal(await story.getByRole('combobox', { name: 'Story assignment' }).inputValue(), 'arrival');
+  await story.getByRole('spinbutton', { name: 'Body size' }).waitFor();
   assert.match(await story.locator('.ep-head').textContent(), /^Story/);
   await story.getByRole('radio', { name: '2 columns' }).click();
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Columns updated');
@@ -463,18 +471,36 @@ try {
   const saved = (text) => w.waitForFunction((text) => document.querySelector('.status')?.textContent === text, text);
   const thumb = (name) => w.getByRole('button', { name, exact: true }).click();
 
-  // Continued texts keep their flow position beside the source control.
+  // The sidebar lists a spread's boxes and elements; each opens its editor on the page, also from the keyboard.
+  const openBox = async (label) => {
+    await ready();
+    await w.locator('.inspector').getByRole('button', { name: 'Edit ' + label, exact: true }).click();
+    await w.locator('.crop-editor, .edit-popover').first().waitFor();
+  };
+  // Continued texts show their flow position in the list and beside the source control in the box's editor.
   await thumb('Photo and story 16–17');
-  await w.locator('.inspector').getByText('Flow 3 of 3', { exact: true }).waitFor();
+  await w.locator('.inspector .content-state').getByText(/· 3 of 3$/).waitFor();
+  await openBox('Story');
+  const storyEditor = w.getByRole('dialog', { name: 'Edit Story' });
+  await storyEditor.getByText('Flow 3 of 3', { exact: true }).waitFor();
+  assert.equal(await storyEditor.getByRole('combobox', { name: 'Story assignment' }).inputValue(), 'arrival');
+  await storyEditor.getByRole('radio', { name: '2 columns' }).waitFor();
+  await w.keyboard.press('Escape');
   await thumb('Photo and story 2–3');
 
-  // #9: photos can be assigned from the keyboard, to an empty box and as a replacement; Undo restores.
-  await w.getByRole('combobox', { name: 'Replace photo in Main photo' }).selectOption('shore');
+  // #9: photos can be assigned from the keyboard, to an empty box and as a replacement; Undo restores. A placed
+  // photo is selected, with Replace and Remove in its toolbar; an empty box opens its editor with Choose photo.
+  await openBox('Main photo');
+  await w.locator('.crop-content').getByRole('combobox', { name: 'Replace photo in Main photo' }).selectOption('shore');
   await saved('Shore placed in Main photo');
   assert.equal((await read()).spreads[1].boxes.hero.photo, 'shore');
-  await w.locator('.box-photo-info').getByRole('button', { name: 'Remove' }).first().click();
+  await w.waitForFunction(() => !document.querySelector('.crop-editor'));
+  await openBox('Main photo');
+  await w.locator('.crop-content').getByRole('button', { name: 'Remove' }).click();
   await saved('Photo removed from Main photo');
-  await w.getByRole('combobox', { name: 'Choose photo for Main photo' }).selectOption('cottage');
+  await w.waitForFunction(() => !document.querySelector('.crop-editor'));
+  await openBox('Main photo');
+  await w.getByRole('dialog', { name: 'Edit Main photo' }).getByRole('combobox', { name: 'Choose photo for Main photo' }).selectOption('cottage');
   await saved('Cottage placed in Main photo');
   assert.equal((await read()).spreads[1].boxes.hero.photo, 'cottage');
   for (let i = 0; i < 3; i++) {
