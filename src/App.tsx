@@ -1098,7 +1098,6 @@ export function App() {
             </div>
           </ActionMenu>}
         </div>
-        <button className="toolbar-icon" aria-label="Toggle Sources" aria-pressed={!panels.bottomHidden} title="Toggle Sources (⌥⌘3)" disabled={!summary} onClick={() => togglePanel('bottom')}><Icon name="sidebarBottom" /></button>
         <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘2)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>
     </header>

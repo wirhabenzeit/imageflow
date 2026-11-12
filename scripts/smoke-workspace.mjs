@@ -93,7 +93,7 @@ try {
   assert.ok(await w.locator('.source-photo').evaluateAll((nodes) => new Set(nodes.map((node) => node.offsetTop)).size > 1));
   await menuAction(app, 'Hide Sources');
   assert.equal(await w.getByRole('region', { name: 'Sources', exact: true }).count(), 0);
-  await w.getByRole('button', { name: 'Toggle Sources', exact: true }).click();
+  await menuAction(app, 'Show Sources');
   assert.equal(await bottom.getAttribute('aria-valuenow'), '300');
   await bottom.focus();
   await w.keyboard.press('Home');
@@ -146,7 +146,8 @@ try {
   await w.waitForFunction(() => JSON.parse(localStorage.getItem('imageflow.workspace.v1')).bottomHidden === true);
   await app.close();
   w = await launch();
-  assert.equal(await w.getByRole('button', { name: 'Toggle Sources', exact: true }).getAttribute('aria-pressed'), 'false');
+  assert.equal(await w.getByRole('button', { name: 'Toggle Sources', exact: true }).count(), 0);
+  assert.equal(await w.getByRole('region', { name: 'Sources', exact: true }).count(), 0);
   await menuAction(app, 'Show Sources');
   assert.equal(await w.getByRole('separator', { name: 'Resize Sources' }).getAttribute('aria-valuenow'), '190');
   await w.getByRole('separator', { name: 'Resize Sources' }).dblclick();

@@ -6,7 +6,6 @@ const icons = {
   minus: 'M3 8h10',
   plus: 'M8 3v10M3 8h10',
   sidebarLeft: 'M3 3h10v10H3zM6 3v10',
-  sidebarBottom: 'M3 3h10v10H3zM3 10h10',
   sidebarRight: 'M3 3h10v10H3zM10 3v10',
   undo: 'M6 4L3 7l3 3M3 7h6a3 3 0 0 1 3 3v2',
   redo: 'M10 4l3 3-3 3M13 7H7a3 3 0 0 0-3 3v2',
