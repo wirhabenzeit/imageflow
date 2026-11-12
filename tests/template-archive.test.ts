@@ -25,13 +25,13 @@ async function template(folder: string, version = '1.0.0') {
   return folder;
 }
 // A stored (uncompressed) zip with exactly these entries, as another tool might write it.
-function zip(entries: { name: string; data?: string; mode?: number }[]) {
+function zip(entries: { name: string | Buffer; data?: string; mode?: number }[]) {
   const parts: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
   for (const { name, data = '', mode = 0o100644 } of entries) {
     const bytes = Buffer.from(data);
-    const nameBytes = Buffer.from(name);
+    const nameBytes = Buffer.isBuffer(name) ? name : Buffer.from(name);
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt32LE(crc32(bytes), 14);
@@ -140,5 +140,31 @@ test('the library imports a template file and exports its entries, built-in ones
     assert.equal(failed.status, 'failed');
     assert.match(failed.message!, /not a zip archive/);
     assert.deepEqual(await readdir(join(work, 'Templates')), ['travel']);
+  } finally { await rm(work, { recursive: true, force: true }); }
+});
+
+test('names macOS stores as UTF-8 without the UTF-8 flag keep their accents; other unflagged names are CP437', async () => {
+  const work = await mkdtemp(join(tmpdir(), 'imageflow-archive-'));
+  try {
+    const file = join(work, 'ditto.imageflow-template');
+    // ditto writes UTF-8 names and leaves the flag unset; 0x81 alone is not UTF-8, and is ü in CP437.
+    await writeFile(file, zip([{ name: 'index.tsx', data: 'source' }, { name: 'maps/Zürich.svg', data: '<svg/>' },
+      { name: Buffer.from([0x4d, 0x81, 0x6e, 0x63, 0x68, 0x65, 0x6e, 0x2e, 0x73, 0x76, 0x67]), data: '<svg/>' }]));
+    await extractTemplateArchive(file, join(work, 'out'));
+    assert.deepEqual((await readdir(join(work, 'out'), { recursive: true })).sort(), ['München.svg', 'index.tsx', 'maps', 'maps/Zürich.svg']);
+  } finally { await rm(work, { recursive: true, force: true }); }
+});
+
+test('export refuses a template its own import would refuse', async () => {
+  const work = await mkdtemp(join(tmpdir(), 'imageflow-archive-'));
+  try {
+    const many = await template(join(work, 'many'));
+    await mkdir(join(many, 'icons'));
+    await Promise.all(Array.from({ length: 10000 }, (_, i) => writeFile(join(many, 'icons', i + '.svg'), '')));
+    await assert.rejects(writeTemplateArchive(many, join(work, 'Many.imageflow-template')), /10002 files; a template file holds at most 10000/);
+    const odd = await template(join(work, 'odd'));
+    await writeFile(join(odd, 'back\\slash.svg'), '');
+    await assert.rejects(writeTemplateArchive(odd, join(work, 'Odd.imageflow-template')), /outside the template\. Rename it/);
+    assert.deepEqual((await readdir(work)).sort(), ['many', 'odd'], 'nothing is written');
   } finally { await rm(work, { recursive: true, force: true }); }
 });

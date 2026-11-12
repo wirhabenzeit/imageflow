@@ -18,14 +18,41 @@ const maxBytes = 512 * 1024 * 1024;
 const dosDate = (0 << 9) | (1 << 5) | 1;
 const utf8Names = 0x0800;
 
+// Zip names without the UTF-8 flag are CP437 by the format, but macOS's own archiver (ditto, Finder's Compress)
+// writes UTF-8 without setting it. A name that is valid UTF-8 is read as UTF-8; anything else as CP437.
+const cp437 = 'ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀' +
+  'αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u00a0';
+const utf8 = new TextDecoder('utf-8', { fatal: true });
+function entryName(bytes: Buffer, flags: number) {
+  if (flags & utf8Names) return bytes.toString('utf8');
+  try { return utf8.decode(bytes); }
+  catch { return [...bytes].map((byte) => byte < 0x80 ? String.fromCharCode(byte) : cp437[byte - 0x80]).join(''); }
+}
+
+/** Why a path cannot be unpacked inside a template folder, if it cannot. */
+function pathProblem(name: string) {
+  if (name.includes('\\') || name.includes('\0') || name.startsWith('/') || /^[a-zA-Z]:/.test(name) ||
+    name.split('/').some((part) => part === '' || part === '.' || part === '..')) return name + ' has a path outside the template.';
+  return undefined;
+}
+
 /** Writes the template in `folder` to an `.imageflow-template` file. The file is replaced only once it is complete. */
 export async function writeTemplateArchive(folder: string, file: string) {
   const files = await templateFiles(folder);
+  // The export must be a file this app can import again, so the import's limits apply here first.
+  if (files.length > maxEntries) throw new Error('The template has ' + files.length + ' files; a template file holds at most ' + maxEntries + '.');
+  for (const path of files) {
+    const problem = pathProblem(path);
+    if (problem) throw new Error(problem + ' Rename it before exporting.');
+  }
+  let total = 0;
   const locals: Buffer[] = [];
   const central: Buffer[] = [];
   let offset = 0;
   for (const path of files) {
     const data = await readFile(join(folder, ...path.split('/')));
+    total += data.length;
+    if (total > maxBytes) throw new Error('The template is too large to export: a template file holds at most 512 MB.');
     const deflated = deflateRawSync(data, { level: 9 });
     const compressed = deflated.length < data.length;
     const body = compressed ? deflated : data;
@@ -60,7 +87,6 @@ export async function writeTemplateArchive(folder: string, file: string) {
     locals.push(local, name, body);
     central.push(entry, name);
     offset += local.length + name.length + body.length;
-    if (offset > maxBytes) throw new Error('The template is too large to export.');
   }
   const directory = Buffer.concat(central);
   const end = Buffer.alloc(22);
@@ -69,6 +95,7 @@ export async function writeTemplateArchive(folder: string, file: string) {
   end.writeUInt16LE(files.length, 10);
   end.writeUInt32LE(directory.length, 12);
   end.writeUInt32LE(offset, 16);
+  if (offset + directory.length + end.length > maxBytes) throw new Error('The template is too large to export: a template file holds at most 512 MB.');
   const partial = join(dirname(file), '.' + basename(file) + '-' + randomUUID());
   try {
     await writeFile(partial, Buffer.concat([...locals, directory, end]), { flag: 'wx' });
@@ -113,11 +140,11 @@ export async function extractTemplateArchive(file: string, destination: string) 
     const next = at + 46 + nameLength + bytes.readUInt16LE(at + 30) + bytes.readUInt16LE(at + 32);
     const mode = bytes.readUInt32LE(at + 38) >>> 16;
     const local = bytes.readUInt32LE(at + 42);
-    const name = bytes.subarray(at + 46, at + 46 + nameLength).toString(flags & utf8Names ? 'utf8' : 'latin1');
+    const name = entryName(bytes.subarray(at + 46, at + 46 + nameLength), flags);
     at = next;
     if (name.endsWith('/')) continue;
-    if (name.includes('\\') || name.includes('\0') || name.startsWith('/') || /^[a-zA-Z]:/.test(name) ||
-      name.split('/').some((part) => part === '' || part === '.' || part === '..')) throw invalid(name + ' has a path outside the template.');
+    const problem = pathProblem(name);
+    if (problem) throw invalid(problem);
     const parts = name.split('/');
     if (parts.some((part) => part.startsWith('.') || part === 'node_modules' || part === '__MACOSX')) continue;
     if (madeOn === 3 && (mode & 0o170000) === 0o120000) throw invalid(name + ' is a symbolic link. Templates must contain their files.');
