@@ -30,6 +30,7 @@ The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided b
 | `grid-bleed.tsx` | A photo grid inside the safe area and a full-bleed panorama with a caption. |
 | `generated-element.tsx` | Generated SVG content from element parameters, edited by clicking it. |
 | `file-input.tsx` | An optional CSV file input, parsed by the template, with a structured finding for bad lines. |
+| `editing-levels.tsx` | Editing UI at three levels: generated controls, arranged `controls` with a condition, and a custom editor using `Control`. |
 | `responsive.tsx` | Two formats and one layout that arranges itself by the shape of the chosen format. |
 
 Agents receive them with `get_authoring_context` and `includeExamples`. To start a template, copy `minimal.tsx` (or the closest example) and add layouts. To extend one, copy a single layout and its declarations. The starter template is the complete reference book, not a required starting point.
@@ -56,6 +57,8 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, requires: ['anchor
 | `text-component` | `ctx.Text`. |
 | `format-helper` | `printFormat`. |
 | `box-records` | `box.photos`. |
+| `editor-controls` | `controls` on spreads, boxes and elements. |
+| `editor-native-controls` | `Control` and `importFile` in element editors, and the element's other parameters in the editor dialog. |
 
 `capabilities` lists what the installed app provides, and `get_authoring_context` reports it as `capabilities.templateApi`. Apps older than `requires` ignore it, but their bundler still rejects an import of a helper they lack. An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
 
@@ -315,6 +318,26 @@ type Anchor = { id: string; title?: string; spread: string; page: number; side: 
 
 An anchor marks a whole page, not a point found by measuring the render. Text flow decides which page a heading inside Markdown continuation lands on, so such headings cannot be anchors yet.
 
+### Editing UI
+
+Saved data and its editing UI are separate. Parameters declare what is saved: IDs, types, defaults, constraints and scopes, which persistence, validation, Undo and project commands (including MCP) rely on. How they are edited is chosen at three levels, from no code to custom UI. Choose the smallest level, and the smallest editor, that does what was asked: a request for a changeable emoji is one string parameter (and a size if wanted), not a choice between emoji, text and uploaded artwork. [`editing-levels.tsx`](examples/editing-levels.tsx) shows all three.
+
+1. **Generated controls (default).** Every parameter gets a control: text field, switch, slider and number, segmented choice or menu, colour, date or month, file chooser with import. Nothing to write.
+2. **Arranged controls.** `controls` on a spread, box or element arranges the generated controls of that scope's parameters: order, titled groups, labels, descriptions, and conditions.
+
+   ```tsx
+   controls: ['show', { group: 'Stamp', when: { show: true }, controls: [
+     'text', { parameter: 'tilt', label: 'Rotation', description: 'Negative values turn it counter-clockwise.' }, 'ink',
+   ] }],
+   ```
+
+   An entry is a parameter ID, `{ parameter, label?, description?, when? }`, or `{ group, description?, controls, when? }`. `when` names other parameters of the same scope and the values they must have (all must match; an array matches any of its values). For boxes, pass `controls` as `box.photo(label, parameters, { controls })` or in `box.markdown`'s options.
+   - A parameter left out of `controls` gets no generated control. It keeps its value, its validation and its project commands, so use this for values only a custom editor or an agent sets.
+   - A condition only hides a control. The value stays saved and validated, and comes back when the condition holds again. Conditions are presentation: they never remove a declaration or change a saved ID.
+   - Click-to-edit follows the box's or element's `controls` for its own parameters. A parameter a node explicitly shows with `ctx.edit` or `ctx.Text` is always editable on that node.
+   - The authoring types check entry IDs against the scope's parameters. Loading the template reports unknown or repeated IDs, a parameter a custom editor owns, conditions on unknown parameters, on the control's own value, or on values the parameter can never have.
+3. **A custom editor** for an element, below.
+
 ### Element editors
 
 An element can supply its own editor for parameters that generated controls handle poorly, such as marking days in a calendar or panning a map:
@@ -331,13 +354,16 @@ elements: { grid: {
 } },
 ```
 
-- **Opening it:** clicking the element opens the editor in a dialog, and so does the editor's button in the element's Inspector section. Parameters the editor lists are edited only there; the element's other parameters keep their generated controls in the Inspector, which the click scrolls to.
-- **Sandbox:** the component runs in a frame on the render origin with the template's CSS, like the book previews. It receives `values` (all of the element's parameters, with the draft applied), `set(changes)`, `document`, `format`, `readOnly`, `commit()` and `cancel()`. It cannot change project data itself.
+- **Opening it:** clicking the element opens the editor in a dialog, and so does the editor's button in the element's Inspector section.
+- **One editor for the element:** parameters the editor lists are edited only by it. The element's other parameters appear below it in the same dialog as generated controls (arranged by the element's `controls`), in the same draft, so Done saves the whole element as one edit. The editor's `values` follow those controls as the user changes them, so its preview always shows the whole draft. Done first applies anything still being typed in the editor's frame, including in `<Control>` fields, and saves only once the frame confirms. If the editor fails while applying, or does not answer within a few seconds, nothing is saved and the dialog stays open with its draft.
+- **Sandbox:** the component runs in a frame on the render origin with the template's CSS, like the book previews. It receives `values` (all of the element's parameters, with the draft applied), `set(changes)`, `document`, `format`, `readOnly`, `commit()`, `cancel()`, `Control` and `importFile`. It cannot change project data itself.
+- **ImageFlow's controls inside:** `<Control parameter="track" />` draws the app's own control for one of the editor's parameters, bound to the draft: the same field, slider, choice or file chooser (with import) as the generated controls, with their validation and accessibility, in the editor's appearance. Compose it with your own UI instead of rebuilding file handling or form controls. `label` overrides the parameter's label.
+- **Files:** `importFile(accept)` asks the app to import a file into the project and resolves to its file ID, or `undefined` when the user cancels; `<Control>` for a file parameter uses it for its **Choose…** button. Assign the ID with `set`, so Done saves it and Cancel discards the assignment; the imported file stays in the project. `file(id)` reads the new file at once.
 - **What ImageFlow owns:** the dialog, Cancel and Done, Escape and ⌘↩, focus, read-only mode, validation against the parameter schema, and saving. One editing session is one undoable edit; Cancel leaves the saved values unchanged.
 - **Draft and commit:** `set()` takes effect immediately, so `set({ ... }); commit()` in one handler saves those changes; `values` catches up on the next render.
 - **Changes from elsewhere:** if what the editor works on changes while it is open (a saved value after Reload or Undo, or a template edit that changes a default or a declaration of the parameters it handles), the dialog says so and refuses to save; the user reopens the editor on the current values.
 - **Failures:** if the component throws while rendering, in an event handler or in async work, the dialog shows the error and offers only Cancel. The editor counts as loaded once the component has mounted.
-- **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors can read files of file parameters with `file()`; remote resources such as map tiles are not available. The starter has two reference examples: the calendar editor (month and marked days) and the route map's **Frame route** editor, which keeps the viewport as three ordinary number parameters (`centerX`, `centerY`, `zoom`) and edits them together by dragging, scrolling, buttons or arrow keys. It draws only the GPX track, without a basemap, so export stays offline.
+- **Scope today:** element parameters only, shown in a dialog (`presentation: 'dialog'`). Editors can read files of file parameters with `file()`; remote resources such as map tiles are not available. The starter has two reference examples: the calendar editor (month and marked days, with **Week starts** as a generated control below it) and the route map's **Edit route** editor. Choosing a track and framing it are one task, so that editor owns the GPX `track` (drawn with `<Control parameter="track" />`, including import) and the viewport, kept as three ordinary number parameters (`centerX`, `centerY`, `zoom`) and edited together by dragging, scrolling, buttons or arrow keys. It draws only the GPX track, without a basemap, so export stays offline.
 
 #### Appearance in custom editors
 

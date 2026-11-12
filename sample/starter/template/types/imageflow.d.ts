@@ -116,12 +116,39 @@ export const p: {
   file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: Known<O, Omit<FileParameter, 'type' | 'default'>>): O & { type: 'file'; default: '' };
 };
 
+// Editing UI
+
+/** A value `when` compares a parameter with. An array matches any of its values. */
+export type ConditionValue = string | number | boolean | readonly (string | number | boolean)[];
+/**
+ * Shows a control or group only while the named parameters of the same scope have these values (all must match).
+ * A hidden control keeps its saved value; validation and project commands are unaffected.
+ */
+export type Condition<K extends string = string> = { [P in K]?: ConditionValue };
+/**
+ * One entry of `controls`: a parameter ID, a parameter with presentation options, or a titled group.
+ *
+ *     controls: ['show', { group: 'Stamp', when: { show: true }, controls: ['text', { parameter: 'tilt', label: 'Rotation' }] }]
+ */
+export type ControlItem<K extends string = string> =
+  | K
+  | { parameter: K; label?: string; description?: string; when?: Condition<K> }
+  | { group: string; description?: string; controls: readonly ControlItem<K>[]; when?: Condition<K> };
+/**
+ * Arranges the generated controls of a scope's parameters: their order, groups, labels, descriptions and
+ * conditions. Without `controls`, every parameter gets a control in declaration order. A parameter left out gets no
+ * control but keeps its value, validation and project commands; use that for values only a custom editor or an
+ * agent sets.
+ */
+export type Controls<K extends string = string> = readonly ControlItem<K>[];
+
 // Declarations
 
-export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parameters?: Parameters; flowOrder?: number };
+export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parameters?: Parameters; flowOrder?: number; controls?: Controls };
 /**
  * Props of a template-supplied element editor. `values` holds all of the element's parameters with the draft
- * applied; `set` changes the editor's own parameters in the draft. ImageFlow validates and saves the draft when
+ * applied, including changes in the dialog's generated controls as the user makes them, so the editor can preview
+ * the whole element; `set` changes the editor's own parameters in the draft. ImageFlow validates and saves the draft when
  * the user clicks Done (or calls `commit`), as one undoable edit; `cancel` discards it.
  */
 export type ElementEditorProps = {
@@ -132,23 +159,37 @@ export type ElementEditorProps = {
   readOnly: boolean;
   commit(): void;
   cancel(): void;
+  /**
+   * ImageFlow's own control for one of this editor's parameters, bound to the draft: the same text field, slider,
+   * choice or file chooser the generated controls use, including importing a file. Compose it with your own UI:
+   * `<Control parameter="track" />`.
+   */
+  Control(props: { parameter: string; label?: string }): ImageFlowElement;
+  /**
+   * Lets the user import a file into the project, offering these extensions, and resolves to its file ID (or
+   * undefined when they cancel). Assign it with `set`, so Done saves it and Cancel discards the assignment; the
+   * imported file stays in the project. `file(id)` reads it at once.
+   */
+  importFile(accept: readonly string[]): Promise<string | undefined>;
 };
 /**
  * An element's own editor for some of its parameters, shown in ImageFlow's editor dialog. It runs in a sandboxed
- * frame with the template's CSS; generated controls remain for the element's other parameters.
+ * frame with the template's CSS. The dialog shows the element's other parameters below it as generated controls,
+ * so the whole element is edited in one place and saved together with Done.
  */
-export type ElementEditor = {
+export type ElementEditor<K extends string = string> = {
   label?: string;
-  parameters: readonly string[];
+  parameters: readonly K[];
   component(props: ElementEditorProps): ImageFlowNode;
   presentation?: 'dialog';
 };
-export type ElementDeclaration = { label: string; parameters?: Parameters; editor?: ElementEditor };
+export type ElementDeclaration = { label: string; parameters?: Parameters; controls?: Controls; editor?: ElementEditor };
 export type SpreadDeclaration = {
   label: string;
   /** `left` or `right` for a single page at the start or end of the book. Default `spread`. */
   span?: Span;
   parameters?: Parameters;
+  controls?: Controls;
   boxes?: Record<string, BoxDeclaration>;
   elements?: Record<string, ElementDeclaration>;
 };
@@ -157,8 +198,9 @@ type Exact<T, Allowed> = { [X in Exclude<keyof T, keyof Allowed>]: never };
 /** Rejects keys a parameter of its type does not have, such as `mutliline`, also in objects written without `p`. */
 type ParametersChecked<P> = { [K in keyof P]: Exact<P[K], Extract<Parameter, { type: P[K] extends { type: infer T } ? T : never }>> };
 type OwnParametersChecked<T> = T extends { parameters: infer P } ? { parameters: ParametersChecked<P> } : unknown;
-type ElementsChecked<E> = { [K in keyof E]: Exact<E[K], ElementDeclaration> & OwnParametersChecked<E[K]> };
-type BoxesChecked<B> = { [K in keyof B]: Exact<B[K], BoxDeclaration> & OwnParametersChecked<B[K]> };
+/** Types each element's `controls` and `editor.parameters` with that element's own parameter IDs. */
+type ElementsChecked<E> = { [K in keyof E]: { controls?: Controls<ParameterKeys<E[K]>>; editor?: ElementEditor<ParameterKeys<E[K]>> } & Exact<E[K], ElementDeclaration> & OwnParametersChecked<E[K]> };
+type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K]>> } & Exact<B[K], BoxDeclaration> & OwnParametersChecked<B[K]> };
 
 // Anchors
 
@@ -313,7 +355,7 @@ export type SpreadDefinition<D extends Parameters = Parameters> = SpreadDeclarat
 };
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
-  'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records';
+  'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -340,6 +382,8 @@ export type SpreadBuilder<D extends Parameters> = <
   /** `left` or `right` for a single page at the start or end of the book. Default `spread`. */
   span?: Span;
   parameters?: P & ParametersChecked<P>;
+  /** Arranges the controls of this layout's own parameters in the sidebar. */
+  controls?: Controls<keyof P & string>;
   boxes?: B & BoxesChecked<B>;
   elements?: E & ElementsChecked<E>;
   render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D>): ImageFlowNode;
@@ -459,9 +503,10 @@ export function Element(props: Styling & Placement & EditMarker & IssueMarker & 
  * `boxes: { hero: box.photo('Main photo', { caption }), body: box.markdown('Story', { flowOrder: 1 }) }`.
  */
 export const box: {
-  photo<const P extends Parameters = {}>(label: string, parameters?: P & ParametersChecked<P>): { type: 'photo'; label: string; parameters: P };
-  markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P & ParametersChecked<P> }):
-    { type: 'markdown'; label: string; parameters: P; flowOrder?: number };
+  photo<const P extends Parameters = {}>(label: string, parameters?: P & ParametersChecked<P>, options?: { controls?: Controls<keyof P & string> }):
+    { type: 'photo'; label: string; parameters: P; controls?: Controls<keyof P & string> };
+  markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string> }):
+    { type: 'markdown'; label: string; parameters: P; flowOrder?: number; controls?: Controls<keyof P & string> };
   /**
    * Several photo boxes with explicit IDs, typed without casts: `boxes: box.photos(['one', 'two'], (id, i) => 'Photo ' + (i + 1))`.
    * The IDs are saved identities, so list them literally and never derive them from content.

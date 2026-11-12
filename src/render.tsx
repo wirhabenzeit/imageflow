@@ -10,7 +10,7 @@ import type { PrintSide, ResolvedFormat } from './format';
 import { parseDocument } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
-import { parameterWarnings, resolveParams } from './parameters';
+import { isParameterValue, parameterWarnings, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings } from './declaration-check';
@@ -25,6 +25,7 @@ import type { PreviewMetadata, PagePreviewMetadata } from './preview';
 import { inspectionSchema } from './inspection';
 import type { ElementInspection, ElementMeasurement } from './inspection';
 import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
+import { Field, ProjectFilesContext } from './Fields';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -763,6 +764,9 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   const format = resolveFormat(template.format);
   const claimed = (values: Values) => Object.fromEntries(editor.parameters.map((key) => [key, values[key]]));
   root.className = 'if-editor';
+  // The project's file registry for file controls. An import adds to it, so it is state the host can update.
+  let projectFiles = book.project.files;
+  let updateFiles: ((files: Record<string, string>) => void) | undefined;
 
   // The draft lives outside React so set() followed directly by commit() sends the newest values, before React
   // has rendered them. Every message is posted in order, and commit carries the draft as well.
@@ -788,15 +792,79 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     update?.(draft);
   };
 
+  // File imports run in the app, which owns the project; it answers with the new file's ID. The frame then reloads
+  // the project's files, so `file(id)` and the file controls see the new file at once.
+  let requests = 0;
+  const pending = new Map<number, (id: string | undefined) => void>();
+  const importFile = (accept: readonly string[]) => {
+    if (readOnly || failed || !Array.isArray(accept)) return Promise.resolve(undefined);
+    const request = ++requests;
+    post({ type: 'editor-import', request, accept: accept.filter((extension) => typeof extension === 'string') });
+    return new Promise<string | undefined>((resolve) => pending.set(request, resolve));
+  };
+  window.addEventListener('message', (event) => {
+    if (event.origin !== editorURL.slice(0, -1)) return;
+    if (event.data?.type === 'editor-flush') {
+      // The app's Done: blurring applies a field that commits on blur, through set(), before the draft is sent. A
+      // component that fails while applying reports the failure instead, and nothing is saved.
+      const request = event.data.request;
+      if (typeof request !== 'number') return;
+      try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
+      catch (error) { fail(error); }
+      if (!failed) post({ type: 'editor-flushed', request, values: changed ? claimed(draft) : {} });
+      return;
+    }
+    if (event.data?.type === 'editor-values') {
+      // The dialog's generated controls, for the element's other parameters: shown to the component, never claimed.
+      const values = event.data.values && typeof event.data.values === 'object' ? event.data.values as Values : {};
+      const others = Object.entries(values).filter(([key, value]) => !editor.parameters.includes(key) &&
+        Object.hasOwn(element.parameters, key) && isParameterValue(element.parameters[key], value));
+      if (!others.length) return;
+      draft = { ...draft, ...Object.fromEntries(others) };
+      update?.(draft);
+      return;
+    }
+    if (event.data?.type !== 'editor-imported') return;
+    const resolve = pending.get(event.data.request);
+    if (!resolve) return;
+    pending.delete(event.data.request);
+    const id = typeof event.data.id === 'string' ? event.data.id : undefined;
+    const session = typeof event.data.project === 'string' && /^[\w-]+$/.test(event.data.project) ? event.data.project : undefined;
+    if (!id || !session) return resolve(undefined);
+    // The import started a new render session for the project; this frame keeps its own, so read the files there.
+    void fetch('/render/' + session + '/data').then((response) => response.json()).then((latest: RenderProject) => {
+      setTemplateFiles(latest.files);
+      projectFiles = latest.project.files;
+      updateFiles?.(projectFiles);
+      resolve(id);
+    }).catch(fail);
+  });
+
+  const EditorValues = React.createContext<Values>(draft);
+  // The app's control for one of this editor's parameters, writing to the draft like `set`.
+  function Control({ parameter, label }: { parameter: string; label?: string }) {
+    const values = React.useContext(EditorValues);
+    const param = editor!.parameters.includes(parameter) && Object.hasOwn(element!.parameters, parameter) ? element!.parameters[parameter] : undefined;
+    if (!param) throw new Error('Control ' + parameter + ' is not one of the parameters this editor edits.');
+    const value = isParameterValue(param, values[parameter]) ? values[parameter] : param.default;
+    return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
+      React.createElement(Field, { param: label ? { ...param, label } : param, value, change: (next) => set({ [parameter]: next }) }));
+  }
+
   function Host() {
     const [values, setValues] = React.useState<Values>(draft);
+    const [files, setFiles] = React.useState(projectFiles);
     React.useEffect(() => {
       update = setValues;
+      updateFiles = setFiles;
       // Effects run only once the component has mounted without throwing.
       post({ type: 'editor-ready' });
-      return () => { update = undefined; };
+      return () => { update = undefined; updateFiles = undefined; };
     }, []);
-    return React.createElement(editor!.component, { values, set, document, format, readOnly, commit, cancel });
+    const context = React.useMemo(() => ({ files, importFile: readOnly ? undefined : (accept: string[]) => importFile(accept) }), [files]);
+    return React.createElement(ProjectFilesContext.Provider, { value: context },
+      React.createElement(EditorValues.Provider, { value: values },
+        React.createElement(editor!.component, { values, set, document, format, readOnly, commit, cancel, Control, importFile })));
   }
 
   // Errors from the component's event handlers and async work do not reach React's error handling.

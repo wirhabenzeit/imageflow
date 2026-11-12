@@ -280,8 +280,12 @@ export function App() {
   // Adds a file for a file parameter to the project's registry and resolves to its ID; the caller assigns it as
   // a normal edit, so Undo removes the assignment and keeps the file.
   function importParameterFile(accept: string[]) {
+    return importProjectFile(accept).then((imported) => imported?.id);
+  }
+  // The same, also naming the render session that has the new file, for an element editor frame to read it from.
+  function importProjectFile(accept: string[]) {
     const generation = inputGeneration.current;
-    return new Promise<string | undefined>((resolve) => enqueue(async () => {
+    return new Promise<{ id: string; project: string } | undefined>((resolve) => enqueue(async () => {
       try {
         const before = current.current;
         if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
@@ -290,7 +294,8 @@ export function App() {
         if ('error' in result) throw new Error(result.error);
         if (!result.value || current.current !== before) return resolve(undefined);
         adopt(result.value.summary);
-        resolve(result.value.imported[0]);
+        const [id] = result.value.imported;
+        resolve(id ? { id, project: result.value.summary.id } : undefined);
       } catch (error) {
         resolve(undefined);
         throw error;
@@ -1026,7 +1031,7 @@ export function App() {
                 toolbarHost={canvasWrap.current}>
                 {/* The box's own parameters (such as Show caption) sit with the photo; they are also in the Inspector. */}
                 {cropBox && Object.keys(cropBox.parameters).length > 0 && <div className="crop-params">
-                  <Fields schema={cropBox.parameters} values={cropState?.params ?? {}} update={(key, value) => edit(({ project }) => {
+                  <Fields schema={cropBox.parameters} controls={cropBox.controls} values={cropState?.params ?? {}} update={(key, value) => edit(({ project }) => {
                     const state = project.spreads.find(({ id }) => id === cropping.spread);
                     if (state?.definition !== cropping.layout || state.boxes[cropping.box]?.photo !== cropPhoto) return;
                     state.boxes[cropping.box].params[key] = value;
@@ -1082,7 +1087,7 @@ export function App() {
       <ElementEditorDialog key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
         blocked={previewNotice || undefined}
-        edit={editCanvas} close={() => setElementEditor(undefined)} />}
+        edit={editCanvas} close={() => setElementEditor(undefined)} importFile={importProjectFile} />}
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     <footer className="status-bar">

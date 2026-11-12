@@ -543,3 +543,13 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .appearance-options input:focus-visible + span { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
 .appearance-options label:hover input:not(:checked) + span { background: var(--segment-hover); }
 @media (prefers-reduced-motion: reduce) { .settings-disclosure > summary::before { transition: none; } }
+
+/* Template-arranged controls (`controls`): titled groups and descriptions, in the sidebar, popovers and dialogs. */
+.control-group { margin: 10px 0 4px; padding: 8px 0 0; border: 0; border-top: 1px solid var(--control-border); min-width: 0; }
+.control-group > legend { padding: 0 6px 0 0; font-size: 11px; font-weight: 600; color: var(--muted); }
+.control-group .control-group { margin-left: 8px; }
+.control-description, .field-description { margin: 0 0 4px; font-size: 11px; color: var(--muted); }
+.edit-popover .control-group { display: grid; gap: 6px; margin: 6px 0 0; }
+/* The element's other parameters, below its custom editor in the same dialog and draft. */
+.ee-fields { margin: 0; padding: 8px 18px 4px; border: 0; border-top: 1px solid var(--control-border); min-width: 0; display: grid; gap: 2px; }
+.ee-fields .field { margin: 6px 0; display: grid; gap: 3px; font-size: 12px; }

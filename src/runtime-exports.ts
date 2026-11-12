@@ -11,5 +11,7 @@ export const capabilities = [
   'anchors', 'geometry', 'box-helpers', 'template-issues', 'typed-components',
   // `spreads: ({ spread }) => …`, `ctx.geometry` with `rect` props, `ctx.Text`, `printFormat`, and `box.photos`.
   'spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-records',
+  // `controls` on spreads, boxes and elements; `Control` and `importFile` in custom element editors.
+  'editor-controls', 'editor-native-controls',
 ] as const;
 export type Capability = typeof capabilities[number];

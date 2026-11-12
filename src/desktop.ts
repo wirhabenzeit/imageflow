@@ -1,5 +1,6 @@
 import type { PrintFormat, PrintSide, Span } from './format';
 import type { Parameters } from './parameters';
+import type { ControlItem } from './controls';
 import type { ProjectFiles } from './project';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
 import type { AppSettings, SettingsPane } from './settings';
@@ -78,12 +79,13 @@ export type DesktopApi = {
 
 // `editor` describes a template-supplied editor for some of the element's parameters (the component itself
 // stays in the render frame).
+// `controls` arranges the generated controls of a scope's parameters (src/controls.ts).
 export type ElementDefinition = {
-  label: string; parameters: Parameters; editor?: { label?: string; parameters: string[]; presentation: 'dialog' };
+  label: string; parameters: Parameters; controls?: ControlItem[]; editor?: { label?: string; parameters: string[]; presentation: 'dialog' };
 };
-export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; parameters: Parameters; flowOrder?: number };
+export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; parameters: Parameters; flowOrder?: number; controls?: ControlItem[] };
 export type SpreadDefinition = {
-  label: string; span: Span; parameters: Parameters;
+  label: string; span: Span; parameters: Parameters; controls?: ControlItem[];
   boxes: Record<string, BoxDefinition>; elements: Record<string, ElementDefinition>;
 };
 export type TemplateInfo = {

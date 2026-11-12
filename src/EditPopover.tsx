@@ -6,11 +6,53 @@ import { readEdit, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import type { Edit } from './Inspector';
 import { ParamControl } from './Fields';
-import { isParameterValue } from './parameters';
+import { isParameterValue, resolveParams } from './parameters';
 import type { Project, SpreadState, Values } from './project';
+import { controlLayout } from './controls';
+import type { ControlNode } from './controls';
 
 type Value = Values[string];
 const scopeLabel = { spread: '', document: 'Book', element: '', box: '' } as const;
+
+type Shown =
+  | { kind: 'field'; target: EditTarget; label: string; description?: string }
+  | { kind: 'group'; label: string; description?: string; children: Shown[] };
+const shownFields = (items: Shown[]): Extract<Shown, { kind: 'field' }>[] =>
+  items.flatMap((item) => item.kind === 'field' ? [item] : shownFields(item.children));
+
+// Orders the targets for display. A box's or element's own parameters follow its `controls` (order, groups, labels,
+// conditions on the current values); parameters it leaves out are not shown. Other marked parameters, such as a
+// spread heading on a ctx.Text node, are explicit requests to edit them here and always show.
+function arrange(targets: EditTarget[], template: TemplateInfo, spread: SpreadState, drafts: Record<string, Value>): Shown[] {
+  const layout = template.spreads[spread.definition];
+  const shown: Shown[] = [];
+  const done = new Set<string>();
+  for (const target of targets) {
+    if (done.has(target.path)) continue;
+    const declaration = target.scope === 'box' ? layout?.boxes[target.owner!] : target.scope === 'element' ? layout?.elements[target.owner!] : undefined;
+    if (!declaration) {
+      done.add(target.path);
+      shown.push({ kind: 'field', target, label: target.param.label });
+      continue;
+    }
+    const same = targets.filter((item) => item.scope === target.scope && item.owner === target.owner);
+    for (const item of same) done.add(item.path);
+    const saved = (target.scope === 'box' ? spread.boxes : spread.elements)[target.owner!]?.params ?? {};
+    const values = { ...resolveParams(declaration.parameters, saved),
+      ...Object.fromEntries(same.filter(({ path }) => path in drafts).map(({ key, path }) => [key, drafts[path]])) };
+    const byKey = new Map(same.map((item) => [item.key, item]));
+    const prune = (nodes: ControlNode[]): Shown[] => nodes.flatMap((node): Shown[] => {
+      if (node.kind === 'field') {
+        const item = byKey.get(node.key);
+        return item ? [{ kind: 'field', target: item, label: node.label, ...(node.description ? { description: node.description } : {}) }] : [];
+      }
+      const children = prune(node.children);
+      return children.length ? [{ kind: 'group', label: node.label, ...(node.description ? { description: node.description } : {}), children }] : [];
+    });
+    shown.push(...prune(controlLayout(declaration.parameters, declaration.controls, values)));
+  }
+  return shown;
+}
 
 // Opens over a node the template marked with `ctx.edit(...)`, and edits those parameters in place.
 export function EditPopover({ project, spread, template, edits, anchor, bounds, readOnly, blocked, edit, close, step, actions }: {
@@ -25,6 +67,8 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
   const editors = template.spreads[spread.definition]?.elements ?? {};
   const targets = edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((target): target is EditTarget =>
     !!target && !(target.scope === 'element' && editors[target.owner!]?.editor?.parameters.includes(target.key)));
+  const shown = arrange(targets, template, spread, drafts);
+  const visible = shownFields(shown);
 
   function apply(changes: Record<string, Value>) {
     const valid = targets.filter(({ path, param }) => path in changes && isParameterValue(param, changes[path]) &&
@@ -73,7 +117,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
     const top = below + height > visibleBottom && anchor.y - height - 10 > 0 ? anchor.y - height - 10 : below;
     const left = Math.max(8, Math.min(anchor.x, bounds.width - element.offsetWidth - 8));
     setPlacement({ left, top });
-  }, [anchor.x, anchor.y, anchor.width, anchor.height, bounds.width, targets.length, blocked]);
+  }, [anchor.x, anchor.y, anchor.width, anchor.height, bounds.width, visible.length, blocked]);
 
   // Focus once placed: the popover is hidden while it measures itself, and hidden fields cannot take focus.
   const focused = useRef(false);
@@ -93,7 +137,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
       event.preventDefault();
       commit();
       close();
-    } else if (event.key === 'Tab' && targets.length === 1) {
+    } else if (event.key === 'Tab' && visible.length === 1) {
       event.preventDefault();
       commit();
       step(event.shiftKey ? -1 : 1);
@@ -102,16 +146,38 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
 
   // A box or element target is titled after the box or element, such as "Story" or "Calendar grid".
   function ownerLabel() {
-    const owner = targets.find(({ scope }) => scope === 'element' || scope === 'box');
+    const owner = visible.map(({ target }) => target).find(({ scope }) => scope === 'element' || scope === 'box');
     const layout = template.spreads[spread.definition];
     if (!owner || !layout) return undefined;
     return (owner.scope === 'element' ? layout.elements : layout.boxes)[owner.owner!]?.label;
   }
-  if (!targets.length && !actions) return null;
-  const heading: ReactNode = targets.length === 1
-    ? <>{targets[0].param.label}{scopeLabel[targets[0].scope] && <span className="muted"> · {scopeLabel[targets[0].scope]}</span>}</>
+  if (!visible.length && !actions) return null;
+  const [only] = visible;
+  const heading: ReactNode = visible.length === 1
+    ? <>{only.label}{scopeLabel[only.target.scope] && <span className="muted"> · {scopeLabel[only.target.scope]}</span>}</>
     : ownerLabel() ?? 'Edit';
-  return <div ref={panel} className="edit-popover" role="dialog" aria-label={'Edit ' + targets.map(({ param }) => param.label).join(', ')}
+  let index = 0;
+  const render = (items: Shown[]): ReactNode => items.map((item, i) => {
+    if (item.kind === 'group') {
+      return <fieldset key={'group ' + i + ' ' + item.label} className="control-group">
+        <legend>{item.label}</legend>
+        {item.description && <p className="control-description">{item.description}</p>}
+        {render(item.children)}
+      </fieldset>;
+    }
+    const { target, label, description } = item;
+    const first = index++ === 0;
+    return <div className="ep-field" key={target.path}>
+      {visible.length > 1 && target.param.type !== 'boolean' && <span className="ep-label">{label}
+        {scopeLabel[target.scope] && <span className="muted"> · {scopeLabel[target.scope]}</span>}</span>}
+      <ParamControl param={label === target.param.label ? target.param : { ...target.param, label }} value={readEdit(project, spread, target)}
+        draft={drafts[target.path]} autoFocus={first}
+        setDraft={(value) => setDrafts((previous) => ({ ...previous, [target.path]: value }))}
+        apply={(value) => apply({ [target.path]: value })} />
+      {description && <small className="field-description">{description}</small>}
+    </div>;
+  });
+  return <div ref={panel} className="edit-popover" role="dialog" aria-label={'Edit ' + visible.map(({ label }) => label).join(', ')}
     style={placement ?? { left: anchor.x, top: anchor.y + anchor.height + 10, visibility: 'hidden' }} onKeyDown={keys}
     onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
     <div className="ep-head">
@@ -119,13 +185,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
       <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)" onClick={() => { commit(); close(); }}><Icon name="close" /></button>
     </div>
     <fieldset disabled={readOnly || !!blocked}>
-      {targets.map((target, i) => <div className="ep-field" key={target.path}>
-        {targets.length > 1 && target.param.type !== 'boolean' && <span className="ep-label">{target.param.label}
-          {scopeLabel[target.scope] && <span className="muted"> · {scopeLabel[target.scope]}</span>}</span>}
-        <ParamControl param={target.param} value={readEdit(project, spread, target)} draft={drafts[target.path]} autoFocus={i === 0}
-          setDraft={(value) => setDrafts((previous) => ({ ...previous, [target.path]: value }))}
-          apply={(value) => apply({ [target.path]: value })} />
-      </div>)}
+      {render(shown)}
     </fieldset>
     {actions && !readOnly && !blocked && <div className="ep-actions">{actions}</div>}
     {blocked && <p className="ep-hint muted" role="status">{blocked}</p>}

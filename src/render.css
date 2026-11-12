@@ -128,3 +128,18 @@ html:has(.if-book) { color-scheme: light dark; }
 html:has(.if-book), html:has(.if-book) body { background: transparent; }
 /* An empty ctx.Text in the editor: the placeholder takes the template's own type, dimmed. */
 .if-text-placeholder { opacity: .45; }
+
+/* ImageFlow's own controls inside a custom editor (`Control`), in the editor's appearance. Scoped to .if-control so
+   the template's own editor UI keeps its styles. */
+.if-editor .if-control { margin: 0 0 12px; padding: 0; border: 0; min-width: 0; }
+.if-editor .if-control .field { display: grid; gap: 4px; font-size: 12px; }
+.if-editor .if-control :is(.field-name, .pc-unit, .pc-count, .field-description) { color: var(--if-editor-muted); }
+.if-editor .if-control :is(input:not([type="checkbox"], [type="range"], [type="color"]), select, textarea, button) {
+  font: inherit; color: var(--if-editor-text); background: var(--if-editor-control); border: 1px solid var(--if-editor-border);
+  border-radius: 5px; padding: 3px 7px; min-height: 24px; }
+.if-editor .if-control :is(input, select, textarea, button):focus-visible { outline: 2px solid var(--if-editor-focus); outline-offset: 1px; }
+.if-editor .if-control .pc-segmented { display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--if-editor-border); }
+.if-editor .if-control .pc-segmented button { flex: 1; border: 0; background: transparent; }
+.if-editor .if-control .pc-segmented button[aria-checked="true"] { background: var(--if-editor-control); box-shadow: 0 1px 2px #0002; }
+.if-editor .if-control .pc-file select { flex: 1; min-width: 0; }
+.if-editor .if-control input.pc-number { width: 64px; }

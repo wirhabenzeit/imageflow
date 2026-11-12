@@ -141,11 +141,11 @@ try {
   await w.getByRole('dialog', { name: 'Edit calendar' }).getByRole('button', { name: 'Cancel', exact: true }).click();
   await appearance('dark');
   await w.locator('[data-spread="road"].spread-thumb').click();
-  await w.getByRole('button', { name: 'Frame route…', exact: true }).click();
+  await w.getByRole('button', { name: 'Edit route…', exact: true }).click();
   await w.frameLocator('.element-editor-frame').locator('.route-editor-frame svg').waitFor();
   await w.waitForTimeout(200);
   await w.screenshot({ path: join(root, '.build', 'appearance-route-dark.png') });
-  await w.getByRole('dialog', { name: 'Frame route' }).getByRole('button', { name: 'Cancel', exact: true }).click();
+  await w.getByRole('dialog', { name: 'Edit route' }).getByRole('button', { name: 'Cancel', exact: true }).click();
   // Real proof exports, including flowed text, rasterize identically in both appearances.
   await menuAction(app, 'Open Sample Project');
   await w.locator('.project-identity strong').getByText('Senja · Field Notes', { exact: true }).waitFor();
