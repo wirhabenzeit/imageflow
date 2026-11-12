@@ -4,6 +4,7 @@ import type { DragEvent, RefObject } from 'react';
 export const spreadMime = 'application/x-imageflow-spread';
 type Indicator = { target: number; top: number };
 
+// `revision` is the active render-session ID, not the persistent document handle.
 export function useSpreadReorder({ list, revision, enabled, canMove, move }: {
   list: RefObject<HTMLDivElement | null>; revision?: string; enabled: boolean;
   canMove: (id: string, target: number) => boolean; move: (id: string, target: number) => void;

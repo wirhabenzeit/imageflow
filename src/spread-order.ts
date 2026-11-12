@@ -9,9 +9,12 @@ export function spreadOrder(spreads: SpreadState[], id: string, target: number, 
   const ordered = [...spreads];
   const [item] = ordered.splice(start, 1);
   ordered.splice(target, 0, item);
-  const spans = ordered.map(({ definition }) => template.spreads[definition]?.span ?? 'spread');
-  // Reordering does not change the page count. Check only sequence placement, so a book with a page-count
-  // error can still be organised, while its single right/left end pages cannot be moved into the interior.
-  if (!spans.every((span, index) => spanAllowedAt(span, index, spans.length, template.format))) return;
+  const allowed = (spread: SpreadState, index: number) =>
+    spanAllowedAt(template.spreads[spread.definition]?.span ?? 'spread', index, spreads.length, template.format);
+  const misplaced = new Set(spreads.filter((spread, index) => !allowed(spread, index)).map(({ id }) => id));
+  // Existing problems must not freeze the book: allow partial repairs and unrelated moves. Track the affected
+  // spreads, rather than just counting errors, so fixing one cannot displace a previously valid end page.
+  // Page-count errors are unchanged by a move and do not affect its allowed destinations.
+  if (ordered.some((spread, index) => !allowed(spread, index) && !misplaced.has(spread.id))) return;
   return ordered;
 }

@@ -50,3 +50,23 @@ test('full-spread books can reorder into either end', () => {
     assert.deepEqual(spreadOrder(full, 's0', 4, { ...template, format })?.map(({ id }) => id), ['s1', 's2', 's3', 's4', 's0']);
   }
 });
+
+test('a book with two misplaced end pages can be repaired one move at a time', () => {
+  const broken = [spreads[1], spreads[0], spreads[2], spreads[4], spreads[3]];
+  const openingFixed = spreadOrder(broken, 's0', 0, template);
+  assert.deepEqual(openingFixed?.map(({ id }) => id), ['s0', 's1', 's2', 's4', 's3']);
+  assert.deepEqual(spreadOrder(openingFixed!, 's4', 4, template), spreads);
+});
+
+test('existing placement errors do not block unrelated moves or trade away valid end pages', () => {
+  const broken = spreads.map((spread, i) => i === 2 ? { ...spread, definition: 'opening' } : spread);
+  assert.deepEqual(spreadOrder(broken, 's1', 3, template)?.map(({ id }) => id), ['s0', 's2', 's3', 's1', 's4']);
+  // This would fix the second opening page but displace the previously valid first one.
+  assert.equal(spreadOrder(broken, 's2', 0, template), undefined);
+  assert.equal(spreadOrder(broken, 's4', 3, template), undefined);
+});
+
+test('single pages incompatible with the delivery format do not freeze full-spread moves', () => {
+  const format = { ...template.format, structure: { ...template.format.structure, delivery: 'spreads' as const } };
+  assert.deepEqual(spreadOrder(spreads, 's1', 3, { ...template, format })?.map(({ id }) => id), ['s0', 's2', 's3', 's1', 's4']);
+});
