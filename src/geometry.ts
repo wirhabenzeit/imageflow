@@ -16,9 +16,19 @@ export type Insets = number | { top?: number; right?: number; bottom?: number; l
 // A layout drawn in a format it does not fit (a spread layout without facing pages, or a page layout with them) is
 // still previewed, and the Book check reports it; `lenient` answers its geometry calls instead of throwing.
 type Mode = { lenient?: boolean };
+// The format a mismatched layout receives as ctx.format carries this mark, so the standalone helpers called with it,
+// such as geometry.spread(ctx.format, 'bleed'), answer leniently too.
+const lenientFormats = new WeakSet<object>();
+export function lenientFormat<F extends ResolvedFormat>(format: F): F {
+  const copy = { ...format };
+  lenientFormats.add(copy);
+  return copy;
+}
+const modeOf = (format: ResolvedFormat, mode: Mode): Mode => mode.lenient || lenientFormats.has(format) ? { lenient: true } : mode;
 const sides = new Set(['left', 'right']);
 
-function pageRect(format: ResolvedFormat, side: Side | undefined, area: Area, { lenient }: Mode): Rect {
+function pageRect(format: ResolvedFormat, side: Side | undefined, area: Area, mode: Mode): Rect {
+  const { lenient } = modeOf(format, mode);
   if (!format.facingPages) {
     if (side && !lenient) {
       throw new Error('This format has no facing pages, so a page has no side. Call page(' + (area === 'trim' ? '' : "'" + area + "'") + ') without one.');
@@ -52,7 +62,7 @@ export function page(format: ResolvedFormat, side?: Side | Area, area?: Area, mo
 // the binding itself. A format without facing pages has no spreads.
 export function spread(format: ResolvedFormat, area: Area = 'trim', mode: Mode = {}): Rect {
   if (!format.facingPages) {
-    if (mode.lenient) return pageRect(format, undefined, area, mode);
+    if (modeOf(format, mode).lenient) return pageRect(format, undefined, area, mode);
     throw new Error("This format has no facing pages, so there is no spread. Use page(" + (area === 'trim' ? '' : "'" + area + "'") + ') for the page.');
   }
   const { trim, bleed, safe } = format;

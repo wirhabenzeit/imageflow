@@ -37,7 +37,6 @@ export default defineTemplate({
         <ctx.PhotoBox id="photo" rect={ctx.geometry.page('safe')} />
         <p data-page={ctx.page.number} style={ctx.geometry.css({ ...ctx.geometry.page('safe'), y: 250, height: 20 })}>Page {ctx.page.number}</p>
       </Spread> },
-    wide: { label: 'Wide', render: (ctx) => <Spread><div style={{ ...ctx.geometry.css(ctx.geometry.spread('bleed')), background: '#00ffff' }} /></Spread> },
   },
 });
 `;

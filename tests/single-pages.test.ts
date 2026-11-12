@@ -6,7 +6,7 @@ import type { Schema } from '../src/declaration-check';
 import { fixtureFits, planFixtures, fixtureRequestSchema } from '../src/fixtures';
 import { formatSchema, mm, pageLabel, pageSequence, pagesText, printFormat, resolveFormat, sheetPages, spanAllowedAt, trimBox } from '../src/format';
 import type { FacingFormat, ResolvedFormat, SinglePageFormat } from '../src/format';
-import { boundGeometry, design, page, spread } from '../src/geometry';
+import { boundGeometry, design, lenientFormat, page, spread } from '../src/geometry';
 import { layoutChoices } from '../src/layouts';
 import { projectSchema } from '../src/project';
 import type { ProjectFiles } from '../src/project';
@@ -120,6 +120,9 @@ test('geometry helpers describe one page without facing pages', () => {
   assert.deepEqual(lenient.page('right', 'safe'), page(format, 'safe'));
   assert.deepEqual(lenient.spread('bleed'), page(format, 'bleed'));
   assert.deepEqual(boundGeometry(facing, { lenient: true }).page('trim'), page(facing, 'right'));
+  // The standalone helpers too, when called with the format such a layout receives as ctx.format.
+  assert.deepEqual(spread(lenientFormat(format), 'bleed'), page(format, 'bleed'));
+  assert.deepEqual(page(lenientFormat(facing), 'safe'), page(facing, 'right', 'safe'));
 });
 
 test('export trim boxes are inset by the bleed on each edge', () => {
@@ -175,7 +178,8 @@ test('layout choices follow the chosen format, and a mismatched layout may switc
   assert.deepEqual(layoutChoices(mixed.spreads, 'body', facing), ['body', 'other']);
   assert.deepEqual(layoutChoices(mixed.spreads, 'body', single), ['month', 'year', 'body']);
   assert.deepEqual(layoutChoices(mixed.spreads, 'month', facing), ['month', 'body', 'other']);
-  assert.deepEqual(info('calendar').facingPages, { calendar: false, book: true });
+  assert.deepEqual(Object.fromEntries(Object.entries(info('calendar').structures!).map(([id, { facingPages }]) => [id, facingPages !== false])),
+    { calendar: false, book: true });
 });
 
 test('fixtures render each layout only in the formats it fits', () => {
@@ -203,6 +207,20 @@ test('MCP commands insert and switch only layouts that fit the book’s format',
     error instanceof ProjectCommandError && error.code === 'INCOMPATIBLE_LAYOUT' && /which has no facing pages\. Insert a single-page layout/.test(error.message));
   assert.throws(() => applyProjectCommands(files(), template, [{ op: 'switch_layout', spread: 'jan', definition: 'body' }]), (error) =>
     error instanceof ProjectCommandError && error.code === 'INCOMPATIBLE_LAYOUT' && /Choose a single-page layout/.test(error.message));
+  // A format selected earlier in the batch applies to the commands after it.
+  const switched = applyProjectCommands(files(), template, [{ op: 'select_format', format: 'book' }, { op: 'switch_layout', spread: 'jan', definition: 'body' },
+    { op: 'insert_spread', definition: 'other' }]);
+  assert.deepEqual(switched.files.project.spreads.map(({ definition }) => definition), ['body', 'other']);
+  assert.throws(() => applyProjectCommands(files(), template, [{ op: 'select_format', format: 'book' }, { op: 'insert_spread', definition: 'year' }]),
+    (error) => error instanceof ProjectCommandError && /which has facing pages\. Insert a spread layout/.test(error.message));
+});
+
+test('a fixture preview in a format shows the layouts that fit it, however many others come first', () => {
+  const spreads = Object.fromEntries([...Array.from({ length: 12 }, (_, i) => ['wide' + i, layout('spread')]), ['month', layout('page')]]);
+  const declared = templateSchema.parse(declare({ formats: { book, calendar }, spreads }));
+  const template = templateInfo(chooseFormat(declared, 'book'));
+  const plan = planFixtures(template, fixtureRequestSchema.parse({ formats: 'all', cases: ['typical'], preview: { printFormat: 'calendar' } }));
+  assert.deepEqual(plan.preview?.cells.map(({ layout }) => layout), ['month']);
 });
 
 // Keep the narrowed types in use, so a change to the union shows up here at compile time.

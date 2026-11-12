@@ -145,9 +145,10 @@ export type TemplateInfo = {
   openingSpreads?: { layout: string; params: Values }[];
   // The format in use, its ID, and the labels of all formats the template offers.
   format: PrintFormat; formatId: string; formats: Record<string, string>;
-  // Whether each format has facing pages, by format ID ('default' for a template with one format). Absent in
-  // summaries from apps that predate formats without facing pages, where every format has them.
-  facingPages?: Record<string, boolean>;
+  // Each format's structure (facing pages, delivery, ends, page count), by format ID ('default' for a template with
+  // one format), so commands and fixtures can check layouts against a format other than the current one. Absent in
+  // summaries from apps that predate it.
+  structures?: Record<string, PrintFormat['structure']>;
 };
 export type BoxLocation = { id: string; type: 'photo' | 'markdown'; x: number; y: number; width: number; height: number };
 // The editor shows the whole book in two frames: the scrolling spread view and the sidebar thumbnails.

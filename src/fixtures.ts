@@ -3,7 +3,7 @@ import type { SpreadDefinition, TemplateInfo } from './desktop';
 import type { Parameter, Parameters } from './parameters';
 import { identifier } from './project';
 import type { Project, SpreadState, Values } from './project';
-import { hasFacingPages } from './format';
+import { spanFits } from './format';
 
 // Authoring fixtures render layouts with synthetic content in a separate book, so an agent can test layouts that the
 // saved book does not use yet, and see how they cope with long, empty or awkward content. Nothing is saved.
@@ -84,8 +84,8 @@ function inapplicable(fixture: FixtureCase, inputs: Inputs) {
 // Whether a layout fits a format of the template: page layouts need a format without facing pages, the others one
 // with them. Fixtures render each layout only in the formats it fits.
 export function fixtureFits(template: TemplateInfo, layout: string, format: string) {
-  const facing = template.facingPages?.[format] ?? (format === template.formatId ? hasFacingPages(template.format) : true);
-  return facing === (template.spreads[layout].span !== 'page');
+  const structure = template.structures?.[format] ?? (format === template.formatId ? template.format.structure : undefined);
+  return structure ? spanFits(template.spreads[layout].span, { structure }) : template.spreads[layout].span !== 'page';
 }
 
 export function availableFormats(template: TemplateInfo) {
@@ -158,7 +158,7 @@ export function planFixtures(template: TemplateInfo, request: FixtureRequest): F
       const cell = cells.find((candidate) => candidate.layout === layout && candidate.case === fixture);
       if (!cell) throw new FixtureError('FIXTURE_NOT_FOUND', 'Fixture ' + layout + '/' + fixture + ' is not tested by this check. Check the skipped list or request that layout and case.');
       return cell;
-    }) : cells.slice(0, fixtureLimits.previewCells);
+    }) : cells.filter((cell) => fixtureFits(template, cell.layout, printFormat)).slice(0, fixtureLimits.previewCells);
     if (shown.length) plan.preview = { ...options, printFormat, cells: shown };
   }
   return plan;

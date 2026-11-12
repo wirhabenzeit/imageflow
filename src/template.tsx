@@ -11,7 +11,7 @@ import type { VariantTags } from './layouts';
 import { isParameterValue, p, parametersSchema, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import type { BoxDefinition, SpreadDefinition, TemplateInfo } from './desktop';
-import { boundGeometry, geometry } from './geometry';
+import { boundGeometry, geometry, lenientFormat } from './geometry';
 import type { BoundGeometry, Rect } from './geometry';
 import { rememberDocument } from './declaration-check';
 import { capabilities, runtimeExports } from './runtime-exports';
@@ -355,7 +355,7 @@ export const defineTemplate = (template: TemplateDeclaration) => normalizeTempla
 export function templateInfo(template: Template): TemplateInfo {
   return {
     format: template.format, formatId: template.formatId, formats: template.formatChoices,
-    facingPages: Object.fromEntries(Object.entries(template.formats ?? { default: template.format }).map(([id, format]) => [id, hasFacingPages(format)])),
+    structures: Object.fromEntries(Object.entries(template.formats ?? { default: template.format }).map(([id, format]) => [id, format.structure])),
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
     parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
@@ -616,11 +616,13 @@ export function SpreadView({ book, template, format, spread, page, index, positi
   const values: SpreadValues = {
     params: resolveParams(definition.parameters, spread.params), document: resolveParams(template.parameters, book.project.params), boxes, elements,
   };
+  // A layout drawn in a format it does not fit gets lenient geometry, through ctx.geometry and ctx.format alike.
+  const fits = spanFits(definition.span, template.format);
   const content = definition.render({
-    ...values, page, format, formatId: template.formatId, mode: book.mode,
+    ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode,
     // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
     edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
-    book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !spanFits(definition.span, template.format) }),
+    book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),
     PhotoBox, MarkdownBox, Element, Text,
   });
   return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, documentParameters: template.parameters, values, lazyPhotos }}>

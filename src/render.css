@@ -79,8 +79,8 @@ html:has(.if-artwork) { overflow: hidden; }
   body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
 
-.if-preview [data-span="left"] .if-sheet::after,
-.if-preview [data-span="right"] .if-sheet::after {
+.if-preview [data-span="left"] .if-sheet:not([data-pages="single"])::after,
+.if-preview [data-span="right"] .if-sheet:not([data-pages="single"])::after {
   content: 'Inside cover';
   position: absolute;
   display: grid;
@@ -90,7 +90,7 @@ html:has(.if-artwork) { overflow: hidden; }
   background: #e6e2d9;
   font: 28px system-ui, sans-serif;
 }
-.if-preview [data-span="right"] .if-sheet::after { inset: 0 50% 0 0; }
+.if-preview [data-span="right"] .if-sheet:not([data-pages="single"])::after { inset: 0 50% 0 0; }
 .if-placeholder {
   display: grid;
   place-items: center;
