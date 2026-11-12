@@ -451,12 +451,15 @@ type DocumentCheck<S, D> = {
     ? [Mismatched<D, TypedWith<S[K]>>] extends [never] ? unknown
       : { [typedDocument]: `Document parameter ${Mismatched<D, TypedWith<S[K]>>} is declared differently in the template's parameters and in spreadFor()` }
     : { [typedDocument]: `Declare document parameter ${Missing<D, TypedWith<S[K]>>} in the template's parameters, or remove it from spreadFor()` })
-    & SpreadChecked<S[K]>;
+    & SpreadChecked<S[K], D extends Parameters ? D : Parameters>;
 };
-/** A spread written as a plain object gets the same unknown-property checks as one from the builder. */
-type SpreadChecked<T> = 0 extends 1 & T ? unknown : Exact<T, SpreadDefinition<any>> & OwnParametersChecked<T>
+/**
+ * A spread written as a plain object gets the same unknown-property checks as one from the builder, and its editors
+ * the template's document parameters `D`.
+ */
+type SpreadChecked<T, D extends Parameters = Parameters> = 0 extends 1 & T ? unknown : Exact<T, SpreadDefinition<any>> & OwnParametersChecked<T>
   & (T extends { boxes: infer B } ? { boxes: BoxesChecked<B> } : unknown)
-  & (T extends { elements: infer E } ? { elements: ElementsChecked<E> } : unknown);
+  & (T extends { elements: infer E } ? { elements: ElementsChecked<E, D> } : unknown);
 
 /**
  * Declares the template. Prefer `spreads` as a function: its `spread` builder types every layout's `ctx.document`

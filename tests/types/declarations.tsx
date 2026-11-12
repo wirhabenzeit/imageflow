@@ -140,3 +140,25 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: doc, sp
       return null;
     } } } }, render: () => <Spread /> }),
 }) });
+
+// A plain-object spread passes the template's document parameters to its editors too, so an editor typed with them
+// compiles there as it does in the builder.
+function PaperEditor({ document }: ElementEditorProps<typeof route, 'zoom', typeof doc>) {
+  const paper: 'warm' | 'white' = document.paper;
+  return paper;
+}
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: doc, spreads: {
+  a: { label: 'A', elements: { e: { label: 'E', parameters: route, editor: { parameters: ['zoom'], component: PaperEditor } } }, render: () => <Spread /> },
+} });
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: doc, spreads: ({ spread }) => ({
+  a: spread({ label: 'A', elements: { e: { label: 'E', parameters: route, editor: { parameters: ['zoom'], component: PaperEditor } } }, render: () => <Spread /> }),
+}) });
+// ...and an editor that reads a document parameter the template does not declare fails in both forms.
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: {
+  a: { label: 'A', elements: { e: { label: 'E', parameters: route, editor: { parameters: ['zoom'], component: PaperEditor } } }, render: () => <Spread /> },
+} });
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
+  // @ts-expect-error
+  a: spread({ label: 'A', elements: { e: { label: 'E', parameters: route, editor: { parameters: ['zoom'], component: PaperEditor } } }, render: () => <Spread /> }),
+}) });
