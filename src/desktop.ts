@@ -1,7 +1,7 @@
 import type { PrintFormat, PrintSide, Span } from './format';
 import type { Parameters } from './parameters';
 import type { ControlItem } from './controls';
-import type { ProjectFiles } from './project';
+import type { ProjectFiles, Values } from './project';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
 import type { ImportMode, SourceStatus } from './source-locations';
 import type { AppSettings, SettingsPane } from './settings';
@@ -116,6 +116,8 @@ export type SpreadDefinition = {
 };
 export type TemplateInfo = {
   version: string; parameters: Parameters; spreads: Record<string, SpreadDefinition>;
+  // The spreads a new book from this template starts with; empty when it starts without spreads.
+  openingSpreads?: { layout: string; params: Values }[];
   // The format in use, its ID, and the labels of all formats the template offers.
   format: PrintFormat; formatId: string; formats: Record<string, string>;
 };

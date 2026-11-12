@@ -40,7 +40,7 @@ export const projectSchema = z.object({
     params: values,
     boxes: z.record(identifier, box).default({}),
     elements: z.record(identifier, z.object({ params: values })).default({}),
-  })).min(1).refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
+  })).refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
 });
 
 export const photoIndexSchema = z.record(identifier, z.object({

@@ -6,7 +6,7 @@ import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
 import type { Anchor, AnchorDeclaration, BookContext, Element, IssueMarker, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
-  Text, TextTag } from './template';
+  TemplateDeclaration, Text, TextTag } from './template';
 import type { Capability, runtimeExports } from './runtime-exports';
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
@@ -37,4 +37,6 @@ export const declaredTypesMatchRuntime: [
   Same<keyof Declared.BoundGeometry, keyof BoundGeometry>,
   Same<keyof Parameters<typeof Declared.printFormat>[0], keyof Parameters<typeof printFormat>[0]>,
   Assignable<ReturnType<typeof Declared.printFormat>, PrintFormat>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<keyof Declared.TemplateDeclaration, keyof TemplateDeclaration>,
+  Assignable<Declared.OpeningSpread, NonNullable<TemplateDeclaration['openingSpreads']>[number]>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

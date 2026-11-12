@@ -1,13 +1,13 @@
 import { createContext, useContext, useLayoutEffect, useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
-import { cssMM, formatSchema, inch, mm, printFormat, pt } from './format';
+import { cssMM, formatSchema, inch, mm, printFormat, pt, spanAllowedAt } from './format';
 import type { PrintFormat, ResolvedFormat, Span } from './format';
-import { identifier } from './project';
+import { identifier, values } from './project';
 import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
 import { getCrop, placementIn } from './spread';
 import { declarationConflicts } from './layouts';
-import { p, parametersSchema, resolveParams } from './parameters';
+import { isParameterValue, p, parametersSchema, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import type { BoxDefinition, SpreadDefinition, TemplateInfo } from './desktop';
 import { boundGeometry, geometry } from './geometry';
@@ -165,6 +165,9 @@ const definition = z.object({
   return order.length < 2 || (!order.includes(undefined) && new Set(order).size === order.length);
 }, 'Markdown boxes need unique flowOrder values.');
 
+// The spreads a new book starts with, in order. Each names a layout and may set some of its own parameters.
+const openingSpread = z.strictObject({ layout: identifier, params: values });
+
 // A template declares one print format, or several named formats the user chooses between in Book settings.
 export const templateSchema = z.object({
   id: identifier,
@@ -188,11 +191,54 @@ export const templateSchema = z.object({
     .superRefine((spreads, context) => {
       for (const message of declarationConflicts(spreads)) context.addIssue({ code: 'custom', message });
     }),
+  openingSpreads: z.array(openingSpread).optional(),
+}).superRefine((template, context) => {
+  for (const issue of openingSpreadProblems(template)) context.addIssue({ code: 'custom', ...issue });
 }).refine(({ format, formats }) => !format !== !formats, 'Declare either format or formats.')
   .refine(({ formats }) => !formats || Object.keys(formats).length > 0, 'Declare at least one format.')
   .refine(({ formats, defaultFormat }) => !defaultFormat || (!!formats && Object.hasOwn(formats, defaultFormat)),
     'defaultFormat must name one of the formats.');
 export type DeclaredTemplate = z.infer<typeof templateSchema>;
+type OpeningSpread = z.infer<typeof openingSpread>;
+
+// Opening spreads must name declared layouts, set only those layouts' own parameters to allowed values, and form a
+// sequence every declared format accepts: single pages only at the book ends the format allows.
+function openingSpreadProblems({ spreads, openingSpreads, format, formats }: {
+  spreads: Record<string, { span: Span; parameters: Parameters }>; openingSpreads?: OpeningSpread[];
+  format?: PrintFormat; formats?: Record<string, PrintFormat>;
+}) {
+  const problems: { path: (string | number)[]; message: string }[] = [];
+  if (!openingSpreads) return problems;
+  openingSpreads.forEach(({ layout, params }, index) => {
+    const path = ['openingSpreads', index];
+    const definition = Object.hasOwn(spreads, layout) ? spreads[layout] : undefined;
+    if (!definition) {
+      problems.push({ path: [...path, 'layout'], message: 'Layout ' + layout + ' is not declared in spreads. Declared layouts: ' +
+        Object.keys(spreads).join(', ') + '.' });
+      return;
+    }
+    for (const [key, value] of Object.entries(params)) {
+      const parameter = Object.hasOwn(definition.parameters, key) ? definition.parameters[key] : undefined;
+      if (!parameter) problems.push({ path: [...path, 'params', key], message: 'Layout ' + layout + ' has no parameter ' + key + '.' });
+      else if (!isParameterValue(parameter, value)) problems.push({ path: [...path, 'params', key],
+        message: JSON.stringify(value) + ' is not an allowed value for ' + parameter.label + ' in layout ' + layout + '.' });
+    }
+  });
+  const declared = openingSpreads.map(({ layout }) => Object.hasOwn(spreads, layout) ? spreads[layout] : undefined);
+  if (declared.some((definition) => !definition)) return problems;
+  const choices = formats ? Object.entries(formats) : format ? [['default', format] as const] : [];
+  for (const [id, choice] of choices) {
+    declared.forEach((definition, index) => {
+      if (spanAllowedAt(definition!.span, index, declared.length, choice)) return;
+      const where = formats ? 'format ' + id : 'the format';
+      const ends = choice.structure.delivery === 'pages' && choice.structure.ends === 'single-pages';
+      problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Layout ' + openingSpreads[index].layout + ' is a single ' +
+        definition!.span + ' page. ' + (ends ? 'In ' + where + ' it can only be the ' + (definition!.span === 'right' ? 'first' : 'last') +
+          ' opening spread.' : where[0].toUpperCase() + where.slice(1) + ' has no single pages at the book ends.') });
+    });
+  }
+  return problems;
+}
 // A template with its format resolved for one project: the project's choice, else the default, else the first.
 export type Template = Omit<DeclaredTemplate, 'format'> & { format: PrintFormat; formatId: string; formatChoices: Record<string, string> };
 export function chooseFormat(template: DeclaredTemplate, chosen?: string): Template & { unknownChoice: boolean } {
@@ -219,6 +265,7 @@ export type TemplateDeclaration = {
   id: string; version: string; contract: 1; requires?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
+  openingSpreads?: { layout: string; params?: Values }[];
 };
 // `spreads` may be a function of the builder; the declaration ImageFlow validates always has the built record.
 // Applied by defineTemplate and again when the template loads, for templates exported without defineTemplate.
@@ -232,7 +279,7 @@ export const defineTemplate = (template: TemplateDeclaration) => normalizeTempla
 export function templateInfo(template: Template): TemplateInfo {
   return {
     format: template.format, formatId: template.formatId, formats: template.formatChoices,
-    version: template.version, parameters: template.parameters,
+    version: template.version, parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
     // Functions (render, editor components) stay in the render frame; the editor gets plain declarations.
     spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, anchors: _anchors, elements, ...info }]) => [id, {
       ...info,

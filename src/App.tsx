@@ -17,7 +17,7 @@ import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
-import { assignmentCounts, newSpread, readEdit, resolveEditPath, sourceUsage } from './editing';
+import { assignmentCounts, firstSpreadLayouts, newSpread, openingSpreadStates, readEdit, resolveEditPath, sourceUsage } from './editing';
 import { moveContent, swapContent } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
@@ -74,6 +74,26 @@ function Guides({ sheet, format }: { sheet: Rect; format: ResolvedFormat }) {
   </div>;
 }
 
+
+// An empty book asks for its first spread: the template's opening spreads, or one layout that can start a book.
+function EmptyBook({ template, writable, start }: { template?: TemplateInfo; writable: boolean; start: (layout?: string) => void }) {
+  const layouts = template ? firstSpreadLayouts(template.spreads, template.format) : [];
+  const opening = template?.openingSpreads ?? [];
+  return <section className="empty-book" aria-labelledby="empty-book-title">
+    <div className="empty-book-art" aria-hidden="true"><span /><span /></div>
+    <h2 id="empty-book-title">This book has no spreads yet</h2>
+    {!template ? <p className="muted">Loading the template…</p> : !writable ? <p className="muted">Spreads can be added once the book can be edited.</p> : <>
+      <p className="muted">{opening.length ? 'Start with the spreads this template suggests, or pick a layout for the first spread.' :
+        'Pick a layout for the first spread. You can switch layouts and add more spreads later.'}</p>
+      {opening.length > 0 && <button className="primary" onClick={() => start()}>
+        Add {opening.length === 1 ? 'the opening spread' : 'the ' + opening.length + ' opening spreads'}</button>}
+      {layouts.length > 0 ? <div className="empty-book-layouts" role="group" aria-label="Layouts for the first spread">
+        {layouts.map((id) => <button key={id} onClick={() => start(id)}>
+          {template.spreads[id].label}</button>)}
+      </div> : <p className="error-text">This template has no layout that can start a book.</p>}
+    </>}
+  </section>;
+}
 
 export function App() {
   const api = window.imageflow;
@@ -218,8 +238,9 @@ export function App() {
       revealedThumb.current = '';
       canvas.current?.scrollTo({ top: 0, left: 0 });
     }
-    setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0].id :
-      next.project.spreads.find(({ id }) => id === previous)?.id ?? next.project.spreads[0].id));
+    // A book may have no spreads yet; then nothing is selected.
+    setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0]?.id :
+      next.project.spreads.find(({ id }) => id === previous)?.id ?? next.project.spreads[0]?.id) ?? '');
     if (selected) pendingReveal.current = selected;
     setRender(undefined);
     setSummary(next);
@@ -595,8 +616,23 @@ export function App() {
     }, () => 'Spread moved to ' + destination, id);
   }
 
+  // Starts an empty book: with one layout, or with the template's opening spreads.
+  function start(layout?: string) {
+    if (!template || spreads.length) return;
+    const added = layout ? [newSpread(layout)] : openingSpreadStates(template);
+    if (!added.length) return;
+    edit(({ project }) => {
+      if (project.spreads.length) return false;
+      project.spreads = added;
+    }, layout ? 'Added ' + (template.spreads[layout]?.label ?? layout) : "Added the template's opening spreads", added[0].id);
+  }
+
   function add(duplicate = false) {
-    if (!template || !spread) return;
+    if (!template) return;
+    if (!spread) {
+      if (!duplicate) start(firstSpreadLayouts(template.spreads, template.format)[0]);
+      return;
+    }
     const entry = Object.entries(template.spreads).find(([, value]) => value.span === 'spread');
     if (!entry && !duplicate) return;
     const next = duplicate ? { ...structuredClone(spread), id: crypto.randomUUID() } : newSpread(entry![0]);
@@ -1011,7 +1047,7 @@ export function App() {
   const blockedInline = editing?.held && !resumeInline && (canvasReady
     ? 'This field changed while you were editing. Close it and open the field again to continue.'
     : 'Editing is paused while the preview is out of date.');
-  const canExport = canvasReady && !busy;
+  const canExport = canvasReady && !busy && spreads.length > 0;
   const counts = summary ? assignmentCounts(summary.project, template?.spreads) : {};
   const format = formatOf(template);
   // A saved format the template's named formats no longer include; the Book check reports it and print export is
@@ -1089,10 +1125,10 @@ export function App() {
             <span className="eyebrow">Spreads</span>
             <div className="icon-actions">
               <button aria-label="Add" title="Add spread" disabled={!writable || !template || !!busy} onClick={() => add()}><Icon name="add" /></button>
-              <button aria-label="Duplicate" title="Duplicate spread" disabled={!writable || !template || !spreadSelected || !!busy} onClick={() => add(true)}><Icon name="duplicate" /></button>
+              <button aria-label="Duplicate" title="Duplicate spread" disabled={!writable || !template || !spreadSelected || !spread || !!busy} onClick={() => add(true)}><Icon name="duplicate" /></button>
               <button aria-label="Move spread up" title="Move up (⌥⌘↑)" disabled={!canReorder || !spreadSelected || !spread || !canMoveSpread(spread.id, index - 1)} onClick={() => move(-1)}><Icon name="up" /></button>
               <button aria-label="Move spread down" title="Move down (⌥⌘↓)" disabled={!canReorder || !spreadSelected || !spread || !canMoveSpread(spread.id, index + 1)} onClick={() => move(1)}><Icon name="down" /></button>
-              <button aria-label="Delete" title="Delete spread" disabled={!writable || !spreadSelected || spreads.length < 2 || !!busy} onClick={() => edit(({ project }) => {
+              <button aria-label="Delete" title="Delete spread" disabled={!writable || !spreadSelected || !spread || !!busy} onClick={() => edit(({ project }) => {
                 project.spreads = project.spreads.filter(({ id }) => id !== spread.id);
               })}><Icon name="delete" /></button>
             </div>
@@ -1136,6 +1172,7 @@ export function App() {
               const { box } = locate(event, event.dataTransfer.types);
               setDropTarget(box ? box.spread + ':' + box.id : undefined);
             }} onDragLeave={() => setDropTarget(undefined)} onDrop={drop}>
+            {summary && !spreads.length && <EmptyBook template={template} writable={writable && !busy} start={start} />}
             {summary && <div ref={stage} className="stage"
               // The stage leaves the grid width as soon as Vertical is chosen, so the frame lays out the column at the
               // canvas width rather than the old grid's.

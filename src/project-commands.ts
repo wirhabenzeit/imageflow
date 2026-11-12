@@ -67,7 +67,7 @@ export type ProjectCommandResult = {
 };
 export type ProjectCommandErrorCode = 'INVALID_OPERATION' | 'SPREAD_NOT_FOUND' | 'LAYOUT_NOT_FOUND' | 'BOX_NOT_FOUND' |
   'ELEMENT_NOT_FOUND' | 'PARAMETER_NOT_FOUND' | 'INVALID_PARAMETER_VALUE' | 'SOURCE_NOT_FOUND' | 'BOX_TYPE_MISMATCH' | 'INCOMPATIBLE_LAYOUT' |
-  'LAST_SPREAD' | 'REFERENCE_NOT_FOUND' | 'DUPLICATE_REFERENCE' | 'INVALID_SPREAD_ID' | 'FORMAT_NOT_FOUND' | 'EMPTY_BOX';
+  'REFERENCE_NOT_FOUND' | 'DUPLICATE_REFERENCE' | 'INVALID_SPREAD_ID' | 'FORMAT_NOT_FOUND' | 'EMPTY_BOX';
 
 export class ProjectCommandError extends Error {
   constructor(readonly code: ProjectCommandErrorCode, message: string, readonly operationIndex?: number) {
@@ -180,7 +180,7 @@ export function applyProjectCommands(
     project.spreads.splice(position, 0, spread);
   }
   function parameterTarget(operation: Extract<z.output<typeof projectOperationSchema>, { op: 'set_parameter' | 'reset_parameter' }>) {
-    const spread = operation.scope === 'document' ? project.spreads[0] : findSpread(operation.spread!);
+    const spread = operation.scope === 'document' ? undefined : findSpread(operation.spread!);
     let target: EditTarget | undefined;
     if (operation.scope === 'document') {
       const parameter = own(template.parameters, operation.key);
@@ -188,7 +188,7 @@ export function applyProjectCommands(
     } else {
       const path = operation.scope === 'spread' ? operation.key :
         (operation.scope === 'box' ? 'boxes.' : 'elements.') + operation.owner + '.' + operation.key;
-      target = resolveEditPath(template, spread.definition, path);
+      target = resolveEditPath(template, spread!.definition, path);
     }
     return { spread, target: target ?? fail('PARAMETER_NOT_FOUND', 'The current template has no parameter at this location.') };
   }
@@ -211,19 +211,19 @@ export function applyProjectCommands(
       case 'set_parameter':
       case 'reset_parameter': {
         const { spread, target } = parameterTarget(operation);
-        const group = target.scope === 'box' ? spread.boxes : spread.elements;
-        const values = target.scope === 'document' ? project.params : target.scope === 'spread' ? spread.params : own(group, target.owner!)?.params;
+        const group = target.scope === 'box' ? spread?.boxes ?? {} : spread?.elements ?? {};
+        const values = target.scope === 'document' ? project.params : target.scope === 'spread' ? spread?.params : own(group, target.owner!)?.params;
         if (operation.op === 'set_parameter') {
           validateValue(target.param, operation.value, target.key);
           if (values && Object.hasOwn(values, target.key) && values[target.key] === operation.value) break;
           if ((target.scope === 'box' || target.scope === 'element') && !Object.hasOwn(group, target.owner!)) group[target.owner!] = { params: {} };
-          writeEdit(project, spread.id, target, operation.value);
+          writeEdit(project, spread?.id, target, operation.value);
         } else {
           if (!values || !Object.hasOwn(values, target.key)) break;
           delete values[target.key];
         }
         changed((operation.op === 'set_parameter' ? 'Updated ' : 'Reset ') + target.path,
-          target.scope === 'document' ? allSpreads() : [spread.id], true);
+          target.scope === 'document' ? allSpreads() : [spread!.id], true);
         break;
       }
       case 'insert_spread': {
@@ -255,7 +255,6 @@ export function applyProjectCommands(
       }
       case 'remove_spread': {
         const spread = findSpread(operation.spread);
-        if (project.spreads.length === 1) fail('LAST_SPREAD', 'A book must keep at least one spread.');
         project.spreads.splice(project.spreads.indexOf(spread), 1);
         changed('Removed spread ' + spread.id, [spread.id, ...allSpreads()], true);
         break;

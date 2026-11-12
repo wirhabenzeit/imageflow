@@ -1030,8 +1030,10 @@ export async function startRender(root: HTMLElement) {
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
     ];
-    const errors: Issue[] = sequence.issues.map((text) => ({ ...message(text), code: 'page-sequence',
-      suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format.' }));
+    // A book without spreads is valid while it is being started, but there is nothing to print yet.
+    const errors: Issue[] = spreads.length ? sequence.issues.map((text) => ({ ...message(text), code: 'page-sequence',
+      suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format.' })) : [{
+      ...message('The book has no spreads yet.'), code: 'book-empty', suggestion: 'Add a spread with insert_spread, or with Add Spread in the editor.' }];
     // The preview falls back to the default format, but printing at a size nobody chose is blocked.
     if (template.unknownChoice) {
       errors.push({ ...message('The template no longer offers the format ' + book.project.format + ' saved with this book. The preview uses ' +
