@@ -80,6 +80,25 @@ try {
   assert.equal(afterSecond.firstProbe?.params?.value, undefined);
   await ready();
 
+  // Clicking the overlapping elements on the page opens the one drawn on top, the second, and saves only its value.
+  const frame = w.frameLocator('iframe.book-frame-book[data-current]');
+  const secondNode = frame.locator('[data-spread="title"] [data-element="secondProbe"]');
+  await secondNode.scrollIntoViewIfNeeded();
+  await w.waitForTimeout(150);
+  const box = await secondNode.boundingBox();
+  await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const onCanvas = w.getByRole('dialog', { name: 'Edit Second probe' });
+  await onCanvas.waitFor();
+  const canvasInput = onCanvas.getByRole('textbox', { name: 'Value' });
+  assert.equal(await canvasInput.inputValue(), 'changed');
+  await canvasInput.fill('from the canvas');
+  await canvasInput.press('Enter');
+  await saved('Value updated');
+  const afterCanvas = (await read()).spreads[0].elements;
+  assert.equal(afterCanvas.secondProbe.params.value, 'from the canvas');
+  assert.equal(afterCanvas.firstProbe?.params?.value, undefined);
+  await ready();
+
   // An element the layout does not render opens at the spread's corner and says so.
   await list.getByRole('button', { name: 'Edit Hidden probe', exact: true }).click();
   const hidden = w.getByRole('dialog', { name: 'Edit Hidden probe' });

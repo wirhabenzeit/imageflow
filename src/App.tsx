@@ -559,10 +559,11 @@ export function App() {
     if (readyId.current !== summary?.id) return { sheet };
     const wanted = types?.includes(photoMime) ? 'photo' : types?.includes(textMime) ? 'markdown' : undefined;
     const box = geometry.boxes.findLast((rect) => rect.type !== 'element' && (!wanted || rect.type === wanted) && inside(rect));
-    // The smallest edit target under the pointer wins, unless a smaller box sits on top of it.
+    // The smallest edit target under the pointer wins, unless a smaller box sits on top of it. Of equal ones, such
+    // as two elements at the same place, the one drawn on top (later in the document) wins, like `top` below.
     const area = (rect: Rect) => rect.width * rect.height;
-    const target = wanted ? undefined : geometry.targets.filter((rect) => inside(rect))
-      .sort((a, b) => area(a) - area(b))[0];
+    const target = wanted ? undefined : geometry.targets.map((rect, order) => ({ rect, order })).filter(({ rect }) => inside(rect))
+      .sort((a, b) => Math.abs(area(a.rect) - area(b.rect)) < 1 ? b.order - a.order : area(a.rect) - area(b.rect))[0]?.rect;
     const element = wanted ? undefined : geometry.boxes.findLast((rect) => rect.type === 'element' && inside(rect));
     // The box or element drawn on top: geometry lists them in document order, so a later one covers an earlier
     // one (an inset map over a full-bleed photo). Templates that reorder with z-index are not accounted for.
