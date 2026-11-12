@@ -33,7 +33,7 @@ import { mcpTools } from '../src/mcp-contract';
 import { starters } from '../src/starters';
 import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-library';
 import { isTemplateArchive, templateArchiveExtension, writeTemplateArchive } from './template-archive';
-import type { ImportPlan } from './template-library';
+import type { ImportPlan, ResolvedTemplate } from './template-library';
 import { describeImport } from '../src/library';
 import type { LibraryImportResult, NewBookChoice } from '../src/library';
 import { capabilities } from '../src/runtime-exports';
@@ -401,7 +401,7 @@ async function chooseStarter(owner: BrowserWindow): Promise<NewBookChoice | unde
 }
 // Fills a new book's staging folder from a library template: its sample book, or the template's own copy with its
 // opening spreads and no content. Either way `project.json` records the template's hash.
-async function createBook(stage: string, template: Awaited<ReturnType<TemplateLibrary['resolve']>>, sample: boolean) {
+async function createBook(stage: string, template: ResolvedTemplate, sample: boolean) {
   const { entry, folder, info } = template;
   const file = join(stage, 'project.json');
   if (sample && template.sample) {
@@ -544,7 +544,10 @@ async function openProject(owner: BrowserWindow, action: OpenAction, document?: 
       defaultPath: join(app.getPath('documents'), (template.defaultName ?? 'Untitled ' + template.entry.label) + '.imageflow'),
       filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
     if (choice.canceled || !choice.filePath || owner.isDestroyed()) return null;
-    const folder = await createDocument(documentPath(choice.filePath), (stage) => createBook(stage, template, selected.sample));
+    // The library may have changed while the dialog was open: the book is made from the entry as it is now, copied
+    // while no import can replace it, so its files, version, hash and opening spreads all come from one snapshot.
+    const folder = await createDocument(documentPath(choice.filePath),
+      (stage) => library.withTemplate(selected.id, (current) => createBook(stage, current, selected.sample)));
     await openDocument(folder);
     return null;
   }

@@ -163,3 +163,24 @@ test('resolve returns the source folder, declarations and, for a built-in, its s
     await assert.rejects(library.resolve('missing'), /no longer in the library/);
   } finally { await done(); }
 });
+
+test('a book is made from one snapshot: an import waits until the template has been copied', async () => {
+  const { work, library, done } = await setup();
+  try {
+    await library.import(await template(work, 'v1', { id: 'travel', version: '1.0.0' }), no);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const copied = library.withTemplate('travel', async ({ entry, folder }) => {
+      await gate;
+      return { version: entry.version, source: await readFile(join(folder, 'index.tsx'), 'utf8') };
+    });
+    const replacing = library.import(await template(work, 'v2', { id: 'travel', version: '2.0.0' }), no);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    release();
+    const snapshot = await copied;
+    assert.equal(snapshot.version, '1.0.0');
+    assert.match(snapshot.source, /version: '1\.0\.0'/, 'the files match the version');
+    assert.equal((await replacing).status, 'replaced');
+    assert.equal((await library.withTemplate('travel', async ({ entry }) => entry.version)), '2.0.0');
+  } finally { await done(); }
+});
