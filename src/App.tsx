@@ -3,6 +3,8 @@ import type { ImportMode } from './source-locations';
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, gridRows, renderOrigin } from './desktop';
+import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
+import type { TargetAnchor } from './edit-targets';
 import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { PanelDivider, useCanvasLayout, usePanels } from './panels';
 import { ActionMenu } from './ActionMenu';
@@ -101,7 +103,11 @@ export function App() {
   const [hovered, setHovered] = useState<string>();
   const [hoveredTarget, setHoveredTarget] = useState<string>();
   // The inline editor that is open: for a marked node (a target), or for a box or element itself (`owner`).
-  const [editing, setEditing] = useState<{ spread: string; key: string; held?: InlineContext; owner?: Owner }>();
+  // `session` names one opening of an editor: it stays while the node the editor is anchored to is renamed (`key`), so
+  // the popover and its unsaved drafts are kept, and changes when the user opens another target.
+  const [editing, setEditing] = useState<{ spread: string; key: string; session: number; held?: InlineContext; owner?: Owner }>();
+  const editorSessions = useRef(0);
+  const openEditing = (next: { spread: string; key: string; owner?: Owner }) => setEditing({ ...next, session: ++editorSessions.current });
   // Crop mode for one photo box. After a commit, `settling` holds the project id the edit started from; the
   // overlay stays until the book has re-rendered, so the frame does not flash back to the old crop.
   // The selected photo, whose crop drags and pinches adjust. `layout` is the spread's layout when it was selected:
@@ -655,16 +661,16 @@ export function App() {
     const top = wanted ? box : geometry.boxes.findLast((rect) => inside(rect));
     return { sheet, box, element, top, target: target && (!box || area(target) <= area(box)) ? target : undefined };
   }
-  const targetKey = (target: { spread: string; edits: string[] }) => target.spread + '|' + target.edits.join(' ');
   const closeEditor = useCallback(() => setEditing(undefined), []);
   // Tab moves between the edit targets of a spread in reading order.
   function stepEditor(direction: 1 | -1) {
     if (!editing || !geometry || readyId.current !== summary?.id) return;
     const order = geometry.targets.filter(({ spread }) => spread === editing.spread)
       .sort((a, b) => Math.abs(a.y - b.y) > 4 ? a.y - b.y : a.x - b.x);
-    const at = order.findIndex((target) => targetKey(target) === editing.key);
+    const at = order.findIndex((target) => targetKey(target) === editKey);
     const next = order[(at + direction + order.length) % order.length];
-    setEditing(next ? { spread: next.spread, key: targetKey(next) } : undefined);
+    if (next) openEditing({ spread: next.spread, key: targetKey(next) });
+    else setEditing(undefined);
   }
   // A box or element is edited through the node it renders: its own target, found by identity (other targets can
   // share its rectangle), when it has parameters or marks; else its rectangle with nothing marked, for the
@@ -675,20 +681,35 @@ export function App() {
     const own = geometry?.targets.find((target) => target.spread === spread && target.owner?.type === type && target.owner.id === owner.id);
     if (own) return own;
     const rect = geometry?.boxes.find((box) => box.spread === spread && box.id === owner.id && (box.type === 'element') === (type === 'element'));
-    if (rect) return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, spread, edits: [], owner: { type, id: owner.id } };
+    if (rect) return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, spread, edits: [], occurrence: 0, owner: { type, id: owner.id } };
     const sheet = geometry?.sheets.find((item) => item.spread === spread);
     const layout = template?.spreads[spreads.find(({ id }) => id === spread)?.definition ?? ''];
     const declared = type === 'element' ? layout?.elements[owner.id] : layout?.boxes[owner.id];
     if (!sheet || !declared) return undefined;
-    return { x: sheet.x + 12, y: sheet.y + 12, width: 0, height: 0, spread, owner: { type, id: owner.id }, hidden: true,
+    return { x: sheet.x + 12, y: sheet.y + 12, width: 0, height: 0, spread, occurrence: 0, owner: { type, id: owner.id }, hidden: true,
       edits: Object.keys(declared.parameters).map((key) => (type === 'element' ? 'elements.' : 'boxes.') + owner.id + '.' + key) };
   }
   // Parameters a template marked on a box besides its own, such as a spread setting shown in its caption.
   const attachedEdits = (target: Target | undefined, owner: Owner) =>
     target?.edits.filter((path) => !path.startsWith((owner.type === 'element' ? 'elements.' : 'boxes.') + owner.id + '.')) ?? [];
   const ownerKey = (spread: string, id: string) => spread + '|#' + id;
+  // A marked node is found by its key when the editor opens, and afterwards by where it was on its sheet, since a
+  // re-render can shift the occurrence numbers of its field. The anchor belongs to one editor session: opening
+  // another target, also by Tab, starts from its key again.
+  const editAnchor = useRef<{ session: number; at: TargetAnchor }>(undefined);
+  const editSheet = editing && geometry?.sheets.find(({ spread }) => spread === editing.spread);
   const editTarget: Target | undefined = editing && (editing.owner ? ownerTarget(editing.spread, editing.owner)
-    : geometry?.targets.find((target) => targetKey(target) === editing.key));
+    : geometry && resolveTarget(geometry.targets, editing.key,
+      editAnchor.current?.session === editing.session ? editAnchor.current.at : undefined, editSheet));
+  // The key of the node the open editor is anchored to, for its outline and for Tab, until `editing` catches up.
+  const editKey = editing && !editing.owner && editTarget ? targetKey(editTarget) : editing?.key;
+  useEffect(() => {
+    if (!editing || editing.owner) editAnchor.current = undefined;
+    else if (editTarget && editSheet) editAnchor.current = { session: editing.session, at: targetAnchor(editTarget, editSheet) };
+    // Same session, renamed to the node it is now at, so that no other node owns the key it opened with.
+    if (editing && !editing.owner && editKey && editKey !== editing.key)
+      setEditing((open) => open && open.session === editing.session ? { ...open, key: editKey } : open);
+  }, [editing, editTarget, editSheet, editKey]);
   const editSpread = editing && spreads.find(({ id }) => id === editing.spread);
   const liveInline = summary && template && editSpread && editTarget &&
     { project: summary.project, spread: editSpread, template, target: editTarget };
@@ -770,7 +791,7 @@ export function App() {
     if (owner.type === 'element' && openElementEditor(spread, owner.id)) return;
     deselectPhoto();
     select(spread, false);
-    setEditing({ spread, key: ownerKey(spread, owner.id), owner });
+    openEditing({ spread, key: ownerKey(spread, owner.id), owner });
   }
   // Opens the popover of a node the template marked, such as a ctx.Text heading, from the sidebar's list.
   function openTarget(target: Target) {
@@ -780,7 +801,7 @@ export function App() {
     }
     deselectPhoto();
     select(target.spread, false);
-    setEditing({ spread: target.spread, key: targetKey(target) });
+    openEditing({ spread: target.spread, key: targetKey(target) });
   }
   function editorOf(spread: string, element: string) {
     const state = spreads.find(({ id }) => id === spread);
@@ -1156,7 +1177,7 @@ export function App() {
                   path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')) ||
                   (target.owner?.id === top.id && (target.owner.type === 'element') === (top.type === 'element'))));
                 if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
-                else if (target) setEditing({ spread: target.spread, key: targetKey(target) });
+                else if (target) openEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
                 // Double-clicking a Markdown box shows its text in Quick Look.
@@ -1196,9 +1217,9 @@ export function App() {
               }} />}
               {geometry?.targets.filter((target) => {
                 const key = targetKey(target);
-                return !cropping && (key === hoveredTarget || key === editing?.key);
+                return !cropping && (key === hoveredTarget || key === editKey);
               }).map((target) => <div key={targetKey(target)} aria-hidden="true"
-                className={'edit-target' + (targetKey(target) === editing?.key ? ' active' : '')}
+                className={'edit-target' + (targetKey(target) === editKey ? ' active' : '')}
                 style={{ left: target.x - 4, top: target.y - 3, width: target.width + 8, height: target.height + 6 }} />)}
               {moving && summary?.photos[moving.photo] && <img className="photo-move-ghost" src={summary.photos[moving.photo]} alt=""
                 style={{ left: moving.x, top: moving.y }} />}
@@ -1229,7 +1250,7 @@ export function App() {
                     }, notice)} />
                 </div>}
               </CropEditor>}
-              {editing && inline && summary && <EditPopover key={editing.key}
+              {editing && inline && summary && <EditPopover key={editing.session}
                 project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} anchor={inline.target}
                 bounds={{ width: stage.current?.clientWidth ?? 0 }} readOnly={summary.readOnly} blocked={blockedInline || undefined}
                 edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}
