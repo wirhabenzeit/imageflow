@@ -1,7 +1,7 @@
 import { createContext, useContext, useLayoutEffect, useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
-import { cssMM, formatSchema, hasFacingPages, inch, mm, printFormat, pt, spanAllowedAt, spanFits } from './format';
+import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, printFormat, pt, spanFits } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
 import { identifier, values } from './project';
 import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
@@ -298,15 +298,18 @@ function openingSpreadProblems({ spreads, openingSpreads, format, formats, defau
   const choices = all.filter(([, choice]) => !first || hasFacingPages(choice) === hasFacingPages(first));
   for (const [id, choice] of choices) {
     declared.forEach((definition, index) => {
-      if (spanAllowedAt(definition!.span, index, declared.length, choice)) return;
+      // Opening spreads may be only part of a book, so full spreads may sit anywhere; the Book check reports a
+      // missing opening or closing page. Single pages must still be at their own end.
+      const { span } = definition!;
+      if (spanFits(span, choice) && (span === 'right' ? index === 0 : span === 'left' ? index === declared.length - 1 : true)) return;
       const where = formats ? 'format ' + id : 'the format';
-      if (!spanFits(definition!.span, choice)) {
+      if ((span === 'page') === hasFacingPages(choice)) {
         problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Layout ' + openingSpreads[index].layout + (hasFacingPages(choice)
           ? " is a single page (span: 'page'), but " + where + ' has facing pages.'
           : ' is for facing pages, but ' + where + " has none. Use a layout with span: 'page'.") });
         return;
       }
-      const ends = hasFacingPages(choice) && choice.structure.delivery === 'pages' && choice.structure.ends === 'single-pages';
+      const ends = hasSingleEnds(choice);
       problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Layout ' + openingSpreads[index].layout + ' is a single ' +
         definition!.span + ' page. ' + (ends ? 'In ' + where + ' it can only be the ' + (definition!.span === 'right' ? 'first' : 'last') +
           ' opening spread.' : where[0].toUpperCase() + where.slice(1) + ' has no single pages at the book ends.') });

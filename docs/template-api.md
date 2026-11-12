@@ -255,7 +255,22 @@ Layouts for these formats use `span: 'page'` (see [Spread spans](#spread-spans))
 | `'right'`, `'left'` | formats with facing pages, `ends: 'single-pages'` and `delivery: 'pages'` | a single first page (`right`) or last page (`left`); the inactive half is shown as an inside cover and not exported |
 | `'page'` | formats without facing pages (`facingPages: false`) | one page |
 
-`span` defaults to `'page'` when no format of the template has facing pages, and to `'spread'` otherwise, so a calendar template does not repeat it on every layout. A layout whose `span` fits none of the template's formats loads with a `declaration-span-unused` warning. Formats with `ends: 'inside-covers'` use full spreads throughout.
+`span` defaults to `'page'` when no format of the template has facing pages, and to `'spread'` otherwise, so a calendar template does not repeat it on every layout. A layout whose `span` fits none of the template's formats loads with a `declaration-span-unused` warning.
+
+#### Book ends
+
+The template and the format each have one job. The template offers layouts with a `span`: a `right` layout for the opening, a `left` layout for the closing, and full spreads in between. The format states what the printer expects, and export follows the format alone. `ends` is therefore a requirement, not a permission:
+
+| `ends` | First spread | Last spread | In between |
+|---|---|---|---|
+| `'single-pages'` (e.g. Blurb) | must be `span: 'right'` | must be `span: 'left'` | full spreads |
+| `'inside-covers'` (e.g. Saal) | full spread; left half printed on the inside cover | full spread; right half printed on the inside cover | full spreads |
+
+- **Page sequence.** A book that breaks the rule gets a `page-sequence` error naming the first or last spread, with the span to switch it to. Print export is blocked; proof export still works. A book of only its opening page is reported as missing its closing page.
+- **`delivery` and `ends`.** Single end pages need page delivery: `delivery: 'spreads'` with `ends: 'single-pages'` is a schema error, because a PDF of whole spreads cannot open on a single right page. `printFormat` defaults `ends` to `'inside-covers'` when `delivery` is `'spreads'`, else to `'single-pages'`. `right` and `left` layouts fit only formats with `ends: 'single-pages'` and `delivery: 'pages'`; in other formats they are filtered and reported like `span: 'page'` layouts.
+- **Editor.** With `'single-pages'`, nothing is inserted before the opening page or after the closing page, spreads do not move into or out of the end positions, and the end pages are not duplicated. The layout picker at the first and last positions offers the `right` and `left` layouts (and, for a misplaced full spread, other full spreads). An empty book starts with a `right` layout. Removing an end spread stays possible and is reported by the page sequence. The MCP commands `insert_spread`, `duplicate_spread` and `move_spread` follow the same rules and fail with `INVALID_POSITION`; `switch_layout` fails with `INCOMPATIBLE_LAYOUT` naming the span the position requires.
+- **Declaration check.** A template with a `'single-pages'` format but no `right` or no `left` layout loads with a `declaration-ends-missing` warning.
+- **Opening spreads** may be only the start of a book, so full spreads may come first or last among them; single pages must still be at their own end.
 
 A template may offer formats of both kinds side by side. The layout picker, new spreads and fixtures use only the layouts that fit the chosen format. A book that switches to a format its layouts do not fit still previews (a page layout is drawn on a spread, a spread layout on one page), but the Book check reports a `page-sequence` error naming each such spread or page, and print export is blocked until its layouts are switched; proof export still works. The picker of a mismatched spread offers the layouts that fit the new format. Switching back to the earlier format restores the book; assignments, crops and text sources are kept, as with any format change. Opening spreads are checked against the formats of the default format's kind, because a new book starts in the default format.
 

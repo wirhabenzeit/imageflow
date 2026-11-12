@@ -12,7 +12,8 @@ const format = formatSchema.parse({
   label: 'Test', trim: { width: mm(200), height: mm(200) },
   bleed: { top: mm(3), bottom: mm(3), outside: mm(3), binding: mm(0) },
   safe: { top: mm(5), bottom: mm(5), outside: mm(5), binding: mm(5) },
-  structure: { delivery: 'pages', ends: 'single-pages', pageCount: { min: 2, max: 200, step: 2 } },
+  // Inside covers put no ordering rule on spreads, so these tests can move spreads freely (strict ends: single-pages.test.ts).
+  structure: { delivery: 'pages', ends: 'inside-covers', pageCount: { min: 2, max: 200, step: 2 } },
   output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' },
 });
 const photo = { type: 'photo' as const, label: 'Photo', parameters: { caption: p.boolean({ label: 'Caption', default: false }) } };

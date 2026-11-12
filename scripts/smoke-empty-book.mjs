@@ -35,10 +35,9 @@ try {
   assert.equal(await w.getByRole('button', { name: 'Delete', exact: true }).isDisabled(), true);
   assert.equal(await w.getByRole('button', { name: 'Duplicate', exact: true }).isDisabled(), true);
   assert.equal(await w.locator('button', { hasText: 'Export proof PDF' }).isDisabled(), true);
-  // The starter offers its opening spreads and the layouts that can start a book: not the closing left page.
+  // The starter's format opens on a single right page, so only its title page can start a book.
   const layouts = await empty.getByRole('group', { name: 'Layouts for the first spread' }).getByRole('button').allTextContents();
-  assert.ok(layouts.includes('Title page') && layouts.includes('Photo and story'), layouts.join(', '));
-  assert.ok(!layouts.includes('Closing page'), 'a single left page cannot start a book');
+  assert.deepEqual(layouts, ['Title page']);
 
   await empty.getByRole('button', { name: 'Add the 3 opening spreads' }).click();
   await saved("Added the template's opening spreads");
@@ -53,9 +52,9 @@ try {
   assert.deepEqual((await read()).spreads, []);
 
   // One layout; then deleting the last spread empties the book again.
-  await empty.getByRole('button', { name: 'Photo and story', exact: true }).click();
-  await saved('Added Photo and story');
-  assert.deepEqual((await read()).spreads.map(({ definition }) => definition), ['story']);
+  await empty.getByRole('button', { name: 'Title page', exact: true }).click();
+  await saved('Added Title page');
+  assert.deepEqual((await read()).spreads.map(({ definition }) => definition), ['title']);
   await ready();
   const remove = w.getByRole('button', { name: 'Delete', exact: true });
   await w.waitForFunction(() => !document.querySelector('button[aria-label="Delete"]')?.disabled);

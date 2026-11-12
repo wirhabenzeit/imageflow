@@ -64,8 +64,8 @@ test('a new book gets the opening spreads with fresh IDs, and an empty book is a
   assert.ok(projectSchema.safeParse({ ...project, spreads: first }).success);
 });
 
-test('an empty book can start with facing pages, or with a single right page where the format allows one', () => {
+test('an empty book starts with a single right page where the format requires one, else with facing pages', () => {
   const layouts = { title: { span: 'right' }, story: { span: 'spread' }, closing: { span: 'left' } } as never;
-  assert.deepEqual(firstSpreadLayouts(layouts, pages('single-pages')), ['title', 'story']);
+  assert.deepEqual(firstSpreadLayouts(layouts, pages('single-pages')), ['title']);
   assert.deepEqual(firstSpreadLayouts(layouts, pages('inside-covers')), ['story']);
 });
