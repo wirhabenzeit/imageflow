@@ -21,7 +21,8 @@ import { bookIndex, chooseFormat, normalizeTemplate, runtime, setTemplateAssets,
 import type { AnchorLookup } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
-import { declaredInTemplate, layoutChoices } from './layouts';
+import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
+import type { VariantTags } from './layouts';
 import { parsePreviewRequest, PreviewError } from './preview';
 import type { PreviewMetadata, PagePreviewMetadata } from './preview';
 import { inspectionSchema } from './inspection';
@@ -721,7 +722,8 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   const format = resolveFormat(template.format);
   const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
   // A preview is the spread itself in another layout: switching only changes which of its content is shown.
-  const previews = layoutChoices(template.spreads, spreads[index].definition).map((definition) => ({
+  // A family with its own picker shows one preview, which stands for the family.
+  const previews = layoutPreviews(template.spreads, spreads[index].definition, template.layoutFamilies).map((definition) => ({
     definition, span: template.spreads[definition].span, spread: { ...spreads[index], definition, id: definition },
   }));
   // Previews read the anchors of the book as saved, so a contents layout shows the real pages.
@@ -919,6 +921,93 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   flushSync(() => react.render(React.createElement(Host)));
 }
 
+// Runs a layout family's picker. Its draft is one of the family's layout IDs; the frame reports it, its height, and
+// commit or cancel to the app, which checks the choice and switches the layout. The frame changes nothing itself.
+function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, familyId: string, initial: string,
+  readOnly: boolean) {
+  const spread = book.project.spreads.find(({ id }) => id === spreadId);
+  const family = template.layoutFamilies && Object.hasOwn(template.layoutFamilies, familyId) ? template.layoutFamilies[familyId] : undefined;
+  const picker = family?.picker;
+  if (!spread || !family || !picker) throw new Error('This layout family has no picker.');
+  const ids = familyLayouts(template.spreads, familyId);
+  const variants = ids.map((id) => ({ id, label: template.spreads[id].label, variant: { ...template.spreads[id].variant } }));
+  const document = resolveParams(template.parameters, book.project.params);
+  const format = resolveFormat(template.format);
+  root.className = 'if-editor';
+  const start = [initial, spread.definition].find((id) => ids.includes(id)) ?? ids[0];
+
+  // The draft lives outside React so choose() followed directly by commit() sends the newest choice.
+  let draft = start;
+  let failed = false;
+  const fail = (error: unknown) => {
+    if (failed) return;
+    failed = true;
+    const reason = error instanceof Error ? error.message : String(error);
+    post({ state: 'error', message: 'The picker stopped working: ' + reason });
+  };
+  const reported = new Set<string>();
+  let update: ((id: string) => void) | undefined;
+  const choose = (id: string) => {
+    if (readOnly || failed) return;
+    if (typeof id !== 'string' || !ids.includes(id)) {
+      // Reported once per value, like an unknown parameter in an element editor; the draft stays as it was.
+      const name = String(id);
+      if (!reported.has(name)) {
+        reported.add(name);
+        post({ type: 'editor-notice', message: 'The picker chose ' + name + ', which is not a layout of ' + family.label + '. It can choose ' + ids.join(', ') + '.' });
+      }
+      return;
+    }
+    draft = id;
+    post({ type: 'editor-draft', values: { layout: draft } });
+    update?.(draft);
+  };
+  const find = (tags: VariantTags) => {
+    const wanted = Object.entries(tags ?? {});
+    return variants.find(({ variant }) => wanted.every(([key, value]) => Object.hasOwn(variant, key) && variant[key] === value))?.id;
+  };
+  const commit = () => { if (!failed) post({ type: 'editor-commit', values: { layout: draft } }); };
+  const cancel = () => post({ type: 'editor-cancel' });
+  window.addEventListener('message', (event) => {
+    if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'editor-flush') return;
+    const request = event.data.request;
+    if (typeof request !== 'number') return;
+    try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
+    catch (error) { fail(error); }
+    if (!failed) post({ type: 'editor-flushed', request, values: { layout: draft } });
+  });
+
+  function Host() {
+    const [current, setCurrent] = React.useState(draft);
+    React.useEffect(() => {
+      update = setCurrent;
+      post({ type: 'editor-ready' });
+      return () => { update = undefined; };
+    }, []);
+    return React.createElement(picker!.component, {
+      variants, current, saved: spread!.definition, choose, find, document, format, readOnly, commit, cancel,
+    });
+  }
+
+  window.addEventListener('error', (event) => {
+    if (!event.error && /^ResizeObserver loop/.test(event.message)) return;
+    fail(event.error ?? event.message);
+  });
+  window.addEventListener('unhandledrejection', (event) => fail(event.reason));
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancel();
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      commit();
+    }
+  });
+  new ResizeObserver(() => post({ type: 'editor-size', height: Math.ceil(root.getBoundingClientRect().height) })).observe(root);
+  const react = createRoot(root, { onUncaughtError: fail, onCaughtError: fail });
+  flushSync(() => react.render(React.createElement(Host)));
+}
+
 export async function startRender(root: HTMLElement) {
   let info: TemplateInfo | undefined;
   // The editor reports which part of the book frame is on screen, and how many grid rows the book view uses (0 for
@@ -978,6 +1067,10 @@ export async function startRender(root: HTMLElement) {
     const query = new URLSearchParams(location.search);
     if (book.mode === 'edit' && query.get('view') === 'editor') {
       renderEditor(root, book, template, query.get('spread') ?? '', query.get('element') ?? '', query.has('readonly'));
+      return;
+    }
+    if (book.mode === 'edit' && query.get('view') === 'layout-picker') {
+      renderLayoutPicker(root, book, template, query.get('spread') ?? '', query.get('family') ?? '', query.get('layout') ?? '', query.has('readonly'));
       return;
     }
     const { spreads } = book.project;

@@ -6,7 +6,8 @@ import type { PrintFormat, ResolvedFormat, Span } from './format';
 import { identifier } from './project';
 import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
 import { getCrop, placementIn } from './spread';
-import { declarationConflicts } from './layouts';
+import { declarationConflicts, familyProblems } from './layouts';
+import type { VariantTags } from './layouts';
 import { p, parametersSchema, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import type { BoxDefinition, SpreadDefinition, TemplateInfo } from './desktop';
@@ -131,6 +132,21 @@ export type ElementEditorProps = {
   Control: (props: { parameter: string; label?: string }) => ReactNode;
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };
+// A layout family's picker chooses one of the family's variants. It runs in a sandboxed frame like an element
+// editor; its draft is a layout ID, and ImageFlow applies it on Done as an ordinary layout switch.
+export type LayoutVariant = { id: string; label: string; variant: VariantTags };
+export type LayoutPickerProps = {
+  variants: LayoutVariant[]; current: string; saved: string; choose: (id: string) => void;
+  find: (tags: VariantTags) => string | undefined;
+  document: Values; format: ResolvedFormat; readOnly: boolean; commit: () => void; cancel: () => void;
+};
+const layoutFamily = z.object({
+  label: z.string().min(1),
+  picker: z.object({
+    label: z.string().min(1).optional(),
+    component: z.custom<(props: LayoutPickerProps) => ReactNode>((value) => typeof value === 'function', 'Expected a picker component.'),
+  }).optional(),
+});
 const elementEditor = z.object({
   label: z.string().min(1).optional(),
   parameters: z.array(identifier).min(1),
@@ -160,6 +176,9 @@ const definition = z.object({
   controls: controlsSchema,
   render: z.custom<(context: RenderContext) => ReactNode>((value) => typeof value === 'function', 'Expected a render function.'),
   anchors: z.custom<(context: AnchorContext) => unknown>((value) => typeof value === 'function', 'Expected an anchors function.').optional(),
+  // The layout family this layout is a variant of, and free-form tags a family's picker reads to tell variants apart.
+  family: identifier.optional(),
+  variant: z.record(identifier, z.union([z.string().max(200), z.number(), z.boolean()])).optional(),
 }).superRefine(({ parameters, controls }, context) => checkControls(context, parameters, controls)).refine(({ boxes }) => {
   const order = Object.values(boxes).filter(({ type }) => type === 'markdown').map(({ flowOrder }) => flowOrder);
   return order.length < 2 || (!order.includes(undefined) && new Set(order).size === order.length);
@@ -183,11 +202,15 @@ export const templateSchema = z.object({
   formats: z.record(identifier, formatSchema).optional(),
   defaultFormat: identifier.optional(),
   parameters: parametersSchema,
+  // Layouts that are variants of one design, by family ID. Each variant names its family with `family`.
+  layoutFamilies: z.record(identifier, layoutFamily).optional(),
   spreads: z.record(identifier, definition).refine((spreads) => Object.keys(spreads).length > 0, 'Declare a spread.')
     // An ID means the same box or parameter in every layout, so switching layouts can carry its content.
     .superRefine((spreads, context) => {
       for (const message of declarationConflicts(spreads)) context.addIssue({ code: 'custom', message });
     }),
+}).superRefine(({ spreads, layoutFamilies }, context) => {
+  for (const { path, message } of familyProblems(spreads, layoutFamilies)) context.addIssue({ code: 'custom', message, path });
 }).refine(({ format, formats }) => !format !== !formats, 'Declare either format or formats.')
   .refine(({ formats }) => !formats || Object.keys(formats).length > 0, 'Declare at least one format.')
   .refine(({ formats, defaultFormat }) => !defaultFormat || (!!formats && Object.hasOwn(formats, defaultFormat)),
@@ -218,6 +241,7 @@ const spreadBuilder = <T,>(definition: T) => definition;
 export type TemplateDeclaration = {
   id: string; version: string; contract: 1; requires?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
+  layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
 };
 // `spreads` may be a function of the builder; the declaration ImageFlow validates always has the built record.
@@ -233,6 +257,9 @@ export function templateInfo(template: Template): TemplateInfo {
   return {
     format: template.format, formatId: template.formatId, formats: template.formatChoices,
     version: template.version, parameters: template.parameters,
+    layoutFamilies: Object.fromEntries(Object.entries(template.layoutFamilies ?? {}).map(([id, { label, picker }]) => [id, {
+      label, ...(picker ? { picker: { ...(picker.label ? { label: picker.label } : {}) } } : {}),
+    }])),
     // Functions (render, editor components) stay in the render frame; the editor gets plain declarations.
     spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, anchors: _anchors, elements, ...info }]) => [id, {
       ...info,

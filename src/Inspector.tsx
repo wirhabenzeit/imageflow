@@ -5,7 +5,7 @@ import type { BookGeometry, Issue, ProjectSummary, RenderStatus, TemplateInfo } 
 import { BookFrame } from './BookFrame';
 import { revealIn } from './reveal';
 import type { ProjectFiles, SpreadState } from './project';
-import { boxLabel, describeLayoutChange, discardContent, keptElements, keptOutside, layoutChoices, planLayoutChange, switchLayout } from './layouts';
+import { boxLabel, describeLayoutChange, discardContent, keptElements, keptOutside, layoutPreviews, pickerFamily, planLayoutChange, switchLayout } from './layouts';
 import { keptMime, photoMime, sourceTitle, textMime } from './source-items';
 import { readEdit, resolveEditPath } from './editing';
 import type { SourceUsage } from './editing';
@@ -15,17 +15,24 @@ import type { SourceRef } from './source-items';
 export type Edit = (files: ProjectFiles) => void;
 
 // Shows the spread in each layout it can switch to, rendered by the template itself. Pointing at a layout says what
-// switching would carry over, keep and fall back on.
-function LayoutPicker({ summary, spread, template, choose }: {
+// switching would carry over, keep and fall back on. A layout family with its own picker is one preview, named after
+// the family, which opens the picker; the variants of other families are listed next to each other.
+function LayoutPicker({ summary, spread, template, choose, openPicker }: {
   summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; choose: (definition: string) => void;
+  openPicker: (family: string, layout: string) => void;
 }) {
   const [geometry, setGeometry] = useState<BookGeometry>();
   const [pointed, setPointed] = useState<string>();
-  const choices = layoutChoices(template.spreads, spread.definition);
+  const families = template.layoutFamilies ?? {};
+  const choices = layoutPreviews(template.spreads, spread.definition, families);
+  const familyOf = (id: string) => pickerFamily(template.spreads, id, families);
+  const name = (id: string) => familyOf(id) ? families[familyOf(id)!].label : template.spreads[id].label;
   // The retained preview and its hit targets must describe the same set of layouts until the next frame is ready.
   const displayed = geometry ? geometry.sheets.map(({ spread }) => spread).filter((id) => Object.hasOwn(template.spreads, id)) : choices;
   const pending = !!geometry && (displayed.length !== choices.length || displayed.some((id, i) => id !== choices[i]));
-  const describe = (id: string) => id === spread.definition ? 'Current layout' : describeLayoutChange(planLayoutChange(spread, id, template.spreads));
+  const describe = (id: string) => id === spread.definition ? 'Current layout · ' + template.spreads[id].label
+    : familyOf(id) ? 'Choose a variant'
+    : describeLayoutChange(planLayoutChange(spread, id, template.spreads));
   const shown = !pending && pointed && choices.includes(pointed) ? pointed : undefined;
   return <div className="layout-picker-shell">
     <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout" aria-busy={pending || undefined}
@@ -33,20 +40,23 @@ function LayoutPicker({ summary, spread, template, choose }: {
       {displayed.map((id) => {
         const item = template.spreads[id];
         const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
-        return <button key={id} type="button" role="radio" disabled={pending} aria-checked={id === spread.definition} aria-label={item.label}
-          aria-describedby={shown === id ? 'layout-consequence' : undefined}
-          title={item.label + (item.span === 'spread' ? '' : ' · single ' + item.span + ' page')} className="layout-option"
+        const family = familyOf(id);
+        const grouped = !family && item.family !== undefined && Object.hasOwn(families, item.family) ? families[item.family].label : undefined;
+        return <button key={id} type="button" role="radio" disabled={pending} aria-checked={id === spread.definition} aria-label={name(id)}
+          aria-describedby={shown === id ? 'layout-consequence' : undefined} aria-haspopup={family ? 'dialog' : undefined}
+          title={(grouped ? grouped + ' · ' : '') + name(id) + (item.span === 'spread' ? '' : ' · single ' + item.span + ' page')}
+          className={'layout-option' + (family ? ' layout-family' : '')}
           style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
           onMouseEnter={() => setPointed(id)} onFocus={() => setPointed(id)} onBlur={() => setPointed(undefined)}
-          onClick={() => { if (id !== spread.definition) choose(id); }}>
-          <span className="layout-option-label">{item.label}</span>
+          onClick={() => { if (family) openPicker(family, id); else if (id !== spread.definition) choose(id); }}>
+          <span className="layout-option-label">{name(id)}{family ? '…' : ''}</span>
         </button>;
       })}
       <BookFrame project={summary.id} view="layouts" query={'spread=' + encodeURIComponent(spread.id)} title="Layout previews"
         onGeometry={setGeometry} />
     </div>
     <p id="layout-consequence" className="layout-consequence" role="tooltip" hidden={!shown}>
-      {shown ? template.spreads[shown].label + ' · ' + describe(shown) : '\u00a0'}</p>
+      {shown ? name(shown) + ' · ' + describe(shown) : '\u00a0'}</p>
   </div>;
 }
 
@@ -117,7 +127,7 @@ function contentState(summary: ProjectSummary, spread: SpreadState, id: string, 
 // elements are edited where they are on the page; the list opens the same editors, also for empty, hidden or
 // overlapping ones, and from the keyboard.
 export function Inspector({ summary, spread, source, template, render, usage, edit, highlight, issues,
-  select, quickLook, focus, targets = [], open, openTarget, place }: {
+  select, quickLook, focus, targets = [], open, openTarget, place, openPicker }: {
   summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void;
   highlight: (id?: string) => void; issues: string; select: (spread: string) => void;
@@ -125,6 +135,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   targets?: BookGeometry['targets']; open: (owner: { type: 'photo' | 'markdown' | 'element'; id: string }) => void;
   openTarget: (target: BookGeometry['targets'][number]) => void;
   place: (from: string, to: string) => void;
+  openPicker: (family: string, layout: string) => void;
 }) {
   const items = useRef(new Map<string, HTMLElement>());
   const [flash, setFlash] = useState<string>();
@@ -140,6 +151,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     return () => clearTimeout(timer);
   }, [focus, source]);
   const definition = template?.spreads[spread.definition];
+  const currentFamily = template && pickerFamily(template.spreads, spread.definition, template.layoutFamilies);
   function changeSpread(update: (spread: SpreadState) => void, notice?: string | (() => string)) {
     edit(({ project }) => {
       const current = project.spreads.find(({ id }) => id === spread.id);
@@ -192,9 +204,14 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     {header}
     <fieldset disabled={!writable}>
       {template && <details open><summary>Spread</summary>
-        <p className="field-label">Layout{definition ? ' · ' + definition.label : ''}</p>
+        <div className="layout-heading">
+          <p className="field-label">Layout{definition ? ' · ' + definition.label : ''}</p>
+          {currentFamily && <button type="button" className="link" aria-haspopup="dialog"
+            onClick={() => openPicker(currentFamily, spread.definition)}>
+            {(template.layoutFamilies?.[currentFamily]?.picker?.label ?? 'Change') + '…'}</button>}
+        </div>
         {!definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
-        <LayoutPicker summary={summary} spread={spread} template={template} choose={(next) => {
+        <LayoutPicker summary={summary} spread={spread} template={template} openPicker={openPicker} choose={(next) => {
           // Planned against the project the switch applies to, which may be newer than this render.
           let consequence = '';
           changeSpread((item) => {

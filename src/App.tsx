@@ -13,6 +13,7 @@ import { revealIn } from './reveal';
 import { EditPopover, MarkedFields } from './EditPopover';
 import { CropEditor } from './CropEditor';
 import { ElementEditorDialog } from './ElementEditor';
+import { LayoutPickerDialog } from './LayoutPickerDialog';
 import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
@@ -110,6 +111,7 @@ export function App() {
   const [cropping, setCropping] = useState<{ spread: string; box: string; layout: string; saved?: string; settling?: string }>();
   // A template-supplied element editor that is open.
   const [elementEditor, setElementEditor] = useState<{ spread: string; element: string }>();
+  const [layoutPicker, setLayoutPicker] = useState<{ spread: string; family: string; layout: string }>();
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const [dropTarget, setDropTarget] = useState<string>();
@@ -408,7 +410,7 @@ export function App() {
     const focused = document.activeElement;
     const typing = focused instanceof HTMLElement && (focused.matches('input, textarea, select, [contenteditable="true"]') || !!focused.closest('dialog'));
     const reloadRunning = reloading.current && !reloadFailed.current;
-    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || typing || agentLocked.current) return false;
+    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || layoutPicker || cropping || reorder.dragging || typing || agentLocked.current) return false;
     agentLocked.current = true;
     if (workspace.current) workspace.current.inert = true;
     setAgentWorking(true);
@@ -1280,6 +1282,11 @@ export function App() {
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
         open={(owner) => { reveal(spread.id); openOwner(spread.id, owner); }}
         openTarget={(target) => { reveal(spread.id); openTarget(target); }} place={(from, to) => place(spread.id, from, to)}
+        openPicker={(family, layout) => {
+          if (readyId.current !== summary.id) return;
+          setEditing(undefined);
+          setLayoutPicker({ spread: spread.id, family, layout });
+        }}
         edit={edit} highlight={setHighlight} issues={issue} select={select} />}
       </div>
     </div>
@@ -1288,6 +1295,11 @@ export function App() {
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
         blocked={previewNotice || undefined}
         edit={editCanvas} close={() => setElementEditor(undefined)} importFile={importProjectFile} />}
+    {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&
+      <LayoutPickerDialog key={layoutPicker.spread + ':' + layoutPicker.family} project={summary.id} template={template}
+        spread={spreads.find(({ id }) => id === layoutPicker.spread)!} family={layoutPicker.family} layout={layoutPicker.layout}
+        readOnly={summary.readOnly} blocked={previewNotice || undefined}
+        edit={editCanvas} close={() => setLayoutPicker(undefined)} />}
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     <footer className="status-bar">

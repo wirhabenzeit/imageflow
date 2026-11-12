@@ -110,12 +110,17 @@ export type ElementDefinition = {
   label: string; parameters: Parameters; controls?: ControlItem[]; editor?: { label?: string; parameters: string[]; presentation: 'dialog' };
 };
 export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; parameters: Parameters; flowOrder?: number; controls?: ControlItem[] };
+// `family` names the layout family this layout is a variant of; `variant` holds the template's tags for it.
 export type SpreadDefinition = {
   label: string; span: Span; parameters: Parameters; controls?: ControlItem[];
   boxes: Record<string, BoxDefinition>; elements: Record<string, ElementDefinition>;
+  family?: string; variant?: Record<string, string | number | boolean>;
 };
 export type TemplateInfo = {
   version: string; parameters: Parameters; spreads: Record<string, SpreadDefinition>;
+  // Families of layouts, by ID. `picker` is set when the family supplies its own picker (the component stays in the
+  // render frame).
+  layoutFamilies?: Record<string, { label: string; picker?: { label?: string } }>;
   // The format in use, its ID, and the labels of all formats the template offers.
   format: PrintFormat; formatId: string; formats: Record<string, string>;
 };

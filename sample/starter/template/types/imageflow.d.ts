@@ -192,6 +192,43 @@ export type SpreadDeclaration = {
   controls?: Controls;
   boxes?: Record<string, BoxDeclaration>;
   elements?: Record<string, ElementDeclaration>;
+  /** The layout family this layout is a variant of: a key of the template's `layoutFamilies`. */
+  family?: string;
+  /** Tags that tell this variant apart from the others in its family, such as `{ size: '3x3' }`. Pickers read them. */
+  variant?: VariantTags;
+};
+
+// Layout families
+
+/** Template-defined tags of a layout variant. ImageFlow gives them no meaning; a family's picker reads them. */
+export type VariantTags = Record<string, string | number | boolean>;
+export type LayoutVariant = { id: string; label: string; variant: VariantTags };
+/**
+ * Props of a layout family's picker. `current` is the variant chosen in the picker's draft (at first the spread's own
+ * layout, when it is a variant); `saved` is the spread's layout. `choose` changes the draft to another variant;
+ * `find` returns the variant whose tags include all the given ones. ImageFlow applies the draft when the user clicks
+ * Done (or the picker calls `commit`), as an ordinary layout switch and one undoable edit.
+ */
+export type LayoutPickerProps = {
+  variants: readonly LayoutVariant[];
+  current: string;
+  saved: string;
+  choose(id: string): void;
+  find(tags: VariantTags): string | undefined;
+  document: Values;
+  format: ResolvedFormat;
+  readOnly: boolean;
+  commit(): void;
+  cancel(): void;
+};
+/**
+ * Layouts that are variants of one design, such as a 2×2 and a 3×3 photo grid. Each variant is an ordinary layout
+ * that names the family with `family`; variants must have the same `span`. With a `picker`, the sidebar shows the
+ * family as one preview that opens the picker in a dialog; without one, it shows each variant.
+ */
+export type LayoutFamily = {
+  label: string;
+  picker?: { label?: string; component(props: LayoutPickerProps): ImageFlowNode };
 };
 /** Rejects properties a declaration does not have, such as a misspelt `flowOrdr`, in object literals and helpers alike. */
 type Exact<T, Allowed> = { [X in Exclude<keyof T, keyof Allowed>]: never };
@@ -348,14 +385,18 @@ export type AnchorContext<P = Values, D = Values> = { params: P; document: D };
 
 /** Type-only marker: the document parameters a spread's render context was typed with. Never set it yourself. */
 declare const typedDocument: unique symbol;
-export type SpreadDefinition<D extends Parameters = Parameters> = SpreadDeclaration & {
+/** Type-only marker: the layout family the builder saw, checked against the template's `layoutFamilies`. */
+declare const typedFamily: unique symbol;
+export type SpreadDefinition<D extends Parameters = Parameters, F extends string = string> = SpreadDeclaration & {
   render(context: UntypedRenderContext): ImageFlowNode;
   anchors?(context: AnchorContext): readonly AnchorDeclaration[];
   readonly [typedDocument]?: D;
+  readonly [typedFamily]?: F;
 };
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
-  'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls';
+  'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
+  'layout-families';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -369,6 +410,7 @@ export type TemplateDeclaration = {
   formats?: Record<string, PrintFormat>;
   defaultFormat?: string;
   parameters?: Parameters;
+  layoutFamilies?: Record<string, LayoutFamily>;
   spreads: Record<string, SpreadDefinition>;
 };
 
@@ -377,6 +419,7 @@ export type SpreadBuilder<D extends Parameters> = <
   const P extends Parameters = {},
   const B extends Record<string, BoxDeclaration> = {},
   const E extends Record<string, ElementDeclaration> = {},
+  const F extends string = never,
 >(definition: {
   label: string;
   /** `left` or `right` for a single page at the start or end of the book. Default `spread`. */
@@ -389,11 +432,15 @@ export type SpreadBuilder<D extends Parameters> = <
   render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D>): ImageFlowNode;
   /** Places other spreads can refer to through `ctx.book`, declared from this spread's values. */
   anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[];
-}) => SpreadDefinition<D>;
+  /** The layout family this layout is a variant of: a key of the template's `layoutFamilies`. */
+  family?: F;
+  /** Tags that tell this variant apart from the others in its family, such as `{ size: '3x3' }`. Pickers read them. */
+  variant?: VariantTags;
+}) => SpreadDefinition<D, F>;
 /** What `spreads` receives when it is a function. */
 export type TemplateTools<D extends Parameters> = { spread: SpreadBuilder<D> };
 
-type TemplateBase<D extends Parameters> = {
+type TemplateBase<D extends Parameters, L extends string = string> = {
   /** Stable template ID; `project.json` refers to it. */
   id: string;
   version: string;
@@ -405,6 +452,8 @@ type TemplateBase<D extends Parameters> = {
   requires?: readonly Capability[];
   /** Book settings, shown in Book settings and read through `ctx.document`. */
   parameters?: D & ParametersChecked<D>;
+  /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */
+  layoutFamilies?: { [K in L]: LayoutFamily };
 };
 /**
  * Declare one `format`, or several named `formats` the user chooses between in Book settings (`defaultFormat`,
@@ -422,9 +471,15 @@ type Mismatched<D, Typed> = { [K in keyof Typed & keyof D]: [ParameterValue<D[K]
  * runtime they would be undefined.
  */
 type TypedWith<T> = typeof typedDocument extends keyof T ? NonNullable<T[typeof typedDocument & keyof T]> : {};
-type DocumentCheck<S, D> = {
+/** The family a spread joins: from the builder's marker, or from a `family` written in a plain object. */
+type FamilyOf<T> = typeof typedFamily extends keyof T ? NonNullable<T[typeof typedFamily & keyof T]>
+  : T extends { family: infer F extends string } ? F : never;
+type FamilyCheck<T, L extends string> = 0 extends 1 & T ? unknown : [FamilyOf<T>] extends [never] ? unknown : string extends FamilyOf<T> ? unknown
+  : [Exclude<FamilyOf<T>, L>] extends [never] ? unknown
+  : { family: `Declare layout family ${Exclude<FamilyOf<T>, L> & string} in the template's layoutFamilies` };
+type DocumentCheck<S, D, L extends string = string> = {
   // Untyped spreads (`any`) are not checked.
-  [K in keyof S]: (0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never]
+  [K in keyof S]: FamilyCheck<S[K], L> & (0 extends 1 & TypedWith<S[K]> ? unknown : [Missing<D, TypedWith<S[K]>>] extends [never]
     ? [Mismatched<D, TypedWith<S[K]>>] extends [never] ? unknown
       : { [typedDocument]: `Document parameter ${Mismatched<D, TypedWith<S[K]>>} is declared differently in the template's parameters and in spreadFor()` }
     : { [typedDocument]: `Declare document parameter ${Missing<D, TypedWith<S[K]>>} in the template's parameters, or remove it from spreadFor()` })
@@ -452,13 +507,15 @@ type SpreadChecked<T> = 0 extends 1 & T ? unknown : Exact<T, SpreadDefinition<an
 export function defineTemplate<
   const D extends Parameters = {},
   const F extends string = never,
-  const S extends Record<string, SpreadDefinition<any>> = {},
->(template: TemplateBase<D> & FormatChoice<F> & { spreads: (tools: TemplateTools<D>) => S & DocumentCheck<S, D> }): TemplateDeclaration;
+  const S extends Record<string, SpreadDefinition<any, any>> = {},
+  const L extends string = never,
+>(template: TemplateBase<D, L> & FormatChoice<F> & { spreads: (tools: TemplateTools<D>) => S & DocumentCheck<S, D, L> }): TemplateDeclaration;
 export function defineTemplate<
   const D extends Parameters = {},
   const F extends string = never,
-  const S extends Record<string, SpreadDefinition<any>> = {},
->(template: TemplateBase<D> & FormatChoice<F> & { spreads: S & DocumentCheck<S, D> }): TemplateDeclaration;
+  const S extends Record<string, SpreadDefinition<any, any>> = {},
+  const L extends string = never,
+>(template: TemplateBase<D, L> & FormatChoice<F> & { spreads: S & DocumentCheck<S, D, L> }): TemplateDeclaration;
 
 /**
  * Returns a `spread` builder typed with these document parameters, for spreads declared outside `defineTemplate`,

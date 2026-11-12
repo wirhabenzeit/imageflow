@@ -173,3 +173,45 @@ test('a placed photo moves to a box on another spread; the two swap, or the sour
   assert.equal(swapContent(a, 'second', b, 'second'), undefined);
   assert.deepEqual([a.boxes.second, b.boxes.second], [{ params: {} }, { params: {}, photo: 'p2' }]);
 });
+
+test('layout families: previews collapse a family with a picker to one, and group the variants of other families', async () => {
+  const { familyLayouts, familyProblems, layoutPreviews, pickerFamily } = await import('../src/layouts');
+  const grids: Layouts = {
+    pair: layout('Pair', { hero: photo('Left'), second: photo('Right') }),
+    grid: layout('2×2', { hero: photo('1') }, { family: 'grid', variant: { size: '2x2' } }),
+    text: layout('Text', { body: text('Story') }),
+    grid9: layout('3×3', { hero: photo('1') }, { family: 'grid', variant: { size: '3x3' } }),
+    wide: layout('Wide', {}, { family: 'banner' }),
+    closing: layout('Closing', {}, { span: 'left' }),
+    narrow: layout('Narrow', {}, { family: 'banner' }),
+  };
+  const families = { grid: { label: 'Photo grid', picker: {} }, banner: { label: 'Banner' } };
+  assert.deepEqual(familyProblems(grids, families), []);
+  assert.deepEqual(familyLayouts(grids, 'grid'), ['grid', 'grid9']);
+  // The family stands where it first appears: its current variant, else its first. Pickerless families stay expanded.
+  assert.deepEqual(layoutPreviews(grids, 'pair', families), ['pair', 'grid', 'text', 'wide', 'narrow']);
+  assert.deepEqual(layoutPreviews(grids, 'grid9', families), ['pair', 'grid9', 'text', 'wide', 'narrow']);
+  assert.deepEqual(layoutPreviews(grids, 'closing', families), ['closing']);
+  // Without declared families, previews are the layout choices as before.
+  assert.deepEqual(layoutPreviews(grids, 'pair'), layoutChoices(grids, 'pair'));
+  assert.equal(pickerFamily(grids, 'grid9', families), 'grid');
+  assert.equal(pickerFamily(grids, 'wide', families), undefined);
+  assert.equal(pickerFamily(grids, 'missing', families), undefined);
+});
+
+test('switching between family variants follows the ordinary layout rules', () => {
+  const variants: Layouts = {
+    grid: layout('2×2', { hero: photo('1'), second: photo('2'), third: photo('3'), fourth: photo('4') }, { family: 'grid' }),
+    grid9: layout('3×3', Object.fromEntries(['hero', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth']
+      .map((id, i) => [id, photo(String(i + 1))])), { family: 'grid' }),
+  };
+  const spread = gridSpread();
+  switchLayout(spread, 'grid9', variants);
+  spread.boxes.fifth = { photo: 'p5', params: {} };
+  assert.equal(describeLayoutChange(planLayoutChange(spread, 'grid', variants)), '4 photos carried over · 1 photo kept outside this layout');
+  switchLayout(spread, 'grid', variants);
+  assert.deepEqual(keptOutside(spread, variants).map(({ id }) => id), ['fifth']);
+  switchLayout(spread, 'grid9', variants);
+  assert.deepEqual(keptOutside(spread, variants), []);
+  assert.equal(photos(spread).fifth, 'p5');
+});

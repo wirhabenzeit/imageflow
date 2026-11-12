@@ -210,6 +210,9 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 
 /* Layout picker: the template renders the spread in each layout; buttons sit under a transparent frame. */
 .field-label { font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+.layout-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.layout-heading button.link { all: unset; cursor: default; font-size: 12px; color: var(--accent); white-space: nowrap; }
+.layout-heading button.link:focus-visible { outline: 2px solid var(--accent); }
 .layout-picker { position: relative; margin: 0 -6px; }
 .layout-picker:not(.placed) { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 0 6px; }
 .layout-picker .book-frame { z-index: 1; }
