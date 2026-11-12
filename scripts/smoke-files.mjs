@@ -155,7 +155,7 @@ try {
   const aside = join(work, 'senja-road.gpx');
   await rerendered(() => rename(sample, aside));
   assert.match(await messages('errors'), /Route map · GPX track: Missing project file: files\/senja-road\.gpx/);
-  assert.equal(await trackLine(), 0);
+  assert.equal(await trackLine(), 1, 'Keep a visibly stale last-good parameter-file preview while its original is missing.');
   await rerendered(() => rename(aside, sample));
   assert.equal(await trackLine(), 1);
   assert.equal((await status()).errors.length, 0);

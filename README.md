@@ -16,24 +16,25 @@ npm run dev
 - Launching without a book opens the compact start window with recent books, **New Book…**, **Open…**, and **Explore a Sample**. New Book uses the shared starter picker, then asks for the document’s name and location. The current catalogue contains the photobook starter; #27 adds the calendar starter.
 - Books are macOS document packages such as **Senja.imageflow**. Finder shows each as one document; double-click it to open. Every book opens in its own window. Reopening the same book focuses its existing window, while a Finder duplicate opens independently. Closing the last book returns to the start window; **ImageFlow → Show Start Window** brings it back at any time.
 - The package contains all originals, text, template code, fonts, and file inputs. Move, duplicate, or back it up as one item. **File → Reveal in Finder / Open Template Folder**, and **Edit Text Source…** in the text Inspector, keep external editing convenient. Templates are copied into each new book; changes to a starter never change an existing book.
-- This is a clean-slate document format: the app opens `.imageflow` packages, with no legacy project-folder conversion. Photo imports copy into the book. Linked photos and their recovery/collection workflow are the separate next phase of #40.
+- This is a clean-slate document format: the app opens `.imageflow` packages, with no legacy project-folder conversion. Book settings → **New imports** sets Copy into Book (default) or Link to Original Files for photos, Markdown and parameter files. Existing sources keep their storage; individual imports may override the default. **File → Manage Sources…** provides status, Locate/Replace, Retry, Copy into Book, and **Include All Assets**. Linked files refresh after external saves; missing originals retain a clearly marked cached view.
 - Add, duplicate, reorder, or delete spreads from the left panel. Select a layout and edit its settings in the Inspector. Boxes and elements are edited on the page: click one, or pick it from the Inspector's **On this spread** list. Changes save to the project folder. Use **Undo** and **Redo** for edits made during the session.
 - Import JPEG, PNG, and WebP photos with the File menu or the Sources strip’s **Import** menu, or drop them onto the photo strip or a photo box. Drag photos from the strip onto photo boxes. Click a placed photo (or its entry in the Inspector's list) to select it: then drag it to move it inside its frame and pinch (or ctrl-scroll) or use the toolbar slider to zoom. Each gesture saves itself as one undoable edit; the toolbar also shows the resulting print resolution against the template’s minimum and target, **Replace photo**, **Remove**, the crop as numbers, and the box's own options such as **Show caption**. An empty photo box opens an editor with **Choose photo…**. Escape, **Done** or a click elsewhere deselects. Dragging a photo that is not selected moves it onto another photo box, on any spread; the two swap. Photo metadata is edited in the photo’s own Inspector.
 - Drop a Markdown file onto a text box, or click the box to assign an imported source or import one. Assigning the same source to several boxes continues the text through the book. Edit the Markdown in your own editor. ImageFlow reloads changes to text, photos, and templates.
 - The **Book check** checks the whole book after every change. A labelled indicator at the right of the status bar shows errors and warnings, or **Book check: no issues**; click it to list them, with links to the affected spreads.
+- **File → Save a Copy…** offers **Include all assets**, checked by default, to make a portable copy containing photos, Markdown and parameter files. Unchecked preserves links. Collection reports missing originals; autosave preserves current links.
 - **Export proof PDF** saves the current layout for review. **Export print PDF** checks the whole book against the template’s print format before saving, and downsamples photos to the format’s maximum resolution. Preflight reports page count, photo resolution, missing content, unplaced text, and PDF resource issues. The starter offers a 290 × 290 mm square and a 320 × 240 mm landscape format (Book settings → Format), both with 3 mm outside, top, and bottom bleed.
 
 | File or folder | Contents |
 | --- | --- |
 | `project.json` | Book title, spread order, assignments, crops, parameter values, and Markdown paths |
-| `photos.json` | Photo IDs, paths, titles, captions, credits, and alt text |
+| `photos.json` | Stable photo IDs, relative copied paths or explicit linked locations, titles, captions, credits, and alt text |
 | `photos/` | Original photos |
 | `texts/` | Editable Markdown sources |
 | `template/` | Project-owned TSX layout code, CSS, fonts, and assets |
 | `files/` | Document-owned template file inputs, such as GPX tracks |
 | `.imageflow/` | Writer ownership and recoverable save journals; do not delete pending recovery data |
 
-Generated photo renditions live in an app-owned temporary cache outside the package. Recent-book metadata and small cover previews live in the app’s data folder, separate from book contents.
+Generated photo renditions and validated source snapshots live in app-owned caches outside the package. Snapshot caching uses APFS clones where possible. Original availability is tracked separately from cached views; only available originals satisfy print and collection. Proofs using unavailable sources require confirmation and carry a visible warning on affected pages. Recent-book metadata and small cover previews live in the app’s data folder, separate from book contents.
 
 Open books you trust. Their templates run as code in the renderer. To test template changes, open a book and edit `template/index.tsx` or `template/styles.css`. Invalid templates show an error in the editor. The starter template ships `template/types/` and a `tsconfig.json`, so code editors type-check templates without installing packages; declare spreads with `spreadFor(documentParameters)` to get typed `params`, `boxes`, and `document` in `render`.
 
@@ -67,3 +68,5 @@ The canvas scrolls through the whole book; the left sidebar contains spread thum
 Open **ImageFlow → Agent Connections…** to configure the [MCP connection](docs/mcp.md) for local agents.
 
 When agent connections are enabled, **Agent · N** in the footer shows the number of connected clients. Click it to inspect or disable the connection.
+
+[Linked source ownership and Save a Copy](docs/decisions/0005-linked-sources.md) describes persisted references, refresh/relinking, source snapshots, and collection semantics.

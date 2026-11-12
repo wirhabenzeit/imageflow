@@ -1,3 +1,4 @@
+import { sourcePath } from './source-locations';
 import { useEffect, useRef, useState } from 'react';
 import { Fields } from './Fields';
 import type { BookGeometry, Issue, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';

@@ -1,12 +1,17 @@
+import { collectSources, relocateSource, relinkFolder, saveDocumentCopy } from './source-actions';
+import { originalPath } from './source-store';
+import { sourceEntries } from '../src/source-locations';
+import { sourcePath, sourceLinked } from '../src/source-locations';
+import { configureSourceStore } from './source-store';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { extname, join, relative, isAbsolute } from 'node:path';
+import { basename, extname, join, relative, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { channels, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
-import type { Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings } from '../src/desktop';
+import type { Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { assetTypes, loadProject, renderData } from './project';
 import type { OpenProject } from './project';
@@ -382,7 +387,7 @@ async function openProject(owner: BrowserWindow, action: OpenAction, document?: 
 function updateMenus() {
   const document = focusedDocument();
   const menu = Menu.getApplicationMenu();
-  for (const id of ['reload', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector', 'reveal-book', 'open-template']) {
+  for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector', 'reveal-book', 'open-template']) {
     const item = menu?.getMenuItemById(id);
     if (item) item.enabled = !!document && !document.closing;
   }
@@ -525,6 +530,7 @@ void app.whenReady().then(async () => {
   settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'));
   recents = new RecentDocuments(join(app.getPath('userData'), 'recent-documents.json'));
   await Promise.all([settings.load(), recents.load()]);
+  configureSourceStore(join(app.getPath('userData'), 'source-cache'));
   nativeTheme.themeSource = settings.value.appearance;
   cache = await mkdtemp(join(app.getPath('temp'), 'imageflow-cache-'));
   const renditions = await configureRenditionCache(cache, join(app.getPath('userData'), 'Cache', 'renditions'));
@@ -594,6 +600,46 @@ void app.whenReady().then(async () => {
   });
   ipcMain.handle(channels.documentAction, (event, action: 'reveal' | 'template' | 'text', id?: string) => fromEditor(event, async (document) => {
     await openDocumentLocation(document, action, id);
+  }));
+  ipcMain.handle(channels.sourceAction, (event, request: SourceAction) => fromEditor(event, async (document) => {
+    const source = sourceEntries(document.book).find((entry) => entry.key === request.key);
+    if (document.book.readOnly) throw new Error('Create an editable book first.');
+    let next = document.book;
+    let message: string | undefined;
+    if (request.action === 'retry') return { summary: await document.reload() };
+    if (request.action === 'collect') next = await collectSources(document.book);
+    else if (request.action === 'locate-folder') {
+      const choice = await dialog.showOpenDialog(document.window, { title: 'Locate Missing Sources in Folder', properties: ['openDirectory'] });
+      if (!choice.canceled && choice.filePaths[0]) {
+        const result = await relinkFolder(document.book, choice.filePaths[0]);
+        next = result.book;
+        const names = new Map(sourceEntries(document.book).map((entry) => [entry.key as string, basename(entry.path)]));
+        message = result.repaired + ' sources located.' + (result.ambiguous.length ? ' Multiple matches need Locate… for: ' + result.ambiguous.map((key) => names.get(key) ?? 'a source').join(', ') : '');
+      }
+    } else {
+      if (!source) throw new Error('Choose a registered source.');
+      if (request.action === 'reveal') {
+        shell.showItemInFolder(await originalPath(document.book.folder, source));
+        return { summary: document.summary };
+      }
+      if (request.action === 'copy') next = await relocateSource(document.book, source.key, undefined, true);
+      else if (request.action === 'locate' || request.action === 'replace') {
+        const choice = await dialog.showOpenDialog(document.window, { title: request.action === 'replace' ? 'Replace Original' : 'Locate Original', properties: ['openFile'],
+          filters: [{ name: source.kind === 'photo' ? 'Photos' : 'Source', extensions: source.kind === 'photo' ? ['jpg', 'jpeg', 'png', 'webp'] : [extname(source.path).slice(1)] }] });
+        if (!choice.canceled && choice.filePaths[0]) next = await relocateSource(document.book, source.key, choice.filePaths[0]);
+      } else throw new Error('Unknown source action.');
+    }
+    document.projectSession.record(next, 'Source location changed', false);
+    return { summary: document.activate(next), message };
+  }));
+  ipcMain.handle(channels.saveCopy, (event, includeAssets: boolean) => fromEditor(event, async (document) => {
+    if (typeof includeAssets !== 'boolean') throw new Error('Choose whether to include all assets.');
+    const choice = await dialog.showSaveDialog(document.window, { title: 'Save a Copy', buttonLabel: 'Save Copy',
+      defaultPath: join(app.getPath('documents'), document.book.project.title + ' Copy.imageflow'), filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
+    if (choice.canceled || !choice.filePath) return null;
+    const folder = await saveDocumentCopy(document.book, choice.filePath, includeAssets);
+    await openDocument(folder);
+    return null;
   }));
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {
@@ -668,6 +714,8 @@ void app.whenReady().then(async () => {
       menuCommand('Open…', 'CmdOrCtrl+O', 'open'),
       menuCommand('Explore a Sample', undefined, 'sample'),
       menuCommand('Reload Book', 'CmdOrCtrl+R', 'reload'),
+      menuCommand('Save a Copy…', 'CmdOrCtrl+Shift+S', 'save-copy'),
+      menuCommand('Manage Sources…', undefined, 'manage-sources'),
       { type: 'separator' },
       menuCommand('Import Photos…', 'CmdOrCtrl+I', 'import-photos'),
       menuCommand('Import Photo Folder…', 'CmdOrCtrl+Shift+I', 'import-folder'),

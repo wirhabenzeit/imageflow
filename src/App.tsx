@@ -1,3 +1,5 @@
+import { SourceManager, SaveCopy } from './SourceManager';
+import type { ImportMode } from './source-locations';
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, renderOrigin } from './desktop';
@@ -114,6 +116,8 @@ export function App() {
   const [busy, setBusy] = useState('');
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState('');
+  const [sourceManager, setSourceManager] = useState(false);
+  const [saveCopy, setSaveCopy] = useState(false);
   const [error, setError] = useState('');
   const [check, setCheck] = useState<BookCheck>();
   const canvas = useRef<HTMLElement>(null);
@@ -284,18 +288,18 @@ export function App() {
 
   // Adds a file for a file parameter to the project's registry and resolves to its ID; the caller assigns it as
   // a normal edit, so Undo removes the assignment and keeps the file.
-  function importParameterFile(accept: string[]) {
-    return importProjectFile(accept).then((imported) => imported?.id);
+  function importParameterFile(accept: string[], mode?: ImportMode) {
+    return importProjectFile(accept, mode).then((imported) => imported?.id);
   }
   // The same, also naming the render session that has the new file, for an element editor frame to read it from.
-  function importProjectFile(accept: string[]) {
+  function importProjectFile(accept: string[], mode?: ImportMode) {
     const generation = inputGeneration.current;
     return new Promise<{ id: string; project: string } | undefined>((resolve) => enqueue(async () => {
       try {
         const before = current.current;
         if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
         setBusy('Importing file…');
-        const result = await api.importFiles(before.id, { kind: 'file', accept });
+        const result = await api.importFiles(before.id, { kind: 'file', accept, mode });
         if ('error' in result) throw new Error(result.error);
         if (!result.value || current.current !== before) return resolve(undefined);
         adopt(result.value.summary);
@@ -308,9 +312,13 @@ export function App() {
     }));
   }
   // importParameterFile only reads refs, the preload API and state setters, so it may be kept from the first render.
-  const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, importFile: importParameterFile }), [summary?.project.files]);
+  const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, defaultMode: summary?.project.importMode ?? 'copy', importFile: importParameterFile }), [summary?.project.files, summary?.project.importMode]);
 
   function act(command: Command) {
+    if (command === 'manage-sources' || command === 'save-copy') {
+      enqueue(async () => { if (command === 'manage-sources') setSourceManager(true); else setSaveCopy(true); });
+      return;
+    }
     if (command === 'toggle-project' || command === 'toggle-inspector') {
       togglePanel(command === 'toggle-project' ? 'left' : 'right');
       return;
@@ -977,6 +985,12 @@ export function App() {
                 {missingFormat && <option value={summary.project.format} disabled>{summary.project.format} (not in the template)</option>}
                 {Object.entries(template.formats).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
               </select></label>}
+            <label className="field">New imports<select value={summary.project.importMode ?? 'copy'} onChange={(event) => {
+              const mode = event.target.value as ImportMode;
+              edit(({ project }) => { project.importMode = mode; }, 'Import default updated');
+            }}><option value="copy">Copy into Book</option><option value="link">Link to Original Files</option></select></label>
+            <p className="muted">Applies to photos, Markdown and parameter files. Existing sources keep their current locations.</p>
+            <button type="button" onClick={() => setSourceManager(true)}>Manage Sources…</button>
             <label className="field">Book title<input key={summary.project.title} defaultValue={summary.project.title}
               onBlur={(event) => {
                 const title = event.target.value.trim();
@@ -1153,6 +1167,7 @@ export function App() {
         {summary && <Sources summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={choose}
           usage={usage} writable={writable} busy={!!busy} importSources={act} quickLook={setQuick}
+          importWithMode={(kind, mode, folder) => importFiles({ kind, mode, folder })}
           importPaths={(files) => {
             const paths = api?.pathsForFiles(files) ?? [];
             if (paths.length) importFiles({ kind: paths.every((path) => /\.md$/i.test(path)) ? 'markdown' : 'photo', paths });
@@ -1160,7 +1175,9 @@ export function App() {
       </div>
       {summary && (!panels.rightHidden ? <PanelDivider side="right" width={panels.right} resize={resizePanel} onResizing={setResizing} /> : <div />)}
       <div className={'inspector-host' + (panels.rightHidden ? ' is-collapsed' : '')} inert={panels.rightHidden} aria-hidden={panels.rightHidden || !summary}>
-      {summary && spread && <Inspector summary={writable || summary.readOnly ? summary : { ...summary, readOnly: true }}
+      {summary && api && sourceManager && <SourceManager api={api} summary={summary} adopt={(next) => adopt(next)} close={() => setSourceManager(false)} />}
+    {summary && api && saveCopy && <SaveCopy api={api} close={() => setSaveCopy(false)} />}
+    {summary && spread && <Inspector summary={writable || summary.readOnly ? summary : { ...summary, readOnly: true }}
         spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}

@@ -1,3 +1,4 @@
+import { configureSourceStore } from '../desktop/source-store';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -34,6 +35,7 @@ async function fixture(t: TestContext) {
   t.after(() => rm(work, { recursive: true, force: true }));
   const folder = join(work, 'book');
   const cache = join(work, 'cache');
+  configureSourceStore(join(work, 'source-cache'));
   await mkdir(cache);
   await cp(resolve('sample/whitewall'), folder, { recursive: true, filter: (path) => !path.includes('.imageflow') });
   return { book: await loadProject(folder, cache, true), cache, folder };

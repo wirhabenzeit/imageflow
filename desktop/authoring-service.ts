@@ -1,3 +1,4 @@
+import { sourcePath, sourceLinked } from '../src/source-locations';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -419,7 +420,7 @@ export function createAuthoringService(hooks: Hooks) {
         };
         result = {
           project: session.handle, revision: report.revision, root: session.book.folder,
-          workflow: ['Edit template/ TSX, CSS and assets directly with workspace tools.', 'Edit existing texts/ Markdown directly.',
+          workflow: ['Edit template/ TSX, CSS and assets directly with workspace tools.', 'Edit registered Markdown at its source location; linked Markdown stays outside the package.',
             'Call check_book with a spread preview after edits; images include whole-book text flow.',
             'Preview a new or unused layout before saving it: call check_book with draft.operations (an insert_spread with a ref) and target the preview at its $ref.',
             'Stress-test layouts with check_book fixtures: synthetic long, empty, portrait-photo and malformed-file content per format, with a coverage matrix and a bannered fixture contact sheet.',
@@ -449,8 +450,8 @@ export function createAuthoringService(hooks: Hooks) {
         const view = args.view ?? 'summary';
         const records = view === 'sources' ? [
           ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, usage: usage.photo[id] ?? [] })),
-          ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path, usage: usage.text[id] ?? [] })),
-          ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path })),
+          ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path: sourcePath(path), linked: sourceLinked(path), usage: usage.text[id] ?? [] })),
+          ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path: sourcePath(path), linked: sourceLinked(path) })),
         ] : project?.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...spread,
           page: sequence?.spreads[project.spreads.indexOf(spread)].page,
           kept: template ? keptOutside(spread, template.spreads) : [],

@@ -1,3 +1,4 @@
+import type { ImportMode } from './source-locations';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { useEffect, useMemo, useRef } from 'react';
@@ -14,10 +15,11 @@ function pagesText(list: { pages: string }[] | undefined) {
   return (list.length === 1 && !list[0].pages.includes('–') ? 'Page ' : 'Pages ') + list.map(({ pages }) => pages).join(', ');
 }
 
-export function Sources({ summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook }: {
+export function Sources({ summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, importWithMode, quickLook }: {
   summary: ProjectSummary; tab: SourceKind; setTab: (tab: SourceKind) => void;
   selected: Partial<Record<SourceKind, string>>; choose: (source: SourceRef) => void; usage: SourceUsage;
   writable: boolean; busy: boolean; importSources: (command: 'import-photos' | 'import-folder' | 'import-texts') => void;
+  importWithMode: (kind: 'photo' | 'markdown', mode: ImportMode, folder?: boolean) => void;
   importPaths: (files: File[]) => void; quickLook: (source: SourceRef) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
@@ -65,6 +67,10 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
         <button onClick={() => importSources('import-photos')}>Import photos…</button>
         <button onClick={() => importSources('import-folder')}>Import folder…</button>
         <button onClick={() => importSources('import-texts')}>Import Markdown…</button>
+        <hr />
+        <button onClick={() => importWithMode(tab === 'photo' ? 'photo' : 'markdown', 'copy')}>Copy {tab === 'photo' ? 'photos' : 'Markdown'} into Book…</button>
+        <button onClick={() => importWithMode(tab === 'photo' ? 'photo' : 'markdown', 'link')}>Link to {tab === 'photo' ? 'photos' : 'Markdown'}…</button>
+        {tab === 'photo' && <button onClick={() => importWithMode('photo', 'link', true)}>Link to photo folder…</button>}
       </ActionMenu>
     </div>
     <div ref={list} className={'source-items source-items-' + tab} role="listbox" aria-orientation="horizontal"
@@ -73,10 +79,12 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
         ? 'No photos yet. Import photos or drop them here.' : 'No Markdown sources yet. Import a .md file or drop it here.'}</p>}
       {items.map(({ id, title }, i) => {
         const placed = usage[tab][id];
+        const sourceState = summary.sources?.[(tab === 'photo' ? 'photo:' : 'markdown:') + id];
+        const sourceLabel = sourceState?.state !== 'available' && sourceState?.problem ? (sourceState.cached ? 'Cached · Missing' : 'Unavailable') : sourceState?.linked ? 'Linked' : undefined;
         const common = {
           'data-id': id, role: 'option', 'aria-selected': current === id,
           tabIndex: current === id || (!current && i === 0) ? 0 : -1,
-          title: title + ' · ' + pagesText(placed),
+          title: title + ' · ' + pagesText(placed) + (sourceLabel ? ' · ' + (sourceState?.problem ?? sourceLabel) : ''),
           onClick: () => focus(id),
           onDoubleClick: () => quickLook({ kind: tab, id }),
           draggable: writable && (tab === 'text' || !!summary.photos[id]),
@@ -89,6 +97,7 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
           return <div key={id} className="source-item source-photo" {...common}>
             {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" draggable={false} /> : <span className="missing">Missing</span>}
             <span className="source-title">{title}</span>
+            {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
             {!!placed?.length && <small className="badge">{placed.length}×</small>}
           </div>;
         }
@@ -99,6 +108,7 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
           {source === undefined ? <span className="missing">Missing file</span> : <span className="source-excerpt">
             {heading && <strong>{heading} </strong>}{body}
           </span>}
+          {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
           <span className="source-meta">{source !== undefined && words(source) + ' words · '}{pagesText(placed)}</span>
         </div>;
       })}

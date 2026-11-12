@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { importModeSchema, sourceReferenceSchema } from './source-locations';
+import type { SourceStatus } from './source-locations';
 import type { Dimensions } from './spread';
 
 export const identifier = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/, 'Use letters, digits, underscores, or hyphens.')
@@ -23,13 +25,14 @@ const box = z.object({
 export const projectSchema = z.object({
   schemaVersion: z.literal(1),
   title: label,
+  importMode: importModeSchema.optional(),
   template: z.object({ id: identifier, version: label }),
   // The template format chosen in Book settings; templates with one format ignore it.
   format: identifier.optional(),
   params: values,
-  texts: z.record(identifier, z.string()).default({}),
-  // Files for file parameters (such as GPX tracks), by ID, as paths inside files/.
-  files: z.record(identifier, z.string()).default({}),
+  texts: z.record(identifier, sourceReferenceSchema).default({}),
+  // File parameter sources (such as GPX tracks), by ID: owned relative paths or explicit external links.
+  files: z.record(identifier, sourceReferenceSchema).default({}),
   // Each spread keeps one state for all its layouts: `definition` picks which boxes and elements are shown.
   spreads: z.array(z.object({
     id: identifier,
@@ -42,6 +45,7 @@ export const projectSchema = z.object({
 
 export const photoIndexSchema = z.record(identifier, z.object({
   path: z.string(),
+  linked: z.boolean().optional(),
   caption: z.string().optional(),
   title: z.string().optional(),
   credit: z.string().optional(),
@@ -53,7 +57,7 @@ export type SpreadState = Project['spreads'][number];
 export type BoxState = z.infer<typeof box>;
 export type Values = z.infer<typeof values>;
 export type PhotoIndex = z.infer<typeof photoIndexSchema>;
-export type Photo = Omit<PhotoIndex[string], 'path'> & Dimensions;
+export type Photo = Omit<PhotoIndex[string], 'path' | 'linked'> & Dimensions;
 // A file the template reads through `file(id)`. Files are read as UTF-8 text.
 export type ProjectFile = { name: string; extension: string; text?: string; problem?: string };
 export type ProjectFiles = { project: Project; photoIndex: PhotoIndex };
@@ -64,6 +68,7 @@ export type RenderProject = {
   // Registered files with their text, or why they could not be read.
   files: Record<string, ProjectFile>;
   problems: string[];
+  sources?: Record<string, SourceStatus>;
   template: { script: string; css?: string; assets: Record<string, string> };
   mode: 'edit' | 'export';
   // A synthetic authoring fixture book. Its artwork carries a banner and fixture labels so it is never mistaken for the book.

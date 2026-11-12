@@ -621,3 +621,24 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .starter-description small { font-size: 11px; }
 .starter-picker footer { display: flex; gap: 8px; justify-content: flex-end; }
 .book-loading { margin: auto; padding: 60px; color: var(--muted); }
+.source-manager, .save-copy-dialog { color: var(--text); background: var(--popup-surface); border: 1px solid var(--edge); border-radius: 12px; padding: 24px; max-height: 85vh; box-shadow: 0 20px 80px #0005; }
+.source-manager { width: min(1000px, 90vw); }
+.save-copy-dialog { width: 440px; }
+.source-manager h2, .save-copy-dialog h2 { font-size: 19px; margin: 0 0 10px; }
+.source-manager footer, .save-copy-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.source-manager-actions { display: flex; gap: 8px; margin: 16px 0; }
+.source-manager-list { max-height: 50vh; overflow: auto; }
+.source-manager table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.source-manager th { text-align: left; padding: 8px; border-bottom: 1px solid var(--edge); }
+.source-manager td { padding: 10px 8px; vertical-align: top; border-bottom: 1px solid var(--subtle-border); }
+.source-manager td:first-child { max-width: 340px; }
+.source-manager td:last-child { width: 235px; }
+.source-manager td button { margin: 0 5px 5px 0; }
+.source-manager small, .source-location { display: block; color: var(--muted); margin-top: 4px; }
+.source-location { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 330px; font-size: 11px; }
+.source-storage { font-size: 10px; color: var(--muted); display: block; }
+.pc-file > select[aria-label="File import mode"] { max-width: 145px; }
+
+.source-photo:has(.source-storage) { grid-template-rows: minmax(0, 1fr) 22px 15px; }
+.source-photo .source-storage { padding: 0 6px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.source-text:has(.source-storage) { grid-template-rows: auto minmax(0, 1fr) auto auto; }

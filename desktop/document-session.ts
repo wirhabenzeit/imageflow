@@ -1,10 +1,13 @@
+import { SourceStore } from './source-store';
+import { captureProjectInputs } from './revisions';
+import { sourceEntries } from '../src/source-locations';
 import { app, dialog } from 'electron';
 import type { BrowserWindow } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
-import { extname, join, relative } from 'node:path';
+import { dirname, extname, join, relative } from 'node:path';
 import { channels, desktopScheme, renderOrigin } from '../src/desktop';
 import type { ExportMode, ImportRequest, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
@@ -56,6 +59,12 @@ export class DocumentSession {
   private checkJob?: AbortController;
   private checkJobs = new Set<AbortController>();
   private watcher?: FSWatcher;
+  private linkedTimer?: ReturnType<typeof setInterval>;
+  private linkedScanRunning = false;
+  private linkedReloadPending = false;
+  private linkedRetryAt = new Map<string, number>();
+  private linkedStamp = new Map<string, string>();
+  private linkedWatchers = new Map<string, FSWatcher>();
   private reloadTimer?: ReturnType<typeof setTimeout>;
   private observedChanges = new Set<string>();
   private importedWrites = new ImportReceipts();
@@ -154,6 +163,9 @@ export class DocumentSession {
     if (this.closeTask) return this.closeTask;
     this.closing = true;
     this.stopWatch();
+    clearInterval(this.linkedTimer);
+    for (const watcher of this.linkedWatchers.values()) watcher.close();
+    this.linkedWatchers.clear();
     this.exportJob?.abort();
     for (const job of this.checkJobs) job.abort();
     for (const reply of this.agentLeases.values()) reply(false);
@@ -196,7 +208,66 @@ export class DocumentSession {
     this.window.setTitle(book.project.title);
     if (!book.readOnly) this.window.setRepresentedFilename(book.folder);
     this.changed?.(book);
+    this.watchLinkedSources(book);
     return this.summary;
+  }
+
+  /** Parent-directory watches survive atomic replacement; reconciliation also covers reconnects and missed events. */
+  private watchLinkedSources(book: OpenProject) {
+    const linked = sourceEntries(book).filter((source) => source.linked);
+    const desired = new Set(linked.map((source) => dirname(source.path)));
+    for (const [path, watcher] of this.linkedWatchers) if (!desired.has(path)) { watcher.close(); this.linkedWatchers.delete(path); }
+    const changed = () => { this.projectSession.inputs.invalidate(); void scan(); };
+    const scan = async () => {
+      if (this.closing || this.linkedScanRunning) return;
+      this.linkedScanRunning = true;
+      try {
+        const current = sourceEntries(this.book).filter((source) => source.linked);
+        let dirty = false;
+        for (const source of current) {
+          const value = await fingerprint(source.path);
+          const previous = this.linkedStamp.get(source.key);
+          this.linkedStamp.set(source.key, value);
+          if (previous !== undefined && previous !== value) dirty = true;
+          if (!dirty && this.book.sources?.[source.key]?.state !== 'available' && Date.now() > (this.linkedRetryAt.get(source.key) ?? 0)) {
+            this.linkedRetryAt.set(source.key, Date.now() + 10_000);
+            const store = await SourceStore.forBook(this.book.folder, this.cache);
+            const probe = await store.resolve(this.book.folder, source);
+            if (probe.status.state === 'available') { await store.settled(); dirty = true; }
+          }
+        }
+        if (this.closing) return;
+        for (const path of new Set(current.map((source) => dirname(source.path)))) {
+          if (this.linkedWatchers.has(path)) continue;
+          try {
+            const watcher = watch(path, (_event, name) => {
+              if (!name || sourceEntries(this.book).some((source) => source.linked && source.path === join(path, String(name)))) changed();
+            });
+            watcher.on('error', () => { watcher.close(); this.linkedWatchers.delete(path); this.projectSession.inputs.invalidate(); });
+            this.linkedWatchers.set(path, watcher);
+          } catch { /* Polling retries unavailable locations when their drive reconnects. */ }
+        }
+        if (dirty) { this.projectSession.inputs.invalidate(); this.linkedReloadPending = true; }
+        if (this.linkedReloadPending && !this.busy) {
+          // A pending refresh is consumed after a save/export; it must not invent additional source changes.
+          await new Promise((resolve) => setTimeout(resolve, 220));
+          if (!this.closing && !this.busy) {
+            this.linkedReloadPending = false;
+            await this.run(async () => {
+              this.notify({ building: true });
+              try { this.notify({ value: await this.reload() }); }
+              catch (error) { this.notify({ error: error instanceof Error ? error.message : String(error) }); throw error; }
+            });
+          }
+        }
+      } finally { this.linkedScanRunning = false; }
+    };
+    if (linked.length && !this.linkedTimer) {
+      this.linkedTimer = setInterval(() => { void scan().catch((error) => this.notify({ error: String(error) })); }, 1500);
+      this.linkedTimer.unref();
+    }
+    if (!linked.length && this.linkedTimer) { clearInterval(this.linkedTimer); this.linkedTimer = undefined; this.linkedStamp.clear(); }
+    void scan().catch((error) => this.notify({ error: String(error) }));
   }
 
   stopWatch() {
@@ -363,7 +434,11 @@ export class DocumentSession {
   }
 
   async exportBook(owner: BrowserWindow, projectId: string, mode: ExportMode) {
-    const book = this.currentBook(projectId);
+    this.currentBook(projectId);
+    const before = await this.projectSession.inputs.capture();
+    const book = await loadProject(this.book.folder, this.cache, true);
+    const loaded = await this.projectSession.inputs.capture();
+    if (before.revision !== loaded.revision || before.observation !== loaded.observation) throw new Error('Sources changed while preparing export. Please retry.');
     if (mode !== 'proof' && mode !== 'print') throw new Error('Unknown export mode.');
     const proof = mode === 'proof';
     const fileName = book.project.title.replace(/[^\p{L}\p{N} _-]/gu, '-').slice(0, 80) + (proof ? ' - Proof.pdf' : '.pdf');
@@ -380,6 +455,14 @@ export class DocumentSession {
     try {
       const fonts = mode === 'print' ? bundledFontNames(book.assets.files) : [];
       const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id, mode, fonts, job.signal, progress);
+      if (proof && errors.some((error) => ['source-unavailable', 'photo-missing', 'text-source-missing', 'file-unreadable', 'file-missing'].includes(error.code ?? '') || /missing|unavailable|denied/i.test(error.message))) {
+        const choice = await dialog.showMessageBox(owner, { type: 'warning', message: 'Save a proof with unavailable sources?',
+          detail: 'This proof may contain cached previews or placeholders. Originals are required for print. Missing-source errors remain in Book check.',
+          buttons: ['Cancel', 'Save Proof'], defaultId: 0, cancelId: 0 });
+        if (choice.response !== 1) return null;
+      }
+      const after = await this.projectSession.inputs.capture({ signal: job.signal });
+      if (before.revision !== after.revision || before.observation !== after.observation) throw new Error('Sources changed during export. No PDF was saved; retry after the external save finishes.');
       progress('Saving PDF…');
       await saveProof(filePath, bytes, job.signal);
       return { warnings, errors };

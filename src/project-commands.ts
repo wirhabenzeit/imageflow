@@ -1,3 +1,4 @@
+import { sourcePath } from './source-locations';
 import { z } from 'zod';
 import type { TemplateInfo } from './desktop';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
@@ -125,7 +126,7 @@ export function applyProjectCommands(
     if (parameter.type === 'file' && value !== '') {
       const path = own(project.files, String(value));
       if (path === undefined) fail('SOURCE_NOT_FOUND', 'Unknown file source ' + value + '.');
-      if (!parameter.accept.some((extension) => path.toLowerCase().endsWith(extension))) {
+      if (!parameter.accept.some((extension) => sourcePath(path).toLowerCase().endsWith(extension))) {
         fail('INVALID_PARAMETER_VALUE', 'File ' + value + ' has an unsupported extension for ' + key + '.');
       }
     }
