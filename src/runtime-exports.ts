@@ -17,5 +17,7 @@ export const capabilities = [
   'layout-families',
   // `spread` on an element editor: layout parameters it edits together with the element's own.
   'editor-spread-parameters',
+  // `openingSpreads`: the spreads a new book starts with.
+  'opening-spreads',
 ] as const;
 export type Capability = typeof capabilities[number];

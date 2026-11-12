@@ -431,7 +431,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
-  'layout-families' | 'editor-spread-parameters';
+  'layout-families' | 'editor-spread-parameters' | 'opening-spreads';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -447,7 +447,14 @@ export type TemplateDeclaration = {
   parameters?: Parameters;
   layoutFamilies?: Record<string, LayoutFamily>;
   spreads: Record<string, SpreadDefinition>;
+  openingSpreads?: readonly OpeningSpread[];
 };
+
+/**
+ * A spread a new book starts with: one of the template's layouts, optionally with some of that layout's own
+ * parameters set. Requires the `opening-spreads` capability.
+ */
+export type OpeningSpread<L extends string = string> = { layout: L; params?: Values };
 
 /** Declares one spread with a render context typed from its own declarations and the template's document parameters. */
 export type SpreadBuilder<D extends Parameters> = <
@@ -490,6 +497,13 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */
   layoutFamilies?: { [K in L]: LayoutFamily };
 };
+/**
+ * The spreads a new book starts with, in order. Without it, a new book starts with no spreads and the editor asks for
+ * the first one. Single-page layouts must sit at a book end every format allows.
+ */
+type Opening<L extends string> = { openingSpreads?: readonly OpeningSpread<L>[] };
+/** Every layout `openingSpreads` names must be declared in `spreads`; a missing one is reported there. */
+type OpeningLayouts<S, L extends string> = { [K in Exclude<L, keyof S>]: SpreadDefinition<any> };
 /**
  * Declare one `format`, or several named `formats` the user chooses between in Book settings (`defaultFormat`,
  * else the first, is used until they do). Layouts adapt through `ctx.format`, `ctx.formatId`, `ctx.geometry`, and the
@@ -547,13 +561,15 @@ export function defineTemplate<
   const F extends string = never,
   const S extends Record<string, SpreadDefinition<any, any>> = {},
   const L extends string = never,
->(template: TemplateBase<D, L> & FormatChoice<F> & { spreads: (tools: TemplateTools<D>) => S & DocumentCheck<S, D, L> }): TemplateDeclaration;
+  const O extends string = never,
+>(template: TemplateBase<D, L> & FormatChoice<F> & Opening<O> & { spreads: (tools: TemplateTools<D>) => S & DocumentCheck<S, D, L> & OpeningLayouts<S, O> }): TemplateDeclaration;
 export function defineTemplate<
   const D extends Parameters = {},
   const F extends string = never,
   const S extends Record<string, SpreadDefinition<any, any>> = {},
   const L extends string = never,
->(template: TemplateBase<D, L> & FormatChoice<F> & { spreads: S & DocumentCheck<S, D, L> }): TemplateDeclaration;
+  const O extends string = never,
+>(template: TemplateBase<D, L> & FormatChoice<F> & Opening<O> & { spreads: S & DocumentCheck<S, D, L> & OpeningLayouts<S, O> }): TemplateDeclaration;
 
 /**
  * Returns a `spread` builder typed with these document parameters, for spreads declared outside `defineTemplate`,

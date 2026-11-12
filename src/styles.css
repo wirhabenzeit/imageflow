@@ -143,6 +143,15 @@ body { margin: 0; }
 .box-highlight { border: 2px solid #e7b347; background: #efc97633; }
 .guides-toggle { position: absolute; bottom: 10px; right: 18px; z-index: 2; border-radius: 4px; background: var(--control-surface); padding: 2px 6px; font-size: 12px; box-shadow: 0 1px 3px #0002; }
 .preview-message { position: absolute; top: 45%; left: 50%; transform: translateX(-50%); padding: 10px 14px; border-radius: 6px; background: var(--panel-surface); }
+/* An empty book: a pair of blank pages and the layouts that can start it. */
+.empty-book { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px 16px; text-align: center; z-index: 1; }
+.empty-book h2 { font: 400 26px/1.15 Georgia, serif; letter-spacing: -.02em; margin: 4px 0 0; }
+.empty-book p { margin: 0; max-width: 420px; }
+.empty-book-art { display: flex; margin-bottom: 8px; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, .14)); }
+.empty-book-art span { width: 64px; height: 84px; background: var(--panel-surface); border: 1px dashed var(--edge); }
+.empty-book-art span:first-child { border-right-style: solid; border-radius: 2px 0 0 2px; }
+.empty-book-art span:last-child { border-left: 0; border-radius: 0 2px 2px 0; }
+.empty-book-layouts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 520px; margin-top: 4px; }
 .preview-state { position: absolute; top: 10px; right: 18px; z-index: 2; pointer-events: none;
   padding: 4px 8px; border-radius: 4px; background: var(--control-surface); box-shadow: 0 1px 3px #0002; font-size: 12px; }
 

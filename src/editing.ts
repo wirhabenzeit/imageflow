@@ -2,10 +2,23 @@ import type { Project, SpreadState, Values } from './project';
 import { isParameterValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import { shownBoxes } from './layouts';
+import { spanAllowedAt } from './format';
+import type { PrintFormat } from './format';
 import type { Layouts } from './layouts';
 
 export function newSpread(definition: string): SpreadState {
   return { id: crypto.randomUUID(), definition, params: {}, boxes: {}, elements: {} };
+}
+
+/** The spreads a new book starts with: the template's opening spreads with new IDs, or none. */
+export function openingSpreadStates(template: { openingSpreads?: readonly { layout: string; params?: Values }[] }): SpreadState[] {
+  return (template.openingSpreads ?? []).map(({ layout, params }) => ({ ...newSpread(layout), params: { ...params } }));
+}
+
+/** The layouts that can be the first spread of an empty book: facing pages, or a single right page where the format allows one. */
+export function firstSpreadLayouts(layouts: Layouts, format: PrintFormat) {
+  // Counted as the first of several, so a closing left page is not offered as the start of a book.
+  return Object.entries(layouts).filter(([, layout]) => spanAllowedAt(layout.span ?? 'spread', 0, 2, format)).map(([id]) => id);
 }
 
 // The boxes a spread shows. Without the template (still loading), every assigned box counts.
@@ -88,7 +101,9 @@ export function readEdit(project: Project, spread: SpreadState, target: EditTarg
   return isParameterValue(target.param, value) ? value! : target.param.default;
 }
 
-export function writeEdit(project: Project, spreadId: string, target: EditTarget, value: Values[string]) {
+// Document parameters need no spread, so a book without spreads can still change them.
+export function writeEdit(project: Project, spreadId: string | undefined, target: EditTarget, value: Values[string]) {
+  if (target.scope === 'document') { project.params[target.key] = value; return; }
   const spread = project.spreads.find(({ id }) => id === spreadId);
   if (spread) editValues(project, spread, target, true)![target.key] = value;
 }

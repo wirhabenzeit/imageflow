@@ -1,7 +1,7 @@
 import type { PrintFormat, PrintSide, Span } from './format';
 import type { Parameters } from './parameters';
 import type { ControlItem } from './controls';
-import type { ProjectFiles } from './project';
+import type { ProjectFiles, Values } from './project';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
 import type { ImportMode, SourceStatus } from './source-locations';
 import type { AppSettings, SettingsPane } from './settings';
@@ -121,6 +121,8 @@ export type TemplateInfo = {
   // Families of layouts, by ID. `picker` is set when the family supplies its own picker (the component stays in the
   // render frame).
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string } }>;
+  // The spreads a new book from this template starts with; empty when it starts without spreads.
+  openingSpreads?: { layout: string; params: Values }[];
   // The format in use, its ID, and the labels of all formats the template offers.
   format: PrintFormat; formatId: string; formats: Record<string, string>;
 };

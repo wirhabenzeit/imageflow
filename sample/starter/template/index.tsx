@@ -307,7 +307,7 @@ export default defineTemplate({
   version: '0.6.0',
   contract: 1,
   requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper',
-    'editor-native-controls', 'layout-families', 'editor-spread-parameters'],
+    'editor-native-controls', 'layout-families', 'editor-spread-parameters', 'opening-spreads'],
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
     landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
@@ -460,4 +460,6 @@ export default defineTemplate({
       </Paper>,
     }),
   }),
+  // A new book without the sample content starts with a title page, one story spread and the closing page.
+  openingSpreads: [{ layout: 'title' }, { layout: 'story' }, { layout: 'closing' }],
 });

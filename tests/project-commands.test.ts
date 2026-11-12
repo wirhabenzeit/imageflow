@@ -168,8 +168,23 @@ test('a failure late in a batch reports its operation and rolls back every earli
     { op: 'set_title', title: 'A changed title' },
     { op: 'set_photo_metadata', photo: 'p1', values: { caption: 'A changed caption' } },
     { op: 'remove_spread', spread: 'two' },
+    { op: 'remove_spread', spread: 'two' },
+  ], 'SPREAD_NOT_FOUND', 3);
+});
+
+test('removing every spread leaves an empty book whose document parameters can still change', () => {
+  const result = applyProjectCommands(files(), template, [
     { op: 'remove_spread', spread: 'one' },
-  ], 'LAST_SPREAD', 3);
+    { op: 'remove_spread', spread: 'two' },
+    { op: 'set_parameter', scope: 'document', key: 'paper', value: 'cream' },
+  ]);
+  assert.deepEqual(result.files.project.spreads, []);
+  assert.equal(result.files.project.params.paper, 'cream');
+  assert.equal(projectSchema.safeParse(result.files.project).success, true);
+  const reset = applyProjectCommands(result.files, template, [{ op: 'reset_parameter', scope: 'document', key: 'paper' }]);
+  assert.equal(Object.hasOwn(reset.files.project.params, 'paper'), false);
+  const inserted = applyProjectCommands(result.files, template, [{ op: 'insert_spread', definition: 'main', ref: 'first' }]);
+  assert.equal(inserted.files.project.spreads.length, 1);
 });
 
 test('references must be declared earlier, unique, and point to existing spreads', () => {

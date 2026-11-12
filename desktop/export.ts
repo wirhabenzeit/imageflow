@@ -80,6 +80,7 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
     `);
     if (status.state === 'error') throw new Error(status.message);
     if (mode === 'print' && status.errors.length) throw new Error(status.errors.map(issueText).join('\n'));
+    if (!status.units.length) throw new Error('The book has no spreads yet. Add a spread before exporting.');
     const format = parseDocument(formatSchema, status.template.format, 'Print format');
     const { outputWidth, height, trim, bleed } = resolveFormat(format);
     progress('Printing PDF…');

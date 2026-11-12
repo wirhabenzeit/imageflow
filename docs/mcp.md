@@ -207,7 +207,7 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | `text-outside-safe-area` | Box or element with the largest overshoot; `overshootMm`. |
 | `file-missing`, `file-unreadable`, `file-type` | Parameter and file source, with the box or element when it owns the parameter. |
 | `parameter-invalid`, `content-undeclared`, `element-undeclared`, `edit-path-unknown` | Saved values or edit markers the current declarations do not accept. |
-| `format-unavailable`, `page-sequence` | Book-level format and page-count findings. |
+| `format-unavailable`, `page-sequence`, `book-empty` | Book-level format and page-count findings; `book-empty` means the book has no spreads yet. |
 | `template:<code>` | A structured template finding from `issue()`, with the template's code, its box or element, `parameter`, file `source`, `details` and `suggestion`. Severity as declared. |
 | `template-issue`, `template-issue-invalid` | A plain `data-issue` mark, or an `issue()` value that failed validation, on its box or element. |
 | `text-overflows-box`, `text-clipped` | A text block whose text runs out of its own fixed-size box (`text-clipped` when the box hides the overflow), or is cut off by a clipping container further out (`text-clipped` with `clippedByTag` and `clippedByBox` or `clippedByElement`). Located at the text block's box or element and the `parameter` its `ctx.edit` marker names; `overflowBottomMm`, `overflowRightMm`, `tag` and the start of its `text`. Line-height slack under a quarter line is ignored. |

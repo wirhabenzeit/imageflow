@@ -6,7 +6,7 @@ import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
 import type { Anchor, AnchorDeclaration, BookContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
-  Text, TextTag } from './template';
+  TemplateDeclaration, Text, TextTag } from './template';
 import type { Capability, runtimeExports } from './runtime-exports';
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
@@ -42,4 +42,6 @@ export const declaredTypesMatchRuntime: [
   Same<Declared.LayoutVariant, LayoutVariant>,
   // An element editor receives exactly the props the runtime passes.
   Same<keyof Declared.ElementEditorProps, keyof ElementEditorProps>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  Same<keyof Declared.TemplateDeclaration, keyof TemplateDeclaration>,
+  Assignable<Declared.OpeningSpread, NonNullable<TemplateDeclaration['openingSpreads']>[number]>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
