@@ -100,7 +100,14 @@ try {
     const modal = await nextPicker;
     watch(modal);
     await modal.getByRole('heading', { name: 'Choose a template' }).waitFor();
-    if (cancelWithButton) await modal.getByRole('button', { name: 'Cancel', exact: true }).click(); else await modal.close();
+    const closed = modal.waitForEvent('close');
+    if (cancelWithButton) {
+      // Cancel destroys its own window. Electron can close the CDP target before acknowledging mouse-up.
+      await modal.getByRole('button', { name: 'Cancel', exact: true }).click().catch((error) => {
+        if (!modal.isClosed() || !error.message.includes('Target page, context or browser has been closed')) throw error;
+      });
+    } else await modal.close();
+    await closed;
     assert.deepEqual(await cancelled, { value: null });
     assert.equal(await app.evaluate(() => globalThis.newBookSaveCalls), 1, 'Cancelling a template never opens Save');
     assert.equal((await current(one)).project.title, 'First');
