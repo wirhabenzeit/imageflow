@@ -214,6 +214,9 @@ const openingSpread = z.strictObject({ layout: identifier, params: values });
 export const templateSchema = z.object({
   id: identifier,
   version: z.string().min(1),
+  // Shown in the template library and the New Book picker; the ID is shown without a label.
+  label: z.string().trim().min(1).max(80).optional(),
+  description: z.string().trim().min(1).max(300).optional(),
   contract: z.literal(1),
   // Features beyond the first contract-1 release. Apps that predate `requires` ignore it; their bundler still
   // rejects imports of helpers they do not export.
@@ -308,7 +311,7 @@ type DeclaredSpread = Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | '
 // definition unchanged.
 const spreadBuilder = <T,>(definition: T) => definition;
 export type TemplateDeclaration = {
-  id: string; version: string; contract: 1; requires?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
+  id: string; version: string; label?: string; description?: string; contract: 1; requires?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
@@ -326,7 +329,9 @@ export const defineTemplate = (template: TemplateDeclaration) => normalizeTempla
 export function templateInfo(template: Template): TemplateInfo {
   return {
     format: template.format, formatId: template.formatId, formats: template.formatChoices,
-    version: template.version, parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
+    id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
+    ...(template.description ? { description: template.description } : {}),
+    parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
     layoutFamilies: Object.fromEntries(Object.entries(template.layoutFamilies ?? {}).map(([id, { label, picker }]) => [id, {
       label, ...(picker ? { picker: { ...(picker.label ? { label: picker.label } : {}) } } : {}),
     }])),

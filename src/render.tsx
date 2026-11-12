@@ -1086,11 +1086,12 @@ export async function startRender(root: HTMLElement) {
       throw new DeclarationError('Template' + (first.path ? ' → ' + first.path.split('.').join(' → ') : '') + ': ' + first.message, issues);
     }
     const template = chooseFormat(declared.data, book.project.format);
+    // Known before the ID check, so a failed load still reports the declared ID (the template library reads it).
+    info = templateInfo(template);
     if (template.id !== book.project.template.id) {
       throw new DeclarationError('The template ID does not match project.json.', [{ path: 'id',
         message: 'The template declares ID ' + template.id + ', but project.json uses ' + book.project.template.id + '.' }]);
     }
-    info = templateInfo(template);
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
     if (book.mode === 'edit' && query.get('view') === 'editor') {

@@ -77,6 +77,9 @@ import './styles.css';
 export default defineTemplate({
   id: 'senja-starter',
   version: '0.1.0',
+  // Shown in the template library and the New Book picker.
+  label: 'Senja journal',
+  description: 'Full-bleed photos with a field-notes text column.',
   contract: 1,
   requires: ['spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-helpers', 'typed-components'],
 
@@ -215,6 +218,10 @@ Arbitrary dimensions within declared limits, rather than named presets, are not 
 ### Spread spans
 
 Spread definitions render two facing pages by default. For formats with `ends: 'single-pages'`, a definition can declare `span: 'right'` (usable as the first page) or `span: 'left'` (usable as the last page); the inactive half is shown as an inside cover and not exported. Formats with `ends: 'inside-covers'` use full spreads throughout.
+
+### Template library
+
+New books are made from the templates in the library: the built-in starter and the templates imported with **Template → Import Templates…**, **Save Template to Library**, or **Settings → Templates**. Import loads the template like a book would and refuses one that fails to load. The library keeps one entry per `id`, compared by `version` as dot-separated numbers: a newer version replaces the entry, while an older version, or the same version with other files, asks first. So bump `version` when you change a template you have shared. `label` (up to 80 characters) and `description` (up to 300) are what the library shows; without a label it shows the ID. A book copies its template when it is created, and `project.json` records the source's hash as `template.hash`; the library is never read while a book renders.
 
 ### Opening spreads
 

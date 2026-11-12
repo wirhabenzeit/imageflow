@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AgentSettings } from './AgentSettings';
+import { TemplateSettings } from './TemplateSettings';
 import { Icon } from './Icon';
 import type { DesktopApi } from './desktop';
 import type { AppSettings, Appearance, SettingsPane } from './settings';
 
-const panes = [{ value: 'general', label: 'General', icon: 'settings' }, { value: 'agents', label: 'Agents', icon: 'agent' }] as const satisfies readonly { value: SettingsPane; label: string; icon: string }[];
+const panes = [{ value: 'general', label: 'General', icon: 'settings' }, { value: 'templates', label: 'Templates', icon: 'templates' },
+  { value: 'agents', label: 'Agents', icon: 'agent' }] as const satisfies readonly { value: SettingsPane; label: string; icon: string }[];
 
 const appearances: { value: Appearance; label: string }[] = [
   { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'system', label: 'System' },
@@ -92,6 +94,7 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
           </div>
           {error && <p role="alert" className="error-text settings-control">{error}</p>}
         </div>}
+        {pane === 'templates' && <TemplateSettings api={api} />}
         {pane === 'agents' && <AgentSettings api={api} />}
       </div>}
     </div>

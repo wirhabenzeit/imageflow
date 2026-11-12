@@ -305,6 +305,8 @@ function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerPro
 export default defineTemplate({
   id: 'imageflow-starter',
   version: '0.6.0',
+  label: 'Photobook',
+  description: 'A travel journal with photographs, stories, maps, and room for your own layouts.',
   contract: 1,
   requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper',
     'editor-native-controls', 'layout-families', 'editor-spread-parameters', 'opening-spreads'],

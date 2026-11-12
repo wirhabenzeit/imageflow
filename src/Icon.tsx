@@ -15,7 +15,8 @@ const icons = {
   delete: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 8.5h5.6l.7-8.5',
   up: 'M8 13V3M4 7l4-4 4 4',
   down: 'M8 3v10M4 9l4 4 4-4',
-  // Settings toolbar: sliders for General, a sparkle for agents.
+  // Settings toolbar: sliders for General, an open book for Templates, a sparkle for agents.
+  templates: 'M2.5 3.5H6.5A1.5 1.5 0 0 1 8 5V13A1.5 1.5 0 0 0 6.5 11.5H2.5ZM13.5 3.5H9.5A1.5 1.5 0 0 0 8 5V13A1.5 1.5 0 0 1 9.5 11.5H13.5Z',
   settings: 'M2.5 5h5.5M11.5 5h2M2.5 11h1.5M7.5 11h6M8 5a1.75 1.75 0 1 0 3.5 0a1.75 1.75 0 1 0-3.5 0M4 11a1.75 1.75 0 1 0 3.5 0a1.75 1.75 0 1 0-3.5 0',
   agent: 'M7 2.5l1.3 3.7 3.7 1.3-3.7 1.3L7 12.5 5.7 8.8 2 7.5l3.7-1.3zM12 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z',
 };
