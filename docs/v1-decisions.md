@@ -31,7 +31,7 @@ MyBook/
 
 ## Templates
 
-- **Templates are code**, written in a code editor, not designed in the app. A new project receives a copy of the bundled starter template (a minimal template in the style of the Senja prototype with a few example spreads) in `template/`; the project then owns its copy, which also pins its version.
+- **Templates are code**, written in a code editor, not designed in the app. A new project receives a copy of the bundled starter template (a minimal template in the style of the Senja prototype with a few example spreads) in `template/`; the project then owns its copy, which also pins its version. A library of templates to choose from is proposed in [decisions/0003-template-library.md](decisions/0003-template-library.md).
 - The app bundles `template/` on load (esbuild) and reloads on change.
 - **Trust:** opening a project executes its template code. v1 assumes you only open projects you trust; there is no sandbox for template code beyond the renderer's.
 - Rendering and Markdown CSS are the template's job, within the platform-owned rules in [template-api.md](template-api.md).
