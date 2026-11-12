@@ -5,8 +5,9 @@ import { renderOrigin } from './desktop';
 // The messages a template-supplied editor frame (an element editor or a layout picker) posts to its dialog. Drafts
 // and committed values are the frame's own report, so each dialog validates them before using them.
 export type FrameMessage =
-  | { type: 'editor-ready' } | { type: 'editor-draft'; values: unknown } | { type: 'editor-size'; height: number }
-  | { type: 'editor-commit'; values: unknown } | { type: 'editor-flushed'; request: number; values: unknown } | { type: 'editor-cancel' }
+  | { type: 'editor-ready' } | { type: 'editor-draft'; values: unknown; spread?: unknown } | { type: 'editor-size'; height: number }
+  | { type: 'editor-commit'; values: unknown; spread?: unknown } | { type: 'editor-flushed'; request: number; values: unknown; spread?: unknown }
+  | { type: 'editor-cancel' }
   | { type: 'editor-import'; request: number; accept: unknown; mode?: unknown } | { type: 'editor-notice'; message: unknown }
   | { state: 'error'; message: string };
 
@@ -14,9 +15,10 @@ export type FrameMessage =
 // it reports, and Done's flush round trip. A frame that does not answer a flush in time saves nothing: the dialog
 // stays open with its draft and Done can be tried again. A late answer to an earlier request is ignored.
 export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handlers: {
-  draft(values: unknown): void;
+  // `spread` is an element editor's draft of the layout parameters it edits; other frames leave it out.
+  draft(values: unknown, spread?: unknown): void;
   // Done after a flush, or the frame's own commit(); both carry the frame's complete draft.
-  done(values: unknown): void;
+  done(values: unknown, spread?: unknown): void;
   cancel(): void;
   import?(data: Extract<FrameMessage, { type: 'editor-import' }>): void;
 }) {
@@ -51,7 +53,7 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
       setReady(true);
       frame.current?.focus();
     } else if (data.type === 'editor-draft') {
-      handlers.draft(data.values);
+      handlers.draft(data.values, data.spread);
       if (!failed) setError('');
     } else if (data.type === 'editor-notice') {
       if (!failed && typeof data.message === 'string') setError(data.message);
@@ -62,8 +64,8 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
     } else if (data.type === 'editor-flushed') {
       if (data.request !== flushing) return;
       setFlushing(undefined);
-      handlers.done(data.values);
-    } else if (data.type === 'editor-commit') handlers.done(data.values);
+      handlers.done(data.values, data.spread);
+    } else if (data.type === 'editor-commit') handlers.done(data.values, data.spread);
     else if (data.type === 'editor-cancel') handlers.cancel();
   });
   useEffect(() => {

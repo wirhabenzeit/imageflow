@@ -789,21 +789,27 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
 // changes project data itself.
 function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, elementId: string, readOnly: boolean) {
   const spread = book.project.spreads.find(({ id }) => id === spreadId);
-  const element = spread && template.spreads[spread.definition]?.elements[elementId];
+  const layout = spread && template.spreads[spread.definition];
+  const element = layout?.elements[elementId];
   const editor = element?.editor;
-  if (!spread || !element || !editor) throw new Error('This element has no editor.');
+  if (!spread || !layout || !element || !editor) throw new Error('This element has no editor.');
   const saved = resolveParams(element.parameters, spread.elements[elementId]?.params ?? {});
+  const savedSpread = resolveParams(layout.parameters, spread.params);
+  const ownedSpread = editor.spread ?? [];
   const document = resolveParams(template.parameters, book.project.params);
   const format = resolveFormat(template.format);
   const claimed = (values: Values) => Object.fromEntries(editor.parameters.map((key) => [key, values[key]]));
+  const claimedSpread = (values: Values) => Object.fromEntries(ownedSpread.map((key) => [key, values[key]]));
   root.className = 'if-editor';
   // The project's file registry for file controls. An import adds to it, so it is state the host can update.
   let projectFiles = book.project.files;
   let updateFiles: ((files: Record<string, SourceReference>) => void) | undefined;
 
   // The draft lives outside React so set() followed directly by commit() sends the newest values, before React
-  // has rendered them. Every message is posted in order, and commit carries the draft as well.
+  // has rendered them. Every message is posted in order, and commit carries the draft as well. The element's and
+  // the layout's parameters are separate drafts, since the same ID can name a parameter in each scope.
   let draft: Values = saved;
+  let spreadDraft: Values = savedSpread;
   let changed = false;
   let failed = false;
   const fail = (error: unknown) => {
@@ -812,18 +818,23 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     const reason = error instanceof Error ? error.message : String(error);
     post({ state: 'error', message: 'The editor stopped working: ' + reason });
   };
-  const commit = () => { if (!failed) post({ type: 'editor-commit', values: changed ? claimed(draft) : {} }); };
+  const drafts = () => changed ? { values: claimed(draft), spread: claimedSpread(spreadDraft) } : { values: {}, spread: {} };
+  const commit = () => { if (!failed) post({ type: 'editor-commit', ...drafts() }); };
   const cancel = () => post({ type: 'editor-cancel' });
-  let update: ((values: Values) => void) | undefined;
-  const set = (changes: Values) => {
+  let update: ((values: { element: Values; spread: Values }) => void) | undefined;
+  const changes = (scope: 'element' | 'spread', next: Values) => {
     if (readOnly || failed) return;
-    const allowed = Object.entries(changes).filter(([key]) => editor.parameters.includes(key));
+    const owned = scope === 'element' ? editor.parameters : ownedSpread;
+    const allowed = Object.entries(next).filter(([key]) => owned.includes(key));
     if (!allowed.length) return;
-    draft = { ...draft, ...Object.fromEntries(allowed) };
+    if (scope === 'element') draft = { ...draft, ...Object.fromEntries(allowed) };
+    else spreadDraft = { ...spreadDraft, ...Object.fromEntries(allowed) };
     changed = true;
-    post({ type: 'editor-draft', values: claimed(draft) });
-    update?.(draft);
+    post({ type: 'editor-draft', values: claimed(draft), spread: claimedSpread(spreadDraft) });
+    update?.({ element: draft, spread: spreadDraft });
   };
+  const set = (next: Values) => changes('element', next);
+  const setSpread = (next: Values) => changes('spread', next);
 
   // File imports run in the app, which owns the project; it answers with the new file's ID. The frame then reloads
   // the project's files, so `file(id)` and the file controls see the new file at once.
@@ -844,7 +855,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       if (typeof request !== 'number') return;
       try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
       catch (error) { fail(error); }
-      if (!failed) post({ type: 'editor-flushed', request, values: changed ? claimed(draft) : {} });
+      if (!failed) post({ type: 'editor-flushed', request, ...drafts() });
       return;
     }
     if (event.data?.type === 'editor-values') {
@@ -854,7 +865,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
         Object.hasOwn(element.parameters, key) && isParameterValue(element.parameters[key], value));
       if (!others.length) return;
       draft = { ...draft, ...Object.fromEntries(others) };
-      update?.(draft);
+      update?.({ element: draft, spread: spreadDraft });
       return;
     }
     if (event.data?.type !== 'editor-imported') return;
@@ -873,19 +884,23 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     }).catch(fail);
   });
 
-  const EditorValues = React.createContext<Values>(draft);
-  // The app's control for one of this editor's parameters, writing to the draft like `set`.
-  function Control({ parameter, label }: { parameter: string; label?: string }) {
-    const values = React.useContext(EditorValues);
-    const param = editor!.parameters.includes(parameter) && Object.hasOwn(element!.parameters, parameter) ? element!.parameters[parameter] : undefined;
-    if (!param) throw new Error('Control ' + parameter + ' is not one of the parameters this editor edits.');
+  const EditorValues = React.createContext({ element: draft, spread: spreadDraft });
+  // The app's control for one of this editor's parameters, writing to the draft like `set` (or `setSpread`).
+  function Control({ parameter, label, scope = 'element' }: { parameter: string; label?: string; scope?: 'element' | 'spread' }) {
+    const values = React.useContext(EditorValues)[scope === 'spread' ? 'spread' : 'element'];
+    const [owned, declared] = scope === 'spread' ? [ownedSpread, layout!.parameters] : [editor!.parameters, element!.parameters];
+    const param = owned.includes(parameter) && Object.hasOwn(declared, parameter) ? declared[parameter] : undefined;
+    if (!param) {
+      throw new Error('Control ' + parameter + (scope === 'spread' ? ' (scope spread)' : '') + ' is not one of the ' +
+        (scope === 'spread' ? 'layout' : 'element') + ' parameters this editor edits' + (owned.length ? ': ' + owned.join(', ') : '') + '.');
+    }
     const value = isParameterValue(param, values[parameter]) ? values[parameter] : param.default;
     return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
-      React.createElement(Field, { param: label ? { ...param, label } : param, value, change: (next) => set({ [parameter]: next }) }));
+      React.createElement(Field, { param: label ? { ...param, label } : param, value, change: (next) => changes(scope === 'spread' ? 'spread' : 'element', { [parameter]: next }) }));
   }
 
   function Host() {
-    const [values, setValues] = React.useState<Values>(draft);
+    const [values, setValues] = React.useState({ element: draft, spread: spreadDraft });
     const [files, setFiles] = React.useState(projectFiles);
     React.useEffect(() => {
       update = setValues;
@@ -897,7 +912,8 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     const context = React.useMemo(() => ({ files, defaultMode: book.project.importMode ?? 'copy', importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
     return React.createElement(ProjectFilesContext.Provider, { value: context },
       React.createElement(EditorValues.Provider, { value: values },
-        React.createElement(editor!.component, { values, set, document, format, readOnly, commit, cancel, Control, importFile })));
+        React.createElement(editor!.component, { values: values.element, set, spread: values.spread, setSpread, document, format, readOnly,
+          commit, cancel, Control, importFile })));
   }
 
   // Errors from the component's event handlers and async work do not reach React's error handling.

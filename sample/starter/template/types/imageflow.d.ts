@@ -154,6 +154,10 @@ export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parame
 export type ElementEditorProps = {
   values: Values;
   set(changes: Values): void;
+  /** The layout's (spread) parameter values, all of them, including drafts of the ones this editor declares in `spread`. */
+  spread: Values;
+  /** Changes layout parameters this editor declares in `spread`, in the same draft as `set`. */
+  setSpread(changes: Values): void;
   document: Values;
   format: ResolvedFormat;
   readOnly: boolean;
@@ -162,9 +166,10 @@ export type ElementEditorProps = {
   /**
    * ImageFlow's own control for one of this editor's parameters, bound to the draft: the same text field, slider,
    * choice or file chooser the generated controls use, including importing a file. Compose it with your own UI:
-   * `<Control parameter="track" />`.
+   * `<Control parameter="track" />`. `scope="spread"` names one of the layout parameters the editor declares in
+   * `spread`: `<Control parameter="heading" scope="spread" />`.
    */
-  Control(props: { parameter: string; label?: string }): ImageFlowElement;
+  Control(props: { parameter: string; label?: string; scope?: 'element' | 'spread' }): ImageFlowElement;
   /**
    * Lets the user import a file into the project, offering these extensions, and resolves to its file ID (or
    * undefined when they cancel). Assign it with `set`, so Done saves it and Cancel discards the assignment; the
@@ -177,9 +182,15 @@ export type ElementEditorProps = {
  * frame with the template's CSS. The dialog shows the element's other parameters below it as generated controls,
  * so the whole element is edited in one place and saved together with Done.
  */
-export type ElementEditor<K extends string = string> = {
+export type ElementEditor<K extends string = string, S extends string = string> = {
   label?: string;
+  /** The element's own parameters this editor edits. */
   parameters: readonly K[];
+  /**
+   * Layout (spread) parameters edited together with them, such as a caption shown next to the element. They are
+   * saved with the element's in one edit, and get no generated control in the sidebar. One editor per parameter.
+   */
+  spread?: readonly S[];
   component(props: ElementEditorProps): ImageFlowNode;
   presentation?: 'dialog';
 };
@@ -236,7 +247,7 @@ type Exact<T, Allowed> = { [X in Exclude<keyof T, keyof Allowed>]: never };
 type ParametersChecked<P> = { [K in keyof P]: Exact<P[K], Extract<Parameter, { type: P[K] extends { type: infer T } ? T : never }>> };
 type OwnParametersChecked<T> = T extends { parameters: infer P } ? { parameters: ParametersChecked<P> } : unknown;
 /** Types each element's `controls` and `editor.parameters` with that element's own parameter IDs. */
-type ElementsChecked<E> = { [K in keyof E]: { controls?: Controls<ParameterKeys<E[K]>>; editor?: ElementEditor<ParameterKeys<E[K]>> } & Exact<E[K], ElementDeclaration> & OwnParametersChecked<E[K]> };
+type ElementsChecked<E, S extends string = string> = { [K in keyof E]: { controls?: Controls<ParameterKeys<E[K]>>; editor?: ElementEditor<ParameterKeys<E[K]>, S> } & Exact<E[K], ElementDeclaration> & OwnParametersChecked<E[K]> };
 type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K]>> } & Exact<B[K], BoxDeclaration> & OwnParametersChecked<B[K]> };
 
 // Anchors
@@ -396,7 +407,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
-  'layout-families';
+  'layout-families' | 'editor-spread-parameters';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -428,7 +439,7 @@ export type SpreadBuilder<D extends Parameters> = <
   /** Arranges the controls of this layout's own parameters in the sidebar. */
   controls?: Controls<keyof P & string>;
   boxes?: B & BoxesChecked<B>;
-  elements?: E & ElementsChecked<E>;
+  elements?: E & ElementsChecked<E, keyof P & string>;
   render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D>): ImageFlowNode;
   /** Places other spreads can refer to through `ctx.book`, declared from this spread's values. */
   anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[];
@@ -488,7 +499,7 @@ type DocumentCheck<S, D, L extends string = string> = {
 /** A spread written as a plain object gets the same unknown-property checks as one from the builder. */
 type SpreadChecked<T> = 0 extends 1 & T ? unknown : Exact<T, SpreadDefinition<any>> & OwnParametersChecked<T>
   & (T extends { boxes: infer B } ? { boxes: BoxesChecked<B> } : unknown)
-  & (T extends { elements: infer E } ? { elements: ElementsChecked<E> } : unknown);
+  & (T extends { elements: infer E } ? { elements: ElementsChecked<E, ParameterKeys<T>> } : unknown);
 
 /**
  * Declares the template. Prefer `spreads` as a function: its `spread` builder types every layout's `ctx.document`

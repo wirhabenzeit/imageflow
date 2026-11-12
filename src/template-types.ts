@@ -5,7 +5,7 @@ import type { PrintFormat, printFormat, ResolvedFormat } from './format';
 import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
-import type { Anchor, AnchorDeclaration, BookContext, Element, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
+import type { Anchor, AnchorDeclaration, BookContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
   Text, TextTag } from './template';
 import type { Capability, runtimeExports } from './runtime-exports';
 
@@ -40,4 +40,6 @@ export const declaredTypesMatchRuntime: [
   // A picker receives exactly the props the runtime passes.
   Same<keyof Declared.LayoutPickerProps, keyof LayoutPickerProps>,
   Same<Declared.LayoutVariant, LayoutVariant>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+  // An element editor receives exactly the props the runtime passes.
+  Same<keyof Declared.ElementEditorProps, keyof ElementEditorProps>,
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

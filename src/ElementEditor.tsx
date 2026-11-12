@@ -12,29 +12,38 @@ import { useEditorFrame } from './editor-frame';
 // What the dialog works on: every parameter of the element, with its declaration and resolved value (the saved
 // value, else the template default). Comparing this tells whether a draft was based on values that have since
 // changed, whether through project data or through the template (a new default, a changed declaration).
+// The layout (spread) parameters the editor edits count too.
 function editingContext(template: TemplateInfo, spread: SpreadState, element: string) {
-  const definition = template.spreads[spread.definition]?.elements[element];
+  const layout = template.spreads[spread.definition];
+  const definition = layout?.elements[element];
   const parameters = definition?.parameters ?? {};
   const resolved = resolveParams(parameters, spread.elements[element]?.params ?? {});
-  return JSON.stringify([spread.definition, definition?.editor?.parameters ?? [], definition?.controls ?? null,
-    Object.keys(parameters).map((key) => [key, parameters[key], resolved[key]])]);
+  const layoutParameters = layout?.parameters ?? {};
+  const owned = (definition?.editor?.spread ?? []).filter((key) => Object.hasOwn(layoutParameters, key));
+  const resolvedSpread = resolveParams(layoutParameters, spread.params);
+  return JSON.stringify([spread.definition, definition?.editor?.parameters ?? [], definition?.editor?.spread ?? [], definition?.controls ?? null,
+    Object.keys(parameters).map((key) => [key, parameters[key], resolved[key]]),
+    owned.map((key) => [key, layoutParameters[key], resolvedSpread[key]])]);
 }
 
 // Hosts a template-supplied element editor. The template's component runs in a frame on the render origin and
 // can only report a draft; this dialog owns Cancel/Done, focus, read-only mode, validation, and saving the draft
 // as one edit (one Undo step). The element's other parameters are generated controls below the frame, in the same
-// draft, so the whole element is edited in one place. File imports the editor asks for run here, in the app.
+// draft, so the whole element is edited in one place. Layout parameters the editor declares are saved in the same
+// edit; they are the editor's own, so they get no generated control here or in the sidebar. File imports the editor asks for run here, in the app.
 export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, edit, close, importFile }: {
   project: string; template: TemplateInfo; spread: SpreadState; element: string; readOnly: boolean;
   blocked?: string;
   edit: (change: Edit, notice?: string) => void; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
 }) {
-  const definition = template.spreads[spread.definition]?.elements[element];
+  const layout = template.spreads[spread.definition];
+  const definition = layout?.elements[element];
   const editor = definition?.editor;
   const dialog = useRef<HTMLDialogElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const draft = useRef<Values>({});
+  const spreadDraft = useRef<Values>({});
   // The editor's draft as last reported, and the generated controls' own draft, for showing conditional controls.
   const [frameDraft, setFrameDraft] = useState<Values>({});
   const [local, setLocal] = useState<Values>({});
@@ -48,11 +57,12 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const title = editor?.label ?? 'Edit ' + (definition?.label ?? element);
   const values = (reported: unknown): Values => reported && typeof reported === 'object' ? reported as Values : {};
   const { height, ready, error, setError, failed, flushing, flush } = useEditorFrame(frame, {
-    draft(reported) {
+    draft(reported, reportedSpread) {
       draft.current = { ...draft.current, ...values(reported) };
+      spreadDraft.current = { ...spreadDraft.current, ...values(reportedSpread) };
       setFrameDraft(draft.current);
     },
-    done: (reported) => done(values(reported)),
+    done: (reported, reportedSpread) => done(values(reported), values(reportedSpread)),
     cancel: () => dialog.current?.close(),
     import(data) {
       const accept = Array.isArray(data.accept) ? data.accept.filter((value): value is string => typeof value === 'string') : [];
@@ -73,23 +83,31 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const current = { ...saved, ...frameDraft, ...local };
   const generated = definition ? controlLayout(definition.parameters, definition.controls, current, owned) : [];
 
-  function done(latest?: Values) {
+  function done(latest?: Values, latestSpread?: Values) {
     if (latest) draft.current = { ...draft.current, ...latest };
+    if (latestSpread) spreadDraft.current = { ...spreadDraft.current, ...latestSpread };
     const changes = [...Object.entries(draft.current), ...Object.entries(local)];
+    const spreadChanges = Object.entries(spreadDraft.current);
     if (failed || stale || blocked) return;
-    if (readOnly || !editor || !definition || !changes.length) return dialog.current?.close();
+    if (readOnly || !editor || !definition || !layout || !(changes.length || spreadChanges.length)) return dialog.current?.close();
     const invalid = changes.filter(([key, value]) => !Object.hasOwn(definition.parameters, key) ||
-      owned.includes(key) !== Object.hasOwn(draft.current, key) || !isParameterValue(definition.parameters[key], value));
+      owned.includes(key) !== Object.hasOwn(draft.current, key) || !isParameterValue(definition.parameters[key], value))
+      .map(([key]) => definition.parameters[key]?.label ?? key);
+    const ownedSpread = editor.spread ?? [];
+    invalid.push(...spreadChanges.filter(([key, value]) => !ownedSpread.includes(key) || !Object.hasOwn(layout.parameters, key) ||
+      !isParameterValue(layout.parameters[key], value)).map(([key]) => layout.parameters[key]?.label ?? key));
     if (invalid.length) {
-      setError('The editor produced values the template does not allow: ' +
-        invalid.map(([key]) => definition.parameters[key]?.label ?? key).join(', ') + '.');
+      setError('The editor produced values the template does not allow: ' + invalid.join(', ') + '.');
       return;
     }
     edit(({ project: files }) => {
       const state = files.spreads.find(({ id }) => id === spread.id);
       if (!state) return;
-      state.elements[element] ??= { params: {} };
-      Object.assign(state.elements[element].params, Object.fromEntries(changes));
+      if (changes.length) {
+        state.elements[element] ??= { params: {} };
+        Object.assign(state.elements[element].params, Object.fromEntries(changes));
+      }
+      Object.assign(state.params, Object.fromEntries(spreadChanges));
     }, (definition.label ?? element) + ' updated');
     dialog.current?.close();
   }

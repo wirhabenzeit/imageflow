@@ -171,8 +171,11 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   // Spread settings the page edits, through ctx.Text, ctx.edit or a box or element marked with them, are edited
   // there and left out here. An element with its own editor opens that editor, which edits only the element, so
   // settings marked on it stay here.
-  const claimed = new Set(targets.filter(({ owner }) => !(owner?.type === 'element' && definition?.elements[owner.id]?.editor))
-    .flatMap(({ edits }) => edits.filter((path) => !path.includes('.'))));
+  // Spread parameters edited elsewhere: by a marked node on the page (other than one inside an element with its own
+  // editor, which opens that editor instead), or by an element editor that declares them.
+  const claimed = new Set([...targets.filter(({ owner }) => !(owner?.type === 'element' && definition?.elements[owner.id]?.editor))
+    .flatMap(({ edits }) => edits.filter((path) => !path.includes('.'))),
+  ...Object.values(definition?.elements ?? {}).flatMap(({ editor }) => editor?.spread ?? [])]);
   // Marked nodes that are not a box or element, such as a ctx.Text heading, in reading order: listed with the
   // boxes and elements, so every editor on the page can be opened from the keyboard.
   const marked = template ? targets.filter((target) => !target.owner)

@@ -136,3 +136,25 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, layoutFamilies: { g
   // @ts-expect-error
   four: spread({ label: '2×2', family: 'grid', variant: { size: [2, 2] }, render: () => <Spread /> }),
 }) });
+
+// An element editor may also edit layout (spread) parameters it lists in `spread`; only declared ones are allowed.
+const stamp = { show: p.boolean({ label: 'Show', default: true }) };
+const caption = { caption: p.string({ label: 'Caption', default: '' }) };
+const StampEditor = ({ Control }: import('imageflow').ElementEditorProps) =>
+  <div><Control parameter="show" /><Control parameter="caption" scope="spread" /></div>;
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
+  a: spread({ label: 'A', parameters: caption, render: () => <Spread />,
+    elements: { stamp: { label: 'Stamp', parameters: stamp, editor: { parameters: ['show'], spread: ['caption'], component: StampEditor } } } }),
+  b: spread({ label: 'B', parameters: caption, render: () => <Spread />,
+    // @ts-expect-error
+    elements: { stamp: { label: 'Stamp', parameters: stamp, editor: { parameters: ['show'], spread: ['captoin'], component: StampEditor } } } }),
+}) });
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: {
+  a: { label: 'A', parameters: caption, render: () => <Spread />,
+    elements: { stamp: { label: 'Stamp', parameters: stamp, editor: { parameters: ['show'], spread: ['caption'], component: StampEditor } } } },
+} });
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: {
+  a: { label: 'A', parameters: caption, render: () => <Spread />,
+    elements: { stamp: { label: 'Stamp', parameters: stamp, editor: { parameters: ['show'], spread: ['captoin'], component: StampEditor } } } },
+} });

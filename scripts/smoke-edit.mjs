@@ -117,6 +117,26 @@ try {
   await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
   assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
 
+  // The calendar editor also edits the layout's title (a spread parameter it declares in `spread`): saved in the
+  // same edit as the grid, and not offered again as a sidebar control.
+  await ready();
+  at = await center('[data-spread="march"] [data-element="grid"]');
+  await w.mouse.click(at.x, at.y);
+  await editorReady();
+  assert.equal(await w.locator('.inspector').getByRole('textbox', { name: 'Calendar title' }).count(), 0);
+  await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
+  await calendarEditor.getByRole('textbox', { name: 'Calendar title' }).fill('Senja in spring');
+  await editorDialog.getByRole('button', { name: 'Done' }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Calendar grid updated');
+  assert.equal((await read()).spreads[7].params.title, 'Senja in spring');
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01', marked: '14' });
+  await ready();
+  assert.equal(await frame.locator('[data-spread="march"] .calendar-title').textContent(), 'Senja in spring');
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  assert.equal((await read()).spreads[7].params.title, undefined);
+  assert.deepEqual((await read()).spreads[7].elements.grid.params, { month: '2027-03-01' });
+
   // The dialog's generated controls and the editor share one draft: choosing Sunday below the editor redraws its
   // calendar at once, and Cancel discards both.
   await ready();
@@ -139,7 +159,6 @@ try {
   const calendarFile = join(project, 'template', 'index.tsx');
   const calendarSource = await readFile(calendarFile, 'utf8');
   const withControl = calendarSource
-    .replace('function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {', 'function CalendarEditor({ values, set, readOnly, Control }: ElementEditorProps) {')
     .replace('  return <div className="calendar-editor">\n', `  return <div className="calendar-editor" onBlurCapture={(event) => {
       const value = (event.target as HTMLInputElement).value;
       if (value === 'slow') for (const end = Date.now() + 6500; Date.now() < end;);
@@ -275,8 +294,8 @@ try {
 
   // set() followed directly by commit() saves the values just set, not the previous render's.
   const withEditor = (code) => templateSource.replace(
-    'function CalendarEditor({ values, set, readOnly }: ElementEditorProps) {',
-    'function CalendarEditor({ values, set, readOnly, commit }: ElementEditorProps) {\n' + code);
+    'function CalendarEditor({ values, set, readOnly, Control }: ElementEditorProps) {',
+    'function CalendarEditor({ values, set, readOnly, Control, commit }: ElementEditorProps) {\n' + code);
   const jump = `  const jump = <button type="button" onClick={() => { set({ month: '2027-04-01', marked: '9' }); commit(); }}>Jump to April</button>;
   const explode = <button type="button" onClick={() => { throw new Error('handler exploded'); }}>Explode</button>;`;
   await rerendered(() => writeFile(templateFile, withEditor(jump).replace(
