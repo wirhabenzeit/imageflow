@@ -1,10 +1,12 @@
+import { controlCycles } from './controls';
+import type { ControlItem } from './controls';
 import type { Parameters } from './parameters';
 
 // Findings about a template declaration that the schema accepts but that are probably mistakes. They are warnings,
 // not errors, so a contract-1 template that loaded before keeps loading. The authoring types reject the same
 // mistakes at compile time; this covers untyped templates and spreads typed separately with spreadFor().
 export type DeclarationWarning = {
-  code: 'declaration-unknown-property' | 'declaration-document-mismatch';
+  code: 'declaration-unknown-property' | 'declaration-document-mismatch' | 'declaration-control-cycle';
   message: string; path: string; details: Record<string, string>; suggestion: string;
 };
 
@@ -108,6 +110,33 @@ export function declarationWarnings(declared: unknown, schema: Schema): Declarat
   const found: DeclarationWarning[] = [];
   unknownKeys(declared, schema, [], found);
   if (plain(declared)) documentMismatches(declared, found);
+  if (plain(declared)) controlCycleWarnings(declared, found);
   // A misspelling repeated in many layouts is reported for each; cap the list like schema errors.
   return found.slice(0, 50);
+}
+
+// Conditional controls that can hide each other for good (controlCycles), at spread, box and element scope.
+function controlCycleWarnings(declared: Record<string, unknown>, found: DeclarationWarning[]) {
+  if (!plain(declared.spreads)) return;
+  const check = (scope: unknown, path: string[]) => {
+    if (!plain(scope) || !Array.isArray(scope.controls)) return;
+    for (const cycle of controlCycles(scope.controls as ControlItem[])) {
+      const names = cycle.join(', ');
+      found.push({
+        code: 'declaration-control-cycle', path: [...path, 'controls'].join('.'),
+        message: path.join(' → ') + ': controls ' + names + ' are each shown only depending on another of them. ' +
+          'Once all are hidden, the generated controls cannot show them again.',
+        details: { controls: names },
+        suggestion: 'Make one of ' + names + ' unconditional, or make sure something else edits it, such as a marked edit target or a custom editor.',
+      });
+    }
+  };
+  for (const [id, definition] of Object.entries(declared.spreads)) {
+    if (!plain(definition)) continue;
+    check(definition, ['spreads', id]);
+    for (const group of ['boxes', 'elements'] as const) {
+      const scopes = definition[group];
+      if (plain(scopes)) for (const [key, scope] of Object.entries(scopes)) check(scope, ['spreads', id, group, key]);
+    }
+  }
 }
