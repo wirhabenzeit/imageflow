@@ -74,9 +74,14 @@ export class ProjectSession {
     if (!entry) return this.book;
     const files = filesOf(entry.files);
     // Keep registered sources, including file parameters, available to retained state and future Redo.
-    files.project.texts = { ...this.book.project.texts, ...files.project.texts };
-    files.project.files = { ...this.book.project.files, ...files.project.files };
+    files.project.texts = { ...files.project.texts, ...this.book.project.texts };
+    files.project.files = { ...files.project.files, ...this.book.project.files };
     files.photoIndex = { ...this.book.photoIndex, ...files.photoIndex };
+    for (const [id, current] of Object.entries(this.book.photoIndex)) {
+      if (!files.photoIndex[id]) continue;
+      files.photoIndex[id].path = current.path;
+      if (current.linked) files.photoIndex[id].linked = true; else delete files.photoIndex[id].linked;
+    }
     const next = await updateProject(this.book, files, true);
     source.pop();
     destination.push({ files: filesOf(this.book), label: entry.label });

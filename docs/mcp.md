@@ -308,3 +308,7 @@ See [the large-book benchmark](authoring-performance.md) for the reproducible 30
 ## Multiple documents
 
 The connection belongs to the app. `list_projects` lists all open authorized books. Every subsequent request selects a stable open-book handle with `project`; changing window focus never redirects a request. Each document has its own queue, history, pending-editor lease, revisions and cleanup. Closing one document expires its handle and cancels its requests, leaving other books and the connection available. Reopening an already-open package focuses it without expiring its handle. Closing and reopening creates a new handle.
+
+## Copied and linked sources
+
+A book has an import default, with per-source storage. `inspect_book` source records expose linked locations; the registered IDs and placements survive refresh, replacement, and relinking. Photo, Markdown and parameter-file links use the same availability and collection rules. Missing originals can have cached content, which never clears source diagnostics or makes a print check current. Checks include registered external files in their input revision and render pinned source snapshots. Agent imports remain restricted to authorized package/inbox paths; importing from within the package keeps that source document-owned. Location management and selecting new external files use the app's native pickers.

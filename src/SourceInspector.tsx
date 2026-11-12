@@ -1,3 +1,4 @@
+import { sourcePath } from './source-locations';
 import { useMemo, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
@@ -51,7 +52,8 @@ export function SourceInspector({ summary, source, template, render, usage, writ
       <div className="si-head">
         <p className="eyebrow">Photo</p>
         <h2>{photo.title || fileName(photo.path)}</h2>
-        <p className="muted">{fileName(photo.path)}</p>
+        <p className="muted">{photo.linked ? 'Linked · ' : 'In book · '}{fileName(photo.path)}</p>
+        {summary.sources?.['photo:' + source.id]?.problem && <p className="error-text">{summary.sources['photo:' + source.id].problem}{summary.sources['photo:' + source.id].cached ? ' · Showing cached preview' : ''}</p>}
       </div>
       {summary.photos[source.id]
         ? <button type="button" className="si-preview" title="Quick Look (Space)" onClick={quickLook}>
@@ -82,7 +84,8 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     <div className="si-head">
       <p className="eyebrow">Text</p>
       <h2>{fileName(path)}</h2>
-      <p className="muted">{path}</p>
+      <p className="muted">{sourcePath(path)}</p>
+      {summary.sources?.['markdown:' + source.id]?.problem && <p className="error-text">{summary.sources['markdown:' + source.id].problem}{summary.sources['markdown:' + source.id].cached ? ' · Showing cached text' : ''}</p>}
     </div>
     {text === undefined ? <p className="error-text">The Markdown file is missing or unreadable.</p> : <dl className="si-facts">
       <dt>Length</dt><dd>{words(text)} words · {text.length} characters</dd>

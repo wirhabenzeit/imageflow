@@ -1,12 +1,13 @@
 import { BrowserWindow } from 'electron';
 import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream } from 'pdf-lib';
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, rgb } from 'pdf-lib';
 import type { PDFObject } from 'pdf-lib';
 import { formatSchema, pdfPoints, resolveFormat } from '../src/format';
 import { parseDocument } from '../src/project';
 import { issueText } from '../src/desktop';
 import type { ExportMode, Issue, RenderStatus } from '../src/desktop';
+import { isUnavailableSource } from '../src/source-diagnostics';
 
 const name = PDFName.of;
 
@@ -102,6 +103,11 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
       page.setCropBox(0, 0, widthPt, heightPt);
       page.setBleedBox(0, 0, widthPt, heightPt);
       page.setTrimBox(pdfPoints(leftBleed), pdfPoints(bleed.bottom), pdfPoints(trim.width * (side === 'spread' ? 2 : 1)), pdfPoints(trim.height));
+      if (mode === 'proof' && status.errors.some((issue) => isUnavailableSource(issue) &&
+          (!issue.spread || issue.spread === status.units[index].spread))) {
+        page.drawRectangle({ x: 0, y: 0, width: widthPt, height: 22, color: rgb(1, .91, .86), opacity: .96 });
+        page.drawText('PROOF: ORIGINAL UNAVAILABLE - cached content or placeholder', { x: 8, y: 7, size: 8, color: rgb(.65, .08, .05) });
+      }
       if (mode === 'print') {
         for (const issue of preflightPage(page.node, page.node.Resources(), fontNames, format.output.transparency === 'forbid')) {
           issues.add(where + ' · ' + issue[0].toUpperCase() + issue.slice(1) + '.');

@@ -1,3 +1,4 @@
+import { configureSourceStore } from '../desktop/source-store';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -34,6 +35,7 @@ async function fixture(t: TestContext) {
   t.after(() => rm(work, { recursive: true, force: true }));
   const folder = join(work, 'book');
   const cache = join(work, 'cache');
+  configureSourceStore(join(work, 'source-cache'));
   await mkdir(cache);
   await cp(resolve('sample/whitewall'), folder, { recursive: true, filter: (path) => !path.includes('.imageflow') });
   return { book: await loadProject(folder, cache, true), cache, folder };
@@ -61,10 +63,11 @@ test('a reverted edit invalidates a running check and its private cache cannot c
   assert.deepEqual(await readdir(cache), []);
   const accepted = await checkProject(book, cache, { expectedRevision: revision }, async (snapshot) => {
     assert.notEqual(snapshot.cache, rejectedCache);
-    assert.deepEqual(await readdir(snapshot.cache), []);
+    assert.deepEqual(await readdir(snapshot.cache), ['pinned-sources']);
+    assert.ok([...snapshot.photos.values()].every((photo) => photo.original.startsWith(join(snapshot.cache, 'pinned-sources'))));
     return { status };
   }, new AbortController().signal);
-  assert.equal(accepted.state, 'ready');
+  assert.equal(accepted.state, 'ready', JSON.stringify(accepted.diagnostics));
   assert.equal(accepted.revision, revision);
   assert.deepEqual(await readdir(cache), []);
   await assert.rejects(readdir(join(folder, '.imageflow')), { code: 'ENOENT' });

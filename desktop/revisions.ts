@@ -1,17 +1,19 @@
+import { sourcePath, sourceLinked } from '../src/source-locations';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
-import { open, readdir, realpath, stat } from 'node:fs/promises';
+import { access, open, readdir, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ProjectRevision, RevisionDiagnosticCode } from '../src/authoring';
 import { photoIndexSchema, projectSchema } from '../src/project';
+import { approvedSource } from './source-access';
 
 const manifests = ['project.json', 'photos.json'] as const;
 const contentFolders = ['template', 'texts', 'photos', 'files'] as const;
 type ContentFolder = typeof contentFolders[number];
-type Input = { path: string; folder?: ContentFolder };
+type Input = { path: string; external?: string; folder?: ContentFolder };
 type ExistingInput = { kind: 'file' | 'directory'; actual: string; info: BigIntStats };
-type InputState = { kind: 'missing' } | ExistingInput;
+type InputState = { kind: 'missing' } | { kind: 'unavailable' } | ExistingInput;
 type Entry = { input: Input; state: InputState; digest?: string; children?: string[] };
 type CaptureOptions = { signal?: AbortSignal; attempts?: 1 | 2 | 3 };
 export type ProjectInputCapture = { revision: ProjectRevision; observation: string; metadataObservation: string };
@@ -55,24 +57,35 @@ function isInside(base: string, path: string) {
   return rel !== '' && rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel);
 }
 
-async function inspect(root: string, { path, folder }: Input): Promise<InputState> {
+async function inspect(root: string, { path, folder, external }: Input): Promise<InputState> {
   const base = folder ? join(root, folder) : root;
-  const candidate = resolve(root, path);
+  const candidate = external ?? resolve(root, path);
   const isTemplateRoot = path === 'template' && folder === 'template';
-  if (isAbsolute(path) || (!isTemplateRoot && !isInside(base, candidate))) {
+  if (external && !await approvedSource(root, { key: path.slice(1).replace('/', ':'), kind: folder === 'photos' ? 'photo' : folder === 'texts' ? 'markdown' : 'file', path: external, linked: true })) return { kind: 'unavailable' };
+  if (external ? !isAbsolute(external) : isAbsolute(path) || (!isTemplateRoot && !isInside(base, candidate))) {
     throw new ProjectRevisionError('source-outside-project', path);
   }
   try {
     const actual = await realpath(candidate);
-    if (isTemplateRoot ? actual !== base : !isInside(base, actual)) {
+    if (external && actual !== external) return { kind: 'unavailable' };
+    if (!external && (isTemplateRoot ? actual !== base : !isInside(base, actual))) {
       throw new ProjectRevisionError('source-outside-project', path);
     }
     const info = await stat(actual, { bigint: true });
-    if (info.isFile()) return { kind: 'file', actual, info };
+    if (info.isFile()) {
+      if (folder && folder !== 'template') {
+        const limit = folder === 'photos' ? external ? 50 : undefined : folder === 'texts' ? 5 : 20;
+        if (limit && info.size > BigInt(limit * 1024 * 1024)) return { kind: 'unavailable' };
+        try { await access(actual, constants.R_OK); }
+        catch { return { kind: 'unavailable' }; }
+      }
+      return { kind: 'file', actual, info };
+    }
     if (info.isDirectory()) return { kind: 'directory', actual, info };
   } catch (error) {
     if (error instanceof ProjectRevisionError) throw error;
     if (isMissing(error)) return { kind: 'missing' };
+    if (folder && folder !== 'template' && ['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) return { kind: 'unavailable' };
     throw new ProjectRevisionError('source-unreadable', path, { cause: error });
   }
   throw new ProjectRevisionError('source-unreadable', path);
@@ -84,7 +97,7 @@ function sameFile(a: BigIntStats, b: BigIntStats) {
 }
 
 function sameState(a: InputState, b: InputState) {
-  if (a.kind === 'missing' || b.kind === 'missing') return a.kind === b.kind;
+  if (a.kind === 'missing' || a.kind === 'unavailable' || b.kind === 'missing' || b.kind === 'unavailable') return a.kind === b.kind;
   return a.kind === b.kind && a.actual === b.actual && (a.kind === 'file'
     ? sameFile(a.info, b.info)
     : a.info.dev === b.info.dev && a.info.ino === b.info.ino);
@@ -195,11 +208,14 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
   const photos = photoIndexSchema.safeParse(readManifest((await record({ path: manifests[1] }, true)).bytes!));
   const sources: (Input & { folder: ContentFolder })[] = [];
   if (project.success) {
-    for (const path of Object.values(project.data.texts)) sources.push({ path, folder: 'texts' });
-    for (const path of Object.values(project.data.files)) sources.push({ path, folder: 'files' });
+    for (const [id, ref] of Object.entries(project.data.texts)) sources.push(sourceLinked(ref)
+      ? { path: '@markdown/' + id, external: sourcePath(ref), folder: 'texts' } : { path: sourcePath(ref), folder: 'texts' });
+    for (const [id, ref] of Object.entries(project.data.files)) sources.push(sourceLinked(ref)
+      ? { path: '@file/' + id, external: sourcePath(ref), folder: 'files' } : { path: sourcePath(ref), folder: 'files' });
   }
   if (photos.success) {
-    for (const { path } of Object.values(photos.data)) sources.push({ path, folder: 'photos' });
+    for (const [id, photo] of Object.entries(photos.data)) sources.push(photo.linked
+      ? { path: '@photo/' + id, external: photo.path, folder: 'photos' } : { path: photo.path, folder: 'photos' });
   }
   for (const input of sources) {
     // Inspect each registry entry even if another registry has already used the same path.
@@ -227,9 +243,9 @@ async function capture(folder: string, signal?: AbortSignal, index?: IndexState)
         JSON.stringify(children) !== JSON.stringify(await directoryNames(current, path)))) {
       throw new ProjectRevisionError('source-changed', path);
     }
-    const actual = state.kind === 'missing' ? null : portable(relative(root, state.actual));
-    hash.update(JSON.stringify([portable(path), state.kind, actual, digest ?? null]) + '\n');
-    if (current.kind !== 'missing') {
+    const actual = state.kind === 'missing' || state.kind === 'unavailable' ? null : portable(relative(root, state.actual));
+    hash.update(JSON.stringify([portable(path), input.external ?? null, state.kind, actual, digest ?? null]) + '\n');
+    if (current.kind !== 'missing' && current.kind !== 'unavailable') {
       const { dev, ino, size, mtimeNs, ctimeNs } = current.info;
       observation.update(JSON.stringify([portable(path), [dev, ino, size, mtimeNs, ctimeNs].join(':')]) + '\n');
     }

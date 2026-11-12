@@ -12,6 +12,10 @@ import { photoDetails, photoExtensions } from './photos';
 import { renditionCacheFor } from './rendition-cache';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
+import { sourceEntries, sourcePath, sourceLinked, sourceFolder } from '../src/source-locations';
+import type { SourceStatus } from '../src/source-locations';
+import { digestBytes, SourceStore } from './source-store';
+import { approveSource } from './source-access';
 import { runtimeExports } from '../src/runtime-exports';
 
 export const assetTypes: Record<string, string> = {
@@ -166,6 +170,7 @@ type TemplateAssets = Awaited<ReturnType<typeof bundleTemplate>>;
 export type OpenProject = ProjectFiles & {
   folder: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
   texts: Record<string, string>; files: Record<string, ProjectFile>; problems: string[]; readOnly: boolean;
+  sources?: Record<string, SourceStatus>;
   manifests: Record<ManifestName, Buffer>;
   // Set only on synthetic fixture books rendered by authoring checks.
   fixture?: FixtureMarking;
@@ -175,7 +180,7 @@ export type OpenProject = ProjectFiles & {
 export const maximumFileSize = 20 * 1024 * 1024;
 const fileName = (path: string) => basename(path).replace(/^fl-[0-9a-f-]{12}-/, '');
 
-export async function loadProject(path: string, fallback: string, readOnly = false): Promise<OpenProject> {
+export async function loadProject(path: string, fallback: string, readOnly = false, pinSources = false): Promise<OpenProject> {
   const folder = await realpath(path);
   await recoverProjectSave(folder, { readOnly });
   const [{ document: project, source: projectFile }, { document: photoIndex, source: photoFile }] = await Promise.all([
@@ -183,47 +188,42 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   ]);
   const assets = await bundleTemplate(folder);
   const cache = fallback;
-  return readContent({ folder, assets, cache, readOnly, project, photoIndex, manifests: { 'project.json': projectFile, 'photos.json': photoFile } });
+  return readContent({ folder, assets, cache, readOnly, project, photoIndex, manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
 }
 
-async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>): Promise<OpenProject> {
+async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>, pinSources = false): Promise<OpenProject> {
   const photos = new Map<string, ProjectPhoto>();
   const texts: Record<string, string> = {};
-  // A file that cannot be read is reported where a parameter uses it, so unused files raise nothing.
   const files: Record<string, ProjectFile> = {};
-  const readFiles = Promise.all(Object.entries(book.project.files).map(async ([id, path]) => {
-    const file: ProjectFile = { name: fileName(path), extension: extname(path).toLowerCase() };
-    files[id] = file;
-    try {
-      const actual = await containedPath(book.folder, path, 'files');
-      if ((await stat(actual)).size > maximumFileSize) throw new Error(path + ' is larger than 20 MB.');
-      file.text = await readFile(actual, 'utf8');
-    } catch (error) {
-      file.problem = error instanceof Error ? error.message : String(error);
-    }
-  }));
+  const sources: Record<string, SourceStatus> = {};
   const problems: string[] = [];
-  const entries = Object.entries(book.photoIndex);
-  const readTexts = Promise.all(Object.entries(book.project.texts).map(async ([id, path]) => {
-    try {
-      if (extname(path).toLowerCase() !== '.md') throw new Error(path + ' must be a Markdown file.');
-      texts[id] = await readFile(await containedPath(book.folder, path, 'texts'), 'utf8');
-    } catch (error) {
-      problems.push('Text ' + id + ' · ' + (error instanceof Error ? error.message : String(error)));
-    }
-  }));
+  const entries = sourceEntries(book);
+  if (!entries.length) return { ...book, photos, texts, files, sources, problems };
+  const store = await SourceStore.forBook(book.folder, book.cache);
   for (let i = 0; i < entries.length; i += 8) {
-    await Promise.all(entries.slice(i, i + 8).map(async ([id, { path, ...metadata }]) => {
-      try {
-        const original = await containedPath(book.folder, path, 'photos');
-        photos.set(id, { ...metadata, ...await photoDetails(original), original, cache: renditionCacheFor(book.cache) });
-      } catch (error) {
-        problems.push('Photo ' + id + ' · ' + (error instanceof Error ? error.message : String(error)));
+    await Promise.all(entries.slice(i, i + 8).map(async (source) => {
+      const { status, stored } = await store.resolve(book.folder, source, { pin: pinSources, cache: book.cache });
+      sources[source.key] = status;
+      if (status.problem && source.kind !== 'file') problems.push(source.kind + ' ' + source.id + ' · ' + status.problem);
+      if (source.kind === 'photo') {
+        if (stored) {
+          const { path: _path, linked: _linked, ...metadata } = book.photoIndex[source.id];
+          const details = await photoDetails(stored.snapshot, null);
+          photos.set(source.id, { ...metadata, ...details, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
+            width: stored.width!, height: stored.height!, original: stored.snapshot,
+            key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
+            cache: renditionCacheFor(book.cache), ...(status.problem ? { problem: status.problem } : {}) });
+        }
+      } else if (source.kind === 'markdown') {
+        if (stored) texts[source.id] = await readFile(stored.snapshot, 'utf8');
+      } else {
+        files[source.id] = { name: fileName(source.path), extension: extname(source.path).toLowerCase(),
+          ...(stored ? { text: await readFile(stored.snapshot, 'utf8') } : {}), ...(status.problem ? { problem: status.problem } : {}) };
       }
     }));
   }
-  await Promise.all([readTexts, readFiles]);
-  return { ...book, photos, texts, files, problems: problems.sort() };
+  await store.settled();
+  return { ...book, photos, texts, files, sources, problems: problems.sort() };
 }
 
 function projectJson(value: unknown) {
@@ -275,6 +275,8 @@ export function withProjectFiles(book: OpenProject, files: ProjectFiles): OpenPr
 export async function importIntoProject(book: OpenProject, request: ImportRequest, paths: string[]) {
   const project = structuredClone(book.project);
   const photoIndex: PhotoIndex = structuredClone(book.photoIndex);
+  const mode = request.mode ?? book.project.importMode ?? 'copy';
+  if (mode !== 'copy' && mode !== 'link') throw new Error('Unknown import mode.');
   const imported: string[] = [];
   const copied: string[] = [];
   const folder = request.kind === 'photo' ? 'photos' : request.kind === 'file' ? 'files' : 'texts';
@@ -291,8 +293,8 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       if (request.kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
       if (request.kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
       const previous = request.kind === 'photo'
-        ? Object.entries(photoIndex).find(([, photo]) => join(book.folder, photo.path) === file)?.[0]
-        : Object.entries(registry).find(([, path]) => join(book.folder, path) === file)?.[0];
+        ? Object.entries(photoIndex).find(([, photo]) => (!!photo.linked === (mode === 'link') || isInside(book.folder, file)) && (photo.linked ? photo.path : join(book.folder, photo.path)) === file)?.[0]
+        : Object.entries(registry).find(([, ref]) => (sourceLinked(ref) === (mode === 'link') || isInside(book.folder, file)) && (sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref))) === file)?.[0];
       if (previous) {
         imported.push(previous);
         continue;
@@ -301,10 +303,12 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       const name = basename(file).replace(/[^\p{L}\p{N} ._-]/gu, '-');
       const relativePath = folder + '/' + id + '-' + name;
       const path = join(book.folder, relativePath);
-      await copyFile(file, path, constants.COPYFILE_EXCL);
-      copied.push(path);
-      if (request.kind === 'photo') photoIndex[id] = { path: relativePath, title: basename(file, extname(file)) };
-      else registry[id] = relativePath;
+      const original = await realpath(file);
+      const linked = mode === 'link' && !isInside(book.folder, original);
+      if (linked) await approveSource(book.folder, { key: request.kind + ':' + id, kind: request.kind, path: original, linked }, request.accept);
+      if (!linked) { await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path); }
+      if (request.kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)) };
+      else registry[id] = linked ? { path: original, linked: true } : relativePath;
       imported.push(id);
     }
     if (!imported.length) throw new Error('No supported files were selected.');
@@ -332,7 +336,7 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
     id, folder: basename(book.folder), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
     photoSizes: Object.fromEntries([...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
-    texts: book.texts,
+    texts: book.texts, sources: book.sources,
   };
 }
 
@@ -347,7 +351,7 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
     })),
     texts: book.texts,
     files: book.files,
-    problems: book.problems,
+    problems: book.problems, sources: book.sources,
     ...(book.fixture ? { fixture: book.fixture } : {}),
     template: {
       script: base + '/template/template.js',

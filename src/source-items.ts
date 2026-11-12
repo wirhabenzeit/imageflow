@@ -1,3 +1,5 @@
+import { sourcePath } from './source-locations';
+import type { SourceReference } from './source-locations';
 import type { ProjectSummary } from './desktop';
 
 // Source helpers live outside Sources.tsx so React fast refresh can treat that file as components only.
@@ -10,7 +12,7 @@ export type SourceKind = 'photo' | 'text';
 export type SourceRef = { kind: SourceKind; id: string };
 
 // Imported files are stored as "<id>-<name>"; show the original name.
-export const fileName = (path: string) => (path.split('/').pop() ?? path).replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');
+export const fileName = (path: SourceReference) => (sourcePath(path).split('/').pop() ?? sourcePath(path)).replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');
 export const words = (source: string) => source.split(/\s+/).filter(Boolean).length;
 
 export function excerpt(source: string) {
@@ -24,7 +26,7 @@ export function excerpt(source: string) {
 export function sourceList(summary: ProjectSummary, kind: SourceKind) {
   return kind === 'photo'
     ? Object.entries(summary.photoIndex).map(([id, entry]) => ({ id, title: entry.title || fileName(entry.path), path: entry.path }))
-    : Object.entries(summary.project.texts).map(([id, path]) => ({ id, title: fileName(path), path }));
+    : Object.entries(summary.project.texts).map(([id, path]) => ({ id, title: fileName(path), path: sourcePath(path) }));
 }
 
 

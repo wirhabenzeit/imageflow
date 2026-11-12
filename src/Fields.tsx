@@ -5,21 +5,24 @@ import type { ControlItem, ControlNode } from './controls';
 import type { Values } from './project';
 import type { Parameter, Parameters } from './parameters';
 import { isParameterValue } from './parameters';
+import { sourcePath } from './source-locations';
+import type { SourceReference, ImportMode } from './source-locations';
 import { fileName } from './source-items';
 
 type Value = Values[string];
 
-// The project's files (ID → path in files/) for file parameters, and how to add one. Provided by the editor shell.
+// The project's files (ID → owned path or linked reference) for file parameters, and how to add one. Provided by the editor shell.
 export const ProjectFilesContext = createContext<{
-  files: Record<string, string>; importFile?: (accept: string[]) => Promise<string | undefined>;
+  files: Record<string, SourceReference>; defaultMode?: ImportMode; importFile?: (accept: string[], mode?: ImportMode) => Promise<string | undefined>;
 }>({ files: {} });
 
 // Chooses among the project's files with an accepted extension, adds a new one, or clears the assignment.
 function FileControl({ param, value, apply, autoFocus }: {
   param: Extract<Parameter, { type: 'file' }>; value: string; apply: (value: Value) => void; autoFocus: boolean;
 }) {
-  const { files, importFile } = useContext(ProjectFilesContext);
-  const accepted = Object.entries(files).filter(([, path]) => param.accept.some((ext) => path.toLowerCase().endsWith(ext)));
+  const { files, importFile, defaultMode = 'copy' } = useContext(ProjectFilesContext);
+  const [mode, setMode] = useState<ImportMode>();
+  const accepted = Object.entries(files).filter(([, path]) => param.accept.some((ext) => sourcePath(path).toLowerCase().endsWith(ext)));
   const missing = !!value && !Object.hasOwn(files, value);
   return <div className="pc-row pc-file">
     <select aria-label={param.label} value={value} data-autofocus={autoFocus || undefined} onChange={(event) => apply(event.target.value)}>
@@ -28,8 +31,11 @@ function FileControl({ param, value, apply, autoFocus }: {
       {value && !missing && !accepted.some(([id]) => id === value) && <option value={value}>{fileName(files[value])}</option>}
       {accepted.map(([id, path]) => <option key={id} value={id}>{fileName(path)}</option>)}
     </select>
+    {importFile && <select aria-label="File import mode" value={mode ?? defaultMode} onChange={(event) => setMode(event.target.value as ImportMode)}>
+      <option value="copy">Copy into Book</option><option value="link">Link to File</option>
+    </select>}
     {importFile && <button type="button" onClick={() => {
-      void importFile(param.accept).then((id) => { if (id) apply(id); });
+      void importFile(param.accept, mode).then((id) => { if (id) apply(id); });
     }}>Choose…</button>}
   </div>;
 }

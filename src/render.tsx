@@ -1,3 +1,5 @@
+import { sourcePath } from './source-locations';
+import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
 import * as jsx from 'react/jsx-runtime';
 import { flushSync } from 'react-dom';
@@ -63,7 +65,7 @@ function textAssignments(book: RenderProject, template: Template) {
     }
   }
   for (const [source, chain] of chains) {
-    const title = book.project.texts[source]?.split('/').pop();
+    const title = (book.project.texts[source] && sourcePath(book.project.texts[source]))?.split('/').pop();
     chain.forEach(({ spread, box }, index) => {
       positions[spread + ':' + box] = { part: index + 1, parts: chain.length, title };
     });
@@ -768,7 +770,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   root.className = 'if-editor';
   // The project's file registry for file controls. An import adds to it, so it is state the host can update.
   let projectFiles = book.project.files;
-  let updateFiles: ((files: Record<string, string>) => void) | undefined;
+  let updateFiles: ((files: Record<string, SourceReference>) => void) | undefined;
 
   // The draft lives outside React so set() followed directly by commit() sends the newest values, before React
   // has rendered them. Every message is posted in order, and commit carries the draft as well.
@@ -798,10 +800,10 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   // the project's files, so `file(id)` and the file controls see the new file at once.
   let requests = 0;
   const pending = new Map<number, (id: string | undefined) => void>();
-  const importFile = (accept: readonly string[]) => {
+  const importFile = (accept: readonly string[], mode?: ImportMode) => {
     if (readOnly || failed || !Array.isArray(accept)) return Promise.resolve(undefined);
     const request = ++requests;
-    post({ type: 'editor-import', request, accept: accept.filter((extension) => typeof extension === 'string') });
+    post({ type: 'editor-import', request, accept: accept.filter((extension) => typeof extension === 'string'), mode });
     return new Promise<string | undefined>((resolve) => pending.set(request, resolve));
   };
   window.addEventListener('message', (event) => {
@@ -863,7 +865,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       post({ type: 'editor-ready' });
       return () => { update = undefined; updateFiles = undefined; };
     }, []);
-    const context = React.useMemo(() => ({ files, importFile: readOnly ? undefined : (accept: string[]) => importFile(accept) }), [files]);
+    const context = React.useMemo(() => ({ files, defaultMode: book.project.importMode ?? 'copy', importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
     return React.createElement(ProjectFilesContext.Provider, { value: context },
       React.createElement(EditorValues.Provider, { value: values },
         React.createElement(editor!.component, { values, set, document, format, readOnly, commit, cancel, Control, importFile })));
@@ -1012,6 +1014,16 @@ export async function startRender(root: HTMLElement) {
           fileErrors(book, element.parameters, spread.elements[id]?.params ?? {}, element.label).map((finding) => ({ ...finding, element: id }))),
       ];
       errors.push(...scoped.map((finding) => ({ ...located(spread.id, finding.message), ...finding })));
+      for (const [box, declaration] of Object.entries(definition.boxes)) {
+        const assignment = spread.boxes[box];
+        const id = declaration.type === 'photo' ? assignment?.photo : assignment?.text;
+        const kind = declaration.type === 'photo' ? 'photo' : 'markdown';
+        const state = id && book.sources?.[kind + ':' + id];
+        if (state && state.state !== 'available' && state.cached) errors.push({
+          ...located(spread.id, state.problem + '. Showing a cached preview; the original is required for print.'),
+          code: 'source-unavailable', box, source: id || undefined, suggestion: 'Locate the original or retry after reconnecting its location.',
+        });
+      }
     }
     for (const [i, result] of decoded.entries()) {
       if (result.status !== 'rejected') continue;
@@ -1051,7 +1063,7 @@ export async function startRender(root: HTMLElement) {
       const first = chain[0];
       if (book.texts[source] === undefined) {
         errors.push({ ...located(first.spread, 'Missing Markdown source ' + source + '.'), code: 'text-source-missing', box: first.box, source,
-          suggestion: 'Restore ' + (book.project.texts[source] ?? 'the Markdown file') + ', or assign another text to box ' + first.box + '.' });
+          suggestion: 'Restore ' + (book.project.texts[source] ? sourcePath(book.project.texts[source]) : 'the Markdown file') + ', or assign another text to box ' + first.box + '.' });
         continue;
       }
       const boxes = chain.map(({ spread, box }) => validated.get(spread)!.boxes.get(box)!);
@@ -1059,9 +1071,9 @@ export async function startRender(root: HTMLElement) {
       const overflow = result.overflowText.trim();
       if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
         const last = chain.at(-1)!;
-        errors.push({ ...located(last.spread, 'Text from ' + (book.project.texts[source] ?? source) + ' does not fit; add a spread that continues it.'),
+        errors.push({ ...located(last.spread, 'Text from ' + (book.project.texts[source] ? sourcePath(book.project.texts[source]) : source) + ' does not fit; add a spread that continues it.'),
           code: 'text-overflow', box: last.box, source,
-          details: { overflowCharacters: overflow.length, boxes: chain.length, path: book.project.texts[source] ?? '' },
+          details: { overflowCharacters: overflow.length, boxes: chain.length, path: book.project.texts[source] ? sourcePath(book.project.texts[source]) : '' },
           suggestion: 'Insert a spread after ' + last.spread + ' with a markdown box and assign text ' + source +
             ' to it so the flow continues, or enlarge the boxes, reduce the text size or shorten the text.' });
       }

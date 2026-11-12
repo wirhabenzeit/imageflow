@@ -155,10 +155,34 @@ try {
   const aside = join(work, 'senja-road.gpx');
   await rerendered(() => rename(sample, aside));
   assert.match(await messages('errors'), /Route map · GPX track: Missing project file: files\/senja-road\.gpx/);
-  assert.equal(await trackLine(), 0);
+  assert.equal(await trackLine(), 1, 'Keep a visibly stale last-good parameter-file preview while its original is missing.');
   await rerendered(() => rename(aside, sample));
   assert.equal(await trackLine(), 1);
   assert.equal((await status()).errors.length, 0);
+
+  // Copy/link choices travel through the template's native file control and its editor frame bridge.
+  const policy = await read();
+  policy.importMode = 'link';
+  await writeFile(join(project, 'project.json'), JSON.stringify(policy, null, 2));
+  await rerendered(() => menuAction(app, 'Reload'));
+  for (const mode of ['link', 'copy']) {
+    const original = join(work, mode + '-through-editor.gpx');
+    await writeFile(original, await readFile(sample));
+    await openDialog([original]);
+    await openRoute();
+    const choice = routeEditor.getByRole('combobox', { name: 'File import mode' });
+    assert.equal(await choice.inputValue(), 'link', 'The custom editor shows the document import default');
+    await choice.selectOption(mode);
+    await routeEditor.getByRole('button', { name: 'Choose…' }).click();
+    await routeEditor.getByRole('combobox', { name: 'GPX track' }).locator('option:checked').filter({ hasText: mode + '-through-editor.gpx' }).waitFor({ state: 'attached' });
+    await rerendered(() => routeDialog.getByRole('button', { name: 'Done' }).click());
+    const state = await read();
+    const id = state.spreads.find(({ id }) => id === 'road').elements.route.params.track;
+    if (mode === 'link') assert.deepEqual(state.files[id], { path: original, linked: true });
+    else assert.equal(typeof state.files[id], 'string');
+    await rerendered(() => w.getByRole('button', { name: 'Undo', exact: true }).click());
+    assert.equal(await trackLine(), 1);
+  }
 
   // A file of a type the parameter does not accept, registered by hand, is reported rather than parsed.
   const data = await read();

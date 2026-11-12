@@ -3,6 +3,7 @@ import type { Parameters } from './parameters';
 import type { ControlItem } from './controls';
 import type { ProjectFiles } from './project';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
+import type { ImportMode, SourceStatus } from './source-locations';
 import type { AppSettings, SettingsPane } from './settings';
 
 export const desktopScheme = 'imageflow';
@@ -15,6 +16,7 @@ export const renderOrigin = desktopScheme + '://render';
 export const channels = {
   current: 'document:current', appError: 'app:error',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
+  sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
   open: 'project:open', save: 'project:save', import: 'project:import',
   command: 'project:command', changed: 'project:changed',
@@ -29,7 +31,7 @@ export const channels = {
 
 export type OpenAction = 'open' | 'new' | 'sample' | 'reload';
 export type ExportMode = 'proof' | 'print';
-export type Command = OpenAction | 'toggle-project' | 'toggle-inspector' | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'undo' | 'redo';
+export type Command = OpenAction | 'toggle-project' | 'toggle-inspector' | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState;
@@ -37,6 +39,7 @@ export type ProjectSummary = ProjectFiles & {
   photos: Record<string, string>;
   photoSizes: Record<string, { width: number; height: number }>;
   texts: Record<string, string>;
+  sources?: Record<string, SourceStatus>;
 };
 export type Result<T> = { value: T } | { error: string };
 export type HistoryState = { undo?: string; redo?: string };
@@ -49,12 +52,16 @@ export type McpClientTarget = 'claude' | 'codex';
 export type ProjectChange = Result<ProjectSummary> | { building: true };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions.
 export type ImportRequest = {
-  kind: 'photo' | 'markdown' | 'file'; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string };
+  kind: 'photo' | 'markdown' | 'file'; mode?: ImportMode; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string };
 };
 
 export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string };
 
+export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder'; key?: string; accept?: string[] };
+
 export type DesktopApi = {
+  sourceAction(request: SourceAction): Promise<Result<{ summary: ProjectSummary; message?: string }>>;
+  saveCopy(includeAssets: boolean): Promise<Result<null>>;
   currentProject(): Promise<Result<ProjectSummary>>;
   onAppError(listener: (message: string) => void): () => void;
   recentDocuments(): Promise<Result<RecentDocument[]>>;

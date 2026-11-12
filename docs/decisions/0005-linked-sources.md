@@ -1,0 +1,45 @@
+# 0005: A document import default with per-source ownership
+
+Status: implemented, 2026-11-12. Second phase of #40, stacked on document packages (#41).
+
+## Decision
+
+Copy versus link is a **document-level default**, not a strict document mode. Book settings → New imports chooses Copy into Book (the default) or Link to Original Files. The default applies to photos, Markdown, parameter-file pickers, folder imports, and drag/drop. Existing sources retain their actual ownership when the default changes, and individual imports may override it. A document can mix copied and linked sources. Imports of resources already inside the package remain document-owned rather than linking a document to itself.
+
+The Sources import menu offers explicit Copy and Link actions. File parameter controls expose the same choice beside Choose. Template code, its fonts, and bundled template assets stay document-owned; linking applies to registered source files, including everything selected through parameter file pickers. File parameters retain their existing UTF-8 text contract and 20 MB limit.
+
+## Persisted locations and identity
+
+`project.json.importMode` is the optional future-import default (`copy` when absent). Photo IDs remain in `photos.json`: a copied photo has a relative `path`, while a linked photo has an absolute `path` and `linked: true`. Markdown and parameter registries retain their IDs, with either a relative string for a copied file or `{ path, linked: true }` for an external file. Locations do not become IDs. Relinking, replacing, collection, and Save a Copy preserve IDs, metadata, assignments, and normalized crops.
+
+Linked paths identify exported files, not a Lightroom catalogue. A package manifest is not permission to read external files. App-owned approvals, stored outside documents and keyed by filesystem book identity (device, inode and birth time), bind each source ID to its exact canonical target. Native import and Locate selections grant access on this Mac. Parameter-file grants also record the declaring picker’s accepted extensions and reject mismatches before reading. Loading, revision hashing, opening text in an editor, collection and Save a Copy all enforce that gate. Unapproved references show “Locate to approve access” and expose no cached or original contents. A Finder duplicate, downloaded book or restored package with a new identity needs its own approval; an explicit Save a Copy transfers only already approved links. Earlier cached previews never grant access.
+
+Atomic replacement at that path updates the same source. The first implementation uses canonical absolute locators and explicit Locate actions for moves; it does not search arbitrary directories or follow filename-only guesses. A Locate Folder action considers byte-identical candidates with the saved filename and digest. Ambiguous candidates are reported for explicit per-source Locate rather than silently selected.
+
+## Stable inputs and availability
+
+The shared source store reads only approved regular linked files, checks the original identity before/after reading, hashes and validates private photo bytes, and stores immutable content-addressed snapshots. APFS clones are used when possible. Linked editor photos and PDF/check jobs read immutable bytes, while Markdown and parameter-file contents are loaded into render data. Ordinary document-owned photos are served from the package: opening reads metadata without decoding, hashing or duplicating every original. Rendition generation guards the original identity so changed owned bytes cannot enter an old rendition key. Checks and exports clone/copy owned photos into private job folders and remove those snapshots when the job settles. The 50 MB import/linked-photo limit does not make larger originals already inside a package unreadable.
+
+The app-owned source cache also retains last-good content and metadata across reopen. Missing, denied, and unreadable states always come from the original location. Cached content never makes an unavailable original available. Derived cache corruption is checked and repaired from an available original; a fallback snapshot is verified against its digest before use. Owned missing photos can fall back to already rendered previews/thumbnails, preserving their known dimensions and an explicit unavailable state. These caches live outside `.imageflow` documents and are not needed to open a collected book with available originals.
+
+One shared store per book serializes index publication, including scan probes and source actions, so concurrent users cannot overwrite each other’s records. Cleanup runs at launch, document close, periodically while idle, and quit. It removes unreferenced snapshots, stale book indexes and abandoned staging files, and evicts closed-book snapshots to a 2 GB budget. Open frames/jobs remain pinned and can temporarily exceed that budget. The most recent book indexes are retained for offline-drive recovery; evicting a last-good snapshot leaves an honest unavailable state rather than an implied original.
+
+Each document watches selected external files' parent directories, so an atomic replacement does not strand an inode watch. Metadata reconciliation and watch reinstallation cover missed events, disconnected locations, resume, and files changed while closed. Short writes are coalesced; invalid content retains a marked last-good view. Unavailable sources are retried without repeatedly rebuilding the editor. A refresh pending behind a save or export is separate from actual source-change invalidation.
+
+Checks reconcile source revisions around loading/rendering. Exports capture current inputs, load pinned contents, and recheck before publishing a PDF. A replacement during export rejects the result. External content changes do not rewrite files or enter ordinary layout Undo. Undo preserves each registered source's current location, so it cannot revive an obsolete relink or replace an external file.
+
+## Recovery, collection and saving
+
+Manage Sources lists photos, Markdown and parameter files with actual storage, location, availability, and cached-view status. It offers Reveal, Locate/Replace Original, Retry, Copy into Book, folder relinking, and Include All Assets. A missing source does not prevent the rest of a book from opening or being edited. Relinking an ID repairs every use. ImageFlow never overwrites or deletes a linked original.
+
+Include All Assets on the current book validates every registered original, prepares owned copies, and publishes the manifest changes through the recoverable save path. Failure leaves the original registries intact; required recovery data and staged referenced assets survive an interrupted committed save. Successfully collecting also sets future imports to Copy.
+
+**File → Save a Copy…** includes an **Include all assets** checkbox, checked by default, before the destination picker. Checked produces an independent package with copied photos, Markdown and parameter files, and a Copy import default. Unchecked preserves the current mix and document default. Linked locators include full paths, which can disclose account names and folder layout when shared; the dialog explains this and that another Mac must locate/approve the links. Preparation takes place beside the destination, copies each owned asset once and each collected linked snapshot once, then publishes the package without an additional full-book copy or internal-disk staging. The original document and linked originals remain untouched. A missing original blocks collection with a list of sources to locate, rather than a falsely portable result. Normal autosave preserves existing ownership and links. Source actions are recorded as non-undoable updates; Locate, Replace, Copy into Book and collection do not consume an empty Undo step.
+
+## Print and proof
+
+Only unavailable sources used by the active layouts or assigned file parameters block print. Missing unused library sources remain diagnostic warnings. Proof export requires explicit confirmation to use cached content/placeholders, retains Book check errors, and marks affected PDF pages with `PROOF: ORIGINAL UNAVAILABLE`. The cached view never satisfies an original-file requirement for print or collection. The confirmation and page markings share the same source-diagnostic codes; unrelated template messages containing “missing” do not trigger a source warning.
+
+## Validation
+
+Unit coverage exercises the shared import default, per-import exceptions, linked Markdown and file inputs, atomic replacement, original dimensions/crops, immutable pinned bytes, missing-source reopen, identity-preserving relinking across Undo, ambiguous folder candidates, collection, and portable Save a Copy. The desktop source workflow exercises all three source kinds, a deterministic replacement during PDF rendering, missing/cached views, print blocking, proof confirmation/marking, and opening a collected copy after external originals are removed. Existing document/session, authoring, editing, layout, parameter-file, and PDF workflows remain regression checks.

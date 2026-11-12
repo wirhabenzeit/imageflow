@@ -1,6 +1,8 @@
 import { lstat, realpath, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { containedPath } from './project';
+import type { SourceReference } from '../src/source-locations';
+import { sourceLinked, sourcePath } from '../src/source-locations';
+import { originalPath } from './source-store';
 
 export async function editableMarkdown(path: string) {
   const actual = await realpath(path);
@@ -10,8 +12,8 @@ export async function editableMarkdown(path: string) {
   return actual;
 }
 
-export async function textSourcePath(folder: string, source: string) {
-  return editableMarkdown(await containedPath(folder, source, 'texts'));
+export async function textSourcePath(folder: string, source: SourceReference, id = 'editor') {
+  return editableMarkdown(await originalPath(folder, { key: 'markdown:' + id, kind: 'markdown', path: sourcePath(source), linked: sourceLinked(source) }));
 }
 
 export async function templateFolder(folder: string) {

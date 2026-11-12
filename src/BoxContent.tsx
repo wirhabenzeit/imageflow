@@ -1,4 +1,5 @@
 import { Field } from './Fields';
+import { sourcePath } from './source-locations';
 import type { ProjectSummary } from './desktop';
 import type { SpreadState } from './project';
 import type { SourceRef } from './source-items';
@@ -92,14 +93,14 @@ export function TextContent({ summary, spread, box, label, change, importText, i
   importText: () => void; inspect?: (source: SourceRef) => void; flow?: { part: number; parts: number };
 }) {
   const assigned = spread.boxes[box]?.text;
-  const choices = Object.entries(summary.project.texts).map(([id, path]) => [id, path.split('/').pop()] as const);
+  const choices = Object.entries(summary.project.texts).map(([id, path]) => [id, sourcePath(path).split('/').pop()] as const);
   return <div className="box-content">
     <label className="field">Markdown
       <select aria-label={label + ' assignment'} value={assigned ?? ''} onChange={(event) => {
         const value = event.target.value;
         change((item) => {
           item.boxes[box] = { params: item.boxes[box]?.params ?? {}, text: value || undefined };
-        }, (value ? (summary.project.texts[value]?.split('/').pop() ?? value) + ' placed in ' : 'Text removed from ') + label);
+        }, (value ? (summary.project.texts[value] ? sourcePath(summary.project.texts[value]).split('/').pop() : value) + ' placed in ' : 'Text removed from ') + label);
       }}>
         <option value="">Unassigned</option>
         {assigned && !choices.some(([id]) => id === assigned) && <option value={assigned}>Missing · {assigned}</option>}
