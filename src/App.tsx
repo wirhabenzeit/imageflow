@@ -30,6 +30,8 @@ import type { SourceKind, SourceRef } from './source-items';
 import { pageSequence, resolveFormat } from './format';
 import type { ResolvedFormat } from './format';
 import type { ProjectFiles, SpreadState } from './project';
+import { spreadOrder } from './spread-order';
+import { spreadMime, useSpreadReorder } from './useSpreadReorder';
 
 type Owner = { type: 'photo' | 'markdown' | 'element'; id: string };
 // `hidden`: the box or element is declared but not on the page, so the editor opens at the spread's corner.
@@ -145,6 +147,10 @@ export function App() {
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
   const generation = inputGeneration.current;
+  const canReorder = writable && !busy && !exporting && !!template;
+  const canMoveSpread = (id: string, target: number) => !!template && !!spreadOrder(spreads, id, target, template);
+  const reorder = useSpreadReorder({ list: thumbList, revision: summary?.id, enabled: canReorder && !panels.leftHidden,
+    canMove: canMoveSpread, move: moveTo });
 
   function clearCanvasEditors() {
     setCropping(undefined);
@@ -385,7 +391,7 @@ export function App() {
     const focused = document.activeElement;
     const typing = focused instanceof HTMLElement && (focused.matches('input, textarea, select, [contenteditable="true"]') || !!focused.closest('dialog'));
     const reloadRunning = reloading.current && !reloadFailed.current;
-    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || typing || agentLocked.current) return false;
+    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || typing || agentLocked.current) return false;
     agentLocked.current = true;
     if (workspace.current) workspace.current.inert = true;
     setAgentWorking(true);
@@ -510,14 +516,23 @@ export function App() {
 
   function move(offset: number) {
     if (!spread) return;
-    pendingReveal.current = spread.id;
+    moveTo(spread.id, index + offset);
+  }
+
+  function moveTo(id: string, target: number) {
+    if (!canReorder || !template || !canMoveSpread(id, target)) return;
+    const revision = summary?.id;
+    let destination = '';
+    setSelectedSource(undefined);
+    revealedThumb.current = '';
     edit(({ project }) => {
-      const start = project.spreads.findIndex(({ id }) => id === spread.id);
-      const end = start + offset;
-      if (start < 0 || end < 0 || end >= project.spreads.length) return;
-      const [item] = project.spreads.splice(start, 1);
-      project.spreads.splice(end, 0, item);
-    });
+      if (current.current?.id !== revision) return;
+      const ordered = spreadOrder(project.spreads, id, target, template);
+      if (!ordered) return;
+      project.spreads = ordered;
+      const pages = pageSequence(ordered.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format).spreads[target].page;
+      destination = pages.left && pages.right ? 'pages ' + pages.left + '–' + pages.right : 'page ' + (pages.left ?? pages.right);
+    }, () => 'Spread moved to ' + destination, id);
   }
 
   function add(duplicate = false) {
@@ -840,6 +855,7 @@ export function App() {
   function drop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
     setDropTarget(undefined);
+    if (event.dataTransfer.types.includes(spreadMime)) return;
     if (!api || !writable || busy || !summary || readyId.current !== summary.id) return;
     const { box } = locate(event);
     // Kept content dropped on its own spread moves; dropped on another spread it is another use of its source.
@@ -905,6 +921,15 @@ export function App() {
   }, []);
 
   function thumbKeys(event: KeyboardEvent) {
+    // The Book menu's proposed move shortcuts (#50) also work while a thumbnail has focus.
+    if (event.metaKey && event.altKey && !event.shiftKey && !event.ctrlKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+      event.preventDefault();
+      const focused = (event.target as HTMLElement).closest<HTMLElement>('.spread-thumb')?.dataset.spread;
+      const from = spreads.findIndex(({ id }) => id === focused);
+      if (focused && from >= 0) moveTo(focused, from + (event.key === 'ArrowUp' ? -1 : 1));
+      return;
+    }
+    if (event.metaKey || event.altKey || event.ctrlKey || event.shiftKey) return;
     const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
     const next = step && spreads[index + step];
     if (!next) return;
@@ -1006,14 +1031,14 @@ export function App() {
             <div className="icon-actions">
               <button aria-label="Add" title="Add spread" disabled={!writable || !template || !!busy} onClick={() => add()}><Icon name="add" /></button>
               <button aria-label="Duplicate" title="Duplicate spread" disabled={!writable || !template || !spreadSelected || !!busy} onClick={() => add(true)}><Icon name="duplicate" /></button>
-              <button aria-label="Move spread up" title="Move up" disabled={!writable || !spreadSelected || index === 0 || !!busy} onClick={() => move(-1)}><Icon name="up" /></button>
-              <button aria-label="Move spread down" title="Move down" disabled={!writable || !spreadSelected || index === spreads.length - 1 || !!busy} onClick={() => move(1)}><Icon name="down" /></button>
+              <button aria-label="Move spread up" title="Move up (⌥⌘↑)" disabled={!canReorder || !spreadSelected || !spread || !canMoveSpread(spread.id, index - 1)} onClick={() => move(-1)}><Icon name="up" /></button>
+              <button aria-label="Move spread down" title="Move down (⌥⌘↓)" disabled={!canReorder || !spreadSelected || !spread || !canMoveSpread(spread.id, index + 1)} onClick={() => move(1)}><Icon name="down" /></button>
               <button aria-label="Delete" title="Delete spread" disabled={!writable || !spreadSelected || spreads.length < 2 || !!busy} onClick={() => edit(({ project }) => {
                 project.spreads = project.spreads.filter(({ id }) => id !== spread.id);
               })}><Icon name="delete" /></button>
             </div>
           </div>
-          <div className="thumbs-scroll">
+          <div className="thumbs-scroll" onDragOver={reorder.over} onDragLeave={reorder.leave} onDrop={reorder.drop}>
             <div ref={thumbList} className={thumbs ? 'spread-thumbs placed' : 'spread-thumbs'} style={{ height: thumbs?.height }}
               role="group" aria-label="Spreads" onKeyDown={thumbKeys}>
               {spreads.map(({ id, definition }, i) => {
@@ -1022,7 +1047,9 @@ export function App() {
                 return <button key={id} data-spread={id}
                   aria-current={spreadSelected && index === i ? 'page' : undefined} aria-label={label(definition, i) + ' ' + pageLabels[i]}
                   title={pagesLabel(i) + ' · ' + label(definition, i) + (level ? ' · ' + (level === 'error' ? 'Has errors' : 'Has warnings') : '')}
-                  className={'spread-thumb' + (inView.includes(id) ? ' in-view' : '')} tabIndex={index === i ? 0 : -1}
+                  className={'spread-thumb' + (inView.includes(id) ? ' in-view' : '') + (reorder.dragging === id ? ' reordering' : '')} tabIndex={index === i ? 0 : -1}
+                  draggable={canReorder && (canMoveSpread(id, i - 1) || canMoveSpread(id, i + 1))}
+                  onDragStart={(event) => reorder.start(event, id)} onDragEnd={reorder.end}
                   style={rect ? { left: rect.x - 5, top: rect.y - 5, width: rect.width + 10, height: rect.height + 30 } : undefined}
                   onClick={() => select(id)}>
                   <span className="spread-thumb-label">
@@ -1032,6 +1059,7 @@ export function App() {
                   </span>
                 </button>;
               })}
+              {reorder.indicator && <div className="spread-insertion" aria-hidden="true" style={{ top: reorder.indicator.top }} />}
               <BookFrame project={summary.id} view="thumbs" title="Spread thumbnails" onGeometry={setThumbs}
                 hold={holdPreview} accept={acceptCandidate} />
             </div>
