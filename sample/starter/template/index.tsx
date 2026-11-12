@@ -222,15 +222,18 @@ function CalendarGrid({ date, firstWeekday, marked = '', toggle }: {
   </>;
 }
 
-// The calendar's own editor: step through months and click days to mark them. It runs in ImageFlow's editor
-// dialog and only proposes values; ImageFlow validates and saves them when the user clicks Done.
+// The calendar's own editor: step through months and click days to mark them, and title the page. It runs in
+// ImageFlow's editor dialog and only proposes values; ImageFlow validates and saves them when the user clicks Done.
+// The title is a layout parameter rather than one of the grid's, edited here because naming the month belongs to
+// the same task; `scope="spread"` gives it ImageFlow's own text field.
 const calendarParameters = {
   month: p.date({ label: 'Month', default: '2027-01-01', precision: 'month' }),
   firstWeekday: p.enum({ label: 'Week starts', default: 'monday', options: ['monday', 'sunday'], labels: { monday: 'Monday', sunday: 'Sunday' } }),
   marked: p.string({ label: 'Marked days', default: '', maxLength: 200 }),
 };
-type CalendarEditorProps = ElementEditorProps<typeof calendarParameters, 'month' | 'marked'>;
-function CalendarEditor({ values, set, readOnly }: CalendarEditorProps) {
+const calendarLayoutParameters = { title: p.string({ label: 'Calendar title', default: '', maxLength: 80, placeholder: 'Shown above the calendar' }) };
+type CalendarEditorProps = ElementEditorProps<typeof calendarParameters, 'month' | 'marked', {}, typeof calendarLayoutParameters, 'title'>;
+function CalendarEditor({ values, set, readOnly, Control }: CalendarEditorProps) {
   const month = values.month;
   const shift = (step: number) => {
     const date = new Date(month + 'T00:00:00Z');
@@ -243,6 +246,7 @@ function CalendarEditor({ values, set, readOnly }: CalendarEditorProps) {
     set({ marked: [...days].sort((a, b) => a - b).join(',') });
   };
   return <div className="calendar-editor">
+    <Control parameter="title" scope="spread" />
     <div className="calendar-editor-nav">
       <button type="button" aria-label="Previous month" disabled={readOnly} onClick={() => shift(-1)}>‹</button>
       <button type="button" aria-label="Next month" disabled={readOnly} onClick={() => shift(1)}>›</button>
@@ -300,10 +304,10 @@ function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerPro
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.5.0',
+  version: '0.6.0',
   contract: 1,
   requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper',
-    'editor-native-controls', 'layout-families'],
+    'editor-native-controls', 'layout-families', 'editor-spread-parameters'],
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
     landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
@@ -408,16 +412,18 @@ export default defineTemplate({
     }),
     calendar: spread({
       label: 'Calendar spread',
+      parameters: calendarLayoutParameters,
       boxes: { hero: box.photo('Calendar photo') },
       elements: { grid: {
         label: 'Calendar grid',
         parameters: calendarParameters,
-        editor: { label: 'Edit calendar', parameters: ['month', 'marked'], component: CalendarEditor },
+        editor: { label: 'Edit calendar', parameters: ['month', 'marked'], spread: ['title'], component: CalendarEditor },
       } },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx} bled={{ left: true }}>
           <ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />
+          {ctx.params.title && <h2 className="calendar-title" style={ctx.geometry.css(at.right(40, 36, 210, 24))}>{ctx.params.title}</h2>}
           <ctx.Element id="grid" className="calendar-grid" rect={at.right(40, 70, 210, 170)}>
             <CalendarGrid date={ctx.elements.grid.params.month} firstWeekday={ctx.elements.grid.params.firstWeekday}
               marked={ctx.elements.grid.params.marked} />

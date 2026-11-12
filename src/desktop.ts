@@ -103,11 +103,11 @@ export type DesktopApi = {
   onProgress(listener: (stage: string) => void): () => void;
 };
 
-// `editor` describes a template-supplied editor for some of the element's parameters (the component itself
-// stays in the render frame).
+// `editor` describes a template-supplied editor for some of the element's parameters, and for the layout (spread)
+// parameters it lists in `spread` (the component itself stays in the render frame).
 // `controls` arranges the generated controls of a scope's parameters (src/controls.ts).
 export type ElementDefinition = {
-  label: string; parameters: Parameters; controls?: ControlItem[]; editor?: { label?: string; parameters: string[]; presentation: 'dialog' };
+  label: string; parameters: Parameters; controls?: ControlItem[]; editor?: { label?: string; parameters: string[]; spread?: string[]; presentation: 'dialog' };
 };
 export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; parameters: Parameters; flowOrder?: number; controls?: ControlItem[] };
 // `family` names the layout family this layout is a variant of; `variant` holds the template's tags for it.

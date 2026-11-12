@@ -9,9 +9,10 @@ import { geometry } from '../src/geometry';
 import { p } from '../src/parameters';
 import { projectSchema } from '../src/project';
 import type { RenderProject } from '../src/project';
-import { box, chooseFormat, defineTemplate, normalizeTemplate, runtime, spreadFor, SpreadView, templateSchema } from '../src/template';
+import { box, chooseFormat, defineTemplate, normalizeTemplate, runtime, spreadFor, SpreadView, templateInfo, templateSchema } from '../src/template';
 import type { RenderContext } from '../src/template';
 
+const templateInfoOf = (declared: Parameters<typeof chooseFormat>[0]) => templateInfo(chooseFormat(declared));
 const declarationWarnings = (declared: unknown) => check(declared, templateSchema as unknown as Schema);
 
 const format = printFormat({
@@ -196,4 +197,33 @@ test('templateInfo reports families and each layout\'s family and tags, without 
   assert.equal(info.spreads.nine.family, 'grid');
   assert.deepEqual(info.spreads.nine.variant, { size: 3 });
   assert.equal(JSON.stringify(info).includes('component'), false);
+});
+
+test('an element editor may edit declared layout parameters, each by one editor, without a generated control', () => {
+  const caption = p.string({ label: 'Caption', default: '' });
+  const show = p.boolean({ label: 'Show', default: true });
+  const component = () => null;
+  const declare = (spread: Record<string, unknown>) => templateSchema.safeParse({
+    id: 't', version: '1', contract: 1, format, spreads: { main: { label: 'Main', render: () => null, ...spread } },
+  });
+  const messages = (result: ReturnType<typeof declare>) => result.success ? [] : result.error.issues.map(({ message }) => message);
+  const ok = declare({ parameters: { caption, title: caption }, controls: ['title'],
+    elements: { stamp: { label: 'Stamp', parameters: { show }, editor: { parameters: ['show'], spread: ['caption'], component } } } });
+  assert.ok(ok.success, JSON.stringify(messages(ok)));
+  assert.deepEqual(templateInfoOf(ok.data!).spreads.main.elements.stamp.editor,
+    { label: undefined, parameters: ['show'], spread: ['caption'], presentation: 'dialog' });
+  // An editor that only edits layout parameters is fine; one that edits nothing is not.
+  assert.ok(declare({ parameters: { caption }, elements: { stamp: { label: 'Stamp', editor: { parameters: [], spread: ['caption'], component } } } }).success);
+  assert.deepEqual(messages(declare({ elements: { stamp: { label: 'Stamp', editor: { parameters: [], component } } } })),
+    ['An element editor needs at least one parameter to edit, of the element or of the layout (spread).']);
+  assert.deepEqual(messages(declare({ parameters: { caption },
+    elements: { stamp: { label: 'Stamp', editor: { parameters: [], spread: ['captoin'], component } } } })),
+  ["Element stamp's editor edits layout parameter captoin, which this layout does not declare."]);
+  assert.deepEqual(messages(declare({ parameters: { caption }, elements: {
+    a: { label: 'A', editor: { parameters: [], spread: ['caption'], component } },
+    b: { label: 'B', editor: { parameters: [], spread: ['caption'], component } },
+  } })), ['Layout parameter caption is edited by the editors of both a and b. Give it to one editor.']);
+  assert.deepEqual(messages(declare({ parameters: { caption }, controls: ['caption'],
+    elements: { stamp: { label: 'Stamp', editor: { parameters: [], spread: ['caption'], component } } } })),
+  ['Control caption is edited by the custom editor, so it has no generated control.']);
 });

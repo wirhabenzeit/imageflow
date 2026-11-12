@@ -202,3 +202,80 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, layoutFamilies: { g
   // @ts-expect-error
   four: spread({ label: '2×2', family: 'grid', variant: { size: [2, 2] }, render: () => <Spread /> }),
 }) });
+
+// An element editor may also edit layout (spread) parameters it lists in `spread`; only declared ones are allowed.
+const stamp = { show: p.boolean({ label: 'Show', default: true }) };
+const caption = { caption: p.string({ label: 'Caption', default: '' }) };
+const StampEditor = ({ Control }: import('imageflow').ElementEditorProps) =>
+  <div><Control parameter="show" /><Control parameter="caption" scope="spread" /></div>;
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
+  a: spread({ label: 'A', parameters: caption, render: () => <Spread />,
+    elements: { stamp: { label: 'Stamp', parameters: stamp, editor: { parameters: ['show'], spread: ['caption'], component: StampEditor } } } }),
+  b: spread({ label: 'B', parameters: caption, render: () => <Spread />,
+    // @ts-expect-error
+    elements: { stamp: { label: 'Stamp', parameters: stamp, editor: { parameters: ['show'], spread: ['captoin'], component: StampEditor } } } }),
+}) });
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: {
+  a: { label: 'A', parameters: caption, render: () => <Spread />,
+    elements: { stamp: { label: 'Stamp', parameters: stamp, editor: { parameters: ['show'], spread: ['caption'], component: StampEditor } } } },
+} });
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: {
+  a: { label: 'A', parameters: caption, render: () => <Spread />,
+    elements: { stamp: { label: 'Stamp', parameters: stamp, editor: { parameters: ['show'], spread: ['captoin'], component: StampEditor } } } },
+} });
+
+// Typed scoped editors keep each schema and ownership list separate, even for a shared parameter ID.
+const scopedLayout = { zoom: p.string({ label: 'Zoom label', default: '' }), title: p.string({ label: 'Title', default: '' }) };
+function Scoped({ values, spread, set, setSpread, Control }: ElementEditorProps<typeof route, 'zoom', typeof doc, typeof scopedLayout, 'zoom'>) {
+  set({ zoom: values.zoom + 1 });
+  setSpread({ zoom: spread.zoom.toUpperCase() });
+  const title: string = spread.title;
+  // @ts-expect-error
+  set({ zoom: 'x' });
+  // @ts-expect-error
+  setSpread({ zoom: 2 });
+  // @ts-expect-error
+  setSpread({ title: 'unowned' });
+  // @ts-expect-error
+  setSpread({ zoon: 'typo' });
+  // @ts-expect-error
+  const unowned = <Control parameter="title" scope="spread" />;
+  // @ts-expect-error
+  const wrongScope = <Control parameter="size" scope="spread" />;
+  return <div>{title}{unowned}{wrongScope}<Control parameter="zoom" /><Control parameter="zoom" scope="spread" /></div>;
+}
+function SpreadOnly({ set, setSpread, Control }: ElementEditorProps<{}, never, typeof doc, typeof scopedLayout, 'zoom'>) {
+  // @ts-expect-error
+  set({ zoom: 1 });
+  setSpread({ zoom: 'label' });
+  // @ts-expect-error
+  const wrongScope = <Control parameter="zoom" />;
+  return <div>{wrongScope}<Control parameter="zoom" scope="spread" /></div>;
+}
+function NoSpread({ setSpread }: ElementEditorProps<typeof route, 'zoom', typeof doc, typeof scopedLayout, never>) {
+  // @ts-expect-error
+  setSpread({ zoom: 'unowned' });
+  return null;
+}
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: doc, spreads: ({ spread }) => ({
+  a: spread({ label: 'A', parameters: scopedLayout, elements: { e: { label: 'E', parameters: route,
+    editor: { parameters: ['zoom'], spread: ['zoom'], component: Scoped } } }, render: () => <Spread /> }),
+  b: spread({ label: 'B', parameters: scopedLayout, elements: { e: { label: 'E',
+    editor: { parameters: [], spread: ['zoom'], component: SpreadOnly } } }, render: () => <Spread /> }),
+  c: spread({ label: 'C', parameters: scopedLayout, elements: { e: { label: 'E', parameters: route,
+    // @ts-expect-error
+    editor: { parameters: ['zoom'], spread: ['title'], component: Scoped } } }, render: () => <Spread /> }),
+  d: spread({ label: 'D', parameters: scopedLayout, elements: { e: { label: 'E', parameters: route,
+    // @ts-expect-error
+    editor: { parameters: ['zoom'], component: Scoped } } }, render: () => <Spread /> }),
+}) });
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: doc, spreads: {
+  a: { label: 'A', parameters: scopedLayout, elements: { e: { label: 'E', parameters: route,
+    editor: { parameters: ['zoom'], spread: ['zoom'], component: Scoped } } }, render: () => <Spread /> },
+} });
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: doc, spreads: {
+  a: { label: 'A', parameters: scopedLayout, elements: { e: { label: 'E', parameters: route,
+    editor: { parameters: ['zoom'], spread: ['title'], component: Scoped } } }, render: () => <Spread /> },
+} });

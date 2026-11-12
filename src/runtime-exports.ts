@@ -15,5 +15,7 @@ export const capabilities = [
   'editor-controls', 'editor-native-controls',
   // `layoutFamilies`, with `family` and `variant` on layouts, and a family's own layout picker.
   'layout-families',
+  // `spread` on an element editor: layout parameters it edits together with the element's own.
+  'editor-spread-parameters',
 ] as const;
 export type Capability = typeof capabilities[number];

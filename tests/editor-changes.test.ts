@@ -51,3 +51,18 @@ test('set() with something other than an object applies nothing and says what it
 test('an unknown Control lists the parameters it can show', () => {
   assert.equal(unknownControl('zoon', owned), 'Control "zoon" is not one of the parameters this editor edits. Use one of: month, marked, zoom.');
 });
+
+test('setSpread validates its own schema and ownership without discarding valid changes', () => {
+  const layout = { zoom: p.string({ label: 'Zoom label', default: '' }), title: p.string({ label: 'Title', default: '' }) };
+  assert.deepEqual(editorChanges(layout, ['zoom'], { zoom: 'label', title: 'unowned', typo: 'missing' }, 'spread'), {
+    allowed: { zoom: 'label' }, rejected: [
+      { key: 'title', message: "setSpread() ignored title: it is not one of this editor's parameters in the spread scope. This editor edits zoom." },
+      { key: 'typo', message: 'setSpread() ignored typo: the layout has no such parameter. This editor edits zoom.' },
+    ],
+  });
+  assert.match(editorChanges(layout, ['zoom'], { zoom: 2 }, 'spread').rejected[0].message, /setSpread\(\) ignored zoom: 2 is not a valid value/);
+  assert.equal(editorChanges(layout, ['zoom'], null, 'spread').rejected[0].message,
+    'setSpread() expects an object of parameter values, such as setSpread({ zoom: … }).');
+  assert.equal(unknownControl('title', ['zoom'], 'spread'),
+    'Control "title" (scope spread) is not one of the parameters this editor edits. Use one of: zoom.');
+});

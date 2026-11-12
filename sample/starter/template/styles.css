@@ -85,3 +85,4 @@
 .variant-picker button:focus-visible { outline: 2px solid var(--if-editor-focus); outline-offset: 1px; }
 .variant-grid { display: grid; gap: 3px; width: 42px; height: 42px; }
 .variant-grid span { border-radius: 2px; background: currentColor; opacity: .35; }
+.field-book .calendar-title { font: 600 16pt/1.2 "Field Serif"; }

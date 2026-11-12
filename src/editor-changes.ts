@@ -33,20 +33,21 @@ function expected(param: Parameter) {
  * valid values, and those that are ignored, each with a message saying why. Untyped template code can pass
  * anything, so `changes` is not trusted to be an object.
  */
-export function editorChanges(parameters: Parameters, owned: readonly string[], changes: unknown): { allowed: Values; rejected: RejectedChange[] } {
+export function editorChanges(parameters: Parameters, owned: readonly string[], changes: unknown, scope: 'element' | 'spread' = 'element'): { allowed: Values; rejected: RejectedChange[] } {
+  const setter = scope === 'spread' ? 'setSpread' : 'set';
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
-    return { allowed: {}, rejected: [{ key: '', message: 'set() expects an object of parameter values, such as set({ ' + (owned[0] ?? 'parameter') + ': … }).' }] };
+    return { allowed: {}, rejected: [{ key: '', message: setter + '() expects an object of parameter values, such as ' + setter + '({ ' + (owned[0] ?? 'parameter') + ': … }).' }] };
   }
   const allowed: Values = {};
   const rejected: RejectedChange[] = [];
   for (const [key, value] of Object.entries(changes)) {
     const param = Object.hasOwn(parameters, key) ? parameters[key] : undefined;
     if (!owned.includes(key)) {
-      rejected.push({ key, message: 'set() ignored ' + key + ': ' + (param
-        ? 'it is not one of this editor\'s parameters, so it is edited by the generated controls. This editor edits ' + list(owned) + '.'
-        : 'the element has no such parameter. This editor edits ' + list(owned) + '.') });
+      rejected.push({ key, message: setter + '() ignored ' + key + ': ' + (param
+        ? 'it is not one of this editor\'s parameters' + (scope === 'element' ? ', so it is edited by the generated controls' : ' in the spread scope') + '. This editor edits ' + list(owned) + '.'
+        : 'the ' + (scope === 'spread' ? 'layout' : 'element') + ' has no such parameter. This editor edits ' + list(owned) + '.') });
     } else if (!param || !isParameterValue(param, value)) {
-      rejected.push({ key, message: 'set() ignored ' + key + ': ' + show(value) + ' is not a valid value' +
+      rejected.push({ key, message: setter + '() ignored ' + key + ': ' + show(value) + ' is not a valid value' +
         (param ? '; ' + param.label + ' takes ' + expected(param) : '') + '.' });
     } else allowed[key] = value as Values[string];
   }
@@ -54,6 +55,6 @@ export function editorChanges(parameters: Parameters, owned: readonly string[], 
 }
 
 /** The message for `<Control parameter>` naming a parameter the editor does not own. */
-export function unknownControl(parameter: unknown, owned: readonly string[]) {
-  return 'Control ' + show(parameter) + ' is not one of the parameters this editor edits. Use one of: ' + list(owned) + '.';
+export function unknownControl(parameter: unknown, owned: readonly string[], scope: 'element' | 'spread' = 'element') {
+  return 'Control ' + show(parameter) + (scope === 'spread' ? ' (scope spread)' : '') + ' is not one of the parameters this editor edits. Use one of: ' + list(owned) + '.';
 }
