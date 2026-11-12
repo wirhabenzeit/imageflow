@@ -101,12 +101,16 @@ export function resolveFormat(format: PrintFormat) {
   return resolved;
 }
 
+export function spanAllowedAt(span: Span, index: number, count: number, format: PrintFormat) {
+  return span === 'spread' || (format.structure.delivery === 'pages' && format.structure.ends === 'single-pages' &&
+    (span === 'right' ? index === 0 : index === count - 1));
+}
+
 export function pageSequence(spans: Span[], format: PrintFormat) {
   let count = 0;
   const issues: string[] = [];
   const spreads = spans.map((span, index) => {
-    if (span !== 'spread' && (format.structure.delivery === 'spreads' || format.structure.ends !== 'single-pages' ||
-        (span === 'right' ? index !== 0 : index !== spans.length - 1))) {
+    if (!spanAllowedAt(span, index, spans.length, format)) {
       issues.push('Spread ' + (index + 1) + ' uses a single ' + span + ' page outside the allowed book end.');
     }
     const left = span === 'right' ? undefined : ++count;
