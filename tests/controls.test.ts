@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { controlCycles, controlLayout, controlProblems, layoutFields, matches } from '../src/controls';
-import { declarationWarnings, withoutReachableControls } from '../src/declaration-check';
+import { declarationWarnings, placeControlWarnings } from '../src/declaration-check';
 import type { Schema } from '../src/declaration-check';
 import { mm, printFormat } from '../src/format';
 import { p } from '../src/parameters';
@@ -137,8 +137,14 @@ test('a group that hides its own control loads with a warning, and cycles are wa
     [['declaration-control-cycle', 'spreads.main.controls', { controls: 'show', layout: 'main', edit: '' }]]);
   // A layout that marks show on the page, such as ctx.edit('show'), offers a way back: no warning for it.
   const warnings = declarationWarnings(grouped, templateSchema as unknown as Schema);
-  assert.deepEqual(withoutReachableControls(warnings, new Set(['main|show'])), []);
-  assert.equal(withoutReachableControls(warnings, new Set(['other|show', 'main|tilt'])).length, 1);
+  // Reachability is per spread: a spread that marks show on the page (ctx.edit('show')) offers a way back, another
+  // spread with the same layout that does not mark it gets its own warning, located on it.
+  const on = (spread: string, layout: string, ...marked: string[]) => ({ spread, layout, marked: new Set(marked) });
+  assert.deepEqual(placeControlWarnings(warnings, [on('a', 'main', 'show')]), []);
+  assert.deepEqual(placeControlWarnings(warnings, [on('a', 'main', 'show'), on('b', 'main', 'tilt'), on('c', 'other', 'show')])
+    .map(({ spread, code }) => [spread, code]), [['b', 'declaration-control-cycle']]);
+  // A layout no spread uses keeps the template-level warning.
+  assert.deepEqual(placeControlWarnings(warnings, [on('c', 'other', 'show')]), warnings);
   const cyclic = {
     id: 't', version: '1', contract: 1, format, spreads: { main: { label: 'Main', render: () => null, boxes: {
       hero: { type: 'photo', label: 'Hero', parameters: { show: parameters.show, kind: parameters.kind },
@@ -149,7 +155,8 @@ test('a group that hides its own control loads with a warning, and cycles are wa
   assert.deepEqual(declarationWarnings(cyclic, templateSchema as unknown as Schema).map(({ code, path, details }) => [code, path, details]),
     [['declaration-control-cycle', 'spreads.main.boxes.hero.controls', { controls: 'show, kind', layout: 'main', edit: 'boxes.hero.' }]]);
   // A box's or element's own parameters follow its controls in a marked node's popover too, so marking them is no way back.
-  assert.equal(withoutReachableControls(declarationWarnings(cyclic, templateSchema as unknown as Schema), new Set(['main|boxes.hero.kind'])).length, 1);
+  const boxWarnings = declarationWarnings(cyclic, templateSchema as unknown as Schema);
+  assert.deepEqual(placeControlWarnings(boxWarnings, [{ spread: 'a', layout: 'main', marked: new Set(['boxes.hero.kind']) }]), boxWarnings);
 });
 
 test('malformed controls reach the schema error instead of crashing the cycle check', () => {

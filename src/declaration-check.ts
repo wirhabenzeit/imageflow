@@ -148,11 +148,21 @@ function controlCycleWarnings(declared: Record<string, unknown>, found: Declarat
   }
 }
 
-// Drops control-cycle warnings for layouts that mark one of the controls' parameters as editable on the page, which
-// is a way to show them again. `marked` holds `layout|edit path` for every marked node the Book check rendered. Only
-// layout (spread) parameters count: a marked node's popover always shows those, while a box's or element's own
-// parameters there follow the same `controls` and conditions, so marking them opens no way back (EditPopover).
-export function withoutReachableControls(warnings: DeclarationWarning[], marked: ReadonlySet<string>) {
-  return warnings.filter(({ code, details }) => code !== 'declaration-control-cycle' || details.edit !== '' ||
-    !details.controls.split(', ').some((key) => marked.has(details.layout + '|' + key)));
+// Where control-cycle warnings apply in a rendered book. A layout (spread) parameter is reachable on a spread that
+// marks it on the page (ctx.edit, ctx.Text), since a marked node's popover always shows layout parameters; whether a
+// spread marks it can depend on its own values, so this is decided per spread, not per layout. A cycle among layout
+// parameters is therefore reported once for each spread using the layout that marks none of them, located on that
+// spread, and not at all when every such spread marks one. Box and element parameters follow the same `controls` and
+// conditions in a marked node's popover, so marking them opens no way back: those warnings, and warnings about
+// layouts no spread uses, stay as they are.
+export type RenderedSpread = { spread: string; layout: string; marked: ReadonlySet<string> };
+export function placeControlWarnings(warnings: DeclarationWarning[], rendered: RenderedSpread[]): (DeclarationWarning & { spread?: string })[] {
+  return warnings.flatMap((warning) => {
+    const { code, details } = warning;
+    if (code !== 'declaration-control-cycle' || details.edit !== '') return [warning];
+    const instances = rendered.filter(({ layout }) => layout === details.layout);
+    if (!instances.length) return [warning];
+    const keys = details.controls.split(', ');
+    return instances.filter(({ marked }) => !keys.some((key) => marked.has(key))).map(({ spread }) => ({ ...warning, spread }));
+  });
 }
