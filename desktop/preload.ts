@@ -21,6 +21,7 @@ const api: DesktopApi = {
   onLibraryChanged: (listener) => listen(channels.libraryChanged, listener),
   importTemplates: () => ipcRenderer.invoke(channels.libraryImport),
   removeTemplate: (id) => ipcRenderer.invoke(channels.libraryRemove, id),
+  exportTemplate: (id) => ipcRenderer.invoke(channels.libraryExport, id),
   documentAction: (action, id) => ipcRenderer.invoke(channels.documentAction, action, id),
   getSettings: () => ipcRenderer.invoke(channels.settings),
   updateSettings: (patch) => ipcRenderer.invoke(channels.updateSettings, patch),

@@ -27,6 +27,11 @@ export function TemplateSettings({ api }: { api?: DesktopApi }) {
     const result = await api!.removeTemplate(id);
     setMessage('error' in result ? result.error : result.value ? 'Moved to the Trash. Books made from it are not affected.' : '');
   });
+  const exportTemplate = (id: string) => run(async () => {
+    setResults([]);
+    const result = await api!.exportTemplate(id);
+    setMessage('error' in result ? result.error : result.value ? 'Exported to ' + result.value + '.' : '');
+  });
   return <div className="template-settings">
     <p className="settings-note template-intro">New books are made from these templates. Each book keeps its own copy, so removing or
       replacing a template here never changes a book.</p>
@@ -37,6 +42,8 @@ export function TemplateSettings({ api }: { api?: DesktopApi }) {
         <div className="template-row">
           <strong>{entry.label}</strong> <span className="muted">{entry.version}</span>
           <span className="template-source">{entry.source === 'built-in' ? 'Built-in' : 'Imported ' + date(entry.importedAt)}</span>
+          <button type="button" disabled={busy || !api} aria-label={'Export ' + entry.label}
+            onClick={() => void exportTemplate(entry.id)}>Export…</button>
           {entry.source === 'imported' && <button type="button" disabled={busy || !api} aria-label={'Move ' + entry.label + ' to the Trash'}
             onClick={() => void remove(entry.id)}>Move to Trash</button>}
         </div>
@@ -48,7 +55,7 @@ export function TemplateSettings({ api }: { api?: DesktopApi }) {
     </ul>
     <div className="template-actions">
       <button type="button" disabled={busy || !api} onClick={() => void importTemplates()}>Import…</button>
-      <span className="settings-note">Choose one or more template folders. Templates contain code: only import templates from people you trust.</span>
+      <span className="settings-note">Choose template folders or .imageflow-template files. Templates contain code: only import templates from people you trust.</span>
     </div>
     {(results.length > 0 || message) && <div className="template-results" role="status">
       {message && <p className="settings-note">{message}</p>}

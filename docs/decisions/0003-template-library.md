@@ -1,6 +1,6 @@
 # 0003: A template library for new projects
 
-Status: accepted with changes, 2026-11-12; see #63. Implemented except sharing (`.imageflow-template` files).
+Status: accepted with changes, 2026-11-12; see #63. Implemented, including sharing with `.imageflow-template` files.
 
 Changes made while planning #63, which override the text below where they differ:
 
