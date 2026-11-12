@@ -413,6 +413,8 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       }),
       targets: sheets.flatMap(({ spread, sheet }) => [...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
         spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node),
+        ...(node.dataset.box ? { owner: { type: 'box' as const, id: node.dataset.box } }
+          : node.dataset.element ? { owner: { type: 'element' as const, id: node.dataset.element } } : {}),
       }))),
     };
     post(geometry);

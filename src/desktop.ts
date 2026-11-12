@@ -96,8 +96,9 @@ export type BookGeometry = {
   sheets: (Rect & { spread: string })[];
   // `upright` is false when template CSS rotates or skews the box, so its rectangle is only a bounding box.
   boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean })[];
-  // Nodes a template marked with `ctx.edit(...)`, and elements with parameters.
-  targets: (Rect & { spread: string; edits: string[] })[];
+  // Nodes a template marked with `ctx.edit(...)`, and boxes and elements with parameters. `owner` is the box or
+  // element the node is, so targets that share a rectangle stay apart; standalone marked nodes have none.
+  targets: (Rect & { spread: string; edits: string[]; owner?: { type: 'box' | 'element'; id: string } })[];
 };
 // A preflight finding. `spread` is the spread id and `where` its readable location, such as "Pages 6–7 · Photo grid".
 // The optional fields give agents a stable `code`, the box/element/source involved, measured values and a repair hint.

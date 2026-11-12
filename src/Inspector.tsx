@@ -6,6 +6,7 @@ import { revealIn } from './reveal';
 import type { ProjectFiles, SpreadState } from './project';
 import { boxLabel, describeLayoutChange, discardContent, keptElements, keptOutside, layoutChoices, planLayoutChange, switchLayout } from './layouts';
 import { keptMime, photoMime, sourceTitle, textMime } from './source-items';
+import { readEdit, resolveEditPath } from './editing';
 import type { SourceUsage } from './editing';
 import { SourceInspector } from './SourceInspector';
 import type { SourceRef } from './source-items';
@@ -115,12 +116,13 @@ function contentState(summary: ProjectSummary, spread: SpreadState, id: string, 
 // elements are edited where they are on the page; the list opens the same editors, also for empty, hidden or
 // overlapping ones, and from the keyboard.
 export function Inspector({ summary, spread, source, template, render, usage, edit, highlight, issues,
-  select, quickLook, focus, targets = [], open, place }: {
+  select, quickLook, focus, targets = [], open, openTarget, place }: {
   summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void;
   highlight: (id?: string) => void; issues: string; select: (spread: string) => void;
   quickLook: () => void; focus?: { box: string; at: number };
   targets?: BookGeometry['targets']; open: (owner: { type: 'photo' | 'markdown' | 'element'; id: string }) => void;
+  openTarget: (target: BookGeometry['targets'][number]) => void;
   place: (from: string, to: string) => void;
 }) {
   const items = useRef(new Map<string, HTMLElement>());
@@ -154,8 +156,21 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   }).filter(Boolean).join(', ');
   const keptSettings = template ? keptElements(spread, template.spreads) : [];
   // Spread settings the page edits, through ctx.Text, ctx.edit or a box or element marked with them, are edited
-  // there and left out here.
-  const claimed = new Set(targets.flatMap(({ edits }) => edits.filter((path) => !path.includes('.'))));
+  // there and left out here. An element with its own editor opens that editor, which edits only the element, so
+  // settings marked on it stay here.
+  const claimed = new Set(targets.filter(({ owner }) => !(owner?.type === 'element' && definition?.elements[owner.id]?.editor))
+    .flatMap(({ edits }) => edits.filter((path) => !path.includes('.'))));
+  // Marked nodes that are not a box or element, such as a ctx.Text heading, in reading order: listed with the
+  // boxes and elements, so every editor on the page can be opened from the keyboard.
+  const marked = template ? targets.filter((target) => !target.owner)
+    .filter((target, i, all) => all.findIndex((other) => other.edits.join(' ') === target.edits.join(' ')) === i)
+    .sort((a, b) => Math.abs(a.y - b.y) > 4 ? a.y - b.y : a.x - b.x)
+    .flatMap((target) => {
+      const fields = target.edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((field) => !!field);
+      if (!fields.length) return [];
+      const value = readEdit(summary.project, spread, fields[0]);
+      return [{ target, label: fields.map(({ param }) => param.label).join(', '), value: typeof value === 'string' ? value : String(value ?? '') }];
+    }) : [];
   const flow = render?.state === 'ready' ? render.flow : undefined;
   const contents = definition ? [
     ...Object.entries(definition.boxes).map(([id, box]) => ({ id, kind: box.type, label: box.label })),
@@ -193,9 +208,18 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
       {template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={spread} template={template}
         kept={kept} label={keptLabel} settings={keptSettings} writable={writable} place={place}
         discard={(box, name) => changeSpread((item) => discardContent(item, box), name + ' removed from this spread')} />}
-      {template && contents.length > 0 && <section className="spread-contents" aria-label="On this spread">
+      {template && (contents.length > 0 || marked.length > 0) && <section className="spread-contents" aria-label="On this spread">
         <p className="field-label">On this spread</p>
         <ul className="content-list">
+          {marked.map(({ target, label, value }) => <li key={spread.id + ':' + target.edits.join(' ')}>
+            <button type="button" className="content-item" aria-label={'Edit ' + label} onClick={() => openTarget(target)}>
+              <span className="content-thumb content-kind" aria-hidden="true">Aa</span>
+              <span className="content-text">
+                <span className="content-label">{label}</span>
+                <span className="content-state muted">{value || 'Empty'}</span>
+              </span>
+            </button>
+          </li>)}
           {contents.map(({ id, kind, label }) => {
             const photo = kind === 'photo' ? spread.boxes[id]?.photo : undefined;
             return <li key={spread.id + ':' + id}>

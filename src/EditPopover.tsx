@@ -5,7 +5,7 @@ import type { Rect, TemplateInfo } from './desktop';
 import { readEdit, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import type { Edit } from './Inspector';
-import { ParamControl } from './Fields';
+import { Field, ParamControl } from './Fields';
 import { isParameterValue, resolveParams } from './parameters';
 import type { Project, SpreadState, Values } from './project';
 import { controlLayout } from './controls';
@@ -52,6 +52,16 @@ function arrange(targets: EditTarget[], template: TemplateInfo, spread: SpreadSt
     shown.push(...prune(controlLayout(declaration.parameters, declaration.controls, values)));
   }
   return shown;
+}
+
+// Fields for parameters marked on a node, saved as each is applied, for places that show them beside another
+// editor (the selected photo's toolbar).
+export function MarkedFields({ project, spread, template, edits, edit }: {
+  project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; edit: (change: Edit, notice?: string) => void;
+}) {
+  return edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((target): target is EditTarget => !!target)
+    .map((target) => <Field key={target.path} param={target.param} value={readEdit(project, spread, target)}
+      change={(value) => edit(({ project: files }) => writeEdit(files, spread.id, target, value), target.param.label + ' updated')} />);
 }
 
 // Opens over what is edited on the page and edits it in place: a node the template marked with `ctx.edit(...)` or
