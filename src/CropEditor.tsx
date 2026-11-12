@@ -126,8 +126,10 @@ export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel
   // Canvas shortcuts apply only when no control has focus: a focused button or the zoom slider handles its own
   // Enter, Space and arrow keys. Escape and Enter deselect the photo, from its toolbar too.
   const keys = useEffectEvent((event: KeyboardEvent) => {
-    if (settling) return;
-    const control = (event.target as HTMLElement).closest?.('button, input, select, textarea, a[href], [role="radio"], [role="option"], [contenteditable]');
+    if (settling || event.defaultPrevented) return;
+    // The nested menu or action panel handles Escape first, before it can end crop editing.
+    if (event.key === 'Escape' && toolbar.current?.querySelector('.crop-actions [role="dialog"], .crop-actions details[open]')) return;
+    const control = (event.target as HTMLElement).closest?.('button, summary, input, select, textarea, a[href], [role="radio"], [role="option"], [contenteditable]');
     if (control) {
       if (event.key === 'Escape' && toolbar.current?.contains(control)) {
         event.preventDefault();

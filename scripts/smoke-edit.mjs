@@ -531,12 +531,25 @@ try {
   // #9: photos can be assigned from the keyboard, to an empty box and as a replacement; Undo restores. A placed
   // photo is selected, with Replace and Remove in its toolbar; an empty box opens its editor with Choose photo.
   await openBox('Main photo');
-  await w.locator('.crop-content').getByRole('combobox', { name: 'Replace photo in Main photo' }).selectOption('shore');
+  await w.locator('.crop-more > summary').focus();
+  await w.keyboard.press('ArrowDown');
+  assert.equal(await w.evaluate(() => document.activeElement.textContent), 'Replace photo…');
+  await w.keyboard.press('Enter');
+  const photoChooser = w.getByRole('dialog', { name: 'Replace photo in Main photo' });
+  await photoChooser.waitFor();
+  await w.screenshot({ path: join(root, '.build', 'crop-photo-chooser.png') });
+  await w.keyboard.press('Escape');
+  await photoChooser.waitFor({ state: 'detached' });
+  assert.ok(await w.locator('.crop-editor').isVisible(), 'Escape closes only the chooser');
+  await w.locator('.crop-more > summary').click();
+  await w.getByRole('button', { name: 'Replace photo…', exact: true }).click();
+  await photoChooser.locator('[data-photo="shore"]').click();
   await saved('Shore placed in Main photo');
   assert.equal((await read()).spreads[1].boxes.hero.photo, 'shore');
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
   await openBox('Main photo');
-  await w.locator('.crop-content').getByRole('button', { name: 'Remove' }).click();
+  await w.locator('.crop-more > summary').click();
+  await w.getByRole('button', { name: 'Remove photo', exact: true }).click();
   await saved('Photo removed from Main photo');
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
   await openBox('Main photo');
@@ -564,7 +577,7 @@ try {
   await thumb('Two photos 10–11');
   await ready();
   await w.getByRole('button', { name: 'Delete', exact: true }).click();
-  await saved('Saved');
+  await saved('Spread deleted');
   await ready();
   await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
   // The Book check is an indicator next to Export; clicking it lists the issues.

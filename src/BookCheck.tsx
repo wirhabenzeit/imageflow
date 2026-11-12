@@ -4,8 +4,8 @@ import type { Issue } from './desktop';
 export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[] };
 
 // A labeled book-check status in the footer, with a popover for findings.
-export function BookCheckIndicator({ check, checking, spread, select }: {
-  check?: BookCheck; checking: boolean; spread: string; select: (spread: string) => void;
+export function BookCheckIndicator({ check, checking, spread, select, request = 0 }: {
+  request?: number; check?: BookCheck; checking: boolean; spread: string; select: (spread: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -31,18 +31,21 @@ export function BookCheckIndicator({ check, checking, spread, select }: {
       window.removeEventListener('keydown', key);
     };
   }, [open]);
-  useEffect(() => { if (!items.length) setOpen(false); }, [items.length]);
+  useEffect(() => {
+    if (request) { setOpen(true); root.current?.querySelector('button')?.focus(); }
+  }, [request]);
 
   if (!check) return null;
   const title = 'Book check · ' + label + (checking ? ' · updating…' : '');
   return <div ref={root} className={'book-check-list book-check-' + level + (checking ? ' book-check-stale' : '')}>
-    <button type="button" className="book-check-toggle" aria-expanded={items.length ? open : undefined} title={title}
-      disabled={!items.length} onClick={() => setOpen(!open)}>
+    <button type="button" className="book-check-toggle" aria-expanded={open} title={title}
+      onClick={() => setOpen(!open)}>
       <span className="visually-hidden">{title}</span>
       <span aria-hidden="true">{checking ? 'Checking book…' : items.length ? label : 'Book check: no issues'}</span>
     </button>
-    {open && items.length > 0 && <div className="book-check-panel" role="dialog" aria-label="Book check">
+    {open && <div className="book-check-panel" role="dialog" aria-label="Book check">
       <p className="book-check-heading">Book check · {label}</p>
+      {!items.length && <p>{checking ? 'Checking book…' : 'No issues found.'}</p>}
       <ul>{items.map(({ issue, level }, i) => <li key={i} className={'issue-' + level + (issue.spread === spread ? ' issue-current' : '')}>
         {issue.spread && issue.where ? <button type="button" className="link" onClick={() => {
           select(issue.spread!);

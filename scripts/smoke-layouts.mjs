@@ -55,13 +55,15 @@ try {
     await w.locator('.crop-editor, .edit-popover').first().waitFor();
   };
   const closeBox = async () => {
+    if (await w.locator('.crop-action-panel').count()) await w.keyboard.press('Escape');
     await w.keyboard.press('Escape');
     await w.waitForFunction(() => !document.querySelector('.crop-editor, .edit-popover'));
   };
   const setCrop = async (box, values) => {
     await openBox(box);
     const toolbar = w.locator('.crop-content');
-    if (await toolbar.locator('.crop-values').getAttribute('open') === null) await toolbar.locator('.crop-values > summary').click();
+    await toolbar.locator('.crop-more > summary').click();
+    await toolbar.getByRole('button', { name: 'Crop values…', exact: true }).click();
     for (const [label, value] of Object.entries(values)) {
       await rerendered(async () => {
         await toolbar.getByRole('spinbutton', { name: label, exact: true }).fill(String(value));
@@ -161,13 +163,16 @@ try {
 
   // Replacing a photo starts its crop over; removing one is a real edit.
   await openBox('Left photo');
-  const replace = w.locator('.crop-content').getByRole('combobox', { name: 'Replace photo in Left photo' });
-  const replacement = await replace.locator('option:not([value=""]):not([disabled])').first().getAttribute('value');
-  await rerendered(() => replace.selectOption(replacement));
+  await w.locator('.crop-more > summary').click();
+  await w.getByRole('button', { name: 'Replace photo…', exact: true }).click();
+  const replace = w.getByRole('dialog', { name: 'Replace photo in Left photo' }).locator('[data-photo]:not(:disabled)').first();
+  const replacement = await replace.getAttribute('data-photo');
+  await rerendered(() => replace.click());
   assert.deepEqual((await settlements()).boxes.hero, { photo: replacement, params: {} });
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
   await openBox('Right photo');
-  await rerendered(() => w.locator('.crop-content').getByRole('button', { name: 'Remove' }).click());
+  await w.locator('.crop-more > summary').click();
+  await rerendered(() => w.getByRole('button', { name: 'Remove photo', exact: true }).click());
 
   // B → C (no photo boxes) → A: the replacement and removal hold, the other photos and their crops return.
   await rerendered(() => layout('Text spread').click());
@@ -248,6 +253,17 @@ try {
   const title = async (photo) => JSON.parse(await readFile(join(project, 'photos.json'), 'utf8'))[photo].title;
   const replacedTitle = await title(replacement);
   await rerendered(() => layout('Two photos').click());
+  assert.equal(await w.locator('.kept-content').getAttribute('open'), null);
+  assert.ok(await w.locator('.spread-contents').evaluate((node) => !!(node.compareDocumentPosition(document.querySelector('.kept-content')) & Node.DOCUMENT_POSITION_FOLLOWING)));
+  await w.locator('.kept-content > summary').click();
+  await w.locator('.spread-thumb[data-spread="arriving"]').click();
+  await w.locator('.spread-thumb[data-spread="settlements"]').click();
+  assert.equal(await w.locator('.kept-content').getAttribute('open'), '');
+  await w.locator('.kept-content > summary').click();
+  await w.locator('.spread-thumb[data-spread="arriving"]').click();
+  await w.locator('.spread-thumb[data-spread="settlements"]').click();
+  assert.equal(await w.locator('.kept-content').getAttribute('open'), null);
+  await w.locator('.kept-content > summary').click();
   const keptNames = () => w.locator('.kept-content .kept-name').allTextContents();
   assert.deepEqual(await keptNames(), ['Cottage', 'Evening light']);
   await rerendered(() => w.getByRole('combobox', { name: 'Place Cottage in' }).selectOption('second'));

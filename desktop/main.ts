@@ -10,8 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join, relative, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { channels, gridColumns, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
-import type { CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction } from '../src/desktop';
+import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
+import type { BookMenuState, CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { assetTypes, loadProject, renderData } from './project';
 import type { OpenProject } from './project';
@@ -409,18 +409,111 @@ async function openProject(owner: BrowserWindow, action: OpenAction, document?: 
   await openDocument(choice.filePaths[0]);
   return null;
 }
+function installMenu(formats: Record<string, string>) {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: 'appMenu', submenu: [
+      { role: 'about' }, { type: 'separator' },
+      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
+      { label: 'Agent Connections…', click: () => showSettings('agents') },
+      { label: 'Show Start Window', click: () => showStart() },
+      { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
+    ] },
+    { label: 'File', submenu: [
+      menuCommand('New Book…', 'CmdOrCtrl+N', 'new'),
+      menuCommand('Open…', 'CmdOrCtrl+O', 'open'),
+      menuCommand('Explore a Sample', undefined, 'sample'),
+      { type: 'separator' }, { role: 'close' },
+      menuCommand('Save a Copy…', 'CmdOrCtrl+Shift+S', 'save-copy'),
+      { type: 'separator' },
+      menuCommand('Export Proof PDF…', 'CmdOrCtrl+Shift+E', 'export'),
+      menuCommand('Export Print PDF…', undefined, 'print'),
+      { type: 'separator' },
+      { id: 'reveal-book', label: 'Reveal in Finder', click: (_item, owner) => { const document = focusedDocument(owner); if (document) shell.showItemInFolder(document.book.folder); } },
+    ] },
+    { label: 'Edit', submenu: [
+      menuCommand('Undo Book Edit', 'CmdOrCtrl+Z', 'undo'),
+      menuCommand('Redo Book Edit', 'CmdOrCtrl+Shift+Z', 'redo'),
+      { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+    ] },
+    { label: 'Book', submenu: [
+      menuCommand('Import Photos…', 'CmdOrCtrl+I', 'import-photos'),
+      menuCommand('Import Photo Folder…', 'CmdOrCtrl+Shift+I', 'import-folder'),
+      menuCommand('Import Markdown…', undefined, 'import-texts'),
+      menuCommand('Manage Sources…', undefined, 'manage-sources'),
+      { type: 'separator' },
+      menuCommand('Add Spread', 'CmdOrCtrl+Shift+N', 'add-spread'),
+      menuCommand('Duplicate Spread', 'CmdOrCtrl+D', 'duplicate-spread'),
+      menuCommand('Move Spread Up', 'Alt+CmdOrCtrl+Up', 'move-spread-up'),
+      menuCommand('Move Spread Down', 'Alt+CmdOrCtrl+Down', 'move-spread-down'),
+      menuCommand('Delete Spread', 'CmdOrCtrl+Backspace', 'delete-spread'),
+      { type: 'separator' },
+      { id: 'book-format', label: 'Format', submenu: Object.entries(formats).map(([id, label]) => ({
+        ...menuCommand(label, undefined, `book-format:${id}`), type: 'radio' as const,
+      })) },
+      menuCommand('Book Settings…', undefined, 'book-settings'),
+      menuCommand('Show Book Check', undefined, 'book-check'),
+      { type: 'separator' },
+      { id: 'open-template', label: 'Open Template Folder', click: (_item, owner) => {
+        const document = focusedDocument(owner);
+        if (document) void document.run(() => openDocumentLocation(document, 'template')).then((result) => { if ('error' in result) report(document.window, result.error); });
+      } },
+      menuCommand('Reload Book', 'CmdOrCtrl+R', 'reload'),
+    ] },
+    { label: 'View', submenu: [
+      menuCommand('Hide Sidebar', 'Alt+CmdOrCtrl+1', 'toggle-project', 'sidebar'),
+      menuCommand('Hide Inspector', 'Alt+CmdOrCtrl+2', 'toggle-inspector', 'inspector'),
+      menuCommand('Hide Sources', 'Alt+CmdOrCtrl+3', 'toggle-sources', 'sources'),
+      { type: 'separator' },
+      { ...menuCommand('Vertical', undefined, 'layout-vertical'), type: 'radio' },
+      { ...menuCommand('Grid', undefined, 'layout-grid'), type: 'radio' },
+      { label: 'Grid Columns', id: 'grid-columns', submenu: gridColumns.map((columns) =>
+        ({ ...menuCommand(columns === 1 ? '1 Column' : columns + ' Columns', undefined, `grid-columns-${columns}`), type: 'radio' as const })) },
+    ] },
+    { role: 'windowMenu' },
+  ]));
+  formatMenuKey = JSON.stringify(Object.entries(formats));
+}
+let formatMenuKey = '';
 function updateMenus() {
   const document = focusedDocument();
+  const state = document?.menuState;
+  // Native submenu membership is fixed after installation; rebuild only when the available formats change.
+  if (Menu.getApplicationMenu()?.getMenuItemById('book-format') &&
+      JSON.stringify(Object.entries(state?.formats ?? {})) !== formatMenuKey) installMenu(state?.formats ?? {});
   const menu = Menu.getApplicationMenu();
-  for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector',
-    'layout-vertical', 'layout-grid', 'grid-columns', ...gridColumns.map((columns) => 'grid-columns-' + columns), 'reveal-book', 'open-template']) {
+  for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector', 'sources',
+    'layout-vertical', 'layout-grid', 'grid-columns', ...gridColumns.map((columns) => 'grid-columns-' + columns), 'reveal-book', 'open-template', 'book-settings', 'book-check', 'book-format', ...spreadCommands]) {
     const item = menu?.getMenuItemById(id);
     if (item) item.enabled = !!document && !document.closing;
+  }
+  const available = !!document && !document.closing;
+  for (const id of spreadCommands) {
+    const item = menu?.getMenuItemById(id);
+    if (item) item.enabled = available && !!state?.enabled[id] && !state.editing && !state.busy;
+  }
+  for (const id of ['import-photos', 'import-folder', 'import-texts', 'manage-sources']) {
+    const item = menu?.getMenuItemById(id);
+    if (item) item.enabled = available && !!state?.writable && !state.busy;
+  }
+  for (const id of ['reload', 'open-template']) {
+    const item = menu?.getMenuItemById(id);
+    if (item) item.enabled = available && !state?.busy;
+  }
+  const formats = menu?.getMenuItemById('book-format');
+  if (formats) {
+    const entries = Object.entries(state?.formats ?? {});
+    formats.enabled = available && !!state?.writable && !state.busy && entries.length > 1;
+    for (const item of formats.submenu?.items ?? []) {
+      if (item.id === `book-format:${state?.format}`) item.checked = true;
+    }
   }
   const sidebar = menu?.getMenuItemById('sidebar');
   const inspector = menu?.getMenuItemById('inspector');
   if (sidebar) sidebar.label = document?.sidebar ? 'Hide Sidebar' : 'Show Sidebar';
   if (inspector) inspector.label = document?.inspector ? 'Hide Inspector' : 'Show Inspector';
+  const sources = menu?.getMenuItemById('sources');
+  if (sources) sources.label = document?.sources ? 'Hide Sources' : 'Show Sources';
   // Radio items check themselves when clicked; the window's own layout decides which stays checked. Checking one
   // item of a radio group unchecks the others.
   const layout = document?.layout ?? { mode: 'vertical', columns: 2 };
@@ -729,11 +822,22 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) => fromEditor(event, (document) => document.checkOpenBook(document.currentBook(id), request)));
   ipcMain.handle(channels.cancelCheck, (event) => { editorOwner(event)?.cancelCheck(); });
-  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean; layout?: CanvasLayout }) => {
+  ipcMain.handle(channels.bookMenu, (event, state: BookMenuState) => {
+    const document = editorOwner(event);
+    if (!document || !state || typeof state.enabled !== 'object' || !state.enabled ||
+        typeof state.editing !== 'boolean' || typeof state.writable !== 'boolean' || typeof state.busy !== 'boolean' ||
+        !state.formats || typeof state.formats !== 'object') return;
+    document.menuState = { ...state,
+      enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'],
+      formats: Object.fromEntries(Object.entries(state.formats).filter(([, label]) => typeof label === 'string')) };
+    updateMenus();
+  });
+  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean; sources?: boolean; layout?: CanvasLayout }) => {
     const document = editorOwner(event);
     if (!document || typeof state?.sidebar !== 'boolean' || typeof state?.inspector !== 'boolean') return;
     document.sidebar = state.sidebar;
     document.inspector = state.inspector;
+    if (typeof state.sources === 'boolean') document.sources = state.sources;
     const layout = state.layout;
     if (layout && (layout.mode === 'vertical' || layout.mode === 'grid') && gridColumns.some((columns) => columns === layout.columns)) {
       document.layout = { mode: layout.mode, columns: layout.columns };
@@ -741,53 +845,7 @@ void app.whenReady().then(async () => {
     updateMenus();
   });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: 'appMenu', submenu: [
-      { role: 'about' }, { type: 'separator' },
-      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
-      { label: 'Agent Connections…', click: () => showSettings('agents') },
-      { label: 'Show Start Window', click: () => showStart() },
-      { type: 'separator' }, { role: 'services' }, { type: 'separator' },
-      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
-    ] },
-    { label: 'File', submenu: [
-      menuCommand('New Book…', 'CmdOrCtrl+N', 'new'),
-      menuCommand('Open…', 'CmdOrCtrl+O', 'open'),
-      menuCommand('Explore a Sample', undefined, 'sample'),
-      menuCommand('Reload Book', 'CmdOrCtrl+R', 'reload'),
-      menuCommand('Save a Copy…', 'CmdOrCtrl+Shift+S', 'save-copy'),
-      menuCommand('Manage Sources…', undefined, 'manage-sources'),
-      { type: 'separator' },
-      menuCommand('Import Photos…', 'CmdOrCtrl+I', 'import-photos'),
-      menuCommand('Import Photo Folder…', 'CmdOrCtrl+Shift+I', 'import-folder'),
-      menuCommand('Import Markdown…', undefined, 'import-texts'),
-      { type: 'separator' },
-      menuCommand('Export Proof PDF…', 'CmdOrCtrl+Shift+E', 'export'),
-      menuCommand('Export Print PDF…', undefined, 'print'),
-      { type: 'separator' },
-      { id: 'reveal-book', label: 'Reveal in Finder', click: (_item, owner) => { const document = focusedDocument(owner); if (document) shell.showItemInFolder(document.book.folder); } },
-      { id: 'open-template', label: 'Open Template Folder', click: (_item, owner) => {
-        const document = focusedDocument(owner);
-        if (document) void document.run(() => openDocumentLocation(document, 'template')).then((result) => { if ('error' in result) report(document.window, result.error); });
-      } },
-      { type: 'separator' }, { role: 'close' },
-    ] },
-    { label: 'Edit', submenu: [
-      menuCommand('Undo Book Edit', 'CmdOrCtrl+Z', 'undo'),
-      menuCommand('Redo Book Edit', 'CmdOrCtrl+Shift+Z', 'redo'),
-      { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
-    ] },
-    { label: 'View', submenu: [
-      menuCommand('Hide Sidebar', 'Alt+CmdOrCtrl+1', 'toggle-project', 'sidebar'),
-      menuCommand('Hide Inspector', 'Alt+CmdOrCtrl+2', 'toggle-inspector', 'inspector'),
-      { type: 'separator' },
-      { ...menuCommand('Vertical', undefined, 'layout-vertical'), type: 'radio' },
-      { ...menuCommand('Grid', undefined, 'layout-grid'), type: 'radio' },
-      { label: 'Grid Columns', id: 'grid-columns', submenu: gridColumns.map((columns) =>
-        ({ ...menuCommand(columns === 1 ? '1 Column' : columns + ' Columns', undefined, `grid-columns-${columns}`), type: 'radio' as const })) },
-    ] },
-    { role: 'windowMenu' },
-  ]));
+  installMenu({});
   ready = true;
   const paths = [...new Set([...pendingOpenFiles.splice(0), ...process.argv.filter(isDocument)])];
   if (paths.length) for (const path of paths) await openFromSystem(path);

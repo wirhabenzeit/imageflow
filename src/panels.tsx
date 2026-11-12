@@ -3,11 +3,11 @@ import { gridColumns } from './desktop';
 import type { CanvasLayout } from './desktop';
 import type { PointerEvent } from 'react';
 
-type Side = 'left' | 'right';
-const defaults = { left: 232, right: 276 };
-const limits = { left: [220, 420], right: [260, 520] };
+type Side = 'left' | 'right' | 'bottom';
+const defaults = { left: 232, right: 276, bottom: 170 };
+const limits = { left: [220, 420], right: [260, 520], bottom: [170, 600] };
 const key = 'imageflow.workspace.v1';
-const initial = { left: 232, right: 276, leftHidden: false, rightHidden: false };
+const initial = { ...defaults, leftHidden: false, rightHidden: false, bottomHidden: false };
 function bounded(side: Side, value: number) {
   return Math.max(limits[side][0], Math.min(limits[side][1], value));
 }
@@ -16,31 +16,48 @@ function restore() {
     const saved = JSON.parse(localStorage.getItem(key) ?? '{}');
     return { left: Number.isFinite(saved.left) ? bounded('left', saved.left) : initial.left,
       right: Number.isFinite(saved.right) ? bounded('right', saved.right) : initial.right,
-      leftHidden: saved.leftHidden === true, rightHidden: saved.rightHidden === true };
+      bottom: Number.isFinite(saved.bottom) ? bounded('bottom', saved.bottom) : initial.bottom,
+      leftHidden: saved.leftHidden === true, rightHidden: saved.rightHidden === true, bottomHidden: saved.bottomHidden === true };
   } catch { return initial; }
 }
 export function usePanels() {
   const [panels, setPanels] = useState(restore);
+  const [windowHeight, setWindowHeight] = useState(() => innerHeight);
+  useEffect(() => {
+    const resized = () => setWindowHeight(innerHeight);
+    window.addEventListener('resize', resized);
+    return () => window.removeEventListener('resize', resized);
+  }, []);
+  const bottomMaximum = Math.max(limits.bottom[0], Math.min(limits.bottom[1], Math.floor(windowHeight / 2)));
   useEffect(() => {
     try { localStorage.setItem(key, JSON.stringify(panels)); } catch { /* Preferences are optional. */ }
   }, [panels]);
-  const toggle = (side: Side) => setPanels((value) => ({ ...value, [side + 'Hidden']: !value[side === 'left' ? 'leftHidden' : 'rightHidden'] }));
-  const resize = (side: Side, width: number) => setPanels((value) => ({ ...value, [side]: bounded(side, width) }));
-  return { panels, toggle, resize };
+  const hiddenKey = (side: Side) => (side + 'Hidden') as 'leftHidden' | 'rightHidden' | 'bottomHidden';
+  const toggle = (side: Side) => setPanels((value) => ({ ...value, [hiddenKey(side)]: !value[hiddenKey(side)] }));
+  const show = (side: Side) => setPanels((value) => value[hiddenKey(side)] ? { ...value, [hiddenKey(side)]: false } : value);
+  const resize = (side: Side, size: number) => setPanels((value) => ({ ...value,
+    [side]: side === 'bottom' ? Math.min(bottomMaximum, bounded(side, size)) : bounded(side, size) }));
+  return { panels: { ...panels, bottom: Math.min(panels.bottom, bottomMaximum) }, bottomMaximum, toggle, show, resize };
 }
-export function PanelDivider({ side, width, resize, onResizing }: { side: Side; width: number; resize: (side: Side, width: number) => void; onResizing: (active: boolean) => void }) {
-  const [drag, setDrag] = useState<{ x: number; width: number }>();
+export function PanelDivider({ side, size, maximum = limits[side][1], resize, onResizing }: {
+  side: Side; size: number; maximum?: number; resize: (side: Side, size: number) => void; onResizing: (active: boolean) => void;
+}) {
+  const [drag, setDrag] = useState<{ at: number; size: number }>();
+  const horizontal = side === 'bottom';
   const move = (event: PointerEvent<HTMLDivElement>) => {
-    if (drag) resize(side, drag.width + (event.clientX - drag.x) * (side === 'left' ? 1 : -1));
+    if (drag) resize(side, drag.size + ((horizontal ? event.clientY : event.clientX) - drag.at) * (side === 'left' ? 1 : -1));
   };
-  return <div className="panel-divider" role="separator" tabIndex={0} aria-label={side === 'left' ? 'Resize project panel' : 'Resize Inspector'}
-    aria-orientation="vertical" aria-valuemin={limits[side][0]} aria-valuemax={limits[side][1]} aria-valuenow={width}
-    onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); onResizing(true); setDrag({ x: event.clientX, width }); }}
+  return <div className={'panel-divider' + (horizontal ? ' panel-divider-bottom' : '')} role="separator" tabIndex={0}
+    aria-label={side === 'left' ? 'Resize project panel' : side === 'right' ? 'Resize Inspector' : 'Resize Sources'}
+    aria-orientation={horizontal ? 'horizontal' : 'vertical'} aria-valuemin={limits[side][0]} aria-valuemax={maximum} aria-valuenow={size}
+    onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); onResizing(true);
+      setDrag({ at: horizontal ? event.clientY : event.clientX, size }); }}
     onPointerMove={move} onPointerUp={() => setDrag(undefined)} onLostPointerCapture={() => { setDrag(undefined); onResizing(false); }}
     onDoubleClick={() => resize(side, defaults[side])} onKeyDown={(event) => {
       if (event.key === 'Home') { event.preventDefault(); resize(side, defaults[side]); }
-      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-        event.preventDefault(); resize(side, width + (event.key === 'ArrowRight' ? 10 : -10) * (side === 'left' ? 1 : -1));
+      const increase = horizontal ? 'ArrowUp' : 'ArrowRight', decrease = horizontal ? 'ArrowDown' : 'ArrowLeft';
+      if (event.key === increase || event.key === decrease) {
+        event.preventDefault(); resize(side, size + (event.key === increase ? 10 : -10) * (side === 'right' ? -1 : 1));
       }
     }} />;
 }
