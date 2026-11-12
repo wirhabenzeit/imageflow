@@ -1,7 +1,8 @@
 import { Icon } from './Icon';
+import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
-import type { Rect, TemplateInfo } from './desktop';
+import type { TemplateInfo } from './desktop';
 import { readEdit, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import type { Edit } from './Inspector';
@@ -64,17 +65,16 @@ export function MarkedFields({ project, spread, template, edits, edit }: {
       change={(value) => edit(({ project: files }) => writeEdit(files, spread.id, target, value), target.param.label + ' updated')} />);
 }
 
-// Opens over what is edited on the page and edits it in place: a node the template marked with `ctx.edit(...)` or
+// Edits the selected item from a stable panel at the bottom of the visible canvas: a node the template marked with `ctx.edit(...)` or
 // `ctx.Text`, or a box or element. For a box, `children` is the platform's part (its photo or text) and `title`
 // names the box.
-export function EditPopover({ project, spread, template, edits, anchor, bounds, readOnly, blocked, edit, close, step, actions, title, children }: {
-  project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; anchor: Rect; bounds: { width: number };
+export function EditPopover({ project, spread, template, edits, host, readOnly, blocked, edit, close, step, actions, title, children }: {
+  project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; host?: HTMLElement | null;
   readOnly: boolean; blocked?: string; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
   actions?: ReactNode; title?: string; children?: ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const [drafts, setDrafts] = useState<Record<string, Value>>({});
-  const [placement, setPlacement] = useState<{ left: number; top: number }>();
   // Parameters owned by a template-supplied element editor are edited there; the popover offers it as an action.
   const editors = template.spreads[spread.definition]?.elements ?? {};
   const targets = edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((target): target is EditTarget =>
@@ -117,37 +117,12 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
     return () => document.removeEventListener('pointerdown', outside, true);
   }, [close]);
 
-  // Sit below the target, or above it, where that is on screen. A target too tall for either, such as a box filling
-  // the page, gets the popover over its own top edge, kept inside the visible part of the book.
+  // Focus the selected item's first control without scrolling the book to the floating panel.
   useLayoutEffect(() => {
-    const element = panel.current;
-    if (!element) return;
-    const view = element.closest('.canvas');
-    const stage = element.offsetParent as HTMLElement | null;
-    const visibleTop = view && stage ? view.scrollTop - stage.offsetTop : -Infinity;
-    const visibleBottom = view && stage ? view.scrollTop + view.clientHeight - stage.offsetTop : Infinity;
-    // A grid scrolls sideways, so the stage can be much wider than the part on screen.
-    const visibleLeft = view && stage ? Math.max(0, view.scrollLeft - stage.offsetLeft) : 0;
-    const visibleRight = view && stage ? Math.min(bounds.width, view.scrollLeft + view.clientWidth - stage.offsetLeft) : bounds.width;
-    const height = element.offsetHeight;
-    const below = anchor.y + anchor.height + 10;
-    const above = anchor.y - height - 10;
-    const top = below + height <= visibleBottom ? below
-      : above >= Math.max(0, visibleTop) ? above
-      : Math.max(Math.max(0, visibleTop) + 8, Math.min(anchor.y + 10, visibleBottom - height - 8));
-    const left = Math.max(visibleLeft + 8, Math.min(anchor.x, visibleRight - element.offsetWidth - 8));
-    setPlacement({ left, top });
-  }, [anchor.x, anchor.y, anchor.width, anchor.height, bounds.width, visible.length, blocked, !!children]);
-
-  // Focus once placed: the popover is hidden while it measures itself, and hidden fields cannot take focus.
-  const focused = useRef(false);
-  useEffect(() => {
-    if (!placement || focused.current) return;
-    focused.current = true;
-    // A box editor without parameters focuses its first control, such as the photo or text choice.
+    if (!host) return;
     (panel.current?.querySelector<HTMLElement>('[data-autofocus]') ??
-      panel.current?.querySelector<HTMLElement>('fieldset :is(select, input, textarea, button):not(:disabled)'))?.focus();
-  }, [placement]);
+      panel.current?.querySelector<HTMLElement>('fieldset :is(select, input, textarea, button):not(:disabled)'))?.focus({ preventScroll: true });
+  }, [host]);
 
   function keys(event: KeyboardEvent) {
     const multiline = (event.target as HTMLElement).tagName === 'TEXTAREA';
@@ -173,7 +148,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
     if (!owner || !layout) return undefined;
     return (owner.scope === 'element' ? layout.elements : layout.boxes)[owner.owner!]?.label;
   }
-  if (!visible.length && !actions && !children) return null;
+  if (!host || (!visible.length && !actions && !children)) return null;
   const [only] = visible;
   const heading: ReactNode = title ?? (visible.length === 1
     ? <>{only.label}{scopeLabel[only.target.scope] && <span className="muted"> · {scopeLabel[only.target.scope]}</span>}</>
@@ -199,9 +174,13 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
       {description && <small className="field-description">{description}</small>}
     </div>;
   });
-  return <div ref={panel} className="edit-popover" role="dialog" aria-label={'Edit ' + (title ?? visible.map(({ label }) => label).join(', '))}
-    style={placement ?? { left: anchor.x, top: anchor.y + anchor.height + 10, visibility: 'hidden' }} onKeyDown={keys}
-    onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
+  return createPortal(<div ref={panel} className="item-controls edit-popover" role="dialog" aria-label={'Edit ' + (title ?? visible.map(({ label }) => label).join(', '))}
+    onKeyDown={keys} onPointerDown={(event) => event.stopPropagation()}
+    onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}
+    onMouseMove={(event) => event.stopPropagation()} onMouseLeave={(event) => event.stopPropagation()}
+    onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
+    onDragLeave={(event) => event.stopPropagation()}
+    onDrop={(event) => { event.preventDefault(); event.stopPropagation(); }}>
     <div className="ep-head">
       <span>{heading}</span>
       <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)" onClick={() => { commit(); close(); }}><Icon name="close" /></button>
@@ -213,5 +192,5 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
     {actions && !readOnly && !blocked && <div className="ep-actions">{actions}</div>}
     {blocked && <p className="ep-hint muted" role="status">{blocked}</p>}
     {readOnly && <p className="ep-hint muted">Sample projects are read-only.</p>}
-  </div>;
+  </div>, host);
 }

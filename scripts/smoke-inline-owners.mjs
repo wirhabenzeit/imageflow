@@ -9,7 +9,7 @@ import { _electron } from 'playwright-core';
 // Every box, element and marked node of a spread has an editor that opens from the sidebar's list, by identity:
 // elements sharing a rectangle each edit their own values, one the layout leaves off the page still opens, a
 // setting marked on a photo stays editable in the photo's toolbar, and standalone ctx.Text nodes are reachable
-// from the keyboard. A field shown twice opens its editor at the occurrence clicked, and Tab reaches both.
+// from the keyboard. A field shown twice keeps the selected occurrence outlined, and Tab reaches both.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'owners-'));
 const project = join(work, 'Book.imageflow');
@@ -23,6 +23,12 @@ try {
   const ready = () => w.waitForSelector('iframe.book-frame-book[data-current][data-ready]');
   await ready();
   const saved = (text) => w.waitForFunction((text) => document.querySelector('.status')?.textContent === text, text);
+  const docked = async (panel) => {
+    const canvas = await w.locator('.canvas-wrap').boundingBox(), controls = await panel.boundingBox();
+    assert.ok(Math.abs(controls.x + controls.width / 2 - canvas.x - canvas.width / 2) < 2, 'Item controls are centered in the canvas');
+    assert.ok(Math.abs(canvas.y + canvas.height - controls.y - controls.height - 16) < 2, 'Item controls share the bottom inset');
+    assert.ok(controls.y >= canvas.y && controls.x >= canvas.x && controls.x + controls.width <= canvas.x + canvas.width, 'Controls fit inside the canvas');
+  };
 
   // Probes: two elements at the same rectangle and one never rendered on the title page; a spread setting marked
   // on the story's photo.
@@ -68,8 +74,8 @@ try {
   assert.equal((await read()).spreads[0].params.subtitle, 'Typed from the list');
   await ready();
 
-  // The subtitle is shown twice; the sidebar lists it once. Clicking the second, higher one on the page anchors the
-  // editor there rather than at the first, and Tab steps through both in reading order.
+  // The subtitle is shown twice; selection follows the occurrence clicked while the controls keep their position.
+  // Tab steps through both in reading order.
   const frame = w.frameLocator('iframe.book-frame-book[data-current]');
   const subtitles = frame.locator('[data-spread="title"] [data-edit="subtitle"]');
   assert.equal(await subtitles.count(), 2);
@@ -94,6 +100,10 @@ try {
   await w.mouse.click(repeated.x, repeated.y);
   const repeatedEditor = w.getByRole('dialog', { name: 'Edit Subtitle' });
   await repeatedEditor.waitFor();
+  await docked(repeatedEditor);
+  const scrollTop = await w.locator('.canvas').evaluate((node) => { const top = node.scrollTop; node.scrollTop += 120; return top; });
+  await docked(repeatedEditor);
+  await w.locator('.canvas').evaluate((node, top) => { node.scrollTop = top; }, scrollTop);
   await anchoredAt(subtitles.nth(1));
   await repeatedEditor.getByRole('textbox', { name: 'Subtitle' }).press('Tab');
   await w.getByRole('dialog', { name: 'Edit Heading' }).waitFor();
@@ -126,11 +136,13 @@ try {
   await anchoredAt(marked.nth(1));
   await both.getByRole('textbox', { name: 'Subtitle' }).fill('Typed from the list');
   // Resizing the window moves and scales the sheets; the editor stays on the lower node.
-  const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
+  const owner = await app.browserWindow(w);
+  const size = await owner.evaluate((window) => window.getContentSize());
   for (const width of [size[0] - 360, size[0]]) {
-    await app.evaluate(({ BrowserWindow }, [width, height]) => BrowserWindow.getAllWindows()[0].setContentSize(width, height), [width, size[1]]);
+    await owner.evaluate((window, [width, height]) => window.setContentSize(width, height), [width, size[1]]);
     await w.waitForTimeout(800);
     await anchoredAt(marked.nth(1));
+    await docked(both);
   }
   // Clicking the node that appeared, which now holds the number the editor opened with, opens it there. The open
   // popover can cover that node, depending on the window size, and a click on the popover is not a click on the page;
@@ -181,10 +193,11 @@ try {
   assert.equal(afterCanvas.firstProbe?.params?.value, undefined);
   await ready();
 
-  // An element the layout does not render opens at the spread's corner and says so.
+  // An element the layout does not render uses the same controls and explains that it is hidden.
   await list.getByRole('button', { name: 'Edit Hidden probe', exact: true }).click();
   const hidden = w.getByRole('dialog', { name: 'Edit Hidden probe' });
   await hidden.waitFor();
+  await docked(hidden);
   assert.match(await hidden.textContent(), /Not on the page in this layout right now/);
   await hidden.getByRole('textbox', { name: 'Value' }).fill('kept');
   await hidden.getByRole('textbox', { name: 'Value' }).press('Enter');
@@ -197,12 +210,30 @@ try {
   await w.locator('.inspector').getByRole('button', { name: 'Edit Main photo', exact: true }).click();
   const extra = w.locator('.crop-params').getByRole('textbox', { name: 'Extra probe' });
   await extra.waitFor();
+  await docked(w.locator('.crop-toolbar'));
   assert.equal(await extra.inputValue(), 'extra');
   await extra.fill('from the toolbar');
   await extra.press('Enter');
   await saved('Extra probe updated');
   assert.equal((await read()).spreads[1].params.extraProbe, 'from the toolbar');
-  console.log('ImageFlow inline owners passed.');
+  await ready();
+  await w.locator('.crop-toolbar').waitFor();
+  await w.keyboard.press('Escape');
+  await w.locator('.crop-editor').waitFor({ state: 'detached' });
+  await list.getByRole('button', { name: 'Edit Story', exact: true }).click();
+  const textControls = w.getByRole('dialog', { name: 'Edit Story', exact: true });
+  await textControls.waitFor();
+  await docked(textControls);
+  await w.screenshot({ path: join(root, '.build', 'item-controls-text.png'), animations: 'disabled' });
+  // A short canvas keeps long control panels reachable through their own scrolling area.
+  await owner.evaluate((window) => window.setContentSize(940, 650));
+  await w.getByRole('separator', { name: 'Resize Sources' }).focus();
+  // Focus alone preserves the editor; resizing with the keyboard leaves the canvas controls open.
+  for (let i = 0; i < 13; i++) await w.keyboard.press('ArrowUp');
+  await docked(textControls);
+  assert.ok(await textControls.evaluate((node) => node.scrollHeight > node.clientHeight), 'Long controls scroll in a short canvas');
+  await w.screenshot({ path: join(root, '.build', 'item-controls-small.png'), animations: 'disabled' });
+  console.log('ImageFlow inline owners passed: item identity, editing, and shared control placement across scrolling and resizing.');
 } finally {
   await app.close();
   await rm(work, { recursive: true, force: true });

@@ -62,13 +62,14 @@ function LayoutPicker({ summary, spread, template, choose, openPicker }: {
 
 // Content the spread keeps for other layouts. Placing an item moves it into a box of this layout (swapping with what
 // is there); dragging it onto a box does the same. Discard removes it from the spread; the source stays.
-function KeptContent({ summary, spread, template, kept, label, settings, writable, place, discard }: {
+function KeptContent({ summary, spread, template, kept, label, settings, writable, place, discard, expanded, setExpanded }: {
   summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; kept: ReturnType<typeof keptOutside>; label: string;
+  expanded: boolean; setExpanded: (open: boolean) => void;
   settings: string[]; writable: boolean; place: (from: string, to: string) => void; discard: (box: string, name: string) => void;
 }) {
   const layout = template.spreads[spread.definition];
   const elementName = (id: string) => Object.values(template.spreads).find((item) => Object.hasOwn(item.elements, id))?.elements[id].label ?? id;
-  return <details open className="kept-content">
+  return <details open={expanded} className="kept-content" onToggle={(event) => setExpanded(event.currentTarget.open)}>
     <summary>Saved outside this layout{label ? ' · ' + label : ''}</summary>
     {kept.length > 0 && <p className="muted">Layouts with these boxes show them again. Drag one onto a box, or place it:</p>}
     <ul className="kept-list">
@@ -139,6 +140,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
 }) {
   const items = useRef(new Map<string, HTMLElement>());
   const [flash, setFlash] = useState<string>();
+  const [keptOpen, setKeptOpen] = useState(false);
   // A click on a box in the book points out its entry here.
   useEffect(() => {
     if (!focus || source) return;
@@ -226,9 +228,6 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
         {definition && <Fields key={spread.id} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
           values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />}
       </details>}
-      {template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={spread} template={template}
-        kept={kept} label={keptLabel} settings={keptSettings} writable={writable} place={place}
-        discard={(box, name) => changeSpread((item) => discardContent(item, box), name + ' removed from this spread')} />}
       {template && (contents.length > 0 || marked.length > 0) && <section className="spread-contents" aria-label="On this spread">
         <p className="field-label">On this spread</p>
         <ul className="content-list">
@@ -260,6 +259,9 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
           })}
         </ul>
       </section>}
+      {template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={spread} template={template}
+        expanded={keptOpen} setExpanded={setKeptOpen} kept={kept} label={keptLabel} settings={keptSettings} writable={writable} place={place}
+        discard={(box, name) => changeSpread((item) => discardContent(item, box), name + ' removed from this spread')} />}
     </fieldset>
   </aside>;
 }

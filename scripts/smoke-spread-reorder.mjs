@@ -206,6 +206,7 @@ try {
   await writeFile(join(brokenPath, 'project.json'), JSON.stringify(brokenProject, null, 2));
   const broken = await testBook(app, brokenPath);
   await broken.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
+  await broken.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   await broken.locator('.spread-thumb[data-spread="title"]').click();
   assert.equal(await broken.getByRole('button', { name: 'Move spread up' }).isEnabled(), true);
   await broken.getByRole('button', { name: 'Move spread up' }).click();

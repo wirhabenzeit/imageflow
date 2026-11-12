@@ -16,7 +16,7 @@ async function launch() {
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
   let w = await app.firstWindow();
   w.setDefaultTimeout(20000);
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1440, 900));
+  await (await app.browserWindow(w)).evaluate((window) => window.setContentSize(1440, 900));
   await app.evaluate(({ dialog }, filePath) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath });
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
@@ -72,6 +72,38 @@ try {
   await right.focus();
   await w.keyboard.press('ArrowLeft');
   assert.equal(await right.getAttribute('aria-valuenow'), '286');
+  await (await app.browserWindow(w)).evaluate((window) => window.setContentSize(940, 900));
+  await settle();
+  // Sources has fixed-size tiles in a wrapping, vertically scrolling area, with a saved divider and visibility.
+  assert.equal(await w.locator('.sources-bar .hint').count(), 0);
+  const bottom = w.getByRole('separator', { name: 'Resize Sources' });
+  assert.equal(await bottom.getAttribute('aria-orientation'), 'horizontal');
+  await bottom.focus();
+  await w.keyboard.press('ArrowUp');
+  assert.equal(await bottom.getAttribute('aria-valuenow'), '180');
+  const bottomHandle = await bottom.boundingBox();
+  await w.mouse.move(bottomHandle.x + 100, bottomHandle.y + 3);
+  await w.mouse.down();
+  await w.mouse.move(bottomHandle.x + 100, bottomHandle.y - 117, { steps: 5 });
+  await w.mouse.up();
+  assert.equal(await bottom.getAttribute('aria-valuenow'), '300');
+  const tileSize = await w.locator('.source-photo').first().boundingBox();
+  assert.equal(Math.round(tileSize.height), 114);
+  assert.ok(await w.locator('.source-items').evaluate((node) => node.scrollWidth <= node.clientWidth));
+  assert.ok(await w.locator('.source-photo').evaluateAll((nodes) => new Set(nodes.map((node) => node.offsetTop)).size > 1));
+  await menuAction(app, 'Hide Sources');
+  assert.equal(await w.getByRole('region', { name: 'Sources', exact: true }).count(), 0);
+  await menuAction(app, 'Show Sources');
+  assert.equal(await bottom.getAttribute('aria-valuenow'), '300');
+  await bottom.focus();
+  await w.keyboard.press('Home');
+  assert.equal(await bottom.getAttribute('aria-valuenow'), '170');
+  assert.ok(await w.locator('.source-items').evaluate((node) => node.scrollHeight > node.clientHeight));
+  await w.keyboard.press('ArrowUp');
+  await w.keyboard.press('ArrowUp');
+  assert.equal(await bottom.getAttribute('aria-valuenow'), '190');
+  await (await app.browserWindow(w)).evaluate((window) => window.setContentSize(1440, 900));
+  await settle();
   // Hover descriptions and long status messages must not move the canvas. The photo grid has a setting the page does
   // not show (Gap), so its sidebar has a field.
   await w.locator('.spread-thumb').nth(3).click();
@@ -98,12 +130,28 @@ try {
   const photo = await w.locator('.book-frame-book[data-current]').contentFrame().locator('[data-spread="arriving"] [data-box="hero"]').boundingBox();
   await w.mouse.click(photo.x + photo.width / 2, photo.y + photo.height / 2);
   await w.locator('.crop-editor').waitFor();
+  const zoomOut = await w.getByRole('button', { name: 'Zoom out', exact: true }).boundingBox();
+  const done = await w.locator('.crop-toolbar').getByRole('button', { name: 'Done', exact: true }).boundingBox();
+  assert.equal(Math.round(zoomOut.y), Math.round(done.y), 'The compact toolbar stays on one line when space allows');
+  await w.locator('.crop-more > summary').click();
+  await w.getByRole('button', { name: 'Replace photo…', exact: true }).click();
+  await w.getByRole('dialog', { name: 'Replace photo in Main photo' }).waitFor();
+  await w.screenshot({ path: join(root, '.build', 'crop-photo-chooser.png') });
+  await w.keyboard.press('Escape');
   await w.keyboard.press('Escape');
   await w.locator('.status').evaluate((node) => { node.textContent = 'Project preview · Proof export'; });
   await w.screenshot({ path: join(root, '.build', 'workspace.png') });
   await w.getByRole('button', { name: 'Toggle Inspector', exact: true }).click();
+  await menuAction(app, 'Hide Sources');
+  await w.waitForFunction(() => JSON.parse(localStorage.getItem('imageflow.workspace.v1')).bottomHidden === true);
   await app.close();
   w = await launch();
+  assert.equal(await w.getByRole('button', { name: 'Toggle Sources', exact: true }).count(), 0);
+  assert.equal(await w.getByRole('region', { name: 'Sources', exact: true }).count(), 0);
+  await menuAction(app, 'Show Sources');
+  assert.equal(await w.getByRole('separator', { name: 'Resize Sources' }).getAttribute('aria-valuenow'), '190');
+  await w.getByRole('separator', { name: 'Resize Sources' }).dblclick();
+  assert.equal(await w.getByRole('separator', { name: 'Resize Sources' }).getAttribute('aria-valuenow'), '170');
   assert.equal(await w.getByRole('button', { name: 'Toggle Inspector', exact: true }).getAttribute('aria-pressed'), 'false');
   assert.equal(await w.getByRole('separator', { name: 'Resize project panel' }).getAttribute('aria-valuenow'), '302');
   await menuAction(app, 'Show Inspector');
@@ -112,7 +160,7 @@ try {
   await settle();
   await restored.dblclick();
   assert.equal(await restored.getAttribute('aria-valuenow'), '276');
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(940, 650));
+  await (await app.browserWindow(w)).evaluate((window) => window.setContentSize(940, 650));
   await settle();
   assert.equal(await w.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   const sourceBar = await w.locator('.sources-bar').boundingBox();
