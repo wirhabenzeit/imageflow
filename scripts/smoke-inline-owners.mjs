@@ -128,14 +128,23 @@ try {
   // Resizing the window moves and scales the sheets; the editor stays on the lower node.
   const size = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
   for (const width of [size[0] - 360, size[0]]) {
-    await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setContentSize(width, 900), width);
+    await app.evaluate(({ BrowserWindow }, [width, height]) => BrowserWindow.getAllWindows()[0].setContentSize(width, height), [width, size[1]]);
     await w.waitForTimeout(800);
     await anchoredAt(marked.nth(1));
   }
-  // Opening the node that now holds the number the editor opened with opens it, rather than staying put.
+  // Clicking the node that appeared, which now holds the number the editor opened with, opens it there. The open
+  // popover can cover that node, depending on the window size, and a click on the popover is not a click on the page;
+  // then the sidebar, which opens the first occurrence, opens it instead.
+  await marked.nth(0).scrollIntoViewIfNeeded();
+  await w.waitForTimeout(150);
   const appeared = await centre(marked.nth(0));
-  await w.mouse.click(appeared.x, appeared.y);
-  await w.getByRole('dialog', { name: 'Edit Subtitle, Show extra' }).waitFor();
+  const covered = await w.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('.edit-popover'), appeared);
+  if (covered) await list.getByRole('button', { name: 'Edit Subtitle, Show extra', exact: true }).click();
+  else await w.mouse.click(appeared.x, appeared.y);
+  await w.getByRole('dialog', { name: 'Edit Subtitle, Show extra' }).waitFor({ timeout: 5000 }).catch(async (error) => {
+    const hit = await w.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.outerHTML.slice(0, 200), appeared);
+    throw new Error(`No editor opened ${covered ? 'from the sidebar' : 'by clicking at ' + JSON.stringify(appeared) + ' on ' + hit}`, { cause: error });
+  });
   await anchoredAt(marked.nth(0));
   await w.keyboard.press('Escape');
   assert.equal((await read()).spreads[0].params.subtitle, 'Typed from the list');
