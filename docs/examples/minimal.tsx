@@ -1,37 +1,43 @@
-// Minimal template: one layout with a photo, an editable heading and page numbers.
-import { defineTemplate, geometry, mm, p, pt, Spread, spreadFor } from 'imageflow';
+// Quickstart: one layout with a full-bleed photo, an editable heading, a book setting and a page number.
+import { defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 
-const format = {
+// Generic geometry for trying things out, not a printer's product: take page counts and output limits from the
+// printer's specification before printing.
+const format = printFormat({
   label: 'Example · 20 × 20 cm',
   trim: { width: mm(200), height: mm(200) },
-  bleed: { top: mm(3), bottom: mm(3), outside: mm(3), binding: mm(0) },
-  safe: { top: mm(12), bottom: mm(12), outside: mm(12), binding: mm(15) },
-  structure: { delivery: 'pages', ends: 'inside-covers', pageCount: { min: 2, max: 200, step: 2 } },
-  output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow', minimumTextSize: pt(7) },
-} as const;
-const spread = spreadFor({});
+  bleed: { all: mm(3), binding: mm(0) },
+  safe: { all: mm(12), binding: mm(15) },
+  ends: 'inside-covers',
+  pageCount: { min: 2, max: 200, step: 2 },
+  output: { minimumTextSize: pt(7) },
+});
 
+// Preview only: the generic `serif` and `sans-serif` families render anywhere, but print export accepts only fonts
+// bundled in template/fonts/ and loaded with @font-face from a CSS file the template imports (see the starter).
 export default defineTemplate({
-  id: 'example-minimal', version: '1.0.0', contract: 1, requires: ['geometry', 'typed-components'],
+  id: 'example-minimal', version: '1.0.0', contract: 1,
+  requires: ['spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'typed-components'],
   format,
-  spreads: {
+  // Book settings, declared once. `spread` below types `ctx.document` from them.
+  parameters: { accent: p.color({ label: 'Heading colour', default: '#243b30' }) },
+  spreads: ({ spread }) => ({
     photo: spread({
       label: 'Photo and heading',
       parameters: { heading: p.string({ label: 'Heading', default: 'A day outside' }) },
       boxes: { hero: { type: 'photo', label: 'Photo' } },
       render: (ctx) => {
-        // Rectangles are millimetres from the left page's trim corner; css() positions a node inside <Spread>.
-        const text = geometry.page(ctx.format, 'right', 'safe');
+        // Rectangles are millimetres from the left page's trim corner; `rect` positions a platform component.
+        const text = ctx.geometry.page('right', 'safe');
         return <Spread>
-          <ctx.PhotoBox id="hero" style={geometry.css(geometry.page(ctx.format, 'left', 'bleed'))} />
-          <h1 {...ctx.edit('heading')} style={{ ...geometry.css({ ...text, height: 30 }), margin: 0, font: '600 24pt/1.2 serif' }}>
-            {ctx.params.heading}
-          </h1>
-          <span style={{ ...geometry.css({ ...text, y: text.y + text.height - 6, height: 6 }), font: '8pt sans-serif', textAlign: 'right' }}>
+          <ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />
+          <ctx.Text parameter="heading" as="h1" rect={{ ...text, height: 30 }}
+            style={{ margin: 0, font: '600 24pt/1.2 serif', color: ctx.document.accent }} />
+          <span style={{ ...ctx.geometry.css({ ...text, y: text.y + text.height - 6, height: 6 }), font: '8pt sans-serif', textAlign: 'right' }}>
             {ctx.page.right}
           </span>
         </Spread>;
       },
     }),
-  },
+  }),
 });

@@ -13,7 +13,9 @@ import { markdownToHtml } from './markdown';
 import { parameterWarnings, resolveParams } from './parameters';
 import type { Parameters } from './parameters';
 import { flow } from './text-flow';
-import { bookIndex, chooseFormat, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import { declarationWarnings } from './declaration-check';
+import type { Schema } from './declaration-check';
+import { bookIndex, chooseFormat, normalizeTemplate, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
@@ -843,9 +845,17 @@ export async function startRender(root: HTMLElement) {
     Object.assign(globalThis, { ImageFlowRuntime: runtime, ImageFlowReact: React, ImageFlowJSX: jsx });
     const [module] = await Promise.all([import(/* @vite-ignore */ book.template.script), loadStyles(book.template.css)]);
     // The project's format choice is resolved first; everything below works with that one format.
-    const declared = templateSchema.safeParse(module.default);
+    // `spreads` may be a builder function when the template was exported without defineTemplate.
+    const exported = normalizeTemplate(module.default);
+    const declaration = declarationWarnings(exported, templateSchema as unknown as Schema);
+    const declared = templateSchema.safeParse(exported);
     if (!declared.success) {
-      const issues = declared.error.issues.slice(0, 20).map((issue) => ({ path: issue.path.join('.'), message: issue.message }));
+      // A misspelt property often causes the schema error, such as `lable` leaving `label` missing: name it too.
+      const issues = [
+        ...declared.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
+        ...declaration.filter(({ code }) => code === 'declaration-unknown-property')
+          .map(({ path, message, suggestion }) => ({ path, message: message + ' ' + suggestion })),
+      ].slice(0, 20);
       const [first] = issues;
       throw new DeclarationError('Template' + (first.path ? ' → ' + first.path.split('.').join(' → ') : '') + ': ' + first.message, issues);
     }
@@ -906,6 +916,7 @@ export async function startRender(root: HTMLElement) {
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
     const warnings: Issue[] = [
+      ...declaration.map(({ code, message: text, path, details, suggestion }) => ({ ...message(text), code, details: { ...details, path }, suggestion })),
       ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),

@@ -67,3 +67,14 @@ export function css(rect: Rect): CSSProperties {
 }
 
 export const geometry = { page, spread, inset, grid, design, css };
+
+// The helpers with one spread's format applied, as `ctx.geometry`.
+export function boundGeometry(format: ResolvedFormat) {
+  return {
+    page: (side: Side, area?: Area) => page(format, side, area),
+    spread: (area?: Area) => spread(format, area),
+    design: (canvas: { width: number; height: number }) => design(format, canvas),
+    inset, grid, css,
+  };
+}
+export type BoundGeometry = ReturnType<typeof boundGeometry>;

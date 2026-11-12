@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "start": "npm run build && node scripts/stage-desktop.mjs && electron .build/desktop",
-    "build": "tsc --noEmit && tsc -p sample/starter/template && vite build",
+    "build": "tsc --noEmit && tsc -p sample/starter/template && tsc -p tests/types && vite build",
     "package:mac": "npm run build && node scripts/package-mac.mjs",
     "test:unit": "node scripts/test-unit.mjs",
     "test:desktop": "npm run build && node scripts/test-unit.mjs && node scripts/stage-desktop.mjs && node scripts/smoke-workspace.mjs && node scripts/smoke-settings.mjs && node scripts/smoke-appearance.mjs && node scripts/smoke-desktop.mjs && node scripts/smoke-draft.mjs && node scripts/smoke-edit.mjs && node scripts/smoke-files.mjs && node scripts/smoke-layouts.mjs && node scripts/smoke-authoring-reload.mjs && node scripts/smoke-authoring-preview.mjs && node scripts/smoke-authoring-fixtures.mjs && node scripts/smoke-authoring-diagnostics.mjs && node scripts/smoke-mcp.mjs && node scripts/smoke-authoring-examples.mjs && node scripts/smoke-starter-geometry.mjs && node scripts/smoke-project-lifecycle.mjs",

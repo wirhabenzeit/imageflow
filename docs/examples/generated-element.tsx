@@ -1,15 +1,11 @@
 // Generated content with parameters: a trip summary drawn from element parameters, edited by clicking it.
-import { defineTemplate, geometry, mm, p, pt, Spread, spreadFor } from 'imageflow';
+import { defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 
-const format = {
-  label: 'Example · 20 × 20 cm',
-  trim: { width: mm(200), height: mm(200) },
-  bleed: { top: mm(3), bottom: mm(3), outside: mm(3), binding: mm(0) },
-  safe: { top: mm(12), bottom: mm(12), outside: mm(12), binding: mm(15) },
-  structure: { delivery: 'pages', ends: 'inside-covers', pageCount: { min: 2, max: 200, step: 2 } },
-  output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow', minimumTextSize: pt(7) },
-} as const;
-const spread = spreadFor({});
+const format = printFormat({
+  label: 'Example · 20 × 20 cm', trim: { width: mm(200), height: mm(200) },
+  bleed: { all: mm(3), binding: mm(0) }, safe: { all: mm(12), binding: mm(15) },
+  ends: 'inside-covers', pageCount: { min: 2, max: 200, step: 2 }, output: { minimumTextSize: pt(7) },
+});
 
 function Stats({ distance, days, unit }: { distance: number; days: number; unit: 'km' | 'mi' }) {
   const shown = unit === 'mi' ? distance / 1.609 : distance;
@@ -20,9 +16,9 @@ function Stats({ distance, days, unit }: { distance: number; days: number; unit:
 }
 
 export default defineTemplate({
-  id: 'example-generated-element', version: '1.0.0', contract: 1, requires: ['geometry', 'typed-components'],
+  id: 'example-generated-element', version: '1.0.0', contract: 1, requires: ['spread-builder', 'bound-geometry', 'format-helper', 'typed-components'],
   format,
-  spreads: {
+  spreads: ({ spread }) => ({
     summary: spread({
       label: 'Trip summary',
       elements: { stats: {
@@ -35,14 +31,14 @@ export default defineTemplate({
       } },
       render: (ctx) => {
         const { distance, days, unit } = ctx.elements.stats.params;
-        const area = geometry.page(ctx.format, 'right', 'safe');
+        const area = ctx.geometry.page('right', 'safe');
         // <Element> is the click target for its own parameters; ctx.Element only accepts this layout's element IDs.
         return <Spread>
-          <ctx.Element id="stats" style={geometry.css({ ...area, height: area.width * .4 })}>
+          <ctx.Element id="stats" rect={{ ...area, height: area.width * .4 }}>
             <Stats distance={distance} days={days} unit={unit} />
           </ctx.Element>
         </Spread>;
       },
     }),
-  },
+  }),
 });

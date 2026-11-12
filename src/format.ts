@@ -33,6 +33,29 @@ export type PrintFormat = z.infer<typeof formatSchema>;
 export const mm = (value: number): Length => ({ value, unit: 'mm' });
 export const pt = (value: number): Length => ({ value, unit: 'pt' });
 export const inch = (value: number): Length => ({ value, unit: 'in' });
+type Insets = PrintFormat['bleed'];
+export type InsetsShorthand = Length | (Partial<Insets> & { all: Length }) | Insets;
+const isLength = (value: InsetsShorthand): value is Length => 'value' in value && 'unit' in value;
+function expandInsets(insets: InsetsShorthand): Insets {
+  if (isLength(insets)) return { top: insets, bottom: insets, outside: insets, binding: insets };
+  const { all, ...sides } = insets as Partial<Insets> & { all?: Length };
+  if (!all) return insets as Insets;
+  return { top: sides.top ?? all, bottom: sides.bottom ?? all, outside: sides.outside ?? all, binding: sides.binding ?? all };
+}
+
+// A complete PrintFormat from shorter options. Only the delivery shape and the PDF container basics have defaults;
+// page counts and every printer limit stay explicit, so a format never claims to be a printer's product by default.
+export function printFormat(options: {
+  label: string; trim: { width: Length; height: Length }; bleed: InsetsShorthand; safe: InsetsShorthand;
+  pageCount: PrintFormat['structure']['pageCount']; delivery?: PrintFormat['structure']['delivery'];
+  ends?: PrintFormat['structure']['ends']; output?: Partial<PrintFormat['output']>;
+}): PrintFormat {
+  return {
+    label: options.label, trim: options.trim, bleed: expandInsets(options.bleed), safe: expandInsets(options.safe),
+    structure: { delivery: options.delivery ?? 'pages', ends: options.ends ?? 'single-pages', pageCount: options.pageCount },
+    output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow', ...options.output },
+  };
+}
 export type Span = 'spread' | 'left' | 'right';
 export type PrintSide = Span;
 
