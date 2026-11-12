@@ -31,10 +31,10 @@ export const channels = {
 
 export type OpenAction = 'open' | 'new' | 'sample' | 'reload';
 export type ExportMode = 'proof' | 'print';
-// The main canvas shows spreads in one vertical column, or in a grid of `rows` rows that scrolls sideways.
-export type CanvasLayout = { mode: 'vertical' | 'grid'; rows: number };
-export const gridRows = [1, 2, 3, 4] as const;
-export type LayoutCommand = 'layout-vertical' | 'layout-grid' | `grid-rows-${typeof gridRows[number]}`;
+// The main canvas shows spreads in one vertical column, or a row-by-row grid with this many columns.
+export type CanvasLayout = { mode: 'vertical' | 'grid'; columns: number };
+export const gridColumns = [1, 2, 3, 4] as const;
+export type LayoutCommand = 'layout-vertical' | 'layout-grid' | `grid-columns-${typeof gridColumns[number]}`;
 export type Command = OpenAction | 'toggle-project' | 'toggle-inspector' | LayoutCommand | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
@@ -134,10 +134,10 @@ export const bookLayout: Record<BookView, { pad: number; gap: number; columns?: 
   layouts: { pad: 6, gap: 26, columns: 2, columnGap: 12 },
 };
 export type Rect = { x: number; y: number; width: number; height: number };
-// Posted by a book frame after layout. Coordinates are relative to the frame document. `rows` is set when the
-// book view is laid out as a grid; `width` is then the width of all columns, which can exceed the frame.
+// Posted by a book frame after layout. Coordinates are relative to the frame document. `columns` is set when the
+// book view is laid out as a grid; the frame fits the canvas width and reports the height of all rows.
 export type BookGeometry = {
-  type: 'geometry'; width: number; height: number; rows?: number;
+  type: 'geometry'; width: number; height: number; columns?: number;
   sheets: (Rect & { spread: string })[];
   // `upright` is false when template CSS rotates or skews the box, so its rectangle is only a bounding box.
   boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean })[];

@@ -126,7 +126,7 @@ export function EditPopover({ project, spread, template, edits, anchor, bounds, 
     const stage = element.offsetParent as HTMLElement | null;
     const visibleTop = view && stage ? view.scrollTop - stage.offsetTop : -Infinity;
     const visibleBottom = view && stage ? view.scrollTop + view.clientHeight - stage.offsetTop : Infinity;
-    // A grid scrolls sideways, so the stage can be much wider than the part on screen.
+    // Keep the popover inside the visible canvas as well as the stage.
     const visibleLeft = view && stage ? Math.max(0, view.scrollLeft - stage.offsetLeft) : 0;
     const visibleRight = view && stage ? Math.min(bounds.width, view.scrollLeft + view.clientWidth - stage.offsetLeft) : bounds.width;
     const height = element.offsetHeight;

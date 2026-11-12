@@ -2,7 +2,7 @@ import { SourceManager, SaveCopy } from './SourceManager';
 import type { ImportMode } from './source-locations';
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
-import { bookLayout, gridRows, renderOrigin } from './desktop';
+import { bookLayout, gridColumns, renderOrigin } from './desktop';
 import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
 import type { TargetAnchor } from './edit-targets';
 import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
@@ -50,8 +50,8 @@ function inlineValues({ project, spread, template, target }: InlineContext) {
   })]);
 }
 
-const isGridRows = (command: Command): command is `grid-rows-${typeof gridRows[number]}` =>
-  gridRows.some((count) => command === `grid-rows-${count}`);
+const isGridColumns = (command: Command): command is `grid-columns-${typeof gridColumns[number]}` =>
+  gridColumns.some((count) => command === `grid-columns-${count}`);
 
 // The editor shell must survive a template whose format cannot be resolved; the render reports why.
 function formatOf(template?: TemplateInfo) {
@@ -144,9 +144,7 @@ export function App() {
   const pendingTasks = useRef(0);
   const workspace = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useCanvasLayout(summary?.folder);
-  const rows = layout.mode === 'grid' ? layout.rows : 0;
-  // The canvas height a grid fills; measured with the canvas.
-  const [canvasHeight, setCanvasHeight] = useState(0);
+  const columns = layout.mode === 'grid' ? layout.columns : 0;
   useEffect(() => {
     void api?.setPanelVisibility({ sidebar: !panels.leftHidden, inspector: !panels.rightHidden, layout });
   }, [api, panels.leftHidden, panels.rightHidden, layout]);
@@ -349,8 +347,8 @@ export function App() {
       changeLayout({ ...layout, mode: command === 'layout-grid' ? 'grid' : 'vertical' });
       return;
     }
-    if (isGridRows(command)) {
-      changeLayout({ mode: 'grid', rows: Number(command.slice('grid-rows-'.length)) });
+    if (isGridColumns(command)) {
+      changeLayout({ mode: 'grid', columns: Number(command.slice('grid-columns-'.length)) });
       return;
     }
     if (command === 'undo' || command === 'redo') return undo(command);
@@ -399,7 +397,7 @@ export function App() {
     });
   }
 
-  const viewCommand = (command: Command) => command.startsWith('toggle-') || command.startsWith('layout-') || command.startsWith('grid-rows-');
+  const viewCommand = (command: Command) => command.startsWith('toggle-') || command.startsWith('layout-') || command.startsWith('grid-columns-');
   const onCommand = useEffectEvent((command: Command) => { if (viewCommand(command) || (!busy && !agentLocked.current)) act(command); });
   const onProjectChanged = useEffectEvent((change: ProjectChange) => {
     if ('building' in change) beginReload();
@@ -474,8 +472,7 @@ export function App() {
     for (const { spread } of list as Issue[]) if (spread) spreadIssues.set(spread, level);
   }
 
-  // Scrolls the book so a spread is fully visible: down the column, or sideways through a grid. Waits for the next
-  // layout if the spread is new.
+  // Scrolls the book vertically so a spread is fully visible. Waits for the next layout if the spread is new.
   function reveal(id: string) {
     const sheet = geometry?.sheets.find(({ spread }) => spread === id);
     const view = canvas.current;
@@ -486,34 +483,26 @@ export function App() {
     pendingReveal.current = undefined;
     const label = bookLayout.book.gap;
     const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
-    if (geometry?.rows) {
-      const left = stage.current.offsetLeft + sheet.x;
-      if (left >= view.scrollLeft && left + sheet.width <= view.scrollLeft + view.clientWidth) return;
-      view.scrollTo({ left: Math.max(0, left - Math.max(label, (view.clientWidth - sheet.width) / 2)), behavior });
-      return;
-    }
     const top = stage.current.offsetTop + sheet.y;
     if (top - label >= view.scrollTop && top + sheet.height <= view.scrollTop + view.clientHeight) return;
     view.scrollTo({ top: Math.max(0, top - Math.max(label, (view.clientHeight - sheet.height) / 2)), behavior });
   }
-  // The part of the book frame that is on screen, in frame coordinates, and the grid rows the frame should use. The
+  // The part of the book frame that is on screen, in frame coordinates, and the grid columns the frame should use. The
   // book frame loads photos near the visible part.
   function viewport() {
     const view = canvas.current;
     if (!view || !stage.current) return undefined;
     const top = view.scrollTop - stage.current.offsetTop;
     const left = view.scrollLeft - stage.current.offsetLeft;
-    return { top, bottom: top + view.clientHeight, left, right: left + view.clientWidth, rows };
+    return { top, bottom: top + view.clientHeight, left, right: left + view.clientWidth, columns };
   }
   function measureView() {
-    const view = canvas.current;
     const range = viewport();
     if (range) {
       for (const frame of stage.current!.querySelectorAll<HTMLIFrameElement>('iframe.book-frame-book')) {
         frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
       }
     }
-    if (view) setCanvasHeight(view.clientHeight);
     if (!range || !geometry) return;
     const ids = geometry.sheets.filter(({ x, y, width, height }) => y < range.bottom && y + height > range.top &&
       x < range.right && x + width > range.left).map(({ spread }) => spread);
@@ -522,41 +511,26 @@ export function App() {
   useEffect(() => {
     measureView();
     // After a layout change, wait for geometry in the requested layout; the frame first reports the old one.
-    if (pendingReveal.current && (geometry?.rows ?? 0) === rows) reveal(pendingReveal.current);
+    if (pendingReveal.current && (geometry?.columns ?? 0) === columns) reveal(pendingReveal.current);
   }, [geometry]);
   // A new layout keeps the selected spread in view once the book has been laid out again.
-  const laidOut = useRef(rows);
+  const laidOut = useRef(columns);
   useEffect(() => {
-    if (laidOut.current === rows) return;
-    laidOut.current = rows;
+    if (laidOut.current === columns) return;
+    laidOut.current = columns;
     if (spreadId) pendingReveal.current = spreadId;
     measureView();
-  }, [rows]);
+  }, [columns]);
   function changeLayout(next: CanvasLayout) {
-    setLayout((previous) => previous.mode === next.mode && previous.rows === next.rows ? previous : next);
+    setLayout((previous) => previous.mode === next.mode && previous.columns === next.columns ? previous : next);
   }
   const onResize = useEffectEvent(() => measureView());
-  // In a grid, a vertical wheel or trackpad gesture scrolls sideways when nothing under the pointer scrolls vertically.
-  const onWheel = useEffectEvent((event: WheelEvent) => {
-    const view = canvas.current;
-    if (!view || !geometry?.rows || event.defaultPrevented || event.ctrlKey || event.shiftKey) return;
-    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-    for (let node = event.target instanceof Element ? event.target : null; node && node !== view; node = node.parentElement) {
-      if (node.scrollHeight > node.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(node).overflowY)) return;
-    }
-    if (view.scrollHeight > view.clientHeight + 1 || view.scrollWidth <= view.clientWidth) return;
-    event.preventDefault();
-    view.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? view.clientWidth : 1);
-  });
   useEffect(() => {
     const listener = () => onResize();
-    const wheel = (event: WheelEvent) => onWheel(event);
     window.addEventListener('resize', listener);
     const observer = new ResizeObserver(listener);
     if (canvas.current) observer.observe(canvas.current);
-    canvas.current?.addEventListener('wheel', wheel, { passive: false });
-    const view = canvas.current;
-    return () => { window.removeEventListener('resize', listener); observer.disconnect(); view?.removeEventListener('wheel', wheel); };
+    return () => { window.removeEventListener('resize', listener); observer.disconnect(); };
   }, [projectInstance]);
   // The sidebar follows the selection when you select another spread, not on every re-render after an edit,
   // so a list you scrolled elsewhere stays where you left it.
@@ -1152,7 +1126,7 @@ export function App() {
       {!panels.leftHidden ? <PanelDivider side="left" width={panels.left} resize={resizePanel} onResizing={setResizing} /> : <div />}
       <div className="workspace-center">
         <div ref={canvasWrap} className="canvas-wrap">
-          <main ref={canvas} className={'canvas' + (geometry?.rows ? ' canvas-grid' : '')} aria-label="Book preview" onScroll={measureView}
+          <main ref={canvas} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" onScroll={measureView}
             onDragOver={(event) => {
               if (!writable || !canvasReady || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime)) return;
               event.preventDefault();
@@ -1160,9 +1134,8 @@ export function App() {
               setDropTarget(box ? box.spread + ':' + box.id : undefined);
             }} onDragLeave={() => setDropTarget(undefined)} onDrop={drop}>
             {summary && <div ref={stage} className="stage"
-              // The stage leaves the grid width as soon as Vertical is chosen, so the frame lays out the column at the
-              // canvas width rather than the old grid's.
-              style={{ width: rows && geometry?.rows ? geometry.width : undefined, height: geometry?.rows ? canvasHeight : geometry?.height,
+              // A grid fills the canvas width; the frame reports the height of all its rows.
+              style={{ width: columns ? '100%' : undefined, height: geometry?.height,
                 cursor: hoveredTarget ? 'pointer' : undefined,
                 '--aspect': format ? format.spreadWidth / format.height : undefined } as CSSProperties}
               onClick={(event) => {
@@ -1200,7 +1173,7 @@ export function App() {
                 setHoveredTarget(target && targetKey(target));
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
               <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus}
-                viewport={viewport} fill={rows ? canvasHeight : undefined} hold={holdPreview} accept={acceptCandidate} />
+                viewport={viewport} hold={holdPreview} accept={acceptCandidate} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const i = spreads.findIndex((item) => item.id === id);
                 if (i < 0) return null;
@@ -1275,10 +1248,10 @@ export function App() {
           </main>
           {summary && previewNotice && <div className={geometry ? 'preview-state' : 'preview-message'} role="status">{previewNotice}</div>}
           {summary && <div className="canvas-controls">
-            <select className="layout-toggle" aria-label="Canvas layout" title="Canvas layout" value={rows ? 'grid-rows-' + rows : 'layout-vertical'}
+            <select className="layout-toggle" aria-label="Canvas layout" title="Canvas layout" value={columns ? 'grid-columns-' + columns : 'layout-vertical'}
               onChange={(event) => act(event.target.value as Command)}>
               <option value="layout-vertical">Vertical</option>
-              {gridRows.map((count) => <option key={count} value={'grid-rows-' + count}>Grid · {count} {count === 1 ? 'row' : 'rows'}</option>)}
+              {gridColumns.map((count) => <option key={count} value={'grid-columns-' + count}>Grid · {count} {count === 1 ? 'column' : 'columns'}</option>)}
             </select>
             <label className="guides-toggle"><input type="checkbox" checked={showGuides}
               onChange={(event) => setShowGuides(event.target.checked)} /> Guides</label>

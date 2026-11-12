@@ -73,7 +73,7 @@ export class DocumentSession {
   private renderIds = new Set<string>();
   sidebar = true;
   inspector = true;
-  layout: CanvasLayout = { mode: 'vertical', rows: 2 };
+  layout: CanvasLayout = { mode: 'vertical', columns: 2 };
 
   constructor(readonly window: BrowserWindow, book: OpenProject, private cache: string,
     private renders: RenderSessions, private unlockProject: ProjectLock | undefined,

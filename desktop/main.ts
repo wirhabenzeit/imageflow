@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join, relative, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { channels, gridRows, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
+import { channels, gridColumns, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
 import type { CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { assetTypes, loadProject, renderData } from './project';
@@ -413,7 +413,7 @@ function updateMenus() {
   const document = focusedDocument();
   const menu = Menu.getApplicationMenu();
   for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector',
-    'layout-vertical', 'layout-grid', 'grid-rows', ...gridRows.map((rows) => 'grid-rows-' + rows), 'reveal-book', 'open-template']) {
+    'layout-vertical', 'layout-grid', 'grid-columns', ...gridColumns.map((columns) => 'grid-columns-' + columns), 'reveal-book', 'open-template']) {
     const item = menu?.getMenuItemById(id);
     if (item) item.enabled = !!document && !document.closing;
   }
@@ -423,10 +423,10 @@ function updateMenus() {
   if (inspector) inspector.label = document?.inspector ? 'Hide Inspector' : 'Show Inspector';
   // Radio items check themselves when clicked; the window's own layout decides which stays checked. Checking one
   // item of a radio group unchecks the others.
-  const layout = document?.layout ?? { mode: 'vertical', rows: 2 };
+  const layout = document?.layout ?? { mode: 'vertical', columns: 2 };
   const check = (id: string) => { const item = menu?.getMenuItemById(id); if (item) item.checked = true; };
   check(layout.mode === 'grid' ? 'layout-grid' : 'layout-vertical');
-  check('grid-rows-' + layout.rows);
+  check('grid-columns-' + layout.columns);
 }
 function menuCommand(label: string, accelerator: string | undefined, command: Command, id: string = command): MenuItemConstructorOptions {
   return { label, id, accelerator, click: (_item, owner) => {
@@ -735,8 +735,8 @@ void app.whenReady().then(async () => {
     document.sidebar = state.sidebar;
     document.inspector = state.inspector;
     const layout = state.layout;
-    if (layout && (layout.mode === 'vertical' || layout.mode === 'grid') && gridRows.some((rows) => rows === layout.rows)) {
-      document.layout = { mode: layout.mode, rows: layout.rows };
+    if (layout && (layout.mode === 'vertical' || layout.mode === 'grid') && gridColumns.some((columns) => columns === layout.columns)) {
+      document.layout = { mode: layout.mode, columns: layout.columns };
     }
     updateMenus();
   });
@@ -783,8 +783,8 @@ void app.whenReady().then(async () => {
       { type: 'separator' },
       { ...menuCommand('Vertical', undefined, 'layout-vertical'), type: 'radio' },
       { ...menuCommand('Grid', undefined, 'layout-grid'), type: 'radio' },
-      { label: 'Grid Rows', id: 'grid-rows', submenu: gridRows.map((rows) =>
-        ({ ...menuCommand(rows === 1 ? '1 Row' : rows + ' Rows', undefined, `grid-rows-${rows}`), type: 'radio' as const })) },
+      { label: 'Grid Columns', id: 'grid-columns', submenu: gridColumns.map((columns) =>
+        ({ ...menuCommand(columns === 1 ? '1 Column' : columns + ' Columns', undefined, `grid-columns-${columns}`), type: 'radio' as const })) },
     ] },
     { role: 'windowMenu' },
   ]));

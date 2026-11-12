@@ -651,7 +651,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .source-photo .source-storage { padding: 0 6px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .source-text:has(.source-storage) { grid-template-rows: auto minmax(0, 1fr) auto auto; }
 
-/* Canvas layout: Vertical stacks spreads in one column; Grid fills rows column by column and scrolls sideways. */
+/* Canvas layout: Vertical stacks spreads in one column; Grid fills each row left to right and scrolls vertically. */
 .canvas-controls { position: absolute; bottom: 10px; right: 18px; z-index: 2; display: flex; align-items: center; gap: 6px; }
 .canvas-controls .guides-toggle { position: static; }
 .layout-toggle { font-size: 12px; border-radius: 4px; padding: 1px 4px; background: var(--popup-surface); border: 1px solid var(--subtle-border); box-shadow: 0 1px 3px #0002; color: inherit; }

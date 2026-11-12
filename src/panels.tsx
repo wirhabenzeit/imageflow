@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { gridRows } from './desktop';
+import { gridColumns } from './desktop';
 import type { CanvasLayout } from './desktop';
 import type { PointerEvent } from 'react';
 
@@ -48,12 +48,14 @@ export function PanelDivider({ side, width, resize, onResizing }: { side: Side; 
 // The canvas layout of each book window, remembered per book like the panel sizes. A book opened for the first
 // time starts with the layout used last.
 const layoutKey = 'imageflow.canvas-layout.v1';
-const defaultLayout: CanvasLayout = { mode: 'vertical', rows: 2 };
+const defaultLayout: CanvasLayout = { mode: 'vertical', columns: 2 };
 type SavedLayouts = { last?: CanvasLayout; books?: Record<string, CanvasLayout> };
 function validLayout(value: unknown): CanvasLayout | undefined {
-  const layout = value as Partial<CanvasLayout> | undefined;
+  const layout = value as (Partial<CanvasLayout> & { rows?: number }) | undefined;
   if (!layout || (layout.mode !== 'vertical' && layout.mode !== 'grid')) return undefined;
-  return { mode: layout.mode, rows: gridRows.includes(layout.rows as typeof gridRows[number]) ? layout.rows! : defaultLayout.rows };
+  // Preserve the chosen density from the former sideways grid preference.
+  const columns = layout.columns ?? layout.rows;
+  return { mode: layout.mode, columns: gridColumns.includes(columns as typeof gridColumns[number]) ? columns! : defaultLayout.columns };
 }
 function savedLayouts(): SavedLayouts {
   try {
