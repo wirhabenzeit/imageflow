@@ -22,7 +22,7 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
   cancel(): void;
   warning?(message: unknown): void;
   import?(data: Extract<FrameMessage, { type: 'editor-import' }>): void;
-}) {
+}, flushError = 'The editor did not respond, so nothing was saved. Try Done again, or Cancel.') {
   const [height, setHeight] = useState(240);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
@@ -31,15 +31,17 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
   // focus, which clicking Done out here does not cause. The request being waited for, if any.
   const [flushing, setFlushing] = useState<number>();
   const flushes = useRef(0);
+  const [flushTimedOut, setFlushTimedOut] = useState(false);
 
   useEffect(() => {
     if (flushing === undefined) return;
     const timeout = setTimeout(() => {
       setFlushing(undefined);
-      setError('The editor did not respond, so nothing was saved. Try Done again, or Cancel.');
+      setError(flushError);
+      setFlushTimedOut(true);
     }, 5000);
     return () => clearTimeout(timeout);
-  }, [flushing]);
+  }, [flushing, flushError]);
 
   const receive = useEffectEvent((event: MessageEvent<FrameMessage>) => {
     if (event.origin !== renderOrigin || event.source !== frame.current?.contentWindow || !event.data) return;
@@ -54,8 +56,8 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
       setReady(true);
       frame.current?.focus();
     } else if (data.type === 'editor-draft') {
-      handlers.draft(data.values, data.spread);
       if (!failed) setError('');
+      handlers.draft(data.values, data.spread);
     } else if (data.type === 'editor-warning') {
       handlers.warning?.(data.message);
     } else if (data.type === 'editor-notice') {
@@ -84,10 +86,11 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
     if (!ready || !target) return false;
     const request = ++flushes.current;
     setFlushing(request);
+    setFlushTimedOut(false);
     setError('');
     target.postMessage({ type: 'editor-flush', request }, renderOrigin);
     return true;
   }
 
-  return { height, ready, error, setError, failed, flushing, flush };
+  return { height, ready, error, setError, failed, flushing, flushTimedOut, flush };
 }

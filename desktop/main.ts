@@ -10,8 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join, relative, isAbsolute } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { channels, gridRows, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
-import type { CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
+import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
+import type { BookMenuState, CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
 import type { OpenProject } from './project';
@@ -42,6 +42,7 @@ import { templateFolder, textSourcePath } from './document-actions';
 import { configureRenditionCache, pruneRenditions } from './rendition-cache';
 
 let settingsWindow: BrowserWindow | null = null;
+const settingsPresentation = new WeakMap<BrowserWindow, { painted: boolean; sized: boolean }>();
 let startWindow: BrowserWindow | null = null;
 let settingsPane: SettingsPane = 'general';
 let mcpConnection: Awaited<ReturnType<typeof createMcpConnection>> | undefined;
@@ -558,24 +559,138 @@ async function openProject(owner: BrowserWindow, action: OpenAction, document?: 
   await openDocument(choice.filePaths[0]);
   return null;
 }
+function installMenu(formats: Record<string, string>) {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: 'appMenu', submenu: [
+      { role: 'about' }, { type: 'separator' },
+      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
+      { label: 'Agent Connections…', click: () => showSettings('agents') },
+      { label: 'Show Start Window', click: () => showStart() },
+      { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
+    ] },
+    { label: 'File', submenu: [
+      menuCommand('New Book…', 'CmdOrCtrl+N', 'new'),
+      menuCommand('Open…', 'CmdOrCtrl+O', 'open'),
+      menuCommand('Explore a Sample', undefined, 'sample'),
+      { type: 'separator' }, { role: 'close' },
+      menuCommand('Save a Copy…', 'CmdOrCtrl+Shift+S', 'save-copy'),
+      { type: 'separator' },
+      menuCommand('Export Proof PDF…', 'CmdOrCtrl+Shift+E', 'export'),
+      menuCommand('Export Print PDF…', undefined, 'print'),
+      { type: 'separator' },
+      { id: 'reveal-book', label: 'Reveal in Finder', click: (_item, owner) => { const document = focusedDocument(owner); if (document) shell.showItemInFolder(document.book.folder); } },
+    ] },
+    { label: 'Edit', submenu: [
+      menuCommand('Undo Book Edit', 'CmdOrCtrl+Z', 'undo'),
+      menuCommand('Redo Book Edit', 'CmdOrCtrl+Shift+Z', 'redo'),
+      { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+    ] },
+    { label: 'Book', submenu: [
+      menuCommand('Import Photos…', 'CmdOrCtrl+I', 'import-photos'),
+      menuCommand('Import Photo Folder…', 'CmdOrCtrl+Shift+I', 'import-folder'),
+      menuCommand('Import Markdown…', undefined, 'import-texts'),
+      menuCommand('Manage Sources…', undefined, 'manage-sources'),
+      { type: 'separator' },
+      menuCommand('Add Spread', 'CmdOrCtrl+Shift+N', 'add-spread'),
+      menuCommand('Duplicate Spread', 'CmdOrCtrl+D', 'duplicate-spread'),
+      menuCommand('Move Spread Up', 'Alt+CmdOrCtrl+Up', 'move-spread-up'),
+      menuCommand('Move Spread Down', 'Alt+CmdOrCtrl+Down', 'move-spread-down'),
+      menuCommand('Delete Spread', 'CmdOrCtrl+Backspace', 'delete-spread'),
+      { type: 'separator' },
+      { id: 'book-format', label: 'Format', submenu: Object.entries(formats).map(([id, label]) => ({
+        ...menuCommand(label, undefined, `book-format:${id}`), type: 'radio' as const,
+      })) },
+      menuCommand('Book Settings…', undefined, 'book-settings'),
+      menuCommand('Show Book Check', undefined, 'book-check'),
+      { type: 'separator' },
+      menuCommand('Reload Book', 'CmdOrCtrl+R', 'reload'),
+    ] },
+    { label: 'Template', submenu: [
+      { label: 'Import Templates…', click: (_item, owner) => {
+        const window = owner ? BrowserWindow.fromId(owner.id) ?? undefined : undefined;
+        void importTemplates(window).then((results) => reportImports(window, results, true)).catch((error) => report(window ?? lastDocument?.window, error));
+      } },
+      { id: 'save-template', label: 'Save Template to Library', click: (_item, owner) => {
+        const document = focusedDocument(owner);
+        if (document) void saveTemplate(document).catch((error) => report(document.window, error));
+      } },
+      { id: 'export-template', label: 'Export Template…', click: (_item, owner) => {
+        const document = focusedDocument(owner);
+        if (document) void exportBookTemplate(document).catch((error) => report(document.window, error));
+      } },
+      { label: 'Manage Templates…', click: () => showSettings('templates') },
+      { type: 'separator' },
+      { id: 'open-template', label: 'Open Template Folder', click: (_item, owner) => {
+        const document = focusedDocument(owner);
+        if (document) void document.run(() => openDocumentLocation(document, 'template')).then((result) => { if ('error' in result) report(document.window, result.error); });
+      } },
+    ] },
+    { label: 'View', submenu: [
+      menuCommand('Hide Sidebar', 'Alt+CmdOrCtrl+1', 'toggle-project', 'sidebar'),
+      menuCommand('Hide Inspector', 'Alt+CmdOrCtrl+2', 'toggle-inspector', 'inspector'),
+      menuCommand('Hide Sources', 'Alt+CmdOrCtrl+3', 'toggle-sources', 'sources'),
+      { type: 'separator' },
+      { ...menuCommand('Vertical', undefined, 'layout-vertical'), type: 'radio' },
+      { ...menuCommand('Grid', undefined, 'layout-grid'), type: 'radio' },
+      { label: 'Grid Columns', id: 'grid-columns', submenu: gridColumns.map((columns) =>
+        ({ ...menuCommand(columns === 1 ? '1 Column' : columns + ' Columns', undefined, `grid-columns-${columns}`), type: 'radio' as const })) },
+      { type: 'separator' },
+      { ...menuCommand('Show Guides', undefined, 'toggle-guides', 'guides'), type: 'checkbox' },
+    ] },
+    { role: 'windowMenu' },
+  ]));
+  formatMenuKey = JSON.stringify(Object.entries(formats));
+}
+let formatMenuKey = '';
 function updateMenus() {
   const document = focusedDocument();
+  const state = document?.menuState;
+  // Native submenu membership is fixed after installation; rebuild only when the available formats change.
+  if (Menu.getApplicationMenu()?.getMenuItemById('book-format') &&
+      JSON.stringify(Object.entries(state?.formats ?? {})) !== formatMenuKey) installMenu(state?.formats ?? {});
   const menu = Menu.getApplicationMenu();
-  for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector',
-    'layout-vertical', 'layout-grid', 'grid-rows', ...gridRows.map((rows) => 'grid-rows-' + rows), 'reveal-book', 'open-template', 'save-template', 'export-template']) {
+  for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector', 'sources', 'guides',
+    'layout-vertical', 'layout-grid', 'grid-columns', ...gridColumns.map((columns) => 'grid-columns-' + columns), 'reveal-book', 'open-template', 'save-template', 'export-template',
+    'book-settings', 'book-check', 'book-format', ...spreadCommands]) {
     const item = menu?.getMenuItemById(id);
     if (item) item.enabled = !!document && !document.closing;
   }
+  const available = !!document && !document.closing;
+  for (const id of spreadCommands) {
+    const item = menu?.getMenuItemById(id);
+    if (item) item.enabled = available && !!state?.enabled[id] && !state.editing && !state.busy;
+  }
+  for (const id of ['import-photos', 'import-folder', 'import-texts', 'manage-sources']) {
+    const item = menu?.getMenuItemById(id);
+    if (item) item.enabled = available && !!state?.writable && !state.busy;
+  }
+  for (const id of ['reload', 'open-template']) {
+    const item = menu?.getMenuItemById(id);
+    if (item) item.enabled = available && !state?.busy;
+  }
+  const formats = menu?.getMenuItemById('book-format');
+  if (formats) {
+    const entries = Object.entries(state?.formats ?? {});
+    formats.enabled = available && !!state?.writable && !state.busy && entries.length > 1;
+    for (const item of formats.submenu?.items ?? []) {
+      if (item.id === `book-format:${state?.format}`) item.checked = true;
+    }
+  }
+  const guides = menu?.getMenuItemById('guides');
+  if (guides) guides.checked = document?.guides ?? false;
   const sidebar = menu?.getMenuItemById('sidebar');
   const inspector = menu?.getMenuItemById('inspector');
   if (sidebar) sidebar.label = document?.sidebar ? 'Hide Sidebar' : 'Show Sidebar';
   if (inspector) inspector.label = document?.inspector ? 'Hide Inspector' : 'Show Inspector';
+  const sources = menu?.getMenuItemById('sources');
+  if (sources) sources.label = document?.sources ? 'Hide Sources' : 'Show Sources';
   // Radio items check themselves when clicked; the window's own layout decides which stays checked. Checking one
   // item of a radio group unchecks the others.
-  const layout = document?.layout ?? { mode: 'vertical', rows: 2 };
+  const layout = document?.layout ?? { mode: 'vertical', columns: 2 };
   const check = (id: string) => { const item = menu?.getMenuItemById(id); if (item) item.checked = true; };
   check(layout.mode === 'grid' ? 'layout-grid' : 'layout-vertical');
-  check('grid-rows-' + layout.rows);
+  check('grid-columns-' + layout.columns);
 }
 function menuCommand(label: string, accelerator: string | undefined, command: Command, id: string = command): MenuItemConstructorOptions {
   return { label, id, accelerator, click: (_item, owner) => {
@@ -677,13 +792,18 @@ function followAppearance(owner: BrowserWindow) {
   owner.once('closed', () => nativeTheme.removeListener('updated', updateBackground));
 }
 
+function revealSettings(owner: BrowserWindow) {
+  const state = settingsPresentation.get(owner);
+  if (state?.painted && state.sized && !process.env.IMAGEFLOW_HIDE_WINDOW) { owner.show(); owner.focus(); }
+}
+
 /** Opens Settings, switching to `pane` when given. Without one, an open window keeps its current pane. */
 function showSettings(pane?: SettingsPane) {
   const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
   settingsPane = pane ?? (settingsWindow && !settingsWindow.isDestroyed() ? settingsPane : 'general');
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     if (pane) settingsWindow.webContents.send(channels.settingsPane, pane);
-    if (!hidden) { settingsWindow.show(); settingsWindow.focus(); }
+    revealSettings(settingsWindow);
     return;
   }
   const preferences = new BrowserWindow({
@@ -697,11 +817,13 @@ function showSettings(pane?: SettingsPane) {
     },
   });
   settingsWindow = preferences;
+  const presentation = { painted: false, sized: false };
+  settingsPresentation.set(preferences, presentation);
   followAppearance(preferences);
   preferences.webContents.on('will-frame-navigate', (event) => event.preventDefault());
   preferences.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   preferences.on('page-title-updated', (event) => event.preventDefault());
-  preferences.once('ready-to-show', () => { if (!hidden) preferences.show(); });
+  preferences.once('ready-to-show', () => { presentation.painted = true; revealSettings(preferences); });
   preferences.once('closed', () => { if (settingsWindow === preferences) settingsWindow = null; });
   void preferences.loadURL(settingsURL).catch((error: unknown) => console.error('ImageFlow could not open Settings', error));
 }
@@ -896,8 +1018,15 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.fitSettings, (event, height: number) => {
     const owner = settingsOwner(event);
     if (!owner || typeof height !== 'number' || !Number.isFinite(height)) return;
-    const [width] = owner.getContentSize();
-    owner.setContentSize(width, Math.round(Math.min(Math.max(height, 120), 760)), process.platform === 'darwin');
+    const presentation = settingsPresentation.get(owner);
+    if (!presentation) return;
+    const firstFit = !presentation.sized;
+    const [width, currentHeight] = owner.getContentSize();
+    const nextHeight = Math.round(Math.min(Math.max(height, 120), 760));
+    // The first measured size must be applied before showing, without a native resize animation.
+    if (nextHeight !== currentHeight) owner.setContentSize(width, nextHeight, !firstFit && owner.isVisible() && process.platform === 'darwin');
+    presentation.sized = true;
+    if (firstFit) revealSettings(owner);
   });
   ipcMain.handle(channels.mcp, async (event, enabled?: boolean) => {
     if (!appOwner(event)) return { error: 'Request is only available to an app window.' };
@@ -923,81 +1052,31 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) => fromEditor(event, (document) => document.checkOpenBook(document.currentBook(id), request)));
   ipcMain.handle(channels.cancelCheck, (event) => { editorOwner(event)?.cancelCheck(); });
-  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean; layout?: CanvasLayout }) => {
+  ipcMain.handle(channels.bookMenu, (event, state: BookMenuState) => {
+    const document = editorOwner(event);
+    if (!document || !state || typeof state.enabled !== 'object' || !state.enabled ||
+        typeof state.editing !== 'boolean' || typeof state.writable !== 'boolean' || typeof state.busy !== 'boolean' ||
+        !state.formats || typeof state.formats !== 'object') return;
+    document.menuState = { ...state,
+      enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'],
+      formats: Object.fromEntries(Object.entries(state.formats).filter(([, label]) => typeof label === 'string')) };
+    updateMenus();
+  });
+  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout }) => {
     const document = editorOwner(event);
     if (!document || typeof state?.sidebar !== 'boolean' || typeof state?.inspector !== 'boolean') return;
     document.sidebar = state.sidebar;
     document.inspector = state.inspector;
+    if (typeof state.sources === 'boolean') document.sources = state.sources;
+    if (typeof state.guides === 'boolean') document.guides = state.guides;
     const layout = state.layout;
-    if (layout && (layout.mode === 'vertical' || layout.mode === 'grid') && gridRows.some((rows) => rows === layout.rows)) {
-      document.layout = { mode: layout.mode, rows: layout.rows };
+    if (layout && (layout.mode === 'vertical' || layout.mode === 'grid') && gridColumns.some((columns) => columns === layout.columns)) {
+      document.layout = { mode: layout.mode, columns: layout.columns };
     }
     updateMenus();
   });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: 'appMenu', submenu: [
-      { role: 'about' }, { type: 'separator' },
-      { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
-      { label: 'Agent Connections…', click: () => showSettings('agents') },
-      { label: 'Show Start Window', click: () => showStart() },
-      { type: 'separator' }, { role: 'services' }, { type: 'separator' },
-      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
-    ] },
-    { label: 'File', submenu: [
-      menuCommand('New Book…', 'CmdOrCtrl+N', 'new'),
-      menuCommand('Open…', 'CmdOrCtrl+O', 'open'),
-      menuCommand('Explore a Sample', undefined, 'sample'),
-      menuCommand('Reload Book', 'CmdOrCtrl+R', 'reload'),
-      menuCommand('Save a Copy…', 'CmdOrCtrl+Shift+S', 'save-copy'),
-      menuCommand('Manage Sources…', undefined, 'manage-sources'),
-      { type: 'separator' },
-      menuCommand('Import Photos…', 'CmdOrCtrl+I', 'import-photos'),
-      menuCommand('Import Photo Folder…', 'CmdOrCtrl+Shift+I', 'import-folder'),
-      menuCommand('Import Markdown…', undefined, 'import-texts'),
-      { type: 'separator' },
-      menuCommand('Export Proof PDF…', 'CmdOrCtrl+Shift+E', 'export'),
-      menuCommand('Export Print PDF…', undefined, 'print'),
-      { type: 'separator' },
-      { id: 'reveal-book', label: 'Reveal in Finder', click: (_item, owner) => { const document = focusedDocument(owner); if (document) shell.showItemInFolder(document.book.folder); } },
-      { type: 'separator' }, { role: 'close' },
-    ] },
-    { label: 'Edit', submenu: [
-      menuCommand('Undo Book Edit', 'CmdOrCtrl+Z', 'undo'),
-      menuCommand('Redo Book Edit', 'CmdOrCtrl+Shift+Z', 'redo'),
-      { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
-    ] },
-    { label: 'Template', submenu: [
-      { label: 'Import Templates…', click: (_item, owner) => {
-        const window = owner ? BrowserWindow.fromId(owner.id) ?? undefined : undefined;
-        void importTemplates(window).then((results) => reportImports(window, results, true)).catch((error) => report(window ?? lastDocument?.window, error));
-      } },
-      { id: 'save-template', label: 'Save Template to Library', click: (_item, owner) => {
-        const document = focusedDocument(owner);
-        if (document) void saveTemplate(document).catch((error) => report(document.window, error));
-      } },
-      { id: 'export-template', label: 'Export Template…', click: (_item, owner) => {
-        const document = focusedDocument(owner);
-        if (document) void exportBookTemplate(document).catch((error) => report(document.window, error));
-      } },
-      { label: 'Manage Templates…', click: () => showSettings('templates') },
-      { type: 'separator' },
-      { id: 'open-template', label: 'Open Template Folder', click: (_item, owner) => {
-        const document = focusedDocument(owner);
-        if (document) void document.run(() => openDocumentLocation(document, 'template')).then((result) => { if ('error' in result) report(document.window, result.error); });
-      } },
-    ] },
-    { label: 'View', submenu: [
-      menuCommand('Hide Sidebar', 'Alt+CmdOrCtrl+1', 'toggle-project', 'sidebar'),
-      menuCommand('Hide Inspector', 'Alt+CmdOrCtrl+2', 'toggle-inspector', 'inspector'),
-      { type: 'separator' },
-      { ...menuCommand('Vertical', undefined, 'layout-vertical'), type: 'radio' },
-      { ...menuCommand('Grid', undefined, 'layout-grid'), type: 'radio' },
-      { label: 'Grid Rows', id: 'grid-rows', submenu: gridRows.map((rows) =>
-        ({ ...menuCommand(rows === 1 ? '1 Row' : rows + ' Rows', undefined, `grid-rows-${rows}`), type: 'radio' as const })) },
-    ] },
-    { role: 'windowMenu' },
-  ]));
+  installMenu({});
   ready = true;
   const paths = [...new Set([...pendingOpenFiles.splice(0), ...process.argv.filter(isSystemFile)])];
   if (paths.length) for (const path of paths) await openFromSystem(path);

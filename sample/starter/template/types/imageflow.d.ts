@@ -203,8 +203,9 @@ export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parame
 /**
  * Props of a template-supplied element editor. `values` holds all of the element's parameters with the draft
  * applied, including changes in the dialog's generated controls as the user makes them, so the editor can preview
- * the whole element; `set` changes the editor's own parameters in the draft. ImageFlow validates and saves the draft when
- * the user clicks Done (or calls `commit`), as one undoable edit; `cancel` discards it.
+ * the whole element; `set` applies the editor's own parameters. Each change is validated and undoable.
+ * `commit` finishes typing and closes;
+ * `cancel` closes without applying unfinished typing. Neither reverts earlier applied changes.
  *
  * Type the props from the element's declaration, so a misspelt parameter or a wrong value fails type checking:
  *
@@ -239,7 +240,7 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
     & EditorFunction<SK, { parameter: SK; label?: string; scope: 'spread' }, ImageFlowElement>;
   /**
    * Lets the user import a file into the project, offering these extensions, and resolves to its file ID (or
-   * undefined when they cancel). Assign it with `set`, so Done saves it and Cancel discards the assignment; the
+   * undefined when they cancel). Assign it with `set` to save the assignment immediately; the
    * imported file stays in the project. `file(id)` reads it at once.
    */
   importFile(accept: readonly string[]): Promise<string | undefined>;
@@ -254,9 +255,9 @@ type ParametersOf<T> = T extends { parameters?: infer P } ? P extends Parameters
 type EditorSpreadKeys<T> = T extends { editor: { spread: readonly (infer K extends string)[] } } ? K : never;
 type EditorKeys<T> = T extends { editor?: { parameters: readonly (infer K)[] } } ? K & string : never;
 /**
- * An element's own editor for some of its parameters, shown in ImageFlow's editor dialog. It runs in a sandboxed
- * frame with the template's CSS. The dialog shows the element's other parameters below it as generated controls,
- * so the whole element is edited in one place and saved together with Done.
+ * An element's own editor for some of its parameters, shown in ImageFlow's non-modal editor panel. It runs in a sandboxed
+ * frame with the template's CSS. The panel shows the element's other parameters below it as generated controls,
+ * so the whole element is edited in one place, with changes applied as they happen.
  */
 export type ElementEditor<K extends string = string, P extends Parameters = Parameters, Owned extends keyof P & string = K & keyof P & string,
   D extends Parameters = Parameters, S extends Parameters = Parameters, OwnedSpread extends keyof S & string = keyof S & string> = {

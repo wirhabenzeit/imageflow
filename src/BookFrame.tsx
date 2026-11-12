@@ -5,15 +5,13 @@ import type { BookGeometry, BookView, RenderStatus } from './desktop';
 type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, viewport, fill, hold, accept }: {
+export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, viewport, hold, accept }: {
   project: string; view: BookView; query?: string; title: string;
   hold?: boolean;
   accept?: (project: string) => boolean;
-  // The part of the frame on screen, for frames that load photos lazily, and the grid rows of the book view (0 for
+  // The part of the frame on screen, for frames that load photos lazily, and the grid columns of the book view (0 for
   // one column); sent when a frame asks for it.
-  viewport?: () => { top: number; bottom: number; left: number; right: number; rows: number } | undefined;
-  // In grid mode the frame is this tall, and as wide as the grid it reports.
-  fill?: number;
+  viewport?: () => { top: number; bottom: number; left: number; right: number; columns: number } | undefined;
   onGeometry: (geometry: BookGeometry | undefined) => void;
   onStatus?: (status: RenderStatus, project: string) => void;
 }) {
@@ -69,7 +67,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending')}
       data-current={id === target || undefined} data-ready={frame?.status?.state === 'ready' && frame.published ? '' : undefined}
       aria-hidden={id !== shown || undefined}
-      style={fill ? { height: fill, width: frame?.geometry?.rows ? frame.geometry.width : undefined } : { height: frame?.geometry?.height }}
+      style={{ height: frame?.geometry?.height }}
       ref={(element) => {
         if (!element) return;
         refs.current.set(id, element);

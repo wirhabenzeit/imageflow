@@ -381,11 +381,9 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
   return true;
 }
 
-// Stacks every sheet in a column, scaled to the frame width, and reports where sheets and boxes landed. With `rows`
-// set (book view only), sheets instead fill a grid column by column, each scaled to its row's share of the frame
-// height (and no wider than the visible canvas), and the book grows sideways. Returns a function that switches
-// between the two.
-type GridRequest = { rows: number; width: number };
+// Fits sheets to the frame width and reports where sheets and boxes landed. In book grid mode, each sheet fits
+// one column and book order runs left to right, then continues on the next row. The book grows vertically.
+type GridRequest = { columns: number };
 function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, initial?: GridRequest) {
   const { pad, gap, columns = 1, columnGap = 0 } = bookLayout[view];
   root.style.setProperty('--if-pad', pad + 'px');
@@ -396,21 +394,19 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     const { x, y, width, height } = node.getBoundingClientRect();
     return { x: x + scrollX, y: y + scrollY, width, height };
   };
-  let rows = view === 'book' ? initial?.rows ?? 0 : 0;
-  let visibleWidth = initial?.width ?? Infinity;
+  let gridColumns = view === 'book' ? initial?.columns ?? 0 : 0;
   let laidOut = '';
   function fit() {
-    // A grid follows the frame height, a column the frame width.
-    const size = rows ? rows + 'x' + innerHeight + 'x' + visibleWidth : String(root.clientWidth);
+    const width = root.clientWidth;
+    const size = gridColumns + 'x' + width;
     if (size === laidOut) return;
     laidOut = size;
-    root.classList.toggle('if-grid', rows > 0);
-    root.style.setProperty('--if-rows', String(rows || 1));
-    const width = root.clientWidth;
-    const row = (innerHeight - pad * 2 - gap * (rows - 1)) / Math.max(1, rows);
+    root.classList.toggle('if-grid', gridColumns > 0);
+    const count = gridColumns || columns;
+    root.style.setProperty('--if-columns', String(count));
+    const column = (width - pad * 2 - (gridColumns ? gap : columnGap) * (count - 1)) / count;
     for (const { sheet } of sheets) {
-      const column = (width - pad * 2 - columnGap * (columns - 1)) / columns;
-      const fitted = rows ? Math.min(row / sheet.offsetHeight, (visibleWidth - pad * 2) / sheet.offsetWidth) : column / sheet.offsetWidth;
+      const fitted = column / sheet.offsetWidth;
       const scale = Math.max(0.01, Math.min(fitted, 1));
       const slot = sheet.parentElement!;
       slot.style.width = sheet.offsetWidth * scale + 'px';
@@ -419,7 +415,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     }
     const bounds = root.getBoundingClientRect();
     const geometry: BookGeometry = {
-      type: 'geometry', width: Math.ceil(bounds.width), height: Math.ceil(bounds.height), ...(rows ? { rows } : {}),
+      type: 'geometry', width: Math.ceil(bounds.width), height: Math.ceil(bounds.height), ...(gridColumns ? { columns: gridColumns } : {}),
       sheets: sheets.map(({ spread, sheet }) => ({ spread, ...relative(sheet) })),
       boxes: sheets.flatMap(({ spread, sheet }) => {
         const scale = Number(sheet.style.getPropertyValue('--if-zoom')) || 1;
@@ -447,8 +443,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
   window.addEventListener('resize', fit);
   return (next: GridRequest) => {
     if (view !== 'book') return;
-    rows = next.rows;
-    visibleWidth = next.width;
+    gridColumns = next.columns;
     fit();
   };
 }
@@ -830,7 +825,11 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     post({ state: 'error', message: 'The editor stopped working: ' + reason });
   };
   const drafts = () => changed ? { values: claimed(draft), spread: claimedSpread(spreadDraft) } : { values: {}, spread: {} };
-  const commit = () => { if (!failed) post({ type: 'editor-commit', ...drafts() }); };
+  const commit = () => {
+    try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
+    catch (error) { fail(error); }
+    if (!failed) post({ type: 'editor-commit', ...drafts() });
+  };
   const cancel = () => post({ type: 'editor-cancel' });
   let update: ((values: { element: Values; spread: Values }) => void) | undefined;
   // A change set() cannot apply (another parameter, or an invalid value) is ignored, as untyped template code would
@@ -872,8 +871,8 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1)) return;
     if (event.data?.type === 'editor-flush') {
-      // The app's Done: blurring applies a field that commits on blur, through set(), before the draft is sent. A
-      // component that fails while applying reports the failure instead, and nothing is saved.
+      // Closing the panel finishes a field that applies on blur, through set(), before confirming the close.
+      // A failure is reported instead; earlier live changes remain saved.
       const request = event.data.request;
       if (typeof request !== 'number') return;
       try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
@@ -1046,20 +1045,19 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
 
 export async function startRender(root: HTMLElement) {
   let info: TemplateInfo | undefined;
-  // The editor reports which part of the book frame is on screen, and how many grid rows the book view uses (0 for
+  // The editor reports which part of the book frame is on screen, and how many grid columns the book view uses (0 for
   // one column). Listen before anything slow happens and ask once, because the editor's first report may otherwise
   // arrive before this script runs.
   let onScreen: Viewport | undefined;
   let onScreenChange: (() => void) | undefined;
-  let grid: GridRequest = { rows: 0, width: Infinity };
+  let grid: GridRequest = { columns: 0 };
   let setGrid: ((grid: GridRequest) => void) | undefined;
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'viewport') return;
     const { top, bottom, left, right } = event.data;
     onScreen = { top: Number(top), bottom: Number(bottom), left: Number(left ?? 0), right: Number(right ?? innerWidth) };
-    const requested = { rows: Math.max(0, Math.min(8, Math.floor(Number(event.data.rows) || 0))),
-      width: Math.max(1, onScreen.right - onScreen.left) || Infinity };
-    if (requested.rows !== grid.rows || (requested.rows && requested.width !== grid.width)) {
+    const requested = { columns: Math.max(0, Math.min(8, Math.floor(Number(event.data.columns) || 0))) };
+    if (requested.columns !== grid.columns) {
       grid = requested;
       setGrid?.(grid);
     }

@@ -1,3 +1,7 @@
+import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { Icon } from './Icon';
+import { ActionMenu } from './ActionMenu';
 import { Field } from './Fields';
 import { sourcePath } from './source-locations';
 import type { ProjectSummary } from './desktop';
@@ -27,27 +31,27 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
   const placement = placementIn(state, spread.definition);
   const ownCrop = !!state?.crops && Object.hasOwn(state.crops, spread.definition);
   const moved = placement.zoom !== 1 || placement.centerX !== centered.centerX || placement.centerY !== centered.centerY;
+  function choosePhoto(photo: string) {
+    if (!photo || photo === assigned) return;
+    reassigned?.();
+    change((item) => { item.boxes[box] = { params: item.boxes[box]?.params ?? {}, photo }; },
+      (summary.photoIndex[photo]?.title || photo) + ' placed in ' + label);
+  }
+  function removePhoto() {
+    reassigned?.();
+    change((item) => {
+      if (item.boxes[box]) item.boxes[box] = { params: item.boxes[box].params };
+    }, 'Photo removed from ' + label);
+  }
   const pick = <select className="box-photo-pick" aria-label={(assigned ? 'Replace photo in ' : 'Choose photo for ') + label} value=""
-    onChange={(event) => {
-      const photo = event.target.value;
-      if (!photo || photo === assigned) return;
-      reassigned?.();
-      change((item) => {
-        item.boxes[box] = { params: item.boxes[box]?.params ?? {}, photo };
-      }, (summary.photoIndex[photo]?.title || photo) + ' placed in ' + label);
-    }}>
+    onChange={(event) => choosePhoto(event.target.value)}>
     <option value="">{assigned ? 'Replace photo…' : 'Choose photo…'}</option>
     {Object.entries(summary.photoIndex).filter(([photo]) => photo !== assigned).map(([photo, entry]) =>
       <option key={photo} value={photo} disabled={!summary.photos[photo]}>
         {(entry.title || entry.path.split('/').pop()) + (summary.photos[photo] ? '' : ' (missing)')}</option>)}
   </select>;
-  const remove = assigned && <button type="button" className="link" onClick={() => {
-    reassigned?.();
-    change((item) => {
-      if (item.boxes[box]) item.boxes[box] = { params: item.boxes[box].params };
-    }, 'Photo removed from ' + label);
-  }}>Remove</button>;
-  const cropValues = values && assigned && <details className="crop-values"><summary>Crop values</summary><div className="crop-values-fields">
+  const remove = assigned && <button type="button" className="link" onClick={removePhoto}>Remove</button>;
+  const fields = <div className="crop-values-fields">
     {([['centerX', 'Horizontal'], ['centerY', 'Vertical'], ['zoom', 'Zoom']] as const).map(([key, name]) =>
       <Field key={key}
         param={{ type: 'number', label: name, default: centered[key], min: key === 'zoom' ? 1 : 0, max: key === 'zoom' ? 20 : 1, step: .01 }}
@@ -57,8 +61,10 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
           if (state?.photo) setPlacement(state, item.definition, { ...placementIn(state, item.definition), [key]: value });
         })} />,
     )}
-  </div></details>;
-  if (compact) return <div className="box-content compact">{pick}{remove}{cropValues}</div>;
+  </div>;
+  const cropValues = values && assigned && <details className="crop-values"><summary>Crop values</summary>{fields}</details>;
+  if (compact) return <CropPhotoActions summary={summary} assigned={assigned} label={label} choose={choosePhoto} remove={removePhoto}
+    fields={values && assigned ? fields : undefined} />;
   return <div className="box-content">
     <div className="box-photo">
       {assigned && summary.photos[assigned]
@@ -83,6 +89,57 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
         }, 'Crop reset')}>Reset crop</button>}
       </div>
       {cropValues}
+    </div>}
+  </div>;
+}
+
+// Rare photo actions stay out of the crop toolbar. The small panels are its children, so clicking them keeps the
+// crop session active; Escape closes the innermost panel before the canvas handles it.
+function CropPhotoActions({ summary, assigned, label, choose, remove, fields }: {
+  summary: ProjectSummary; assigned?: string; label: string; choose: (photo: string) => void; remove: () => void; fields?: ReactNode;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState<'photos' | 'values'>();
+  function close() {
+    setOpen(undefined);
+    root.current?.querySelector('summary')?.focus();
+  }
+  useEffect(() => {
+    if (!open) return;
+    (panel.current?.querySelector<HTMLElement>('.crop-photo-choices button:not(:disabled), input') ?? panel.current?.querySelector('button'))?.focus();
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(undefined); };
+    // Numeric fields blur after Enter; Escape must still close the panel when focus has returned to the page.
+    const keys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', keys, true);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', keys, true); };
+  }, [open]);
+  return <div ref={root} className="crop-actions">
+    <ActionMenu className="crop-more" label={<><Icon name="cog" size={16} /><span className="visually-hidden">More photo actions</span></>}>
+      <button type="button" onClick={() => setOpen('photos')}>Replace photo…</button>
+      <button type="button" disabled={!assigned} onClick={remove}>Remove photo</button>
+      {fields && <button type="button" onClick={() => setOpen('values')}>Crop values…</button>}
+    </ActionMenu>
+    {open && <div ref={panel} className="crop-action-panel" role="dialog" aria-label={open === 'photos' ? 'Replace photo in ' + label : 'Crop values'}>
+      <header><strong>{open === 'photos' ? 'Replace photo' : 'Crop values'}</strong><button type="button" aria-label="Close photo actions" onClick={close}>×</button></header>
+      {open === 'values' ? fields : <div className="crop-photo-choices" onKeyDown={(event) => {
+        if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+        const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+        const step = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : event.key === 'ArrowUp' ? -2 : 2;
+        buttons[event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : Math.max(0, Math.min(buttons.length - 1, at + step))]?.focus();
+      }}>
+        {Object.entries(summary.photoIndex).filter(([photo]) => photo !== assigned).map(([photo, entry]) =>
+          <button type="button" key={photo} data-photo={photo} disabled={!summary.photos[photo]} onClick={() => choose(photo)}>
+            {summary.photos[photo] && <img src={summary.photos[photo]} alt="" loading="lazy" />}
+            <span>{entry.title || photo}{!summary.photos[photo] && ' (missing)'}</span>
+          </button>)}
+        {Object.keys(summary.photoIndex).filter((photo) => photo !== assigned).length === 0 && <p className="muted">Import another photo to replace this one.</p>}
+      </div>}
     </div>}
   </div>;
 }

@@ -141,7 +141,7 @@ try {
   assert.equal(await editor.locator('h3').textContent(), month);
   assert.match(await editor.getByRole('button', { name: '1', exact: true }).getAttribute('class'), /marked/);
   assert.equal(await editor.locator('#root').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(245, 245, 245)');
-  await w.getByRole('dialog', { name: 'Edit calendar' }).getByRole('button', { name: 'Cancel', exact: true }).click();
+  await w.getByRole('dialog', { name: 'Edit calendar' }).getByRole('button', { name: 'Close', exact: true }).click();
   await appearance('dark');
   await w.locator('[data-spread="road"].spread-thumb').click();
   await ready();
@@ -149,7 +149,7 @@ try {
   await w.frameLocator('.element-editor-frame').locator('.route-editor-frame svg').waitFor();
   await w.waitForTimeout(200);
   await w.screenshot({ path: join(root, '.build', 'appearance-route-dark.png') });
-  await w.getByRole('dialog', { name: 'Edit route' }).getByRole('button', { name: 'Cancel', exact: true }).click();
+  await w.getByRole('dialog', { name: 'Edit route' }).getByRole('button', { name: 'Close', exact: true }).click();
   // Real proof exports, including flowed text, rasterize identically in both appearances.
   w = await menuAction(app, 'Open Sample Project');
   await w.locator('.project-identity strong').getByText('Senja · Field Notes', { exact: true }).waitFor();

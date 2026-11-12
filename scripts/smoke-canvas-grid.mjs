@@ -6,8 +6,8 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { testBook, menuAction } from './ui-actions.mjs';
 
-// Grid mode of the canvas (#52): spreads fill rows column by column and the canvas scrolls sideways. Checks the
-// geometry, menu state, sidebar reveal, in-view highlight, lazy photos, sideways wheel scrolling, editing a box, and
+// Grid mode of the canvas (#52): spreads fill each row left to right and the canvas scrolls vertically. Checks the
+// geometry, menu state, sidebar reveal, in-view highlight, lazy photos, vertical wheel scrolling, editing a box, and
 // that the layout is remembered for the book.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'canvas-grid-'));
@@ -29,15 +29,15 @@ async function launch() {
   await w.emulateMedia({ colorScheme: null, reducedMotion: 'reduce' });
   return w;
 }
-const checked = () => app.evaluate(({ Menu }) => Object.fromEntries(['layout-vertical', 'layout-grid', 'grid-rows-1', 'grid-rows-2', 'grid-rows-3', 'grid-rows-4']
+const checked = () => app.evaluate(({ Menu }) => Object.fromEntries(['layout-vertical', 'layout-grid', 'grid-columns-1', 'grid-columns-2', 'grid-columns-3', 'grid-columns-4']
   .map((id) => [id, Menu.getApplicationMenu().getMenuItemById(id).checked])));
-// Rows menu items sit in the Grid Rows submenu, which menuAction does not search.
-async function chooseRows(w, rows) {
+// Column menu items sit in the Grid Columns submenu, which menuAction does not search.
+async function chooseColumns(w, columns) {
   const id = await app.browserWindow(w).then((window) => window.evaluate((window) => window.id));
-  await app.evaluate(({ Menu, BrowserWindow }, { rows, id }) => {
-    const item = Menu.getApplicationMenu().getMenuItemById('grid-rows-' + rows);
+  await app.evaluate(({ Menu, BrowserWindow }, { columns, id }) => {
+    const item = Menu.getApplicationMenu().getMenuItemById('grid-columns-' + columns);
     item.click(item, BrowserWindow.fromId(id));
-  }, { rows, id });
+  }, { columns, id });
 }
 
 try {
@@ -59,89 +59,89 @@ try {
     if (settled) window.__scrolls = [];
     return settled;
   }, null, { polling: 100 });
-  const gridRows = async (rows) => {
+  const gridColumns = async (columns) => {
     await frame.locator('.if-book.if-grid').waitFor();
-    await w.waitForFunction((rows) => document.querySelector('.canvas.canvas-grid') &&
-      document.querySelector('.layout-toggle')?.value === 'grid-rows-' + rows, rows);
-    await frame.locator('.if-book').evaluate((node, rows) => new Promise((resolve) => {
-      const check = () => node.style.getPropertyValue('--if-rows') === String(rows) ? resolve() : requestAnimationFrame(check);
+    await w.locator('.canvas.canvas-grid').waitFor();
+    await frame.locator('.if-book').evaluate((node, columns) => new Promise((resolve) => {
+      const check = () => node.style.getPropertyValue('--if-columns') === String(columns) ? resolve() : requestAnimationFrame(check);
       check();
-    }), rows);
-    // The frame fills the canvas height and is as wide as the stage once the grid has settled.
+    }), columns);
+    // The frame fills the canvas width and the stage follows its full content height.
     await w.waitForFunction(() => {
       const canvas = document.querySelector('.canvas');
       const frame = document.querySelector('iframe.book-frame-book[data-current]');
       const stage = document.querySelector('.stage');
-      return frame.clientHeight === canvas.clientHeight && Math.abs(frame.offsetWidth - stage.offsetWidth) < 1;
+      return frame.offsetWidth === canvas.clientWidth && Math.abs(frame.offsetHeight - stage.offsetHeight) < 1;
     });
     await w.waitForTimeout(200);
   };
 
   // Vertical by default.
-  assert.equal(await w.locator('.layout-toggle').inputValue(), 'layout-vertical');
-  assert.deepEqual(await checked(), { 'layout-vertical': true, 'layout-grid': false, 'grid-rows-1': false, 'grid-rows-2': true, 'grid-rows-3': false, 'grid-rows-4': false });
+  assert.equal(await w.locator('.canvas-controls, .layout-toggle, .guides-toggle').count(), 0);
+  assert.equal(await w.locator('.guides').count(), 0);
+  await menuAction(app, 'Show Guides');
+  await w.locator('.guides').first().waitFor();
+  assert.equal(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('guides').checked), true);
+  await menuAction(app, 'Show Guides');
+  await w.locator('.guides').first().waitFor({ state: 'detached' });
+  assert.deepEqual(await checked(), { 'layout-vertical': true, 'layout-grid': false, 'grid-columns-1': false, 'grid-columns-2': true, 'grid-columns-3': false, 'grid-columns-4': false });
   assert.equal(await frame.locator('.if-book.if-grid').count(), 0);
 
-  // Grid from the View menu: two rows, filled column by column, sized to the canvas height, scrolling sideways.
+  // Grid from the View menu: two columns, filled row by row, sized to the canvas width, scrolling vertically.
   await menuAction(app, 'Grid');
-  await gridRows(2);
-  assert.deepEqual(await checked(), { 'layout-vertical': false, 'layout-grid': true, 'grid-rows-1': false, 'grid-rows-2': true, 'grid-rows-3': false, 'grid-rows-4': false });
+  await gridColumns(2);
+  assert.deepEqual(await checked(), { 'layout-vertical': false, 'layout-grid': true, 'grid-columns-1': false, 'grid-columns-2': true, 'grid-columns-3': false, 'grid-columns-4': false });
   let view = await canvas();
-  assert.ok(view.scrollWidth > view.clientWidth + 100, 'The grid scrolls sideways');
-  assert.ok(view.scrollHeight <= view.clientHeight + 1, 'The grid does not scroll vertically');
+  assert.ok(view.scrollHeight > view.clientHeight + 100, 'The grid scrolls vertically');
+  assert.ok(view.scrollWidth <= view.clientWidth + 1, 'The grid does not scroll sideways');
   let rects = await sheets();
   assert.equal(rects.length, 15);
-  assert.ok(Math.abs(rects[0].x - rects[1].x) < 1 && rects[1].y > rects[0].y + rects[0].height, 'Spreads fill a column top to bottom');
-  assert.ok(rects[2].x > rects[0].x + rects[0].width && Math.abs(rects[2].y - rects[0].y) < 1, 'The next column continues to the right');
-  const rowHeight = (view.clientHeight - 2 * 32 - 40) / 2;
-  // The frame re-fits after it takes the canvas height; poll until it has.
-  for (let tries = 0; tries < 50 && !rects.every(({ height }) => Math.abs(height - rowHeight) < 2); tries++) {
-    await w.waitForTimeout(100);
-    rects = await sheets();
-  }
-  assert.ok(rects.every(({ height }) => Math.abs(height - rowHeight) < 2), 'Each spread is one row tall: ' + rects[0].height + ' vs ' + rowHeight);
+  assert.ok(Math.abs(rects[0].y - rects[1].y) < 1 && rects[1].x > rects[0].x + rects[0].width, 'Spreads fill a row left to right');
+  assert.ok(rects[2].y > rects[0].y + rects[0].height && Math.abs(rects[2].x - rects[0].x) < 1, 'The next row continues below');
+  const columnWidth = (view.clientWidth - 2 * 32 - 40) / 2;
+  assert.ok(rects.every(({ width }) => Math.abs(width - columnWidth) < 2), 'Each spread fits one column: ' + rects[0].width + ' vs ' + columnWidth);
   // Overlays follow the frame geometry: the selection outline matches the first sheet.
   const selection = await w.locator('.sheet-selection').boundingBox();
   const sheet = await frame.locator('.if-spread-container').first().boundingBox();
   assert.ok(Math.abs(selection.x - sheet.x) < 2 && Math.abs(selection.width - sheet.width) < 2);
 
-  // Three rows from the canvas control, then from the menu's rows submenu.
-  await w.locator('.layout-toggle').selectOption('grid-rows-3');
-  await gridRows(3);
+  // Change the column count through the View menu's columns submenu.
+  await chooseColumns(w, 3);
+  await gridColumns(3);
   rects = await sheets();
-  assert.ok(Math.abs(rects[0].x - rects[2].x) < 1 && rects[3].x > rects[0].x, 'Three spreads per column');
-  await chooseRows(w, 4);
-  await gridRows(4);
-  assert.equal((await checked())['grid-rows-4'], true);
-  await chooseRows(w, 1);
-  await gridRows(1);
+  assert.ok(Math.abs(rects[0].y - rects[2].y) < 1 && rects[3].y > rects[0].y, 'Three spreads per row');
+  await chooseColumns(w, 4);
+  await gridColumns(4);
+  assert.equal((await checked())['grid-columns-4'], true);
+  await chooseColumns(w, 1);
+  await gridColumns(1);
   rects = await sheets();
   view = await canvas();
-  assert.ok(rects.every(({ y }) => Math.abs(y - rects[0].y) < 1), 'One row is a filmstrip');
+  assert.ok(rects.every(({ x }) => Math.abs(x - rects[0].x) < 1), 'One column stacks spreads vertically');
   assert.ok(rects.every(({ width }) => width <= view.clientWidth - 64 + 1), 'A spread is never wider than the canvas');
 
-  // Selecting a spread in the sidebar reveals it sideways, and the in-view highlight follows the visible columns.
+  // Selecting a spread in the sidebar reveals it vertically, and the in-view highlight follows the visible rows.
   await w.locator('.spread-thumb[data-spread="may"]').click();
-  await w.waitForFunction(() => document.querySelector('.canvas').scrollLeft > 0);
+  await w.waitForFunction(() => document.querySelector('.canvas').scrollTop > 0);
   await scrolled();
   view = await canvas();
-  assert.equal(view.scrollTop, 0);
+  assert.equal(view.scrollLeft, 0);
   const may = await frame.locator('[data-spread="may"]').first().boundingBox();
   const bounds = await w.locator('.canvas').boundingBox();
-  assert.ok(may.x >= bounds.x - 1 && may.x + may.width <= bounds.x + bounds.width + 1, 'The selected spread is on screen');
+  assert.ok(may.y >= bounds.y - 1 && may.y + may.height <= bounds.y + bounds.height + 1, 'The selected spread is on screen');
   await w.locator('.spread-thumb[data-spread="may"].in-view').waitFor({ timeout: 5000 }).catch(async () => {
     throw new Error('In view: ' + JSON.stringify(await w.locator('.spread-thumb.in-view').evaluateAll((nodes) => nodes.map((node) => node.dataset.spread))));
   });
   assert.equal(await w.locator('.spread-thumb[data-spread="title"].in-view').count(), 0);
-  // Photos load for the visible columns and not for spreads far to the left.
+  // Photos load for the visible rows and not for spreads far above.
   await frame.locator('[data-spread="may"] img[data-src][src]').first().waitFor();
   assert.equal(await frame.locator('[data-spread="arriving"] img[data-src][src]').count(), 0);
 
-  // A vertical wheel gesture scrolls the grid sideways.
-  const before = (await canvas()).scrollLeft;
+  // A vertical wheel gesture scrolls the grid vertically.
+  const before = (await canvas()).scrollTop;
   await w.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
   await w.mouse.wheel(0, -400);
-  await w.waitForFunction((before) => document.querySelector('.canvas').scrollLeft < before - 100, before);
+  await w.waitForFunction((before) => document.querySelector('.canvas').scrollTop < before - 100, before);
 
   // Editing works the same: clicking a photo selects it for cropping, and a marked text opens its editor.
   await w.locator('.spread-thumb[data-spread="water"]').click();
@@ -153,7 +153,7 @@ try {
   assert.ok(Math.abs(crop.x - photo.x) < 3 && Math.abs(crop.width - photo.width) < 3, 'The crop editor sits on the photo');
   await w.keyboard.press('Escape');
   await w.locator('.spread-thumb[data-spread="title"]').click();
-  await w.waitForFunction(() => document.querySelector('.canvas').scrollLeft === 0);
+  await w.waitForFunction(() => document.querySelector('.canvas').scrollTop === 0);
   await scrolled();
   const heading = await frame.locator('[data-spread="title"] [data-edit="heading"]').boundingBox();
   await w.mouse.move(heading.x + heading.width / 2, heading.y + heading.height / 2);
@@ -168,42 +168,43 @@ try {
   const saved = JSON.parse(await readFile(join(book, 'project.json'), 'utf8'));
   assert.equal(saved.spreads[0].params.heading, 'Grid heading');
   await w.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
-  await gridRows(1);
+  await gridColumns(1);
   assert.equal(await frame.locator('[data-spread="title"] h1').textContent(), 'Grid heading');
 
-  // An editor for a target near the canvas's right edge stays inside the visible canvas, not just the wide stage.
-  await chooseRows(w, 2);
-  await gridRows(2);
+  // An editor for a target near the canvas's bottom edge stays inside the visible canvas.
+  await chooseColumns(w, 2);
+  await gridColumns(2);
   const quiet = frame.locator('[data-spread="quiet"] [data-edit~="heading"]').first();
   const edge = await w.locator('.canvas').boundingBox();
-  const headingX = await quiet.evaluate((node) => node.getBoundingClientRect().left);
-  const frameX = await w.locator('iframe.book-frame-book[data-current]').evaluate((node) => node.getBoundingClientRect().left + node.parentElement.parentElement.scrollLeft);
-  // Scroll so the heading starts 100 px before the canvas's right edge.
-  await w.locator('.canvas').evaluate((node, left) => { node.scrollLeft = left; }, frameX + headingX - (edge.x + edge.width - 100));
+  const headingY = await quiet.evaluate((node) => node.getBoundingClientRect().top);
+  const frameY = await w.locator('iframe.book-frame-book[data-current]').evaluate((node) => node.getBoundingClientRect().top + node.parentElement.parentElement.scrollTop);
+  // Scroll so the heading starts 10 px before the canvas's bottom edge.
+  await w.locator('.canvas').evaluate((node, top) => { node.scrollTop = top; }, frameY + headingY - (edge.y + edge.height - 10));
   await scrolled();
   const partial = await quiet.boundingBox();
-  assert.ok(partial.x < edge.x + edge.width - 60 && partial.x + partial.width > edge.x + edge.width, 'The heading is cut off by the canvas edge');
-  await w.mouse.click(partial.x + 30, partial.y + partial.height / 2);
+  assert.ok(partial.y < edge.y + edge.height && partial.y + partial.height > edge.y + edge.height, 'The heading is cut off by the canvas edge');
+  await w.mouse.click(partial.x + 30, partial.y + 3);
   const edgePopover = w.getByRole('dialog', { name: 'Edit Heading' });
   await edgePopover.waitFor();
   await w.waitForTimeout(100);
   const placed = await edgePopover.boundingBox();
-  assert.ok(placed.x >= edge.x - 1 && placed.x + placed.width <= edge.x + edge.width + 1, 'The editor is inside the visible canvas: ' + JSON.stringify({ placed, edge }));
+  assert.ok(placed.y >= edge.y - 1 && placed.y + placed.height <= edge.y + edge.height + 1 &&
+    placed.x >= edge.x - 1 && placed.x + placed.width <= edge.x + edge.width + 1, 'The editor is inside the visible canvas: ' + JSON.stringify({ placed, edge }));
   await edgePopover.getByRole('textbox', { name: 'Heading' }).press('Escape');
   await edgePopover.waitFor({ state: 'detached' });
-  await chooseRows(w, 1);
-  await gridRows(1);
+  await chooseColumns(w, 1);
+  await gridColumns(1);
 
   // The layout is remembered for the book.
   await app.close();
   w = await launch();
   frame = w.frameLocator('iframe.book-frame-book[data-current]');
-  await gridRows(1);
-  assert.deepEqual(await checked(), { 'layout-vertical': false, 'layout-grid': true, 'grid-rows-1': true, 'grid-rows-2': false, 'grid-rows-3': false, 'grid-rows-4': false });
+  await gridColumns(1);
+  assert.deepEqual(await checked(), { 'layout-vertical': false, 'layout-grid': true, 'grid-columns-1': true, 'grid-columns-2': false, 'grid-columns-3': false, 'grid-columns-4': false });
 
-  // Back to one column from two rows: the selected spread stays on screen.
-  await chooseRows(w, 2);
-  await gridRows(2);
+  // Back to Vertical from two columns: the selected spread stays on screen.
+  await chooseColumns(w, 2);
+  await gridColumns(2);
   await w.locator('.spread-thumb[data-spread="twilight"]').click();
   await scrolled();
   await menuAction(app, 'Vertical');
@@ -213,13 +214,13 @@ try {
     const canvas = document.querySelector('.canvas');
     return canvas.scrollWidth <= canvas.clientWidth + 1 && canvas.scrollHeight > canvas.clientHeight * 3;
   });
-  assert.deepEqual(await checked(), { 'layout-vertical': true, 'layout-grid': false, 'grid-rows-1': false, 'grid-rows-2': true, 'grid-rows-3': false, 'grid-rows-4': false });
+  assert.deepEqual(await checked(), { 'layout-vertical': true, 'layout-grid': false, 'grid-columns-1': false, 'grid-columns-2': true, 'grid-columns-3': false, 'grid-columns-4': false });
   await scrolled();
   const twilight = await frame.locator('[data-spread="twilight"]').first().boundingBox();
   const column = await w.locator('.canvas').boundingBox();
   assert.ok(twilight.y >= column.y - 1 && twilight.y + twilight.height <= column.y + column.height + 1,
     'The selected spread is on screen after switching to Vertical: ' + JSON.stringify({ twilight, column }));
-  console.log('Canvas grid smoke passed: geometry, rows, menu state, reveal, in-view, lazy photos, wheel, editing and persistence.');
+  console.log('Canvas grid smoke passed: geometry, columns, menu state, reveal, in-view, lazy photos, wheel, editing and persistence.');
 } finally {
   await app?.close();
   await rm(work, { recursive: true, force: true });

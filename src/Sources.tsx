@@ -61,7 +61,6 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
         {tabs.map(([kind, label, count]) => <button key={kind} role="tab" aria-selected={tab === kind}
           onClick={() => setTab(kind)}>{label} <span className="count">{count}</span></button>)}
       </div>
-      <span className="hint"><kbd>Space</kbd> Quick Look</span>
       <span className="spacer" />
       <ActionMenu className="source-import" disabled={!writable || busy} label={<>Import <Icon name="chevron" /></>}>
         <button onClick={() => importSources('import-photos')}>Import photos…</button>
@@ -73,7 +72,7 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
         {tab === 'photo' && <button onClick={() => importWithMode('photo', 'link', true)}>Link to photo folder…</button>}
       </ActionMenu>
     </div>
-    <div ref={list} className={'source-items source-items-' + tab} role="listbox" aria-orientation="horizontal"
+    <div ref={list} className={'source-items source-items-' + tab} role="listbox"
       aria-label={tab === 'photo' ? 'Photos' : 'Texts'} onKeyDown={keys}>
       {!items.length && <p className="source-empty muted">{tab === 'photo'
         ? 'No photos yet. Import photos or drop them here.' : 'No Markdown sources yet. Import a .md file or drop it here.'}</p>}

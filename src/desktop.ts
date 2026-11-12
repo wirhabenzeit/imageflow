@@ -23,7 +23,7 @@ export const channels = {
   command: 'project:command', changed: 'project:changed',
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
   check: 'project:check', cancelCheck: 'project:cancel-check',
-  panelVisibility: 'editor:panel-visibility',
+  panelVisibility: 'editor:panel-visibility', bookMenu: 'editor:book-menu',
   settings: 'app:settings', updateSettings: 'app:update-settings', settingsChanged: 'app:settings-changed',
   showSettings: 'app:show-settings', settingsPane: 'app:settings-pane', fitSettings: 'app:fit-settings',
   library: 'library:list', libraryChanged: 'library:changed', libraryImport: 'library:import', libraryRemove: 'library:remove',
@@ -34,11 +34,15 @@ export const channels = {
 
 export type OpenAction = 'open' | 'new' | 'sample' | 'reload';
 export type ExportMode = 'proof' | 'print';
-// The main canvas shows spreads in one vertical column, or in a grid of `rows` rows that scrolls sideways.
-export type CanvasLayout = { mode: 'vertical' | 'grid'; rows: number };
-export const gridRows = [1, 2, 3, 4] as const;
-export type LayoutCommand = 'layout-vertical' | 'layout-grid' | `grid-rows-${typeof gridRows[number]}`;
-export type Command = OpenAction | 'toggle-project' | 'toggle-inspector' | LayoutCommand | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo';
+// The main canvas shows spreads in one vertical column, or a row-by-row grid with this many columns.
+export type CanvasLayout = { mode: 'vertical' | 'grid'; columns: number };
+export const gridColumns = [1, 2, 3, 4] as const;
+export type LayoutCommand = 'layout-vertical' | 'layout-grid' | `grid-columns-${typeof gridColumns[number]}`;
+export const spreadCommands = ['add-spread', 'duplicate-spread', 'move-spread-up', 'move-spread-down', 'delete-spread'] as const;
+export type SpreadCommand = typeof spreadCommands[number];
+export type BookMenuState = { enabled: Record<SpreadCommand, boolean>; editing: boolean; writable: boolean; busy: boolean;
+  formats: Record<string, string>; format?: string };
+export type Command = SpreadCommand | 'book-settings' | 'book-check' | `book-format:${string}` | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState;
@@ -96,7 +100,8 @@ export type DesktopApi = {
   // Settings sizes its native window to the current pane's content height.
   fitSettings(height: number): Promise<void>;
   // The window's panel and canvas layout state, so the View menu can show it.
-  setPanelVisibility(state: { sidebar: boolean; inspector: boolean; layout?: CanvasLayout }): Promise<void>;
+  setBookMenuState(state: BookMenuState): Promise<void>;
+  setPanelVisibility(state: { sidebar: boolean; inspector: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout }): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;
   saveProject(id: string, files: ProjectFiles, label?: string): Promise<Result<ProjectSummary>>;
   history(id: string, direction: 'undo' | 'redo'): Promise<Result<ProjectSummary>>;
@@ -154,10 +159,10 @@ export const bookLayout: Record<BookView, { pad: number; gap: number; columns?: 
   layouts: { pad: 6, gap: 26, columns: 2, columnGap: 12 },
 };
 export type Rect = { x: number; y: number; width: number; height: number };
-// Posted by a book frame after layout. Coordinates are relative to the frame document. `rows` is set when the
-// book view is laid out as a grid; `width` is then the width of all columns, which can exceed the frame.
+// Posted by a book frame after layout. Coordinates are relative to the frame document. `columns` is set when the
+// book view is laid out as a grid; the frame fits the canvas width and reports the height of all rows.
 export type BookGeometry = {
-  type: 'geometry'; width: number; height: number; rows?: number;
+  type: 'geometry'; width: number; height: number; columns?: number;
   sheets: (Rect & { spread: string })[];
   // `upright` is false when template CSS rotates or skews the box, so its rectangle is only a bounding box.
   boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean })[];

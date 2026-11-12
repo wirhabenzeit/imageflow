@@ -40,8 +40,8 @@ try {
   const routeEditor = w.frameLocator('iframe.element-editor-frame');
   const editorReady = async () => {
     await routeDialog.waitFor();
-    await w.waitForFunction(() => !document.querySelector('dialog.element-editor .ee-status.muted'));
-    // The dialog is centred, so it moves while the frame still grows; wait until its height has settled.
+    await w.waitForFunction(() => !document.querySelector('.element-editor .ee-status.muted'));
+    // The panel grows upward while the frame loads; wait until its height has settled.
     await w.waitForFunction(() => {
       const frame = document.querySelector('iframe.element-editor-frame');
       const state = (window.__frameHeights ??= []);
@@ -51,6 +51,18 @@ try {
       if (settled) window.__frameHeights = [];
       return settled;
     }, null, { polling: 100 });
+  };
+  const waitRoute = async (check) => {
+    for (let i = 0; i < 100; i++) {
+      if (check((await read()).spreads.find(({ id }) => id === 'road').elements.route.params)) return;
+      await w.waitForTimeout(100);
+    }
+    assert.ok(check((await read()).spreads.find(({ id }) => id === 'road').elements.route.params));
+  };
+  const closeRoute = async () => {
+    await routeDialog.getByRole('button', { name: 'Close', exact: true }).click();
+    await routeDialog.waitFor({ state: 'detached' });
+    await w.waitForFunction(() => !document.querySelector('.preview-state, .preview-message'));
   };
   // Clicking the inset opens its Edit route editor, which owns the GPX track and the viewport. Returns the track
   // control, ImageFlow's own file control inside the template's editor.
@@ -69,7 +81,7 @@ try {
   assert.equal((await status()).errors.length + (await status()).warnings.length, 0);
   assert.equal(await frame.locator('[data-spread="headlands"] [data-element="route"]').getAttribute('class'), 'route-map empty');
 
-  // The route map's own editor frames part of the route: zoom and move, then Done saves the viewport as one edit.
+  // The route map saves each zoom/move while open; each action is undoable.
   const viewBox = () => frame.locator(route + ' svg').getAttribute('viewBox');
   assert.equal(await viewBox(), '0.000 0.000 100.000 100.000');
   // Clicking the inset opens its editor directly.
@@ -85,12 +97,13 @@ try {
   await note('Zoom 2.3×');
   await routeEditor.getByRole('application', { name: 'Route viewport' }).press('ArrowRight');
   await routeEditor.locator('svg[viewBox="32.218 27.778 44.444 44.444"]').waitFor();
-  await rerendered(() => routeDialog.getByRole('button', { name: 'Done' }).click());
+  await waitRoute((p) => p.zoom === 2.25 && p.centerX === 0.5444);
+  await closeRoute();
   await saved('Route map updated');
   const framed = (await read()).spreads.find(({ id }) => id === 'road').elements.route.params;
-  assert.deepEqual(framed, { track: 'senja-road', centerX: 0.5444, centerY: 0.5, zoom: 2.25 });
+  assert.deepEqual(framed, { track: 'senja-road', centerX: 0.5444, zoom: 2.25 });
   assert.equal(await viewBox(), '32.218 27.778 44.444 44.444');
-  await rerendered(() => w.getByRole('button', { name: 'Undo', exact: true }).click());
+  for (let i = 0; i < 3; i++) await rerendered(() => w.getByRole('button', { name: 'Undo', exact: true }).click());
   assert.equal(await viewBox(), '0.000 0.000 100.000 100.000');
   // Without a track the editor says what is missing.
   const empty = frame.locator('[data-spread="headlands"] [data-element="route"]');
@@ -104,16 +117,17 @@ try {
   assert.equal(await w.locator('.crop-editor').count(), 0);
   await routeEditor.getByText('Choose a GPX track to draw the route.').waitFor();
   assert.equal(await routeEditor.getByRole('combobox', { name: 'GPX track' }).inputValue(), '');
-  await routeDialog.getByRole('button', { name: 'Cancel' }).click();
-  await w.waitForFunction(() => !document.querySelector('dialog.element-editor'));
+  await routeDialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await w.waitForFunction(() => !document.querySelector('.element-editor'));
 
-  // Clearing is a valid state: no route, no issue. The editor shows the change at once; Done saves it, and Undo
+  // Clearing is a valid state: no route, no issue. The editor saves the change at once, and Undo
   // restores the assignment.
   let track = await openRoute();
   assert.equal(await track.inputValue(), 'senja-road');
   await track.selectOption('');
   await routeEditor.getByText('Choose a GPX track to draw the route.').waitFor();
-  await rerendered(() => routeDialog.getByRole('button', { name: 'Done' }).click());
+  await waitRoute((p) => p.track === '');
+  await closeRoute();
   await saved('Route map updated');
   assert.equal((await read()).spreads.find(({ id }) => id === 'road').elements.route.params.track, '');
   assert.equal(await trackLine(), 0);
@@ -122,7 +136,7 @@ try {
   assert.equal(await trackLine(), 1);
 
   // Choose… in the editor copies the file into files/ and registers it at once; the editor reads it immediately and
-  // Done assigns it. A file the template cannot parse is the template's diagnostic; the book still renders.
+  // Choosing it assigns it immediately. A file the template cannot parse is the template's diagnostic; the book still renders.
   const broken = join(work, 'Broken ride.gpx');
   await writeFile(broken, '<gpx><trk><trkseg><trkpt lat="69.2"');
   await openDialog([broken]);
@@ -131,7 +145,8 @@ try {
   await routeEditor.getByText('Broken ride.gpx is not valid GPX.').waitFor();
   assert.match(await track.inputValue(), /^fl-/);
   assert.deepEqual((await track.locator('option').allTextContents()).sort(), ['Broken ride.gpx', 'None', 'senja-road.gpx']);
-  await rerendered(() => routeDialog.getByRole('button', { name: 'Done' }).click());
+  await waitRoute((p) => /^fl-/.test(p.track));
+  await closeRoute();
   await saved('Route map updated');
   const afterImport = await read();
   const imported = afterImport.spreads.find(({ id }) => id === 'road').elements.route.params.track;
@@ -175,7 +190,9 @@ try {
     await choice.selectOption(mode);
     await routeEditor.getByRole('button', { name: 'Choose…' }).click();
     await routeEditor.getByRole('combobox', { name: 'GPX track' }).locator('option:checked').filter({ hasText: mode + '-through-editor.gpx' }).waitFor({ state: 'attached' });
-    await rerendered(() => routeDialog.getByRole('button', { name: 'Done' }).click());
+    const selectedTrack = await routeEditor.getByRole('combobox', { name: 'GPX track' }).inputValue();
+    await waitRoute((p) => p.track === selectedTrack);
+    await closeRoute();
     const state = await read();
     const id = state.spreads.find(({ id }) => id === 'road').elements.route.params.track;
     if (mode === 'link') assert.deepEqual(state.files[id], { path: original, linked: true });

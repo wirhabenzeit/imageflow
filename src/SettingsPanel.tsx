@@ -29,12 +29,13 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
   // The native window follows the selected pane's height, like macOS Settings.
   useLayoutEffect(() => {
     const node = content.current;
-    if (!api || !node) return;
+    if (!api || !node || !pane || (!settings && !error)) return;
     const fit = () => void api.fitSettings(Math.ceil(node.getBoundingClientRect().height));
+    fit();
     const observer = new ResizeObserver(fit);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [api, pane]);
+  }, [api, pane, !!settings, !!error]);
   useEffect(() => {
     if (!api) return;
     let active = true;
