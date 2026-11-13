@@ -48,6 +48,8 @@ export type ProjectSummary = ProjectFiles & {
   handle?: string; history?: HistoryState;
   // The template's hash as loaded; network approvals hold for one hash (ADR 0006).
   templateHash?: string;
+  // The network origins this book's frames may reach now (ADR 0006).
+  network?: string[];
   // Thumbnail URL and pixel size per readable photo; Markdown source per readable text.
   photos: Record<string, string>;
   photoSizes: Record<string, { width: number; height: number }>;

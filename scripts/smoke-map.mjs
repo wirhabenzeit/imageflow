@@ -178,6 +178,22 @@ try {
   await configure({ delay: 0, tileStatus: 500 });
   const failed = await check();
   assert.equal(failed.filter((line) => /^rendered-image-failed: Map could not be rendered/.test(line)).length, 2, failed.join('\n'));
+  // The live Book check follows the page: a map that fails to draw in the editor's preview is listed in it.
+  const unchanged = await w.locator(current).getAttribute('src');
+  const restyled = JSON.parse(await readFile(file, 'utf8'));
+  restyled.spreads.find(({ id }) => id === 'map-a').elements.map.params.style = 'bright';
+  await writeFile(file, JSON.stringify(restyled, null, 2) + '\n');
+  await w.waitForFunction((src) => {
+    const node = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return node && node.getAttribute('src') !== src;
+  }, unchanged);
+  const failing = frame.locator('[data-spread="map-a"] [data-element="map"] .if-rendered-image');
+  await failing.scrollIntoViewIfNeeded();
+  await failing.and(frame.locator('[data-rendered="failed"]')).waitFor();
+  await w.locator('.book-check-toggle').click();
+  await w.getByRole('dialog', { name: 'Book check' }).getByText(/Map could not be rendered/).first().waitFor({ timeout: 10000 });
+  await w.locator('.book-check-toggle').click();
+
   const printed = await w.evaluate(async () => {
     const frames = [...document.querySelectorAll('iframe.book-frame-book[data-ready]:not([aria-hidden="true"])')];
     return window.imageflow.exportBook(new URL(frames.at(-1).src).pathname.split('/').at(-1), 'print');

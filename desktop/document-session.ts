@@ -36,6 +36,7 @@ import { CommittedProjectSaveError } from './persistence';
 import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { McpToolName } from '../src/mcp-contract';
+import { renderIdleMs } from '../src/render-budget';
 
 // `network` lists the origins this book's frames may reach now (ADR 0006): its preview, check, export and element
 // editor frames. Absent for frames that stay offline, such as template probes.
@@ -153,7 +154,8 @@ export class DocumentSession {
 
   get book() { return this.projectSession.book; }
   get summary(): ProjectSummary {
-    return { ...projectSummary(this.book, this.active.id), handle: this.projectSession.handle, history: this.projectSession.history };
+    return { ...projectSummary(this.book, this.active.id), handle: this.projectSession.handle, history: this.projectSession.history,
+      network: [...this.networkOrigins] };
   }
   notify(change: ProjectChange) {
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.changed, change);
@@ -589,7 +591,14 @@ export class DocumentSession {
     inputs: ProjectInputIndex | undefined = this.projectSession?.book.folder === book.folder ? this.projectSession.inputs : undefined, draft?: CheckDraft) {
     const renditions = this.projectSession?.inputs === inputs ? this.projectSession?.renditions : undefined;
     const job = new AbortController();
-    const timeout = setTimeout(() => job.abort(new Error('The authoring check timed out.')), 90_000);
+    // The check may take as long as its renders keep making progress (render-budget); it times out only when they
+    // stall for longer than a waiting render allows, or other work stalls as long.
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => job.abort(new Error('The authoring check timed out.')), renderIdleMs('check') + 30_000);
+    };
+    arm();
     this.checkJobs.add(job);
     if (!externalSignal) this.checkJob = job;
     try {
@@ -599,10 +608,10 @@ export class DocumentSession {
         try {
           const url = renderOrigin + '/render/' + id;
           if (preview) {
-            const image = await captureBookPreview(url, preview, signal, inspect);
+            const image = await captureBookPreview(url, preview, signal, inspect, arm);
             return { status: image.status, preview: image };
           }
-          return { status: await checkBookRender(url, signal, inspect) };
+          return { status: await checkBookRender(url, signal, inspect, arm) };
         } finally {
           this.renders.delete(id);
         }

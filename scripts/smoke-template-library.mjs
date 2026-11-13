@@ -146,8 +146,35 @@ try {
   await answer(1);
   assert.deepEqual(await editorNetwork(editor), ['https://tiles.openfreemap.org']);
   assert.deepEqual(await messages(), []);
-  // Stop Allowing in Settings reaches the open book at once: its frames render again without the sites, and its
-  // editors ask.
+  // A map spread, with its editor open while the trust changes.
+  const unmapped = await editor.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
+  const journey = JSON.parse(await readFile(join(book, 'project.json'), 'utf8'));
+  journey.spreads.splice(1, 0, { id: 'map-spread', definition: 'map' });
+  await writeFile(join(book, 'project.json'), JSON.stringify(journey, null, 2) + '\n');
+  await editor.waitForFunction((src) => {
+    const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return frame && frame.getAttribute('src') !== src;
+  }, unmapped);
+  const mapElement = editor.frameLocator('iframe.book-frame-book[data-current]').locator('[data-spread="map-spread"] [data-element="map"]');
+  await mapElement.scrollIntoViewIfNeeded();
+  const mapBox = await mapElement.boundingBox();
+  await editor.mouse.click(mapBox.x + mapBox.width / 2, mapBox.y + mapBox.height / 2);
+  await editor.getByRole('dialog', { name: 'Edit map' }).waitFor();
+  // Whether the open map editor's frame may reach the map server: a request its policy blocks reports a violation.
+  const editorReach = async () => {
+    await editor.locator('iframe.element-editor-frame').waitFor();
+    return editor.frameLocator('iframe.element-editor-frame').locator('body').evaluate(() => new Promise((resolve) => {
+      let blocked = false;
+      document.addEventListener('securitypolicyviolation', (event) => { if (event.blockedURI.includes('tiles.openfreemap.org')) blocked = true; });
+      fetch('https://tiles.openfreemap.org/imageflow-probe', { signal: AbortSignal.timeout(1500) }).catch(() => {})
+        .finally(() => setTimeout(() => resolve(blocked ? 'blocked' : 'allowed'), 200));
+    }));
+  };
+  assert.equal(await editorReach(), 'allowed');
+  const editorBefore = await editor.locator('iframe.element-editor-frame').getAttribute('src');
+
+  // Stop Allowing in Settings reaches the open book at once: its frames, and the open editor, load again without the
+  // sites, and editors ask.
   const frameBefore = await editor.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
   await travelEntry.getByText('Allowed in every book made from this version, until its files change.').waitFor();
   await settings.getByRole('button', { name: 'Stop allowing network access for Travel journal' }).click();
@@ -155,6 +182,9 @@ try {
     const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
     return frame && frame.getAttribute('src') !== src;
   }, frameBefore);
+  await editor.waitForFunction((src) => document.querySelector('iframe.element-editor-frame')?.getAttribute('src') !== src, editorBefore);
+  assert.equal(await editorReach(), 'blocked', 'the open editor lost its network access');
+  await editor.getByRole('dialog', { name: 'Edit map' }).getByRole('button', { name: 'Close', exact: true }).click();
   assert.deepEqual(await editorNetwork(editor), []);
   assert.equal((await messages())[0].message, 'Allow this book’s template to connect to the internet?');
 
@@ -195,7 +225,7 @@ try {
   await settings.getByText('Moved to the Trash. Books made from it are not affected.').waitFor();
   await editor.evaluate(() => window.imageflow.openProject('reload'));
   await editor.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
-  assert.equal(await editor.locator('.spread-thumb').count(), 3);
+  assert.equal(await editor.locator('.spread-thumb').count(), 4);
 
   // The built-in starter without its sample book: the template's opening spreads and no photos.
   const second = editor.evaluate(() => window.imageflow.openProject('new'));

@@ -26,6 +26,7 @@ import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { Edit } from './Inspector';
 import { BookCheckIndicator } from './BookCheck';
+import type { PictureStatus } from './BookFrame';
 import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
 import { keptMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
@@ -591,6 +592,12 @@ export function App() {
     }
     setCheck(status.state === 'ready' ? { id, errors: status.errors, warnings: status.warnings } :
       { id, errors: [{ message: status.message }], warnings: [] });
+  }
+  // Pictures the book view draws after it is ready (ADR 0006): their failures and how many are still drawing.
+  function bookPictures(pictures: PictureStatus, id: string) {
+    if (!acceptCandidate(id) && readyId.current !== id) return;
+    setCheck((previous) => !previous || previous.id !== id ? previous : { ...previous, pictures: pictures.pending,
+      errors: [...previous.errors.filter(({ code }) => code !== 'rendered-image-failed'), ...pictures.errors] });
   }
   const checkCurrent = !!check && check.id === summary?.id;
   const spreadIssues = new Map<string, 'error' | 'warning'>();
@@ -1321,7 +1328,7 @@ export function App() {
                 setHovered(sheet);
                 setHoveredTarget(target && targetKey(target));
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
-              <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus}
+              <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus} onPictures={bookPictures}
                 viewport={viewport} hold={holdPreview} accept={acceptCandidate} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const i = spreads.findIndex((item) => item.id === id);
@@ -1432,7 +1439,7 @@ export function App() {
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
         canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile}
-          prepare={template?.network?.length ? () => decideNetwork(template, true) : undefined} />}
+          prepare={template?.network?.length ? () => decideNetwork(template, true) : undefined} network={summary.network?.join(' ')} />}
     {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&
       <LayoutPickerDialog key={layoutPicker.spread + ':' + layoutPicker.family} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === layoutPicker.spread)!} family={layoutPicker.family} layout={layoutPicker.layout}

@@ -1,6 +1,7 @@
 import { sourcePath } from './source-locations';
 import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
-import { configureRenderedImages, renderingImages, settleRenderedImages } from './rendered-image';
+import { configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, watchRenderedImages } from './rendered-image';
+import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
 import * as jsx from 'react/jsx-runtime';
@@ -35,11 +36,13 @@ import type { ElementInspection, ElementMeasurement } from './inspection';
 import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import { Field, ProjectFilesContext } from './Fields';
 import { editorChanges, unknownControl } from './editor-changes';
+import { pictureTimeoutMs } from './render-budget';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
 function publish(status: RenderStatus) {
   window.imageflowRenderStatus = status;
+  (globalThis as { imageflowRenderActivity?: number }).imageflowRenderActivity = Date.now();
   if (window.parent !== window) post(status);
 }
 
@@ -1162,10 +1165,10 @@ export async function startRender(root: HTMLElement) {
     // in the Book check, and at the format's target resolution for export (ADR 0006).
     const target = template.format.output.resolution?.target ?? 300;
     configureRenderedImages(edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
-      concurrency: view === 'book' ? 2 : 1, timeoutMs: 60_000 }
-      : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: 60_000 }
-        : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: 60_000 }
-          : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: 120_000 });
+      concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview }
+      : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
+        : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
+          : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
     if (edit && view === 'layouts') {
       await renderLayouts(root, book, template, info, query.get('spread') ?? '');
       return;
@@ -1226,12 +1229,12 @@ export async function startRender(root: HTMLElement) {
       suggestion: 'Use select_format with one of the template formats, or declare format ' + book.project.format + ' again in the template.' });
     }
     errors.push(...fileErrors(book, template.parameters, book.project.params, 'Document'));
-    for (const failed of pictureFailures) {
-      errors.push({ ...(failed.spread ? located(failed.spread, failed.message) : message(failed.message)), code: 'rendered-image-failed',
-        ...(failed.element ? { element: failed.element } : {}), details: { label: failed.label, timedOut: failed.timedOut ? 1 : 0 },
-        suggestion: failed.timedOut ? 'Check the internet connection, then check or export again.'
-          : 'Check that the template’s network sites are allowed for this book and reachable, then check or export again.' });
-    }
+    const pictureIssues = (failures: RenderedImageFailure[]): Issue[] => failures.map((failed) => ({
+      ...(failed.spread ? located(failed.spread, failed.message) : message(failed.message)), code: 'rendered-image-failed',
+      ...(failed.element ? { element: failed.element } : {}), details: { label: failed.label, timedOut: failed.timedOut ? 1 : 0 },
+      suggestion: failed.timedOut ? 'Check the internet connection, then check or export again.'
+        : 'Check that the template’s network sites are allowed for this book and reachable, then check or export again.' }));
+    errors.push(...pictureIssues(pictureFailures));
     for (const { api, spread } of guards?.calls ?? []) {
       errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api))), code: 'render-impure',
         details: { api }, suggestion: impureSuggestion });
@@ -1378,6 +1381,22 @@ export async function startRender(root: HTMLElement) {
       state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions, anchors: index.anchors,
       ...(inspection ? { inspection } : {}),
     });
+    // The editor's book view does not wait for its pictures. It reports them to the live Book check as they start,
+    // finish or fail, so a map that failed on the page is never missing from the check.
+    if (lazy && window.parent !== window) {
+      let queued = false;
+      const report = () => {
+        if (queued) return;
+        queued = true;
+        setTimeout(() => {
+          queued = false;
+          const { pending, failures } = renderedImageState();
+          post({ type: 'pictures', pending, errors: pictureIssues(failures) });
+        }, 50);
+      };
+      watchRenderedImages(report);
+      report();
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The template could not be rendered.';
     if (error instanceof PreviewError) window.imageflowPreview = { state: 'error', code: error.code };

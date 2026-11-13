@@ -30,13 +30,15 @@ function editingContext(template: TemplateInfo, spread: SpreadState, element: st
 
 // Template components report values from an isolated frame. Apply each valid change through the app's save
 // queue, keeping the frame mounted while the book renders. Closing flushes any field still being typed.
-export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, canvasReady, edit, close, importFile, prepare, host }: {
+export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, canvasReady, edit, close, importFile, prepare, network = '', host }: {
   project: string; template: TemplateInfo; spread: SpreadState; element: string; readOnly: boolean;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
   // Settles once the frame may load: the network origins its policy allows are decided before it is served.
   prepare?: () => Promise<string | void>;
+  // The network origins the book may reach now; when they change, the frame loads again under the new policy.
+  network?: string;
 }) {
   const layout = template.spreads[spread.definition];
   const definition = layout?.elements[element];
@@ -85,6 +87,14 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     });
     return () => { current = false; };
   }, []);
+  // A frame keeps the content security policy it loaded with, so when network access is allowed or withdrawn while
+  // the editor is open (in Settings, or by a change to the template), it loads again on the book as it is now.
+  const openedNetwork = useRef(network);
+  useEffect(() => {
+    if (network === openedNetwork.current) return;
+    openedNetwork.current = network;
+    setSource(address(latestProject.current));
+  }, [network]);
   const values = (reported: unknown): Values => reported && typeof reported === 'object' ? reported as Values : {};
   const { height, ready, error, setError, failed, flushing, flushTimedOut, flush } = useEditorFrame(frame, {
     draft(reported, reportedSpread) {

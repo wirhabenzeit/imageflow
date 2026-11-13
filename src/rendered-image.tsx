@@ -43,6 +43,18 @@ export function configureRenderedImages(next: Partial<Settings>) {
   settings = { ...settings, ...next };
 }
 
+const watchers = new Set<() => void>();
+const changed = () => { for (const watcher of watchers) watcher(); };
+/** Calls `listener` whenever a picture starts drawing, is drawn, fails or goes; returns a function that stops it. */
+export function watchRenderedImages(listener: () => void) {
+  watchers.add(listener);
+  return () => { watchers.delete(listener); };
+}
+/** The pictures still drawing and the failures on the page now, without waiting. */
+export function renderedImageState() {
+  return { pending: pending.size, failures: [...failures].filter(([node]) => node.isConnected).map(([, failure]) => failure) };
+}
+
 /** Whether a picture is being drawn now; the purity guards allow the declared rendering work meanwhile. */
 export const renderingImages = () => running > 0;
 
@@ -52,11 +64,15 @@ export async function settleRenderedImages(): Promise<RenderedImageFailure[]> {
   return [...failures].filter(([node]) => node.isConnected).map(([, failure]) => failure);
 }
 
+// When a picture last started or finished drawing; jobs waiting for this frame wait while it moves (render-budget).
+const progress = () => { (globalThis as { imageflowRenderActivity?: number }).imageflowRenderActivity = Date.now(); };
+
 async function slot<T>(work: () => Promise<T>) {
   if (running >= settings.concurrency) await new Promise<void>((resolve) => queue.push(resolve));
   running++;
+  progress();
   try { return await work(); }
-  finally { running--; queue.shift()?.(); }
+  finally { running--; progress(); queue.shift()?.(); }
 }
 
 async function toBlob(picture: RenderedPicture): Promise<Blob> {
@@ -143,11 +159,13 @@ export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', class
       fail(timedOut ? messageOf(error) : label + ' could not be rendered: ' + messageOf(error), timedOut);
     });
     pending.add(task);
-    void task.finally(() => pending.delete(task));
+    changed();
+    void task.finally(() => { pending.delete(task); changed(); });
     return () => {
       controller.abort();
       failures.delete(node);
       if (url) URL.revokeObjectURL(url);
+      changed();
     };
   }, [key]);
   return <div ref={wrapper} className={'if-rendered-image' + (className ? ' ' + className : '')} style={style} data-rendered="pending"
