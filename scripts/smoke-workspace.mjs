@@ -39,6 +39,9 @@ try {
   assert.deepEqual(await labels(), ['Hide Sidebar', 'Hide Inspector']);
   assert.equal(await w.locator('.project-head').innerText().then((text) => text.includes('28 pages')), true);
   assert.equal(await w.locator('.project-head').innerText().then((text) => text.includes('Book\nBook')), false);
+  // The check below is about the animation itself, so it must not depend on the machine's Reduce Motion setting
+  // (CI's macOS runners can have it on, which turns the transition off). The end of this script covers 'reduce'.
+  await w.emulateMedia({ reducedMotion: 'no-preference' });
   const before = await canvas();
   await w.getByRole('button', { name: 'Toggle project panel', exact: true }).click();
   assert.equal(await w.getByRole('complementary', { name: 'Project', exact: true }).count(), 0);
@@ -47,7 +50,8 @@ try {
     for (let frame = 0; frame < 16; frame++) { await new Promise(requestAnimationFrame); widths.push(node.clientWidth); }
     return widths;
   });
-  assert.ok(new Set(widths).size > 2, 'Panel collapse animates through intermediate canvas widths');
+  const transition = await w.locator('.workspace').evaluate((node) => getComputedStyle(node).transitionDuration);
+  assert.ok(new Set(widths).size > 2, 'Panel collapse animates through intermediate canvas widths (transition ' + transition + ', widths ' + widths.join(' ') + ')');
   await settle();
   assert.ok((await canvas()).width > before.width + 200);
   await menuAction(app, 'Hide Inspector');
