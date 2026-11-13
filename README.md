@@ -58,7 +58,7 @@ To prepare a downloadable release, follow [Releasing ImageFlow](docs/releasing.m
 
 For everyday pull requests, GitHub Actions runs `check` (build, app/template/API type checks, and unit tests on Linux) and `desktop` (two focused Apple silicon Mac smoke checks). `npm run test:desktop:smoke` checks app launch, book opening and rendering, proof PDF output, durable saves and orderly shutdown. It builds and stages the app but leaves unit tests to `check`.
 
-The separate **Full desktop suite** workflow runs `npm run test:desktop` after pushes to `main` and can be started manually from Actions. It covers the broader editing, layout, template, source, appearance and MCP workflows. It does not run on every PR. Packaged-app checks belong to the release workflow.
+The separate **Full desktop suite** workflow runs `npm run test:desktop` only when started manually from Actions, for example before a release. It covers documents, files, layouts, the template library, the calendar starter, linked sources, drafts and MCP. UI polish, animation and timing are checked by hand rather than by smoke scripts. Packaged-app checks belong to the release workflow.
 
 Both workflows use Node.js 22 from the supported `engines.node` range, install Poppler for the PDF checks, cache npm and Electron downloads, and cancel older runs for the same ref. If the repository becomes private, the PR workflow's `desktop` job runs only on pushes to `main` to conserve macOS minutes.
 
