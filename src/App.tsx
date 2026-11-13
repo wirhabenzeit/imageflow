@@ -548,14 +548,15 @@ export function App() {
     return () => { mounted = false; command(); changed(); progress(); lease(); release(); appError(); };
   }, [api]);
 
-  // Network origins the template declares (ADR 0006): decided once per book and declaration when it first renders,
-  // and again whenever an element editor opens. Newly allowed origins reload the frames so they may reach them.
+  // Network origins the template declares (ADR 0006): decided once per book and template version (its hash) when it
+  // first renders, and again whenever an element editor opens. Newly allowed origins reload the frames so they may
+  // reach them.
   const networkAsked = useRef(new Set<string>());
   // Resolves to the project ID to render from now on.
   function decideNetwork(declared: TemplateInfo | undefined, always = false): Promise<string | void> {
     const before = current.current;
     if (!api || !before || before.readOnly || !declared?.network?.length) return Promise.resolve(before?.id);
-    const key = before.folder + '\n' + declared.network.join(' ');
+    const key = before.folder + '\n' + (before.templateHash ?? '') + '\n' + declared.network.join(' ');
     if (!always && networkAsked.current.has(key)) return Promise.resolve(before.id);
     networkAsked.current.add(key);
     return api.editorNetwork(before.id, declared.network).then((result) => {

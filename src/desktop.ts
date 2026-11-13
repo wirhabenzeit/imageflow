@@ -46,6 +46,8 @@ export type Command = SpreadCommand | 'book-settings' | 'book-check' | `book-for
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState;
+  // The template's hash as loaded; network approvals hold for one hash (ADR 0006).
+  templateHash?: string;
   // Thumbnail URL and pixel size per readable photo; Markdown source per readable text.
   photos: Record<string, string>;
   photoSizes: Record<string, { width: number; height: number }>;

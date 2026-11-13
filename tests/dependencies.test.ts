@@ -107,6 +107,22 @@ test('React and imageflow cannot be bundled, and a rebuild needs installed packa
   await assert.rejects(rebuildDependencies(root), /node_modules is missing\. Run npm install/);
 });
 
+test('relative imports cannot reach installed packages or dotfiles, which the hash and copies leave out', async (t) => {
+  const { folder, root } = await fixture(t);
+  const importing = (path: string) => writeFile(join(root, 'index.tsx'),
+    `import { defineTemplate } from 'imageflow';\nimport x from '${path}';\nexport const v = x;\nexport default defineTemplate({ id: 'deps', version: '1', contract: 1, spreads: {} } as never);\n`);
+  await importing('./node_modules/tiny-lib/index.js');
+  await assert.rejects(bundleTemplate(folder), /is an installed package file\. Import the package by name/);
+  await mkdir(join(root, '.hidden'), { recursive: true });
+  await writeFile(join(root, '.hidden/data.js'), 'export default 1;\n');
+  await importing('./.hidden/data.js');
+  await assert.rejects(bundleTemplate(folder), /is inside \.hidden, which templates leave out of their hash and copies/);
+  await mkdir(join(root, 'lib'), { recursive: true });
+  await writeFile(join(root, 'lib/data.js'), 'export default 1;\n');
+  await importing('./lib/data.js');
+  await bundleTemplate(folder);
+});
+
 test('the type check resolves packages from the saved declarations, without node_modules', async (t) => {
   const { folder, root } = await fixture(t);
   await rebuildDependencies(root);

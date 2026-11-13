@@ -146,6 +146,17 @@ try {
   await answer(1);
   assert.deepEqual(await editorNetwork(editor), ['https://tiles.openfreemap.org']);
   assert.deepEqual(await messages(), []);
+  // Stop Allowing in Settings reaches the open book at once: its frames render again without the sites, and its
+  // editors ask.
+  const frameBefore = await editor.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
+  await travelEntry.getByText('Allowed in every book made from this version, until its files change.').waitFor();
+  await settings.getByRole('button', { name: 'Stop allowing network access for Travel journal' }).click();
+  await editor.waitForFunction((src) => {
+    const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return frame && frame.getAttribute('src') !== src;
+  }, frameBefore);
+  assert.deepEqual(await editorNetwork(editor), []);
+  assert.equal((await messages())[0].message, 'Allow this book’s template to connect to the internet?');
 
   // Export Template… writes the book's own template.
   const fromBook = join(work, 'From book.imageflow-template');
@@ -162,10 +173,16 @@ try {
   await app.evaluate(() => new Promise((resolve) => { const wait = () => globalThis.messages.length ? resolve() : setTimeout(wait, 50); wait(); }));
   assert.equal((await app.evaluate(() => globalThis.messages))[0].message, 'Travel journal 1.0.0 is already in the library.');
   // Changing the book's template ends the trust: its editors ask again, and declining keeps them offline.
-  await writeFile(join(book, 'template', 'index.tsx'), retitled('1.1.0'));
   await answer(1);
+  const unchanged = await editor.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
+  await writeFile(join(book, 'template', 'index.tsx'), retitled('1.1.0'));
+  await editor.waitForFunction((src) => {
+    const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return frame && frame.getAttribute('src') !== src;
+  }, unchanged);
+  // The book asks for the changed template when it renders, and its editors ask again after Not Now.
+  await shown('Allow this book’s template to connect to the internet?');
   assert.deepEqual(await editorNetwork(editor), []);
-  assert.equal((await messages())[0].message, 'Allow this book’s template to connect to the internet?');
   await answer(0);
   await menu('Save Template to Library');
   await shown('Travel journal 1.1.0 replaced the earlier version in the library.');

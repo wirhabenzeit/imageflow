@@ -3,7 +3,7 @@
 // the output resolution and a cancellation signal, limits how many run at once, and waits for all of them, with a
 // timeout, before a Book check or an export page is final. The result is an image owned by the frame: rendering
 // never changes the book's saved content, and nothing is kept after the frame closes.
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 
 export type RenderMode = 'preview' | 'check' | 'export';
@@ -77,14 +77,28 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message
 export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', className, style }: RenderedImageProps) {
   const wrapper = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
-  const latest = useRef(draw);
-  latest.current = draw;
-  const key = JSON.stringify(inputs ?? null);
+  // Drawn again when the inputs, the output settings or the box's size change; each drawing keeps the `draw` and
+  // settings of the render that started it, so a queued or slow drawing never mixes old and new values.
+  const [size, setSize] = useState('');
+  const drawnSize = useRef('');
+  const { mode, pixelRatio, timeoutMs } = settings;
+  const key = JSON.stringify([inputs ?? null, mode, pixelRatio, size]);
+  useLayoutEffect(() => {
+    const node = wrapper.current!;
+    const observer = new ResizeObserver(() => {
+      const next = node.offsetWidth + 'x' + node.offsetHeight;
+      if (next !== drawnSize.current) setSize(next);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
   useLayoutEffect(() => {
     const node = wrapper.current!;
     const img = image.current!;
     const controller = new AbortController();
-    const { mode, pixelRatio, timeoutMs } = settings;
+    const width = node.offsetWidth;
+    const height = node.offsetHeight;
+    drawnSize.current = width + 'x' + height;
     let url: string | undefined;
     node.dataset.rendered = 'pending';
     img.style.display = 'none';
@@ -98,8 +112,6 @@ export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', class
     };
     const task = slot(async () => {
       if (controller.signal.aborted) return;
-      const width = node.offsetWidth;
-      const height = node.offsetHeight;
       if (!width || !height) throw new Error('the element has no size on the page.');
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
@@ -107,12 +119,21 @@ export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', class
           Math.round(timeoutMs / 1000) + ' s.'), { timedOut: true })); }, timeoutMs);
       });
       try {
-        const blob = await Promise.race([latest.current({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]);
+        const blob = await Promise.race([draw({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]);
         if (controller.signal.aborted) return;
         url = URL.createObjectURL(blob);
         img.src = url;
         await img.decode();
         if (controller.signal.aborted) return;
+        // The picture covers the box, cropped to its proportions, so its resolution is the lower of the two axes. It
+        // must have the pixels asked for on both; a small or stretched picture would print blurred.
+        const ratio = Math.min(img.naturalWidth / width, img.naturalHeight / height);
+        if (ratio < pixelRatio * 0.98) {
+          const needed = Math.floor(width * pixelRatio) + ' × ' + Math.floor(height * pixelRatio);
+          throw new Error('the picture is ' + img.naturalWidth + ' × ' + img.naturalHeight + ' px, but the box needs at least ' + needed +
+            ' px' + (mode === 'export' ? ' (' + Math.round(pixelRatio * 96) + ' ppi)' : '') + '.');
+        }
+        node.dataset.ppi = String(Math.round(ratio * 96));
         img.style.display = 'block';
         node.dataset.rendered = 'ready';
         node.removeAttribute('title');
@@ -131,6 +152,6 @@ export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', class
   }, [key]);
   return <div ref={wrapper} className={'if-rendered-image' + (className ? ' ' + className : '')} style={style} data-rendered="pending"
     data-rendered-label={label}>
-    <img ref={image} alt={alt} style={{ display: 'none', width: '100%', height: '100%' }} />
+    <img ref={image} alt={alt} style={{ display: 'none', width: '100%', height: '100%', objectFit: 'cover' }} />
   </div>;
 }

@@ -311,7 +311,7 @@ export default defineTemplate({
   contract: 1,
   requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper',
     'editor-native-controls', 'layout-families', 'editor-spread-parameters', 'opening-spreads', 'editor-network', 'rendered-images'],
-  // The map editor loads OpenFreeMap styles and tiles once the user allows it; printed pages use the saved image.
+  // The Map layout loads OpenFreeMap styles and tiles once the user allows it, in its editor, the page and export.
   network: [mapOrigin],
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),

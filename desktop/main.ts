@@ -32,7 +32,7 @@ import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { SettingsPane } from '../src/settings';
 import { mcpTools } from '../src/mcp-contract';
 import { starters } from '../src/starters';
-import { copyTemplate, templateHash, TemplateImportError, TemplateLibrary } from './template-library';
+import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-library';
 import { TemplateTrust, trustedOrigins } from './template-trust';
 import { isTemplateArchive, templateArchiveExtension, writeTemplateArchive } from './template-archive';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
@@ -519,6 +519,8 @@ async function importTemplate(owner: BrowserWindow | undefined, path: string) {
   });
   if (allowed && (result.status === 'imported' || result.status === 'replaced')) {
     await trust.allow(allowed.hash, allowed.info.network ?? [], { id: allowed.info.id ?? '', version: allowed.info.version }).catch((error) => console.warn('ImageFlow could not save template trust', error));
+    // Lists already showing the new entry learn that it is trusted.
+    publishLibrary();
   }
   return result;
 }
@@ -527,8 +529,7 @@ async function importTemplate(owner: BrowserWindow | undefined, path: string) {
  * The sites a book's frames may reach without asking, because its template, as it is now, is trusted: those of
  * `declared`, or before the template has rendered, all the trust covers.
  */
-async function bookNetworkTrust(folder: string, declared?: readonly string[]) {
-  const hash = await templateHash(await templateFolder(folder));
+async function bookNetworkTrust(hash: string, declared?: readonly string[]) {
   const builtIn = await library.builtInNetwork(hash);
   const allowed = builtIn ?? await trust.allowed(hash);
   return declared ? trustedOrigins(declared, { builtIn: builtIn !== undefined, allowed }) : allowed;
@@ -1082,6 +1083,8 @@ void app.whenReady().then(async () => {
       if (!entry?.network?.length) throw new Error('This template does not ask for network access.');
       if (allow) await trust.allow(entry.hash, entry.network, entry); else await trust.revoke(entry.hash);
       publishLibrary();
+      // Open books from this template follow at once: their frames are rendered again under the new policy (ADR 0006).
+      for (const document of documents.values()) void document.updateNetwork().catch((error) => console.warn('ImageFlow could not update network access', error));
       return { value: true };
     } catch (error) { return { error: errorMessage(error) }; }
   });

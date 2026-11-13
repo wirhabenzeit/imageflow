@@ -1,6 +1,6 @@
 import { testBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
@@ -29,7 +29,7 @@ function NetworkEditor() {
 }
 import React from 'react';
 // Draws a small picture after requesting both origins; fails when the declared one is blocked.
-async function drawChecked() {
+async function drawChecked({ width, height, pixelRatio }) {
   const seen = new Set();
   const listener = (event) => seen.add(new URL(event.blockedURI).host);
   document.addEventListener('securitypolicyviolation', listener);
@@ -39,8 +39,8 @@ async function drawChecked() {
   document.body.dataset.blocked = [...seen].sort().join(',') || 'none';
   if (seen.has('tiles.allowed.invalid')) throw new Error('tiles.allowed.invalid is not allowed');
   const canvas = document.createElement('canvas');
-  canvas.width = 8; canvas.height = 8;
-  canvas.getContext('2d').fillRect(0, 0, 8, 8);
+  canvas.width = Math.ceil(width * pixelRatio); canvas.height = Math.ceil(height * pixelRatio);
+  canvas.getContext('2d').fillRect(0, 0, canvas.width, canvas.height);
   return canvas;
 }
 export default defineTemplate({ id: 'network-test', version: '1', contract: 1, requires: ['editor-network', 'rendered-images'],
@@ -132,6 +132,18 @@ try {
   await answer(1);
   assert.equal(await blocked(), 'other.invalid');
   assert.deepEqual(await prompts(), []);
+
+  // The approval belongs to this version of the template: changing its files renders the book offline and asks again.
+  await answer(1);
+  const frameBefore = await w.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
+  await writeFile(join(folder, 'template/index.tsx'), (await readFile(join(folder, 'template/index.tsx'), 'utf8')) + '// changed\n');
+  await w.waitForFunction((src) => {
+    const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return frame && frame.getAttribute('src') !== src;
+  }, frameBefore);
+  for (let i = 0; i < 100 && !(await prompts()).length; i++) await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal((await prompts()).length, 1);
+  assert.equal(await pageBlocked(), 'other.invalid,tiles.allowed.invalid');
   console.log('ImageFlow editor network passed.');
 } finally {
   await app.close();
