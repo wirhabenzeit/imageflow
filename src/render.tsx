@@ -1200,6 +1200,8 @@ export async function startRender(root: HTMLElement) {
       ...placeControlWarnings(declaration, rendered).map(({ code, message: text, path, details, suggestion, spread }) =>
         ({ ...(spread ? located(spread, text) : message(text)), code, details: { ...details, path }, suggestion })),
       ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
+      ...(book.template.warnings ?? []).map((text) => ({ ...message(text), code: 'template-dependencies',
+        suggestion: 'Run npm install in template/, then choose Template → Rebuild Dependencies.' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
     ];

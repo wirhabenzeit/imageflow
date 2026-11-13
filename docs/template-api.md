@@ -15,7 +15,7 @@ template/
   spreads/         optional: one file per spread definition
 ```
 
-The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided by the host and must not be bundled. Relative imports, CSS imports, and asset imports inside `template/` are allowed; other package imports are not supported. Templates must render deterministically without fetching data, timers, state, or effects. This is an authoring requirement, not a guarantee that arbitrary template JavaScript is safe; open only projects you trust.
+The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided by the host and must not be bundled. Relative imports, CSS imports, and asset imports inside `template/` are allowed. Other packages come from npm through the template's saved dependency bundle ([Dependencies](#dependencies)). Templates must render deterministically without fetching data, timers, state, or effects. This is an authoring requirement, not a guarantee that arbitrary template JavaScript is safe; open only projects you trust.
 
 `imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `printFormat`, `Spread`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue` and `capabilities`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
 
@@ -352,6 +352,21 @@ defineTemplate({
 - **Changes from elsewhere:** if the spread's layout or the family's declarations change while the picker is open, the dialog says so and refuses to switch.
 - **Agents and commands** keep switching layouts by ID with `switch_layout`. `get_authoring_context` reports `layoutFamilies`, and `family` and `variant` on each layout, so agents see the same grouping.
 - **Scope today:** a finite list of explicitly declared variants, shown in a dialog. The set of boxes is never derived from parameters, and unbounded counts (rows 1 to n) are not supported. Hosting the picker inline in the sidebar may follow.
+
+## Dependencies
+
+A template can use npm packages, such as a map or chart library (requires nothing in `requires`; apps that predate this reject the import):
+
+1. Add a `package.json` in `template/` and run `npm install` there.
+2. Import the package as usual: `import maplibregl from 'maplibre-gl'`, and its CSS with `import 'maplibre-gl/dist/maplibre-gl.css'`.
+3. Choose **Template → Rebuild Dependencies**. ImageFlow bundles every package the template imports into `template/vendor/`: `modules/` (ES modules, shared code split into chunks, CSS beside them), `types/` (the declarations those packages reach, laid out as `node_modules`), `LICENSES/` and `manifest.json` (packages and versions, the lockfile's hash, and which import maps to which module).
+
+Books never read `node_modules`. Opening, previews, the Book check and export resolve package imports only through `vendor/manifest.json`, so a book renders the same code on every Mac, and the template hash, which covers `vendor/` but not `node_modules/`, identifies that code. A package import missing from the manifest is a compile error pointing at the rebuild. When `package-lock.json` changes after a rebuild, the Book check warns (`template-dependencies`) and the book keeps the saved bundle until you rebuild. Exported templates and the library include `vendor/` and leave out `node_modules/`.
+
+- **React** is the app's: packages that import `react` get the host's React and its hooks. Bundling `react`, `react-dom` or `imageflow` is refused.
+- **Types:** the type check resolves packages from `vendor/types`, so `check_book` with `typescript: true` works without `node_modules`; problems inside third-party declarations are not reported. A package without declarations (and no `@types` package) is typed as `any`, with a `template-dependencies` warning. The rebuild also points `paths` in `template/tsconfig.json` at `vendor/types` and excludes `vendor/` there, so code editors see the same declarations.
+- **Purity still applies:** a library may run freely in an [element editor](#element-editors), but layouts must render from their inputs alone ([Render function](#render-function)). A map library, for example, runs in the editor, which saves a snapshot with `saveFile`; the layout draws that image.
+- Licences: `vendor/LICENSES/` holds each bundled package's licence file. Keep it when you share the template.
 
 ## Render function
 

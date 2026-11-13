@@ -15,6 +15,8 @@ import { identifier } from '../src/project';
 import type { RenderProject } from '../src/project';
 import { printBook, saveProof } from './export';
 import { approveNetwork, approvedNetwork } from './source-access';
+import { rebuildDependencies } from './dependencies';
+import { templateFolder } from './document-actions';
 import { importIntoProject, loadProject, projectSummary, readProjectManifest, saveGeneratedFile } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
@@ -142,6 +144,14 @@ export class DocumentSession {
     const next = await loadProject(this.book.folder, this.cache, this.book.readOnly);
     const summary = this.activate(next, true);
     if (!this.watcher) this.watchProject(next);
+    return summary;
+  }
+  /** Bundles the template's installed packages into template/vendor/ and reloads the book with them (ADR 0006). */
+  async rebuildDependencies() {
+    if (this.book.readOnly) throw new Error('Create a project to change its template.');
+    await rebuildDependencies(await templateFolder(this.book.folder));
+    const summary = await this.reload();
+    this.notify({ value: summary });
     return summary;
   }
   replyLease(id: string, allowed: boolean) { this.agentLeases.get(id)?.(allowed === true); }

@@ -3,6 +3,8 @@ import { isUtf8 } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import sharp from 'sharp';
+import * as ReactExports from 'react';
+import { dependencyWarning, isBareImport, missingDependency, readDependencyManifest, vendoredModule } from './dependencies';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BuildFailure, Loader } from 'esbuild';
 import type { AuthoringDiagnostic } from '../src/authoring';
@@ -72,7 +74,8 @@ export async function readProjectDocument(root: string, name: ManifestName): Pro
 
 const hostModules = new Map([
   ['imageflow', 'export const { ' + runtimeExports.join(', ') + ' } = globalThis.ImageFlowRuntime;'],
-  ['react', 'export default globalThis.ImageFlowReact; export const { createElement, Fragment, Children } = globalThis.ImageFlowReact;'],
+  // All of React's named exports, so bundled dependencies that use hooks share the app's React.
+  ['react', 'export default globalThis.ImageFlowReact; export const { ' + Object.keys(ReactExports).filter((name) => /^[A-Za-z_$][\w$]*$/.test(name) && name !== 'default').join(', ') + ' } = globalThis.ImageFlowReact;'],
   ['react/jsx-runtime', 'export const { jsx, jsxs, Fragment } = globalThis.ImageFlowJSX;'],
 ]);
 
@@ -83,12 +86,16 @@ export class TemplateCompileError extends Error {
   }
 }
 
-async function bundleTemplate(folder: string) {
+export async function bundleTemplate(folder: string) {
   const entry = await containedPath(folder, 'template/index.tsx', 'template');
   const root = resolve(folder, 'template');
   const loader: Record<string, Loader> = Object.fromEntries(
     Object.keys(assetTypes).filter((ext) => ext !== '.js' && ext !== '.css').map((ext) => [ext, 'file']),
   );
+  const manifest = await readDependencyManifest(root).catch((error: Error) => {
+    throw new TemplateCompileError(error.message, [{ code: 'template-compile-error', stage: 'template', severity: 'error', message: error.message }]);
+  });
+  const dependencies = await dependencyWarning(root, manifest);
   try {
     // esbuild reads its executable path when the module is first loaded.
     const { build } = await import('esbuild');
@@ -115,6 +122,11 @@ async function bundleTemplate(folder: string) {
           builder.onResolve({ filter: /.*/ }, async (args) => {
             if (args.kind === 'entry-point' || args.pluginData) return;
             if (hostModules.has(args.path)) return { path: args.path, namespace: 'imageflow-host' };
+            // Packages resolve only through the saved dependency bundle, never through node_modules (ADR 0006).
+            if (isBareImport(args.path)) {
+              if (vendoredModule(root, manifest, args.path) === undefined) return { errors: [{ text: missingDependency(args.path) }] };
+              return { path: args.path, namespace: 'imageflow-vendor' };
+            }
             if (!args.path.startsWith('./') && !args.path.startsWith('../')) {
               return { errors: [{ text: 'Use a relative template import instead of ' + args.path + '.' }] };
             }
@@ -128,6 +140,9 @@ async function bundleTemplate(folder: string) {
           });
           builder.onLoad({ filter: /.*/, namespace: 'imageflow-host' }, (args) => ({
             contents: hostModules.get(args.path),
+          }));
+          builder.onLoad({ filter: /.*/, namespace: 'imageflow-vendor' }, (args) => ({
+            contents: vendoredModule(root, manifest, args.path), resolveDir: root, loader: 'js',
           }));
         },
       }],
@@ -150,7 +165,7 @@ async function bundleTemplate(folder: string) {
       files.set(name, await readFile(source));
       urls[path] = name;
     }
-    return { files, urls };
+    return { files, urls, ...(dependencies ? { warnings: [dependencies] } : {}) };
   } catch (error) {
     const message = 'Template could not be bundled. ' + (error instanceof Error ? error.message : String(error));
     const errors = (error as Partial<BuildFailure> | null)?.errors;
@@ -445,6 +460,7 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
       script: base + '/template/template.js',
       css: book.assets.files.has('template.css') ? base + '/template/template.css' : undefined,
       assets: Object.fromEntries(Object.entries(book.assets.urls).map(([path, name]) => [path, base + '/template/' + name])),
+      ...(book.assets.warnings ? { warnings: book.assets.warnings } : {}),
     },
   };
 }

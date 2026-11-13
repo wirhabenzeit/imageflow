@@ -636,6 +636,12 @@ function installMenu(formats: Record<string, string>) {
         const document = focusedDocument(owner);
         if (document) void document.run(() => openDocumentLocation(document, 'template')).then((result) => { if ('error' in result) report(document.window, result.error); });
       } },
+      { id: 'rebuild-dependencies', label: 'Rebuild Dependencies', click: (_item, owner) => {
+        const document = focusedDocument(owner);
+        if (document) void document.run(() => document.rebuildDependencies()).then((result) => {
+          if ('error' in result) report(document.window, result.error);
+        });
+      } },
     ] },
     { label: 'View', submenu: [
       menuCommand('Hide Sidebar', 'Alt+CmdOrCtrl+1', 'toggle-project', 'sidebar'),
