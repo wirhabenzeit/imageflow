@@ -1,4 +1,5 @@
 import { sourcePath } from './source-locations';
+import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
 import * as jsx from 'react/jsx-runtime';
@@ -1075,6 +1076,9 @@ export async function startRender(root: HTMLElement) {
     setTemplateAssets(book.template.assets);
     setTemplateFiles(book.files);
     Object.assign(globalThis, { ImageFlowRuntime: runtime, ImageFlowReact: React, ImageFlowJSX: jsx });
+    // Book check, export and artwork frames record impure calls from template code, including at module load.
+    const guards = book.mode === 'edit' ? undefined : installPurityGuards(window as unknown as Record<string, unknown>,
+      new URL(book.template.script, location.href).pathname);
     const [module] = await Promise.all([import(/* @vite-ignore */ book.template.script), loadStyles(book.template.css)]);
     // The project's format choice is resolved first; everything below works with that one format.
     // `spreads` may be a builder function when the template was exported without defineTemplate.
@@ -1176,6 +1180,10 @@ export async function startRender(root: HTMLElement) {
       suggestion: 'Use select_format with one of the template formats, or declare format ' + book.project.format + ' again in the template.' });
     }
     errors.push(...fileErrors(book, template.parameters, book.project.params, 'Document'));
+    for (const { api, spread } of guards?.calls ?? []) {
+      errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api))), code: 'render-impure',
+        details: { api }, suggestion: impureSuggestion });
+    }
     for (const spread of spreads) {
       const definition = template.spreads[spread.definition];
       if (!definition) continue;

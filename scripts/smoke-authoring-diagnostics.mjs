@@ -169,6 +169,30 @@ try {
   assert.equal(setup.location?.line, template().split('\n').length + 1);
   assert.equal(loading.checks.declarations, 'not-run');
 
+  // A layout that requests data, draws with the GPU, starts a worker or schedules work fails the check (ADR 0006).
+  await writeFile(entry, template().replace('  initial:{', `  impure:{label:'Impure',render:ctx=>{
+    fetch('https://tiles.example.invalid/0.pbf').catch(()=>{});
+    document.createElement('canvas').getContext('webgl');
+    document.createElement('canvas').getContext('2d');
+    setTimeout(()=>{},0);
+    try { new Worker('data:text/javascript,'); } catch {}
+    return <Spread><p style={abs(20,20,50,10)}>Impure</p></Spread>;
+  }},
+  initial:{`));
+  const current = (await call('check_book', { project })).data;
+  // The same template without the impure spread in the book checks cleanly: only rendered layouts are judged.
+  assert.ok(!current.diagnostics.some((d) => d.code === 'render-impure'), JSON.stringify(current.diagnostics));
+  const impure = (await call('check_book', { project, expectedRevision: current.revision, draft: { operations: [
+    { op: 'insert_spread', definition: 'impure', ref: 'impure', after: 'first' },
+  ] } })).data;
+  const calls = impure.diagnostics.filter((d) => d.code === 'render-impure');
+  assert.deepEqual(calls.map((d) => d.details.api).sort(), ["HTMLCanvasElement.getContext('webgl')", 'Worker', 'fetch', 'setTimeout'],
+    JSON.stringify(impure.diagnostics));
+  for (const d of calls) {
+    assert.equal(d.severity, 'error');
+    assert.equal(d.location.spread, impure.draft.references.impure);
+  }
+
   await writeFile(entry, template());
   assert.equal((await call('check_book', { project })).data.state, 'ready');
   assert.equal(JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).spreads.length, 1);

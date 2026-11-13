@@ -1,6 +1,6 @@
 # 0006: Template dependencies, editor network access and generated files
 
-Status: proposed, 2026-11-13. Motivated by a real map layout in the photobook starter, replacing the basemap-less GPX inset.
+Status: accepted, 2026-11-13; phase 1 (render purity) implemented. Motivated by a real map layout in the photobook starter, replacing the basemap-less GPX inset.
 
 ## Problem
 

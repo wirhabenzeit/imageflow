@@ -1,4 +1,5 @@
 import { createContext, useContext, useLayoutEffect, useRef } from 'react';
+import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
 import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, printFormat, pt, spanFits } from './format';
@@ -621,13 +622,20 @@ export function SpreadView({ book, template, format, spread, page, index, positi
   };
   // A layout drawn in a format it does not fit gets lenient geometry, through ctx.geometry and ctx.format alike.
   const fits = spanFits(definition.span, template.format);
-  const content = definition.render({
-    ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode,
-    // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
-    edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
-    book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),
-    PhotoBox, MarkdownBox, Element, Text,
-  });
+  // Purity guards (Book check and export only) attribute impure calls to the layout rendering now.
+  renderingSpread(spread.id);
+  let content: ReturnType<typeof definition.render>;
+  try {
+    content = definition.render({
+      ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode,
+      // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
+      edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
+      book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),
+      PhotoBox, MarkdownBox, Element, Text,
+    });
+  } finally {
+    renderingSpread(undefined);
+  }
   return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, documentParameters: template.parameters, values, lazyPhotos }}>
     {content}</SpreadData.Provider>;
 }

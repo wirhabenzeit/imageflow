@@ -357,6 +357,8 @@ defineTemplate({
 
 `render(context)` is called per spread instance and must be a pure function of its input: no state, effects, timers, randomness, or data fetching.
 
+Book check and export enforce the parts of this that would make a printed page depend on something outside the book. While they render, a call from template code (including bundled libraries and module setup) to `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Worker`, `SharedWorker`, `importScripts`, a GPU canvas context (`webgl`, `webgl2`, `webgpu`, `bitmaprenderer`, on `HTMLCanvasElement` or `OffscreenCanvas`), `navigator.gpu`, `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` is a `render-impure` error naming the API and, when it happened while a layout rendered, its spread. Print export refuses a book with such an error. A 2D canvas is allowed. The editor's own previews and element editors are not checked, so an element editor may use these APIs (see [ADR 0006](decisions/0006-template-capabilities.md)). The check reports mistakes; it is not a sandbox, and the render frames' content security policy blocks other origins regardless.
+
 ```ts
 type RenderContext = {
   params: SpreadParams;                     // this spread instance
