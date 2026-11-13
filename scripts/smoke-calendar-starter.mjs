@@ -43,7 +43,7 @@ try {
   // Every day of January fits in the days element, above the bottom of the safe area.
   const daysFit = async () => {
     const january = frame.locator('.month').first();
-    const [area, last] = [await january.locator('.days').locator('..').boundingBox(), await january.locator('.days li').last().boundingBox()];
+    const [area, last] = [await january.locator('.days').boundingBox(), await january.locator('.days li').last().boundingBox()];
     assert.ok(last.y + last.height <= area.y + area.height + 1, 'day 31 fits: ' + JSON.stringify({ area, last }));
   };
   // The printer's sizes are 400 dpi pixels with 31 px of bleed on each side.
@@ -90,14 +90,18 @@ try {
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await frame.locator('.month-name').first().filter({ hasText: 'JAN' }).waitFor();
 
-  // Marked days that are not days of the month are reported, not silently dropped: February has no 30th, and the
-  // other entries are no day numbers at all. Only the 17th is marked.
+  // Marked days are dates for the whole calendar. The sample marks 17 May and 24–26 and 31 December.
+  assert.deepEqual(await frame.locator('.month').nth(4).locator('.marked .day').allTextContents(), ['17']);
+  assert.deepEqual(await frame.locator('.month').nth(11).locator('.marked .day').allTextContents(), ['24', '25', '26', '31']);
+  // A yearly date and a one-off date show in their month; entries that are not dates are reported once, not dropped.
   const file = join(project, 'project.json');
   const saved = JSON.parse(await readFile(file, 'utf8'));
-  saved.spreads.find(({ id }) => id === 'feb').elements = { days: { params: { marked: '0, -1, 1.5, typo, 17, 30' } } };
+  const sample = saved.params.markedDates;
+  saved.params.markedDates = '0, typo, 30.02, 14.2, 2027-02-03, 2028-02-05, 29.02, 1.5';
   await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
   await frame.locator('.month').nth(1).locator('.marked').first().waitFor();
-  assert.deepEqual(await frame.locator('.month').nth(1).locator('.marked .day').allTextContents(), ['17']);
+  assert.deepEqual(await frame.locator('.month').nth(1).locator('.marked .day').allTextContents(), ['3', '14']);
+  assert.deepEqual(await frame.locator('.month').nth(4).locator('.marked .day').allTextContents(), ['1']);
   // Template findings are reported with a `template:` prefix on their code.
   let invalid = [];
   for (let attempt = 0; attempt < 50 && !invalid.length; attempt++) {
@@ -105,10 +109,17 @@ try {
     if (!invalid.length) await w.waitForTimeout(100);
   }
   assert.equal(invalid.length, 1, JSON.stringify(invalid));
-  assert.match(invalid[0].message, /^Marked days 0, -1, 1\.5, typo, 30 are not a day of FEB \(1–28\)/);
-  saved.spreads.find(({ id }) => id === 'feb').elements = {};
+  assert.match(invalid[0].message, /^Marked days: 0, typo, 30\.02 are not dates/);
+  // Moving the December page to the front makes it January, and the December marks stay in December.
+  saved.params.markedDates = sample;
+  saved.spreads.splice(1, 0, ...saved.spreads.splice(saved.spreads.findIndex(({ id }) => id === 'dec'), 1));
   await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
-  await frame.locator('.month').nth(1).locator('.marked').waitFor({ state: 'detached' });
+  await frame.locator('.month').first().locator('.place', { hasText: 'Outer coast, Senja' }).waitFor();
+  assert.deepEqual(await frame.locator('.month').first().locator('.marked .day').allTextContents(), []);
+  assert.deepEqual(await frame.locator('.month').nth(11).locator('.marked .day').allTextContents(), ['24', '25', '26', '31']);
+  saved.spreads.splice(12, 0, saved.spreads.splice(1, 1)[0]);
+  await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
+  await frame.locator('.month').first().locator('.place', { hasText: 'Segla, Senja' }).waitFor();
 
   // Without the cover the months stay January to December, and twelve pages still print.
   await w.locator('.spread-thumb').first().click();

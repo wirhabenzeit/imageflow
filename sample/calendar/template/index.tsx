@@ -1,5 +1,5 @@
 import { box, defineTemplate, inch, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
-import type { ImageFlowNode, Photo, RenderContext } from 'imageflow';
+import type { ImageFlowNode, Photo, Rect, RenderContext } from 'imageflow';
 import './styles.css';
 
 // A wall calendar without facing pages: a cover, then one page per month. Each page is a full-bleed photo with a
@@ -39,7 +39,10 @@ const documentParameters = {
   firstMonth: p.date({ label: 'First month', default: '2027-01-01', precision: 'month' }),
   language: p.enum({ label: 'Month and day names', default: 'en', options: ['en', 'de', 'fr', 'es', 'it', 'nl'], labels: languages }),
   strip: p.color({ label: 'Strip colour', default: '#121212' }),
-  highlight: p.color({ label: 'Marked days', default: '#f2a93b' }),
+  // Dates, not days of a page: birthdays and holidays stay on their date when pages move.
+  markedDates: p.string({ label: 'Marked days', default: '', maxLength: 600, multiline: true,
+    placeholder: '25.12 every year, 2027-04-16 once' }),
+  highlight: p.color({ label: 'Marked day colour', default: '#f2a93b' }),
 };
 type Context = RenderContext<{ label: string }, typeof documentParameters>;
 
@@ -59,11 +62,22 @@ const weekdayName = (date: Date, language: Language) => {
   const name = clean(new Intl.DateTimeFormat(language, { timeZone: 'UTC', weekday: 'short' }).format(date)).slice(0, 2);
   return name.charAt(0).toLocaleUpperCase(language) + name.slice(1);
 };
-// Marked days are a comma-separated list of day numbers, such as "3, 14".
-// Every token is kept, so entries that are not days of this month can be reported instead of silently dropped.
-const markedTokens = (value: string) => value.split(/[\s,;]+/).filter(Boolean);
-const markedDays = (value: string, days = 31) =>
-  new Set(markedTokens(value).filter((token) => /^\d+$/.test(token)).map(Number).filter((day) => day >= 1 && day <= days));
+// Marked days are dates for the whole calendar: "25.12" every year or "2027-04-16" once, separated by commas,
+// semicolons or new lines. Every entry is kept, so ones that are not dates can be reported instead of dropped.
+type MarkedDate = { month: number; day: number; year?: number };
+const markedEntries = (value: string) => value.split(/[\s,;]+/).filter(Boolean).map((entry): { entry: string; date?: MarkedDate } => {
+  const yearly = /^(\d{1,2})\.(\d{1,2})\.?$/.exec(entry);
+  const once = /^(\d{4})-(\d{2})-(\d{2})$/.exec(entry);
+  const [year, month, day] = once ? [Number(once[1]), Number(once[2]), Number(once[3])]
+    : yearly ? [undefined, Number(yearly[2]), Number(yearly[1])] : [undefined, 0, 0];
+  // A yearly 29.02 is valid: it shows in leap years.
+  const longest = month >= 1 && month <= 12 ? new Date(Date.UTC(year ?? 2024, month, 0)).getUTCDate() : 0;
+  return day >= 1 && day <= longest ? { entry, date: { month, day, year } } : { entry };
+});
+/** The marked days of one month. */
+const markedDays = (value: string, month: Date) => new Set(markedEntries(value).flatMap(({ date }) =>
+  date && date.month === month.getUTCMonth() + 1 && (date.year === undefined || date.year === month.getUTCFullYear())
+    && date.day <= daysIn(month) ? [date.day] : []));
 
 // Type sizes are designed for A3 and scale with the trim width, like the positions do.
 const scale = (context: Pick<Context, 'format'>, value: number, unit: 'pt' | 'mm') => (value * context.format.trim.width / canvas.width).toFixed(2) + unit;
@@ -105,9 +119,11 @@ function Rule({ context }: { context: Pick<Context, 'geometry'> }) {
   return <div className="rule" style={context.geometry.css({ ...rect, width: trim.x + trim.width - rect.x })} />;
 }
 
-function Days({ month, language, marked }: { month: Date; language: Language; marked: string }) {
-  const highlighted = markedDays(marked, daysIn(month));
-  return <ol className="days">
+function Days({ month, language, marked, edit, rect, geometry, finding }: {
+  month: Date; language: Language; marked: string; edit: object; rect: Rect; geometry: Context['geometry']; finding: object;
+}) {
+  const highlighted = markedDays(marked, month);
+  return <ol className="days" {...edit} {...finding} style={geometry.css(rect)}>
     {Array.from({ length: daysIn(month) }, (_, i) => {
       const date = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), i + 1));
       const weekend = date.getUTCDay() === 0 || date.getUTCDay() === 6;
@@ -156,9 +172,6 @@ export default defineTemplate({
       label: 'Month',
       parameters: { place: p.string({ label: 'Place', default: '', maxLength: 40, placeholder: "The photo's caption" }) },
       boxes: { hero: box.photo('Photo') },
-      elements: { days: { label: 'Days', parameters: {
-        marked: p.string({ label: 'Marked days', default: '', maxLength: 120, placeholder: 'Day numbers, such as 3, 14' }),
-      } } },
       // Every month page declares an anchor, so a page knows how many months come before it. Adding, removing or
       // moving pages renumbers the months.
       anchors: () => [{ id: 'month' }],
@@ -167,21 +180,20 @@ export default defineTemplate({
         const index = Math.max(0, ctx.book.anchors('month').findIndex((anchor) => anchor.page === ctx.page.number));
         const month = monthAt(ctx.document.firstMonth, index);
         const language = ctx.document.language;
-        const marked = ctx.elements.days.params.marked;
-        const valid = markedDays(marked, daysIn(month));
-        const rejected = markedTokens(marked).filter((token) => !/^\d+$/.test(token) || !valid.has(Number(token)));
-        const finding = rejected.length ? issue({ code: 'marked-day-invalid', severity: 'warning', element: 'days', parameter: 'marked',
-          message: (rejected.length === 1 ? 'Marked day ' : 'Marked days ') + rejected.join(', ') + (rejected.length === 1 ? ' is' : ' are') + ' not a day of ' + monthName(month, language) +
-            ' (1–' + daysIn(month) + ') and ' + (rejected.length === 1 ? 'is' : 'are') + ' not shown.',
-          suggestion: 'Use day numbers from 1 to ' + daysIn(month) + ', separated by commas.' }) : {};
+        const marked = ctx.document.markedDates;
+        // Entries that are not dates are reported once, on the first month page.
+        const rejected = index === 0 ? markedEntries(marked).filter(({ date }) => !date).map(({ entry }) => entry) : [];
+        const finding = rejected.length ? issue({ code: 'marked-day-invalid', severity: 'warning',
+          message: 'Marked days: ' + rejected.join(', ') + (rejected.length === 1 ? ' is not a date' : ' are not dates') + ' and ' +
+            (rejected.length === 1 ? 'is' : 'are') + ' not shown.',
+          suggestion: 'Write 25.12 for every year or 2027-04-16 for one date, separated by commas.' }) : {};
         return <Page context={ctx} className="month">
           <ctx.PhotoBox id="hero" rect={photoRect(ctx)} />
           <StripCaption context={ctx} text={place(ctx.params.place, ctx.boxes.hero.photo)} placeholder="Place" edit={ctx.edit('place')} />
           <Rule context={ctx} />
           <p className="month-name" style={ctx.geometry.css(at.page(strip.x, rule + 5, strip.width, 8))}>{monthName(month, language)}</p>
-          <ctx.Element id="days" {...finding} rect={at.page(strip.x, rule + 20, strip.width, 297 - rule - 26)}>
-            <Days month={month} language={language} marked={marked} />
-          </ctx.Element>
+          <Days month={month} language={language} marked={marked} edit={ctx.edit('document.markedDates')} finding={finding}
+            rect={at.page(strip.x, rule + 20, strip.width, 297 - rule - 26)} geometry={ctx.geometry} />
         </Page>;
       },
     }),
