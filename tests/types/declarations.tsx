@@ -328,3 +328,11 @@ const languageValue: 'en' | 'de' = languageMap.default;
 p.enum({ label: 'Language', options: { en: 'English' }, default: 'fr' });
 // @ts-expect-error labels belong in the map
 p.enum({ label: 'Language', options: { en: 'English' }, default: 'en', labels: { en: 'English' } });
+
+// Number-like object keys normalize to string saved values, whether or not the keys are quoted.
+const numericEnum = p.enum({ label: 'Year', options: { 2024: 'This year', 10: 'Ten', older: 'Older' }, default: '2024' });
+const numericEnumValue: '2024' | '10' | 'older' = numericEnum.default;
+// @ts-expect-error defaults remain string saved values
+p.enum({ label: 'Year', options: { 2024: 'This year' }, default: 2024 });
+// @ts-expect-error missing numeric key
+p.enum({ label: 'Year', options: { 2024: 'This year' }, default: '2025' });

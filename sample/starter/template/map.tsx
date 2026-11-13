@@ -202,7 +202,7 @@ export function MapEditor({ values, set, readOnly, Control, context }: MapEditor
       <button type="button" disabled={readOnly || !points} onClick={fitTrack}>Fit track</button>
     </div>
     <div ref={holder} className="map-editor-map" role="application" aria-label="Map view"
-      data-output-width={measured?.width} data-output-height={measured?.height}
+      data-output-x={measured?.x} data-output-y={measured?.y} data-output-width={measured?.width} data-output-height={measured?.height}
       style={rect ? { aspectRatio: (rect.width / rect.height).toFixed(4) } : undefined} />
     <p className={'map-editor-note' + (state.error ? ' error' : '')} role="status">
       {state.error ?? (!measured ? 'Waiting for the page layout…' : 'Drag and zoom to frame the page. The page draws this view, and export draws it again at print resolution.')}

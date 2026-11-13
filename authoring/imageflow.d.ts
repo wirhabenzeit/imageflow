@@ -160,6 +160,7 @@ export type ParameterValues<P> = { [K in keyof P]: ParameterValue<P[K]> };
 type Options<P extends Parameter> = Omit<P, 'type'>;
 /** Rejects option names the parameter type does not have, such as `mutliline`, which ImageFlow would ignore. */
 type Known<O, Allowed> = O & { [K in Exclude<keyof O, keyof Allowed>]: never };
+type EnumKeys<C> = `${Extract<keyof C, string | number>}`;
 export const p: {
   boolean<const O extends Options<BooleanParameter>>(options: Known<O, Options<BooleanParameter>>): O & { type: 'boolean' };
   string<const O extends Options<StringParameter>>(options: Known<O, Options<StringParameter>>): O & { type: 'string' };
@@ -167,9 +168,9 @@ export const p: {
   number<const O extends Options<NumberParameter>>(options: Known<O, Options<NumberParameter>>): O & { type: 'number' };
   enum<const T extends string>(options: Common & { options: readonly T[]; default: NoInfer<T>; labels?: Partial<Record<T, string>> }):
     Common & { options: readonly T[]; default: T; labels?: Partial<Record<T, string>>; type: 'enum' };
-  /** A value-to-label map; keys become the saved options in insertion order. */
-  enum<const C extends Record<string, string>>(options: Common & { options: C; default: NoInfer<Extract<keyof C, string>> }):
-    Common & { options: Extract<keyof C, string>[]; default: Extract<keyof C, string>; labels: C; type: 'enum' };
+  /** Keys become string values in JavaScript enumeration order (array index keys first). Use arrays for an explicit order. */
+  enum<const C extends Record<string, string>>(options: Common & { options: C; default: NoInfer<EnumKeys<C>> }):
+    Common & { options: EnumKeys<C>[]; default: EnumKeys<C>; labels: C; type: 'enum' };
   color<const O extends Options<ColorParameter>>(options: Known<O, Options<ColorParameter>>): O & { type: 'color' };
   date<const O extends Options<DateParameter>>(options: Known<O, Options<DateParameter>>): O & { type: 'date' };
   file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: Known<O, Omit<FileParameter, 'type' | 'default'>>): O & { type: 'file'; default: '' };

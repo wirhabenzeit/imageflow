@@ -98,8 +98,6 @@ function Days({ month, language, marked, edit, rect, geometry, finding }: {
   </ol>;
 }
 
-// The place shown on a month page: its own text, else the photo's caption.
-
 // The day picker, opened by clicking the days of a month page. It edits the document's marked dates for the month
 // that page shows, which it reads from its context: moving the page to another month updates the open picker.
 // A click marks that date once; a day marked every year shows as marked, and the picker offers to remove the

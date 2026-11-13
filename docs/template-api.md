@@ -828,7 +828,7 @@ The API is the in-process `imageflow` template module. There is no documented pu
 
 ### Enum maps and scaled CSS lengths
 
-`p.enum({ label: 'Language', options: { en: 'English', de: 'Deutsch' }, default: 'en' })` normalizes to the existing array-of-options declaration with labels. Keys are saved values, in insertion order; TypeScript checks the default against those keys. Array options and separate labels remain supported.
+`p.enum({ label: 'Language', options: { en: 'English', de: 'Deutsch' }, default: 'en' })` normalizes to the existing array-of-options declaration with labels. Keys become string saved values, including unquoted numeric keys; TypeScript checks the string default against those keys. Maps follow JavaScript property enumeration order: array index keys (such as `'2024'`) are sorted first in ascending order, then other string keys keep insertion order. Use the array form when option order must be explicit. Array options and separate labels remain supported.
 
 `const at = ctx.geometry.design({ width: 420, height: 297 })` exposes `scaleX` and `scaleY`. `at.length(19, 'pt', 'x')` returns a CSS length, rounded to two decimal places. Choose `x`, `y`, `min` or `max` explicitly, including for type sizes; positions still scale on their respective axes. Units are `mm`, `pt` or `px`. Canvas dimensions must be positive and finite. The calendar uses the x axis to preserve its existing typography.
 
@@ -836,12 +836,12 @@ The API is the in-process `imageflow` template module. There is no documented pu
 
 The canonical SDK is `authoring/`. `npm run generate:authoring` generates standalone snapshots for both shipped templates; the build runs it automatically. Their tiny `tsconfig.json` extends `./.imageflow-sdk/tsconfig.json`. No template maintains a declaration copy or synchronization test.
 
-Creating a book writes the installed SDK into `template/.imageflow-sdk/`. Exporting a template includes a fresh snapshot in the archive without changing its source folder. Existing books are never rewritten when opened. The snapshot includes React declarations, a standalone TypeScript configuration and `api.json` identifying contract 1 and the SDK content digest. Outside ImageFlow, run `tsc -p .imageflow-sdk/tsconfig.json`, or extend that configuration from your own `tsconfig.json`.
+Creating a book writes the installed SDK into `template/.imageflow-sdk/`. Exporting a template includes a fresh snapshot in the archive for external authoring, without changing its source folder. App import discards all archive-supplied SDK folders, at any depth; new books and subsequent exports use the installed SDK instead. Existing books are never rewritten when opened. The snapshot includes React declarations, a standalone TypeScript configuration and `api.json` identifying contract 1 and the SDK content digest. Outside ImageFlow, run `tsc -p .imageflow-sdk/tsconfig.json`, or extend that configuration from your own `tsconfig.json`.
 
 `.imageflow-sdk/` is reserved for generated tooling. It is excluded from template hashes, saved-input revisions and runtime imports; the app always checks against its installed SDK. Authored source and other declaration files remain part of template identity. An export may contain different tooling bytes after an app update while retaining the same authored-template hash.
 
 ### Actual element geometry in editors
 
-`context.elements[id].rect` is the element’s measured bounding rectangle in millimetres relative to the spread’s trim origin. It comes from the current page, including CSS sizing, rather than reconstructing a whole-spread rectangle. It is `null` before the current page is ready or when the element is not rendered. CSS rotation or skew yields a bounding rectangle. Changes of format, layout or element size refresh the measurements; ordinary editor draft overlays preserve them.
+`context.elements[id].rect` is the element’s measured bounding rectangle in millimetres relative to the spread’s trim origin. It comes from the current page, including CSS sizing, rather than reconstructing a whole-spread rectangle. It is `null` before the current page is ready or when the element is not rendered. CSS rotation or skew yields a bounding rectangle. Changes of format, layout, element size, or DOM content/class/style that moves an element refresh the measurements; ordinary editor draft overlays preserve them.
 
 The map editor waits for its first measurement, uses the actual output aspect ratio and width to frame the map, and keeps its existing map stable while the book redraws. Saved map settings remain ordinary parameters.

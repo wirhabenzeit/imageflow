@@ -28,17 +28,19 @@ export default defineTemplate({ id: 'sdk', version: '1', contract: 1, format, sp
   const metadata = JSON.parse(await readFile(join(template, '.imageflow-sdk/api.json'), 'utf8'));
   assert.equal(metadata.contract, 1);
   assert.match(metadata.sdk, /^[a-f0-9]{64}$/);
-  // Neither React nor ImageFlow needs to be installed beside the exported template.
+  // Neither React nor ImageFlow needs to be installed beside the generated standalone snapshot.
+  const checked = spawnSync(process.execPath, [resolve('node_modules/typescript/bin/tsc'), '-p', join(template, '.imageflow-sdk/tsconfig.json')], { encoding: 'utf8' });
+  assert.equal(checked.status, 0, checked.stdout + checked.stderr);
   const file = join(work, 'Template.imageflow-template');
   await writeTemplateArchive(template, file, types);
   const bytes = await readFile(file);
+  assert.ok(bytes.includes(Buffer.from('.imageflow-sdk/api.json')), 'exports include portable tooling for external authors');
   await writeTemplateArchive(template, file, types);
   assert.deepEqual(await readFile(file), bytes);
   const exported = join(work, 'exported');
   await extractTemplateArchive(file, exported);
   assert.equal(await templateHash(exported), before);
-  const checked = spawnSync(process.execPath, [resolve('node_modules/typescript/bin/tsc'), '-p', join(exported, '.imageflow-sdk/tsconfig.json')], { encoding: 'utf8' });
-  assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+  await assert.rejects(readFile(join(exported, '.imageflow-sdk/api.json')), /ENOENT/, 'app import discards the sender’s tooling');
   const installed = await readFile(join(types, 'imageflow.d.ts'), 'utf8');
   await writeFile(join(types, 'imageflow.d.ts'), installed + '\n// Next SDK build\n');
   await writeTemplateArchive(template, file, types);

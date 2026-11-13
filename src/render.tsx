@@ -456,10 +456,10 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       sheets: sheets.map(({ spread, sheet }) => ({ spread, ...relative(sheet) })),
       boxes: sheets.flatMap(({ spread, sheet }) => {
         const scale = Number(sheet.style.getPropertyValue('--if-zoom')) || 1;
+        const origin = measuredBounds(sheet.querySelector<HTMLElement>('.if-spread')!, sheet, format);
         return [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].map((box) => {
           const rect = relative(box);
           const measured = measuredBounds(box, sheet, format);
-          const origin = measuredBounds(sheet.querySelector<HTMLElement>('.if-spread')!, sheet, format);
           const sized = Math.abs(rect.width - box.offsetWidth * scale) < 1.5 && Math.abs(rect.height - box.offsetHeight * scale) < 1.5;
           return {
             spread, id: (box.dataset.box ?? box.dataset.element)!, upright: sized && upright(box, sheet),
@@ -483,8 +483,20 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
   fit();
   new ResizeObserver(fit).observe(root);
   // A custom editor consumes actual element sizes, including CSS layout changes within a stable viewport.
-  const elements = new ResizeObserver(() => { laidOut = ''; fit(); });
+  let measuring = false;
+  const measure = () => {
+    if (measuring) return;
+    measuring = true;
+    requestAnimationFrame(() => { measuring = false; laidOut = ''; fit(); });
+  };
+  const elements = new ResizeObserver(measure);
   for (const { sheet } of sheets) for (const node of sheet.querySelectorAll<HTMLElement>('[data-element]')) elements.observe(node);
+  // Position can change without resizing: a class/style change or a sibling's content may move an element.
+  // Observe template content only; fit() writes the surrounding sheet/slot styles, so it cannot retrigger this.
+  const layout = new MutationObserver(measure);
+  for (const { sheet } of sheets) layout.observe(sheet.querySelector('.if-spread')!, {
+    subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'],
+  });
   window.addEventListener('resize', fit);
   return (next: GridRequest) => {
     if (view !== 'book') return;

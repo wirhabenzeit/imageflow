@@ -28,6 +28,9 @@ test('enum label maps normalize to the existing saved parameter shape', () => {
     spreads: { main: { label: 'Main', render: () => null } } }).success, true);
   choices.de = 'German';
   assert.equal(short.labels.de, 'Deutsch');
+  const numeric = p.enum({ label: 'Year', options: { older: 'Older', 2024: 'This year', 10: 'Ten', 2: 'Two' }, default: '2024' });
+  assert.deepEqual(numeric.options, ['2', '10', '2024', 'older']);
+  assert.deepEqual(p.enum({ label: 'Year', options: ['older', '2024', '10', '2'], default: '2024' }).options, ['older', '2024', '10', '2']);
 });
 
 test('printFormat expands inset shorthands into an ordinary, complete PrintFormat', () => {

@@ -37,7 +37,6 @@ test('the calendar starter typechecks against the canonical installed SDK', asyn
   const { folder, check } = await fixture(t);
   await cp(resolve('sample/calendar/template'), join(folder, 'template'), { recursive: true });
   assert.deepEqual((await check()).diagnostics, []);
-
 });
 
 test('type errors retain exact locations while project declaration copies cannot replace installed modules', async (t) => {

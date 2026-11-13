@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib';
 import { TemplateImportError, templateFiles } from './template-library';
-import { authoringSnapshot, authoringSnapshotFolder } from './authoring-sdk';
+import { authoringSnapshot } from './authoring-sdk';
 
 // `.imageflow-template` files: authored templateFiles plus an optional installed SDK snapshot. The archive is
 // deterministic (sorted names, fixed timestamps), so exporting the same template twice gives the same bytes, and
@@ -112,8 +112,8 @@ const invalid = (detail: string) => new TemplateImportError('This file is not a 
 
 /**
  * Unpacks an `.imageflow-template` file into `destination`, which must not exist yet. Only the files a template
- * folder would contribute, plus the reserved SDK snapshot, are written. Other dotfiles, `node_modules/` and
- * macOS's `__MACOSX/` are skipped, and an archive
+ * folder would contribute are written. All dotfiles (including SDK snapshots), `node_modules/` and macOS's
+ * `__MACOSX/` are skipped, and an archive
  * that holds one folder with the template inside (as Finder's Compress makes) is unpacked from that folder. Entries
  * that would leave the destination, links, encrypted entries and damaged data are refused before anything is written.
  */
@@ -149,7 +149,7 @@ export async function extractTemplateArchive(file: string, destination: string) 
     const problem = pathProblem(name);
     if (problem) throw invalid(problem);
     const parts = name.split('/');
-    if (parts.some((part) => (part.startsWith('.') && part !== authoringSnapshotFolder) || part === 'node_modules' || part === '__MACOSX')) continue;
+    if (parts.some((part) => part.startsWith('.') || part === 'node_modules' || part === '__MACOSX')) continue;
     if (madeOn === 3 && (mode & 0o170000) === 0o120000) throw invalid(name + ' is a symbolic link. Templates must contain their files.');
     if (flags & 1) throw invalid(name + ' is encrypted.');
     if (method !== 0 && method !== 8) throw invalid(name + ' is compressed in a way this app does not read.');

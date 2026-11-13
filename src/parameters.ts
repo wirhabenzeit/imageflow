@@ -50,9 +50,10 @@ function parameter<T extends Parameter['type']>(type: T) {
 
 type FileOptions = Omit<Extract<Parameter, { type: 'file' }>, 'type' | 'default'>;
 type EnumParameter = Extract<Parameter, { type: 'enum' }>;
+type EnumKeys<C> = `${Extract<keyof C, string | number>}`;
 function enumParameter<const Options extends Omit<EnumParameter, 'type'>>(options: Options): Options & { type: 'enum' };
-function enumParameter<const Choices extends Record<string, string>>(options: { label: string; options: Choices; default: NoInfer<Extract<keyof Choices, string>> }):
-  { type: 'enum'; label: string; options: Extract<keyof Choices, string>[]; labels: Choices; default: Extract<keyof Choices, string> };
+function enumParameter<const Choices extends Record<string, string>>(options: { label: string; options: Choices; default: NoInfer<EnumKeys<Choices>> }):
+  { type: 'enum'; label: string; options: EnumKeys<Choices>[]; labels: Choices; default: EnumKeys<Choices> };
 function enumParameter(options: { label: string; options: string[] | Record<string, string>; default: string; labels?: Record<string, string> }) {
   return Array.isArray(options.options) ? { ...options, type: 'enum' as const }
     : { label: options.label, type: 'enum' as const, default: options.default, options: Object.keys(options.options), labels: { ...options.options } };

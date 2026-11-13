@@ -115,11 +115,12 @@ try {
   const editor = w.frameLocator('iframe.element-editor-frame');
   const mapOutput = editor.locator('.map-editor-map[data-output-width]');
   await mapOutput.waitFor();
-  const outputSize = () => mapOutput.evaluate((node) => ({ width: Number(node.dataset.outputWidth), height: Number(node.dataset.outputHeight) }));
+  const outputSize = () => mapOutput.evaluate((node) => ({ x: Number(node.dataset.outputX), y: Number(node.dataset.outputY),
+    width: Number(node.dataset.outputWidth), height: Number(node.dataset.outputHeight) }));
   const waitSize = async (rect) => {
     for (let i = 0; i < 100; i++) {
       const size = await outputSize();
-      if (Math.abs(size.width - rect.width) < .2 && Math.abs(size.height - rect.height) < .2) return;
+      if (Object.entries(rect).every(([axis, value]) => Math.abs(size[axis] - value) < .2)) return;
       await w.waitForTimeout(100);
     }
     assert.fail('The editor did not receive measured output: ' + JSON.stringify(await outputSize()));
@@ -132,6 +133,13 @@ try {
   });
   await waitSize({ width: 180, height: 100 });
   assert.ok(Math.abs((await outputSize()).width - 180) < .2);
+  await frame.locator('[data-spread="map-a"] [data-element="map"]').evaluate((node, style) => node.setAttribute('style', style), originalStyle);
+  await waitSize(original);
+  // Moving a box without resizing it refreshes position as well as size.
+  await frame.locator('[data-spread="map-a"] [data-element="map"]').evaluate((node) => {
+    node.style.left = '17mm'; node.style.top = '29mm';
+  });
+  await waitSize({ ...original, x: 17, y: 29 });
   await frame.locator('[data-spread="map-a"] [data-element="map"]').evaluate((node, style) => node.setAttribute('style', style), originalStyle);
   await waitSize(original);
   // Chooses a style in the map editor and waits until the editor shows it chosen. The hidden test window can drop
