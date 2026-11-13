@@ -1,8 +1,8 @@
 import { packagedMacExecutable } from './mac-paths.mjs';
-import { menuAction, exportAction } from './ui-actions.mjs';
+import { menuAction, exportAction, testBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electronPath from 'electron';
@@ -70,9 +70,10 @@ try {
     timeout: 15000,
   });
   const chooser = await instance.firstWindow();
-  const created = instance.waitForEvent('window');
-  await chooser.getByRole('button', { name: 'Explore a Sample', exact: true }).click();
-  const window = await created;
+  assert.equal(await chooser.getByRole('button', { name: 'Explore a Sample', exact: true }).count(), 0);
+  const fixture = join(runDir, 'WhiteWall.imageflow');
+  await cp(join(root, 'sample/whitewall'), fixture, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  const window = await testBook(instance, fixture);
   window.setDefaultTimeout(15000);
   const status = window.locator('.status');
   const expectStatus = async (message) => {
@@ -81,7 +82,7 @@ try {
     assert.equal(await status.textContent(), message);
   };
 
-  await expectStatus('Project preview · Proof export');
+  await expectStatus('');
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));
   const previewLines = await window.frameLocator('iframe.book-frame-book[data-current]').locator('[data-box="story"]').evaluate((box) => {
     const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
@@ -109,7 +110,7 @@ try {
   await window.waitForFunction(() => document.querySelector('.status-error') ||
     document.querySelector('.status')?.textContent?.startsWith('Proof PDF saved'), null, { timeout: 45000 });
   assert.match(await status.textContent(), /^Proof PDF saved\./);
-  await window.waitForFunction(() => /Book check · [1-9]\d* errors?/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
+  await window.waitForFunction(() => /Book check · [1-9]\d* errors?/.test(document.querySelector('.book-check-toggle')?.getAttribute('title') ?? ''));
   await window.locator('.book-check-toggle').click();
   assert.match(await window.locator('.book-check-panel').textContent(), /Page count is 2\./);
   await window.locator('.book-check-toggle').click();
@@ -125,7 +126,7 @@ try {
   await menuAction(instance, 'Open project…');
   await window.locator('.status-error').waitFor();
   assert.match(await status.textContent(), /project\.json.*schemaVersion/);
-  assert.equal(await window.locator('.project-identity strong').textContent(), 'Senja · Field Notes');
+  assert.equal(await window.locator('.project-identity strong').textContent(), 'WhiteWall');
 
   await menuAction(instance, 'Reload');
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));

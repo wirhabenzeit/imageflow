@@ -1,4 +1,4 @@
-import { testBook, menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
+import { testBook, menuAction, agentSettings, closeSettings, popupAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -142,7 +142,7 @@ try {
   assert.match(broken.diagnostics.map(({ message }) => message).join('\n'), /unknown, duplicate, or incompatible box: hero/);
 
   // A required capability this app lacks, and a helper it does not export, are named before any layout runs.
-  await write(minimal.replace("'typed-components']", "'teleport']"));
+  await write(minimal.replace("contract: 1,", "contract: 1, requires: ['teleport'],"));
   const capability = (await call('check_book', { project })).data;
   assert.equal(capability.state, 'error');
   assert.match(capability.diagnostics[0].message, /does not provide: teleport\. Update ImageFlow/);
@@ -186,11 +186,12 @@ try {
     finding.map(({ location, message }) => ({ spread: location.spread, element: location.element, parameter: location.parameter, message })));
   const pdf = join(work, 'print.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, pdf);
-  await window.locator('.export-menu > summary').click();
-  assert.equal(await window.getByRole('button', { name: 'Export print PDF', exact: true }).isDisabled(), true);
-  await window.keyboard.press('Escape');
-  await menuAction(app, 'Export Print PDF…');
-  await window.locator('.status-error', { hasText: 'The note is empty.' }).waitFor({ timeout: 60000 });
+  const nativeExport = await popupAction(app, window, window.locator('.export-menu .action-menu-trigger'));
+  assert.equal(nativeExport.find(({ label }) => label === 'Export for Print…').enabled, false);
+  const checkedProject = (await window.evaluate(() => window.imageflow.currentProject())).value;
+  const blockedPrint = await window.evaluate((id) => window.imageflow.exportBook(id, 'print'), checkedProject.id);
+  assert.ok(blockedPrint.error);
+  assert.match(blockedPrint.error, /The note is empty/);
   await assert.rejects(readFile(pdf), { code: 'ENOENT' });
   console.log('ImageFlow authoring examples passed.');
 } finally {

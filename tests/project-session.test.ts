@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import { updateProject } from '../desktop/project';
 import type { OpenProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
+import { removeSources } from '../desktop/source-actions';
 import { projectSchema } from '../src/project';
 import type { ProjectFiles } from '../src/project';
 
@@ -142,4 +143,54 @@ test('closing a project session closes its input index', async (t) => {
   session.close();
   session.close();
   await assert.rejects(inputs.capture());
+});
+
+test('removing assets restores their registry and placements with Undo and removes them again with Redo', async (t) => {
+  const session = await fixture(t);
+  const files = filesOf(session.book);
+  await mkdir(join(session.book.folder, 'texts'));
+  await writeFile(join(session.book.folder, 'texts/note.md'), '# A note');
+  files.project.texts.note = 'texts/note.md';
+  files.project.spreads[0].boxes.body = { text: 'note', params: {} };
+  const registered = await updateProject(session.book, files, true);
+  session.record(registered, 'Import', false);
+  session.record(await removeSources(session.book, ['markdown:note']), 'Remove assets', true, false);
+  assert.equal(session.book.project.texts.note, undefined);
+  assert.equal(session.book.project.spreads[0].boxes.body.text, undefined);
+  await session.undo('undo');
+  assert.equal(session.book.project.texts.note, 'texts/note.md');
+  assert.equal(session.book.project.spreads[0].boxes.body.text, 'note');
+  await session.undo('redo');
+  assert.equal(session.book.project.texts.note, undefined);
+  assert.equal(await readFile(join(session.book.folder, 'texts/note.md'), 'utf8'), '# A note');
+});
+
+test('Last Opened restores opening content and remains undoable', async (t) => {
+  const session = await fixture(t);
+  await session.save(withTitle(session.book, 'Changed'), 'Change title');
+  await session.revertOpened();
+  assert.equal(session.book.project.title, 'Original');
+  assert.equal(session.history.undo, 'Revert to Last Opened');
+  await session.undo('undo');
+  assert.equal(session.book.project.title, 'Changed');
+  await session.undo('redo');
+  assert.equal(session.book.project.title, 'Original');
+});
+
+test('asset removal Undo preserves later imports and unrelated source-location repairs', async (t) => {
+  const session = await fixture(t);
+  await mkdir(join(session.book.folder, 'texts'));
+  for (const name of ['removed', 'kept', 'relocated', 'later']) await writeFile(join(session.book.folder, 'texts/' + name + '.md'), '# ' + name);
+  const files = filesOf(session.book);
+  files.project.texts = { removed: 'texts/removed.md', kept: 'texts/kept.md' };
+  session.record(await updateProject(session.book, files, true), 'Import', false);
+  session.record(await removeSources(session.book, ['markdown:removed']), 'Remove assets', true, false);
+  const repaired = filesOf(session.book);
+  repaired.project.texts.kept = 'texts/relocated.md';
+  repaired.project.texts.later = 'texts/later.md';
+  session.record(await updateProject(session.book, repaired, true), 'Locate and import', false);
+  await session.undo('undo');
+  assert.deepEqual(session.book.project.texts, { removed: 'texts/removed.md', kept: 'texts/relocated.md', later: 'texts/later.md' });
+  await session.undo('redo');
+  assert.deepEqual(session.book.project.texts, { kept: 'texts/relocated.md', later: 'texts/later.md' });
 });

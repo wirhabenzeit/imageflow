@@ -154,15 +154,14 @@ function RouteEditor({ values, set, readOnly, Control }: RouteEditorProps) {
   const zoomBy = (factor: number) => move({ ...viewport, zoom: viewport.zoom * factor });
   const pan = (dx: number, dy: number) => move({ ...viewport, centerX: viewport.centerX + dx * viewport.size, centerY: viewport.centerY + dy * viewport.size });
   const track = <Control parameter="track" />;
-  if (!line) return <div className="route-editor">{track}<p className="route-editor-note">{problem}</p></div>;
-  const editable = !readOnly;
+  const editable = !readOnly && !!line;
   return <div className="route-editor">
     {track}
     <div className="route-editor-nav">
       <button type="button" aria-label="Zoom out" disabled={!editable || viewport.zoom <= 1} onClick={() => zoomBy(1 / 1.5)}>−</button>
       <button type="button" aria-label="Zoom in" disabled={!editable || viewport.zoom >= maxRouteZoom} onClick={() => zoomBy(1.5)}>+</button>
       <button type="button" disabled={!editable || viewport.zoom === 1} onClick={() => move({ centerX: .5, centerY: .5, zoom: 1 })}>Whole route</button>
-      <span>{editable ? 'Drag to move, scroll to zoom. Arrow keys move too.' : ''}</span>
+      <span>{viewport.zoom > 1 ? 'Zoom ' + viewport.zoom.toFixed(1) + '×' : ''}</span>
     </div>
     <div className="route-editor-frame" role="application" aria-label="Route viewport" tabIndex={editable ? 0 : -1}
       onPointerDown={(event: PointerEvent) => {
@@ -188,7 +187,7 @@ function RouteEditor({ values, set, readOnly, Control }: RouteEditorProps) {
       }}>
       <svg viewBox={viewBox(viewport)} aria-hidden="true"><polyline points={line} /></svg>
     </div>
-    <p className="route-editor-note">{viewport.zoom === 1 ? 'Shows the whole route.' : 'Zoom ' + viewport.zoom.toFixed(1) + '×'}</p>
+    <p className="route-editor-note" role="status">{problem}</p>
   </div>;
 }
 

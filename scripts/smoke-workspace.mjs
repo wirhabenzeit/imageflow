@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook, menuAction } from './ui-actions.mjs';
+import { testBook, menuAction, popupAction } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'workspace-'));
@@ -133,13 +133,11 @@ try {
   const zoomOut = await w.getByRole('button', { name: 'Zoom out', exact: true }).boundingBox();
   const done = await w.locator('.crop-toolbar').getByRole('button', { name: 'Done', exact: true }).boundingBox();
   assert.equal(Math.round(zoomOut.y), Math.round(done.y), 'The compact toolbar stays on one line when space allows');
-  await w.locator('.crop-more > summary').click();
-  await w.getByRole('button', { name: 'Replace photo…', exact: true }).click();
+  await popupAction(app, w, w.locator('.crop-more .action-menu-trigger'), 'Replace photo…');
   await w.getByRole('dialog', { name: 'Replace photo in Main photo' }).waitFor();
   await w.screenshot({ path: join(root, '.build', 'crop-photo-chooser.png') });
   await w.keyboard.press('Escape');
   await w.keyboard.press('Escape');
-  await w.locator('.status').evaluate((node) => { node.textContent = 'Project preview · Proof export'; });
   await w.screenshot({ path: join(root, '.build', 'workspace.png') });
   await w.getByRole('button', { name: 'Toggle Inspector', exact: true }).click();
   await menuAction(app, 'Hide Sources');
@@ -162,28 +160,18 @@ try {
   assert.equal(await restored.getAttribute('aria-valuenow'), '276');
   await (await app.browserWindow(w)).evaluate((window) => window.setContentSize(940, 650));
   await settle();
+  if (!(await w.evaluate(() => document.documentElement.scrollWidth <= innerWidth))) console.log('Overflow:', await w.evaluate(() => ({ width: innerWidth, sizes: [...document.querySelectorAll('.studio,.workspace,.sources-bar,.inspector,.project-panel,.canvas-wrap,.status-bar')].map((el) => [el.className, el.clientWidth, el.scrollWidth, el.getBoundingClientRect().x]) })));
   assert.equal(await w.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   const sourceBar = await w.locator('.sources-bar').boundingBox();
-  const importTrigger = w.locator('.source-import > summary');
+  const importTrigger = w.locator('.source-import .action-menu-trigger');
   const importBox = await importTrigger.boundingBox();
   assert.ok(importBox.x >= sourceBar.x && importBox.x + importBox.width <= sourceBar.x + sourceBar.width);
   assert.equal(await w.locator('.sources-bar').evaluate((node) => node.scrollWidth <= node.clientWidth), true);
-  await importTrigger.focus();
-  await w.keyboard.press('ArrowDown');
-  assert.equal(await w.evaluate(() => document.activeElement.textContent), 'Import photos…');
-  await w.keyboard.press('ArrowDown');
-  assert.equal(await w.evaluate(() => document.activeElement.textContent), 'Import folder…');
-  const folder = await w.getByRole('button', { name: 'Import folder…', exact: true }).boundingBox();
-  assert.ok(folder.x >= 0 && folder.x + folder.width <= 940 && folder.y >= 0 && folder.y + folder.height <= 650);
-  await w.keyboard.press('Escape');
-  assert.equal(await w.locator('.source-import').getAttribute('open'), null);
-  await w.locator('.export-menu > summary').focus();
-  await w.keyboard.press('ArrowDown');
-  assert.equal(await w.evaluate(() => document.activeElement.textContent), 'Export print PDF');
-  await w.keyboard.press('ArrowDown');
-  assert.equal(await w.evaluate(() => document.activeElement.textContent), 'Export proof PDF');
-  await w.keyboard.press('Tab');
-  assert.equal(await w.locator('.export-menu').getAttribute('open'), null);
+  const nativeImport = await popupAction(app, w, importTrigger);
+  assert.ok(nativeImport.some(({ label }) => label === 'Import photos…'));
+  assert.ok(nativeImport.some(({ label }) => label === 'Import folder…'));
+  const nativeExport = await popupAction(app, w, w.locator('.export-menu .action-menu-trigger'));
+  assert.deepEqual(nativeExport.map(({ label }) => label), ['Export for Print…', 'Export PDF…']);
   // Check rendered secondary-text and focus colors against the surfaces they sit on.
   const contrast = await w.evaluate(() => {
     const rgb = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number);
@@ -191,7 +179,7 @@ try {
     const ratio = (a, b) => (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
     const text = lum(rgb(getComputedStyle(document.querySelector('.muted')).color));
     const backgrounds = ['.project-panel', '.inspector'].map((selector) => lum(rgb(getComputedStyle(document.querySelector(selector)).backgroundColor)));
-    const trigger = document.querySelector('.source-import > summary');
+    const trigger = document.querySelector('.source-import .action-menu-trigger');
     trigger.focus();
     const focus = lum(rgb(getComputedStyle(trigger).outlineColor));
     return backgrounds.map((background) => ({ text: ratio(text, background), focus: ratio(focus, background) }));

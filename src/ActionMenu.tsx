@@ -1,42 +1,36 @@
-import { useEffect, useRef } from 'react';
-import type { KeyboardEvent, ReactNode } from 'react';
+import { Children, isValidElement } from 'react';
+import type { ReactNode, MouseEvent, ReactElement } from 'react';
+import type { PopupItem } from './desktop';
 
-// Small action lists use ordinary buttons, including Tab, plus arrow-key navigation.
+type Button = { children?: ReactNode; disabled?: boolean; title?: string; onClick?: (event: MouseEvent<HTMLButtonElement>) => void };
+const text = (node: ReactNode): string => Children.toArray(node).map((item) => typeof item === 'string' || typeof item === 'number' ? String(item)
+  : isValidElement<{ children?: ReactNode }>(item) ? text(item.props.children) : '').join('');
+
+// The same declarative actions feed a native menu; callbacks and book data stay in the owning renderer.
 export function ActionMenu({ label, className, disabled, children }: {
   label: ReactNode; className: string; disabled?: boolean; children: ReactNode;
 }) {
-  const root = useRef<HTMLDetailsElement>(null);
-  const close = () => root.current?.removeAttribute('open');
-  useEffect(() => {
-    const outside = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) close();
-    };
-    document.addEventListener('pointerdown', outside);
-    return () => document.removeEventListener('pointerdown', outside);
-  }, []);
-  function keys(event: KeyboardEvent<HTMLDetailsElement>) {
-    const menu = root.current!;
-    if (event.key === 'Escape' && menu.open) {
-      event.preventDefault(); event.stopPropagation(); close(); menu.querySelector('summary')?.focus();
-    } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-      event.preventDefault();
-      const wasOpen = menu.open;
-      menu.open = true;
-      const buttons = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
-      const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
-      const last = buttons.length - 1;
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? last :
-        !wasOpen || at < 0 ? (event.key === 'ArrowUp' ? last : 0) :
-          (at + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
-      buttons[next]?.focus();
-    }
+  const actions: ReactElement<Button>[] = [];
+  const items: PopupItem[] = [];
+  function collect(nodes: ReactNode) {
+    Children.forEach(nodes, (node) => {
+      if (!isValidElement<Button>(node)) return;
+      if (node.type === 'hr') items.push({ type: 'separator' });
+      else if (node.type === 'button') {
+        const id = String(actions.push(node) - 1);
+        items.push({ id, label: text(node.props.children), enabled: !node.props.disabled, toolTip: node.props.title });
+      } else collect(node.props.children);
+    });
   }
-  if (disabled) return <div className={className}><button className="action-menu-trigger" disabled>{label}</button></div>;
-  return <details ref={root} className={className} onKeyDown={keys}
-    onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) close(); }}>
-    <summary>{label}</summary>
-    <div className="action-menu-choices" onClick={(event) => {
-      if ((event.target as Element).closest('button:not(:disabled)')) close();
-    }}>{children}</div>
-  </details>;
+  collect(children);
+  async function open(event: MouseEvent<HTMLButtonElement>) {
+    const trigger = event.currentTarget;
+    const rect = trigger.getBoundingClientRect();
+    const selected = await window.imageflow?.popupMenu(items, { x: Math.round(rect.left), y: Math.round(rect.bottom) });
+    if (selected !== null && selected !== undefined) actions[Number(selected)]?.props.onClick?.({ ...event, currentTarget: trigger, target: trigger });
+  }
+  return <div className={className}><button type="button" className="action-menu-trigger" disabled={disabled} aria-haspopup="menu"
+    onClick={(event) => void open(event)} onKeyDown={(event) => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); event.currentTarget.click(); }
+    }}>{label}</button></div>;
 }

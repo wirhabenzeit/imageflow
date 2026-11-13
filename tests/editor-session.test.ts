@@ -58,7 +58,7 @@ test('a node marked only with parameters a document editor owns opens that edito
   assert.equal(documentEditorFor(info, ['document.accent']), undefined);
   assert.equal(documentEditorFor(info, ['markedDates']), undefined);
   assert.equal(documentEditorFor(info, []), undefined);
-  // Owned document parameters get no control in Book settings.
+  // Owned document parameters get no control in template controls.
   assert.deepEqual(editorOwnedDocument(info), ['markedDates']);
 });
 
@@ -171,7 +171,7 @@ test('a document editor sets only its own document parameters', () => {
   const { allowed, rejected } = editorChanges(template.parameters, ['markedDates'], { markedDates: '25.12', accent: '#000000', holidays: 'x' }, 'element', 'document');
   assert.deepEqual(allowed, { markedDates: '25.12' });
   assert.deepEqual(rejected.map(({ message }) => message), [
-    "set() ignored accent: it is not one of this editor's parameters, so it is edited in Book settings. This editor edits markedDates.",
+    "set() ignored accent: it is not one of this editor's parameters, so it is edited in template controls. This editor edits markedDates.",
     'set() ignored holidays: the document has no such parameter. This editor edits markedDates.',
   ]);
 });

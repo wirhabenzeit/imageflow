@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { testBook, undoBook, popupAction } from './ui-actions.mjs';
 
 // A book without spreads opens, shows the empty state, reports itself in Book check, refuses export, and starts
 // from the template's opening spreads or from one layout.
@@ -27,14 +27,15 @@ try {
   const ready = () => w.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   await empty.waitFor();
   await w.getByRole('heading', { name: 'This book has no spreads yet' }).waitFor();
-  await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
+  await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-toggle')?.getAttribute('title') ?? ''));
   await w.locator('.book-check-toggle').click();
   assert.match(await w.locator('.book-check-panel').textContent(), /The book has no spreads yet\./);
   await w.locator('.book-check-toggle').click();
   assert.equal(await w.locator('.spread-thumb').count(), 0);
   assert.equal(await w.getByRole('button', { name: 'Delete', exact: true }).isDisabled(), true);
   assert.equal(await w.getByRole('button', { name: 'Duplicate', exact: true }).isDisabled(), true);
-  assert.equal(await w.locator('button', { hasText: 'Export proof PDF' }).isDisabled(), true);
+  const exportItems = await popupAction(app, w, w.locator('.export-menu .action-menu-trigger'));
+  assert.equal(exportItems.find(({ label }) => label === 'Export PDF…').enabled, false);
   // The starter's format opens on a single right page, so only its title page can start a book.
   const layouts = await empty.getByRole('group', { name: 'Layouts for the first spread' }).getByRole('button').allTextContents();
   assert.deepEqual(layouts, ['Title page']);
@@ -46,8 +47,8 @@ try {
   await ready();
   assert.equal(await w.locator('.spread-thumb').count(), 3);
   assert.equal(await w.locator('.spread-thumb').first().getAttribute('aria-current'), 'page', 'the first new spread is selected');
-  await w.getByRole('button', { name: 'Undo', exact: true }).click();
-  await saved('Edit undone');
+  await undoBook(w);
+  await ready();
   await empty.waitFor();
   assert.deepEqual((await read()).spreads, []);
 

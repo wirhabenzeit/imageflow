@@ -1,5 +1,5 @@
 import { packagedMacExecutable } from './mac-paths.mjs';
-import { testBook, menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
+import { testBook, menuAction, agentSettings, closeSettings, undoBook, waitForProject } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -24,7 +24,7 @@ const format = (label, w, h) => ({label, trim:{width:mm(w),height:mm(h)},
  output:{container:'pdf',colorSpace:'sRGB',transparency:'allow'}});
 export default defineTemplate({id:'mcp-test',version:'1',contract:1,
  formats:{portrait:format('Portrait',80,110),landscape:format('Landscape',110,80)},defaultFormat:'portrait',
- parameters:{color:p.color({label:'Color',default:'#0000ff'})},
+ parameters:{color:p.color({label:'Color',default:'#0000ff'}),note:p.string({label:'Note',default:''})},
  spreads:{base:{label:'Base',parameters:{heading:p.string({label:'Heading',default:'Hello'})},
  boxes:{hero:{type:'photo',label:'Photo'}},render:ctx=><Spread><h1 style={{color:ctx.document.color}}>{ctx.params.heading}</h1>
  <PhotoBox id="hero" style={{position:'absolute',left:'10mm',top:'25mm',width:'40mm',height:'40mm'}} /></Spread>}
@@ -58,13 +58,13 @@ try {
   assert.match(await connectionDialog.getByRole('textbox',{name:'Claude Code command'}).inputValue(),/^claude mcp add --scope user -e ELECTRON_RUN_AS_NODE=1 imageflow -- /);
   await connectionDialog.getByText('Waiting for an agent to connect.', { exact: true }).waitFor();
   await closeSettings(app);
-  await window.getByRole('button', { name: 'Agent · 0', exact: true }).waitFor();
+  await window.getByRole('button', { name: 'No agent connected', exact: true }).waitFor();
   client = new Client({name:'ImageFlow prototype test',version:'1.0.0'});
   await client.connect(new StdioClientTransport({...config,stderr:'pipe'}));
-  await window.getByRole('button', { name: 'Agent · 1', exact: true }).waitFor();
+  await window.getByRole('button', { name: /^Connected:/ }).waitFor();
   // The status-bar indicator opens the Agents pane of Settings.
   const opened=app.waitForEvent('window');
-  await window.getByRole('button', { name: 'Agent · 1', exact: true }).click();
+  await window.getByRole('button', { name: /^Connected:/ }).click();
   const agents=await opened;
   await agents.getByRole('tab', { name: 'Agents', selected: true }).waitFor();
   await agents.getByText('Connected: ImageFlow prototype test', { exact: true }).waitFor();
@@ -156,25 +156,23 @@ try {
   assert.equal(JSON.parse(await readFile(join(folder,'project.json'),'utf8')).title,'MCP book');
 
   // Agent batch is one UI Undo entry; Redo restores it. UI edits remain in the same history.
-  await window.getByRole('button',{name:'Undo',exact:true}).click();
-  await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Edit undone');
+  await undoBook(window, 'undo');
   await ready();
   assert.equal(JSON.parse(await readFile(join(folder,'project.json'),'utf8')).spreads.length,1);
-  await window.getByRole('button',{name:'Redo',exact:true}).click();
-  await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Edit redone');
+  await undoBook(window, 'redo');
   await ready();
   assert.equal(JSON.parse(await readFile(join(folder,'project.json'),'utf8')).spreads.length,2);
 
   // Human typing blocks mutations without changing or discarding the draft.
-  await window.getByText('Book settings',{exact:true}).click();
-  const title=window.getByLabel('Book title');
+  await window.locator('.template-controls > summary').click();
+  const title=window.getByLabel('Note', {exact:true});
   await title.fill('Human draft');
   revision=(await good('list_projects')).projects[0].revision;
   const blocked=await call('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'draft-test',label:'Agent title',operations:[{op:'set_title',title:'Agent title'}]});
   assert.equal(blocked.data.error.code,'EDIT_IN_PROGRESS');
   assert.equal(await title.inputValue(),'Human draft');
   await title.blur();
-  await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Saved');
+  await waitForProject(window, (book) => book.project.params.note === 'Human draft');
   await ready();
   // A UI save that lands while the agent is requesting its lease must not be rejected by agent busy state.
   revision=(await good('list_projects')).projects[0].revision;
@@ -193,6 +191,7 @@ try {
     };
   });
   const waitingAgent=call('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'lease-race',label:'Agent title',operations:[{op:'set_title',title:'Must not replace human save'}]});
+  void waitingAgent.catch(() => {});
   for (let attempts=0;;attempts++) {
     if (await app.evaluate(()=>globalThis.leaseGate.waiting)) break;
     assert.ok(attempts<100,'agent requested its editing lease');
@@ -200,8 +199,8 @@ try {
   }
   await title.fill('Human save during agent handoff');
   await title.blur();
-  await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Saved');
-  assert.equal(JSON.parse(await readFile(join(folder,'project.json'),'utf8')).title,'Human save during agent handoff');
+  await waitForProject(window, (book) => book.project.params.note === 'Human save during agent handoff');
+  assert.equal(JSON.parse(await readFile(join(folder,'project.json'),'utf8')).params.note,'Human save during agent handoff');
   await app.evaluate(()=>globalThis.leaseGate.release());
   assert.ok(['REVISION_CONFLICT','EDIT_IN_PROGRESS'].includes((await waitingAgent).data.error.code));
   await ready();
@@ -274,11 +273,10 @@ try {
   await window.waitForFunction(()=>!document.querySelector('.status-error'));
   await ready();
   assert.equal((await good('check_book',{project,expectedRevision:committedRepair.revision})).state,'ready');
-  await window.getByRole('button',{name:'Undo',exact:true}).click();
-  await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Edit undone');
+  await undoBook(window, 'undo', false);
   assert.equal(await chapterHeading(),'A new chapter');
-  await window.getByRole('button',{name:'Redo',exact:true}).click();
-  await window.waitForFunction(()=>document.querySelector('.status')?.textContent==='Edit redone');
+  await window.locator('.status-error').waitFor();
+  await undoBook(window, 'redo');
   assert.equal(await chapterHeading(),'Recovered');
   await ready();
   const beforeRestore=await window.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
@@ -308,10 +306,10 @@ try {
 
   // Revocation disconnects the bridge; re-enabling gives it a new token and it reconnects.
   await window.evaluate(()=>window.imageflow.mcpSettings(false));
-  await window.getByRole('button', { name: /^Agent ·/ }).waitFor({ state: 'detached' });
+  await window.getByRole('button', { name: /^(Connected:|No agent connected)/ }).waitFor({ state: 'detached' });
   assert.equal((await call('list_projects')).response.isError,true);
   await window.evaluate(()=>window.imageflow.mcpSettings(true));
-  await window.getByRole('button', { name: /^Agent ·/ }).waitFor();
+  await window.getByRole('button', { name: /^(Connected:|No agent connected)/ }).waitFor();
   assert.equal((await good('list_projects')).projects[0].project,project);
   const priorFrame=await window.locator('iframe.book-frame-book[data-current]').getAttribute('src');
   await menuAction(app, 'Open project…');
@@ -320,7 +318,7 @@ try {
   assert.equal((await good('list_projects')).projects[0].project, project);
   await client.close();
   client = undefined;
-  const waiting = window.getByRole('button', { name: 'Agent · 0', exact: true });
+  const waiting = window.getByRole('button', { name: 'No agent connected', exact: true });
   await waiting.waitFor();
   const reopened=app.waitForEvent('window');
   await waiting.click();
@@ -328,8 +326,11 @@ try {
   await pane.getByRole('checkbox', { name: 'Allow agents to use open books', exact: true }).uncheck();
   await pane.getByText(/^Agents select an open book to check, preview and edit/).waitFor();
   await closeSettings(app);
-  await window.getByRole('button', { name: /^Agent ·/ }).waitFor({ state: 'detached' });
+  await window.getByRole('button', { name: /^(Connected:|No agent connected)/ }).waitFor({ state: 'detached' });
   console.log('ImageFlow MCP authoring prototype passed.');
+} catch (error) {
+  console.error('Agent workflow failed:', error);
+  throw error;
 } finally {
   await client?.close();
   await app.close();

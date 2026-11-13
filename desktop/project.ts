@@ -141,7 +141,7 @@ export async function bundleTemplate(folder: string) {
             // out of reach of relative imports too (ADR 0006).
             const excluded = relative(root, path).split(sep).find((part) => part === 'node_modules' || part.startsWith('.'));
             if (excluded) return { errors: [{ text: args.path + (excluded === 'node_modules'
-              ? ' is an installed package file. Import the package by name, which resolves through the saved dependency bundle (Template → Rebuild Dependencies).'
+              ? ' is an installed package file. Import the package by name, which resolves through the saved dependency bundle (the template dependency rebuild script).'
               : ' is inside ' + excluded + ', which templates leave out of their hash and copies. Move it to a folder without a leading dot.') }] };
             return { path };
           });
@@ -363,6 +363,7 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
   return {
     id, folder: basename(book.folder), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
+    photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
     photoSizes: Object.fromEntries([...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
     texts: book.texts, sources: book.sources, ...(book.templateHash ? { templateHash: book.templateHash } : {}),
   };

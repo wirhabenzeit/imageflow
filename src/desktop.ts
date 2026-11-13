@@ -11,13 +11,17 @@ export const desktopScheme = 'imageflow';
 export const editorURL = desktopScheme + '://editor/';
 export const startURL = desktopScheme + '://editor/start';
 export const starterURL = desktopScheme + '://editor/new';
+export const assetsURL = desktopScheme + '://editor/assets';
+export const templatesURL = desktopScheme + '://editor/templates';
 export const settingsURL = desktopScheme + '://editor/settings';
 export const renderOrigin = desktopScheme + '://render';
 
 export const channels = {
+  popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', dragSources: 'document:drag-sources',
+  showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
-  sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
+  sourceMenu: 'document:source-menu', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
   open: 'project:open', save: 'project:save', import: 'project:import', network: 'project:editor-network',
   command: 'project:command', changed: 'project:changed',
@@ -32,7 +36,7 @@ export const channels = {
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
 } as const;
 
-export type OpenAction = 'open' | 'new' | 'sample' | 'reload';
+export type OpenAction = 'open' | 'new' | 'reload';
 export type ExportMode = 'proof' | 'print';
 // The main canvas shows spreads in one vertical column, or a row-by-row grid with this many columns.
 export type CanvasLayout = { mode: 'vertical' | 'grid'; columns: number };
@@ -40,9 +44,10 @@ export const gridColumns = [1, 2, 3, 4] as const;
 export type LayoutCommand = 'layout-vertical' | 'layout-grid' | `grid-columns-${typeof gridColumns[number]}`;
 export const spreadCommands = ['add-spread', 'duplicate-spread', 'move-spread-up', 'move-spread-down', 'delete-spread'] as const;
 export type SpreadCommand = typeof spreadCommands[number];
-export type BookMenuState = { enabled: Record<SpreadCommand, boolean>; editing: boolean; writable: boolean; busy: boolean;
-  formats: Record<string, string>; format?: string };
-export type Command = SpreadCommand | 'book-settings' | 'book-check' | `book-format:${string}` | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo';
+export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
+  writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canPrint: boolean;
+  sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; saving?: boolean };
+export type Command = SpreadCommand | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState;
@@ -52,6 +57,7 @@ export type ProjectSummary = ProjectFiles & {
   network?: string[];
   // Thumbnail URL and pixel size per readable photo; Markdown source per readable text.
   photos: Record<string, string>;
+  photoRevisions?: Record<string, string>;
   photoSizes: Record<string, { width: number; height: number }>;
   texts: Record<string, string>;
   sources?: Record<string, SourceStatus>;
@@ -72,23 +78,31 @@ export type ImportRequest = {
 
 export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string };
 
-export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder'; key?: string; accept?: string[] };
+export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview'; key?: string; keys?: string[]; accept?: string[] };
 
+export type PopupItem = { id?: string; label?: string; type?: 'separator'; enabled?: boolean; checked?: boolean; toolTip?: string };
 export type DesktopApi = {
+  popupMenu(items: PopupItem[], point?: { x: number; y: number }): Promise<string | null>;
+  documentProxy(action: 'path' | 'drag'): Promise<void>;
+  dragSources(keys: string[]): Promise<void>;
+  showAssets(accept: string[]): Promise<Result<void>>;
+  showTemplates(): Promise<void>;
+  templatePreview(id: string, hash: string): Promise<Result<string | null>>;
+  sourceMenu(keys: string | string[]): Promise<Result<'reveal' | 'locate' | 'locate-folder' | 'copy' | 'remove' | null>>;
   sourceAction(request: SourceAction): Promise<Result<{ summary: ProjectSummary; message?: string }>>;
-  saveCopy(includeAssets: boolean): Promise<Result<null>>;
+  saveCopy(includeAssets?: boolean): Promise<Result<null>>;
   currentProject(): Promise<Result<ProjectSummary>>;
   onAppError(listener: (message: string) => void): () => void;
   recentDocuments(): Promise<Result<RecentDocument[]>>;
   onRecentsChanged(listener: () => void): () => void;
   recentDocument(id: string, action: 'open' | 'locate' | 'remove'): Promise<Result<null>>;
   // The New Book picker's choice; nothing cancels.
-  chooseStarter(choice?: NewBookChoice): Promise<void>;
+  chooseStarter(choice?: NewBookChoice): Promise<Result<boolean>>;
   // The template library, and changes to it from any window.
   library(): Promise<Result<LibraryEntry[]>>;
   onLibraryChanged(listener: () => void): () => void;
   // Asks for template folders or .imageflow-template files to import; from Settings or the New Book picker.
-  importTemplates(): Promise<Result<LibraryImportResult[]>>;
+  importTemplates(paths?: string[]): Promise<Result<LibraryImportResult[]>>;
   // Asks to move an imported template to the Trash; false when the user cancels.
   removeTemplate(id: string): Promise<Result<boolean>>;
   // Asks where to save a library entry as an .imageflow-template file; the file, or null when the user cancels.
@@ -141,6 +155,7 @@ export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; paramet
 export type SpreadDefinition = {
   label: string; span: Span; parameters: Parameters; controls?: ControlItem[];
   boxes: Record<string, BoxDefinition>; elements: Record<string, ElementDefinition>;
+  declaresAnchors?: boolean;
   family?: string; variant?: Record<string, string | number | boolean>;
 };
 export type TemplateInfo = {

@@ -61,7 +61,7 @@ export function AgentSettings({ api }: { api?: DesktopApi }) {
         <button disabled={!settings || !!pending} onClick={() => void install('claude')}>Add to Claude Desktop</button>
         <button disabled={!settings || !!pending} onClick={() => void install('codex')}>Add to ChatGPT &amp; Codex</button>
       </div>
-      <p className="settings-note" role="status">{notice || 'Add ImageFlow to each app once. Nothing else to install.'}</p>
+      {notice && <p className="settings-note" role="status">{notice}</p>}
       <details className="settings-disclosure">
         <summary>Claude Code and other agents</summary>
         <p className="settings-note">Command for Claude Code:</p>

@@ -1,4 +1,4 @@
-import { testBook, menuAction, exportAction } from './ui-actions.mjs';
+import { testBook, menuAction, exportAction, popupAction, undoBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -15,6 +15,12 @@ const read = async () => JSON.parse(await readFile(join(project, 'project.json')
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
+  // This test mutates its own fixture template. Permission behaviour has its own network smoke test.
+  await app.evaluate(({ dialog }) => {
+    const show = dialog.showMessageBox.bind(dialog);
+    dialog.showMessageBox = async (...args) => args.at(-1)?.message === 'Allow this book’s template to connect to the internet?'
+      ? { response: 0, checkboxChecked: false } : show(...args);
+  });
   const w = await testBook(app, project, true);
   w.setDefaultTimeout(20000);
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, project);
@@ -93,7 +99,10 @@ try {
   };
   const editorReady = async ({ sized = true } = {}) => {
     await editorDialog.waitFor();
-    await w.waitForFunction(() => !document.querySelector('.element-editor .ee-status.muted'));
+    await w.waitForFunction(() => !document.querySelector('.element-editor .ee-status.muted')).catch(async (error) => {
+      console.log('Editor readiness diagnostic:', await editorDialog.innerText(), await w.locator('.status').innerText(), await calendarEditor.locator('body').innerText().catch(() => '(no body)'), await w.locator('iframe.element-editor-frame').getAttribute('src').catch(() => '(no frame)'));
+      throw error;
+    });
     if (!sized) return;
     await w.waitForFunction(() => {
       const frame = document.querySelector('iframe.element-editor-frame');
@@ -118,8 +127,8 @@ try {
   };
   const undoCalendar = async (count = 1) => {
     for (let i = 0; i < count; i++) {
-      await w.getByRole('button', { name: 'Undo', exact: true }).click();
-      await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+      await undoBook(w);
+      await ready();
       await waitBook();
     }
   };
@@ -220,9 +229,9 @@ try {
   // One outside click performs its action after flushing, including Undo of the field just typed.
   await openCalendarEditor();
   await calendarEditor.getByRole('textbox', { name: 'Calendar title' }).fill('Undo this typing');
-  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await undoBook(w);
   await editorDialog.waitFor({ state: 'detached' });
-  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  await ready();
   await waitBook();
   assert.equal((await read()).spreads[7].params.title, undefined);
   await openCalendarEditor();
@@ -303,7 +312,7 @@ try {
   external.spreads[7].elements.grid.params.month = '2028-05-01';
   await writeFile(join(project, 'project.json'), JSON.stringify(external, null, 2));
   await rerendered(() => menu('Reload Book'));
-  await editorDialog.getByRole('alert').filter({ hasText: 'changed while this editor was open' }).waitFor();
+  await editorDialog.getByRole('alert').filter({ hasText: 'changed.' }).waitFor();
   await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
   await calendarEditor.getByRole('button', { name: '14', exact: true }).press('Meta+Enter');
   await w.waitForTimeout(300);
@@ -324,7 +333,7 @@ try {
   const defaultMonth = "default: '2027-01-01', precision: 'month'";
   assert.ok(templateSource.includes(defaultMonth));
   await rerendered(() => writeFile(templateFile, templateSource.replace(defaultMonth, "default: '2028-01-01', precision: 'month'")));
-  await editorDialog.getByRole('alert').filter({ hasText: 'changed while this editor was open' }).waitFor();
+  await editorDialog.getByRole('alert').filter({ hasText: 'changed.' }).waitFor();
   await calendarEditor.getByRole('button', { name: '14', exact: true }).click();
   await w.waitForTimeout(300);
   assert.deepEqual((await read()).spreads[7].elements.grid.params, {});
@@ -368,6 +377,7 @@ try {
     '<div className="calendar-editor-nav">', '<div className="calendar-editor-nav">{warn}')));
   await openCalendarEditor();
   await calendarEditor.getByRole('button', { name: 'Try changes' }).click();
+  await editorDialog.locator('.ee-warnings summary').click();
   await editorDialog.locator('.ee-warnings').getByText(/setSpread\(\) ignored typo/).waitFor();
   await waitCalendar((s) => s.params.title === 'Scoped title' && s.elements.grid.params.marked === '9');
   await calendarEditor.getByRole('button', { name: 'Try changes' }).click();
@@ -441,10 +451,10 @@ try {
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
   assert.deepEqual((await hero()).crops, { story: crop });
   // Each gesture is one Undo step: first the pinch, then the drag.
-  await w.getByRole('button', { name: 'Undo', exact: true }).click();
-  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
+  await undoBook(w);
+  await ready();
   assert.equal((await hero()).crops.story.zoom, 1);
-  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await undoBook(w);
   await until(async () => (await hero()).crops === undefined);
 
   // The toolbar zooms with its slider, saved when the key is released, and holds the box's own parameters.
@@ -461,9 +471,9 @@ try {
   await toolbar.getByRole('slider', { name: 'Zoom' }).focus();
   await w.keyboard.press('Escape');
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
-  await w.getByRole('button', { name: 'Undo', exact: true }).click();
-  await w.waitForFunction(() => document.querySelector('.status')?.textContent === 'Edit undone');
-  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await undoBook(w);
+  await ready();
+  await undoBook(w);
   await until(async () => (await hero()).crops === undefined && !(await hero()).params.caption);
 
   // Dragging a photo that is not selected moves it: onto another photo box the two swap, as one edit.
@@ -483,7 +493,7 @@ try {
   assert.equal(after.hero.photo, before.second.photo);
   assert.equal(after.second.photo, before.hero.photo);
   assert.equal(await w.locator('.crop-editor').count(), 0, 'a move does not select');
-  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await undoBook(w);
   await until(async () => (await pair()).hero.photo === before.hero.photo);
   await ready();
   at = await center('[data-spread="arriving"] [data-box="hero"]');
@@ -547,7 +557,7 @@ try {
   await w.locator('.inspector .content-state').getByText(/· 3 of 3$/).waitFor();
   await openBox('Story');
   const storyEditor = w.getByRole('dialog', { name: 'Edit Story' });
-  await storyEditor.getByText('Flow 3 of 3', { exact: true }).waitFor();
+  await storyEditor.getByText('3 of 3', { exact: true }).waitFor();
   assert.equal(await storyEditor.getByRole('combobox', { name: 'Story assignment' }).inputValue(), 'arrival');
   await storyEditor.getByRole('radio', { name: '2 columns' }).waitFor();
   await w.keyboard.press('Escape');
@@ -556,25 +566,20 @@ try {
   // #9: photos can be assigned from the keyboard, to an empty box and as a replacement; Undo restores. A placed
   // photo is selected, with Replace and Remove in its toolbar; an empty box opens its editor with Choose photo.
   await openBox('Main photo');
-  await w.locator('.crop-more > summary').focus();
-  await w.keyboard.press('ArrowDown');
-  assert.equal(await w.evaluate(() => document.activeElement.textContent), 'Replace photo…');
-  await w.keyboard.press('Enter');
+  await popupAction(app, w, w.locator('.crop-more .action-menu-trigger'), 'Replace photo…');
   const photoChooser = w.getByRole('dialog', { name: 'Replace photo in Main photo' });
   await photoChooser.waitFor();
   await w.screenshot({ path: join(root, '.build', 'crop-photo-chooser.png') });
   await w.keyboard.press('Escape');
   await photoChooser.waitFor({ state: 'detached' });
   assert.ok(await w.locator('.crop-editor').isVisible(), 'Escape closes only the chooser');
-  await w.locator('.crop-more > summary').click();
-  await w.getByRole('button', { name: 'Replace photo…', exact: true }).click();
+  await popupAction(app, w, w.locator('.crop-more .action-menu-trigger'), 'Replace photo…');
   await photoChooser.locator('[data-photo="shore"]').click();
   await saved('Shore placed in Main photo');
   assert.equal((await read()).spreads[1].boxes.hero.photo, 'shore');
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
   await openBox('Main photo');
-  await w.locator('.crop-more > summary').click();
-  await w.getByRole('button', { name: 'Remove photo', exact: true }).click();
+  await popupAction(app, w, w.locator('.crop-more .action-menu-trigger'), 'Remove photo');
   await saved('Photo removed from Main photo');
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
   await openBox('Main photo');
@@ -582,8 +587,8 @@ try {
   await saved('Cottage placed in Main photo');
   assert.equal((await read()).spreads[1].boxes.hero.photo, 'cottage');
   for (let i = 0; i < 3; i++) {
-    await w.getByRole('button', { name: 'Undo', exact: true }).click();
-    await saved('Edit undone');
+    await undoBook(w);
+    await ready();
   }
   assert.equal((await read()).spreads[1].boxes.hero.photo, 'segla');
 
@@ -604,10 +609,10 @@ try {
   await w.getByRole('button', { name: 'Delete', exact: true }).click();
   await saved('Spread deleted');
   await ready();
-  await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
+  await w.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-toggle')?.getAttribute('title') ?? ''));
   // The Book check is an indicator next to Export; clicking it lists the issues.
   assert.equal(await w.locator('.inspector .book-check-list').count(), 0);
-  assert.deepEqual(await w.locator('.status-bar .book-check-toggle > [aria-hidden]').allTextContents(), ['1 error']);
+  assert.equal(await w.locator('.status-bar .book-check-toggle .issue-count').textContent(), '1');
   await w.locator('.book-check-toggle').click();
   assert.match(await w.getByRole('dialog', { name: 'Book check' }).textContent(), /Page count is 26/);
   await w.keyboard.press('Escape');
@@ -618,17 +623,16 @@ try {
   await w.waitForFunction(() => /^Proof PDF saved/.test(document.querySelector('.status')?.textContent ?? '') ||
     document.querySelector('.status-error'), null, { timeout: 60000 });
   assert.match(await statusText(), /^Proof PDF saved\. 1 error/);
-  assert.match(await w.locator('.book-check-toggle').textContent(), /Book check · 1 error/);
-  await w.locator('.export-menu > summary').click();
-  assert.equal(await w.getByRole('button', { name: 'Export print PDF', exact: true }).isDisabled(), true);
-  await w.locator('.export-menu > summary').click();
-  await w.getByRole('button', { name: 'Undo', exact: true }).click();
-  await saved('Edit undone');
+  assert.match(await w.locator('.book-check-toggle').getAttribute('title'), /Book check · 1 error/);
+  const exportItems = await popupAction(app, w, w.locator('.export-menu .action-menu-trigger'));
+  assert.equal(exportItems.find(({ label }) => label === 'Export for Print…').enabled, false);
+  await undoBook(w);
   await ready();
-  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
+  await ready();
+  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-toggle')?.getAttribute('title') ?? ''));
 
   // #17: a template with several formats; switching re-renders at the new size and exports at it; Undo returns.
-  await w.getByText('Book settings', { exact: true }).click();
+  await w.locator('.template-controls > summary').click();
   let previous = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
   await w.getByRole('combobox', { name: 'Format' }).selectOption('landscape');
   await saved('Format changed to Landscape · 32 × 24 cm');
@@ -649,8 +653,8 @@ try {
   const firstPage = (await PDFDocument.load(await readFile(printed))).getPage(0).getMediaBox();
   assert.ok(Math.abs(firstPage.width - points(323)) < 0.5 && Math.abs(firstPage.height - points(246)) < 0.5, JSON.stringify(firstPage));
   previous = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
-  await w.getByRole('button', { name: 'Undo', exact: true }).click();
-  await saved('Edit undone');
+  await undoBook(w);
+  await ready();
   await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, previous);
   assert.equal((await read()).format, undefined);
   assert.equal((await frame.locator('body').evaluate(() => window.imageflowRenderStatus)).template.formatId, 'square');
@@ -660,7 +664,7 @@ try {
   const formatsSource = await readFile(formatsFile, 'utf8');
   await writeFile(formatsFile, formatsSource.replace('  formats: {', "  formats: {\n    huge: bookFormat('Huge', 1200, 290),"));
   await w.waitForFunction(() => /PDF dimensions must be between 10 and 1000 mm/.test(document.querySelector('.status-error')?.textContent ?? ''), null, { timeout: 30000 });
-  assert.ok(await w.locator('.document-settings').isVisible(), 'the sidebar survives a template format error');
+  assert.ok(await w.locator('.template-controls').isVisible(), 'the sidebar survives a template format error');
   assert.ok(await w.getByRole('button', { name: 'Undo', exact: true }).isVisible());
   await writeFile(formatsFile, formatsSource);
   await w.waitForFunction(() => !document.querySelector('.status-error'), null, { timeout: 30000 });
@@ -678,7 +682,7 @@ try {
   await w.getByRole('combobox', { name: 'Format' }).selectOption('square');
   await saved('Format changed to WhiteWall Gallery Square · 29 × 29 cm');
   await ready();
-  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
+  await w.waitForFunction(() => /Book check · No issues/.test(document.querySelector('.book-check-toggle')?.getAttribute('title') ?? ''));
   assert.equal((await read()).format, 'square');
 
   // A template converted to one fixed format ignores the saved choice and shows no Format picker.

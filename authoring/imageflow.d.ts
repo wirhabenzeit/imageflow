@@ -317,7 +317,7 @@ export type DocumentEditorProps<D extends Parameters = Parameters, K extends key
 /**
  * An editor for document parameters, declared in the template's `editors`. A node marked only with parameters it
  * owns, such as `ctx.edit('document.markedDates')`, opens it in ImageFlow's editor panel with that spread's
- * `context`; its parameters get no control in Book settings. Each document parameter belongs to one editor.
+ * `context`; its parameters get no control in the template controls. Each document parameter belongs to one editor.
  */
 export type DocumentEditor<D extends Parameters = Parameters, K extends keyof D & string = keyof D & string> = {
   label?: string;
@@ -347,9 +347,9 @@ export type VariantTags = Record<string, string | number | boolean>;
 export type LayoutVariant = { id: string; label: string; variant: VariantTags };
 /**
  * Props of a layout family's picker. `current` is the variant chosen in the picker's draft (at first the spread's own
- * layout, when it is a variant); `saved` is the spread's layout. `choose` changes the draft to another variant;
- * `find` returns the variant whose tags include all the given ones. ImageFlow applies the draft when the user clicks
- * Done (or the picker calls `commit`), as an ordinary layout switch and one undoable edit.
+ * layout, when it is a variant); `saved` is the spread's layout. `choose` immediately applies another variant as one undoable layout switch;
+ * `find` returns the variant whose tags include all the given ones. The picker expands inline in the sidebar.
+ * `commit` applies the current choice; `cancel` closes the picker without reverting applied choices.
  */
 export type LayoutPickerProps = {
   variants: readonly LayoutVariant[];
@@ -366,7 +366,7 @@ export type LayoutPickerProps = {
 /**
  * Layouts that are variants of one design, such as a 2×2 and a 3×3 photo grid. Each variant is an ordinary layout
  * that names the family with `family`; variants must have the same `span`. With a `picker`, the sidebar shows the
- * family as one preview that opens the picker in a dialog; without one, it shows each variant.
+ * family as one preview that expands the picker inline; without one, it shows each variant.
  */
 export type LayoutFamily = {
   label: string;
@@ -624,7 +624,7 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
    * Included in the contract-1 baseline; declaring an origin does not grant permission to use it.
    */
   network?: readonly string[];
-  /** Book settings, shown in Book settings and read through `ctx.document`. */
+  /** Book-wide template parameters, shown in the template controls and read through `ctx.document`. */
   parameters?: D & ParametersChecked<D>;
   /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */
   layoutFamilies?: { [K in L]: LayoutFamily };
@@ -639,7 +639,7 @@ type Opening<L extends string> = { openingSpreads?: readonly OpeningSpread<L>[] 
 /** Every layout `openingSpreads` names must be declared in `spreads`; a missing one is reported there. */
 type OpeningLayouts<S, L extends string> = { [K in Exclude<L, keyof S>]: SpreadDefinition<any> };
 /**
- * Declare one `format`, or several named `formats` the user chooses between in Book settings (`defaultFormat`,
+ * Declare one `format`, or several named `formats` the user chooses between in template controls (`defaultFormat`,
  * else the first, is used until they do). Layouts adapt through `ctx.format`, `ctx.formatId`, `ctx.geometry`, and the
  * `--trim-*`, `--bleed-*` and `--safe-*` CSS variables of `<Spread>`.
  */

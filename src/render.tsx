@@ -1022,7 +1022,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     // (including the generated controls' draft) and the layout parameters it owns.
     const shown = React.useMemo(() => withEditorDraft(current, documentEditor ? { document: claimed(values.element) }
       : { element: elementId, values: values.element, spread: claimedSpread(values.spread) }), [current, values]);
-    const context = React.useMemo(() => ({ files, defaultMode: book.project.importMode ?? 'copy', importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
+    const context = React.useMemo(() => ({ files, importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
     return React.createElement(ProjectFilesContext.Provider, { value: context },
       React.createElement(EditorValues.Provider, { value: values },
         documentEditor
@@ -1213,6 +1213,10 @@ export async function startRender(root: HTMLElement) {
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
     const { chains, positions } = textAssignments(book, template);
+    if (book.mode === 'edit') {
+      const focus = () => post({ type: 'editor-focus', text: !!document.activeElement?.matches('textarea, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"])') });
+      document.addEventListener('focusin', focus); document.addEventListener('focusout', focus);
+    }
     const edit = book.mode === 'edit';
     const check = !edit && query.get('view') === 'check';
     const artwork = !edit && query.get('view') === 'artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
@@ -1275,7 +1279,7 @@ export async function startRender(root: HTMLElement) {
         ({ ...(spread ? located(spread, text) : message(text)), code, details: { ...details, path }, suggestion })),
       ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
       ...(book.template.warnings ?? []).map((text) => ({ ...message(text), code: 'template-dependencies',
-        suggestion: 'Run npm install in template/, then choose Template → Rebuild Dependencies.' })),
+        suggestion: 'Run npm install in template/, then run the template dependency rebuild script.' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
     ];
@@ -1286,7 +1290,7 @@ export async function startRender(root: HTMLElement) {
     // The preview falls back to the default format, but printing at a size nobody chose is blocked.
     if (template.unknownChoice) {
       errors.push({ ...message('The template no longer offers the format ' + book.project.format + ' saved with this book. The preview uses ' +
-        template.format.label + '; choose a format in Book settings.'), code: 'format-unavailable',
+        template.format.label + '; choose a format in template controls.'), code: 'format-unavailable',
       details: { saved: book.project.format ?? '', used: template.format.label },
       suggestion: 'Use select_format with one of the template formats, or declare format ' + book.project.format + ' again in the template.' });
     }

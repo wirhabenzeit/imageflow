@@ -198,7 +198,7 @@ try {
   const hidden = w.getByRole('dialog', { name: 'Edit Hidden probe' });
   await hidden.waitFor();
   await docked(hidden);
-  assert.match(await hidden.textContent(), /Not on the page in this layout right now/);
+  assert.equal(await hidden.getByText('Not on the page in this layout right now', { exact: true }).count(), 0);
   await hidden.getByRole('textbox', { name: 'Value' }).fill('kept');
   await hidden.getByRole('textbox', { name: 'Value' }).press('Enter');
   await saved('Value updated');
@@ -231,7 +231,11 @@ try {
   // Focus alone preserves the editor; resizing with the keyboard leaves the canvas controls open.
   for (let i = 0; i < 13; i++) await w.keyboard.press('ArrowUp');
   await docked(textControls);
-  assert.ok(await textControls.evaluate((node) => node.scrollHeight > node.clientHeight), 'Long controls scroll in a short canvas');
+  const lastControl = textControls.locator('button,select,input,textarea').last();
+  await lastControl.focus();
+  const lastBounds = await lastControl.boundingBox();
+  const canvasBounds = await w.locator('.canvas-wrap').boundingBox();
+  assert.ok(lastBounds.y >= canvasBounds.y && lastBounds.y + lastBounds.height <= canvasBounds.y + canvasBounds.height, 'Compact controls remain reachable in a short canvas');
   await w.screenshot({ path: join(root, '.build', 'item-controls-small.png'), animations: 'disabled' });
   console.log('ImageFlow inline owners passed: item identity, editing, and shared control placement across scrolling and resizing.');
 } finally {

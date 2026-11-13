@@ -1,4 +1,3 @@
-import type { ImportMode } from './source-locations';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { useEffect, useMemo, useRef } from 'react';
@@ -15,12 +14,12 @@ function pagesText(list: { pages: string }[] | undefined) {
   return (list.length === 1 && !list[0].pages.includes('–') ? 'Page ' : 'Pages ') + list.map(({ pages }) => pages).join(', ');
 }
 
-export function Sources({ summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, importWithMode, quickLook }: {
+export function Sources({ summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, manage }: {
   summary: ProjectSummary; tab: SourceKind; setTab: (tab: SourceKind) => void;
   selected: Partial<Record<SourceKind, string>>; choose: (source: SourceRef) => void; usage: SourceUsage;
   writable: boolean; busy: boolean; importSources: (command: 'import-photos' | 'import-folder' | 'import-texts') => void;
-  importWithMode: (kind: 'photo' | 'markdown', mode: ImportMode, folder?: boolean) => void;
   importPaths: (files: File[]) => void; quickLook: (source: SourceRef) => void;
+  manage: () => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const items = useMemo(() => sourceList(summary, tab), [summary, tab]);
@@ -40,7 +39,7 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
       if (items.length) focus(items[event.key === 'Home' ? 0 : items.length - 1].id);
-    } else if (event.key === ' ') {
+    } else if (event.key === ' ' || event.key === 'Escape') {
       event.preventDefault();
       if (current) quickLook({ kind: tab, id: current });
     }
@@ -62,14 +61,12 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
           onClick={() => setTab(kind)}>{label} <span className="count">{count}</span></button>)}
       </div>
       <span className="spacer" />
+      <button type="button" className="source-manage" disabled={!writable || busy} onClick={manage}>Assets…</button>
       <ActionMenu className="source-import" disabled={!writable || busy} label={<>Import <Icon name="chevron" /></>}>
         <button onClick={() => importSources('import-photos')}>Import photos…</button>
         <button onClick={() => importSources('import-folder')}>Import folder…</button>
         <button onClick={() => importSources('import-texts')}>Import Markdown…</button>
-        <hr />
-        <button onClick={() => importWithMode(tab === 'photo' ? 'photo' : 'markdown', 'copy')}>Copy {tab === 'photo' ? 'photos' : 'Markdown'} into Book…</button>
-        <button onClick={() => importWithMode(tab === 'photo' ? 'photo' : 'markdown', 'link')}>Link to {tab === 'photo' ? 'photos' : 'Markdown'}…</button>
-        {tab === 'photo' && <button onClick={() => importWithMode('photo', 'link', true)}>Link to photo folder…</button>}
+
       </ActionMenu>
     </div>
     <div ref={list} className={'source-items source-items-' + tab} role="listbox"
@@ -117,7 +114,7 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
 
 export function QuickLook({ summary, source, usage, navigate, close, jump }: {
   summary: ProjectSummary; source: SourceRef; usage: SourceUsage;
-  navigate: (step: number) => void; close: () => void; jump: (spread: string) => void;
+  navigate: (step: number) => void; close: () => void; jump?: (spread: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const frame = useRef<HTMLDivElement>(null);
@@ -127,9 +124,14 @@ export function QuickLook({ summary, source, usage, navigate, close, jump }: {
   const placed = usage[source.kind][source.id] ?? [];
   useEffect(() => {
     const element = dialog.current;
-    if (element && !element.open) element.showModal();
+    if (element && !element.open) element.show();
     frame.current?.focus();
   }, []);
+  useEffect(() => {
+    const outside = (event: PointerEvent) => { if (!dialog.current?.contains(event.target as Node)) close(); };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [close]);
   const html = useMemo(() => {
     const text = source.kind === 'text' ? summary.texts[source.id] : undefined;
     return text === undefined ? undefined : markdownToHtml(text);
@@ -145,7 +147,7 @@ export function QuickLook({ summary, source, usage, navigate, close, jump }: {
   return <dialog ref={dialog} className={'quicklook quicklook-' + source.kind} aria-label={'Quick Look · ' + item.title}
     onClose={close} onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }}
     onKeyDown={(event) => {
-      if (event.key === ' ') {
+      if (event.key === ' ' || event.key === 'Escape') {
         event.preventDefault();
         dialog.current?.close();
       } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
@@ -173,7 +175,8 @@ export function QuickLook({ summary, source, usage, navigate, close, jump }: {
       <footer className="ql-footer">
         <span>{details.filter(Boolean).join(' · ')}</span>
         <span className="ql-usage">{placed.length ? <>Placed on {placed.map(({ spread, pages }) =>
-          <button key={spread} className="link" onClick={() => { dialog.current?.close(); jump(spread); }}>{pages}</button>)}</> : 'Not placed'}</span>
+          jump ? <button key={spread} className="link" onClick={() => { dialog.current?.close(); jump(spread); }}>{pages}</button>
+            : <span key={spread}>{pages}</span>)}</> : 'Not placed'}</span>
       </footer>
     </div>
   </dialog>;

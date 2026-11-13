@@ -90,7 +90,7 @@ try {
   const inset = await frame.locator(route).boundingBox();
   await w.mouse.click(inset.x + inset.width / 2, inset.y + inset.height / 2);
   await editorReady();
-  const note = (text) => routeEditor.locator('.route-editor-note', { hasText: text }).waitFor();
+  const note = (text) => routeEditor.locator('.route-editor-nav', { hasText: text }).waitFor();
   await routeEditor.getByRole('button', { name: 'Zoom in' }).click();
   await note('Zoom 1.5×');
   await routeEditor.getByRole('button', { name: 'Zoom in' }).click();
@@ -124,7 +124,7 @@ try {
   // restores the assignment.
   let track = await openRoute();
   assert.equal(await track.inputValue(), 'senja-road');
-  await track.selectOption('');
+  await routeEditor.getByRole('button', { name: 'Remove GPX track', exact: true }).click();
   await routeEditor.getByText('Choose a GPX track to draw the route.').waitFor();
   await waitRoute((p) => p.track === '');
   await closeRoute();
@@ -141,10 +141,10 @@ try {
   await writeFile(broken, '<gpx><trk><trkseg><trkpt lat="69.2"');
   await openDialog([broken]);
   track = await openRoute();
-  await routeEditor.getByRole('button', { name: 'Choose…' }).click();
+  await routeEditor.getByRole('combobox', { name: 'GPX track' }).selectOption(':choose');
   await routeEditor.getByText('Broken ride.gpx is not valid GPX.').waitFor();
   assert.match(await track.inputValue(), /^fl-/);
-  assert.deepEqual((await track.locator('option').allTextContents()).sort(), ['Broken ride.gpx', 'None', 'senja-road.gpx']);
+  assert.deepEqual((await track.locator('option').allTextContents()).sort(), ['Choose file…', 'Replace file…', 'senja-road.gpx']);
   await waitRoute((p) => /^fl-/.test(p.track));
   await closeRoute();
   await saved('Route map updated');
@@ -175,21 +175,16 @@ try {
   assert.equal(await trackLine(), 1);
   assert.equal((await status()).errors.length, 0);
 
-  // Copy/link choices travel through the template's native file control and its editor frame bridge.
-  const policy = await read();
-  policy.importMode = 'link';
-  await writeFile(join(project, 'project.json'), JSON.stringify(policy, null, 2));
-  await rerendered(() => menuAction(app, 'Reload'));
+  // File controls follow the global default through the editor-frame bridge.
   for (const mode of ['link', 'copy']) {
     const original = join(work, mode + '-through-editor.gpx');
     await writeFile(original, await readFile(sample));
     await openDialog([original]);
     await openRoute();
-    const choice = routeEditor.getByRole('combobox', { name: 'File import mode' });
-    assert.equal(await choice.inputValue(), 'link', 'The custom editor shows the document import default');
-    await choice.selectOption(mode);
-    await routeEditor.getByRole('button', { name: 'Choose…' }).click();
-    await routeEditor.getByRole('combobox', { name: 'GPX track' }).locator('option:checked').filter({ hasText: mode + '-through-editor.gpx' }).waitFor({ state: 'attached' });
+    assert.equal(await routeEditor.getByRole('combobox', { name: 'File import mode' }).count(), 0);
+    await w.evaluate((importMode) => window.imageflow.updateSettings({ importMode }), mode);
+    await routeEditor.getByRole('combobox', { name: 'GPX track' }).selectOption(':choose');
+    await routeEditor.locator('.box-photo-name').filter({ hasText: mode + '-through-editor.gpx' }).waitFor();
     const selectedTrack = await routeEditor.getByRole('combobox', { name: 'GPX track' }).inputValue();
     await waitRoute((p) => p.track === selectedTrack);
     await closeRoute();

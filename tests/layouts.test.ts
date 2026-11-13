@@ -97,12 +97,12 @@ test('planning describes the switch and changes nothing', () => {
   assert.deepEqual(spread, before);
   assert.deepEqual(change.carried, { photo: 2, text: 0 });
   assert.deepEqual(change.kept, { photo: 2, text: 0 });
-  assert.equal(describeLayoutChange(change), '2 photos carried over · 2 photos kept outside this layout');
+  assert.equal(describeLayoutChange(change), '2 photos set aside');
   go(spread, 'pair');
-  assert.equal(describeLayoutChange(planLayoutChange(spread, 'grid', layouts)), '2 photos carried over · 2 photos shown again');
+  assert.equal(describeLayoutChange(planLayoutChange(spread, 'grid', layouts)), '');
   spread.boxes.body = { text: 't1', params: {} };
   assert.equal(describeLayoutChange(planLayoutChange(spread, 'text', layouts)),
-    '1 text shown again · 2 photos kept outside this layout · text will reflow');
+    '2 photos set aside');
   assert.throws(() => planLayoutChange(spread, 'missing', layouts), /no layout missing/);
 });
 
@@ -208,7 +208,7 @@ test('switching between family variants follows the ordinary layout rules', () =
   const spread = gridSpread();
   switchLayout(spread, 'grid9', variants);
   spread.boxes.fifth = { photo: 'p5', params: {} };
-  assert.equal(describeLayoutChange(planLayoutChange(spread, 'grid', variants)), '4 photos carried over · 1 photo kept outside this layout');
+  assert.equal(describeLayoutChange(planLayoutChange(spread, 'grid', variants)), '1 photo set aside');
   switchLayout(spread, 'grid', variants);
   assert.deepEqual(keptOutside(spread, variants).map(({ id }) => id), ['fifth']);
   switchLayout(spread, 'grid9', variants);

@@ -1,85 +1,97 @@
 import { useState } from 'react';
 import type { DesktopApi } from './desktop';
+import { TemplatePreview } from './TemplatePreview';
 import { describeImport } from './library';
+import { useListSelection } from './list-selection';
 import type { LibraryImportResult } from './library';
 import type { useLibrary } from './useLibrary';
 
-const date = (value?: string) => value ? new Date(value).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '';
-
-/** The Templates pane: the template library a new book is created from. */
 export function TemplateSettings({ api, library }: { api?: DesktopApi; library: ReturnType<typeof useLibrary> }) {
   const { entries, error } = library;
   const [results, setResults] = useState<LibraryImportResult[]>([]);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const run = async (task: () => Promise<void>) => {
-    setBusy(true);
-    try { await task(); } finally { setBusy(false); }
-  };
-  const importTemplates = () => run(async () => {
-    setMessage('');
-    const result = await api!.importTemplates();
-    if ('error' in result) setMessage(result.error);
-    else if (result.value.length) setResults(result.value);
+  const [pendingTrust, setPendingTrust] = useState<{ id: string; allow: boolean }>();
+  const list = useListSelection(entries?.map(({ id }) => id) ?? [], (id) => entries?.find((entry) => entry.id === id)?.label ?? id, false);
+  const selected = list.selected[0] ?? entries?.[0]?.id;
+  const entry = entries?.find(({ id }) => id === selected);
+  async function run(task: () => Promise<void>) {
+    setBusy(true); setMessage(''); setResults([]);
+    try { await task(); } catch { setMessage('Could not update the library. Please try again.'); } finally { setBusy(false); }
+  }
+  const importTemplates = (paths?: string[]) => run(async () => {
+    const result = await api!.importTemplates(paths);
+    if ('error' in result) setMessage(result.error); else setResults(result.value);
   });
   const remove = (id: string) => run(async () => {
-    setResults([]);
     const result = await api!.removeTemplate(id);
-    setMessage('error' in result ? result.error : result.value ? 'Moved to the Trash. Books made from it are not affected.' : '');
-  });
-  const trustTemplate = (id: string, allow: boolean) => run(async () => {
-    setResults([]);
-    const result = await api!.trustTemplate(id, allow);
     setMessage('error' in result ? result.error : '');
   });
   const exportTemplate = (id: string) => run(async () => {
-    setResults([]);
     const result = await api!.exportTemplate(id);
-    setMessage('error' in result ? result.error : result.value ? 'Exported to ' + result.value + '.' : '');
+    setMessage('error' in result ? result.error : result.value ? 'Exported.' : '');
   });
-  return <div className="template-settings">
-    <p className="settings-note template-intro">New books are made from these templates. Each book keeps its own copy, so removing or
-      replacing a template here never changes a book.</p>
-    {error && <div><p role="alert" className="error-text">{error}</p>
-      <button type="button" onClick={() => void library.reload()} aria-label="Retry loading templates">Retry</button></div>}
-    <ul className="template-list" aria-label="Templates">
-      {!entries && !error && <li className="muted">Loading templates…</li>}
-      {entries?.map((entry) => <li key={entry.id} className={entry.unavailable ? 'unavailable' : undefined}>
-        <div className="template-row">
-          <strong>{entry.label}</strong> <span className="muted">{entry.version}</span>
-          <span className="template-source">{entry.source === 'built-in' ? 'Built-in' : 'Imported ' + date(entry.importedAt)}</span>
-          <button type="button" disabled={busy || !api} aria-label={'Export ' + entry.label}
-            onClick={() => void exportTemplate(entry.id)}>Export…</button>
-          {entry.source === 'imported' && <button type="button" disabled={busy || !api} aria-label={'Move ' + entry.label + ' to the Trash'}
-            onClick={() => void remove(entry.id)}>Move to Trash</button>}
-        </div>
-        {entry.description && <p className="settings-note">{entry.description}</p>}
-        <p className="settings-note">{[entry.formats.join(', '), entry.layouts.length + (entry.layouts.length === 1 ? ' layout' : ' layouts'),
-          entry.id].filter(Boolean).join(' · ')}{entry.replacesBuiltIn ? ' · Replaces the built-in template' : ''}</p>
-        {entry.packages?.length ? <p className="settings-note">Packages: {entry.packages.map(({ name, version, license }) =>
-          name + ' ' + version + (license ? ' (' + license + ')' : '')).join(', ')}</p> : null}
-        {entry.network?.length ? <div className="template-network">
-          <p className="settings-note">Connects to: {entry.network.join(', ')}</p>
-          <p className="settings-note">{entry.networkTrust === 'built-in' ? 'Allowed in every book: this template comes with ImageFlow.'
-            : entry.networkTrust === 'allowed' ? 'Allowed in every book made from this version, until its files change.'
-              : 'Each book made from it asks before it goes online.'}</p>
-          {entry.source === 'imported' && <button type="button" disabled={busy || !api}
-            aria-label={(entry.networkTrust ? 'Stop allowing network access for ' : 'Allow network access for ') + entry.label}
-            onClick={() => void trustTemplate(entry.id, !entry.networkTrust)}>{entry.networkTrust ? 'Stop Allowing' : 'Allow in Every Book'}</button>}
-        </div> : null}
-        {entry.unavailable && <p className="settings-note error-text">Can't be used: {entry.unavailable}</p>}
-      </li>)}
-    </ul>
-    <div className="template-actions">
-      <button type="button" disabled={busy || !api} onClick={() => void importTemplates()}>Import…</button>
-      <span className="settings-note">Choose template folders or .imageflow-template files. Templates contain code: only import templates from people you trust.</span>
+  const trustTemplate = (id: string, allow: boolean) => run(async () => {
+    setPendingTrust({ id, allow });
+    try {
+      const result = await api!.trustTemplate(id, allow);
+      setMessage('error' in result ? result.error : '');
+      if ('value' in result) await library.reload();
+    } finally { setPendingTrust(undefined); }
+  });
+  const contextMenu = async (id: string) => {
+    const item = entries?.find((item) => item.id === id);
+    if (!item || busy) return;
+    const action = await api?.popupMenu([{ id: 'export', label: 'Export…' },
+      ...(item.source === 'imported' ? [{ id: 'remove', label: 'Move to Trash' }] : [])]);
+    if (action === 'export') void exportTemplate(id); if (action === 'remove') void remove(id);
+  };
+  return <div className="template-settings" onDragOver={(event) => { event.preventDefault(); }} onDrop={(event) => {
+    event.preventDefault(); const paths = api?.pathsForFiles([...event.dataTransfer.files]); if (paths?.length && !busy) void importTemplates(paths);
+  }}>
+    <div className="template-browser">
+      <div className="template-list" role="listbox" aria-label="Templates" onKeyDown={(event) => {
+        if ((event.key === 'Delete' || event.key === 'Backspace') && entry?.source === 'imported' && !busy) { event.preventDefault(); void remove(entry.id); }
+        else if ((event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) && selected) { event.preventDefault(); void contextMenu(selected); }
+        else list.key(event);
+      }}>
+        {!entries && !error && <p className="muted">Loading templates…</p>}
+        {entries?.map((item) => <div key={item.id} role="option" className="template-library-row" aria-selected={selected === item.id}
+          data-list-id={item.id} tabIndex={selected === item.id ? 0 : -1} title={item.unavailable ?? item.description}
+          onClick={() => list.choose(item.id)} onContextMenu={(event) => {
+            list.context(item.id, event);
+            void contextMenu(item.id);
+          }}>
+          <TemplatePreview api={api} entry={item} natural /><strong>{item.label}</strong><span className="muted">{item.version}</span>
+        </div>)}
+      </div>
+      <section className="template-detail" aria-label="Template details">
+        {entry && <>
+          <TemplatePreview api={api} entry={entry} natural />
+          <h2>{entry.label} <small className="muted">{entry.version}</small></h2>
+          {entry.description && <p>{entry.description}</p>}
+          <dl><dt>Formats</dt><dd>{entry.formats.join(', ')}</dd><dt>Layouts</dt><dd>{entry.layouts.join(', ')}</dd>
+            <dt>ID</dt><dd>{entry.id}</dd>
+            {entry.source === 'imported' && <><dt>Imported</dt><dd>{entry.importedAt ? new Date(entry.importedAt).toLocaleDateString() : ''}</dd></>}
+          </dl>
+          {entry.packages?.length ? <section><h3>Packages</h3><ul>{entry.packages.map(({ name, version, license }) =>
+            <li key={name}>{name} {version}{license && ' · ' + license}</li>)}</ul></section> : null}
+          {entry.network?.length ? <section className="template-network"><h3>Network</h3>
+            <p>{entry.network.join(', ')}</p>
+            <label className="pc-switch"><input type="checkbox" checked={pendingTrust?.id === entry.id ? pendingTrust.allow : !!entry.networkTrust} disabled={busy || entry.source !== 'imported'}
+              onChange={(event) => void trustTemplate(entry.id, event.target.checked)} />Allow network access</label>
+          </section> : null}
+          {entry.unavailable && <p className="error-text">{entry.unavailable}</p>}
+          <div className="template-detail-actions"><button disabled={busy || !api} onClick={() => void exportTemplate(entry.id)}>Export…</button>
+            {entry.source === 'imported' && <button disabled={busy || !api} onClick={() => void remove(entry.id)}>Move to Trash</button>}</div>
+        </>}
+      </section>
     </div>
-    {(results.length > 0 || message) && <div className="template-results" role="status">
-      {message && <p className="settings-note">{message}</p>}
-      {results.map((result, i) => <div key={i}>
-        <p className={'settings-note' + (result.status === 'failed' ? ' error-text' : '')}>{describeImport(result)}</p>
-        {result.details?.length ? <ul className="template-details">{result.details.map((detail, j) => <li key={j}>{detail}</li>)}</ul> : null}
-      </div>)}
-    </div>}
+    <footer className="template-actions"><button type="button" disabled={busy || !api} onClick={() => void importTemplates()}>Import…</button>
+      <div className="template-results" role="status">{error || message}
+        {results.map((result, i) => <p key={i} className={result.status === 'failed' ? 'error-text' : undefined}>{describeImport(result)}</p>)}
+        {error && <button onClick={() => void library.reload()}>Retry</button>}
+      </div>
+    </footer>
   </div>;
 }

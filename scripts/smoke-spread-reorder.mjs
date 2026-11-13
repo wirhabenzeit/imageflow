@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { exportAction, menuAction, testBook } from './ui-actions.mjs';
+import { exportAction, menuAction, testBook, undoBook } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'spread-order-'));
@@ -83,8 +83,8 @@ try {
     const canvas = document.querySelector('.canvas')?.getBoundingClientRect();
     return sheet && canvas && sheet.top >= canvas.top && sheet.bottom <= canvas.bottom;
   });
-  await undo.click();
-  await saved('Edit undone');
+  await undoBook(w);
+  await ready();
   assert.deepEqual(await order(), ids);
   assert.equal(await undo.isDisabled(), true, 'the drag creates exactly one history entry');
   assert.notEqual((await w.evaluate(() => window.imageflow.currentProject())).value.id, movedSession, 'Undo also changes the revision');
@@ -102,8 +102,8 @@ try {
   assert.equal(await w.evaluate(() => window.reorderAnimations.length), 0);
   assert.equal(await w.frameLocator('iframe.book-frame-thumbs[data-current][data-ready]').locator('body')
     .evaluate(() => window.reorderAnimations.length), 0);
-  await undo.click();
-  await saved('Edit undone');
+  await undoBook(w);
+  await ready();
   await ready();
   await w.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
   await w.emulateMedia({ reducedMotion: 'no-preference' });
@@ -170,8 +170,8 @@ try {
   await saved('Spread moved to pages 2–3');
   assert.deepEqual(await order(), [ids[0], 'last-notes', ...ids.slice(1, -2), 'closing']);
   assert.equal(await thumb('last-notes').getAttribute('aria-current'), 'page');
-  await undo.click();
-  await saved('Edit undone');
+  await undoBook(w);
+  await ready();
   assert.deepEqual(await order(), ids);
   assert.equal(await undo.isDisabled(), true);
   await ready();
@@ -183,8 +183,8 @@ try {
   await saved('Spread moved to pages 4–5');
   assert.equal(await thumb('arriving').evaluate((node) => node === document.activeElement), true);
   assert.equal(await thumb('arriving').getAttribute('aria-current'), 'page');
-  await undo.click();
-  await saved('Edit undone');
+  await undoBook(w);
+  await ready();
   await ready();
 
   // Dispatch in one browser task so both presses arrive before the first save can finish.
@@ -196,11 +196,11 @@ try {
   });
   await saved('Spread moved to pages 6–7');
   assert.deepEqual(await order(), [ids[0], ids[2], ids[3], ids[1], ...ids.slice(4)], 'rapid presses each move one position');
-  await undo.click();
-  await saved('Edit undone');
+  await undoBook(w);
+  await ready();
   assert.deepEqual(await order(), [ids[0], ids[2], ids[1], ...ids.slice(3)]);
-  await undo.click();
-  await saved('Edit undone');
+  await undoBook(w);
+  await ready();
   assert.deepEqual(await order(), ids);
   assert.equal(await undo.isDisabled(), true, 'each keyboard move is one Undo step');
   await ready();
@@ -217,7 +217,9 @@ try {
   await w.locator('.spread-insertion').waitFor();
   const beforeReload = (await w.evaluate(() => window.imageflow.currentProject())).value.id;
   await menuAction(app, 'Reload');
-  await saved('Project files reloaded');
+  for (let attempt = 0; (await w.evaluate(() => window.imageflow.currentProject())).value.id === beforeReload; attempt++) {
+    assert.ok(attempt < 100); await w.waitForTimeout(50);
+  }
   await ready();
   assert.notEqual((await w.evaluate(() => window.imageflow.currentProject())).value.id, beforeReload);
   assert.equal(await w.locator('.spread-insertion, .spread-thumb.reordering').count(), 0);
@@ -276,9 +278,6 @@ try {
   await broken.waitForFunction(() => document.querySelector('.status')?.textContent === 'Spread moved to page 28');
   assert.deepEqual(JSON.parse(await readFile(join(brokenPath, 'project.json'), 'utf8')).spreads.map(({ id }) => id), ids);
 
-  const sample = await menuAction(app, 'Open Sample Project');
-  await sample.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
-  assert.equal(await sample.locator('.spread-thumb[draggable="true"]').count(), 0, 'read-only books cannot drag');
   console.log('ImageFlow spread reordering passed.');
 } catch (error) {
   console.error(error);

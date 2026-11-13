@@ -109,8 +109,6 @@ function MarkedDaysEditor({ values, set, context, readOnly, Control }: DocumentE
   const marked = values.markedDates;
   const year = month.getUTCFullYear();
   const monthLabel = new Intl.DateTimeFormat(language, { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(month);
-  const dayLabel = (day: number, withYear: boolean) => new Intl.DateTimeFormat(language, { timeZone: 'UTC', day: 'numeric', month: 'long',
-    ...(withYear ? { year: 'numeric' } : {}) }).format(new Date(Date.UTC(year, month.getUTCMonth(), day)));
   // Weeks start on Monday; 1 January 2024 was a Monday.
   const offset = (month.getUTCDay() + 6) % 7;
   const weekdays = Array.from({ length: 7 }, (_, i) => weekdayName(new Date(Date.UTC(2024, 0, 1 + i)), language));
@@ -122,25 +120,17 @@ function MarkedDaysEditor({ values, set, context, readOnly, Control }: DocumentE
     <div className="marked-days-grid" role="group" aria-label={'Marked days in ' + monthLabel}>
       {weekdays.map((name) => <strong key={name}>{name}</strong>)}
       {Array.from({ length: offset }, (_, i) => <span key={'blank' + i} />)}
-      {/* A day marked every year is not toggled by a click, so one click never changes every year's calendar. */}
+      {/* A regular click changes only this year; Option-click changes the yearly mark. */}
       {days.map(({ day, once, yearly }) => <button key={day} type="button" className={yearly ? 'yearly' : once ? 'once' : undefined}
-        aria-pressed={once || yearly} disabled={readOnly || yearly}
-        title={yearly ? 'Marked every year: remove it below' : once ? 'Marked in ' + year + '. Click to unmark.' : 'Click to mark in ' + year + '.'}
-        onClick={() => change(day, { once: !once })}>{day}</button>)}
+        aria-pressed={once || yearly} disabled={readOnly}
+        title={(yearly ? 'Every year' : once ? 'Once in ' + year : 'Unmarked') + ' · Click: once · ⌥-click: every year'}
+        onClick={(event: MouseEvent) => change(day, event.altKey ? { yearly: !yearly } : { once: !once })}
+        onKeyDown={(event: KeyboardEvent) => { if (event.altKey && event.key === 'Enter') { event.preventDefault(); change(day, { yearly: !yearly }); } }}>{day}</button>)}
     </div>
-    <p className="marked-days-note">Click a day to mark it in {year}. Days with a ring are marked every year.</p>
-    <ul className="marked-days-list">
-      {days.filter(({ once, yearly }) => once || yearly).map(({ day, once, yearly }) => <li key={day}>
-        <span>{yearly ? dayLabel(day, false) + ', every year' + (once ? ', and once in ' + year : '') : dayLabel(day, true)}</span>
-        {/* Removing the yearly mark keeps a one-off mark of the same day, which then shows on its own. */}
-        {yearly
-          ? <button type="button" disabled={readOnly} onClick={() => change(day, { yearly: false })}>Unmark every year</button>
-          : <button type="button" disabled={readOnly} onClick={() => change(day, { yearly: true, once: false })}>Mark every year</button>}
-      </li>)}
-    </ul>
-    {rejected.length > 0 && <p className="marked-days-note">Not shown, because they are not dates: {rejected.join(', ')}</p>}
+    <p className="marked-days-note" title={"Click a day to mark it in " + year}>● Once · ◯ Every year</p>
     <details className="marked-days-all">
       <summary>All marked days</summary>
+      {rejected.length > 0 && <p className="marked-days-note">Not dates: {rejected.join(', ')}</p>}
       <Control parameter="markedDates" label="Marked days (25.12 every year, 2027-04-16 once)" />
     </details>
   </div>;

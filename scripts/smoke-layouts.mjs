@@ -1,4 +1,4 @@
-import { testBook, menuAction } from './ui-actions.mjs';
+import { testBook, menuAction, popupAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -62,8 +62,7 @@ try {
   const setCrop = async (box, values) => {
     await openBox(box);
     const toolbar = w.locator('.crop-content');
-    await toolbar.locator('.crop-more > summary').click();
-    await toolbar.getByRole('button', { name: 'Crop values…', exact: true }).click();
+    await popupAction(app, w, toolbar.locator('.crop-more .action-menu-trigger'), 'Crop values…');
     for (const [label, value] of Object.entries(values)) {
       await rerendered(async () => {
         await toolbar.getByRole('spinbutton', { name: label, exact: true }).fill(String(value));
@@ -72,7 +71,7 @@ try {
     }
     await closeBox();
   };
-  const kept = () => w.locator('.inspector').getByText(/^Saved outside this layout/).textContent();
+  const kept = () => w.locator('.inspector').getByText(/^Set aside/).textContent();
 
   await w.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   const layoutReady = async (spread) => {
@@ -124,7 +123,17 @@ try {
   // Only layouts with the same footprint are offered: no single title or closing page for a full spread. The grid
   // family has its own picker, so its 2×2 and 3×3 variants are one preview, named after the family.
   assert.deepEqual(await picker.getByRole('radio').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label'))),
-    ['Photo and story', 'Panorama', 'Photo grid', 'Two photos', 'Text spread', 'Calendar spread', 'Contents']);
+    ['Photo and story', 'Panorama', 'Map', 'Photo grid', 'Two photos', 'Text spread', 'Calendar spread', 'Contents']);
+
+  // A new book revision with unchanged preview inputs reuses the same iframe, including its map drawing.
+  await w.locator('iframe.book-frame-layouts[data-current][data-ready]').waitFor();
+  const previewBefore = await w.locator('iframe.book-frame-layouts[data-current]').getAttribute('src');
+  await w.locator('iframe.book-frame-layouts[data-current]').evaluate((frame) => { frame.dataset.reuseProbe = 'retained'; });
+  const metadata = await read();
+  metadata.title = 'Metadata-only save';
+  await rerendered(() => writeFile(join(project, 'project.json'), JSON.stringify(metadata, null, 2)));
+  assert.equal(await w.locator('iframe.book-frame-layouts[data-current]').getAttribute('src'), previewBefore);
+  assert.equal(await w.locator('iframe.book-frame-layouts[data-current]').getAttribute('data-reuse-probe'), 'retained');
 
   // Crops are set per layout; the one set last is the focus other layouts fill around.
   await setCrop('Upper left', { Zoom: 2, Horizontal: 0.3 });
@@ -135,19 +144,19 @@ try {
   // Pointing at a layout says what switching does, without changing anything.
   const before = await read();
   await layout('Two photos').hover();
-  assert.equal(await w.locator('#layout-consequence').textContent(), 'Two photos · 2 photos carried over · 2 photos kept outside this layout');
+  assert.equal(await w.locator('#layout-consequence').textContent(), 'Two photos · 2 photos set aside');
   await layout('Text spread').focus();
-  assert.equal(await w.locator('#layout-consequence').textContent(), 'Text spread · 4 photos kept outside this layout');
+  assert.equal(await w.locator('#layout-consequence').textContent(), 'Text spread · 4 photos set aside');
   assert.deepEqual(await read(), before);
 
   // A → B: the shared boxes show, the others stay on the spread without Book check warnings.
   await rerendered(() => layout('Two photos').click());
-  assert.equal(await statusLine(), 'Two photos · 2 photos carried over · 2 photos kept outside this layout');
+  assert.equal(await statusLine(), 'Two photos · 2 photos set aside');
   let state = await settlements();
   assert.equal(state.definition, 'pair');
   assert.deepEqual(Object.fromEntries(Object.entries(state.boxes).map(([id, box]) => [id, box.photo])),
     { hero: 'segla', second: 'shore', third: 'cottage', fourth: 'light' });
-  assert.equal(await kept(), 'Saved outside this layout · 2 photos');
+  assert.equal(await kept(), 'Set aside · 2 photos');
   assert.deepEqual((await status()).warnings, []);
   // The pair layout has no crop of its own: it fills around the focus set in the grid.
   assert.equal(Object.hasOwn((await settlements()).boxes.hero.crops ?? {}, 'pair'), false);
@@ -163,84 +172,49 @@ try {
 
   // Replacing a photo starts its crop over; removing one is a real edit.
   await openBox('Left photo');
-  await w.locator('.crop-more > summary').click();
-  await w.getByRole('button', { name: 'Replace photo…', exact: true }).click();
+  await popupAction(app, w, w.locator('.crop-more .action-menu-trigger'), 'Replace photo…');
   const replace = w.getByRole('dialog', { name: 'Replace photo in Left photo' }).locator('[data-photo]:not(:disabled)').first();
   const replacement = await replace.getAttribute('data-photo');
   await rerendered(() => replace.click());
   assert.deepEqual((await settlements()).boxes.hero, { photo: replacement, params: {} });
   await w.waitForFunction(() => !document.querySelector('.crop-editor'));
   await openBox('Right photo');
-  await w.locator('.crop-more > summary').click();
-  await rerendered(() => w.getByRole('button', { name: 'Remove photo', exact: true }).click());
+  await rerendered(() => popupAction(app, w, w.locator('.crop-more .action-menu-trigger'), 'Remove photo'));
 
   // B → C (no photo boxes) → A: the replacement and removal hold, the other photos and their crops return.
   await rerendered(() => layout('Text spread').click());
-  assert.equal(await kept(), 'Saved outside this layout · 3 photos');
+  assert.equal(await kept(), 'Set aside · 3 photos');
   // The family's preview opens its picker, which starts on the first variant for a spread outside the family.
-  const pickerDialog = w.getByRole('dialog', { name: 'Grid size' });
-  const pickerFrame = w.frameLocator('dialog.layout-picker-dialog iframe');
+  const pickerRegion = w.getByRole('region', { name: 'Grid size' });
+  const pickerFrame = w.frameLocator('.inline-layout-picker iframe');
   const gridSize = (name) => pickerFrame.getByRole('radio', { name, exact: true });
-  // Waits until the picker reported ready and its frame took its content height: the dialog is centred, so it moves
-  // while the frame grows, and a click before then can miss.
   const pickerReady = async () => {
-    await pickerDialog.waitFor();
-    await w.waitForFunction(() => {
-      const dialog = document.querySelector('dialog.layout-picker-dialog');
-      const frame = dialog?.querySelector('iframe');
-      const state = (window.__pickerHeights ??= []);
-      state.push(frame?.style.height);
-      if (state.length > 4) state.shift();
-      const settled = !dialog?.textContent.includes('Loading the picker') && state.length === 4 &&
-        state.every((height) => height && height !== '240px' && height === state[0]);
-      if (settled) window.__pickerHeights = [];
-      return settled;
-    }, null, { polling: 100 });
+    await pickerRegion.waitFor();
+    await gridSize('2 × 2').waitFor();
+    await w.waitForFunction(() => !document.querySelector('.inline-layout-picker')?.textContent.includes('Loading…'));
   };
-  // A click right after the out-of-process frame settles can still miss it, so choose until the picker shows the choice.
-  const chooseSize = async (name) => {
-    for (let attempt = 0; attempt < 10 && await gridSize(name).getAttribute('aria-checked') !== 'true'; attempt++) {
-      await gridSize(name).click();
-      await w.waitForTimeout(300);
-    }
-    assert.equal(await gridSize(name).getAttribute('aria-checked'), 'true');
-  };
-  // The picker reports its draft asynchronously; the dialog then says what Done would do.
-  const pickerSays = (text) => w.waitForFunction((expected) =>
-    document.querySelector('.layout-picker-dialog .layout-picker-consequence')?.textContent === expected, text);
   await layout('Photo grid').click();
   await pickerReady();
-  assert.equal(await gridSize('2 × 2').getAttribute('aria-checked'), 'true');
-  await pickerSays('Photo grid 2×2 · 3 photos shown again');
-  await rerendered(() => pickerDialog.getByRole('button', { name: 'Done', exact: true }).click());
-  assert.equal(await statusLine(), 'Photo grid 2×2 · 3 photos shown again');
+  assert.equal(await w.locator('dialog.layout-picker-dialog').count(), 0);
+  // The canvas and sidebar remain interactive while the inline picker is open.
+  assert.equal(await button('Add').isEnabled(), true);
+  await rerendered(() => gridSize('2 × 2').click());
+  assert.equal(await statusLine(), '');
   state = await settlements();
   assert.deepEqual(Object.fromEntries(Object.entries(state.boxes).map(([id, box]) => [id, box.photo])),
     { hero: replacement, second: undefined, third: 'cottage', fourth: 'light' });
   assert.deepEqual(state.boxes.third.crops, { grid: { centerX: 0.5, centerY: 0.5, zoom: 1.5 } });
-  assert.equal(await w.locator('.inspector').getByText(/^Saved outside this layout/).count(), 0);
+  assert.equal(await w.locator('.inspector').getByText(/^Set aside/).count(), 0);
 
-  // Everything above is in project.json: reloading shows the same book.
   await rerendered(() => menuAction(app, 'Reload'));
   assert.deepEqual(await settlements(), state);
   assert.deepEqual((await status()).errors, []);
-
-  // The picker switches between variants as an ordinary layout switch: the 2×2 photos stay in the upper left of the
-  // 3×3 grid, Cancel changes nothing, Done is one Undo step, and the five new boxes are empty.
-  await button('Grid size…').click();
-  await pickerReady();
-  await chooseSize('3 × 3');
-  await pickerSays('Photo grid 3×3 · 3 photos carried over');
-  await pickerDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await pickerDialog.waitFor({ state: 'detached' });
-  assert.deepEqual(await settlements(), state);
-  await button('Grid size…').click();
+  // A variant is an immediate, single Undo step. No Cancel/Done round trip.
+  if (!(await pickerRegion.count())) await button('Grid size…').click();
   await pickerReady();
   assert.equal(await gridSize('2 × 2').getAttribute('aria-checked'), 'true');
-  await chooseSize('3 × 3');
-  await pickerSays('Photo grid 3×3 · 3 photos carried over');
-  await rerendered(() => pickerDialog.getByRole('button', { name: 'Done', exact: true }).click());
-  assert.equal(await statusLine(), 'Photo grid 3×3 · 3 photos carried over');
+  await rerendered(() => gridSize('3 × 3').click());
+  assert.equal(await statusLine(), '');
   assert.equal((await settlements()).definition, 'grid9');
   assert.equal(await frame.locator('[data-spread="settlements"] [data-box]').count(), 9);
   assert.equal(await layout('Photo grid').getAttribute('aria-checked'), 'true');

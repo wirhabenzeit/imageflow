@@ -1,4 +1,7 @@
-import { collectSources, relocateSource, relinkFolder, saveDocumentCopy } from './source-actions';
+import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
+import type { RegisteredCommand } from '../src/commands';
+import { bookName } from '../src/book-name';
+import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, fileIsAssigned, removeSources } from './source-actions';
 import { originalPath } from './source-store';
 import { sourceEntries } from '../src/source-locations';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
@@ -8,9 +11,9 @@ import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { basename, extname, join, relative, isAbsolute } from 'node:path';
+import { basename, dirname, extname, join, relative, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
+import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
 import type { BookMenuState, CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
@@ -40,10 +43,12 @@ import type { ImportPlan, ResolvedTemplate } from './template-library';
 import { describeImport } from '../src/library';
 import type { LibraryImportResult, NewBookChoice } from '../src/library';
 import { capabilities } from '../src/runtime-exports';
-import { openingSpreadStates } from '../src/editing';
+import { newSpread, openingSpreadStates } from '../src/editing';
 import { templateFolder, textSourcePath } from './document-actions';
 import { configureRenditionCache, pruneRenditions } from './rendition-cache';
 
+let templatesWindow: BrowserWindow | null = null;
+const assetsWindows = new Map<DocumentSession, { window: BrowserWindow; accept: string[] }>();
 let settingsWindow: BrowserWindow | null = null;
 const settingsPresentation = new WeakMap<BrowserWindow, { painted: boolean; sized: boolean }>();
 let startWindow: BrowserWindow | null = null;
@@ -65,7 +70,7 @@ const identities = new Map<string, DocumentSession>();
 const opening = new Map<string, Promise<DocumentSession>>();
 const closing = new Set<Promise<void>>();
 const covers = new Map<DocumentSession, { dirty: boolean; timer?: ReturnType<typeof setTimeout>; job?: AbortController; task?: Promise<void> }>();
-const pickers = new Map<number, { window: BrowserWindow; select: (choice?: NewBookChoice) => void }>();
+const pickers = new Map<number, { window: BrowserWindow }>();
 const pendingOpenFiles: string[] = [];
 let ready = false;
 let lastDocument: DocumentSession | undefined;
@@ -117,7 +122,7 @@ async function serve(request: Request) {
   if (host !== 'editor' && host !== 'render') return new Response(null, { status: 404 });
   const dist = join(app.getAppPath(), 'dist');
   if (!devServer && /^\/assets\/[\w.-]+\.[a-z0-9]+$/i.test(pathname)) return net.fetch(pathToFileURL(join(dist, pathname)).href);
-  if (host === 'editor' && ['/', '/settings', '/start', '/new'].includes(pathname)) {
+  if (host === 'editor' && ['/', '/settings', '/start', '/new', '/assets', '/templates'].includes(pathname)) {
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigin + "; frame-ancestors 'none'; base-uri 'none'",
     });
@@ -170,10 +175,19 @@ function editorOwner(event: RendererEvent) {
   const document = documents.get(event.sender.id);
   return trusted(event, document?.window, editorURL) ? document : undefined;
 }
+function assetsOwner(event: RendererEvent) {
+  return [...assetsWindows].find(([, entry]) => trusted(event, entry.window, assetsURL))?.[0];
+}
+function templatesOwner(event: IpcMainInvokeEvent) { return trusted(event, templatesWindow, templatesURL) ? templatesWindow : undefined; }
+async function fromBook<T>(event: IpcMainInvokeEvent, run: (document: DocumentSession) => Promise<T>): Promise<Result<T>> {
+  const document = editorOwner(event) ?? assetsOwner(event);
+  if (!document || quitting) return { error: 'Request is only available to an open book.' };
+  return document.run(() => run(document));
+}
 function settingsOwner(event: IpcMainInvokeEvent) { return trusted(event, settingsWindow, settingsURL) ? settingsWindow : undefined; }
 function pickerOwner(event: IpcMainInvokeEvent) { return [...pickers.values()].find((entry) => trusted(event, entry.window, starterURL))?.window; }
 function startOwner(event: IpcMainInvokeEvent) { return trusted(event, startWindow, startURL) ? startWindow : undefined; }
-function appOwner(event: IpcMainInvokeEvent) { return editorOwner(event)?.window ?? startOwner(event) ?? settingsOwner(event); }
+function appOwner(event: IpcMainInvokeEvent) { return editorOwner(event)?.window ?? startOwner(event) ?? settingsOwner(event) ?? templatesOwner(event); }
 async function fromEditor<T>(event: IpcMainInvokeEvent, run: (document: DocumentSession) => Promise<T>): Promise<Result<T>> {
   const document = editorOwner(event);
   if (!document || quitting) return { error: 'Request is only available to an open book.' };
@@ -181,13 +195,13 @@ async function fromEditor<T>(event: IpcMainInvokeEvent, run: (document: Document
 }
 function focusedDocument(owner: BaseWindow | null | undefined = BrowserWindow.getFocusedWindow()) {
   const browser = owner ? BrowserWindow.fromId(owner.id) : undefined;
-  return browser ? documents.get(browser.webContents.id) : lastDocument && !lastDocument.closing ? lastDocument : undefined;
+  return browser ? documents.get(browser.webContents.id) ?? [...assetsWindows].find(([, entry]) => entry.window === browser)?.[0] : lastDocument && !lastDocument.closing ? lastDocument : undefined;
 }
 function report(owner: BrowserWindow | null | undefined, error: unknown) {
   if (owner && !owner.isDestroyed()) owner.webContents.send(channels.appError, errorMessage(error));
   else { showStart(); startWindow?.webContents.once('did-finish-load', () => report(startWindow, error)); }
 }
-function sampleFolder(name = 'whitewall') {
+function sampleFolder(name: string) {
   return devSample ? join(devSample, name) : app.isPackaged ? join(process.resourcesPath, 'sample', name) : join(app.getAppPath(), 'sample', name);
 }
 async function openDocumentLocation(document: DocumentSession, action: 'reveal' | 'template' | 'text', id?: string) {
@@ -217,6 +231,38 @@ function showStart() {
   owner.once('ready-to-show', () => { if (!hidden) owner.show(); });
   owner.once('closed', () => { if (startWindow === owner) startWindow = null; });
   void owner.loadURL(startURL).catch((error) => console.error('ImageFlow could not open its start window', error));
+}
+function showTemplates() {
+  if (quitting) return;
+  if (templatesWindow && !templatesWindow.isDestroyed()) { focus(templatesWindow); return; }
+  const owner = new BrowserWindow({ title: 'Manage Templates', width: 760, height: 560, minWidth: 580, minHeight: 400,
+    show: false, webPreferences: windowOptions() });
+  templatesWindow = owner;
+  secureWindow(owner);
+  owner.webContents.on('will-frame-navigate', (event) => event.preventDefault());
+  owner.once('ready-to-show', () => focus(owner));
+  owner.once('closed', () => { if (templatesWindow === owner) templatesWindow = null; });
+  void owner.loadURL(templatesURL).catch((error) => report(owner, error));
+}
+function showAssets(document: DocumentSession, accept: string[]) {
+  const current = assetsWindows.get(document);
+  if (current && !current.window.isDestroyed()) { current.accept = accept; focus(current.window); return; }
+  const owner = new BrowserWindow({ title: 'Assets — ' + bookName(document.book.folder), width: 760, height: 480,
+    minWidth: 560, minHeight: 340, show: false, parent: document.window, webPreferences: windowOptions() });
+  assetsWindows.set(document, { window: owner, accept });
+  secureWindow(owner);
+  owner.webContents.on('will-frame-navigate', (event) => event.preventDefault());
+  owner.on('focus', () => { lastDocument = document; updateMenus(); });
+  owner.once('ready-to-show', () => focus(owner));
+  owner.once('closed', () => { if (assetsWindows.get(document)?.window === owner) assetsWindows.delete(document); });
+  void owner.loadURL(assetsURL).catch((error) => report(owner, error));
+}
+function publishAssets(document: DocumentSession) {
+  const owner = assetsWindows.get(document)?.window;
+  if (owner && !owner.isDestroyed() && !document.closing) {
+    owner.setTitle('Assets — ' + bookName(document.book.folder));
+    owner.webContents.send(channels.changed, { value: document.summary });
+  }
 }
 function publishRecents() { if (startWindow && !startWindow.isDestroyed()) startWindow.webContents.send(channels.recentsChanged); }
 async function maintainSources() {
@@ -305,6 +351,7 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
         webPreferences: windowOptions() });
       secureWindow(editor);
       document = new DocumentSession(editor, book, cache, sessions, release, (next) => {
+        if (document) queueMicrotask(() => { if (document) publishAssets(document); });
         if (document && !next.readOnly) {
           void recents.refresh(next.folder, next.project.title).then(publishRecents).catch((error) => console.warn('ImageFlow could not update recent books', error));
           markCoverDirty(document);
@@ -322,6 +369,8 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
       editor.on('blur', () => { if (covers.get(current)?.dirty) scheduleCover(current, current.book); });
       editor.on('closed', () => {
         documents.delete(webContentsId);
+        assetsWindows.get(current)?.window.destroy();
+        assetsWindows.delete(current);
         const work = covers.get(current);
         if (work) { clearTimeout(work.timer); work.job?.abort(); }
         const task = (async () => {
@@ -333,7 +382,7 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
             covers.delete(current);
             await SourceStore.release(current.book.folder);
             await maintainSources();
-            if (identities.get(identity) === current) identities.delete(identity);
+            for (const [key, value] of identities) if (value === current) identities.delete(key);
             if (lastDocument === current) lastDocument = [...documents.values()].at(-1);
             await saveDevState();
             if (!documents.size && !quitting) showStart();
@@ -377,38 +426,38 @@ async function openFromSystem(path: string) {
   try { await openDocument(path); }
   catch (error) { report(startWindow ?? lastDocument?.window, error); }
 }
-async function chooseStarter(owner: BrowserWindow): Promise<NewBookChoice | undefined> {
-  const existing = pickers.get(owner.id);
-  if (existing) { focus(existing.window); return undefined; }
-  const picker = new BrowserWindow({ title: 'New Book', width: 600, height: 520, resizable: false, show: false,
-    parent: owner, modal: true, webPreferences: windowOptions() });
+function chooseStarter() {
+  const existing = pickers.get(0);
+  if (existing && !existing.window.isDestroyed()) { focus(existing.window); return; }
+  const size = settings.value.newBookSize ?? { width: 720, height: 560 };
+  const picker = new BrowserWindow({ title: 'New Book', ...size, minWidth: 560, minHeight: 420, show: false, webPreferences: windowOptions() });
   secureWindow(picker);
   picker.webContents.on('will-frame-navigate', (event) => event.preventDefault());
-  const result = new Promise<NewBookChoice | undefined>((resolve) => {
-    let selection: NewBookChoice | undefined;
-    let closed = false;
-    let sheetOpen = false;
-    let finishing = false;
-    const finish = () => {
-      if (!closed || sheetOpen || finishing) return;
-      finishing = true;
-      owner.off('sheet-begin', beginSheet);
-      owner.off('sheet-end', endSheet);
-      owner.off('closed', ownerClosed);
-      // The next native panel must start outside the modal window's close callback.
-      setImmediate(() => { pickers.delete(owner.id); resolve(owner.isDestroyed() ? undefined : selection); });
-    };
-    const beginSheet = () => { sheetOpen = true; };
-    const endSheet = () => { sheetOpen = false; finish(); };
-    const ownerClosed = () => { selection = undefined; closed = true; sheetOpen = false; finish(); };
-    if (process.platform === 'darwin') { owner.on('sheet-begin', beginSheet); owner.on('sheet-end', endSheet); }
-    owner.once('closed', ownerClosed);
-    picker.once('closed', () => { closed = true; finish(); });
-    pickers.set(owner.id, { window: picker, select: (choice) => { selection = choice; picker.close(); } });
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+  picker.on('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (picker.isDestroyed()) return;
+      const [width, height] = picker.getSize();
+      void settings.update({ newBookSize: { width, height } }).catch(() => {});
+    }, 250);
   });
-  picker.once('ready-to-show', () => { if (!hidden) picker.show(); });
-  await picker.loadURL(starterURL);
-  return result;
+  pickers.set(0, { window: picker });
+  picker.once('closed', () => { clearTimeout(resizeTimer); if (pickers.get(0)?.window === picker) pickers.delete(0); });
+  picker.once('ready-to-show', () => focus(picker));
+  void picker.loadURL(starterURL).catch((error) => report(picker, error));
+}
+async function createNewBook(owner: BrowserWindow, selected: NewBookChoice) {
+  const template = await library.resolve(selected.id);
+  const choice = await dialog.showSaveDialog(owner, { title: 'New Book', buttonLabel: 'Create',
+    defaultPath: join(app.getPath('documents'), (template.defaultName ?? 'Untitled ' + template.entry.label) + '.imageflow'),
+    filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
+  if (choice.canceled || !choice.filePath || owner.isDestroyed()) return false;
+  const folder = await createDocument(documentPath(choice.filePath),
+    (stage) => library.withTemplate(selected.id, (current) => createBook(stage, current, selected.sample)));
+  await openDocument(folder);
+  owner.close();
+  return true;
 }
 // Fills a new book's staging folder from a library template: its sample book, or the template's own copy with its
 // opening spreads and no content. Either way `project.json` records the template's hash.
@@ -431,6 +480,63 @@ async function createBook(stage: string, template: ResolvedTemplate, sample: boo
     schemaVersion: 1, title: 'Untitled', template: { id: entry.id, version: entry.version, hash: entry.hash },
     params: {}, texts: {}, files: {}, spreads: openingSpreadStates(info),
   }, null, 2) + '\n');
+}
+
+// Previews are disposable and keyed by content hash. Rendering is serialized so opening a library does not
+// launch one hidden browser per card; an offline or empty template keeps the neutral cover placeholder.
+const templatePreviews = new Map<string, Promise<string | null>>();
+const previewJobs = new Map<string, AbortController>();
+let previewQueue: Promise<unknown> = Promise.resolve();
+function templatePreview(id: string, hash: string, origins: string[]) {
+  const key = JSON.stringify([hash, origins]);
+  const existing = templatePreviews.get(key);
+  if (existing) return existing;
+  const controller = new AbortController();
+  previewJobs.set(key, controller);
+  const task = previewQueue.then(async () => {
+    if (controller.signal.aborted) return null;
+    const stage = await mkdtemp(join(cache, 'template-preview-'));
+    const session = randomUUID();
+    try {
+      await library.withTemplate(id, async (template) => {
+        if (template.entry.hash !== hash) throw new Error('Template changed.');
+        await createBook(stage, template, true);
+        const file = join(stage, 'project.json');
+        const project = JSON.parse(await readFile(file, 'utf8'));
+        if (!project.spreads.length) {
+          const first = Object.keys(template.info.spreads)[0];
+          if (!first) return [];
+          project.spreads = [newSpread(first)];
+          await writeFile(file, JSON.stringify(project));
+        }
+      });
+      const book = await loadProject(stage, cache, true);
+      const first = book.project.spreads[0];
+      if (!first) return null;
+      sessions.set(session, { book, mode: 'export', network: () => origins });
+      const preview = await captureBookPreview(renderOrigin + '/render/' + session,
+        { target: { spread: first.id }, maxEdge: 320, format: 'jpeg' }, controller.signal);
+      return 'data:image/jpeg;base64,' + Buffer.from(preview.bytes).toString('base64');
+    } catch { return null; }
+    finally {
+      sessions.delete(session);
+      await SourceStore.release(stage);
+      await rm(stage, { recursive: true, force: true });
+    }
+  });
+  templatePreviews.set(key, task);
+  const finished = () => { if (previewJobs.get(key) === controller) previewJobs.delete(key); };
+  void task.then(finished, finished);
+  if (templatePreviews.size > 24) templatePreviews.delete(templatePreviews.keys().next().value!);
+  previewQueue = task.catch(() => {});
+  return task;
+}
+function invalidateTemplatePreviews(hash: string) {
+  for (const key of new Set([...templatePreviews.keys(), ...previewJobs.keys()])) {
+    if (JSON.parse(key)[0] !== hash) continue;
+    previewJobs.get(key)?.abort();
+    templatePreviews.delete(key);
+  }
 }
 
 // Loads a template in a hidden renderer, the way a book loads it, to read and check its declarations. The ID is
@@ -481,8 +587,7 @@ async function confirmReplace(owner: BrowserWindow | undefined, plan: ImportPlan
     message: plan.kind === 'older'
       ? 'Replace ' + name + ' ' + plan.current!.version + ' with the older version ' + plan.info.version + '?'
       : 'Replace ' + name + ' ' + plan.info.version + ' with a different template of the same version?',
-    detail: 'Books already made from it keep their own copy.' +
-      (plan.kind === 'changed' ? ' When you change a template, give it a new version in defineTemplate, so the two can be told apart.' : ''),
+    detail: plan.kind === 'changed' ? 'Use a new version number for a changed template.' : undefined,
   };
   const { response } = owner && !owner.isDestroyed() ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
   return response === 0;
@@ -494,7 +599,6 @@ async function confirmReplace(owner: BrowserWindow | undefined, plan: ImportPlan
  */
 async function reviewImport(owner: BrowserWindow | undefined, plan: ImportPlan) {
   const network = plan.info.network ?? [];
-  if (!plan.packages.length && !network.length) return { ok: true, allow: false };
   const name = (plan.info.label ?? plan.info.id) + ' ' + plan.info.version;
   const detail = [
     ...(plan.packages.length ? ['It includes these npm packages, bundled into the template:',
@@ -538,7 +642,7 @@ async function bookNetworkTrust(hash: string, declared?: readonly string[]) {
   return declared ? trustedOrigins(declared, { builtIn: builtIn !== undefined, allowed }) : allowed;
 }
 
-/** Library entries with why their network access needs no question, for Settings and New Book. */
+/** Library entries with why their network access needs no question, for Manage Templates and New Book. */
 async function libraryWithTrust() {
   return Promise.all((await library.list()).map(async (entry) => {
     if (!entry.network?.length) return entry;
@@ -548,30 +652,30 @@ async function libraryWithTrust() {
   }));
 }
 
-/** Imports template folders the user chooses. Templates are code, so the panel says to import only trusted ones. */
-async function importTemplates(owner: BrowserWindow | undefined): Promise<LibraryImportResult[]> {
+/** Imports chosen folders or archives, with the code/trust warning in the import confirmation. */
+async function importTemplates(owner: BrowserWindow | undefined, paths?: string[]): Promise<LibraryImportResult[]> {
   const options = { title: 'Import Templates', buttonLabel: 'Import',
-    message: 'Choose template folders or .imageflow-template files. Templates contain code: only import templates from people you trust.',
+    message: 'Choose template folders or .imageflow-template files.',
     filters: [{ name: 'ImageFlow Template', extensions: [templateArchiveExtension.slice(1)] }],
     properties: ['openDirectory', 'openFile', 'multiSelections'] as ('openDirectory' | 'openFile' | 'multiSelections')[] };
-  const choice = owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+  const choice = paths ? { canceled: false, filePaths: paths } : owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
   if (choice.canceled) return [];
   const results: LibraryImportResult[] = [];
   for (const path of choice.filePaths) results.push(await importTemplate(owner, path));
   return results;
 }
 
-async function reportImports(owner: BrowserWindow | undefined, results: LibraryImportResult[], offerSettings = false) {
+async function reportImports(owner: BrowserWindow | undefined, results: LibraryImportResult[], offerLibrary = false) {
   if (!results.length) return;
   const failed = results.filter(({ status }) => status === 'failed');
   const options = {
     type: failed.length ? 'warning' as const : 'info' as const,
-    buttons: offerSettings && failed.length < results.length ? ['OK', 'Show in Settings'] : ['OK'], defaultId: 0,
+    buttons: offerLibrary && failed.length < results.length ? ['OK', 'Show Templates'] : ['OK'], defaultId: 0,
     message: results.length === 1 ? describeImport(results[0]) : results.length - failed.length + ' of ' + results.length + ' templates imported.',
     detail: [...(results.length > 1 ? results.map(describeImport) : []), ...failed.flatMap(({ details }) => details ?? [])].join('\n'),
   };
   const { response } = owner && !owner.isDestroyed() ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
-  if (response === 1) showSettings('templates');
+  if (response === 1) showTemplates();
 }
 
 /** Asks where to save a template file. The name says which template and version it holds. */
@@ -581,18 +685,6 @@ async function chooseTemplateFile(owner: BrowserWindow, name: string) {
     filters: [{ name: 'ImageFlow Template', extensions: [templateArchiveExtension.slice(1)] }] });
   return choice.canceled || !choice.filePath ? undefined
     : isTemplateArchive(choice.filePath) ? choice.filePath : choice.filePath + templateArchiveExtension;
-}
-
-/** Exports the open book's own template, as it is now, so it can be shared without the book. */
-async function exportBookTemplate(document: DocumentSession) {
-  const { id, version } = document.book.project.template;
-  const file = await chooseTemplateFile(document.window, id + ' ' + version);
-  if (file) await writeTemplateArchive(await templateFolder(document.book.folder), file, join(__dirname, 'authoring-types'));
-}
-
-async function saveTemplate(document: DocumentSession) {
-  const result = await importTemplate(document.window, await templateFolder(document.book.folder));
-  await reportImports(document.window, [result], true);
 }
 
 function publishLibrary() {
@@ -608,22 +700,7 @@ async function openProject(owner: BrowserWindow, action: OpenAction, document?: 
     if ('error' in result) throw new Error(result.error);
     return result.value;
   }
-  if (action === 'sample') { await openDocument(sampleFolder(), true); return null; }
-  if (action === 'new') {
-    const selected = await chooseStarter(owner);
-    if (!selected || owner.isDestroyed()) return null;
-    const template = await library.resolve(selected.id);
-    const choice = await dialog.showSaveDialog(owner, { title: 'New Book', buttonLabel: 'Create Book',
-      defaultPath: join(app.getPath('documents'), (template.defaultName ?? 'Untitled ' + template.entry.label) + '.imageflow'),
-      filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
-    if (choice.canceled || !choice.filePath || owner.isDestroyed()) return null;
-    // The library may have changed while the dialog was open: the book is made from the entry as it is now, copied
-    // while no import can replace it, so its files, version, hash and opening spreads all come from one snapshot.
-    const folder = await createDocument(documentPath(choice.filePath),
-      (stage) => library.withTemplate(selected.id, (current) => createBook(stage, current, selected.sample)));
-    await openDocument(folder);
-    return null;
-  }
+  if (action === 'new') { chooseStarter(); return null; }
   if (action !== 'open') throw new Error('Unknown document action.');
   const choice = await dialog.showOpenDialog(owner, { title: 'Open ImageFlow Book', properties: ['openFile'],
     filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
@@ -631,154 +708,126 @@ async function openProject(owner: BrowserWindow, action: OpenAction, document?: 
   await openDocument(choice.filePaths[0]);
   return null;
 }
-function installMenu(formats: Record<string, string>) {
+async function moveBook(document: DocumentSession, renameOnly: boolean) {
+  const original = document.book.folder;
+  const choice = renameOnly
+    ? await dialog.showSaveDialog(document.window, { title: 'Rename Book', buttonLabel: 'Rename', defaultPath: original,
+      filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] })
+    : await dialog.showOpenDialog(document.window, { title: 'Move Book To', buttonLabel: 'Move', properties: ['openDirectory', 'createDirectory'] });
+  const destination = 'filePath' in choice ? choice.filePath && documentPath(choice.filePath)
+    : choice.filePaths[0] ? join(choice.filePaths[0], basename(original)) : undefined;
+  if (choice.canceled || !destination || destination === original) return;
+  const oldRecent = (await recents.list()).find(({ path }) => path === original);
+  const result = await document.run(async () => {
+    await document.moveTo(destination);
+    const identity = await documentIdentity(document.book.folder);
+    for (const [key, value] of identities) if (value === document) identities.delete(key);
+    identities.set(identity.identity, document);
+    await recents.remember(document.book.folder, bookName(document.book.folder), oldRecent?.id);
+    app.addRecentDocument(document.book.folder); publishRecents(); await saveDevState();
+  });
+  if ('error' in result) throw new Error(result.error);
+}
+async function revertOpened(document: DocumentSession) {
+  const choice = await dialog.showMessageBox(document.window, { type: 'question', message: 'Restore the opening content and settings?',
+    buttons: ['Restore', 'Cancel'], defaultId: 1, cancelId: 1 });
+  if (choice.response !== 0) return;
+  const result = await document.run(async () => document.notify({ value: document.activate(await document.projectSession.revertOpened()) }));
+  if ('error' in result) throw new Error(result.error);
+}
+function installMenu() {
+  const registered = (id: RegisteredCommand, command: Command | undefined = id as Command, type?: 'checkbox' | 'radio'): MenuItemConstructorOptions => {
+    const item = commandState(id, emptyMenuState);
+    return { ...item, type, acceleratorWorksWhenHidden: false, click: (_item, owner) => {
+      const document = focusedDocument(owner);
+      if (!document || !commandState(id, document.menuState ?? emptyMenuState).enabled) return;
+      if ((id === 'undo' || id === 'redo') && owner === assetsWindows.get(document)?.window) {
+        void document.run(async () => document.notify({ value: document.activate(await document.projectSession.undo(id)) }))
+          .then((result) => { if ('error' in result) report(owner as BrowserWindow, new Error(result.error)); });
+      }
+      else if (id === 'reveal-book') shell.showItemInFolder(document.book.folder);
+      else if (id === 'rename-book' || id === 'move-book') void moveBook(document, id === 'rename-book').catch((error) => report(document.window, error));
+      else if (id === 'revert-opened') void revertOpened(document).catch((error) => report(document.window, error));
+      else if (command) document.window.webContents.send(channels.command, command);
+    } };
+  };
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu', submenu: [
       { role: 'about' }, { type: 'separator' },
       { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
-      { label: 'Agent Connections…', click: () => showSettings('agents') },
-      { label: 'Show Start Window', click: () => showStart() },
       { type: 'separator' }, { role: 'services' }, { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
     ] },
     { label: 'File', submenu: [
-      menuCommand('New Book…', 'CmdOrCtrl+N', 'new'),
-      menuCommand('Open…', 'CmdOrCtrl+O', 'open'),
-      menuCommand('Explore a Sample', undefined, 'sample'),
-      { type: 'separator' }, { role: 'close' },
-      menuCommand('Save a Copy…', 'CmdOrCtrl+Shift+S', 'save-copy'),
+      { label: 'New Book…', accelerator: 'CmdOrCtrl+N', click: () => chooseStarter() },
+      { label: 'Open…', accelerator: 'CmdOrCtrl+O', click: (_item, owner) => {
+        const window = owner ? BrowserWindow.fromId(owner.id) : startWindow;
+        if (window) void openProject(window, 'open').catch((error) => report(window, error)); else showStart();
+      } },
+      { role: 'recentDocuments', submenu: [{ role: 'clearRecentDocuments' }] },
+      { type: 'separator' }, { role: 'close' }, registered('save-copy'), registered('rename-book'), registered('move-book'),
+      { label: 'Revert To', submenu: [registered('revert-opened'), registered('reload')] },
       { type: 'separator' },
-      menuCommand('Export Proof PDF…', 'CmdOrCtrl+Shift+E', 'export'),
-      menuCommand('Export Print PDF…', undefined, 'print'),
-      { type: 'separator' },
-      { id: 'reveal-book', label: 'Reveal in Finder', click: (_item, owner) => { const document = focusedDocument(owner); if (document) shell.showItemInFolder(document.book.folder); } },
+      { label: 'Import', submenu: [registered('import-photos'), registered('import-folder'), registered('import-texts')] },
+      registered('export'), registered('print'), { type: 'separator' }, registered('reveal-book'),
     ] },
     { label: 'Edit', submenu: [
-      menuCommand('Undo Book Edit', 'CmdOrCtrl+Z', 'undo'),
-      menuCommand('Redo Book Edit', 'CmdOrCtrl+Shift+Z', 'redo'),
-      { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+      registered('undo'), registered('redo'),
+      { role: 'undo', id: 'native-undo', visible: false, acceleratorWorksWhenHidden: false },
+      { role: 'redo', id: 'native-redo', visible: false, acceleratorWorksWhenHidden: false },
+      { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'delete' }, { role: 'selectAll' },
     ] },
-    { label: 'Book', submenu: [
-      menuCommand('Import Photos…', 'CmdOrCtrl+I', 'import-photos'),
-      menuCommand('Import Photo Folder…', 'CmdOrCtrl+Shift+I', 'import-folder'),
-      menuCommand('Import Markdown…', undefined, 'import-texts'),
-      menuCommand('Manage Sources…', undefined, 'manage-sources'),
-      { type: 'separator' },
-      menuCommand('Add Spread', 'CmdOrCtrl+Shift+N', 'add-spread'),
-      menuCommand('Duplicate Spread', 'CmdOrCtrl+D', 'duplicate-spread'),
-      menuCommand('Move Spread Up', 'Alt+CmdOrCtrl+Up', 'move-spread-up'),
-      menuCommand('Move Spread Down', 'Alt+CmdOrCtrl+Down', 'move-spread-down'),
-      menuCommand('Delete Spread', 'CmdOrCtrl+Backspace', 'delete-spread'),
-      { type: 'separator' },
-      { id: 'book-format', label: 'Format', submenu: Object.entries(formats).map(([id, label]) => ({
-        ...menuCommand(label, undefined, `book-format:${id}`), type: 'radio' as const,
-      })) },
-      menuCommand('Book Settings…', undefined, 'book-settings'),
-      menuCommand('Show Book Check', undefined, 'book-check'),
-      { type: 'separator' },
-      menuCommand('Reload Book', 'CmdOrCtrl+R', 'reload'),
-    ] },
-    { label: 'Template', submenu: [
-      { label: 'Import Templates…', click: (_item, owner) => {
-        const window = owner ? BrowserWindow.fromId(owner.id) ?? undefined : undefined;
-        void importTemplates(window).then((results) => reportImports(window, results, true)).catch((error) => report(window ?? lastDocument?.window, error));
-      } },
-      { id: 'save-template', label: 'Save Template to Library', click: (_item, owner) => {
-        const document = focusedDocument(owner);
-        if (document) void saveTemplate(document).catch((error) => report(document.window, error));
-      } },
-      { id: 'export-template', label: 'Export Template…', click: (_item, owner) => {
-        const document = focusedDocument(owner);
-        if (document) void exportBookTemplate(document).catch((error) => report(document.window, error));
-      } },
-      { label: 'Manage Templates…', click: () => showSettings('templates') },
-      { type: 'separator' },
-      { id: 'open-template', label: 'Open Template Folder', click: (_item, owner) => {
-        const document = focusedDocument(owner);
-        if (document) void document.run(() => openDocumentLocation(document, 'template')).then((result) => { if ('error' in result) report(document.window, result.error); });
-      } },
-      { id: 'rebuild-dependencies', label: 'Rebuild Dependencies', click: (_item, owner) => {
-        const document = focusedDocument(owner);
-        if (document) void document.run(() => document.rebuildDependencies()).then((result) => {
-          if ('error' in result) report(document.window, result.error);
-        });
-      } },
-    ] },
+    { label: 'Spread', submenu: [registered('add-spread'), registered('duplicate-spread'), registered('delete-spread'),
+      { type: 'separator' }, registered('move-spread-up'), registered('move-spread-down')] },
+    { label: 'Book', submenu: [registered('manage-sources'), registered('book-check')] },
+    { label: 'Templates', submenu: [{ label: 'Manage Templates…', click: () => showTemplates() }] },
     { label: 'View', submenu: [
-      menuCommand('Hide Sidebar', 'Alt+CmdOrCtrl+1', 'toggle-project', 'sidebar'),
-      menuCommand('Hide Inspector', 'Alt+CmdOrCtrl+2', 'toggle-inspector', 'inspector'),
-      menuCommand('Hide Sources', 'Alt+CmdOrCtrl+3', 'toggle-sources', 'sources'),
-      { type: 'separator' },
-      { ...menuCommand('Vertical', undefined, 'layout-vertical'), type: 'radio' },
-      { ...menuCommand('Grid', undefined, 'layout-grid'), type: 'radio' },
-      { label: 'Grid Columns', id: 'grid-columns', submenu: gridColumns.map((columns) =>
-        ({ ...menuCommand(columns === 1 ? '1 Column' : columns + ' Columns', undefined, `grid-columns-${columns}`), type: 'radio' as const })) },
-      { type: 'separator' },
-      { ...menuCommand('Show Guides', undefined, 'toggle-guides', 'guides'), type: 'checkbox' },
+      registered('sidebar', 'toggle-project'), registered('inspector', 'toggle-inspector'), registered('sources', 'toggle-sources'),
+      { type: 'separator' }, registered('layout-vertical', 'layout-vertical', 'radio'), registered('layout-grid', 'layout-grid', 'radio'),
+      { label: 'Columns', id: 'grid-columns', submenu: gridColumns.map((columns) => ({ id: 'grid-columns-' + columns,
+        label: columns === 1 ? '1 Column' : columns + ' Columns', type: 'radio' as const,
+        click: (_item: Electron.MenuItem, owner?: BaseWindow) => {
+          const document = focusedDocument(owner); if (document?.layout.mode === 'grid') document.window.webContents.send(channels.command, `grid-columns-${columns}`);
+        } })) },
+      registered('guides', 'toggle-guides', 'checkbox'), { type: 'separator' },
+      registered('zoom-in'), registered('zoom-out'), registered('zoom-actual'), registered('zoom-fit'), { type: 'separator' }, { role: 'togglefullscreen' },
     ] },
-    { role: 'windowMenu' },
+    { role: 'windowMenu', submenu: [{ label: 'Welcome to ImageFlow', accelerator: 'CmdOrCtrl+Shift+1', click: () => showStart() },
+      { type: 'separator' }, { role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
+    { role: 'help', submenu: [
+      { label: 'ImageFlow Help', click: () => void shell.openExternal('https://github.com/wirhabenzeit/imageflow#readme') },
+      { label: 'Connect an Agent…', click: () => showSettings('agents') },
+      { label: 'Template Authoring Guide', click: () => void shell.openExternal('https://github.com/wirhabenzeit/imageflow/blob/main/docs/template-api.md') },
+    ] },
   ]));
-  formatMenuKey = JSON.stringify(Object.entries(formats));
 }
-let formatMenuKey = '';
 function updateMenus() {
   const document = focusedDocument();
-  const state = document?.menuState;
-  // Native submenu membership is fixed after installation; rebuild only when the available formats change.
-  if (Menu.getApplicationMenu()?.getMenuItemById('book-format') &&
-      JSON.stringify(Object.entries(state?.formats ?? {})) !== formatMenuKey) installMenu(state?.formats ?? {});
+  const owner = BrowserWindow.getFocusedWindow() ?? document?.window;
+  const inBook = !!document && owner === document.window;
+  const state: BookMenuState = { ...emptyMenuState, ...document?.menuState, document: !!document && !document.closing,
+    sidebar: document?.sidebar, inspector: document?.inspector, sources: document?.sources, guides: document?.guides, layout: document?.layout };
+  if (!inBook) { state.editing = true; state.canExport = false; state.canPrint = false; }
   const menu = Menu.getApplicationMenu();
-  for (const id of ['reload', 'save-copy', 'manage-sources', 'import-photos', 'import-folder', 'import-texts', 'export', 'print', 'undo', 'redo', 'sidebar', 'inspector', 'sources', 'guides',
-    'layout-vertical', 'layout-grid', 'grid-columns', ...gridColumns.map((columns) => 'grid-columns-' + columns), 'reveal-book', 'open-template', 'save-template', 'export-template',
-    'book-settings', 'book-check', 'book-format', ...spreadCommands]) {
+  for (const id of Object.keys(commandRegistry) as RegisteredCommand[]) {
     const item = menu?.getMenuItemById(id);
-    if (item) item.enabled = !!document && !document.closing;
+    if (!item) continue;
+    const next = commandState(id, state);
+    item.label = next.label; item.enabled = next.enabled;
+    // Electron selects a radio item when its setter is used, even when assigned false.
+    if (next.checked !== undefined && (item.type !== 'radio' || next.checked)) item.checked = next.checked;
   }
-  const available = !!document && !document.closing;
-  for (const id of spreadCommands) {
-    const item = menu?.getMenuItemById(id);
-    if (item) item.enabled = available && !!state?.enabled[id] && !state.editing && !state.busy;
+  const inAssets = !!document && owner === assetsWindows.get(document)?.window;
+  const native = (!inBook && !inAssets) || (inBook && state.textEditing);
+  for (const direction of ['undo', 'redo']) {
+    const own = menu?.getMenuItemById(direction), text = menu?.getMenuItemById('native-' + direction);
+    if (own) own.visible = !native;
+    if (text) text.visible = native;
   }
-  for (const id of ['import-photos', 'import-folder', 'import-texts', 'manage-sources']) {
-    const item = menu?.getMenuItemById(id);
-    if (item) item.enabled = available && !!state?.writable && !state.busy;
+  for (const columns of gridColumns) {
+    const item = menu?.getMenuItemById('grid-columns-' + columns);
+    if (item) { item.enabled = state.document && state.layout?.mode === 'grid'; if (state.layout?.columns === columns) item.checked = true; }
   }
-  for (const id of ['reload', 'open-template']) {
-    const item = menu?.getMenuItemById(id);
-    if (item) item.enabled = available && !state?.busy;
-  }
-  const formats = menu?.getMenuItemById('book-format');
-  if (formats) {
-    const entries = Object.entries(state?.formats ?? {});
-    formats.enabled = available && !!state?.writable && !state.busy && entries.length > 1;
-    for (const item of formats.submenu?.items ?? []) {
-      if (item.id === `book-format:${state?.format}`) item.checked = true;
-    }
-  }
-  const guides = menu?.getMenuItemById('guides');
-  if (guides) guides.checked = document?.guides ?? false;
-  const sidebar = menu?.getMenuItemById('sidebar');
-  const inspector = menu?.getMenuItemById('inspector');
-  if (sidebar) sidebar.label = document?.sidebar ? 'Hide Sidebar' : 'Show Sidebar';
-  if (inspector) inspector.label = document?.inspector ? 'Hide Inspector' : 'Show Inspector';
-  const sources = menu?.getMenuItemById('sources');
-  if (sources) sources.label = document?.sources ? 'Hide Sources' : 'Show Sources';
-  // Radio items check themselves when clicked; the window's own layout decides which stays checked. Checking one
-  // item of a radio group unchecks the others.
-  const layout = document?.layout ?? { mode: 'vertical', columns: 2 };
-  const check = (id: string) => { const item = menu?.getMenuItemById(id); if (item) item.checked = true; };
-  check(layout.mode === 'grid' ? 'layout-grid' : 'layout-vertical');
-  check('grid-columns-' + layout.columns);
-}
-function menuCommand(label: string, accelerator: string | undefined, command: Command, id: string = command): MenuItemConstructorOptions {
-  return { label, id, accelerator, click: (_item, owner) => {
-    const document = focusedDocument(owner ?? undefined);
-    let browser = owner ? BrowserWindow.fromId(owner.id) : undefined;
-    if (command === 'new' || command === 'open' || command === 'sample') {
-      if (!browser) { showStart(); browser = startWindow ?? undefined; }
-      if (browser) void openProject(browser, command, document).catch((error) => report(browser, error));
-    } else document?.window.webContents.send(channels.command, command);
-  } };
 }
 const mcpDescriptorPath = () => join(app.getPath('userData'), 'mcp-connection.json');
 
@@ -827,7 +876,7 @@ async function installMcp(target: McpClientTarget) {
 }
 
 
-function appWindows() { return [...documents.values()].map((document) => document.window).concat([startWindow, settingsWindow].filter((window): window is BrowserWindow => !!window)); }
+function appWindows() { return [...documents.values()].map((document) => document.window).concat([startWindow, settingsWindow, templatesWindow, ...[...assetsWindows.values()].map(({ window }) => window)].filter((window): window is BrowserWindow => !!window)); }
 function publishMcpSettings() {
   const value = mcpSettings();
   for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.mcpChanged, value);
@@ -942,6 +991,8 @@ void app.whenReady().then(async () => {
       await Promise.allSettled([...closing]);
       await Promise.all([settings.settled(), recents.settled()]);
       await maintainSources();
+      for (const job of previewJobs.values()) job.abort();
+      await previewQueue;
       await rm(cache, { recursive: true, force: true });
       await pruneRenditions(renditions).catch((error) => console.warn('ImageFlow could not prune image previews', error));
     })().catch((error) => console.error('ImageFlow could not finish cleanup', error)).finally(() => { quitReady = true; app.quit(); });
@@ -950,8 +1001,53 @@ void app.whenReady().then(async () => {
     try { return await serve(request); }
     catch (error) { console.error('ImageFlow could not serve a document resource', error); return new Response(null, { status: 404 }); }
   });
-  ipcMain.handle(channels.current, (event) => {
+  ipcMain.handle(channels.popupMenu, async (event, items: unknown, point: unknown) => {
+    const owner = appOwner(event) ?? pickerOwner(event) ?? assetsWindows.get(assetsOwner(event)!)?.window;
+    if (!owner || !Array.isArray(items) || items.length > 80) return null;
+    let selected: string | null = null;
+    const entries = items.flatMap<MenuItemConstructorOptions>((item) => {
+      if (item?.type === 'separator') return [{ type: 'separator' as const }];
+      if (typeof item?.label !== 'string' || typeof item.id !== 'string') return [];
+      return [{ label: item.label.slice(0, 160), enabled: item.enabled !== false,
+        ...(typeof item.toolTip === 'string' ? { toolTip: item.toolTip.slice(0, 300) } : {}),
+        ...(typeof item.checked === 'boolean' ? { type: 'checkbox' as const, checked: item.checked } : {}), click: () => { selected = item.id; } }];
+    });
+    const at = point as { x?: unknown; y?: unknown };
+    const position = Number.isInteger(at?.x) && Number.isInteger(at?.y) ? { x: Number(at.x), y: Number(at.y) } : {};
+    await new Promise<void>((resolve) => Menu.buildFromTemplate(entries).popup({ window: owner, ...position, callback: resolve }));
+    return selected;
+  });
+  ipcMain.handle(channels.documentProxy, async (event, action: unknown) => {
     const document = editorOwner(event);
+    if (!document || document.closing) return;
+    const folder = document.book.folder;
+    if (action === 'drag') { document.window.webContents.startDrag({ file: folder, icon: await app.getFileIcon(folder) }); return; }
+    if (action !== 'path') return;
+    const paths = [folder];
+    while (dirname(paths.at(-1)!) !== paths.at(-1)) paths.push(dirname(paths.at(-1)!));
+    const entries = await Promise.all(paths.map(async (path) => ({ label: basename(path) || parse(path).root,
+      icon: await app.getFileIcon(path).catch(() => undefined), click: () => shell.showItemInFolder(path) })));
+    Menu.buildFromTemplate(entries).popup({ window: document.window });
+  });
+  ipcMain.handle(channels.dragSources, async (event, keys: unknown) => {
+    const document = assetsOwner(event);
+    if (!document || !Array.isArray(keys) || !keys.every((key) => typeof key === 'string')) return;
+    const entries = sourceEntries(document.book).filter(({ key }) => keys.includes(key));
+    const files = await Promise.all(entries.map((entry) => originalPath(document.book.folder, entry)));
+    if (files.length) assetsWindows.get(document)?.window.webContents.startDrag({ file: files[0], files, icon: await app.getFileIcon(files[0]) });
+  });
+  ipcMain.handle(channels.showAssets, (event, accept: unknown) => {
+    const document = editorOwner(event);
+    if (!document || document.closing || !Array.isArray(accept) || !accept.every((ext) => typeof ext === 'string' && /^\.[a-z0-9]{1,10}$/.test(ext)))
+      return { error: 'Request is only available to an open book.' };
+    showAssets(document, accept);
+    return { value: undefined };
+  });
+  ipcMain.handle(channels.showTemplates, (event) => {
+    if (appOwner(event) || pickerOwner(event)) showTemplates();
+  });
+  ipcMain.handle(channels.current, (event) => {
+    const document = editorOwner(event) ?? assetsOwner(event);
     return document && !document.closing ? { value: document.summary } : { error: 'This window has no open book.' };
   });
   ipcMain.handle(channels.open, async (event, action: OpenAction) => {
@@ -960,10 +1056,13 @@ void app.whenReady().then(async () => {
     try { return { value: await openProject(owner, action, editorOwner(event)) }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
-  ipcMain.handle(channels.chooseStarter, (event, choice?: NewBookChoice) => {
-    const picker = [...pickers.values()].find((entry) => trusted(event, entry.window, starterURL));
-    if (!picker || (choice !== undefined && (typeof choice?.id !== 'string' || typeof choice.sample !== 'boolean'))) return;
-    picker.select(choice && { id: choice.id, sample: choice.sample });
+  ipcMain.handle(channels.chooseStarter, async (event, choice?: NewBookChoice) => {
+    const owner = pickerOwner(event);
+    if (!owner) return { error: 'Request is only available to New Book.' };
+    if (!choice) { owner.close(); return { value: false }; }
+    if (typeof choice.id !== 'string' || typeof choice.sample !== 'boolean') return { error: 'Choose a template.' };
+    try { return { value: await createNewBook(owner, choice) }; }
+    catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.recents, async (event) => startOwner(event) ? { value: await recents.list() } : { error: 'Request is only available to the start window.' });
   ipcMain.handle(channels.recentAction, async (event, id: string, action: 'open' | 'locate' | 'remove') => {
@@ -992,17 +1091,48 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.documentAction, (event, action: 'reveal' | 'template' | 'text', id?: string) => fromEditor(event, async (document) => {
     await openDocumentLocation(document, action, id);
   }));
-  ipcMain.handle(channels.sourceAction, (event, request: SourceAction) => fromEditor(event, async (document) => {
-    const source = sourceEntries(document.book).find((entry) => entry.key === request.key);
+  ipcMain.handle(channels.sourceMenu, async (event, input: unknown) => {
+    const document = assetsOwner(event);
+    const keys = typeof input === 'string' ? [input] : input;
+    if (!document || document.closing || !Array.isArray(keys) || !keys.every((key) => typeof key === 'string')) return { error: 'Choose assets in an open book.' };
+    const chosen = sourceEntries(document.book).filter(({ key }) => keys.includes(key));
+    const owner = assetsWindows.get(document)?.window;
+    if (!chosen.length || !owner || document.book.readOnly) return { value: null };
+    const missing = chosen.some(({ key }) => document.book.sources?.[key]?.state !== 'available');
+    const linked = chosen.filter(({ linked }) => linked).length;
+    let action: 'reveal' | 'locate' | 'locate-folder' | 'copy' | 'remove' | null = null;
+    const menu = Menu.buildFromTemplate([
+      { label: 'Show in Finder', enabled: !missing, click: () => { action = 'reveal'; } },
+      ...(missing ? [{ label: chosen.length === 1 ? 'Locate…' : 'Locate Folder…', click: () => { action = chosen.length === 1 ? 'locate' : 'locate-folder'; } }] : []),
+      ...(linked && !missing ? [{ label: linked === 1 ? 'Copy into Book' : 'Copy ' + linked + ' into Book', click: () => { action = 'copy'; } }] : []),
+      { type: 'separator' }, { label: 'Remove from Book', enabled: !chosen.some((source) => source.kind === 'file' && fileIsAssigned(document.book, source.id)), click: () => { action = 'remove'; } },
+    ]);
+    await new Promise<void>((resolve) => menu.popup({ window: owner, callback: resolve }));
+    return { value: action };
+  });
+  ipcMain.handle(channels.sourceAction, (event, request: SourceAction) => fromBook(event, async (document) => {
+    const owner = assetsOwner(event) ? assetsWindows.get(document)?.window ?? document.window : document.window;
+    if (assetsOwner(event)) request = { ...request, accept: assetsWindows.get(document)?.accept };
+    const activate = (summary: ProjectSummary) => { if (assetsOwner(event)) document.notify({ value: summary }); return summary; };
+    const keys = request.keys ?? (request.key ? [request.key] : undefined);
+    if (keys && (!Array.isArray(keys) || keys.length > 1000 || !keys.every((key) => typeof key === 'string'))) throw new Error('Invalid asset selection.');
+    const chosen = sourceEntries(document.book).filter(({ key }) => keys?.includes(key));
+    const source = chosen[0];
     if (document.book.readOnly) throw new Error('Create an editable book first.');
     let next = document.book;
     let message: string | undefined;
-    if (request.action === 'retry') return { summary: await document.reload() };
-    if (request.action === 'collect') next = await collectSources(document.book);
+    if (request.action === 'retry') return { summary: activate(await document.reload()) };
+    if (request.action === 'collect') next = await collectSources(document.book, keys);
+    else if (request.action === 'remove') {
+      if (!keys?.length) throw new Error('Select assets first.');
+      next = await removeSources(document.book, keys);
+      document.projectSession.record(next, 'Remove assets', true, false);
+      return { summary: activate(document.activate(next)) };
+    }
     else if (request.action === 'locate-folder') {
-      const choice = await dialog.showOpenDialog(document.window, { title: 'Locate Missing Sources in Folder', properties: ['openDirectory'] });
+      const choice = await dialog.showOpenDialog(owner, { title: 'Locate Missing Sources in Folder', properties: ['openDirectory'] });
       if (!choice.canceled && choice.filePaths[0]) {
-        const result = await relinkFolder(document.book, choice.filePaths[0]);
+        const result = await relinkFolder(document.book, choice.filePaths[0], keys);
         next = result.book;
         const names = new Map(sourceEntries(document.book).map((entry) => [entry.key as string, basename(entry.path)]));
         message = result.repaired + ' sources located.' + (result.ambiguous.length ? ' Multiple matches need Locate… for: ' + result.ambiguous.map((key) => names.get(key) ?? 'a source').join(', ') : '');
@@ -1010,24 +1140,32 @@ void app.whenReady().then(async () => {
     } else {
       if (!source) throw new Error('Choose a registered source.');
       if (request.action === 'reveal') {
-        shell.showItemInFolder(await originalPath(document.book.folder, source));
+        for (const entry of chosen) shell.showItemInFolder(await originalPath(document.book.folder, entry));
         return { summary: document.summary };
       }
-      if (request.action === 'copy') next = await relocateSource(document.book, source.key, undefined, true);
+      if (request.action === 'copy') next = await collectSources(document.book, chosen.filter(({ linked }) => linked).map(({ key }) => key));
+      else if (request.action === 'preview') { owner.previewFile(await originalPath(document.book.folder, source)); return { summary: document.summary }; }
       else if (request.action === 'locate' || request.action === 'replace') {
         if (source.kind === 'file' && !request.accept?.length) throw new Error('This template does not declare a compatible file parameter.');
-        const choice = await dialog.showOpenDialog(document.window, { title: request.action === 'replace' ? 'Replace Original' : 'Locate Original', properties: ['openFile'],
+        const choice = await dialog.showOpenDialog(owner, { title: request.action === 'replace' ? 'Replace Original' : 'Locate Original', properties: ['openFile'],
           filters: [{ name: source.kind === 'photo' ? 'Photos' : 'Source', extensions: source.kind === 'photo' ? ['jpg', 'jpeg', 'png', 'webp'] : source.kind === 'file' ? request.accept!.map((extension) => extension.slice(1)) : ['md'] }] });
         if (!choice.canceled && choice.filePaths[0]) next = await relocateSource(document.book, source.key, choice.filePaths[0], false, request.accept);
       } else throw new Error('Unknown source action.');
     }
     document.projectSession.record(next, 'Source location changed', false);
-    return { summary: document.activate(next), message };
+    return { summary: activate(document.activate(next)), message };
   }));
-  ipcMain.handle(channels.saveCopy, (event, includeAssets: boolean) => fromEditor(event, async (document) => {
-    if (typeof includeAssets !== 'boolean') throw new Error('Choose whether to include all assets.');
-    const choice = await dialog.showSaveDialog(document.window, { title: 'Save a Copy', buttonLabel: 'Save Copy',
-      defaultPath: join(app.getPath('documents'), document.book.project.title + ' Copy.imageflow'), filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
+  ipcMain.handle(channels.saveCopy, (event, includeAssets?: boolean) => fromEditor(event, async (document) => {
+    if (includeAssets === undefined) {
+      const answer = await dialog.showMessageBox(document.window, { type: 'question', message: 'Duplicate this book?',
+        buttons: ['Duplicate', 'Cancel'], defaultId: 0, cancelId: 1, checkboxLabel: 'Include all files', checkboxChecked: true,
+        detail: sourceEntries(document.book).some(({ linked }) => linked) ? 'Unchecked: linked files keep their full paths.' : undefined });
+      if (answer.response !== 0) return null;
+      includeAssets = answer.checkboxChecked;
+    }
+    if (typeof includeAssets !== 'boolean') throw new Error('Choose whether to include all files.');
+    const choice = await dialog.showSaveDialog(document.window, { title: 'Duplicate Book', buttonLabel: 'Duplicate',
+      defaultPath: join(app.getPath('documents'), bookName(document.book.folder) + ' Copy.imageflow'), filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
     if (choice.canceled || !choice.filePath) return null;
     const folder = await saveDocumentCopy(document.book, choice.filePath, includeAssets);
     await openDocument(folder);
@@ -1053,22 +1191,31 @@ void app.whenReady().then(async () => {
     return document.activate(await document.projectSession.undo(direction));
   }));
   ipcMain.handle(channels.showSettings, (event, pane: SettingsPane) => {
-    if ((appOwner(event) || pickerOwner(event)) && (pane === 'general' || pane === 'agents' || pane === 'templates')) showSettings(pane);
+    if ((appOwner(event) || pickerOwner(event)) && (pane === 'general' || pane === 'agents')) showSettings(pane);
+  });
+  ipcMain.handle(channels.templatePreview, async (event, id: unknown, hash: unknown) => {
+    if ((!templatesOwner(event) && !pickerOwner(event)) || typeof id !== 'string' || typeof hash !== 'string')
+      return { error: 'Request is only available to Templates and New Book.' };
+    try {
+      const entry = (await library.list()).find((entry) => entry.id === id && entry.hash === hash);
+      return { value: entry && !entry.unavailable ? await templatePreview(id, hash, await bookNetworkTrust(hash, entry.network)) : null };
+    } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.library, async (event) => {
     if (!appOwner(event) && !pickerOwner(event)) return { error: 'Request is only available to an app window.' };
     try { return { value: await libraryWithTrust() }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
-  ipcMain.handle(channels.libraryImport, async (event) => {
-    const owner = settingsOwner(event) ?? pickerOwner(event);
-    if (!owner) return { error: 'Request is only available to Settings and New Book.' };
-    try { return { value: await importTemplates(owner) }; }
+  ipcMain.handle(channels.libraryImport, async (event, paths?: unknown) => {
+    const owner = templatesOwner(event) ?? pickerOwner(event);
+    if (!owner) return { error: 'Request is only available to Templates and New Book.' };
+    if (paths !== undefined && (!Array.isArray(paths) || paths.length > 50 || !paths.every((path) => typeof path === 'string' && isAbsolute(path)))) return { error: 'Choose template folders or archives.' };
+    try { return { value: await importTemplates(owner, paths as string[] | undefined) }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.libraryExport, async (event, id: unknown) => {
-    const owner = settingsOwner(event);
-    if (!owner || typeof id !== 'string') return { error: 'Request is only available to Settings.' };
+    const owner = templatesOwner(event);
+    if (!owner || typeof id !== 'string') return { error: 'Request is only available to Templates.' };
     try {
       const entry = (await library.list()).find((item) => item.id === id);
       if (!entry) throw new Error('This template is no longer in the library.');
@@ -1079,12 +1226,13 @@ void app.whenReady().then(async () => {
     } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.libraryTrust, async (event, id: unknown, allow: unknown) => {
-    const owner = settingsOwner(event);
-    if (!owner || typeof id !== 'string' || typeof allow !== 'boolean') return { error: 'Request is only available to Settings.' };
+    const owner = templatesOwner(event);
+    if (!owner || typeof id !== 'string' || typeof allow !== 'boolean') return { error: 'Request is only available to Templates.' };
     try {
       const entry = (await library.list()).find((item) => item.id === id && item.source === 'imported');
       if (!entry?.network?.length) throw new Error('This template does not ask for network access.');
       if (allow) await trust.allow(entry.hash, entry.network, entry); else await trust.revoke(entry.hash);
+      invalidateTemplatePreviews(entry.hash);
       publishLibrary();
       // Open books from this template follow at once: their frames are rendered again under the new policy (ADR 0006).
       for (const document of documents.values()) void document.updateNetwork().catch((error) => console.warn('ImageFlow could not update network access', error));
@@ -1092,16 +1240,16 @@ void app.whenReady().then(async () => {
     } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.libraryRemove, async (event, id: unknown) => {
-    const owner = settingsOwner(event);
-    if (!owner || typeof id !== 'string') return { error: 'Request is only available to Settings.' };
+    const owner = templatesOwner(event);
+    if (!owner || typeof id !== 'string') return { error: 'Request is only available to Templates.' };
     try {
       const entry = (await library.list()).find((item) => item.id === id && item.source === 'imported');
       if (!entry) throw new Error('This template is no longer in the library.');
       const { response } = await dialog.showMessageBox(owner, { type: 'question', buttons: ['Move to Trash', 'Cancel'], defaultId: 1, cancelId: 1,
         message: 'Move ' + entry.label + ' to the Trash?',
-        detail: 'Books made from it are not affected: each keeps its own copy of the template.' +
-          (entry.replacesBuiltIn ? ' The built-in template with the same ID is listed again.' : '') });
+        detail: entry.replacesBuiltIn ? 'The built-in template will be restored.' : undefined });
       if (response !== 0) return { value: false };
+      invalidateTemplatePreviews(entry.hash);
       await library.remove(id);
       return { value: true };
     } catch (error) { return { error: errorMessage(error) }; }
@@ -1139,7 +1287,22 @@ void app.whenReady().then(async () => {
     catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.on(channels.agentLeaseReply, (event, id: string, allowed: boolean) => { editorOwner(event)?.replyLease(id, allowed); });
-  ipcMain.handle(channels.import, (event, id: string, request: ImportRequest) => fromEditor(event, (document) => document.importFiles(document.window, id, request)));
+  ipcMain.handle(channels.import, (event, id: string, request: ImportRequest) => fromEditor(event, async (document) => {
+    if (request.target && request.paths?.length) {
+      document.currentBook(id);
+      for (const source of sourceEntries(document.book).filter(({ kind }) => kind === request.kind)) {
+        const path = await originalPath(document.book.folder, source).catch(() => undefined);
+        if (!path || path !== request.paths[0]) continue;
+        const files = structuredClone({ project: document.book.project, photoIndex: document.book.photoIndex });
+        const spread = files.project.spreads.find(({ id }) => id === request.target!.spread);
+        if (!spread) throw new Error('The spread changed.');
+        spread.boxes[request.target.box] = { params: spread.boxes[request.target.box]?.params ?? {},
+          ...(request.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
+        return { summary: document.activate(await document.projectSession.save(files, 'Place asset')), imported: [source.id] };
+      }
+    }
+    return document.importFiles(document.window, id, { ...request, mode: request.mode ?? settings.value.importMode });
+  }));
   ipcMain.handle(channels.network, async (event, id: string, origins: unknown) => {
     const document = editorOwner(event);
     if (!document || quitting) return { error: 'Request is only available to an open book.' };
@@ -1153,11 +1316,15 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.bookMenu, (event, state: BookMenuState) => {
     const document = editorOwner(event);
     if (!document || !state || typeof state.enabled !== 'object' || !state.enabled ||
-        typeof state.editing !== 'boolean' || typeof state.writable !== 'boolean' || typeof state.busy !== 'boolean' ||
-        !state.formats || typeof state.formats !== 'object') return;
-    document.menuState = { ...state,
-      enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'],
-      formats: Object.fromEntries(Object.entries(state.formats).filter(([, label]) => typeof label === 'string')) };
+        typeof state.editing !== 'boolean' || typeof state.writable !== 'boolean' || typeof state.busy !== 'boolean') return;
+    document.menuState = { ...emptyMenuState, ...state,
+      enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
+    document.window.setDocumentEdited(state.saving === true);
+    if (typeof state.sidebar === 'boolean') document.sidebar = state.sidebar;
+    if (typeof state.inspector === 'boolean') document.inspector = state.inspector;
+    if (typeof state.sources === 'boolean') document.sources = state.sources;
+    if (typeof state.guides === 'boolean') document.guides = state.guides;
+    if (state.layout && (state.layout.mode === 'grid' || state.layout.mode === 'vertical') && gridColumns.includes(state.layout.columns as 1|2|3|4)) document.layout = state.layout;
     updateMenus();
   });
   ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout }) => {
@@ -1174,7 +1341,7 @@ void app.whenReady().then(async () => {
     updateMenus();
   });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
-  installMenu({});
+  installMenu();
   ready = true;
   const paths = [...new Set([...pendingOpenFiles.splice(0), ...process.argv.filter(isSystemFile)])];
   if (paths.length) for (const path of paths) await openFromSystem(path);

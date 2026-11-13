@@ -3,8 +3,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
-// Rebuilds a template's saved npm bundle (template/vendor/) outside the app, as Template → Rebuild Dependencies
-// does: `node scripts/rebuild-template-dependencies.mjs sample/starter/template`. Run npm install there first.
+// Rebuilds a template's saved npm bundle (template/vendor/) outside the app: `node scripts/rebuild-template-dependencies.mjs sample/starter/template`. Run npm install there first.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const template = resolve(process.argv[2] ?? 'sample/starter/template');
 const out = join(root, '.build', 'rebuild-dependencies.mjs');

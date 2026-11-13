@@ -233,13 +233,10 @@ export function describeLayoutChange(change: LayoutChange) {
     counts.text && counts.text + (counts.text === 1 ? ' text' : ' texts'),
   ].filter(Boolean).join(', ');
   const parts = [
-    amount(change.carried) && amount(change.carried) + ' carried over',
-    amount(change.restored) && amount(change.restored) + ' shown again',
-    amount(change.kept) && amount(change.kept) + ' kept outside this layout',
-    ...change.fallbacks.map((label) => label + ' uses the default'),
-    change.reflow && 'text will reflow',
+    amount(change.kept) && amount(change.kept) + ' set aside',
+    ...change.fallbacks.map((label) => label + ' will reset'),
   ].filter(Boolean);
-  return parts.length ? parts.join(' · ') : 'No content to carry over';
+  return parts.join(' · ');
 }
 
 // Switches the spread's layout. Content, crops and parameter values all stay with the spread.

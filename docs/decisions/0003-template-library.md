@@ -5,9 +5,9 @@ Status: accepted with changes, 2026-11-12; see #63. Implemented, including shari
 Changes made while planning #63, which override the text below where they differ:
 
 - **One entry per template ID.** Importing a newer version replaces the entry, and the old one goes to the Trash. An older version, or the same version with other files, asks first. The library is a hidden folder, `Templates/<id>/template/` plus `library.json`, with no *Reveal in Finder*.
-- **No thumbnails.** The picker and the Templates pane show the label, description, version, formats and layouts.
-- **Starting content.** Books may have no spreads. A template may declare `openingSpreads`, and a book made from it starts with them. Only the built-in starter has sample content, offered as *Include sample photos, texts and spreads*.
-- **Commands.** A top-level *Template* menu holds *Import Templates…*, *Save Template to Library*, *Manage Templates…* and *Open Template Folder*. Import accepts several folders at once.
+- **Previews (#97).** New Book and Manage Templates share cached cover previews of the sample or first opening spread. Templates that cannot produce a preview keep a neutral placeholder. A selectable list has a fixed detail pane for packages, formats and network permissions.
+- **Starting content.** Books may have no spreads. A template may declare `openingSpreads`, and a book made from it starts with them. The shipped Photobook and Wall calendar templates offer *Include sample content*.
+- **Commands (#97).** *Templates → Manage Templates…* opens a standalone library window, reached from the Templates menu. New Book shows a Manage Templates link only for a library error. Settings holds global defaults. The editing window has no template-authoring dialog. Format and template-provided controls share one sidebar section, while the book’s file name identifies the document.
 
 ## Context
 

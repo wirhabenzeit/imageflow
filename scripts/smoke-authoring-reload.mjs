@@ -1,4 +1,4 @@
-import { testBook, menuAction } from './ui-actions.mjs';
+import { testBook, menuAction, popupAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -63,7 +63,7 @@ try {
     });
   });
 
-  // Pause the watcher's receipt read. The preceding read is the title save's conflict check.
+  // Pause the watcher's receipt read. The preceding read is the parameter save's conflict check.
   await app.evaluate((_, manifest) => {
     const fs = process.getBuiltinModule('node:fs/promises');
     const read = fs.readFile;
@@ -89,11 +89,10 @@ try {
   let previous = await frameUrl();
   const photoId = JSON.parse(await readFile(manifest, 'utf8')).spreads.find(({ id }) => id === 'arriving').boxes.hero.photo;
   try {
-    await window.getByText('Book settings', { exact: true }).click();
-    await window.getByLabel('Book title').fill('Edited in ImageFlow');
-    await window.getByLabel('Book title').blur();
+    await window.locator('.template-controls > summary').click();
+    await window.getByRole('radio', { name: 'Cool', exact: true }).click();
     await readyAfter(previous);
-    assert.equal(JSON.parse(await readFile(manifest, 'utf8')).title, 'Edited in ImageFlow');
+    assert.equal(JSON.parse(await readFile(manifest, 'utf8')).params.paper, 'cool');
     assert.equal(await button('Undo').isEnabled(), true);
 
     await app.evaluate(() => {
@@ -140,9 +139,8 @@ try {
   assert.ok(Math.abs(await scroll() - position) <= 1);
   assert.equal(await selected(), 'arriving');
   assert.equal(await window.locator('.crop-editor').count(), 0);
-  await window.locator('.export-menu > summary').click();
-  assert.equal(await button('Export print PDF').isDisabled(), true);
-  await window.locator('.export-menu > summary').click();
+  const nativeExport = await popupAction(app, window, window.locator('.export-menu .action-menu-trigger'));
+  assert.equal(nativeExport.find(({ label }) => label === 'Export for Print…').enabled, false);
   assert.deepEqual((await window.evaluate(() => window.reloadEvents)).slice(0, 2), ['building', 'error']);
 
   // A runtime failure leaves the same last-good frame and rejects clicks and drops on its artwork.
@@ -208,7 +206,7 @@ try {
   previous = await frameUrl();
   await replace(template, fixed.replace("label: 'Heading'", "label: 'Title for this spread'"));
   await readyAfter(previous);
-  await popover.getByText(/This field changed while you were editing/).waitFor();
+  assert.match(await popover.getAttribute('title'), /This field changed while you were editing/);
   assert.equal(await draft.inputValue(), 'Uncommitted stale heading');
   assert.equal(await draft.isDisabled(), true);
   await popover.getByRole('button', { name: 'Close', exact: true }).click();
@@ -221,7 +219,8 @@ try {
   await replace(manifest, JSON.stringify(book));
   await menuAction(app, 'Reload');
   await readyAfter(previous);
-  await window.locator('.project-identity').getByText('Loaded manually', { exact: true }).waitFor();
+  assert.equal((await window.evaluate(() => window.imageflow.currentProject())).value.project.title, 'Loaded manually');
+  assert.equal(await window.locator('.project-identity strong').textContent(), 'Book');
   const manuallyLoaded = await frameUrl();
   await window.waitForTimeout(500);
   assert.deepEqual(await window.evaluate(() => window.reloadEvents), []);
@@ -233,7 +232,8 @@ try {
   book.title = 'Edited on disk';
   await replace(manifest, JSON.stringify(book));
   await readyAfter(previous);
-  await window.locator('.project-identity').getByText('Edited on disk', { exact: true }).waitFor();
+  assert.equal((await window.evaluate(() => window.imageflow.currentProject())).value.project.title, 'Edited on disk');
+  assert.equal(await window.locator('.project-identity strong').textContent(), 'Book');
   assert.equal(await button('Undo').isDisabled(), true);
 
   previous = await frameUrl();

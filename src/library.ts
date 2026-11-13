@@ -1,7 +1,7 @@
 // A package in a template's saved dependency bundle (ADR 0006). `license` is the package's declared licence, or ''.
 export type TemplatePackage = { name: string; version: string; license: string };
 
-// A template in the template library, as the New Book picker and the Templates pane in Settings show it.
+// A template in the template library, as the New Book picker and Manage Templates show it.
 export type LibraryEntry = {
   id: string; version: string; label: string; description?: string;
   // Labels of the template's formats and layouts, and how many opening spreads a new book starts with.

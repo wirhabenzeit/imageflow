@@ -24,6 +24,7 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
   import?(data: Extract<FrameMessage, { type: 'editor-import' }>): void;
 }, flushError = 'The editor did not respond, so nothing was saved. Try Done again, or Cancel.') {
   const [height, setHeight] = useState(240);
+  const measured = useRef(false);
   const [ready, setReady] = useState(false);
   const [generation, setGeneration] = useState(0);
   const [error, setError] = useState('');
@@ -67,7 +68,10 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
     } else if (data.type === 'editor-import') {
       handlers.import?.(data);
     } else if (data.type === 'editor-size') {
-      setHeight(Math.max(120, Math.min(data.height, window.innerHeight * 0.7)));
+      if (Number.isFinite(data.height) && data.height > 0 && !measured.current) {
+        measured.current = true;
+        setHeight(Math.max(120, Math.min(data.height, window.innerHeight * 0.7)));
+      }
     } else if (data.type === 'editor-flushed') {
       if (data.request !== flushing) return;
       setFlushing(undefined);

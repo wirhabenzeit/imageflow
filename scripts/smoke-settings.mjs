@@ -97,7 +97,7 @@ async function checkAppearance(page, source) {
 }
 try {
   let page = await launch();
-  assert.deepEqual(await page.evaluate(() => window.imageflow.getSettings()), { value: { appearance: 'system' } });
+  assert.deepEqual(await page.evaluate(() => window.imageflow.getSettings()), { value: { appearance: 'system', importMode: 'copy' } });
   await checkAppearance(page, 'system');
   const accelerator = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.flatMap((item) => item.submenu?.items ?? []).find((item) => item.label === 'Settings…')?.accelerator);
   assert.equal(accelerator, 'CmdOrCtrl+,');
@@ -112,7 +112,7 @@ try {
   await settings.getByRole('tab', { name: 'Agents' }).click();
   await settings.waitForFunction((height) => innerHeight > height, generalHeight);
   await closeWindow(settings);
-  settings = await openSettings('Agent Connections…');
+  settings = await openSettings('Connect an Agent…');
   assert.ok(await settings.evaluate(() => innerHeight) > generalHeight, 'Direct Agents opens at its larger size');
   await closeWindow(settings);
   settings = await openSettings();
@@ -155,7 +155,7 @@ try {
   await settings.getByRole('radio', { name: 'Dark', exact: true }).check();
   await checkAppearance(page, 'dark');
   const file = await app.evaluate(({ app }) => app.getPath('userData'));
-  assert.deepEqual(JSON.parse(await readFile(join(file, 'settings.json'), 'utf8')), { appearance: 'dark' });
+  assert.deepEqual(JSON.parse(await readFile(join(file, 'settings.json'), 'utf8')), { appearance: 'dark', importMode: 'copy' });
   for (const patch of [{ appearance: 'sepia' }, { appearance: null }, { unrelated: true }, null]) {
     const result = await settings.evaluate((patch) => window.imageflow.updateSettings(patch), patch);
     assert.ok(result.error);

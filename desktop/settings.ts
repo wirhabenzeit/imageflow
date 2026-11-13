@@ -5,10 +5,15 @@ import type { AppSettings } from '../src/settings';
 
 function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) ||
-      Object.keys(patch).some((key) => key !== 'appearance')) throw new Error('Invalid app settings.');
+      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'importMode' && key !== 'newBookSize')) throw new Error('Invalid app settings.');
   const appearance = 'appearance' in patch ? patch.appearance : current.appearance;
   if (appearance !== 'light' && appearance !== 'dark' && appearance !== 'system') throw new Error('Invalid appearance setting.');
-  return { ...current, appearance };
+  const importMode = 'importMode' in patch ? patch.importMode : current.importMode;
+  if (importMode !== 'copy' && importMode !== 'link') throw new Error('Invalid import mode setting.');
+  const newBookSize = 'newBookSize' in patch ? patch.newBookSize as { width?: unknown; height?: unknown } : current.newBookSize;
+  if (newBookSize && (!Number.isInteger(newBookSize.width) || !Number.isInteger(newBookSize.height) ||
+      Number(newBookSize.width) < 560 || Number(newBookSize.width) > 4000 || Number(newBookSize.height) < 420 || Number(newBookSize.height) > 3000)) throw new Error('Invalid window size.');
+  return { ...current, appearance, importMode, ...(newBookSize ? { newBookSize: newBookSize as {width:number;height:number} } : {}) };
 }
 
 export class SettingsStore {

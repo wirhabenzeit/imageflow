@@ -1,4 +1,4 @@
-import { exportAction, testBook } from './ui-actions.mjs';
+import { exportAction, testBook, popupAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -133,7 +133,7 @@ try {
   }
 
   // Switching to the facing format keeps the book but reports every page layout, and blocks print export.
-  await w.getByText('Book settings', { exact: true }).click();
+  await w.locator('.template-controls > summary').click();
   const before = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
   await w.getByRole('combobox', { name: 'Format' }).selectOption('book');
   await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, before);
@@ -144,9 +144,8 @@ try {
     'Spread 2 uses a single-page layout, but Book has facing pages. Switch it to a spread layout.',
     'Spread 3 uses a single-page layout, but Book has facing pages. Switch it to a spread layout.',
   ]);
-  await w.locator('.export-menu > summary').click();
-  assert.equal(await w.getByRole('button', { name: 'Export print PDF', exact: true }).isDisabled(), true);
-  await w.locator('.export-menu > summary').click();
+  const nativeExport = await popupAction(app, w, w.locator('.export-menu .action-menu-trigger'));
+  assert.equal(nativeExport.find(({ label }) => label === 'Export for Print…').enabled, false);
   const proof = await exported('Export proof PDF', join(work, 'proof.pdf'), 'Proof PDF saved');
   assert.equal(proof.getPageCount(), 6);
   assert.equal(JSON.parse(await readFile(join(project, 'project.json'), 'utf8')).spreads[1].definition, 'month');

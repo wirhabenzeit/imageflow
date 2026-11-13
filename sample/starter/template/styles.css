@@ -74,7 +74,7 @@
 .route-editor-frame:focus-visible { outline: 2px solid var(--if-editor-focus); outline-offset: 2px; }
 .route-editor-frame svg { display: block; width: 100%; height: 100%; }
 .route-editor-frame polyline { stroke: var(--if-editor-text); stroke-width: 3px; }
-.route-editor-note { margin: 8px 0 0; font-size: 12px; color: var(--if-editor-muted); text-align: center; }
+.route-editor-note { height: 2.8em; overflow: auto; margin: 8px 0 0; font-size: 12px; color: var(--if-editor-muted); text-align: center; }
 .route-map.empty { border: .3mm dashed #fff; background: #0003; color: #fff; font: 500 8pt/1.3 "Field Sans"; text-align: center; padding: 3mm; }
 
 /* The grid family's picker, in ImageFlow's editor frame. */
@@ -103,4 +103,4 @@
 .map-editor-actions .primary { background: var(--if-editor-accent); border-color: var(--if-editor-accent); color: #fff; }
 .map-editor-map { width: 100%; border: 1px solid var(--if-editor-border); border-radius: 6px; overflow: hidden; }
 .map-editor-note { margin: 0; font-size: 12px; color: var(--if-editor-muted); }
-.map-editor-note.error { color: #c0392b; }
+.map-editor-error { height: 2.8em; overflow: auto; margin: 0; font-size: 12px; line-height: 1.4; color: #c0392b; }

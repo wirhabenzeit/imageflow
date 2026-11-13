@@ -37,7 +37,7 @@ export function editorChanges(parameters: Parameters, owned: readonly string[], 
   editor: 'element' | 'document' = 'element'): { allowed: Values; rejected: RejectedChange[] } {
   // What `set()` writes to: an element's parameters, or a document editor's document parameters.
   const kind = scope === 'spread' ? 'layout' : editor;
-  const elsewhere = scope === 'spread' ? ' in the spread scope' : editor === 'document' ? ', so it is edited in Book settings' : ', so it is edited by the generated controls';
+  const elsewhere = scope === 'spread' ? ' in the spread scope' : editor === 'document' ? ', so it is edited in template controls' : ', so it is edited by the generated controls';
   const setter = scope === 'spread' ? 'setSpread' : 'set';
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
     return { allowed: {}, rejected: [{ key: '', message: setter + '() expects an object of parameter values, such as ' + setter + '({ ' + (owned[0] ?? 'parameter') + ': … }).' }] };

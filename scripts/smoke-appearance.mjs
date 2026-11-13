@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { testBook, menuAction, exportAction, agentSettings, closeSettings } from './ui-actions.mjs';
+import { testBook, menuAction, exportAction, agentSettings, closeSettings, popupAction } from './ui-actions.mjs';
 
 // Change app settings only inside this isolated profile, never the user's macOS preference.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -24,7 +24,8 @@ try {
   }, book);
   async function appearance(mode) {
     const result = await w.evaluate((appearance) => window.imageflow.updateSettings({ appearance }), mode);
-    assert.deepEqual(result, { value: { appearance: mode } });
+    assert.equal(result.value?.appearance, mode);
+    assert.equal(result.value?.importMode, 'copy');
     await w.waitForFunction((mode) => matchMedia('(prefers-color-scheme: dark)').matches === (mode === 'dark') &&
       getComputedStyle(document.querySelector('.studio')).backgroundColor === (mode === 'dark' ? 'rgb(37, 37, 37)' : 'rgb(245, 245, 245)'), mode).catch(async (error) => {
       console.log(await app.evaluate(({ nativeTheme }) => ({ source: nativeTheme.themeSource, dark: nativeTheme.shouldUseDarkColors })));
@@ -86,13 +87,10 @@ try {
     });
   });
   assert.ok(contrast.every((value) => value >= 4.5), JSON.stringify(contrast));
-  await w.locator('.export-menu > summary').click();
-  assert.equal(await w.locator('.export-choices').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(53, 53, 53)');
-  await w.screenshot({ path: join(root, '.build', 'appearance-menu-dark.png') });
-  await w.keyboard.press('Escape');
-  await w.locator('.source-import > summary').click();
-  await w.getByRole('button', { name: 'Import folder…', exact: true }).waitFor();
-  await w.keyboard.press('Escape');
+  const nativeExport = await popupAction(app, w, w.locator('.export-menu .action-menu-trigger'));
+  assert.deepEqual(nativeExport.map(({ label }) => label), ['Export for Print…', 'Export PDF…']);
+  const nativeImport = await popupAction(app, w, w.locator('.source-import .action-menu-trigger'));
+  assert.ok(nativeImport.some(({ label }) => label === 'Import folder…'));
   // The sidebar's list of the spread's boxes opens a placed photo selected, with its crop toolbar.
   await ready();
   await w.locator('.inspector .content-item:has(img)').first().click();
@@ -151,8 +149,10 @@ try {
   await w.screenshot({ path: join(root, '.build', 'appearance-route-dark.png') });
   await w.getByRole('dialog', { name: 'Edit route' }).getByRole('button', { name: 'Close', exact: true }).click();
   // Real proof exports, including flowed text, rasterize identically in both appearances.
-  w = await menuAction(app, 'Open Sample Project');
-  await w.locator('.project-identity strong').getByText('Senja · Field Notes', { exact: true }).waitFor();
+  const proofBook = join(work, 'whitewall.imageflow');
+  await cp(join(root, 'sample/whitewall'), proofBook, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  w = await testBook(app, proofBook);
+  await w.locator('.project-identity strong').getByText('whitewall', { exact: true }).waitFor();
   await ready();
   const rasters = [];
   for (const mode of ['light', 'dark']) {

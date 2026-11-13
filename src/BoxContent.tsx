@@ -45,7 +45,7 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
   }
   const pick = <select className="box-photo-pick" aria-label={(assigned ? 'Replace photo in ' : 'Choose photo for ') + label} value=""
     onChange={(event) => choosePhoto(event.target.value)}>
-    <option value="">{assigned ? 'Replace photo…' : 'Choose photo…'}</option>
+    <option value={assigned ?? ''}>{assigned ? 'Replace photo…' : 'Choose photo…'}</option>
     {Object.entries(summary.photoIndex).filter(([photo]) => photo !== assigned).map(([photo, entry]) =>
       <option key={photo} value={photo} disabled={!summary.photos[photo]}>
         {(entry.title || entry.path.split('/').pop()) + (summary.photos[photo] ? '' : ' (missing)')}</option>)}
@@ -79,14 +79,14 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
         {remove}
       </div>
     </div>
-    {assigned && (adjustCrop || moved || values) && <div className="crop-controls">
+    {assigned && <div className="crop-controls">
       <p className="muted">{placement.zoom !== 1 ? 'Zoomed ' + placement.zoom.toFixed(1) + '×' : 'Fills the frame'}
         {moved ? ' · moved' : ''}{moved && !ownCrop ? ' · from another layout' : ''}</p>
       <div className="box-actions">
         {adjustCrop && <button type="button" onClick={adjustCrop}>Adjust crop…</button>}
-        {moved && <button type="button" onClick={() => change((item) => {
+        <button type="button" disabled={!moved} onClick={() => change((item) => {
           if (item.boxes[box]?.photo) setPlacement(item.boxes[box], item.definition, centered);
-        }, 'Crop reset')}>Reset crop</button>}
+        }, 'Crop reset')}>Reset crop</button>
       </div>
       {cropValues}
     </div>}
@@ -103,7 +103,7 @@ function CropPhotoActions({ summary, assigned, label, choose, remove, fields }: 
   const [open, setOpen] = useState<'photos' | 'values'>();
   function close() {
     setOpen(undefined);
-    root.current?.querySelector('summary')?.focus();
+    root.current?.querySelector<HTMLElement>('.action-menu-trigger')?.focus();
   }
   useEffect(() => {
     if (!open) return;
@@ -151,24 +151,30 @@ export function TextContent({ summary, spread, box, label, change, importText, i
 }) {
   const assigned = spread.boxes[box]?.text;
   const choices = Object.entries(summary.project.texts).map(([id, path]) => [id, sourcePath(path).split('/').pop()] as const);
+  const name = assigned ? choices.find(([id]) => id === assigned)?.[1] ?? 'Missing text' : 'No text';
+  function assign(value?: string) {
+    change((item) => {
+      item.boxes[box] = { params: item.boxes[box]?.params ?? {}, ...(value ? { text: value } : {}) };
+    }, value ? (choices.find(([id]) => id === value)?.[1] ?? value) + ' placed in ' + label : 'Text removed from ' + label);
+  }
   return <div className="box-content">
-    <label className="field">Markdown
-      <select aria-label={label + ' assignment'} value={assigned ?? ''} onChange={(event) => {
-        const value = event.target.value;
-        change((item) => {
-          item.boxes[box] = { params: item.boxes[box]?.params ?? {}, text: value || undefined };
-        }, (value ? (summary.project.texts[value] ? sourcePath(summary.project.texts[value]).split('/').pop() : value) + ' placed in ' : 'Text removed from ') + label);
-      }}>
-        <option value="">Unassigned</option>
-        {assigned && !choices.some(([id]) => id === assigned) && <option value={assigned}>Missing · {assigned}</option>}
-        {choices.map(([id, name]) => <option value={id} key={id}>{name ?? id}</option>)}
-      </select>
-    </label>
-    <div className="box-actions">
-      {assigned && summary.project.texts[assigned] && inspect &&
-        <button type="button" onClick={() => inspect({ kind: 'text', id: assigned })}>Show text</button>}
-      <button type="button" onClick={importText}>Import Markdown…</button>
+    <div className="box-photo box-text">
+      <button type="button" className="box-photo-thumb content-file-icon" title="Show text" aria-label={'Show text in ' + label}
+        disabled={!assigned || !summary.project.texts[assigned] || !inspect}
+        onClick={() => assigned && inspect?.({ kind: 'text', id: assigned })}>Aa</button>
+      <div className="box-photo-info">
+        <span className="box-photo-name" title={name}>{name}{flow && flow.parts > 1 && <small className="text-flow muted">{flow.part} of {flow.parts}</small>}</span>
+        <select className="box-photo-pick" aria-label={label + ' assignment'} value={assigned ?? ''} onChange={(event) => {
+          if (event.target.value === ':import') importText();
+          else if (event.target.value) assign(event.target.value);
+        }}>
+          <option value={assigned ?? ''}>{assigned ? 'Replace text…' : 'Choose text…'}</option>
+          <option value=":import">Choose Markdown file…</option>
+          {choices.filter(([id]) => id !== assigned).map(([id, name]) => <option value={id} key={id}>{name ?? id}</option>)}
+        </select>
+        {assigned && <button type="button" className="link" onClick={() => assign()}>Remove</button>}
+
+      </div>
     </div>
-    {flow && <p className="muted">Flow {flow.part} of {flow.parts}</p>}
   </div>;
 }

@@ -1,4 +1,6 @@
-import { SourceManager, SaveCopy } from './SourceManager';
+import { commandState } from './commands';
+import type { BookMenuState } from './desktop';
+import { bookName } from './book-name';
 import type { ImportMode } from './source-locations';
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
@@ -17,7 +19,7 @@ import { CropEditor } from './CropEditor';
 import { ElementEditorDialog } from './ElementEditor';
 import { documentEditorFor, editorOwnedDocument, editorTargetGone } from './editor-session';
 import type { EditorTarget } from './editor-session';
-import { LayoutPickerDialog } from './LayoutPickerDialog';
+import { LayoutFamilyPicker } from './LayoutFamilyPicker';
 import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
@@ -90,8 +92,6 @@ function EmptyBook({ template, writable, start }: { template?: TemplateInfo; wri
     <div className="empty-book-art" aria-hidden="true"><span /><span /></div>
     <h2 id="empty-book-title">This book has no spreads yet</h2>
     {!template ? <p className="muted">Loading the template…</p> : !writable ? <p className="muted">Spreads can be added once the book can be edited.</p> : <>
-      <p className="muted">{opening.length ? 'Start with the spreads this template suggests, or pick a layout for the first spread.' :
-        'Pick a layout for the first spread. You can switch layouts and add more spreads later.'}</p>
       {opening.length > 0 && <button className="primary" onClick={() => start()}>
         Add {opening.length === 1 ? 'the opening spread' : 'the ' + opening.length + ' opening spreads'}</button>}
       {layouts.length > 0 ? <div className="empty-book-layouts" role="group" aria-label="Layouts for the first spread">
@@ -107,6 +107,7 @@ export function App() {
   const { panels, bottomMaximum, toggle: togglePanel, show: showPanel, resize: resizePanel } = usePanels();
   const [resizing, setResizing] = useState(false);
   const [summary, setSummary] = useState<ProjectSummary>();
+  useEffect(() => { if (summary) document.title = bookName(summary.folder); }, [summary?.folder]);
   const [projectInstance, setProjectInstance] = useState(0);
   const current = useRef<ProjectSummary>(undefined);
   const [spreadId, setSpreadId] = useState('');
@@ -156,12 +157,22 @@ export function App() {
   const [busy, setBusy] = useState('');
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState('');
-  const [sourceManager, setSourceManager] = useState(false);
-  const [saveCopy, setSaveCopy] = useState(false);
-  const settingsPanel = useRef<HTMLDetailsElement>(null);
-  const [settingsRequest, setSettingsRequest] = useState(0);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(''), 4500);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  const [zoom, setZoom] = useState(1);
+  const [textEditing, setTextEditing] = useState(false);
   const [checkRequest, setCheckRequest] = useState(0);
   const [controlFocused, setControlFocused] = useState(false);
+  const [spreadFocused, setSpreadFocused] = useState(false);
+  useEffect(() => {
+    const focus = () => setSpreadFocused(!!document.activeElement?.closest('.spread-thumb, .canvas'));
+    const pointer = (event: PointerEvent) => setSpreadFocused(event.target instanceof Element && !!event.target.closest('.spread-thumb, .canvas'));
+    document.addEventListener('focusin', focus); document.addEventListener('pointerdown', pointer, true);
+    return () => { document.removeEventListener('focusin', focus); document.removeEventListener('pointerdown', pointer, true); };
+  }, []);
   useEffect(() => {
     const focus = () => setControlFocused(!!document.activeElement?.closest('input, textarea, select, [contenteditable], iframe, dialog, .edit-popover, .crop-toolbar'));
     document.addEventListener('focusin', focus);
@@ -169,12 +180,17 @@ export function App() {
     focus();
     return () => { document.removeEventListener('focusin', focus); document.removeEventListener('focusout', focus); };
   }, []);
+
   useEffect(() => {
-    if (!settingsRequest || !settingsPanel.current) return;
-    settingsPanel.current.open = true;
-    settingsPanel.current.querySelector('summary')?.focus();
-    settingsPanel.current.scrollIntoView({ block: 'nearest' });
-  }, [settingsRequest]);
+    const isText = (node: Element | null) => !!node?.matches('textarea, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"]):not([type="file"])');
+    const focus = () => setTextEditing(isText(document.activeElement));
+    const message = (event: MessageEvent) => {
+      if (event.origin === renderOrigin && event.data?.type === 'editor-focus' && document.activeElement instanceof HTMLIFrameElement &&
+          event.source === document.activeElement.contentWindow) setTextEditing(event.data.text === true);
+    };
+    document.addEventListener('focusin', focus); document.addEventListener('focusout', focus); window.addEventListener('message', message);
+    return () => { document.removeEventListener('focusin', focus); document.removeEventListener('focusout', focus); window.removeEventListener('message', message); };
+  }, []);
   const [error, setError] = useState('');
   const [check, setCheck] = useState<BookCheck>();
   const canvas = useRef<HTMLElement>(null);
@@ -216,12 +232,10 @@ export function App() {
   const agentLocked = useRef(false);
   const [agentWorking, setAgentWorking] = useState(false);
   const pendingTasks = useRef(0);
+  const [saving, setSaving] = useState(false);
   const workspace = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useCanvasLayout(summary?.folder);
   const columns = layout.mode === 'grid' ? layout.columns : 0;
-  useEffect(() => {
-    void api?.setPanelVisibility({ sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout });
-  }, [api, panels.leftHidden, panels.rightHidden, panels.bottomHidden, showGuides, layout]);
   const spreads = summary?.project.spreads ?? [];
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
@@ -244,14 +258,6 @@ export function App() {
   const canDelete = canChangeBook && spreadSelected && !!spread;
   const canMoveUp = canReorder && spreadSelected && !!spread && canMoveSpread(spread.id, index - 1);
   const canMoveDown = canReorder && spreadSelected && !!spread && canMoveSpread(spread.id, index + 1);
-  useEffect(() => {
-    void api?.setBookMenuState({ enabled: { 'add-spread': canAdd, 'duplicate-spread': canDuplicate,
-      'move-spread-up': canMoveUp, 'move-spread-down': canMoveDown, 'delete-spread': canDelete },
-      editing: controlFocused || !!editing || !!cropping || !!elementEditor || !!layoutPicker || !!quick || sourceManager || saveCopy,
-      writable: canChangeBook, busy: !!busy || exporting || !!reload || agentWorking,
-      formats: template?.formats ?? {}, format: template?.formatId });
-  }, [api, canAdd, canDuplicate, canMoveUp, canMoveDown, canDelete, controlFocused, editing, cropping, elementEditor, layoutPicker,
-    quick, sourceManager, saveCopy, canChangeBook, busy, exporting, reload, agentWorking, template?.formats, template?.formatId]);
   // This is the render-session ID, regenerated by DocumentSession.activate() on save, history and reload.
   const reorder = useSpreadReorder({ list: thumbList, revision: summary?.id, enabled: canReorder && !panels.leftHidden,
     canMove: canMoveSpread, move: moveTo });
@@ -340,6 +346,11 @@ export function App() {
     return queue.current;
   }
 
+  async function persist<T>(operation: () => Promise<T>) {
+    setSaving(true);
+    try { return await operation(); } finally { setSaving(false); }
+  }
+
   // `notice` may be a function, read after the change ran, for notices that describe what the change found.
   function edit(change: (files: ProjectFiles) => void | false, notice?: string | (() => string), selected?: string, canvasId?: string) {
     let applied = false;
@@ -353,11 +364,11 @@ export function App() {
       if (JSON.stringify(files.project) === JSON.stringify(before.project) &&
           JSON.stringify(files.photoIndex) === JSON.stringify(before.photoIndex)) { applied = true; return; }
       const label = (typeof notice === 'function' ? notice() : notice) ?? 'Project edit';
-      const result = await api.saveProject(before.id, files, label);
+      const result = await persist(() => api.saveProject(before.id, files, label));
       if ('error' in result) throw new Error(result.error);
       if (current.current !== before) return;
       adopt(result.value, false, selected);
-      setNotice((typeof notice === 'function' ? notice() : notice) ?? 'Saved');
+      setNotice((typeof notice === 'function' ? notice() : notice) ?? '');
       applied = true;
     }).then(() => applied);
   }
@@ -371,11 +382,11 @@ export function App() {
     enqueue(async () => {
       const before = current.current;
       if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current) return;
-      const result = await api.history(before.id, direction);
+      const result = await persist(() => api.history(before.id, direction));
       if ('error' in result) throw new Error(result.error);
       if (current.current !== before) return;
       adopt(result.value);
-      setNotice(direction === 'undo' ? 'Edit undone' : 'Edit redone');
+
     });
   }
 
@@ -386,7 +397,7 @@ export function App() {
       if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current ||
           (canvasId && (before.id !== canvasId || readyId.current !== canvasId))) return;
       setBusy('Importing files…');
-      const result = await api.importFiles(before.id, request);
+      const result = await persist(() => api.importFiles(before.id, request));
       if ('error' in result) throw new Error(result.error);
       if (!result.value || current.current !== before) return;
       adopt(result.value.summary);
@@ -413,7 +424,7 @@ export function App() {
         const before = current.current;
         if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
         setBusy('Importing file…');
-        const result = await api.importFiles(before.id, { kind: 'file', accept, mode });
+        const result = await persist(() => api.importFiles(before.id, { kind: 'file', accept, mode }));
         if ('error' in result) throw new Error(result.error);
         if (!result.value || current.current !== before) return resolve(undefined);
         adopt(result.value.summary);
@@ -426,25 +437,32 @@ export function App() {
     }));
   }
   // importParameterFile only reads refs, the preload API and state setters, so it may be kept from the first render.
-  const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, defaultMode: summary?.project.importMode ?? 'copy', importFile: importParameterFile }), [summary?.project.files, summary?.project.importMode]);
+  const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, importFile: importParameterFile }), [summary?.project.files]);
+
+  async function showAssets() {
+    if (!api) return;
+    const groups = template ? [template.parameters, ...Object.values(template.spreads).flatMap((spread) => [spread.parameters,
+      ...Object.values(spread.boxes).map((box) => box.parameters), ...Object.values(spread.elements).map((element) => element.parameters)])] : [];
+    const accept = [...new Set(groups.flatMap((group) => Object.values(group).flatMap((param) => param.type === 'file' ? param.accept : [])))];
+    const result = await api.showAssets(accept);
+    if ('error' in result) setError(result.error);
+  }
 
   function act(command: Command) {
-    if (command === 'book-settings') { showPanel('left'); setSettingsRequest((value) => value + 1); return; }
     if (command === 'book-check') { setCheckRequest((value) => value + 1); return; }
-    if (command.startsWith('book-format:')) { changeFormat(command.slice('book-format:'.length)); return; }
     if ((spreadCommands as readonly string[]).includes(command)) {
       // Native accelerators must never delete/reorder a spread while a field or another editor owns the keyboard.
-      if (controlFocused || editing || cropping || elementEditor || layoutPicker || quick || sourceManager || saveCopy) return;
+      if (controlFocused || editing || cropping || elementEditor || quick) return;
       if (command === 'add-spread' && canAdd) add();
       if (command === 'duplicate-spread' && canDuplicate) add(true);
       if (command === 'move-spread-up' && canMoveUp) move(-1);
       if (command === 'move-spread-down' && canMoveDown) move(1);
-      if (command === 'delete-spread' && canDelete) deleteSpread();
+      if (command === 'delete-spread' && canDelete && spreadFocused) deleteSpread();
       return;
     }
 
     if (command === 'manage-sources' || command === 'save-copy') {
-      enqueue(async () => { if (command === 'manage-sources') setSourceManager(true); else setSaveCopy(true); });
+      enqueue(async () => { if (command === 'manage-sources') await showAssets(); else { const result = await api?.saveCopy(); if (result && 'error' in result) setError(result.error); } });
       return;
     }
     if (command === 'toggle-project' || command === 'toggle-inspector' || command === 'toggle-sources') {
@@ -460,7 +478,14 @@ export function App() {
       changeLayout({ mode: 'grid', columns: Number(command.slice('grid-columns-'.length)) });
       return;
     }
-    if (command === 'undo' || command === 'redo') return undo(command);
+    if (command === 'undo' || command === 'redo') { if (!textEditing) return undo(command); return; }
+    if (command === 'zoom-in') { setZoom((value) => Math.min(3, value * 1.2)); return; }
+    if (command === 'zoom-out') { setZoom((value) => Math.max(.3, value / 1.2)); return; }
+    if (command === 'zoom-fit') { setZoom(1); return; }
+    if (command === 'zoom-actual') {
+      const width = canvas.current?.clientWidth ?? 1;
+      setZoom(format ? Math.max(.3, Math.min(3, (format.spreadWidth * 96 / 25.4 + 64) / width)) : 1); return;
+    }
     if (command === 'import-photos' || command === 'import-folder' || command === 'import-texts') {
       return importFiles({ kind: command === 'import-texts' ? 'markdown' : 'photo', folder: command === 'import-folder' });
     }
@@ -499,7 +524,7 @@ export function App() {
         }
         return;
       }
-      if (command !== 'new' && command !== 'open' && command !== 'sample') return;
+      if (command !== 'new' && command !== 'open') return;
       setBusy(command === 'new' ? 'Creating project…' : 'Opening project…');
       const result = await api.openProject(command);
       if ('error' in result) throw new Error(result.error);
@@ -507,7 +532,7 @@ export function App() {
     });
   }
 
-  const viewCommand = (command: Command) => command.startsWith('toggle-') || command.startsWith('layout-') || command.startsWith('grid-columns-') || command === 'book-settings' || command === 'book-check';
+  const viewCommand = (command: Command) => command.startsWith('toggle-') || command.startsWith('layout-') || command.startsWith('grid-columns-') || command.startsWith('zoom-') || command === 'book-check';
   const onCommand = useEffectEvent((command: Command) => { if (viewCommand(command) || (!busy && !agentLocked.current)) act(command); });
   const onProjectChanged = useEffectEvent((change: ProjectChange) => {
     if ('building' in change) beginReload();
@@ -524,7 +549,7 @@ export function App() {
     const focused = document.activeElement;
     const typing = focused instanceof HTMLElement && (focused.matches('input, textarea, select, [contenteditable="true"]') || !!focused.closest('dialog'));
     const reloadRunning = reloading.current && !reloadFailed.current;
-    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || layoutPicker || cropping || reorder.dragging || typing || agentLocked.current) return false;
+    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || typing || agentLocked.current) return false;
     agentLocked.current = true;
     if (workspace.current) workspace.current.inert = true;
     setAgentWorking(true);
@@ -576,7 +601,7 @@ export function App() {
     setRender(status);
     if (status.state === 'ready') {
       readyId.current = id;
-      if (reloading.current) setNotice('Project files reloaded');
+
       reloading.current = false;
       reloadFailed.current = false;
       setReload(undefined);
@@ -1185,6 +1210,18 @@ export function App() {
     ? 'This field changed while you were editing. Close it and open the field again to continue.'
     : 'Editing is paused while the preview is out of date.');
   const canExport = canvasReady && !busy && spreads.length > 0;
+  const menuState: BookMenuState = { document: !!summary, enabled: { 'add-spread': canAdd, 'duplicate-spread': canDuplicate,
+    'move-spread-up': canMoveUp, 'move-spread-down': canMoveDown, 'delete-spread': canDelete && spreadFocused },
+    editing: controlFocused || !!editing || !!cropping || !!elementEditor || !!quick, textEditing,
+    writable, busy: !!busy || exporting || !!reload || agentWorking, history: summary?.history,
+    canExport, canPrint: canExport && checkCurrent && !check?.errors.length,
+    sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom,
+    saving };
+  const menuKey = JSON.stringify(menuState);
+  useEffect(() => { void api?.setBookMenuState(menuState); }, [api, menuKey]);
+  const undoCommand = commandState('undo', menuState), redoCommand = commandState('redo', menuState);
+  const pdfCommand = commandState('export', menuState), printCommand = commandState('print', menuState);
+
   const counts = summary ? assignmentCounts(summary.project, template?.spreads) : {};
   const format = formatOf(template);
   // A saved format the template's named formats no longer include; the Book check reports it and print export is
@@ -1197,28 +1234,31 @@ export function App() {
   return <ProjectFilesContext.Provider value={projectFiles}><div className={navigator.platform.includes('Mac') ? 'studio mac-studio' : 'studio'}>
     <header className="toolbar">
       <div className="toolbar-actions project-context">
-        <button className="toolbar-icon" aria-label="Toggle project panel" aria-pressed={!panels.leftHidden} title="Toggle project panel (⌥⌘1)" onClick={() => togglePanel('left')}><Icon name="sidebarLeft" /></button>
-        <div className="project-identity" title={summary?.folder}>
-          <strong>{summary?.project.title ?? 'ImageFlow'}</strong>
-          <span className="muted">{summary ? summary.readOnly ? 'Sample · Read only' : busy ? 'Working…' : 'Saved locally' : 'Photobook studio'}</span>
+        <button className="toolbar-icon" aria-label="Toggle project panel" aria-pressed={!panels.leftHidden} title="Toggle project panel (⌃⌘S)" onClick={() => togglePanel('left')}><Icon name="sidebarLeft" /></button>
+        <div className="project-identity" title={summary?.folder}
+          onContextMenu={(event) => { event.preventDefault(); void api?.documentProxy('path'); }}
+          onClick={(event) => { if (event.metaKey) void api?.documentProxy('path'); }}>
+          {summary && <button type="button" className="document-proxy" aria-label="Document location" title="⌘-click for location · Drag to Finder"
+            draggable onDragStart={(event) => { event.preventDefault(); void api?.documentProxy('drag'); }}
+            onClick={(event) => { event.stopPropagation(); void api?.documentProxy('path'); }}><Icon name="document" size={16} /></button>}
+          <strong>{summary ? bookName(summary.folder) : 'ImageFlow'}</strong>
+          <span className="muted">{summary?.readOnly ? 'Read Only' : ''}</span>
         </div>
         {summary && <div className="history">
-          <button aria-label="Undo" title={summary.history?.undo ? 'Undo ' + summary.history.undo : 'Undo'} disabled={!writable || !summary.history?.undo || !!busy} onClick={() => undo('undo')}><Icon name="undo" /></button>
-          <button aria-label="Redo" title={summary.history?.redo ? 'Redo ' + summary.history.redo : 'Redo'} disabled={!writable || !summary.history?.redo || !!busy} onClick={() => undo('redo')}><Icon name="redo" /></button>
+          <button aria-label="Undo" title={undoCommand.label} disabled={!undoCommand.enabled} onClick={() => undo('undo')}><Icon name="undo" /></button>
+          <button aria-label="Redo" title={redoCommand.label} disabled={!redoCommand.enabled} onClick={() => undo('redo')}><Icon name="redo" /></button>
         </div>}
       </div>
       <div className="toolbar-actions">
         <div className="export-area">
           {exporting ? <div className="export-progress"><span role="status" title={busy}>{busy}</span><button onClick={() => void api?.cancelExport()}>Cancel export</button></div> : <ActionMenu className="export-menu" disabled={!summary} label={<><Icon name="export" /><span>Export</span><Icon name="chevron" /></>}>
             <div className="export-choices">
-              <button className="primary" disabled={!canExport || !checkCurrent || !!check?.errors.length} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('print'); }}>Export print PDF</button>
-              <button disabled={!canExport} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('export'); }}>Export proof PDF</button>
-              {!checkCurrent && <p>Checking book… Print export will be available when checks finish.</p>}
-              {checkCurrent && !!check?.errors.length && <p>Resolve Book check errors before print export.</p>}
+              <button className="primary" disabled={!printCommand.enabled} title={!checkCurrent ? 'Checking book…' : check?.errors.length ? 'Resolve book check errors' : undefined} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('print'); }}>Export for Print…</button>
+              <button disabled={!pdfCommand.enabled} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('export'); }}>Export PDF…</button>
             </div>
           </ActionMenu>}
         </div>
-        <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘2)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
+        <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘I)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>
     </header>
     <div ref={workspace} inert={agentWorking} key={projectInstance} className="workspace"
@@ -1229,35 +1269,22 @@ export function App() {
       <aside className={'project-panel' + (panels.leftHidden ? ' is-collapsed' : '')} aria-label="Project" inert={panels.leftHidden} aria-hidden={panels.leftHidden}>
         <div className="project-panel-content">
         <div className="project-head">
-          <h1>{summary ? template?.format.label ?? 'Book' : 'Photobook studio'}</h1>
-          <p className="muted" title={summary?.folder}>{summary ? (sequence ? sequence.count + ' pages · ' + spreads.length + ' spreads' : 'Loading book…') + (summary.readOnly ? ' · Sample' : '') : 'Local photobook projects'}</p>
+
+          <p className="muted" title={summary?.folder}>{summary ? (sequence ? sequence.count + ' pages · ' + spreads.length + ' spreads' : 'Loading book…') : ''}</p>
         </div>
-        {summary && <details ref={settingsPanel} className="document-settings">
-          <summary>Book settings</summary>
+        {summary && template && <details className="document-settings template-controls">
+          <summary>{template.label ? template.label + ' settings' : 'Template controls'}</summary>
           <fieldset disabled={!writable}>
-            {template && (Object.keys(template.formats).length > 1 || missingFormat) && <label className="field">Format
+            {(Object.keys(template.formats).length > 1 || missingFormat) && <label className="field">Format
               <select value={missingFormat ? summary.project.format : template.formatId} onChange={(event) => {
                 changeFormat(event.target.value);
               }}>
                 {missingFormat && <option value={summary.project.format} disabled>{summary.project.format} (not in the template)</option>}
                 {Object.entries(template.formats).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
               </select></label>}
-            <label className="field">New imports<select value={summary.project.importMode ?? 'copy'} onChange={(event) => {
-              const mode = event.target.value as ImportMode;
-              edit(({ project }) => { project.importMode = mode; }, 'Import default updated');
-            }}><option value="copy">Copy into Book</option><option value="link">Link to Original Files</option></select></label>
-            <p className="muted">Applies to photos, Markdown and parameter files. Existing sources keep their current locations.</p>
-            <button type="button" onClick={() => setSourceManager(true)}>Manage Sources…</button>
-            <label className="field">Book title<input key={summary.project.title} defaultValue={summary.project.title}
-              onBlur={(event) => {
-                const title = event.target.value.trim();
-                if (title && title !== summary.project.title) edit(({ project }) => { project.title = title; });
-              }} /></label>
-            {template && <Fields schema={template.parameters} values={summary.project.params} exclude={editorOwnedDocument(template)}
-              update={(id, value) => edit(({ project }) => { project.params[id] = value; })} />}
-            {template && Object.entries(template.editors ?? {}).map(([id, { label, parameters }]) => <p key={id} className="muted">
-              {parameters.map((key) => template.parameters[key]?.label ?? key).join(', ')} {parameters.length === 1 ? 'is' : 'are'} edited on
-              the page{label ? ' with ' + label : ''}: click where the book shows {parameters.length === 1 ? 'it' : 'them'}.</p>)}
+            <Fields schema={template.parameters} values={summary.project.params} exclude={editorOwnedDocument(template)}
+              update={(id, value) => edit(({ project }) => { project.params[id] = value; })} />
+
           </fieldset>
         </details>}
         {summary && <>
@@ -1313,7 +1340,7 @@ export function App() {
             {summary && !spreads.length && <EmptyBook template={template} writable={writable && !busy} start={start} />}
             {summary && <div ref={stage} className="stage"
               // A grid fills the canvas width; the frame reports the height of all its rows.
-              style={{ width: columns ? '100%' : undefined, height: geometry?.height,
+              style={{ width: zoom !== 1 ? (zoom * 100) + '%' : columns ? '100%' : undefined, height: geometry?.height,
                 cursor: hoveredTarget ? 'pointer' : undefined,
                 '--aspect': format ? format.spreadWidth / format.height : undefined } as CSSProperties}
               onClick={(event) => {
@@ -1413,7 +1440,7 @@ export function App() {
                   : editElement && editorOf(editing.spread, editElement)
                     ? <button type="button" onClick={() => openElementEditor(editing.spread, editElement)}>
                       {(editorOf(editing.spread, editElement)!.label ?? 'Open editor') + '…'}</button> : undefined}>
-                {inline.target.hidden && <p className="ep-hint muted">Not on the page in this layout right now; its settings are kept.</p>}
+
                 {editing.owner?.type === 'photo' && <PhotoContent summary={summary} spread={inline.spread} box={editing.owner.id}
                   label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose} values={!!boxSource(editing.spread, editing.owner.id)}
                   adjustCrop={cropBlocked(editing.spread, editing.owner.id) ? undefined : () => startCrop(editing.spread, editing.owner!.id)} />}
@@ -1431,8 +1458,7 @@ export function App() {
         <div className="sources-host" inert={panels.bottomHidden} aria-hidden={panels.bottomHidden}>
         {summary && <Sources summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={choose}
-          usage={usage} writable={writable} busy={!!busy} importSources={act} quickLook={setQuick}
-          importWithMode={(kind, mode, folder) => importFiles({ kind, mode, folder })}
+          usage={usage} writable={writable} busy={!!busy} importSources={act} quickLook={setQuick} manage={() => void showAssets()}
           importPaths={(files) => {
             const paths = api?.pathsForFiles(files) ?? [];
             if (paths.length) importFiles({ kind: paths.every((path) => /\.md$/i.test(path)) ? 'markdown' : 'photo', paths });
@@ -1441,8 +1467,6 @@ export function App() {
       </div>
       {summary && (!panels.rightHidden ? <PanelDivider side="right" size={panels.right} resize={resizePanel} onResizing={setResizing} /> : <div />)}
       <div className={'inspector-host' + (panels.rightHidden ? ' is-collapsed' : '')} inert={panels.rightHidden} aria-hidden={panels.rightHidden || !summary}>
-      {summary && api && sourceManager && <SourceManager api={api} summary={summary} template={template} adopt={(next) => adopt(next)} close={() => setSourceManager(false)} />}
-    {summary && api && saveCopy && <SaveCopy api={api} close={() => setSaveCopy(false)} />}
     {summary && spread && <Inspector summary={writable || summary.readOnly ? summary : { ...summary, readOnly: true }}
         spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
@@ -1452,8 +1476,12 @@ export function App() {
         openPicker={(family, layout) => {
           if (readyId.current !== summary.id) return;
           setEditing(undefined);
-          setLayoutPicker({ spread: spread.id, family, layout });
+          setLayoutPicker((current) => current?.spread === spread.id && current.family === family ? undefined : { spread: spread.id, family, layout });
         }}
+        expandedFamily={layoutPicker?.spread === spread.id ? layoutPicker.family : undefined}
+        familyPicker={template && layoutPicker?.spread === spread.id && <LayoutFamilyPicker key={summary.id + ':' + layoutPicker.family}
+          project={summary.id} template={template} spread={spread} family={layoutPicker.family} layout={layoutPicker.layout}
+          readOnly={summary.readOnly} blocked={previewNotice || undefined} edit={editCanvas} close={() => setLayoutPicker(undefined)} />}
         edit={edit} highlight={setHighlight} issues={issue} select={select} />}
       </div>
     </div>
@@ -1463,16 +1491,11 @@ export function App() {
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
         canvasReady={canvasReady} geometry={geometry} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile}
           prepare={template?.network?.length ? () => decideNetwork(template, true) : undefined} network={summary.network?.join(' ')} />}
-    {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&
-      <LayoutPickerDialog key={layoutPicker.spread + ':' + layoutPicker.family} project={summary.id} template={template}
-        spread={spreads.find(({ id }) => id === layoutPicker.spread)!} family={layoutPicker.family} layout={layoutPicker.layout}
-        readOnly={summary.readOnly} blocked={previewNotice || undefined}
-        edit={editCanvas} close={() => setLayoutPicker(undefined)} />}
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     <footer className="status-bar">
       <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
-        {issue || busy || notice || (summary ? 'Project preview · Proof export' : 'ImageFlow for macOS')}
+        {issue || busy || notice}
       </span>
       <AgentStatus api={api} />
       {summary && <BookCheckIndicator request={checkRequest} check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}

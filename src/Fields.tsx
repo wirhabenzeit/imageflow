@@ -13,30 +13,32 @@ type Value = Values[string];
 
 // The project's files (ID → owned path or linked reference) for file parameters, and how to add one. Provided by the editor shell.
 export const ProjectFilesContext = createContext<{
-  files: Record<string, SourceReference>; defaultMode?: ImportMode; importFile?: (accept: string[], mode?: ImportMode) => Promise<string | undefined>;
+  files: Record<string, SourceReference>; importFile?: (accept: string[], mode?: ImportMode) => Promise<string | undefined>;
 }>({ files: {} });
 
 // Chooses among the project's files with an accepted extension, adds a new one, or clears the assignment.
 function FileControl({ param, value, apply, autoFocus }: {
   param: Extract<Parameter, { type: 'file' }>; value: string; apply: (value: Value) => void; autoFocus: boolean;
 }) {
-  const { files, importFile, defaultMode = 'copy' } = useContext(ProjectFilesContext);
-  const [mode, setMode] = useState<ImportMode>();
+  const { files, importFile } = useContext(ProjectFilesContext);
   const accepted = Object.entries(files).filter(([, path]) => param.accept.some((ext) => sourcePath(path).toLowerCase().endsWith(ext)));
   const missing = !!value && !Object.hasOwn(files, value);
-  return <div className="pc-row pc-file">
-    <select aria-label={param.label} value={value} data-autofocus={autoFocus || undefined} onChange={(event) => apply(event.target.value)}>
-      <option value="">None</option>
-      {missing && <option value={value}>Missing file</option>}
-      {value && !missing && !accepted.some(([id]) => id === value) && <option value={value}>{fileName(files[value])}</option>}
-      {accepted.map(([id, path]) => <option key={id} value={id}>{fileName(path)}</option>)}
-    </select>
-    {importFile && <select aria-label="File import mode" value={mode ?? defaultMode} onChange={(event) => setMode(event.target.value as ImportMode)}>
-      <option value="copy">Copy into Book</option><option value="link">Link to File</option>
-    </select>}
-    {importFile && <button type="button" onClick={() => {
-      void importFile(param.accept, mode).then((id) => { if (id) apply(id); });
-    }}>Choose…</button>}
+  return <div className="box-photo pc-file">
+    <span className="box-photo-empty content-file-icon" aria-hidden="true">File</span>
+    <div className="box-photo-info">
+      <span className="box-photo-name" title={value && files[value] ? sourcePath(files[value]) : undefined}>
+        {missing ? 'Missing file' : value ? fileName(files[value]) : 'No file'}</span>
+      <select className="box-photo-pick" aria-label={param.label} value={value} data-autofocus={autoFocus || undefined}
+        onChange={(event) => {
+          if (event.target.value === ':choose') void importFile?.(param.accept).then((id) => { if (id) apply(id); });
+          else if (event.target.value) apply(event.target.value);
+        }}>
+        <option value={value}>{value ? 'Replace file…' : 'Choose…'}</option>
+        {importFile && <option value=":choose">Choose file…</option>}
+        {accepted.filter(([id]) => id !== value).map(([id, path]) => <option key={id} value={id}>{fileName(path)}</option>)}
+      </select>
+      {value && <button type="button" className="link" aria-label={'Remove ' + param.label} onClick={() => apply('')}>Remove</button>}
+    </div>
   </div>;
 }
 

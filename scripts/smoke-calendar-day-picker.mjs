@@ -82,9 +82,9 @@ try {
   };
 
   await ready();
-  // The marked dates have no field in Book settings; the settings say where they are edited.
-  await w.getByText('Book settings', { exact: true }).click();
-  await w.getByText('Marked days is edited on the page with Marked days', { exact: false }).waitFor();
+  // The marked dates have no field among the generated template controls; the settings say where they are edited.
+  await w.locator('.template-controls > summary').click();
+  assert.equal(await w.getByText('Marked days is edited on the page with Marked days', { exact: false }).count(), 0);
   assert.equal(await w.getByLabel('Marked days', { exact: true }).count(), 0);
 
   // Clicking February's days opens the picker for February, from the page's position in the book.
@@ -130,9 +130,10 @@ try {
   assert.equal(await picker.locator('h3').textContent(), 'May 2027');
   const seventeenth = picker.getByRole('button', { name: '17', exact: true });
   assert.equal(await seventeenth.getAttribute('class'), 'yearly');
-  assert.equal(await seventeenth.isDisabled(), true);
-  assert.equal(await picker.locator('.marked-days-list li').first().locator('span').textContent(), 'May 17, every year, and once in 2027');
-  await press('Unmark every year');
+  assert.equal(await seventeenth.isDisabled(), false);
+  assert.equal(await picker.locator('.marked-days-list').count(), 0);
+  const panelHeight = (await dialog.boundingBox()).height;
+  await seventeenth.click({ modifiers: ['Alt'] });
   await waitFor((state) => state.params.markedDates === '24.12, 25.12, 26.12, 31.12, 2027-05-17', 'the yearly entry is removed, the one-off kept');
   await idle();
   assert.equal(await seventeenth.getAttribute('class'), 'once');
@@ -140,14 +141,17 @@ try {
   await press('9');
   await waitFor((state) => state.params.markedDates.endsWith('2027-05-09'), 'a one-off date');
   await idle();
-  await picker.locator('.marked-days-list li', { hasText: 'May 9, 2027' }).getByRole('button', { name: 'Mark every year' }).click();
-  await waitFor((state) => state.params.markedDates === '24.12, 25.12, 26.12, 31.12, 2027-05-17, 09.05', 'the date repeats every year');
+  await picker.getByRole('button', { name: '9', exact: true }).click({ modifiers: ['Alt'] });
+  await waitFor((state) => state.params.markedDates === '24.12, 25.12, 26.12, 31.12, 2027-05-17, 2027-05-09, 09.05', 'the date repeats every year');
+
+  await idle();
+  assert.equal((await dialog.boundingBox()).height, panelHeight, 'Marking days never grows the editor');
 
   // A change to the marked dates from elsewhere stops the picker: it saves nothing until it is reopened.
   const external = await read();
   external.params.markedDates = '01.05';
   await write(external);
-  await dialog.getByRole('alert').filter({ hasText: 'Marked days changed while this editor was open' }).waitFor();
+  await dialog.getByRole('alert').filter({ hasText: 'Marked days changed.' }).waitFor();
   await waitFor((state) => state.params.markedDates === '01.05', 'the outside change is kept');
   await close();
 
