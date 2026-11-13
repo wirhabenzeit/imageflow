@@ -40,7 +40,7 @@ Set these in the environment before running `npm run package:mac:release`. Signi
 
 ## GitHub Actions credentials
 
-In Keychain Access, export only the Developer ID Application identity, including its private key, as a password-protected `.p12`. Store the following repository Actions secrets:
+In Keychain Access, export only the Developer ID Application identity, including its private key, as a password-protected `.p12`. Store the following **environment secrets** under **Settings → Environments → release**:
 
 | Secret | Contents |
 | --- | --- |
@@ -51,62 +51,19 @@ In Keychain Access, export only the Developer ID Application identity, including
 | `APPLE_API_KEY_ID` | API Key ID |
 | `APPLE_API_ISSUER` | Issuer ID |
 
-Use them in a trusted macOS release job after checkout, Node setup and `npm ci`. Ordinary PR checks do not need signing credentials. The following steps import the identity into a temporary keychain, give Apple's signing tools access to that key, restore the runner’s original keychain search list, and remove the credentials after the job. Cleanup still removes credential files if restoring the search list fails:
+Configure `release` to allow only **tags matching `v*`**, require approval from `wirhabenzeit`, and disable administrator bypass. Self-review is allowed so the sole maintainer can approve their own release tags; an explicit approval is still required. Remove all repository-level copies of these secrets. Adding `environment: release` to YAML does not configure those GitHub protection settings by itself.
 
-```yaml
-- name: Prepare signing credentials
-  env:
-    P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-    P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-    API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
-  run: |
-    umask 077
-    security list-keychains -d user > "$RUNNER_TEMP/ImageFlow-keychains-before.tmp"
-    mv "$RUNNER_TEMP/ImageFlow-keychains-before.tmp" "$RUNNER_TEMP/ImageFlow-keychains-before.txt"
-    IMAGEFLOW_KEYCHAIN="$RUNNER_TEMP/imageflow-signing.keychain-db"
-    IMAGEFLOW_KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
-    printf '::add-mask::%s\n' "$IMAGEFLOW_KEYCHAIN_PASSWORD"
-    printf '%s' "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/ImageFlow.p12"
-    printf '%s' "$API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/ImageFlow-AuthKey.p8"
-    security create-keychain -p "$IMAGEFLOW_KEYCHAIN_PASSWORD" "$IMAGEFLOW_KEYCHAIN"
-    security set-keychain-settings -lut 21600 "$IMAGEFLOW_KEYCHAIN"
-    security unlock-keychain -p "$IMAGEFLOW_KEYCHAIN_PASSWORD" "$IMAGEFLOW_KEYCHAIN"
-    security import "$RUNNER_TEMP/ImageFlow.p12" -k "$IMAGEFLOW_KEYCHAIN" -P "$P12_PASSWORD" -f pkcs12 -T /usr/bin/codesign
-    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$IMAGEFLOW_KEYCHAIN_PASSWORD" "$IMAGEFLOW_KEYCHAIN"
-    security list-keychains -d user -s "$IMAGEFLOW_KEYCHAIN"
-    printf 'APPLE_SIGNING_KEYCHAIN=%s\n' "$IMAGEFLOW_KEYCHAIN" >> "$GITHUB_ENV"
-    printf 'APPLE_API_KEY=%s\n' "$RUNNER_TEMP/ImageFlow-AuthKey.p8" >> "$GITHUB_ENV"
-- name: Build signed app
-  env:
-    APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-  run: npm run package:mac
-- name: Check the signed app
-  run: npm run test:packaged:existing
-- name: Notarize tested app and artifacts
-  env:
-    APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-    APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-    APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-  run: npm run notarize:mac
-- name: Remove signing credentials
-  if: always()
-  run: |
-    IMAGEFLOW_CLEANUP_STATUS=0
-    if [[ -f "$RUNNER_TEMP/ImageFlow-keychains-before.txt" ]]; then
-      python3 - "$RUNNER_TEMP/ImageFlow-keychains-before.txt" <<'PYKEYCHAINS' || IMAGEFLOW_CLEANUP_STATUS=$?
-    import pathlib, shlex, subprocess, sys
-    previous = shlex.split(pathlib.Path(sys.argv[1]).read_text())
-    subprocess.run(["security", "list-keychains", "-d", "user", "-s", *previous], check=True)
-    restored = subprocess.check_output(["security", "list-keychains", "-d", "user"], text=True)
-    assert shlex.split(restored) == previous, "Could not restore the original keychain search list"
-    PYKEYCHAINS
-    fi
-    if [[ -f "$RUNNER_TEMP/imageflow-signing.keychain-db" ]]; then
-      security delete-keychain "$RUNNER_TEMP/imageflow-signing.keychain-db" || IMAGEFLOW_CLEANUP_STATUS=$?
-    fi
-    rm -f "$RUNNER_TEMP/ImageFlow.p12" "$RUNNER_TEMP/ImageFlow-AuthKey.p8" "$RUNNER_TEMP/ImageFlow-keychains-before.txt" "$RUNNER_TEMP/ImageFlow-keychains-before.tmp"
-    exit "$IMAGEFLOW_CLEANUP_STATUS"
-```
+The [release workflow](../.github/workflows/release.yml) checks that the tagged commit belongs to `origin/main` before the protected job is scheduled, then checks it again after approval. The reviewer should inspect the tagged commit and workflow before approving credential access.
+
+Credential access is limited to individual steps:
+
+1. `release-secrets.mjs` validates all six secrets before the build, decoding and parsing the API key in memory. An empty or invalid key fails here without writing it to disk.
+2. The app is built with no Apple credential variables or signing keychain available.
+3. `mac-credentials.mjs sign` imports the certificate into a temporary keychain, signs the existing app without rebuilding it, restores the original search list, and deletes the keychain. The intermediate `.p12` is removed immediately after import. This step never writes an API key file.
+4. Packaged tests run after the signing credentials have been removed.
+5. `mac-credentials.mjs notarize` creates a fresh temporary keychain for DMG signing and writes the API key only for this operation. Its cleanup restores and verifies the original search list and removes the keychain and key file, including when the operation fails.
+
+The helper passes neither the encoded certificate/key secrets nor the certificate password to the signing/notarization child process. Cleanup failures fail the job while still attempting to remove every temporary credential file. The signing and notarization libraries remain trusted tools that necessarily use the signing identity; the release environment's human approval is the credential-access boundary.
 
 ## Verification
 
