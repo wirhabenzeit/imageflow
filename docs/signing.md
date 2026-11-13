@@ -74,14 +74,18 @@ Use them in a trusted macOS release job after checkout, Node setup and `npm ci`.
     security list-keychains -d user -s "$IMAGEFLOW_KEYCHAIN"
     printf 'APPLE_SIGNING_KEYCHAIN=%s\n' "$IMAGEFLOW_KEYCHAIN" >> "$GITHUB_ENV"
     printf 'APPLE_API_KEY=%s\n' "$RUNNER_TEMP/ImageFlow-AuthKey.p8" >> "$GITHUB_ENV"
-- name: Build release artifacts
+- name: Build signed app
+  env:
+    APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+  run: npm run package:mac
+- name: Check the signed app
+  run: npm run test:packaged:existing
+- name: Notarize tested app and artifacts
   env:
     APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
     APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
     APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-  run: npm run package:mac:release
-- name: Check the signed app
-  run: npm run test:packaged:existing
+  run: npm run notarize:mac
 - name: Remove signing credentials
   if: always()
   run: |
@@ -103,4 +107,4 @@ xcrun stapler validate out/ImageFlow-<version>-arm64.dmg
 
 Gatekeeper should report `accepted` and `source=Notarized Developer ID`. Main and helper apps use hardened runtime and the JIT entitlement. Unsigned executable memory, disabled library validation and debugger access are not granted. The RunAsNode fuse remains enabled because both the MCP bridge and template typechecking use ImageFlow's own executable; the packaged MCP smoke test exercises that path.
 
-References: [Apple's Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/), [Apple's notarization workflow](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution), [Electron notarization](https://github.com/electron/notarize).
+References: [Apple's Developer ID certificates](https://developer.apple.com/help/account/certificates/create-developer-id-certificates/), [Apple's notarization workflow](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution), [Electron notarization](https://github.com/electron/notarize), [GitHub's temporary signing keychain setup](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications).
