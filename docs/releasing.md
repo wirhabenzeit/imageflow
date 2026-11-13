@@ -42,7 +42,7 @@ After the workflow and installation check succeed, click **Publish release**. Ke
 
 ## Test tags and retries
 
-For a workflow rehearsal, use a separate test branch with a prerelease version such as `0.1.0-test.1`, then push `v0.1.0-test.1`. Such tags produce drafts also marked **prerelease**. Keep the test version out of the production branch and leave the draft unpublished. Drafts and prereleases are excluded from the public update feed.
+For a workflow rehearsal, use a separate test branch with an unused prerelease version such as `0.1.0-test.1`, then push `v0.1.0-test.1`. Such tags produce drafts also marked **prerelease**. Keep the test version out of the production branch and leave the draft unpublished. Drafts and prereleases are excluded from the public update feed.
 
 If signing, tests, notarization or upload fails, fix the cause and rerun the failed jobs for the same tag. Existing draft assets can be replaced on a rerun. The workflow refuses to modify an already published release; release a new version for a published-build fix. Do not move a released tag to a different commit.
 
