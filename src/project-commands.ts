@@ -5,12 +5,13 @@ import type { PrintFormat } from './format';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import { describeLayoutChange, discardContent, layoutChoices, planLayoutChange, swapContent, switchLayout } from './layouts';
-import { hasFacingPages, spanFits } from './format';
+import { hasFacingPages, spanFits, spanRequiredAt } from './format';
 import { isParameterValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import { identifier } from './project';
 import type { ProjectFiles, SpreadState, Values } from './project';
 import { maxZoom, setPlacement } from './spread';
+import { insertionProblem, spreadOrder } from './spread-order';
 
 const id = identifier.refine((value) => value.length <= 256, 'Identifiers must be at most 256 characters.');
 export const spreadReference = z.union([id, z.string().startsWith('$').refine((value) => id.safeParse(value.slice(1)).success,
@@ -69,7 +70,7 @@ export type ProjectCommandResult = {
 };
 export type ProjectCommandErrorCode = 'INVALID_OPERATION' | 'SPREAD_NOT_FOUND' | 'LAYOUT_NOT_FOUND' | 'BOX_NOT_FOUND' |
   'ELEMENT_NOT_FOUND' | 'PARAMETER_NOT_FOUND' | 'INVALID_PARAMETER_VALUE' | 'SOURCE_NOT_FOUND' | 'BOX_TYPE_MISMATCH' | 'INCOMPATIBLE_LAYOUT' |
-  'REFERENCE_NOT_FOUND' | 'DUPLICATE_REFERENCE' | 'INVALID_SPREAD_ID' | 'FORMAT_NOT_FOUND' | 'EMPTY_BOX';
+  'REFERENCE_NOT_FOUND' | 'DUPLICATE_REFERENCE' | 'INVALID_SPREAD_ID' | 'FORMAT_NOT_FOUND' | 'EMPTY_BOX' | 'INVALID_POSITION';
 
 export class ProjectCommandError extends Error {
   constructor(readonly code: ProjectCommandErrorCode, message: string, readonly operationIndex?: number) {
@@ -180,6 +181,11 @@ export function applyProjectCommands(
     }
     if (ref) references[ref] = spread.id;
   }
+  function checkInsertion(spread: SpreadState, after: string | null | undefined) {
+    const position = after === undefined ? project.spreads.length : after === null ? 0 : project.spreads.indexOf(findSpread(after)) + 1;
+    const problem = insertionProblem(project.spreads, position, template.spreads[spread.definition]?.span ?? 'spread', { spreads: template.spreads, format });
+    if (problem) fail('INVALID_POSITION', problem);
+  }
   function insertAfter(spread: SpreadState, after: string | null | undefined) {
     const position = after === undefined ? project.spreads.length : after === null ? 0 : project.spreads.indexOf(findSpread(after)) + 1;
     project.spreads.splice(position, 0, spread);
@@ -239,6 +245,7 @@ export function applyProjectCommands(
           fail('INCOMPATIBLE_LAYOUT', 'Layout ' + operation.definition + ' does not fit the book\'s format ' + format.label + (hasFacingPages(format)
             ? ', which has facing pages. Insert a spread layout.' : ', which has no facing pages. Insert a single-page layout.'));
         }
+        checkInsertion(spread, operation.after);
         registerSpread(spread, operation.ref);
         insertAfter(spread, operation.after);
         changed('Inserted spread ' + spread.id, allSpreads(), true);
@@ -247,6 +254,7 @@ export function applyProjectCommands(
       case 'duplicate_spread': {
         const source = findSpread(operation.spread);
         const spread = { ...structuredClone(source), id: newSpread(source.definition).id };
+        checkInsertion(spread, operation.after === undefined ? source.id : operation.after);
         registerSpread(spread, operation.ref);
         insertAfter(spread, operation.after === undefined ? source.id : operation.after);
         changed('Duplicated spread ' + source.id + ' as ' + spread.id, allSpreads(), true);
@@ -257,10 +265,15 @@ export function applyProjectCommands(
         const after = operation.after === null ? undefined : findSpread(operation.after);
         if (spread === after) break;
         const before = project.spreads.indexOf(spread);
-        project.spreads.splice(before, 1);
-        const position = after ? project.spreads.indexOf(after) + 1 : 0;
-        project.spreads.splice(position, 0, spread);
-        if (position !== before) changed('Moved spread ' + spread.id, allSpreads(), true);
+        const position = after ? project.spreads.filter((other) => other !== spread).indexOf(after) + 1 : 0;
+        if (position === before) break;
+        const ordered = spreadOrder(project.spreads, spread.id, position, { spreads: template.spreads, format });
+        if (!ordered) {
+          fail('INVALID_POSITION', 'This move would put a spread where ' + format.label + ' does not allow it: the book must open on a single ' +
+            'right page and close on a single left page, with full spreads between them. Spreads cannot move into or out of those ends.');
+        }
+        project.spreads = ordered;
+        changed('Moved spread ' + spread.id, allSpreads(), true);
         break;
       }
       case 'remove_spread': {
@@ -272,7 +285,12 @@ export function applyProjectCommands(
       case 'switch_layout': {
         const spread = findSpread(operation.spread);
         findLayout(operation.definition);
-        if (!layoutChoices(template.spreads, spread.definition, format).includes(operation.definition)) {
+        const position = { index: project.spreads.indexOf(spread), count: project.spreads.length };
+        if (!layoutChoices(template.spreads, spread.definition, format, position).includes(operation.definition)) {
+          const required = spanRequiredAt(position.index, position.count, format);
+          if (template.spreads[operation.definition].span !== required && required !== template.spreads[spread.definition].span) {
+            fail('INCOMPATIBLE_LAYOUT', 'This position requires a layout with span: \'' + required + '\' in ' + format.label + '.');
+          }
           fail('INCOMPATIBLE_LAYOUT', spanFits(template.spreads[operation.definition].span, format)
             ? 'A layout switch must keep the same page footprint.'
             : 'Layout ' + operation.definition + ' does not fit the book\'s format ' + format.label + (hasFacingPages(format)

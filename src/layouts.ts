@@ -1,7 +1,7 @@
 import { isParameterValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import type { SpreadState, Values } from './project';
-import { hasFacingPages, spanFits } from './format';
+import { hasFacingPages, spanFits, spanRequiredAt } from './format';
 import type { PrintFormat, Span } from './format';
 
 // Switching layouts. A spread keeps one state for all its layouts, keyed by the IDs the template declares: a box,
@@ -65,14 +65,19 @@ export function declarationConflicts(layouts: Layouts) {
 // single page changes the book's pagination and is not a layout switch. A spread whose layout the template no
 // longer has may choose any. With the book's format, layouts that do not fit it are left out, and a spread whose
 // layout does not fit (the book switched to a format of the other kind) may choose any layout that does: a page
-// layout without facing pages, a spread layout with them. The current layout is always a choice.
-export function layoutChoices(layouts: Layouts, current: string, format?: Pick<PrintFormat, 'structure'>) {
+// layout without facing pages, a spread layout with them. With its position in the book as well, a spread whose
+// layout is not the one the format requires there (a full spread at the start of a book that must open on a single
+// right page) may choose the required span instead. The current layout is always a choice.
+export function layoutChoices(layouts: Layouts, current: string, format?: Pick<PrintFormat, 'structure'>, position?: { index: number; count: number }) {
   const span = own(layouts, current)?.span;
   const fits = (id: string) => !format || spanFits(layouts[id].span, format);
   if (format && span && !spanFits(span, format)) {
-    const wanted: Span = hasFacingPages(format) ? 'spread' : 'page';
+    const wanted: Span = position ? spanRequiredAt(position.index, position.count, format) : hasFacingPages(format) ? 'spread' : 'page';
     return Object.keys(layouts).filter((id) => id === current || layouts[id].span === wanted);
   }
+  // A misplaced spread keeps its own footprint's layouts and may also take the one its position requires.
+  const required = format && position ? spanRequiredAt(position.index, position.count, format) : span;
+  if (span && required !== span) return Object.keys(layouts).filter((id) => id === current || layouts[id].span === span || layouts[id].span === required);
   return Object.keys(layouts).filter((id) => id === current || ((!span || layouts[id].span === span) && fits(id)));
 }
 
@@ -132,8 +137,9 @@ export function familyProblems(layouts: Layouts, families: LayoutFamilies = {}) 
 // The layouts the sidebar previews for a spread, from those it can switch to (`layoutChoices`), in declaration
 // order. A family with a picker shows one preview: the spread's own layout when it is a variant, else the first
 // variant. Other families keep a preview per variant, moved together to where the family first appears.
-export function layoutPreviews(layouts: Layouts, current: string, families: LayoutFamilies = {}, format?: Pick<PrintFormat, 'structure'>) {
-  const choices = layoutChoices(layouts, current, format);
+export function layoutPreviews(layouts: Layouts, current: string, families: LayoutFamilies = {}, format?: Pick<PrintFormat, 'structure'>,
+  position?: { index: number; count: number }) {
+  const choices = layoutChoices(layouts, current, format, position);
   const shown: string[] = [];
   const done = new Set<string>();
   for (const id of choices) {

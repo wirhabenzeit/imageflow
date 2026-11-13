@@ -5,7 +5,7 @@ import type { Parameters } from './parameters';
 // not errors, so a contract-1 template that loaded before keeps loading. The authoring types reject the same
 // mistakes at compile time; this covers untyped templates and spreads typed separately with spreadFor().
 export type DeclarationWarning = {
-  code: 'declaration-unknown-property' | 'declaration-document-mismatch' | 'declaration-control-cycle' | 'declaration-span-unused';
+  code: 'declaration-unknown-property' | 'declaration-document-mismatch' | 'declaration-control-cycle' | 'declaration-span-unused' | 'declaration-ends-missing';
   message: string; path: string; details: Record<string, string>; suggestion: string;
 };
 
@@ -130,22 +130,42 @@ export function declarationWarnings(declared: unknown, schema: Schema): Declarat
 // layout states its span.
 function spanWarnings(declared: Record<string, unknown>, found: DeclarationWarning[]) {
   if (!plain(declared.spreads)) return;
-  const formats = plain(declared.formats) ? Object.values(declared.formats) : [declared.format];
-  const facing = formats.map((format) => !plain(format) || !plain(format.structure) || format.structure.facingPages !== false);
-  const anyFacing = facing.includes(true), anySingle = facing.includes(false);
-  for (const [id, definition] of Object.entries(declared.spreads)) {
-    if (!plain(definition)) continue;
-    const span = definition.span ?? (anyFacing ? 'spread' : 'page');
-    if (span === 'page' ? anySingle : anyFacing) continue;
+  const formats = (plain(declared.formats) ? Object.values(declared.formats) : [declared.format]).filter(plain);
+  const structure = (format: Record<string, unknown>) => plain(format.structure) ? format.structure : {};
+  const single = formats.filter((format) => structure(format).facingPages === false);
+  const facing = formats.filter((format) => structure(format).facingPages !== false);
+  // Single end pages belong to page delivery with ends: 'single-pages', as the schema requires.
+  const ends = facing.filter((format) => structure(format).delivery === 'pages' && structure(format).ends === 'single-pages');
+  const spans = Object.entries(declared.spreads).filter(([, definition]) => plain(definition))
+    .map(([id, definition]) => [id, (definition as Record<string, unknown>).span ?? (facing.length || !formats.length ? 'spread' : 'page')] as const);
+  for (const [id, span] of spans) {
+    const fits = span === 'page' ? single.length > 0 : span === 'left' || span === 'right' ? ends.length > 0 : facing.length > 0 || !formats.length;
+    if (fits) continue;
     found.push({
       code: 'declaration-span-unused', path: 'spreads.' + id + '.span',
       message: 'spreads → ' + id + ': ' + (span === 'page'
         ? "the layout is a single page (span: 'page'), but every format of the template has facing pages. No book can use it."
-        : 'the layout is for facing pages (span: ' + JSON.stringify(span) + '), but no format of the template has facing pages. No book can use it.'),
+        : span === 'left' || span === 'right'
+          ? 'the layout is a single ' + span + " end page, but no format of the template has ends: 'single-pages' with delivery: 'pages'. No book can use it."
+          : 'the layout is for facing pages (span: ' + JSON.stringify(span) + '), but no format of the template has facing pages. No book can use it.'),
       details: { spread: id, span: String(span) },
       suggestion: span === 'page' ? 'Add a format with facingPages: false, or give the layout a facing span.'
+        : span === 'left' || span === 'right' ? "Add a format with ends: 'single-pages', or make the layout a full spread."
         : "Set span: 'page' on the layout, or add a format with facing pages.",
     });
+  }
+  // A format with single ends requires a right page to open and a left page to close the book.
+  if (ends.length) {
+    for (const side of ['right', 'left'] as const) {
+      if (spans.some(([, span]) => span === side)) continue;
+      found.push({
+        code: 'declaration-ends-missing', path: 'spreads',
+        message: "spreads: a format has ends: 'single-pages', which requires every book to " + (side === 'right' ? 'open on a single right' : 'close on a single left') +
+          " page, but no layout has span: '" + side + "'. No such book can pass the Book check.",
+        details: { span: side },
+        suggestion: "Add a layout with span: '" + side + "', or use ends: 'inside-covers' for that format.",
+      });
+    }
   }
 }
 

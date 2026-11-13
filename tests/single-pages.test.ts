@@ -91,7 +91,7 @@ test('layouts of the other kind are drawn and reported as page-sequence problems
   const single = pageSequence(['page', 'spread', 'page'], withCount({ min: 1, max: 20, step: 1 }));
   assert.deepEqual(single.spreads.map(({ page }) => page.number), [1, 2, 3]);
   assert.deepEqual(single.issues, ['Page 2 uses a spread layout, but Wall calendar · A4 portrait has no facing pages. Switch it to a single-page layout.']);
-  const facing = pageSequence(['spread', 'page'], book);
+  const facing = pageSequence(['spread', 'page'], { ...book, structure: { ...book.structure, ends: 'inside-covers' } });
   assert.deepEqual(facing.spreads[1], { span: 'page', page: { left: 3, right: 4 }, sides: ['left', 'right'] });
   assert.deepEqual(facing.issues, ['Spread 2 uses a single-page layout, but Square has facing pages. Switch it to a spread layout.']);
   assert.equal(spanAllowedAt('page', 0, 1, calendar), true);
@@ -208,9 +208,11 @@ test('MCP commands insert and switch only layouts that fit the book’s format',
   assert.throws(() => applyProjectCommands(files(), template, [{ op: 'switch_layout', spread: 'jan', definition: 'body' }]), (error) =>
     error instanceof ProjectCommandError && error.code === 'INCOMPATIBLE_LAYOUT' && /Choose a single-page layout/.test(error.message));
   // A format selected earlier in the batch applies to the commands after it.
-  const switched = applyProjectCommands(files(), template, [{ op: 'select_format', format: 'book' }, { op: 'switch_layout', spread: 'jan', definition: 'body' },
-    { op: 'insert_spread', definition: 'other' }]);
-  assert.deepEqual(switched.files.project.spreads.map(({ definition }) => definition), ['body', 'other']);
+  const switched = applyProjectCommands(files(), template, [{ op: 'select_format', format: 'book' }, { op: 'insert_spread', definition: 'other' }]);
+  assert.deepEqual(switched.files.project.spreads.map(({ definition }) => definition), ['month', 'other']);
+  // There, the first spread must become a single right page.
+  assert.throws(() => applyProjectCommands(files(), template, [{ op: 'select_format', format: 'book' }, { op: 'switch_layout', spread: 'jan', definition: 'body' }]),
+    (error) => error instanceof ProjectCommandError && /requires a layout with span: 'right' in Square/.test(error.message));
   assert.throws(() => applyProjectCommands(files(), template, [{ op: 'select_format', format: 'book' }, { op: 'insert_spread', definition: 'year' }]),
     (error) => error instanceof ProjectCommandError && /which has facing pages\. Insert a spread layout/.test(error.message));
 });
