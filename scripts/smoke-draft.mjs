@@ -1,3 +1,4 @@
+import { packagedMacExecutable } from './mac-paths.mjs';
 import { testBook, menuAction, exportAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -17,7 +18,7 @@ const read = async (file = 'project.json') => JSON.parse(await readFile(join(pro
 let app;
 try {
   app = await _electron.launch({
-    executablePath: packaged ? join(root, 'out', 'ImageFlow-darwin-' + process.arch, 'ImageFlow.app', 'Contents/MacOS/ImageFlow') : electron,
+    executablePath: packaged ? packagedMacExecutable(root) : electron,
     args: [...(packaged ? [] : [join(root, '.build/desktop')]), '--user-data-dir=' + join(work, 'profile')],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' },
   });

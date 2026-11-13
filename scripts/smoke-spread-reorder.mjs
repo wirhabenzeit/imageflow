@@ -13,6 +13,20 @@ const read = async () => JSON.parse(await readFile(join(project, 'project.json')
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
+  await app.context().addInitScript(() => {
+    window.reorderAnimations = [];
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (frames, options) {
+      const animation = animate.call(this, frames, options);
+      if (this.matches('.spread-thumb, .if-spread-container')) {
+        const record = { spread: this.dataset.spread, frames, duration: options.duration, canceled: false };
+        window.reorderAnimations.push(record);
+        animation.addEventListener('cancel', () => { record.canceled = true; });
+        if (this.matches('.spread-thumb') && window.holdReorderAnimations) animation.pause();
+      }
+      return animation;
+    };
+  });
   const w = await testBook(app, project, true);
   const thumb = (id) => w.locator('.spread-thumb[data-spread="' + id + '"]');
   const scroll = w.locator('.thumbs-scroll');
@@ -27,6 +41,7 @@ try {
   await w.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
   assert.equal(await thumb('title').getAttribute('draggable'), 'false');
   assert.equal(await thumb('closing').getAttribute('draggable'), 'false');
+  await w.evaluate(() => { window.holdReorderAnimations = true; });
 
   // A real native drag, through Chromium's data transfer. One Undo restores the entire book and selection.
   await thumb('arriving').click();
@@ -39,6 +54,29 @@ try {
   const movedSession = (await w.evaluate(() => window.imageflow.currentProject())).value.id;
   assert.notEqual(movedSession, initialSummary.id, 'a save creates a new render-session revision');
   await ready();
+  await w.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
+  const motions = await w.evaluate(() => window.reorderAnimations);
+  const artworkMotions = await w.frameLocator('iframe.book-frame-thumbs[data-current][data-ready]')
+    .locator('body').evaluate(() => window.reorderAnimations);
+  assert.deepEqual(motions.map(({ spread }) => spread).sort(), ['arriving', 'headlands']);
+  assert.deepEqual(artworkMotions.map(({ spread }) => spread).sort(), ['arriving', 'headlands']);
+  for (const motion of motions) {
+    const artwork = artworkMotions.find(({ spread }) => spread === motion.spread);
+    assert.deepEqual(motion.frames, artwork.frames, 'Artwork and labels follow the same path');
+    assert.equal(motion.duration, 160, 'Settling stays short');
+    assert.equal(artwork.duration, 160);
+  }
+  await w.frameLocator('iframe.book-frame-thumbs[data-current][data-ready]').locator('body').evaluate(async () => {
+    while (document.getAnimations().length) await new Promise(resolve => requestAnimationFrame(resolve));
+  });
+  // Starting a fresh drag cancels any visual offset before its hit testing begins.
+  assert.ok(await thumb('arriving').evaluate(node => node.getAnimations().length), 'Hold the real settling animation to test interruption');
+  const interrupt = await w.evaluateHandle(() => new DataTransfer());
+  await thumb('arriving').dispatchEvent('dragstart', { dataTransfer: interrupt });
+  assert.equal(await thumb('arriving').evaluate(node => node.getAnimations().length), 0);
+  await thumb('arriving').dispatchEvent('dragend');
+  await interrupt.dispose();
+  await w.evaluate(() => { window.holdReorderAnimations = false; });
   assert.equal(await thumb('arriving').getAttribute('aria-current'), 'page');
   await w.waitForFunction(() => {
     const sheet = document.querySelector('.sheet-selection')?.getBoundingClientRect();
@@ -54,6 +92,23 @@ try {
   await ready();
 
   console.log('Native drag, selection, reveal and Undo passed.');
+  // Reduced Motion keeps the same save/Undo behavior and skips both animation layers.
+  await w.emulateMedia({ reducedMotion: 'reduce' });
+  await w.evaluate(() => { window.reorderAnimations = []; });
+  await thumb('arriving').focus();
+  await w.keyboard.press('Alt+Meta+ArrowDown');
+  await saved('Spread moved to pages 4–5');
+  await w.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
+  assert.equal(await w.evaluate(() => window.reorderAnimations.length), 0);
+  assert.equal(await w.frameLocator('iframe.book-frame-thumbs[data-current][data-ready]').locator('body')
+    .evaluate(() => window.reorderAnimations.length), 0);
+  await undo.click();
+  await saved('Edit undone');
+  await ready();
+  await w.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
+  await w.emulateMedia({ reducedMotion: 'no-preference' });
+  assert.deepEqual(await order(), ids);
+  console.log('Synchronized 160 ms settling, animation cleanup, interruptible drag and Reduced Motion passed.');
   // Controlled drag events let the test inspect insertion indicators and hold a pointer still at either edge.
   const start = async (id) => {
     const dataTransfer = await w.evaluateHandle(() => new DataTransfer());

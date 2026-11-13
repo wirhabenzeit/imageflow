@@ -9,6 +9,8 @@ import { editorURL } from './desktop';
 import { bookLayout } from './desktop';
 import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { cssMM, pageLabel, pageNumbers, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, toMillimeters } from './format';
+import { animateReorder } from './reorder-motion';
+import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat, UnitPages } from './format';
 import { parseDocument } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
@@ -399,6 +401,36 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
 // one column and book order runs left to right, then continues on the next row. The book grows vertically.
 type GridRequest = { columns: number };
 function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, initial?: GridRequest) {
+  if (view === 'thumbs') {
+    let animations: Animation[] = [];
+    window.addEventListener('message', (event: MessageEvent) => {
+      if (event.source !== parent || event.origin !== 'imageflow://editor') return;
+      if (event.data?.type === 'prepare-reorder' && Array.isArray(event.data.offsets)) {
+        animations.forEach(animation => animation.cancel());
+        animations = [];
+        if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          for (const offset of event.data.offsets as ReorderOffset[]) {
+            if (typeof offset.spread !== 'string' || !Number.isFinite(offset.x) || !Number.isFinite(offset.y)) continue;
+            const slot = sheets.find(sheet => sheet.spread === offset.spread)?.sheet.parentElement;
+            if (!slot) continue;
+            const animation = animateReorder(slot, offset);
+            animation.pause();
+            animation.currentTime = 0;
+            animations.push(animation);
+          }
+        }
+        post({ type: 'reorder-ready' });
+      } else if (event.data?.type === 'play-reorder' && Number.isFinite(event.data.start)) {
+        for (const animation of animations) {
+          animation.play();
+          animation.startTime = event.data.start - performance.timeOrigin;
+        }
+      } else if (event.data?.type === 'cancel-reorder') {
+        animations.forEach(animation => animation.cancel());
+        animations = [];
+      }
+    });
+  }
   const { pad, gap, columns = 1, columnGap = 0 } = bookLayout[view];
   root.style.setProperty('--if-pad', pad + 'px');
   root.style.setProperty('--if-gap', gap + 'px');
