@@ -113,7 +113,7 @@ export class DocumentSession {
   }
   async run<T>(task: () => Promise<T>): Promise<Result<T>> {
     if (this.closing) return { error: 'This book is closing.' };
-    if (this.busy) return { error: 'ImageFlow is finishing another operation in this book.' };
+    if (this.busy) return { error: 'ImageFlow is finishing another operation in this book.', code: 'BOOK_BUSY' };
     this.busy = true;
     try { return { value: await task() }; }
     catch (error) {

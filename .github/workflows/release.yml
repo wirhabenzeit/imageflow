@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+      - name: Require the tagged commit on main
+        run: node scripts/release-main.mjs
+      - name: Check tag against package version
+        id: version
+        run: node scripts/release-metadata.mjs
+
+  mac:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    environment: release
+    timeout-minutes: 60
+    env:
+      IMAGEFLOW_HIDE_WINDOW: '1'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      RELEASE_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+          cache: npm
+      - name: Check runner architecture
+        run: node -e "if (process.arch !== process.env.RELEASE_ARCH) throw new Error('Release runner architecture does not match the target')"
+      - name: Cache Electron downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            .build/electron-cache
+            ~/Library/Caches/electron
+          key: ${{ runner.os }}-${{ runner.arch }}-electron-${{ hashFiles('package-lock.json') }}
+      - name: Recheck main before credential access
+        run: node scripts/release-main.mjs
+      - name: Validate release credentials before building
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: node scripts/release-secrets.mjs
+      - run: npm ci
+      - name: Install PDF test tools
+        run: brew install poppler
+      - name: Build local app without release credentials
+        run: npm run package:mac
+      - name: Sign the existing app with temporary credentials
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: node scripts/mac-credentials.mjs sign --arch "$RELEASE_ARCH"
+      - name: Test signed app after signing credentials are removed
+        run: npm run test:packaged:existing
+      - name: Notarize tested app with temporary credentials
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: node scripts/mac-credentials.mjs notarize --arch "$RELEASE_ARCH"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ImageFlow-release-mac-${{ matrix.arch }}
+          path: |
+            out/*.zip
+            out/*.dmg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+
+  draft:
+    needs: [version, mac]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ImageFlow-release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Create or update draft release
+        run: node scripts/release-draft.mjs release-assets/*.zip release-assets/*.dmg
