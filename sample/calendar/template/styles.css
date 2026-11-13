@@ -1,0 +1,40 @@
+@font-face {
+  font-family: "Calendar Sans";
+  src: url("./fonts/inter-latin-300-normal.woff2") format("woff2");
+  font-weight: 300;
+}
+@font-face {
+  font-family: "Calendar Sans";
+  src: url("./fonts/inter-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+}
+@font-face {
+  font-family: "Calendar Sans";
+  src: url("./fonts/inter-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+}
+
+/* Sizes come from the page as custom properties, scaled from the A3 design to the chosen format. */
+.wall-calendar { color: #fff; font: 300 var(--caption-size)/1 "Calendar Sans"; }
+.wall-calendar :is(p, ol) { margin: 0; padding: 0; }
+.wall-calendar .strip { background: var(--strip); }
+.wall-calendar .rule { background: rgb(255 255 255 / .55); }
+
+/* Written down the strip from its top, centred across it, like the place on a printed calendar. */
+.wall-calendar .place {
+  font-size: var(--place-size); writing-mode: vertical-rl; display: flex; align-items: center; white-space: nowrap; overflow: hidden; letter-spacing: -.01em;
+}
+.wall-calendar .place.empty { opacity: .4; }
+.wall-calendar .month-name { text-align: center; letter-spacing: .02em; }
+.wall-calendar .year {
+  display: flex; justify-content: flex-end; align-items: center; writing-mode: vertical-rl;
+  font: 700 var(--year-size)/1 "Calendar Sans"; letter-spacing: -.02em;
+}
+
+/* One row per day: the number right-aligned, the weekday after it. Weekends are lighter. */
+.wall-calendar .days { display: flex; flex-direction: column; list-style: none; font-weight: 700; }
+.wall-calendar .days li { display: grid; grid-template-columns: 1fr 1fr; column-gap: var(--day-gap); align-items: baseline; height: var(--day-row); }
+.wall-calendar .day { text-align: right; font-size: var(--day-size); font-variant-numeric: tabular-nums; }
+.wall-calendar .weekday { font-size: var(--weekday-size); }
+.wall-calendar .days .weekend { color: rgb(255 255 255 / .5); font-weight: 400; }
+.wall-calendar .days .marked { color: var(--highlight); }

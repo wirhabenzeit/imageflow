@@ -50,7 +50,8 @@ try {
   const picker = await windowAt('imageflow://editor/new');
   await picker.getByRole('heading', { name: 'Choose a template' }).waitFor();
   await picker.getByRole('radio', { name: /Photobook/ }).waitFor();
-  assert.equal(await picker.getByRole('radio').count(), 1);
+  await picker.getByRole('radio', { name: /Wall calendar/ }).waitFor();
+  assert.equal(await picker.getByRole('radio').count(), 2, 'the built-in photobook and calendar');
 
   await menu('Manage Templates…');
   const settings = await windowAt(settingsURL);

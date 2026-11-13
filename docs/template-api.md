@@ -245,6 +245,8 @@ The `all` shorthand of `bleed` and `safe` works in both. A side name of the othe
 
 Layouts for these formats use `span: 'page'` (see [Spread spans](#spread-spans)). In a format without facing pages, `ctx.format` and `ctx.geometry` describe one page: `ctx.format.facingPages` is `false`, `bleed` and `safe` have `left` and `right`, `spreadWidth` is the page width, `ctx.geometry.page(area?)` takes no side and `ctx.geometry.spread()` throws. `ctx.page` is `{ number }`, anchors report `side: 'page'`, and `ctx.book.pages` counts pages as usual. `<Spread>` sets `--bleed-left`, `--bleed-right`, `--safe-left` and `--safe-right` instead of the outside and binding variables. The export has one PDF page per unit, with bleed on all four sides and a TrimBox inset by the bleed on each edge.
 
+The Wall calendar starter, `sample/calendar/template/index.tsx`, is a complete example: two landscape formats without facing pages, a cover and a month layout, months numbered by `month` anchors (`ctx.book.anchors('month')`), and type sizes scaled with the trim width.
+
 ### Spread spans
 
 `span` says which pages a layout occupies, and so which formats it fits:

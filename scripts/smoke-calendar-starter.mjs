@@ -1,0 +1,101 @@
+import { exportAction, testBook } from './ui-actions.mjs';
+import assert from 'node:assert/strict';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import electron from 'electron';
+import { PDFDocument } from 'pdf-lib';
+import { _electron } from 'playwright-core';
+
+// #27: the calendar starter opens without Book check findings, numbers its months from the page position, and
+// exports a print PDF of 13 single pages in both formats. `--screenshots <folder>` also saves the editor and the
+// print PDFs there, for reviewing the design.
+const root = fileURLToPath(new URL('../', import.meta.url));
+const build = join(root, '.build');
+const flag = process.argv.indexOf('--screenshots');
+const screenshots = flag >= 0 ? process.argv[flag + 1] : undefined;
+const work = await mkdtemp(join(build, 'calendar-starter-'));
+const project = join(work, 'Calendar.imageflow');
+await cp(join(root, 'sample', 'calendar'), project, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+if (screenshots) await mkdir(screenshots, { recursive: true });
+
+const points = (millimetres) => millimetres * 72 / 25.4;
+const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 0.5, message + ': ' + actual + ' ≉ ' + expected);
+let app;
+try {
+  app = await _electron.launch({ executablePath: electron, args: [join(build, 'desktop'), '--user-data-dir=' + join(work, 'profile')],
+    env: { ...process.env, ...(screenshots ? {} : { IMAGEFLOW_HIDE_WINDOW: '1' }) }, timeout: 15000 });
+  const w = await testBook(app, project, false);
+  w.setDefaultTimeout(30000);
+  await w.setViewportSize({ width: 1600, height: 1000 }).catch(() => {});
+  const ready = 'iframe.book-frame-book[data-current][data-ready]';
+  const frame = w.frameLocator(ready);
+  const renderStatus = () => frame.locator('body').evaluate(() => window.imageflowRenderStatus);
+  const months = () => frame.locator('.month-name').allTextContents();
+  const saveTo = (filePath) => app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, filePath);
+  const exported = async (name, file, expected) => {
+    await saveTo(file);
+    await exportAction(w, name);
+    await w.waitForFunction((expected) => document.querySelector('.status-error') ||
+      (document.querySelector('.status')?.textContent ?? '').startsWith(expected), expected, { timeout: 120000 });
+    assert.match(await w.locator('.status').textContent(), new RegExp('^' + expected));
+    return PDFDocument.load(await readFile(file));
+  };
+  // Every day of January fits in the days element, above the bottom of the safe area.
+  const daysFit = async () => {
+    const january = frame.locator('.month').first();
+    const [area, last] = [await january.locator('.days').locator('..').boundingBox(), await january.locator('.days li').last().boundingBox()];
+    assert.ok(last.y + last.height <= area.y + area.height + 1, 'day 31 fits: ' + JSON.stringify({ area, last }));
+  };
+  const printed = async (format, trim) => {
+    const file = join(screenshots ?? work, 'calendar-' + format + '.pdf');
+    const pdf = await exported('Export print PDF', file, 'Print PDF saved');
+    assert.equal(pdf.getPageCount(), 13);
+    for (const page of pdf.getPages()) {
+      near(page.getMediaBox().width, points(trim.width + 6), format + ' page width');
+      near(page.getMediaBox().height, points(trim.height + 6), format + ' page height');
+    }
+  };
+
+  await w.locator(ready).waitFor();
+  const status = await renderStatus();
+  assert.equal(status.state, 'ready');
+  assert.deepEqual(status.errors, [], JSON.stringify(status.errors));
+  assert.deepEqual(status.warnings ?? [], [], JSON.stringify(status.warnings));
+  assert.equal(status.pages, 13);
+  assert.deepEqual(await months(), ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']);
+  // Days follow the month: February 2027 has 28, and 1 February 2027 is a Monday.
+  const february = frame.locator('.month').nth(1).locator('.days li');
+  assert.equal(await february.count(), 28);
+  assert.equal(await february.first().textContent(), '1Mo');
+  assert.deepEqual(await frame.locator('.month').nth(1).locator('.weekend .day').allTextContents(),
+    ['6', '7', '13', '14', '20', '21', '27', '28']);
+  // The place falls back to the photo's caption; the cover counts the months for its year.
+  assert.equal(await frame.locator('.month .place').first().textContent(), 'Segla, Senja');
+  assert.equal(await frame.locator('.cover .year').textContent(), '2027');
+  await daysFit();
+  if (screenshots) await w.screenshot({ path: join(screenshots, 'editor.png') });
+  await printed('a3', { width: 420, height: 297 });
+
+  // A first month later in the year renumbers the pages, and the cover shows both years.
+  await w.getByText('Book settings', { exact: true }).click();
+  const first = w.getByLabel('First month', { exact: true });
+  await first.fill('2026-09');
+  await frame.locator('.month-name').first().filter({ hasText: 'SEP' }).waitFor();
+  assert.deepEqual((await months()).slice(0, 5), ['SEP', 'OCT', 'NOV', 'DEC', 'JAN']);
+  assert.equal(await frame.locator('.cover .year').textContent(), '2026–27');
+  await w.getByRole('button', { name: 'Undo', exact: true }).click();
+  await frame.locator('.month-name').first().filter({ hasText: 'JAN' }).waitFor();
+
+  // The A4 format keeps the proportions and passes the print checks too.
+  const before = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  await w.getByRole('combobox', { name: 'Format' }).selectOption('a4');
+  await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, before);
+  assert.deepEqual((await renderStatus()).errors, []);
+  await daysFit();
+  await printed('a4', { width: 297, height: 210 });
+  console.log('ImageFlow calendar starter passed.');
+} finally {
+  await app?.close();
+  await rm(work, { recursive: true, force: true });
+}
