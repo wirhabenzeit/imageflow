@@ -20,8 +20,8 @@
         "./types/jsx-runtime.d.ts"
       ],
       "*": [
-        "./vendor/types/node_modules/*",
-        "./vendor/types/node_modules/@types/*"
+        "./vendor/types/packages/*",
+        "./vendor/types/packages/@types/*"
       ]
     }
   },

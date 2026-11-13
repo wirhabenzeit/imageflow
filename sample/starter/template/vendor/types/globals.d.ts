@@ -1,1 +1,1 @@
-/// <reference path="./node_modules/@types/geojson/index.d.ts" />
+/// <reference path="./packages/@types/geojson/index.d.ts" />

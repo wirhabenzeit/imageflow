@@ -41,7 +41,7 @@ function check(): TypecheckResult {
     }
   }
   readSources(root);
-  // Declarations of the saved dependency bundle (ADR 0006), laid out as node_modules so packages resolve as usual.
+  // Declarations of the saved dependency bundle (ADR 0006), in vendor/types/packages by package name.
   const vendorTypes = join(root, 'vendor', 'types');
   const untyped = join(vendorTypes, 'untyped.d.ts');
   const modules: Record<string, string> = {
@@ -52,6 +52,8 @@ function check(): TypecheckResult {
     jsx: ts.JsxEmit.ReactJSX, strict: true, noEmit: true, skipLibCheck: false, types: [],
     allowJs: true, checkJs: false, noUncheckedSideEffectImports: true, resolveJsonModule: true, allowImportingTsExtensions: true,
     lib: ['lib.es2022.d.ts', 'lib.dom.d.ts', 'lib.dom.iterable.d.ts'],
+    // Every bare import, from template code and from vendored declarations alike, resolves among the saved packages.
+    baseUrl: vendorTypes, paths: { '*': ['packages/*', 'packages/@types/*'] },
   };
   const host = ts.createCompilerHost(options);
   const permitted = (path: string) => {
@@ -80,9 +82,8 @@ function check(): TypecheckResult {
       return { resolvedFileName: join(types, 'csstype/index.d.ts'), extension: ts.Extension.Dts };
     }
     if (!name.startsWith('./') && !name.startsWith('../')) {
-      // Template code resolves packages from vendor/types; vendored declarations resolve their own imports in place.
-      const from = inside(vendorTypes, resolve(containingFile)) ? containingFile : join(vendorTypes, 'index.d.ts');
-      return ts.resolveModuleName(name, from, options, host).resolvedModule;
+      const resolved = ts.resolveModuleName(name, containingFile, options, host).resolvedModule;
+      return resolved && inside(vendorTypes, resolve(resolved.resolvedFileName)) ? resolved : undefined;
     }
     return ts.resolveModuleName(name, containingFile, options, host).resolvedModule;
   });

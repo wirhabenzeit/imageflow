@@ -103,7 +103,10 @@ async function licenseFiles(directory: string) {
   return entries.filter((name) => /^(licen[cs]e|copying|notice)(\.|$)/i.test(name)).sort();
 }
 
-/** Copies the declaration files the given packages' types reach, keeping their node_modules layout. */
+/**
+ * Copies the declaration files the given packages' types reach into `vendor/types/packages/`, laid out by package
+ * name. The folder is not called node_modules, which .gitignore files and template export leave out.
+ */
 async function vendorTypes(root: string, packages: string[], target: string) {
   const ts = (await import('typescript')).default;
   const options = { moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022,
@@ -151,7 +154,7 @@ async function vendorTypes(root: string, packages: string[], target: string) {
   if (ambient.size) {
     await writeFile(join(target, '..', 'globals.d.ts'), [...ambient].sort().map((name) => {
       const entry = ts.resolveModuleName(name, containing, options, host).resolvedModule?.resolvedFileName;
-      return entry ? '/// <reference path="./node_modules/' + slash(relative(modules, entry)) + '" />' : '';
+      return entry ? '/// <reference path="./packages/' + slash(relative(modules, entry)) + '" />' : '';
     }).filter(Boolean).join('\n') + '\n');
   }
   return untyped;
@@ -230,7 +233,7 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
       } else manifest.licenses[name] = typeof info.license === 'string' ? info.license : '';
     }
     manifest.untyped = await vendorTypes(root, [...new Set(specifiers.filter((specifier) => extname(specifier) !== '.css').map(packageName))],
-      join(staging, 'types', 'node_modules'));
+      join(staging, 'types', 'packages'));
     if (manifest.untyped.length) {
       await mkdir(join(staging, 'types'), { recursive: true });
       await writeFile(join(staging, 'types', 'untyped.d.ts'), manifest.untyped.map((name) => 'declare module ' + JSON.stringify(name) + ';').join('\n') + '\n');
@@ -251,7 +254,7 @@ async function updateTsconfig(root: string) {
   try { config = JSON.parse(await readFile(path, 'utf8')); } catch { return; }
   config.compilerOptions ??= {};
   config.compilerOptions.paths = { ...config.compilerOptions.paths,
-    '*': ['./vendor/types/node_modules/*', './vendor/types/node_modules/@types/*'] };
+    '*': ['./vendor/types/packages/*', './vendor/types/packages/@types/*'] };
   config.exclude = [...new Set([...(config.exclude ?? []), 'node_modules', 'vendor'])];
   const globals = await stat(join(root, vendorFolder, 'types', 'globals.d.ts')).then(() => true, () => false);
   const files = (config as { files?: string[] }).files?.filter((name) => name !== 'vendor/types/globals.d.ts') ?? [];
