@@ -1,6 +1,6 @@
 # 0006: Template dependencies, network access and asynchronous rendering
 
-Status: accepted, 2026-11-13; revised the same day. Phases 1 (render purity), 2 (asynchronous rendering), 3 (network), 4 (npm dependencies) and 5 (the starter's Map layout) implemented. The Map layout is added beside the Panorama GPX inset rather than replacing it for now. Persistent snapshots and generated files are deferred (see [Deferred](#deferred)); reproducible offline printing is tracked in #92. Motivated by a real map layout in the photobook starter, replacing the basemap-less GPX inset.
+Status: accepted, 2026-11-13; revised the same day. Phases 1 (render purity), 2 (asynchronous rendering), 3 (network), 4 (npm dependencies) and 5 (the starter's Map layout) implemented. The Map layout is added beside the Panorama GPX inset rather than replacing it for now. Persistent snapshots and generated files are deferred (see [Deferred](#deferred)); reproducible offline printing is tracked in #94. Motivated by a real map layout in the photobook starter, replacing the basemap-less GPX inset.
 
 ## Problem
 
@@ -89,14 +89,14 @@ Keyed providers (MapTiler, Mapbox, Stadia) can be added by template authors thro
 
 - Templates can use ordinary npm libraries, for maps, charts, QR codes, elevation profiles, without app changes.
 - Maps are drawn at print resolution, and there is no snapshot to fall out of date.
-- Printing a book with a map needs the network and the provider. If a provider changes its style or data, a reprint can differ; if it is down, the Book check fails and export stops instead of printing an incomplete page. Offline, reproducible printing returns with #92.
+- Printing a book with a map needs the network and the provider. If a provider changes its style or data, a reprint can differ; if it is down, the Book check fails and export stops instead of printing an incomplete page. Offline, reproducible printing returns with #94.
 - Templates with `network` are more powerful code; the consent step and per-frame CSP limit that power to the declared origins.
 - Export takes longer for pages with pictures, bounded by the per-picture timeout.
 - The template package gains a generated `vendor/` folder. Authors need `npm install` and an explicit rebuild to change dependencies; a book never picks up installed packages by itself.
 
 ## Deferred
 
-- **Persistent snapshots and generated files.** Saving a rendered picture into the book (an editor `saveFile`, image file parameters, and collection of files no saved state or Undo history refers to) was designed in the first draft and is left out of v1. It returns, if needed, for offline and reproducible printing (#92).
+- **Persistent snapshots and generated files.** Saving a rendered picture into the book (an editor `saveFile`, image file parameters, and collection of files no saved state or Undo history refers to) was designed in the first draft and is left out of v1. It returns, if needed, for offline and reproducible printing (#94).
 
 ## Phases
 
