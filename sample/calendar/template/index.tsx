@@ -60,7 +60,10 @@ const weekdayName = (date: Date, language: Language) => {
   return name.charAt(0).toLocaleUpperCase(language) + name.slice(1);
 };
 // Marked days are a comma-separated list of day numbers, such as "3, 14".
-const markedDays = (value: string) => new Set(value.split(/[\s,;]+/).map(Number).filter((day) => Number.isInteger(day) && day > 0));
+// Every token is kept, so entries that are not days of this month can be reported instead of silently dropped.
+const markedTokens = (value: string) => value.split(/[\s,;]+/).filter(Boolean);
+const markedDays = (value: string, days = 31) =>
+  new Set(markedTokens(value).filter((token) => /^\d+$/.test(token)).map(Number).filter((day) => day >= 1 && day <= days));
 
 // Type sizes are designed for A3 and scale with the trim width, like the positions do.
 const scale = (context: Pick<Context, 'format'>, value: number, unit: 'pt' | 'mm') => (value * context.format.trim.width / canvas.width).toFixed(2) + unit;
@@ -103,7 +106,7 @@ function Rule({ context }: { context: Pick<Context, 'geometry'> }) {
 }
 
 function Days({ month, language, marked }: { month: Date; language: Language; marked: string }) {
-  const highlighted = markedDays(marked);
+  const highlighted = markedDays(marked, daysIn(month));
   return <ol className="days">
     {Array.from({ length: daysIn(month) }, (_, i) => {
       const date = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), i + 1));
@@ -165,9 +168,12 @@ export default defineTemplate({
         const month = monthAt(ctx.document.firstMonth, index);
         const language = ctx.document.language;
         const marked = ctx.elements.days.params.marked;
-        const outside = [...markedDays(marked)].filter((day) => day > daysIn(month));
-        const finding = outside.length ? issue({ code: 'marked-day-outside-month', severity: 'warning', element: 'days', parameter: 'marked',
-          message: monthName(month, language) + ' has no day ' + outside.join(', ') + '.', suggestion: 'Remove the day from Marked days.' }) : {};
+        const valid = markedDays(marked, daysIn(month));
+        const rejected = markedTokens(marked).filter((token) => !/^\d+$/.test(token) || !valid.has(Number(token)));
+        const finding = rejected.length ? issue({ code: 'marked-day-invalid', severity: 'warning', element: 'days', parameter: 'marked',
+          message: (rejected.length === 1 ? 'Marked day ' : 'Marked days ') + rejected.join(', ') + (rejected.length === 1 ? ' is' : ' are') + ' not a day of ' + monthName(month, language) +
+            ' (1–' + daysIn(month) + ') and ' + (rejected.length === 1 ? 'is' : 'are') + ' not shown.',
+          suggestion: 'Use day numbers from 1 to ' + daysIn(month) + ', separated by commas.' }) : {};
         return <Page context={ctx} className="month">
           <ctx.PhotoBox id="hero" rect={photoRect(ctx)} />
           <StripCaption context={ctx} text={place(ctx.params.place, ctx.boxes.hero.photo)} placeholder="Place" edit={ctx.edit('place')} />

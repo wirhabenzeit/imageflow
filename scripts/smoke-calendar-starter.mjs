@@ -90,6 +90,26 @@ try {
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await frame.locator('.month-name').first().filter({ hasText: 'JAN' }).waitFor();
 
+  // Marked days that are not days of the month are reported, not silently dropped: February has no 30th, and the
+  // other entries are no day numbers at all. Only the 17th is marked.
+  const file = join(project, 'project.json');
+  const saved = JSON.parse(await readFile(file, 'utf8'));
+  saved.spreads.find(({ id }) => id === 'feb').elements = { days: { params: { marked: '0, -1, 1.5, typo, 17, 30' } } };
+  await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
+  await frame.locator('.month').nth(1).locator('.marked').first().waitFor();
+  assert.deepEqual(await frame.locator('.month').nth(1).locator('.marked .day').allTextContents(), ['17']);
+  // Template findings are reported with a `template:` prefix on their code.
+  let invalid = [];
+  for (let attempt = 0; attempt < 50 && !invalid.length; attempt++) {
+    invalid = (await renderStatus()).warnings.filter(({ code }) => code === 'template:marked-day-invalid');
+    if (!invalid.length) await w.waitForTimeout(100);
+  }
+  assert.equal(invalid.length, 1, JSON.stringify(invalid));
+  assert.match(invalid[0].message, /^Marked days 0, -1, 1\.5, typo, 30 are not a day of FEB \(1–28\)/);
+  saved.spreads.find(({ id }) => id === 'feb').elements = {};
+  await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
+  await frame.locator('.month').nth(1).locator('.marked').waitFor({ state: 'detached' });
+
   // Without the cover the months stay January to December, and twelve pages still print.
   await w.locator('.spread-thumb').first().click();
   await w.waitForFunction(() => !document.querySelector('button[aria-label="Delete"]')?.disabled);
