@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
+import sharp from 'sharp';
 import { clickClosingWindow } from './ui-actions.mjs';
 
-// The template library: import from Settings, live updates in an open New Book picker, removal, a failed import,
+// The template library: import from its own window, live updates in an open New Book picker, removal, a failed import,
 // creating books from a library template and from the built-in starter without its sample, and Save Template to Library.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'template-library-'));
@@ -21,7 +22,7 @@ await writeFile(join(travel, 'index.tsx'), retitled('1.0.0'));
 await cp(join(root, 'sample/starter/template'), broken, { recursive: true });
 await writeFile(join(broken, 'index.tsx'), source.replace('spreads: ({ spread }) => ({', 'spreads: ({ spread }) => ({ broken: 1,'));
 
-const settingsURL = 'imageflow://editor/settings';
+const settingsURL = 'imageflow://editor/templates';
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1', IMAGEFLOW_TEMPLATES: library } });
 const choose = (paths) => app.evaluate(({ dialog }, paths) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: paths }); }, paths);
@@ -59,20 +60,30 @@ try {
   start.setDefaultTimeout(30000);
   await start.locator('.start-window').waitFor();
 
-  // An open New Book picker follows changes made in Settings.
+  // An open New Book picker follows changes made in Templates.
   const created = start.evaluate(() => window.imageflow.openProject('new'));
   void created.catch(() => {});
   const picker = await windowAt('imageflow://editor/new');
-  await picker.getByRole('heading', { name: 'Choose a template' }).waitFor();
-  await picker.getByRole('radio', { name: /Photobook/ }).waitFor();
-  await picker.getByRole('radio', { name: /Wall calendar/ }).waitFor();
-  assert.equal(await picker.getByRole('radio').count(), 2, 'the built-in photobook and calendar');
+  await picker.getByRole('heading', { name: 'New Book' }).waitFor();
+  await picker.getByRole('option', { name: /Photobook/ }).waitFor();
+  await picker.getByRole('option', { name: /Wall calendar/ }).waitFor();
+  assert.equal(await picker.getByRole('option').count(), 2, 'the built-in photobook and calendar');
 
+  assert.equal(await picker.getByRole('button', { name: 'Manage Templates…', exact: true }).count(), 0);
   await menu('Manage Templates…');
   const settings = await windowAt(settingsURL);
-  const list = settings.getByRole('list', { name: 'Templates' });
-  await list.getByText('Photobook').waitFor();
-  assert.equal(await settings.getByRole('tab', { name: 'Templates' }).getAttribute('aria-selected'), 'true');
+  const list = settings.getByRole('listbox', { name: 'Templates' });
+  await list.getByText('Photobook', { exact: true }).waitFor();
+  await list.getByRole('option').filter({ has: settings.getByText('Photobook', { exact: true }) }).locator('.template-preview img').waitFor();
+  assert.equal(await settings.getByRole('main', { name: 'Templates' }).count(), 1);
+  const cover = await settings.evaluate(async () => {
+    const { value } = await window.imageflow.library();
+    const book = value.find(({ id }) => id === 'imageflow-starter');
+    return (await window.imageflow.templatePreview(book.id, book.hash)).value;
+  });
+  assert.ok(cover, 'The photobook has a generated preview');
+  const pixels = await sharp(Buffer.from(cover.split(',')[1], 'base64')).stats();
+  assert.ok(pixels.channels.some(({ stdev }) => stdev > 1), 'The photobook preview contains visible content');
 
   // Import shows the packages and network sites the template brings; the sites are not allowed unless asked to.
   await answer(0);
@@ -84,51 +95,55 @@ try {
   assert.match(review.detail, /maplibre-gl 5\.24\.1 \(BSD-3-Clause\)/);
   assert.match(review.detail, /https:\/\/tiles\.openfreemap\.org/);
   assert.equal(review.checkboxLabel, 'Allow these sites in every book made from this version');
-  const travelEntry = list.getByRole('listitem').filter({ has: settings.getByText('Travel journal', { exact: true }) });
-  await travelEntry.getByText('Packages: maplibre-gl 5.24.1 (BSD-3-Clause)').waitFor();
-  await travelEntry.getByText('Connects to: https://tiles.openfreemap.org').waitFor();
-  await travelEntry.getByText('Each book made from it asks before it goes online.').waitFor();
-  await list.getByRole('listitem').filter({ has: settings.getByText('Photobook', { exact: true }) }).getByText('Allowed in every book: this template comes with ImageFlow.').waitFor();
-  // Settings can allow the sites for this version, and stop allowing them.
-  await settings.getByRole('button', { name: 'Allow network access for Travel journal' }).click();
-  await travelEntry.getByText('Allowed in every book made from this version, until its files change.').waitFor();
-  await settings.getByRole('button', { name: 'Stop allowing network access for Travel journal' }).click();
-  await travelEntry.getByText('Each book made from it asks before it goes online.').waitFor();
+  const travelEntry = list.getByRole('option').filter({ has: settings.getByText('Travel journal', { exact: true }) });
+  await travelEntry.click();
+  const detail = settings.getByRole('region', { name: 'Template details' });
+  await detail.getByText('maplibre-gl 5.24.1 · BSD-3-Clause').waitFor();
+  await detail.getByText('https://tiles.openfreemap.org', { exact: true }).waitFor();
+  const trust = detail.getByRole('checkbox', { name: 'Allow network access' });
+  assert.equal(await trust.isChecked(), false);
+  await trust.check();
+  await trust.and(settings.locator(':enabled')).waitFor();
+  assert.equal(await trust.isChecked(), true);
+  await trust.uncheck();
+  await trust.and(settings.locator(':enabled')).waitFor();
+  assert.equal(await trust.isChecked(), false);
   await list.getByText('Travel journal', { exact: true }).waitFor();
   assert.deepEqual(await readdir(library), ['travel'], 'a failed import leaves nothing in the library');
-  await picker.getByRole('radio', { name: /Travel journal/ }).waitFor();
+  await picker.getByRole('option', { name: /Travel journal/ }).waitFor();
 
   // Export a library entry to share it: the file holds the template's files.
   const shared = join(work, 'Travel journal.imageflow-template');
   await saveAs(shared);
-  await settings.getByRole('button', { name: 'Export Travel journal' }).click();
-  await settings.getByText('Exported to ' + shared + '.').waitFor();
+  await settings.getByRole('button', { name: 'Export…' }).click();
+  await settings.getByText('Exported.').waitFor();
   const archive = await readFile(shared);
   assert.equal(archive.subarray(0, 4).toString('latin1'), 'PK\x03\x04');
   assert.ok(archive.includes('index.tsx'));
 
   // Removal asks first, then the template disappears from the picker too.
   await answer(1);
-  await settings.getByRole('button', { name: 'Move Travel journal to the Trash' }).click();
+  await settings.getByRole('button', { name: 'Move to Trash' }).click();
   await settings.waitForFunction(() => globalThis.document.querySelector('.template-settings button:not(:disabled)'));
   assert.deepEqual(await readdir(library), ['travel'], 'Cancel keeps the template');
   await answer(0);
-  await settings.getByRole('button', { name: 'Move Travel journal to the Trash' }).click();
-  await settings.getByText('Moved to the Trash. Books made from it are not affected.').waitFor();
-  await picker.getByRole('radio', { name: /Travel journal/ }).waitFor({ state: 'detached' });
+  await settings.getByRole('button', { name: 'Move to Trash' }).click();
+  await travelEntry.waitFor({ state: 'detached' });
+  await picker.getByRole('option', { name: /Travel journal/ }).waitFor({ state: 'detached' });
   assert.deepEqual(await readdir(library).catch(() => []), []);
 
   // Import the shared file from the picker itself, allowing its sites, then create a book from it: the template's
   // opening spreads, no content.
   await answer(0, true);
   await choose([shared]);
-  await picker.getByRole('button', { name: 'Import Templates…' }).click();
-  await picker.getByRole('radio', { name: /Travel journal/ }).check();
+  await settings.getByRole('button', { name: 'Import…' }).click();
+  await travelEntry.click();
+  await picker.getByRole('option', { name: /Travel journal/ }).click();
   assert.equal(await picker.getByRole('checkbox').count(), 0, 'only a template with a sample book offers it');
-  await picker.getByText('The book starts with 3 spreads from the template.').waitFor();
+  assert.equal(await picker.locator('.starter-start').count(), 0);
   const book = join(work, 'Journey.imageflow');
   await saveAs(book);
-  await clickClosingWindow(picker, picker.getByRole('button', { name: 'Continue…' }));
+  await clickClosingWindow(picker, picker.getByRole('button', { name: 'Create' }));
   assert.deepEqual(await created, { value: null });
   const project = JSON.parse(await readFile(join(book, 'project.json'), 'utf8'));
   assert.equal(project.title, 'Journey');
@@ -174,11 +189,13 @@ try {
   assert.equal(await editorReach(), 'allowed');
   const editorBefore = await editor.locator('iframe.element-editor-frame').getAttribute('src');
 
-  // Stop Allowing in Settings reaches the open book at once: its frames, and the open editor, load again without the
+  // Stop Allowing in Templates reaches the open book at once: its frames, and the open editor, load again without the
   // sites, and editors ask.
   const frameBefore = await editor.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
-  await travelEntry.getByText('Allowed in every book made from this version, until its files change.').waitFor();
-  await settings.getByRole('button', { name: 'Stop allowing network access for Travel journal' }).click();
+  await travelEntry.click();
+  await trust.and(settings.locator(':enabled')).waitFor();
+  assert.equal(await trust.isChecked(), true);
+  await trust.uncheck();
   await editor.waitForFunction((src) => {
     const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
     return frame && frame.getAttribute('src') !== src;
@@ -189,20 +206,6 @@ try {
   assert.deepEqual(await editorNetwork(editor), []);
   assert.equal((await messages())[0].message, 'Allow this book’s template to connect to the internet?');
 
-  // Export Template… writes the book's own template.
-  const fromBook = join(work, 'From book.imageflow-template');
-  await saveAs(fromBook);
-  await editor.bringToFront();
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/').focus());
-  await menu('Export Template…');
-  for (let start = Date.now(); !(await stat(fromBook).catch(() => undefined)) && Date.now() - start < 10000;) await new Promise((resolve) => setTimeout(resolve, 50));
-  assert.deepEqual(await readFile(fromBook), archive, 'the book has the same template, so the same file');
-
-  // Save Template to Library: the unchanged template is already there; a new version replaces it.
-  await answer(0);
-  await menu('Save Template to Library');
-  await app.evaluate(() => new Promise((resolve) => { const wait = () => globalThis.messages.length ? resolve() : setTimeout(wait, 50); wait(); }));
-  assert.equal((await app.evaluate(() => globalThis.messages))[0].message, 'Travel journal 1.0.0 is already in the library.');
   // Changing the book's template ends the trust: its editors ask again, and declining keeps them offline.
   await answer(1);
   const unchanged = await editor.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
@@ -214,16 +217,19 @@ try {
   // The book asks for the changed template when it renders, and its editors ask again after Not Now.
   await shown('Allow this book’s template to connect to the internet?');
   assert.deepEqual(await editorNetwork(editor), []);
+  // New template versions are imported through Templates, without book-authoring menus.
+  await writeFile(join(travel, 'index.tsx'), retitled('1.1.0'));
   await answer(0);
-  await menu('Save Template to Library');
-  await shown('Travel journal 1.1.0 replaced the earlier version in the library.');
+  await choose([travel]);
+  await settings.getByRole('button', { name: 'Import…' }).click();
+  await settings.getByText('Travel journal 1.1.0 replaced the earlier version in the library.').waitFor();
   assert.equal((await messages())[0].message, 'Import Travel journal 1.1.0?', 'a new version is reviewed again');
   await list.getByText('1.1.0').waitFor();
 
   // Removing the library entry never affects the book.
   await answer(0);
-  await settings.getByRole('button', { name: 'Move Travel journal to the Trash' }).click();
-  await settings.getByText('Moved to the Trash. Books made from it are not affected.').waitFor();
+  await settings.getByRole('button', { name: 'Move to Trash' }).click();
+  await travelEntry.waitFor({ state: 'detached' });
   await editor.evaluate(() => window.imageflow.openProject('reload'));
   await editor.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   assert.equal(await editor.locator('.spread-thumb').count(), 4);
@@ -232,11 +238,11 @@ try {
   const second = editor.evaluate(() => window.imageflow.openProject('new'));
   void second.catch(() => {});
   const modal = await windowAt('imageflow://editor/new', new Set([picker]));
-  await modal.getByRole('radio', { name: /Photobook/ }).check();
-  await modal.getByRole('checkbox', { name: 'Include sample photos, texts and spreads' }).uncheck();
+  await modal.getByRole('option', { name: /Photobook/ }).click();
+  await modal.getByRole('checkbox', { name: 'Include sample content' }).uncheck();
   const plain = join(work, 'Plain.imageflow');
   await saveAs(plain);
-  await clickClosingWindow(modal, modal.getByRole('button', { name: 'Continue…' }));
+  await clickClosingWindow(modal, modal.getByRole('button', { name: 'Create' }));
   assert.deepEqual(await second, { value: null });
   const starter = JSON.parse(await readFile(join(plain, 'project.json'), 'utf8'));
   assert.equal(starter.template.id, 'imageflow-starter');

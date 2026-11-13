@@ -179,7 +179,7 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
       </small>}
     </div>;
   });
-  return createPortal(<div ref={panel} className="item-controls edit-popover" role="dialog" aria-label={'Edit ' + (title ?? visible.map(({ label }) => label).join(', '))}
+  return createPortal(<div ref={panel} className="item-controls edit-popover" role="dialog" aria-label={'Edit ' + (title ?? visible.map(({ label }) => label).join(', '))} title={blocked || (readOnly ? 'Read Only' : undefined)}
     onKeyDown={keys} onPointerDown={(event) => event.stopPropagation()}
     onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}
     onMouseMove={(event) => event.stopPropagation()} onMouseLeave={(event) => event.stopPropagation()}
@@ -195,7 +195,5 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
       {render(shown)}
     </fieldset>
     {actions && !readOnly && !blocked && <div className="ep-actions">{actions}</div>}
-    {blocked && <p className="ep-hint muted" role="status">{blocked}</p>}
-    {readOnly && <p className="ep-hint muted">Sample projects are read-only.</p>}
   </div>, host);
 }

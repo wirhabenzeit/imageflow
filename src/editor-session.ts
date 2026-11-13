@@ -39,7 +39,7 @@ export function documentEditorFor(template: Pick<TemplateInfo, 'editors'>, edits
   return Object.entries(template.editors ?? {}).find(([, { parameters }]) => keys.every((key) => parameters.includes(key)))?.[0];
 }
 
-/** Document parameters some document editor owns: they get no control in Book settings. */
+/** Document parameters some document editor owns: they get no control in template controls. */
 export const editorOwnedDocument = (template: Pick<TemplateInfo, 'editors'>) =>
   Object.values(template.editors ?? {}).flatMap(({ parameters }) => parameters);
 

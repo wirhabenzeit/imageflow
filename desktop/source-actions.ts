@@ -57,10 +57,10 @@ export async function relocateSource(book: OpenProject, key: string, selection?:
   }
 }
 
-export async function collectSources(book: OpenProject) {
+export async function collectSources(book: OpenProject, keys?: readonly string[]) {
   const before = await captureProjectInputs(book.folder);
   const store = await SourceStore.forBook(book.folder, book.cache);
-  const linked = sourceEntries(book);
+  const linked = sourceEntries(book).filter(({ key }) => !keys || keys.includes(key));
   const originals = await Promise.all(linked.map(async (source) => ({ source, resolved: await store.resolve(book.folder, source) })));
   const missing = originals.filter(({ resolved }) => resolved.status.state !== 'available');
   if (missing.length) throw new Error('Cannot include all assets. Locate or restore: ' + missing.map(({ source }) => basename(source.path)).join(', ') + '.');
@@ -79,7 +79,7 @@ export async function collectSources(book: OpenProject) {
 }
 
 /** Only byte-identical candidates are proposed automatically. Filename alone is never an identity match. */
-export async function relinkFolder(book: OpenProject, directory: string) {
+export async function relinkFolder(book: OpenProject, directory: string, keys?: readonly string[]) {
   const { readdir } = await import('node:fs/promises');
   const root = await realpath(directory);
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
@@ -88,7 +88,7 @@ export async function relinkFolder(book: OpenProject, directory: string) {
   let next = book;
   const ambiguous: string[] = [];
   let repaired = 0;
-  for (const source of sourceEntries(book)) {
+  for (const source of sourceEntries(book).filter(({ key }) => !keys || keys.includes(key))) {
     const state = await store.resolve(book.folder, source);
     if (state.status.state === 'available' || !state.stored?.digest) continue;
     const matches: string[] = [];
@@ -102,6 +102,27 @@ export async function relinkFolder(book: OpenProject, directory: string) {
     else if (matches.length > 1) ambiguous.push(source.key);
   }
   return { book: next, repaired, ambiguous };
+}
+
+export function fileIsAssigned(book: OpenProject, id: string) {
+  const values = [book.project.params, ...book.project.spreads.flatMap((spread) => [spread.params,
+    ...Object.values(spread.boxes).map(({ params }) => params), ...Object.values(spread.elements).map(({ params }) => params)])];
+  return values.some((params) => Object.values(params).some((value) => value === id));
+}
+export async function removeSources(book: OpenProject, keys: readonly string[]) {
+  const sources = sourceEntries(book).filter(({ key }) => keys.includes(key));
+  if (sources.length !== new Set(keys).size) throw new Error('An asset changed. Select it again.');
+  if (sources.some((source) => source.kind === 'file' && fileIsAssigned(book, source.id))) throw new Error('Remove the file’s assignments before removing it from the book.');
+  const files = filesOf(book);
+  for (const source of sources) {
+    if (source.kind === 'photo') delete files.photoIndex[source.id];
+    else delete files.project[source.kind === 'markdown' ? 'texts' : 'files'][source.id];
+    if (source.kind !== 'file') for (const spread of files.project.spreads) for (const box of Object.values(spread.boxes)) {
+      if (source.kind === 'photo' && box.photo === source.id) delete box.photo;
+      if (source.kind === 'markdown' && box.text === source.id) delete box.text;
+    }
+  }
+  return updateProject(book, files, true);
 }
 
 /** Save a consistent copy. Collection is prepared before publishing any destination document. */

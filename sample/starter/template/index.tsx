@@ -154,15 +154,14 @@ function RouteEditor({ values, set, readOnly, Control }: RouteEditorProps) {
   const zoomBy = (factor: number) => move({ ...viewport, zoom: viewport.zoom * factor });
   const pan = (dx: number, dy: number) => move({ ...viewport, centerX: viewport.centerX + dx * viewport.size, centerY: viewport.centerY + dy * viewport.size });
   const track = <Control parameter="track" />;
-  if (!line) return <div className="route-editor">{track}<p className="route-editor-note">{problem}</p></div>;
-  const editable = !readOnly;
+  const editable = !readOnly && !!line;
   return <div className="route-editor">
     {track}
     <div className="route-editor-nav">
       <button type="button" aria-label="Zoom out" disabled={!editable || viewport.zoom <= 1} onClick={() => zoomBy(1 / 1.5)}>−</button>
       <button type="button" aria-label="Zoom in" disabled={!editable || viewport.zoom >= maxRouteZoom} onClick={() => zoomBy(1.5)}>+</button>
       <button type="button" disabled={!editable || viewport.zoom === 1} onClick={() => move({ centerX: .5, centerY: .5, zoom: 1 })}>Whole route</button>
-      <span>{editable ? 'Drag to move, scroll to zoom. Arrow keys move too.' : ''}</span>
+      <span>{viewport.zoom > 1 ? 'Zoom ' + viewport.zoom.toFixed(1) + '×' : ''}</span>
     </div>
     <div className="route-editor-frame" role="application" aria-label="Route viewport" tabIndex={editable ? 0 : -1}
       onPointerDown={(event: PointerEvent) => {
@@ -188,7 +187,7 @@ function RouteEditor({ values, set, readOnly, Control }: RouteEditorProps) {
       }}>
       <svg viewBox={viewBox(viewport)} aria-hidden="true"><polyline points={line} /></svg>
     </div>
-    <p className="route-editor-note">{viewport.zoom === 1 ? 'Shows the whole route.' : 'Zoom ' + viewport.zoom.toFixed(1) + '×'}</p>
+    <p className="route-editor-note" role="status">{problem}</p>
   </div>;
 }
 
@@ -285,21 +284,16 @@ const photoGrid = <const S extends keyof typeof gridSizes>(size: S) => (ctx: Ren
   </Paper>;
 };
 
-// The grid family's picker: one "Grid size" choice drawn as small grids. It chooses by the variants' tags, so a new
-// size needs only a new layout with its tag.
+// The grid family's size is a regular segmented field beside the layout's other settings.
 function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerProps) {
-  return <div className="variant-picker" role="radiogroup" aria-label="Grid size">
+  return <div className="if-control"><div className="pc-segmented" role="radiogroup" aria-label="Grid size">
     {variants.map(({ id, variant }) => {
       const size = String(variant.size);
-      const columns = Object.hasOwn(gridSizes, size) ? gridSizes[size as keyof typeof gridSizes].columns : 1;
       return <button key={id} type="button" role="radio" aria-checked={id === current} disabled={readOnly} onClick={() => choose(id)}>
-        <span className="variant-grid" style={{ gridTemplateColumns: 'repeat(' + columns + ', 1fr)' }} aria-hidden="true">
-          {Array.from({ length: columns * columns }, (_, i) => <span key={i} />)}
-        </span>
         {size.replace('x', ' × ')}
       </button>;
     })}
-  </div>;
+  </div></div>;
 }
 
 export default defineTemplate({

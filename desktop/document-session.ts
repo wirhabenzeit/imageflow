@@ -1,14 +1,15 @@
+import { bookName } from '../src/book-name';
 import { SourceStore } from './source-store';
 import { captureProjectInputs } from './revisions';
 import { sourceEntries } from '../src/source-locations';
 import { isUnavailableSource } from '../src/source-diagnostics';
-import { app, dialog } from 'electron';
+import { app, dialog, shell } from 'electron';
 import type { BrowserWindow } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
-import { dirname, extname, join, relative } from 'node:path';
+import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
+import { basename, dirname, extname, join, relative } from 'node:path';
 import { channels, desktopScheme, renderOrigin } from '../src/desktop';
 import type { BookMenuState, CanvasLayout, ExportMode, ImportRequest, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
@@ -32,15 +33,18 @@ import { createAuthoringService, AuthoringError } from './authoring-service';
 import { AuthoringQueue } from './authoring-queue';
 import { authoringErrorResult } from './authoring-errors';
 import { ImportReceipts } from './import-receipts';
-import { CommittedProjectSaveError } from './persistence';
+import { saveDocumentCopy } from './source-actions';
+import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
 import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { McpToolName } from '../src/mcp-contract';
 import { renderIdleMs } from '../src/render-budget';
+import { PreviewPictureCache } from './preview-picture-cache';
 
 // `network` lists the origins this book's frames may reach now (ADR 0006): its preview, check, export and element
 // editor frames. Absent for frames that stay offline, such as template probes.
-export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[] }>;
+export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[];
+  pictures?: PreviewPictureCache; pictureScope?: string }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 async function fingerprint(path: string) {
@@ -77,6 +81,7 @@ export class DocumentSession {
   private importedWrites = new ImportReceipts();
   private agentLeases = new Map<string, (allowed: boolean) => void>();
   private renderIds = new Set<string>();
+  private previewPictures = new PreviewPictureCache();
   // The origins this book's frames may reach (ADR 0006), and the template hash they were allowed for. A frame of a
   // book whose template has another hash gets none, so a changed template never inherits an earlier approval.
   private network: { hash?: string; origins: readonly string[] } = { origins: [] };
@@ -179,6 +184,35 @@ export class DocumentSession {
     this.notify({ value: this.activate(next, true) });
     this.watchProject(next);
   }
+  async moveTo(destination: string) {
+    const original = this.book.folder;
+    if (destination === original) return;
+    await mkdir(destination); // Exclusive reservation: never replace even an empty existing package.
+    try {
+      await rename(original, destination);
+    } catch (error) {
+      await rmdir(destination).catch(() => {});
+      if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+      const copied = await saveDocumentCopy(this.book, destination, false);
+      let release: ProjectLock | undefined;
+      try {
+        release = await acquireProjectLock(copied);
+        const next = await loadProject(copied, this.cache, false);
+        this.stopWatch();
+        await shell.trashItem(original);
+        await this.unlockProject?.();
+        this.unlockProject = release; release = undefined;
+        this.projectSession.relocate(copied);
+        this.notify({ value: this.activate(next) }); this.watchProject(next);
+      } catch (error) {
+        if (release) { await release(); await rm(copied, { recursive: true, force: true }); }
+        this.watchProject(this.book);
+        throw error;
+      }
+      return;
+    }
+    await this.relocate(destination);
+  }
   async reload() {
     const next = await loadProject(this.book.folder, this.cache, this.book.readOnly);
     const summary = this.activate(next, true);
@@ -240,6 +274,7 @@ export class DocumentSession {
       finally {
         this.unlockProject = undefined;
         for (const id of this.renderIds) this.renders.delete(id);
+        this.previewPictures.clear();
         await this.projectSession.close();
       }
     })();
@@ -266,10 +301,10 @@ export class DocumentSession {
       }
     }
     this.renderIds.add(id);
-    this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book) });
+    this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book), pictures: this.previewPictures });
     // A changed template gets the approvals for its own hash, if any, and the frames are rendered again with them.
     if (this.networkPrepared && !book.readOnly && book.templateHash !== this.network.hash) queueMicrotask(() => void this.updateNetwork().catch(() => {}));
-    this.window.setTitle(book.project.title);
+    this.window.setTitle(bookName(book.folder));
     if (!book.readOnly) this.window.setRepresentedFilename(book.folder);
     this.changed?.(book);
     this.watchLinkedSources(book);
@@ -518,9 +553,7 @@ export class DocumentSession {
         const { response } = await dialog.showMessageBox(this.window, {
           type: 'question', buttons: ['Allow', 'Not Now'], defaultId: 0, cancelId: 1,
           message: 'Allow this book’s template to connect to the internet?',
-          detail: 'It loads data from these sites to draw its pages and editors, in previews and when you export:\n' + pending.join('\n') +
-            '\n\nIt can send what you edit there, too. Without them, those pictures cannot be drawn and the book cannot be exported. ' +
-            'Allow only templates you trust.',
+          detail: 'This template loads maps or data from:\n' + pending.join('\n') + '\n\nAllow only templates you trust.',
         });
         if (response === 0) {
           await approveNetwork(book.folder, pending, hash);
@@ -551,7 +584,7 @@ export class DocumentSession {
       if (before.revision !== loaded.revision || before.observation !== loaded.observation) throw new Error('Sources changed while preparing export. Please retry.');
       if (mode !== 'proof' && mode !== 'print') throw new Error('Unknown export mode.');
       const proof = mode === 'proof';
-      const fileName = book.project.title.replace(/[^\p{L}\p{N} _-]/gu, '-').slice(0, 80) + (proof ? ' - Proof.pdf' : '.pdf');
+      const fileName = bookName(book.folder).replace(/[^\p{L}\p{N} _-]/gu, '-').slice(0, 80) + (proof ? ' - Proof.pdf' : '.pdf');
       const { canceled, filePath } = await dialog.showSaveDialog(owner, {
         title: proof ? 'Export Proof PDF' : 'Export Print PDF', defaultPath: join(app.getPath('documents'), fileName),
         filters: [{ name: 'PDF', extensions: ['pdf'] }],

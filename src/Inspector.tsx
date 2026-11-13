@@ -1,7 +1,9 @@
 import { sourcePath } from './source-locations';
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { Fields } from './Fields';
 import type { BookGeometry, Issue, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
+import { layoutPreviewKey } from './layout-preview';
 import { BookFrame } from './BookFrame';
 import { revealIn } from './reveal';
 import type { ProjectFiles, SpreadState } from './project';
@@ -14,15 +16,15 @@ import type { SourceRef } from './source-items';
 
 export type Edit = (files: ProjectFiles) => void;
 
-// Shows the spread in each layout it can switch to, rendered by the template itself. Pointing at a layout says what
-// switching would carry over, keep and fall back on. A layout family with its own picker is one preview, named after
-// the family, which opens the picker; the variants of other families are listed next to each other.
-function LayoutPicker({ summary, spread, template, choose, openPicker }: {
+// Shows the spread in each layout it can switch to, rendered by the template itself. A family is one preview, named after
+// the family; its controls appear with the selected spread's parameters below the complete layout browser.
+function LayoutPicker({ summary, spread, template, choose }: {
   summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; choose: (definition: string) => void;
-  openPicker: (family: string, layout: string) => void;
 }) {
+  const key = layoutPreviewKey(summary, template, spread);
+  const [preview, setPreview] = useState(() => ({ key, project: summary.id }));
+  if (preview.key !== key) setPreview({ key, project: summary.id });
   const [geometry, setGeometry] = useState<BookGeometry>();
-  const [pointed, setPointed] = useState<string>();
   const families = template.layoutFamilies ?? {};
   const { spreads } = summary.project;
   const choices = layoutPreviews(template.spreads, spread.definition, families, template.format,
@@ -32,33 +34,25 @@ function LayoutPicker({ summary, spread, template, choose, openPicker }: {
   // The retained preview and its hit targets must describe the same set of layouts until the next frame is ready.
   const displayed = geometry ? geometry.sheets.map(({ spread }) => spread).filter((id) => Object.hasOwn(template.spreads, id)) : choices;
   const pending = !!geometry && (displayed.length !== choices.length || displayed.some((id, i) => id !== choices[i]));
-  const describe = (id: string) => id === spread.definition ? 'Current layout · ' + template.spreads[id].label
-    : familyOf(id) ? 'Choose a variant'
-    : describeLayoutChange(planLayoutChange(spread, id, template.spreads));
-  const shown = !pending && pointed && choices.includes(pointed) ? pointed : undefined;
   return <div className="layout-picker-shell">
     <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout" aria-busy={pending || undefined}
-      style={{ height: geometry?.height }} onMouseLeave={() => setPointed(undefined)}>
+      style={{ height: geometry?.height }}>
       {displayed.map((id) => {
         const item = template.spreads[id];
         const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
         const family = familyOf(id);
         const grouped = !family && item.family !== undefined && Object.hasOwn(families, item.family) ? families[item.family].label : undefined;
         return <button key={id} type="button" role="radio" disabled={pending} aria-checked={id === spread.definition} aria-label={name(id)}
-          aria-describedby={shown === id ? 'layout-consequence' : undefined} aria-haspopup={family ? 'dialog' : undefined}
-          title={(grouped ? grouped + ' · ' : '') + name(id) + (item.span === 'spread' || item.span === 'page' ? '' : ' · single ' + item.span + ' page')}
+          aria-description={grouped}
           className={'layout-option' + (family ? ' layout-family' : '')}
           style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
-          onMouseEnter={() => setPointed(id)} onFocus={() => setPointed(id)} onBlur={() => setPointed(undefined)}
-          onClick={() => { if (family) openPicker(family, id); else if (id !== spread.definition) choose(id); }}>
-          <span className="layout-option-label">{name(id)}{family ? '…' : ''}</span>
+          onClick={() => { if (id !== spread.definition) choose(id); }}>
+          <span className="layout-option-label">{name(id)}</span>
         </button>;
       })}
-      <BookFrame project={summary.id} view="layouts" query={'spread=' + encodeURIComponent(spread.id)} title="Layout previews"
+      <BookFrame project={preview.project} view="layouts" query={'spread=' + encodeURIComponent(spread.id)} title="Layout previews"
         onGeometry={setGeometry} />
     </div>
-    <p id="layout-consequence" className="layout-consequence" role="tooltip" hidden={!shown}>
-      {shown ? name(shown) + ' · ' + describe(shown) : '\u00a0'}</p>
   </div>;
 }
 
@@ -72,8 +66,7 @@ function KeptContent({ summary, spread, template, kept, label, settings, writabl
   const layout = template.spreads[spread.definition];
   const elementName = (id: string) => Object.values(template.spreads).find((item) => Object.hasOwn(item.elements, id))?.elements[id].label ?? id;
   return <details open={expanded} className="kept-content" onToggle={(event) => setExpanded(event.currentTarget.open)}>
-    <summary>Saved outside this layout{label ? ' · ' + label : ''}</summary>
-    {kept.length > 0 && <p className="muted">Layouts with these boxes show them again. Drag one onto a box, or place it:</p>}
+    <summary>Set aside{label ? ' · ' + label : ''}</summary>
     <ul className="kept-list">
       {kept.map((item) => {
         const name = sourceTitle(summary, item.kind, item.source);
@@ -130,7 +123,7 @@ function contentState(summary: ProjectSummary, spread: SpreadState, id: string, 
 // elements are edited where they are on the page; the list opens the same editors, also for empty, hidden or
 // overlapping ones, and from the keyboard.
 export function Inspector({ summary, spread, source, template, render, usage, edit, highlight, issues,
-  select, quickLook, focus, targets = [], open, openTarget, place, openPicker }: {
+  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker }: {
   summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void;
   highlight: (id?: string) => void; issues: string; select: (spread: string) => void;
@@ -138,7 +131,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   targets?: BookGeometry['targets']; open: (owner: { type: 'photo' | 'markdown' | 'element'; id: string }) => void;
   openTarget: (target: BookGeometry['targets'][number]) => void;
   place: (from: string, to: string) => void;
-  openPicker: (family: string, layout: string) => void;
+  familyPicker?: ReactNode;
 }) {
   const items = useRef(new Map<string, HTMLElement>());
   const [flash, setFlash] = useState<string>();
@@ -155,7 +148,6 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     return () => clearTimeout(timer);
   }, [focus, source]);
   const definition = template?.spreads[spread.definition];
-  const currentFamily = template && pickerFamily(template.spreads, spread.definition, template.layoutFamilies);
   function changeSpread(update: (spread: SpreadState) => void, notice?: string | (() => string)) {
     edit(({ project }) => {
       const current = project.spreads.find(({ id }) => id === spread.id);
@@ -197,8 +189,6 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     ...Object.entries(definition.elements).map(([id, element]) => ({ id, kind: 'element' as const, label: element.label })),
   ] : [];
   const header = <>
-    <p className="eyebrow">Inspector</p>
-    {issues && <div className="inspection-issues" role="alert">{issues}</div>}
   </>;
   if (source) {
     return <aside className="inspector" aria-label="Inspector">
@@ -211,21 +201,17 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     {header}
     <fieldset disabled={!writable}>
       {template && <details open><summary>Spread</summary>
-        <div className="layout-heading">
-          <p className="field-label">Layout{definition ? ' · ' + definition.label : ''}</p>
-          {currentFamily && <button type="button" className="link" aria-haspopup="dialog"
-            onClick={() => openPicker(currentFamily, spread.definition)}>
-            {(template.layoutFamilies?.[currentFamily]?.picker?.label ?? 'Change') + '…'}</button>}
-        </div>
+        <p className="field-label">Layout</p>
         {!definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
-        <LayoutPicker summary={summary} spread={spread} template={template} openPicker={openPicker} choose={(next) => {
+        <LayoutPicker summary={summary} spread={spread} template={template} choose={(next) => {
           // Planned against the project the switch applies to, which may be newer than this render.
           let consequence = '';
           changeSpread((item) => {
             consequence = describeLayoutChange(planLayoutChange(item, next, template.spreads));
             switchLayout(item, next, template.spreads);
-          }, () => template.spreads[next].label + ' · ' + consequence);
+          }, () => consequence ? template.spreads[next].label + ' · ' + consequence : '');
         }} />
+        {familyPicker}
         {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
         {definition && <Fields key={spread.id} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
           values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />}

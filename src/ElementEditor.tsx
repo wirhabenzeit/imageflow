@@ -157,7 +157,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   const owned = editor?.parameters ?? [];
   const saved = resolveParams(definition?.parameters ?? {}, spread.elements[element]?.params ?? {});
   const current = { ...saved, ...frameDraft, ...local };
-  // A document editor's other document parameters stay in Book settings; an element's appear below its editor.
+  // A document editor's other document parameters stay in template controls; an element's appear below its editor.
   const generated = definition ? controlLayout(definition.parameters, definition.controls, current, owned) : [];
 
   async function apply(reported: Values, reportedSpread: Values, generatedValues: Values) {
@@ -231,26 +231,20 @@ export function ElementEditorDialog({ project, template, spread, params, target,
       else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); requestClose(); }
     }}>
     <header className="ee-header">
-      <h2>{title}</h2>
+      <h2>{title}</h2>{readOnly && <span className="muted">Read Only</span>}
       <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)"
         disabled={flushing !== undefined} onClick={() => requestClose()}><Icon name="close" /></button>
     </header>
-    {saveRejected && <p className="ee-status error-text" role="alert">
-      The last change could not be saved. Close and reopen this editor to continue from the saved values.
-    </p>}
-    {blocked && !stale && <p className="ee-status muted" role="status">{blocked}</p>}
+    <div className="ee-status-row" aria-live="polite">
+      {(saveRejected || stale || error) ? <p className="ee-status error-text" role="alert">
+        {saveRejected ? 'The last change could not be saved. Reopen the editor to retry.' : stale ? subject + ' changed. Reopen the editor to continue.' : error}
+      </p> : blocked ? <p className="ee-status muted" role="status">{blocked}</p>
+        : !ready && <p className="ee-status muted">Loading…</p>}
+      {warnings.length > 0 && <details className="ee-warnings"><summary>{warnings.length} editor warnings</summary>
+        <ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
+    </div>
     <div className="ee-body">
     {prepared && <iframe ref={frame} className="element-editor-frame" inert={!!blocked || saveRejected} title={title} src={source} style={{ height }} />}
-    {!ready && !error && <p className="ee-status muted">Loading the editor…</p>}
-    {stale && <p className="ee-status error-text" role="alert">
-      {subject + ' changed while this editor was open. Close and open the editor again to continue from the current values.'}
-    </p>}
-    {error && !stale && <p className="ee-status error-text" role="alert">{error}</p>}
-    {readOnly && <p className="ee-status muted">Sample projects are read-only.</p>}
-    {warnings.length > 0 && <div className="ee-status ee-warnings" role="status">
-      <strong>The editor asked for changes it cannot make:</strong>
-      <ul>{warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
-    </div>}
     {generated.length > 0 && <fieldset className="ee-fields" disabled={readOnly || failed || stale || !!blocked || saveRejected}>
       <ControlList nodes={generated} field={(node, param) => <Field key={node.key} param={param} value={current[node.key]}
         description={node.description} change={(next) => {

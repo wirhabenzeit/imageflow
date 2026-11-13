@@ -1,12 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AgentSettings } from './AgentSettings';
-import { TemplateSettings } from './TemplateSettings';
 import { Icon } from './Icon';
-import { useLibrary } from './useLibrary';
 import type { DesktopApi } from './desktop';
 import type { AppSettings, Appearance, SettingsPane } from './settings';
 
-const panes = [{ value: 'general', label: 'General', icon: 'settings' }, { value: 'templates', label: 'Templates', icon: 'templates' },
+const panes = [{ value: 'general', label: 'General', icon: 'settings' },
   { value: 'agents', label: 'Agents', icon: 'agent' }] as const satisfies readonly { value: SettingsPane; label: string; icon: string }[];
 
 const appearances: { value: Appearance; label: string }[] = [
@@ -20,8 +18,6 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
   const [error, setError] = useState('');
   const [pane, setPane] = useState<SettingsPane>();
   const [requestedPane, setRequestedPane] = useState<SettingsPane>();
-  const library = useLibrary(api, { timeoutMs: 5000 });
-  const templatesReady = !!library.entries || !!library.error || !api;
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!api) { setRequestedPane('general'); return; }
@@ -30,11 +26,7 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
     const stop = api.onSettingsPane(setRequestedPane);
     return () => { active = false; stop(); };
   }, [api]);
-  // Keep the current pane until Templates is ready, so its final content is
-  // measured before the native resize rather than arriving halfway through it.
-  useLayoutEffect(() => {
-    if (requestedPane && (requestedPane !== 'templates' || templatesReady)) setPane(requestedPane);
-  }, [requestedPane, templatesReady]);
+  useLayoutEffect(() => { if (requestedPane) setPane(requestedPane); }, [requestedPane]);
   // The native window follows the selected pane's height, like macOS Settings.
   useLayoutEffect(() => {
     const node = content.current;
@@ -59,14 +51,14 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
     return () => { active = false; stop(); };
   }, [api]);
 
-  async function choose(appearance: Appearance) {
+  async function choose(patch: Partial<AppSettings>) {
     if (!api || !settings) return;
     const request = ++revision.current;
     pending.current++;
-    setSettings({ ...settings, appearance });
+    setSettings({ ...settings, ...patch });
     setError('');
     try {
-      const result = await api.updateSettings({ appearance });
+      const result = await api.updateSettings(patch);
       if ('error' in result) throw new Error(result.error);
       if (request === revision.current) setSettings(result.value);
     } catch {
@@ -98,15 +90,19 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
           <div className="settings-control">
             <div className="appearance-options" role="radiogroup" aria-labelledby="appearance-label" aria-describedby="appearance-description">
               {appearances.map(({ value, label }) => <label key={value}>
-                <input type="radio" name="appearance" value={value} disabled={!settings} checked={settings?.appearance === value} onChange={() => void choose(value)} />
+                <input type="radio" name="appearance" value={value} disabled={!settings} checked={settings?.appearance === value} onChange={() => void choose({ appearance: value })} />
                 <span>{label}</span>
               </label>)}
             </div>
             <p className="settings-note" id="appearance-description">System follows your macOS appearance.</p>
           </div>
+          <label className="settings-label" htmlFor="default-import-mode">New imports:</label>
+          <select className="settings-control" id="default-import-mode" disabled={!settings} value={settings?.importMode ?? 'copy'}
+            onChange={(event) => void choose({ importMode: event.target.value as AppSettings['importMode'] })}>
+            <option value="copy">Copy into Book</option><option value="link">Link to Original Files</option>
+          </select>
           {error && <p role="alert" className="error-text settings-control">{error}</p>}
         </div>}
-        {pane === 'templates' && <TemplateSettings api={api} library={library} />}
         {pane === 'agents' && <AgentSettings api={api} />}
       </div>}
     </div>

@@ -25,7 +25,7 @@ async function packageApp() {
     const books = join(staging, 'sample');
     await Promise.all([
       stageDesktop({ packaged: true, destination: source }),
-      cp(sample, books, { recursive: true, filter: (path) => basename(path) !== '.imageflow' }),
+      cp(sample, books, { recursive: true, filter: (path) => !['.imageflow', 'whitewall'].includes(basename(path)) }),
     ]);
     const [output] = await packager({
       dir: source,

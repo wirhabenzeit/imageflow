@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { testBook, menuAction, retryBookRefresh } from './ui-actions.mjs';
+import { testBook, menuAction, retryBookRefresh, waitForPage } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/linked-smoke-')));
@@ -31,13 +31,20 @@ async function ready(page) {
   await page.waitForFunction(() => !document.querySelector('.preview-state') && !document.querySelector('.book-check-stale'));
 }
 async function reload(page) { await page.reload(); await ready(page); }
+async function assetWindow() {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const found = app.windows().find((window) => window.url() === 'imageflow://editor/assets');
+    if (found) return found;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('Assets window did not open');
+}
+
 try {
   const page = await testBook(app, folder, true);
   await ready(page);
   let summary = await current(page);
-  summary.project.importMode = 'link';
-  assert.ok((await page.evaluate((s) => window.imageflow.saveProject(s.id, { project: s.project, photoIndex: s.photoIndex }), summary)).value);
-  await reload(page);
+  assert.ok((await page.evaluate(() => window.imageflow.updateSettings({ importMode: 'link' }))).value);
   const imported = {};
   for (const [kind, path] of [['photo', photo], ['markdown', text], ['file', file]]) {
     const result = await page.evaluate(async ({ kind, path }) => {
@@ -60,23 +67,23 @@ try {
   const replacement = join(external, 'New.png');
   await sharp({ create: { width: 3600, height: 2800, channels: 3, background: '#e4b874' } }).png().toFile(replacement);
   await rename(replacement, photo);
-  await page.waitForFunction(async (id) => (await window.imageflow.currentProject()).value.photoSizes[id]?.width === 3600, imported.photo);
+  await waitForPage(page, async (id) => (await window.imageflow.currentProject()).value.photoSizes[id]?.width === 3600, imported.photo);
   assert.deepEqual((await current(page)).project.spreads[1].boxes.hero.crops, crop);
   const goodPhoto = await readFile(photo);
   await writeFile(photo, goodPhoto.subarray(0, 12));
-  await page.waitForFunction(async (id) => {
+  await waitForPage(page, async (id) => {
     const source = (await window.imageflow.currentProject()).value.sources['photo:' + id];
     return source.state === 'unreadable' && source.cached;
   }, imported.photo);
   await writeFile(photo, goodPhoto);
-  await page.waitForFunction(async (id) => (await window.imageflow.currentProject()).value.sources['photo:' + id].state === 'available', imported.photo);
+  await waitForPage(page, async (id) => (await window.imageflow.currentProject()).value.sources['photo:' + id].state === 'available', imported.photo);
   const markdownReplacement = join(external, 'new.md');
   await writeFile(markdownReplacement, '# Revised externally\n\nA second edition.');
   await rename(markdownReplacement, text);
-  await page.waitForFunction(async (id) => (await window.imageflow.currentProject()).value.texts[id]?.includes('A second edition.'), imported.markdown);
+  await waitForPage(page, async (id) => (await window.imageflow.currentProject()).value.texts[id]?.includes('A second edition.'), imported.markdown);
   const fileBefore = (await current(page)).sources['file:' + imported.file].digest;
   await writeFile(file, (await readFile(file, 'utf8')).replace('</gpx>', '<!-- external save --></gpx>'));
-  await page.waitForFunction(async ({ id, before }) => (await window.imageflow.currentProject()).value.sources['file:' + id].digest !== before, { id: imported.file, before: fileBefore });
+  await waitForPage(page, async ({ id, before }) => (await window.imageflow.currentProject()).value.sources['file:' + id].digest !== before, { id: imported.file, before: fileBefore });
   await ready(page);
   // An external write during rendering must neither change pinned image bytes nor publish a falsely current PDF.
   const race = join(work, 'Race.pdf');
@@ -100,32 +107,33 @@ try {
   let raced;
   for (let attempt = 0; attempt < 5; attempt++) {
     raced = await page.evaluate((id) => window.imageflow.exportBook(id, 'proof'), (await current(page)).id);
-    if (!raced.error?.includes('while preparing export')) break;
+    if (raced.code !== 'BOOK_BUSY' && !raced.error?.includes('while preparing export')) break;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   assert.match(raced.error, /Sources changed during export/);
   await reload(page);
   await assert.rejects(stat(race), { code: 'ENOENT' });
-  await page.waitForFunction(async () => (await window.imageflow.currentProject()).value.sources && !document.querySelector('.preview-state'));
+  await waitForPage(page, async () => (await window.imageflow.currentProject()).value.sources && !document.querySelector('.preview-state'));
   // Remove all originals. The book stays editable and every source keeps a marked cached view.
   const photoBytes = await readFile(photo); const textBytes = await readFile(text); const fileBytes = await readFile(file);
   await Promise.all([photo, text, file].map((path) => rm(path)));
-  await page.waitForFunction(async () => Object.values((await window.imageflow.currentProject()).value.sources).filter((source) => source.linked).every((source) => source.state === 'missing' && source.cached));
+  await waitForPage(page, async () => Object.values((await window.imageflow.currentProject()).value.sources).filter((source) => source.linked).every((source) => source.state === 'missing' && source.cached));
   await ready(page);
-  await menuAction(app, 'Manage Sources…');
-  const manager = page.getByRole('dialog', { name: 'Book sources' });
+  await menuAction(app, 'Assets…');
+  const managerWindow = await assetWindow();
+  const manager = managerWindow.getByRole('region', { name: 'Assets' });
   await manager.waitFor();
   // A linked-file refresh may still own the book just after the renderer becomes ready.
   // Retry only that explicit busy response; any other error must fail with its actual message.
   const collection = await retryBookRefresh(async () => {
-    await manager.getByRole('button', { name: 'Include All Assets', exact: true }).click();
+    await manager.getByRole('button', { name: 'Copy All into Book', exact: true }).click();
     const alert = manager.getByRole('alert');
     await alert.waitFor();
     return { error: await alert.innerText(), code: await alert.getAttribute('data-error-code') };
   }, () => ready(page));
   assert.match(collection.error, /Cannot include all assets/);
   await page.screenshot({ path: join(root, '.build/linked-missing-sources.png') });
-  await manager.getByRole('button', { name: 'Done', exact: true }).click();
+  await managerWindow.close();
   const checked = await retryBookRefresh(async () => {
     state = await current(page);
     return page.evaluate((id) => window.imageflow.checkBook(id, {}), state.id);
@@ -147,7 +155,7 @@ try {
   await stat(proof);
   assert.match(execFileSync('pdftotext', [proof, '-']).toString(), /PROOF: ORIGINAL UNAVAILABLE/);
   await Promise.all([writeFile(photo, photoBytes), writeFile(text, textBytes), writeFile(file, fileBytes)]);
-  await page.waitForFunction(async () => Object.values((await window.imageflow.currentProject()).value.sources).every((source) => source.state === 'available'));
+  await waitForPage(page, async () => Object.values((await window.imageflow.currentProject()).value.sources).every((source) => source.state === 'available'));
   await ready(page);
   await reload(page);
   // An unavailable unused library original is a warning, not a reason to block printing.
@@ -161,15 +169,33 @@ try {
   const unusedId = unusedImport.value.imported[0];
   await reload(page);
   await rm(unused);
-  await page.waitForFunction(async (id) => (await window.imageflow.currentProject()).value.sources['photo:' + id].state === 'missing', unusedId);
+  await waitForPage(page, async (id) => (await window.imageflow.currentProject()).value.sources['photo:' + id].state === 'missing', unusedId);
   const unusedPrint = join(work, 'Unused-missing-print.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, unusedPrint);
   const printable = await page.evaluate((id) => window.imageflow.exportBook(id, 'print'), (await current(page)).id);
   assert.ok(printable.value, JSON.stringify(printable));
   await stat(unusedPrint);
   await writeFile(unused, photoBytes);
-  await page.waitForFunction(async (id) => (await window.imageflow.currentProject()).value.sources['photo:' + id].state === 'available', unusedId);
+  await waitForPage(page, async (id) => (await window.imageflow.currentProject()).value.sources['photo:' + id].state === 'available', unusedId);
   await reload(page);
+  // Linked assets carry a chain, and the native context menu copies only the selected original into this book.
+  await menuAction(app, 'Assets…');
+  const linkedWindow = await assetWindow();
+  const linkedRow = linkedWindow.locator('[data-source="photo:' + unusedId + '"]');
+  await linkedRow.getByRole('img', { name: 'Linked to original file' }).waitFor();
+  await app.evaluate(({ Menu }) => {
+    Menu.prototype.popup = function ({ callback }) {
+      globalThis.assetMenuLabels = this.items.map(({ label }) => label);
+      this.items.find(({ label }) => label === 'Copy into Book').click();
+      callback();
+    };
+  });
+  await linkedRow.click({ button: 'right' });
+  await waitForPage(linkedWindow, async (id) => !(await window.imageflow.currentProject()).value.photoIndex[id].linked, unusedId);
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Show in Finder', 'Copy into Book', '', 'Remove from Book']);
+  await linkedRow.getByRole('img', { name: 'Linked to original file' }).waitFor({ state: 'detached' });
+  await stat(unused);
+  await linkedWindow.close();
   // A shared manifest cannot approve a local file, even when its extension is valid for a parameter.
   const unselected = join(external, 'NotChosen.gpx');
   await writeFile(unselected, '<gpx><!-- private dummy fixture --></gpx>');
@@ -185,28 +211,43 @@ try {
   assert.equal(await loadedFile(), undefined);
   const historyBeforeLocate = (await current(page)).history;
   await app.evaluate(({ dialog }, filePath) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] }); }, unselected);
-  await menuAction(app, 'Manage Sources…');
-  const accessManager = page.getByRole('dialog', { name: 'Book sources' });
-  const unapprovedRow = accessManager.getByRole('row').filter({ hasText: 'NotChosen.gpx' });
-  await unapprovedRow.getByText('Locate to approve access', { exact: true }).waitFor();
-  await unapprovedRow.getByRole('button', { name: 'Locate…', exact: true }).click();
-  await unapprovedRow.getByText('Available', { exact: true }).waitFor();
+  await menuAction(app, 'Assets…');
+  const accessWindow = await assetWindow();
+  const accessManager = accessWindow.getByRole('region', { name: 'Assets' });
+  const unapprovedRow = accessManager.getByRole('option').filter({ hasText: 'NotChosen.gpx' });
+  await unapprovedRow.getByText('Locate to approve', { exact: true }).waitFor();
+  await app.evaluate(({ Menu }) => {
+    Menu.prototype.popup = function ({ callback }) {
+      globalThis.assetMenuLabels = this.items.map(({ label }) => label);
+      this.items.find(({ label }) => label === 'Locate…').click();
+      callback();
+    };
+  });
+  await unapprovedRow.click({ button: 'right' });
+  await accessWindow.waitForFunction(() => !document.querySelector('[data-source="file:notchosen"]')?.textContent.includes('Locate to approve'));
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Show in Finder', 'Locate…', '', 'Remove from Book']);
   assert.deepEqual((await current(page)).history, historyBeforeLocate, 'Locate does not add an empty Undo step');
-  await accessManager.getByRole('button', { name: 'Done', exact: true }).click();
+  await accessWindow.close();
   await reload(page);
   assert.match(await loadedFile(), /private dummy fixture/);
   // Save a Copy exposes collection as an explicit choice and opens an independent, portable document.
   const portable = join(work, 'Portable.imageflow');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, portable);
-  await menuAction(app, 'Save a Copy…');
-  const save = page.getByRole('dialog', { name: 'Save a copy' });
-  await save.waitFor();
-  assert.equal(await save.getByRole('checkbox', { name: 'Include all assets' }).isChecked(), true);
-  await page.screenshot({ path: join(root, '.build/linked-save-copy.png') });
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = async (...args) => {
+      const options = args.at(-1);
+      globalThis.duplicateOptions = options;
+      return { response: 0, checkboxChecked: true };
+    };
+  });
   const before = new Set(app.windows());
-  await save.getByRole('button', { name: 'Choose Location…' }).click();
-  await page.waitForFunction(() => !document.querySelector('.save-copy-dialog') || document.querySelector('.save-copy-dialog [role=alert]'));
-  if (await save.count()) throw new Error(await save.getByRole('alert').textContent());
+  await menuAction(app, 'Save a Copy…');
+  await page.waitForFunction(() => !document.querySelector('.save-copy-dialog'));
+  for (let attempt = 0; !app.windows().some((page) => !before.has(page) && page.url() === 'imageflow://editor/'); attempt++) {
+    assert.ok(attempt < 300, 'Duplicate opens the copied book');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal((await app.evaluate(() => globalThis.duplicateOptions)).checkboxLabel, 'Include all files');
   const copy = app.windows().find((page) => !before.has(page) && page.url() === 'imageflow://editor/');
   assert.ok(copy);
   await ready(copy);

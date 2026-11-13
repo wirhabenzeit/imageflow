@@ -123,6 +123,9 @@ export async function captureBookPreview(url: string, request: PreviewRequest, s
       throw new PreviewError('preview-capture-failed', 'The rendered artwork does not fit the preview dimensions.');
     }
     try {
+      // A ready layout can precede its compositor paint in a hidden window, especially on Linux.
+      await window.webContents.executeJavaScript('document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))');
+      signal?.throwIfAborted();
       const image = await window.webContents.capturePage({ x: 0, y: 0, width, height }, { stayHidden: true });
       if (image.isEmpty()) throw new Error('The capture returned no pixels.');
       // Normalize the encoded dimensions on displays with a device scale factor other than one.

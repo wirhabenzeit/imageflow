@@ -29,7 +29,7 @@ export const projectSchema = z.object({
   // `hash` is the template source's hash when the book was created from the template library; it tells a later
   // template update whether the book's copy was edited since.
   template: z.object({ id: identifier, version: label, hash: z.string().regex(/^[a-f0-9]{64}$/).optional() }),
-  // The template format chosen in Book settings; templates with one format ignore it.
+  // The template format chosen in template controls; templates with one format ignore it.
   format: identifier.optional(),
   params: values,
   texts: z.record(identifier, sourceReferenceSchema).default({}),

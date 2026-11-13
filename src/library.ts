@@ -1,11 +1,12 @@
 // A package in a template's saved dependency bundle (ADR 0006). `license` is the package's declared licence, or ''.
 export type TemplatePackage = { name: string; version: string; license: string };
 
-// A template in the template library, as the New Book picker and the Templates pane in Settings show it.
+// A template in the template library, as the New Book picker and Manage Templates show it.
 export type LibraryEntry = {
   id: string; version: string; label: string; description?: string;
   // Labels of the template's formats and layouts, and how many opening spreads a new book starts with.
   formats: string[]; layouts: string[]; openingSpreads: number;
+  shape?: 'Square' | 'Landscape' | 'Portrait';
   // `built-in` templates ship with the app and cannot be removed; an imported template with the same ID replaces one.
   source: 'built-in' | 'imported'; replacesBuiltIn?: boolean;
   importedAt?: string; importedFrom?: string;
@@ -22,6 +23,10 @@ export type LibraryEntry = {
 
 // What New Book creates: a template from the library, with the sample book when the template has one.
 export type NewBookChoice = { id: string; sample: boolean };
+
+export function templateFormatSummary(entry: Pick<LibraryEntry, 'shape' | 'formats'>) {
+  return [entry.shape, entry.formats.length > 1 ? entry.formats.length + ' formats' : !entry.shape ? entry.formats[0] : ''].filter(Boolean).join(' · ');
+}
 
 export type LibraryImportResult = {
   source: string; status: 'imported' | 'replaced' | 'unchanged' | 'cancelled' | 'failed';

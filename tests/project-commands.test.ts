@@ -85,7 +85,7 @@ test('layout switches preserve hidden content, crops, and rejected parameter ove
     { op: 'switch_layout', spread: 'one', definition: 'main' },
   ]);
   assert.deepEqual(result.files, original);
-  assert.match(result.changes[0], /Short heading uses the default/);
+  assert.match(result.changes[0], /Short heading will reset/);
   assert.equal(result.reflow, true);
   failure([{ op: 'switch_layout', spread: 'one', definition: 'end' }], 'INCOMPATIBLE_LAYOUT');
 });

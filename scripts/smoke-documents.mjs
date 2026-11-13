@@ -6,7 +6,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import { clickClosingWindow } from './ui-actions.mjs';
+import { clickClosingWindow, waitForPage } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/documents-smoke-')));
@@ -70,19 +70,16 @@ try {
   await start.getByRole('button', { name: 'New Book…', exact: true }).click();
   const picker = await pickerPromise;
   watch(picker);
-  await picker.getByRole('heading', { name: 'Choose a template' }).waitFor();
+  await picker.getByRole('heading', { name: 'New Book' }).waitFor();
   await picker.screenshot({ path: join(root, '.build/documents-starter.png') });
-  // macOS may finish dismissing a modal sheet after its BrowserWindow has closed. Keep that native handoff
-  // pending so the mocked save dialog cannot conceal an attempt to open it too early.
-  if (process.platform === 'darwin') await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/new').getParentWindow().emit('sheet-begin');
+  const nativePicker = await app.evaluate(({ BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/new');
+    return { modal: window.isModal(), parent: !!window.getParentWindow(), resizable: window.isResizable() };
   });
-  await clickClosingWindow(picker, picker.getByRole('button', { name: 'Continue…' }));
-  if (process.platform === 'darwin') {
-    await app.evaluate(() => new Promise((resolve) => setImmediate(resolve)));
-    assert.equal(await app.evaluate(() => globalThis.newBookSaveCalls), 0, 'Wait for native sheet dismissal before opening Save');
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/start').emit('sheet-end'));
-  }
+  assert.deepEqual(nativePicker, { modal: false, parent: false, resizable: true });
+  await start.evaluate(() => window.imageflow.openProject('new'));
+  assert.equal(app.windows().filter((page) => page.url() === 'imageflow://editor/new').length, 1, 'New Book is a singleton');
+  await clickClosingWindow(picker, picker.getByRole('button', { name: 'Create', exact: true }));
   let one;
   for (let attempt = 0; attempt < 250; attempt++) {
     one = app.windows().find((page) => page.url() === 'imageflow://editor/');
@@ -99,7 +96,7 @@ try {
     void cancelled.catch(() => {});
     const modal = await nextPicker;
     watch(modal);
-    await modal.getByRole('heading', { name: 'Choose a template' }).waitFor();
+    await modal.getByRole('heading', { name: 'New Book' }).waitFor();
     if (cancelWithButton) {
       await clickClosingWindow(modal, modal.getByRole('button', { name: 'Cancel', exact: true }));
     } else {
@@ -113,7 +110,7 @@ try {
   }
   await assert.rejects(stat(join(first, '.imageflow/photos')), { code: 'ENOENT' });
   await one.screenshot({ path: join(root, '.build/documents-editor.png') });
-  await start.waitForFunction(async () => (await window.imageflow.recentDocuments()).value.some((book) => !!book.cover));
+  await waitForPage(start, async () => (await window.imageflow.recentDocuments()).value.some((book) => !!book.cover));
   const initialCovers = await app.evaluate(() => globalThis.reviewCoverRenders);
   await save(one, 'Cover update pending');
   await new Promise((resolve) => setTimeout(resolve, 1200));
@@ -156,7 +153,11 @@ try {
   // External edits and undo histories stay scoped to the document.
   const text = join(second, 'texts/arrival.md');
   await writeFile(text, '# Changed externally\n\nA second-window source.\n');
-  await two.waitForFunction(() => document.querySelector('.status')?.textContent?.includes('reloaded'));
+  for (let attempt = 0; (await current(two)).texts.arrival !== '# Changed externally\n\nA second-window source.\n'; attempt++) {
+    assert.ok(attempt < 200, 'External text refreshes');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  await ready(two);
   assert.equal((await current(two)).texts.arrival, '# Changed externally\n\nA second-window source.\n');
   assert.equal((await current(one)).project.title, 'First');
   const checked = await Promise.all([one, two].map((page) => page.evaluate(async () => {

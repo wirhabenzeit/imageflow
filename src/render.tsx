@@ -1,6 +1,6 @@
 import { sourcePath } from './source-locations';
 import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
-import { configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, watchRenderedImages } from './rendered-image';
+import { configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
@@ -795,7 +795,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   let renderError: unknown;
   const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
   flushSync(() => react.render(previews.map(({ definition, span, spread }) => (
-    <div className="if-spread-container" data-span={span} data-spread={definition} key={definition}>
+    <div className="if-spread-container" data-span={span} data-spread={definition} data-layout={definition} key={definition}>
       <SpreadView book={book} spread={spread} template={template} format={format} positions={{}}
         page={sequence.spreads[index].page} index={anchors} renderPhotos />
     </div>
@@ -815,6 +815,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
     return { spread: definition, sheet };
   });
   layoutBook(root, sheets, 'layouts', format);
+  await settleRestoredImages();
   publish({ state: 'ready', template: info, pages: sequence.count, units: [], errors: [], warnings: [], flow: {}, anchors: anchors.anchors });
 }
 
@@ -1022,7 +1023,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     // (including the generated controls' draft) and the layout parameters it owns.
     const shown = React.useMemo(() => withEditorDraft(current, documentEditor ? { document: claimed(values.element) }
       : { element: elementId, values: values.element, spread: claimedSpread(values.spread) }), [current, values]);
-    const context = React.useMemo(() => ({ files, defaultMode: book.project.importMode ?? 'copy', importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
+    const context = React.useMemo(() => ({ files, importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
     return React.createElement(ProjectFilesContext.Provider, { value: context },
       React.createElement(EditorValues.Provider, { value: values },
         documentEditor
@@ -1056,7 +1057,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
 
 // Runs a layout family's picker. Its draft is one of the family's layout IDs; the frame reports it, its height, and
 // commit or cancel to the app, which checks the choice and switches the layout. The frame changes nothing itself.
-function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, familyId: string, initial: string,
+function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, familyId: string,
   readOnly: boolean) {
   const spread = book.project.spreads.find(({ id }) => id === spreadId);
   const family = template.layoutFamilies && Object.hasOwn(template.layoutFamilies, familyId) ? template.layoutFamilies[familyId] : undefined;
@@ -1064,13 +1065,14 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   if (!spread || !family || !picker) throw new Error('This layout family has no picker.');
   const ids = familyLayouts(template.spreads, familyId);
   const variants = ids.map((id) => ({ id, label: template.spreads[id].label, variant: { ...template.spreads[id].variant } }));
-  const document = resolveParams(template.parameters, book.project.params);
+  let document = resolveParams(template.parameters, book.project.params);
   const format = resolveFormat(template.format);
-  root.className = 'if-editor';
-  const start = [initial, spread.definition].find((id) => ids.includes(id)) ?? ids[0];
+  root.className = 'if-editor if-layout-settings';
+  let saved = spread.definition;
+  let disabled = readOnly;
 
   // The draft lives outside React so choose() followed directly by commit() sends the newest choice.
-  let draft = start;
+  let draft = saved;
   let failed = false;
   const fail = (error: unknown) => {
     if (failed) return;
@@ -1079,9 +1081,9 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
     post({ state: 'error', message: 'The picker stopped working: ' + reason });
   };
   const reported = new Set<string>();
-  let update: ((id: string) => void) | undefined;
+  let update: (() => void) | undefined;
   const choose = (id: string) => {
-    if (readOnly || failed) return;
+    if (disabled || failed) return;
     if (typeof id !== 'string' || !ids.includes(id)) {
       // Reported once per value, like an unknown parameter in an element editor; the draft stays as it was.
       const name = String(id);
@@ -1093,16 +1095,26 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
     }
     draft = id;
     post({ type: 'editor-draft', values: { layout: draft } });
-    update?.(draft);
+    update?.();
   };
   const find = (tags: VariantTags) => {
     const wanted = Object.entries(tags ?? {});
     return variants.find(({ variant }) => wanted.every(([key, value]) => Object.hasOwn(variant, key) && variant[key] === value))?.id;
   };
-  const commit = () => { if (!failed) post({ type: 'editor-commit', values: { layout: draft } }); };
+  const commit = () => { if (!failed && ids.includes(draft)) post({ type: 'editor-commit', values: { layout: draft } }); };
   const cancel = () => post({ type: 'editor-cancel' });
   window.addEventListener('message', (event) => {
-    if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'editor-flush') return;
+    if (event.source !== parent || event.origin !== editorURL.slice(0, -1)) return;
+    if (event.data?.type === 'layout-picker-state') {
+      if (typeof event.data.saved !== 'string' || !Object.hasOwn(template.spreads, event.data.saved) || typeof event.data.readOnly !== 'boolean') return;
+      saved = event.data.saved;
+      draft = saved;
+      document = resolveParams(template.parameters, event.data.document ?? {});
+      disabled = event.data.readOnly;
+      update?.();
+      return;
+    }
+    if (event.data?.type !== 'editor-flush') return;
     const request = event.data.request;
     if (typeof request !== 'number') return;
     try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
@@ -1111,14 +1123,14 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   });
 
   function Host() {
-    const [current, setCurrent] = React.useState(draft);
+    const [, refresh] = React.useReducer((value: number) => value + 1, 0);
     React.useEffect(() => {
-      update = setCurrent;
+      update = refresh;
       post({ type: 'editor-ready' });
       return () => { update = undefined; };
     }, []);
     return React.createElement(picker!.component, {
-      variants, current, saved: spread!.definition, choose, find, document, format, readOnly, commit, cancel,
+      variants, current: draft, saved, choose, find, document, format, readOnly: disabled, commit, cancel,
     });
   }
 
@@ -1201,13 +1213,18 @@ export async function startRender(root: HTMLElement) {
     }
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
+    if (book.mode === 'edit') {
+      const focus = () => post({ type: 'editor-focus', text: !!document.activeElement?.matches('textarea, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"])') });
+      document.addEventListener('focusin', focus); document.addEventListener('focusout', focus); window.addEventListener('focus', focus);
+      setTimeout(focus, 0);
+    }
     if (book.mode === 'edit' && query.get('view') === 'editor') {
       renderEditor(root, book, template, query.get('spread') ?? '', query.has('editor') ? { editor: query.get('editor')! } : { element: query.get('element') ?? '' },
         query.has('readonly'));
       return;
     }
     if (book.mode === 'edit' && query.get('view') === 'layout-picker') {
-      renderLayoutPicker(root, book, template, query.get('spread') ?? '', query.get('family') ?? '', query.get('layout') ?? '', query.has('readonly'));
+      renderLayoutPicker(root, book, template, query.get('spread') ?? '', query.get('family') ?? '', query.has('readonly'));
       return;
     }
     const { spreads } = book.project;
@@ -1227,7 +1244,8 @@ export async function startRender(root: HTMLElement) {
     // in the Book check, and at the format's target resolution for export (ADR 0006).
     const target = template.format.output.resolution?.target ?? 300;
     configureRenderedImages(edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
-      concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview }
+      concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
+      previewCache: view !== 'book' ? location.pathname + '/picture/' : undefined }
       : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
         : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
           : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
@@ -1250,7 +1268,7 @@ export async function startRender(root: HTMLElement) {
     flushSync(() => react.render(visible.map(({ spread, i }) => {
       const view = <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
         page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy} />;
-      return <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} key={spread.id}>
+      return <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} data-layout={spread.definition} key={spread.id}>
         {edit ? view : <LayoutBoundary spread={spread.id} failures={layoutFailures}>{view}</LayoutBoundary>}
       </div>;
     })));
@@ -1259,6 +1277,7 @@ export async function startRender(root: HTMLElement) {
     // A check or export is final only once every asynchronous picture is drawn or has failed; the editor shows
     // them as they arrive.
     const pictureFailures = lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
+    if (edit && view === 'thumbs') await settleRestoredImages();
     const images = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
@@ -1275,7 +1294,7 @@ export async function startRender(root: HTMLElement) {
         ({ ...(spread ? located(spread, text) : message(text)), code, details: { ...details, path }, suggestion })),
       ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
       ...(book.template.warnings ?? []).map((text) => ({ ...message(text), code: 'template-dependencies',
-        suggestion: 'Run npm install in template/, then choose Template → Rebuild Dependencies.' })),
+        suggestion: 'Run npm install in template/, then run the template dependency rebuild script.' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
     ];
@@ -1286,7 +1305,7 @@ export async function startRender(root: HTMLElement) {
     // The preview falls back to the default format, but printing at a size nobody chose is blocked.
     if (template.unknownChoice) {
       errors.push({ ...message('The template no longer offers the format ' + book.project.format + ' saved with this book. The preview uses ' +
-        template.format.label + '; choose a format in Book settings.'), code: 'format-unavailable',
+        template.format.label + '; choose a format in template controls.'), code: 'format-unavailable',
       details: { saved: book.project.format ?? '', used: template.format.label },
       suggestion: 'Use select_format with one of the template formats, or declare format ' + book.project.format + ' again in the template.' });
     }

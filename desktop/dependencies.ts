@@ -62,12 +62,12 @@ export async function dependencyWarning(root: string, manifest: DependencyManife
   const hasPackage = await stat(join(root, 'package.json')).then(() => true, () => false);
   if (!hasPackage) return undefined;
   if (!manifest) {
-    return 'The template has a package.json but no saved dependency bundle. Choose Template → Rebuild Dependencies after npm install.';
+    return 'The template has a package.json but no saved dependency bundle. Run the template dependency rebuild script after npm install.';
   }
   const lock = await lockfileHash(root);
   if (lock && lock !== manifest.lockfile) {
     return 'template/package-lock.json changed since the dependency bundle was saved; the book still uses the saved bundle. ' +
-      'Choose Template → Rebuild Dependencies to use the installed packages.';
+      'Run the template dependency rebuild script to use the installed packages.';
   }
   return manifest.untyped.length ? 'These template dependencies have no type declarations, so the type check treats them as any: ' +
     manifest.untyped.join(', ') + '. Install their @types packages and rebuild the dependencies.' : undefined;
@@ -88,7 +88,7 @@ export function vendoredModule(_root: string, manifest: DependencyManifest | und
 }
 
 export const missingDependency = (specifier: string) => 'The template imports ' + specifier + ', which is not in its saved dependency bundle ' +
-  '(template/vendor/manifest.json). Install it in template/ with npm install, then choose Template → Rebuild Dependencies.';
+  '(template/vendor/manifest.json). Install it in template/ with npm install, then run the template dependency rebuild script.';
 
 const assetLoaders: Record<string, Loader> = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.woff', '.woff2', '.ttf', '.otf']
   .map((extension) => [extension, 'dataurl' as const]));

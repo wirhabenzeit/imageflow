@@ -17,7 +17,7 @@ function Placements({ summary, template, usage, render, source, select }: {
   source: SourceRef; select: (spread: string) => void;
 }) {
   const placed = usage[source.kind][source.id] ?? [];
-  if (!placed.length) return <p className="muted">Not placed in the book yet. Drag it onto a {source.kind === 'photo' ? 'photo' : 'text'} box.</p>;
+  if (!placed.length) return <p className="muted">Not placed</p>;
   return <ul className="si-placements">
     {placed.map(({ spread: id, pages }) => {
       const spread = summary.project.spreads.find((item) => item.id === id);
@@ -97,13 +97,12 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     {!summary.readOnly && <button type="button" onClick={() => {
       setOpenError('');
       void window.imageflow?.documentAction('text', source.id).then((result) => { if ('error' in result) setOpenError(result.error); });
-    }}>Edit Text Source…</button>}
+    }}>Open in Editor</button>}
     {openError && <p role="alert" className="error-text">{openError}</p>}
     {html !== undefined && <details open><summary>Preview</summary>
       <button type="button" className="si-text-preview" title="Quick Look (Space)" onClick={quickLook}>
         <div className="ql-markdown" dangerouslySetInnerHTML={{ __html: html }} />
       </button>
-      <p className="muted">Edit {fileName(path)} in your own editor; ImageFlow reloads it when you save.</p>
     </details>}
   </div>;
 }

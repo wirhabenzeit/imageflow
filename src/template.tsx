@@ -164,7 +164,7 @@ export type DocumentEditorProps = {
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };
 // A layout family's picker chooses one of the family's variants. It runs in a sandboxed frame like an element
-// editor; its draft is a layout ID, and ImageFlow applies it on Done as an ordinary layout switch.
+// editor; its choice is a layout ID, applied immediately as an ordinary undoable layout switch.
 export type LayoutVariant = { id: string; label: string; variant: VariantTags };
 export type LayoutPickerProps = {
   variants: LayoutVariant[]; current: string; saved: string; choose: (id: string) => void;
@@ -179,7 +179,7 @@ const layoutFamily = z.object({
   }).optional(),
 });
 // A document editor owns some document parameters. Nodes marked only with those parameters open it, with the context
-// of the spread they are on. Its parameters get no control in Book settings.
+// of the spread they are on. Its parameters get no control in the template controls.
 const documentEditor = z.object({
   label: z.string().min(1).optional(),
   parameters: z.array(identifier).min(1, 'A document editor needs at least one document parameter to edit.'),
@@ -257,7 +257,7 @@ function withSpans(template: unknown) {
     [id, plainRecord(definition) && definition.span === undefined ? { ...definition, span } : definition])) };
 }
 
-// A template declares one print format, or several named formats the user chooses between in Book settings.
+// A template declares one print format, or several named formats the user chooses between in template controls.
 export const templateSchema = z.preprocess(withSpans, z.object({
   id: identifier,
   version: z.string().min(1),
@@ -418,7 +418,7 @@ export function templateInfo(template: Template): TemplateInfo {
     }])),
     // Functions (render, editor components) stay in the render frame; the editor gets plain declarations.
     spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, anchors: _anchors, elements, ...info }]) => [id, {
-      ...info,
+      ...info, declaresAnchors: !!_anchors,
       elements: Object.fromEntries(Object.entries(elements).map(([key, { editor, ...element }]) => [key, {
         ...element, ...(editor ? { editor: { label: editor.label, parameters: editor.parameters,
           ...(editor.spread?.length ? { spread: editor.spread } : {}), presentation: editor.presentation } } : {}),

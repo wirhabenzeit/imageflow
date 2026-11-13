@@ -1,3 +1,4 @@
+import { Icon } from './Icon';
 import { useEffect, useRef, useState } from 'react';
 import type { Issue } from './desktop';
 
@@ -38,17 +39,16 @@ export function BookCheckIndicator({ check, checking, spread, select, request = 
 
   if (!check) return null;
   const drawing = !checking && !!check.pictures;
-  const title = 'Book check · ' + label + (checking ? ' · updating…' : drawing ? ' · drawing pictures…' : '');
+  const title = 'Book check · ' + (checking ? 'Checking…' : drawing ? 'Rendering…' : label);
   return <div ref={root} className={'book-check-list book-check-' + level + (checking ? ' book-check-stale' : '')}>
-    <button type="button" className="book-check-toggle" aria-expanded={open} title={title}
+    <button type="button" className="book-check-toggle" aria-expanded={open} title={title} aria-label={title}
       onClick={() => setOpen(!open)}>
-      <span className="visually-hidden">{title}</span>
-      <span aria-hidden="true">{checking ? 'Checking book…' : drawing ? (items.length ? label + ' · drawing pictures…' : 'Drawing pictures…')
-        : items.length ? label : 'Book check: no issues'}</span>
+      {checking || drawing ? <span className="status-spinner" aria-hidden="true" /> : <Icon name={items.length ? 'warning' : 'check'} />}
+      {items.length > 0 && <span className="issue-count">{items.length}</span>}
     </button>
     {open && <div className="book-check-panel" role="dialog" aria-label="Book check">
       <p className="book-check-heading">Book check · {label}</p>
-      {!items.length && <p>{checking ? 'Checking book…' : drawing ? 'No issues so far; pictures are still drawing.' : 'No issues found.'}</p>}
+      {!items.length && <p>{checking ? 'Checking book…' : drawing ? 'Rendering…' : 'No issues found.'}</p>}
       <ul>{items.map(({ issue, level }, i) => <li key={i} className={'issue-' + level + (issue.spread === spread ? ' issue-current' : '')}>
         {issue.spread && issue.where ? <button type="button" className="link" onClick={() => {
           select(issue.spread!);

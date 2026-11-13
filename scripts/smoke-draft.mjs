@@ -76,7 +76,7 @@ try {
   assert.equal(starter.pages, 28);
   assert.deepEqual(starter.flow['turning:body'], { part: 2, parts: 3, title: 'arrival.md' });
   assert.equal((await read()).title, 'Draft Photobook');
-  await window.waitForFunction(() => /Book check · (No issues|\d)/.test(document.querySelector('.book-check-toggle')?.textContent ?? '') &&
+  await window.waitForFunction(() => /Book check · (No issues|\d)/.test(document.querySelector('.book-check-toggle')?.getAttribute('title') ?? '') &&
     !document.querySelector('.book-check-stale'));
   const bookCheck = await preview().locator('body').evaluate(() => window.imageflowRenderStatus);
   assert.equal(bookCheck?.state, 'ready');
@@ -92,11 +92,11 @@ try {
   assert.equal(pages[0].getTrimBox().x, 0);
   assert.ok(pages.at(-1).getTrimBox().x > 0);
 
-  await window.getByText('Book settings', { exact: true }).click();
-  const title = window.getByLabel('Book title');
-  await saveState(async () => { await title.fill('My first book'); await title.blur(); }, (data) => data.title === 'My first book');
-  await saveState(() => button('Undo').click(), (data) => data.title === 'Draft Photobook');
-  await saveState(() => button('Redo').click(), (data) => data.title === 'My first book');
+  await window.locator('.template-controls > summary').click();
+  const oldPaper = (await read()).params.paper;
+  await saveState(() => window.getByRole('radio', { name: 'Cool', exact: true }).click(), (data) => data.params.paper === 'cool');
+  await saveState(() => button('Undo').click(), (data) => data.params.paper === oldPaper);
+  await saveState(() => button('Redo').click(), (data) => data.params.paper === 'cool');
   await saveState(() => window.getByLabel('Page numbers').uncheck(), (data) => data.params.showPageNumbers === false);
 
   await window.getByRole('button', { name: 'Photo and story 2–3' }).click();
@@ -153,7 +153,7 @@ try {
   }, project);
   await menuAction(app, 'Open project…');
   await ready();
-  assert.equal(await window.locator('.project-identity strong').textContent(), 'My first book');
+  assert.equal(await window.locator('.project-identity strong').textContent(), 'Draft Photobook');
   assert.equal((await read()).spreads.length, 16);
   if (!packaged) await checkFlow(app, root);
   console.log('ImageFlow draft workflow passed' + (packaged ? ' (packaged).' : '.'));

@@ -1,54 +1,69 @@
 import { useEffect, useState } from 'react';
 import type { DesktopApi } from './desktop';
-import { describeImport } from './library';
+import { TemplatePreview } from './TemplatePreview';
 import { useLibrary } from './useLibrary';
+import { templateFormatSummary } from './library';
 
-/** The New Book picker: the templates in the library, shared by the start window and File → New Book. */
 export function StarterPicker({ api }: { api?: DesktopApi }) {
   const { entries, error } = useLibrary(api);
   const [selected, setSelected] = useState<string>();
   const [sample, setSample] = useState(true);
-  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState('');
   const usable = entries?.filter(({ unavailable }) => !unavailable) ?? [];
-  // Keep the choice while the library changes; otherwise preselect the first usable template.
   useEffect(() => {
     if (entries && !usable.some(({ id }) => id === selected)) setSelected(usable[0]?.id);
   }, [entries]);
   const entry = usable.find(({ id }) => id === selected);
-  const importTemplates = async () => {
-    const result = await api?.importTemplates();
-    if (result && 'value' in result && result.value.length) setNotice(result.value.map(describeImport).join(' '));
-    else if (result && 'error' in result) setNotice(result.error);
+  const create = async (id = selected) => {
+    const chosen = usable.find((template) => template.id === id);
+    if (!api || !chosen || busy) return;
+    setBusy(true); setFailure('');
+    try {
+      const result = await api.chooseStarter({ id: chosen.id, sample: !!chosen.sample && sample });
+      if ('error' in result) setFailure(result.error);
+    } catch { setFailure('Could not create the book. Please try again.'); }
+    finally { setBusy(false); }
   };
-  return <main className="studio starter-picker">
-    <header><h1>Choose a template</h1><p className="muted">Your book keeps its own copy of the template. Make it yours.</p></header>
-    <div className="starter-choices" role="radiogroup" aria-label="Template">
+  const imported = entries?.some(({ source }) => source === 'imported');
+  return <main className="studio starter-picker" onKeyDown={(event) => {
+    if (event.key === 'Enter' && !(event.target as Element).closest('button,input')) { event.preventDefault(); void create(); }
+    if (event.key === 'Escape' && !busy) void api?.chooseStarter();
+  }}>
+    <header><h1>New Book</h1></header>
+    <div className="starter-choices" role="listbox" aria-label="Template" aria-busy={busy}>
       {!entries && !error && <p className="muted">Loading templates…</p>}
       {error && <p className="error-text">{error}</p>}
-      {entries?.map((template) => <label className={'starter-choice' + (template.unavailable ? ' unavailable' : '')} key={template.id}>
-        <input type="radio" name="template" value={template.id} checked={selected === template.id} disabled={!!template.unavailable}
-          onChange={() => setSelected(template.id)} />
-        <span className="starter-art" aria-hidden="true"><span>{template.label}</span><span>{template.layouts.length} layouts</span></span>
-        <span className="starter-description">
-          <strong>{template.label} <span className="starter-version">{template.version}</span></strong>
-          {template.description && <span>{template.description}</span>}
-          <small>{template.formats.join(' · ')}{template.source === 'imported' ? ' · Imported' : ''}</small>
-          {template.unavailable && <small className="error-text">{template.unavailable}</small>}
-        </span>
-      </label>)}
+      {(imported ? ['built-in', 'imported'] as const : ['built-in'] as const).map((source) => <section className="starter-group" key={source}>
+        {imported && <h2>{source === 'built-in' ? 'ImageFlow' : 'Imported'}</h2>}
+        <div className="starter-grid">
+          {entries?.filter((item) => item.source === source || !imported).map((template) => <button type="button" role="option"
+            key={template.id} aria-label={template.label} aria-selected={selected === template.id} disabled={busy || !!template.unavailable}
+            tabIndex={selected === template.id ? 0 : -1} className="starter-choice" title={template.unavailable ?? template.description}
+            onClick={() => setSelected(template.id)} onDoubleClick={() => { setSelected(template.id); void create(template.id); }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') { event.preventDefault(); void create(); return; }
+              if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              const at = usable.findIndex(({ id }) => id === template.id);
+              const next = usable[event.key === 'Home' ? 0 : event.key === 'End' ? usable.length - 1 : Math.max(0, Math.min(usable.length - 1, at + (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1)))];
+              if (next) { setSelected(next.id); document.querySelector<HTMLButtonElement>('[data-template="' + CSS.escape(next.id) + '"]')?.focus(); }
+            }} data-template={template.id}>
+            <TemplatePreview api={api} entry={template} natural />
+            <strong>{template.label}</strong>
+            <small title={template.formats.join('\n')}>{templateFormatSummary(template)}</small>
+          </button>)}
+        </div>
+      </section>)}
     </div>
-    {entry?.sample && <label className="pc-switch starter-sample"><input type="checkbox" checked={sample} onChange={(event) => setSample(event.target.checked)} />
-      Include sample photos, texts and spreads</label>}
-    {entry && !(entry.sample && sample) && <p className="muted starter-start">{entry.openingSpreads
-      ? 'The book starts with ' + (entry.openingSpreads === 1 ? 'one spread' : entry.openingSpreads + ' spreads') + ' from the template.'
-      : 'The book starts empty; you choose its first spread.'}</p>}
-    {notice && <p className="muted starter-notice" role="status">{notice}</p>}
-    <footer>
-      <button onClick={() => void importTemplates()} disabled={!api}>Import Templates…</button>
-      <button onClick={() => void api?.showSettings('templates')} disabled={!api}>Manage Templates…</button>
-      <span className="spacer" />
-      <button onClick={() => void api?.chooseStarter()}>Cancel</button>
-      <button className="primary" disabled={!api || !entry} onClick={() => entry && void api?.chooseStarter({ id: entry.id, sample: !!entry.sample && sample })}>Continue…</button>
-    </footer>
+    <div className="starter-options">
+      {entry?.sample && <label className="pc-switch"><input type="checkbox" checked={sample} disabled={busy}
+        onChange={(event) => setSample(event.target.checked)} />Include sample content</label>}
+    </div>
+    <div className="starter-notice" role="status">{failure || error}
+      {(error || (entries && (!usable.length || entries.some(({ unavailable }) => unavailable)))) && <button className="link" onClick={() => void api?.showTemplates()}>Manage Templates…</button>}
+    </div>
+    <footer><button disabled={busy} onClick={() => void api?.chooseStarter()}>Cancel</button>
+      <button className="primary" disabled={!api || !entry || busy} onClick={() => void create()}>Create</button></footer>
   </main>;
 }

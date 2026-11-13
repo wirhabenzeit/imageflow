@@ -1,3 +1,4 @@
+import { Icon } from './Icon';
 import { useEffect, useState } from 'react';
 import type { DesktopApi, McpSettings } from './desktop';
 
@@ -11,6 +12,7 @@ export function AgentStatus({ api }: { api?: DesktopApi }) {
   }, [api]);
   if (!api || !settings?.enabled) return null;
   const { clients } = settings;
-  return <button className="agent-status" title={clients.length ? 'Connected: ' + clients.map(({ name }) => name).join(', ') : 'Agent access is on · waiting for an agent'}
-    onClick={() => void api.showSettings('agents')}>Agent · {clients.length}</button>;
+  return <button className="agent-status" title={clients.length ? 'Connected: ' + clients.map(({ name }) => name).join(', ') : 'No agent connected'}
+    aria-label={clients.length ? 'Connected: ' + clients.map(({ name }) => name).join(', ') : 'No agent connected'}
+    onClick={() => void api.showSettings('agents')}><Icon name="agent" />{clients.length > 0 && <span className="connection-dot" />}</button>;
 }

@@ -9,6 +9,13 @@ function listen<T>(channel: string, listener: (value: T) => void) {
 }
 
 const api: DesktopApi = {
+  popupMenu: (items, point) => ipcRenderer.invoke(channels.popupMenu, items, point),
+  documentProxy: (action) => ipcRenderer.invoke(channels.documentProxy, action),
+  dragSources: (keys) => ipcRenderer.invoke(channels.dragSources, keys),
+  showAssets: (accept) => ipcRenderer.invoke(channels.showAssets, accept),
+  showTemplates: () => ipcRenderer.invoke(channels.showTemplates),
+  templatePreview: (id, hash) => ipcRenderer.invoke(channels.templatePreview, id, hash),
+  sourceMenu: (key) => ipcRenderer.invoke(channels.sourceMenu, key),
   sourceAction: (request) => ipcRenderer.invoke(channels.sourceAction, request),
   saveCopy: (includeAssets) => ipcRenderer.invoke(channels.saveCopy, includeAssets),
   currentProject: () => ipcRenderer.invoke(channels.current),
@@ -19,7 +26,7 @@ const api: DesktopApi = {
   chooseStarter: (choice) => ipcRenderer.invoke(channels.chooseStarter, choice),
   library: () => ipcRenderer.invoke(channels.library),
   onLibraryChanged: (listener) => listen(channels.libraryChanged, listener),
-  importTemplates: () => ipcRenderer.invoke(channels.libraryImport),
+  importTemplates: (paths) => ipcRenderer.invoke(channels.libraryImport, paths),
   removeTemplate: (id) => ipcRenderer.invoke(channels.libraryRemove, id),
   exportTemplate: (id) => ipcRenderer.invoke(channels.libraryExport, id),
   trustTemplate: (id, allow) => ipcRenderer.invoke(channels.libraryTrust, id, allow),

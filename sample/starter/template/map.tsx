@@ -195,7 +195,6 @@ export function MapEditor({ values, set, readOnly, Control, context }: MapEditor
   };
   return <div className="map-editor">
     <Control parameter="track" />
-    {problem && <p className="map-editor-note error">{problem}</p>}
     <div className="map-editor-styles" role="radiogroup" aria-label="Map style">
       {(Object.keys(styles) as MapStyle[]).map((style) => <button key={style} type="button" role="radio" aria-checked={values.style === style}
         disabled={readOnly} onClick={() => set({ style })}>{styles[style]}</button>)}
@@ -204,9 +203,7 @@ export function MapEditor({ values, set, readOnly, Control, context }: MapEditor
     <div ref={holder} className="map-editor-map" role="application" aria-label="Map view"
       data-output-x={measured?.x} data-output-y={measured?.y} data-output-width={measured?.width} data-output-height={measured?.height}
       style={rect ? { aspectRatio: (rect.width / rect.height).toFixed(4) } : undefined} />
-    <p className={'map-editor-note' + (state.error ? ' error' : '')} role="status">
-      {state.error ?? (!measured ? 'Waiting for the page layout…' : 'Drag and zoom to frame the page. The page draws this view, and export draws it again at print resolution.')}
-    </p>
+    <p className="map-editor-error" role="status">{state.error ?? problem ?? ''}</p>
     <p className="map-editor-note">{mapAttribution}</p>
   </div>;
 }
