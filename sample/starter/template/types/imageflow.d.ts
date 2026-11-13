@@ -225,8 +225,12 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
   spread: ParameterValues<S>;
   /** Changes only the layout parameters this editor lists in `spread`, in the same draft as `set`. */
   setSpread: EditorFunction<SK, EditorChanges<S, SK>, void>;
+  /** The document settings, as `context.document`: current while the editor is open. */
   document: ParameterValues<D>;
+  /** The format, as `context.format`: it follows a format change while the editor is open. */
   format: ResolvedFormat;
+  /** The spread the editor was opened from, as `render` sees it, kept current while the editor is open. */
+  context: EditorContext<SpreadDeclaration, D>;
   readOnly: boolean;
   commit(): void;
   cancel(): void;
@@ -268,6 +272,48 @@ export type ElementEditor<K extends string = string, P extends Parameters = Para
   spread?: readonly (keyof S & string)[];
   component: EditorFunction<Owned, ElementEditorProps<P, Owned, D, S, OwnedSpread>, ImageFlowNode>;
   presentation?: 'dialog';
+};
+/**
+ * The read-only view of the book an editor is opened from: the values `render` reads for that spread (its
+ * parameters, the document's, boxes with their photos' metadata, elements, page numbers, the book's anchors and the
+ * format), plus the spread's ID and layout. It follows the book while the editor stays open: reordering spreads,
+ * another photo, a changed document setting or format refresh it. The editor's own draft is applied to it: an
+ * element editor's element values and owned layout parameters, or a document editor's own document parameters. Markdown boxes'
+ * `text` is null, since flow positions are known only to the book render. Pure helpers that take
+ * `Pick<RenderContext, 'page' | 'book' | 'document'>` serve `render` and editors alike.
+ */
+export type EditorContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
+  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'elements' | 'page' | 'format' | 'formatId' | 'book'> & { spread: string; layout: string };
+/**
+ * Props of a document editor. `values` holds only the editor's own document parameters (`K`), with the draft
+ * applied, and `set` changes them. Every other setting is read from `context`, the spread the editor was opened
+ * from, which follows the book while the editor is open. `format` is `context.format`. Requires `document-editors`.
+ *
+ *     function MarkedDays({ values, set, context }: DocumentEditorProps<typeof documentParameters, 'markedDates'>) { ... }
+ */
+export type DocumentEditorProps<D extends Parameters = Parameters, K extends keyof D & string = keyof D & string> = {
+  values: ParameterValues<Pick<D, K>>;
+  /** Changes some of this editor's own document parameters in the draft. Other keys and invalid values are ignored and reported. */
+  set: EditorFunction<K, EditorChanges<D, K>, void>;
+  context: EditorContext<SpreadDeclaration, D>;
+  format: ResolvedFormat;
+  readOnly: boolean;
+  commit(): void;
+  cancel(): void;
+  /** ImageFlow's own control for one of this editor's parameters, bound to the draft. */
+  Control: EditorFunction<K, { parameter: K; label?: string }, ImageFlowElement>;
+  importFile(accept: readonly string[]): Promise<string | undefined>;
+};
+/**
+ * An editor for document parameters, declared in the template's `editors`. A node marked only with parameters it
+ * owns, such as `ctx.edit('document.markedDates')`, opens it in ImageFlow's editor panel with that spread's
+ * `context`; its parameters get no control in Book settings. Each document parameter belongs to one editor.
+ */
+export type DocumentEditor<D extends Parameters = Parameters, K extends keyof D & string = keyof D & string> = {
+  label?: string;
+  /** The document parameters this editor edits. */
+  parameters: readonly K[];
+  component: EditorFunction<K, DocumentEditorProps<D, K>, ImageFlowNode>;
 };
 export type ElementDeclaration = { label: string; parameters?: Parameters; controls?: Controls; editor?: ElementEditor };
 export type SpreadDeclaration = {
@@ -489,7 +535,8 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
-  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages';
+  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
+  'editor-network' | 'rendered-images';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -501,6 +548,7 @@ export type TemplateDeclaration = {
   description?: string;
   contract: 1;
   requires?: readonly Capability[];
+  network?: readonly string[];
   format?: PrintFormat;
   formats?: Record<string, PrintFormat>;
   defaultFormat?: string;
@@ -508,6 +556,7 @@ export type TemplateDeclaration = {
   layoutFamilies?: Record<string, LayoutFamily>;
   spreads: Record<string, SpreadDefinition>;
   openingSpreads?: readonly OpeningSpread[];
+  editors?: Record<string, DocumentEditor>;
 };
 
 /**
@@ -557,10 +606,19 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
    * instead of failing in a layout. Apps older than this field ignore it.
    */
   requires?: readonly Capability[];
+  /**
+   * HTTPS origins this template's element editors may reach, such as `['https://tiles.openfreemap.org']` or
+   * `'https://*.example.com'`, without paths. ImageFlow asks the user once per book; until they allow it, editors
+   * run offline. Book previews, the Book check and export never reach the network: an editor saves what pages need
+   * with `saveFile`. Requires `editor-network`.
+   */
+  network?: readonly string[];
   /** Book settings, shown in Book settings and read through `ctx.document`. */
   parameters?: D & ParametersChecked<D>;
   /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */
   layoutFamilies?: { [K in L]: LayoutFamily };
+  /** Editors of document parameters, by ID, opened from nodes marked with their parameters. Requires `document-editors`. */
+  editors?: Record<string, DocumentEditor<D, any>>;
 };
 /**
  * The spreads a new book starts with, in order. Without it, a new book starts with no spreads and the editor asks for
@@ -762,6 +820,37 @@ export function asset(path: string): string;
  * latter in the Book check. Parse the text yourself and mark problems on a rendered node with `data-issue="…"`.
  */
 export function file(id: string): { name: string; extension: string; text: string } | undefined;
+
+/** Where and how big a `<RenderedImage>` draws. */
+export type RenderTarget = {
+  /** The element's size in CSS pixels (96 per inch), as laid out on the page. */
+  width: number; height: number;
+  /** Device pixels per CSS pixel: the screen's in previews, the format's target resolution ÷ 96 in export. */
+  pixelRatio: number;
+  mode: 'preview' | 'check' | 'export';
+  /** Aborted when the element goes away, its inputs change, or ImageFlow stops waiting for it. */
+  signal: AbortSignal;
+};
+export type RenderedImageProps = {
+  /** Draws the picture for the target: a PNG or JPEG `Blob`, or a canvas. Reject to report a failure. */
+  draw: (target: RenderTarget) => Promise<Blob | HTMLCanvasElement | OffscreenCanvas>;
+  /** Everything `draw` depends on, as JSON-like data; the picture is drawn again when it changes. */
+  inputs: unknown;
+  /** Names the picture in messages, such as `'Map'`. */
+  label?: string;
+  alt?: string;
+  className?: string;
+  style?: CSSProperties;
+};
+/**
+ * A picture that template code draws asynchronously, such as a map from a WebGL library and remote tiles
+ * (requires `rendered-images`). ImageFlow gives `draw` the element's size, the output resolution and a cancellation
+ * signal, runs a few at a time, and waits for all of them, with a timeout, before a Book check or export is final.
+ * Inside `draw`, timers, WebGL, workers and requests to the template's `network` origins are allowed. The picture
+ * belongs to that render only: it is drawn again in every preview and export and never saved in the book. A failure
+ * or timeout is a `rendered-image-failed` error, so export never prints a page without it.
+ */
+export function RenderedImage(props: RenderedImageProps): ImageFlowElement;
 
 // Only the declarations marked `export` above are part of the module.
 export {};

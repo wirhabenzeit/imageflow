@@ -21,7 +21,7 @@ export async function createDocument(destination: string, starter: string | ((st
   const staging = join(dirname(folder), '.imageflow-create-' + randomUUID());
   let reserved = false;
   try {
-    if (typeof starter === 'string') await cp(starter, staging, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+    if (typeof starter === 'string') await cp(starter, staging, { recursive: true, filter: (path) => basename(path) !== '.imageflow' && basename(path) !== 'node_modules' });
     else { await mkdir(staging); await starter(staging); }
     const file = join(staging, 'project.json');
     const project = JSON.parse(await readFile(file, 'utf8'));

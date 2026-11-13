@@ -1,6 +1,8 @@
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
+import * as ReactExports from 'react';
+import { dependencyWarning, isBareImport, missingDependency, readDependencyManifest, vendoredModule } from './dependencies';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BuildFailure, Loader } from 'esbuild';
 import type { AuthoringDiagnostic } from '../src/authoring';
@@ -17,6 +19,7 @@ import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
 import { approveSource } from './source-access';
 import { runtimeExports } from '../src/runtime-exports';
+import { templateHash } from './template-library';
 
 export const assetTypes: Record<string, string> = {
   '.js': 'text/javascript', '.css': 'text/css', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -70,7 +73,8 @@ export async function readProjectDocument(root: string, name: ManifestName): Pro
 
 const hostModules = new Map([
   ['imageflow', 'export const { ' + runtimeExports.join(', ') + ' } = globalThis.ImageFlowRuntime;'],
-  ['react', 'export default globalThis.ImageFlowReact; export const { createElement, Fragment, Children } = globalThis.ImageFlowReact;'],
+  // All of React's named exports, so bundled dependencies that use hooks share the app's React.
+  ['react', 'export default globalThis.ImageFlowReact; export const { ' + Object.keys(ReactExports).filter((name) => /^[A-Za-z_$][\w$]*$/.test(name) && name !== 'default').join(', ') + ' } = globalThis.ImageFlowReact;'],
   ['react/jsx-runtime', 'export const { jsx, jsxs, Fragment } = globalThis.ImageFlowJSX;'],
 ]);
 
@@ -81,12 +85,16 @@ export class TemplateCompileError extends Error {
   }
 }
 
-async function bundleTemplate(folder: string) {
+export async function bundleTemplate(folder: string) {
   const entry = await containedPath(folder, 'template/index.tsx', 'template');
   const root = resolve(folder, 'template');
   const loader: Record<string, Loader> = Object.fromEntries(
     Object.keys(assetTypes).filter((ext) => ext !== '.js' && ext !== '.css').map((ext) => [ext, 'file']),
   );
+  const manifest = await readDependencyManifest(root).catch((error: Error) => {
+    throw new TemplateCompileError(error.message, [{ code: 'template-compile-error', stage: 'template', severity: 'error', message: error.message }]);
+  });
+  const dependencies = await dependencyWarning(root, manifest);
   try {
     // esbuild reads its executable path when the module is first loaded.
     const { build } = await import('esbuild');
@@ -113,6 +121,13 @@ async function bundleTemplate(folder: string) {
           builder.onResolve({ filter: /.*/ }, async (args) => {
             if (args.kind === 'entry-point' || args.pluginData) return;
             if (hostModules.has(args.path)) return { path: args.path, namespace: 'imageflow-host' };
+            // Packages resolve only through the saved dependency bundle, never through node_modules (ADR 0006).
+            if (isBareImport(args.path)) {
+              if (vendoredModule(root, manifest, args.path) === undefined) return { errors: [{ text: missingDependency(args.path) }] };
+              return { path: args.path, namespace: 'imageflow-vendor' };
+            }
+            // Inline images in stylesheets, such as icons in vendored CSS, need no file and stay as they are.
+            if (args.kind === 'url-token' && args.path.startsWith('data:')) return { path: args.path, external: true };
             if (!args.path.startsWith('./') && !args.path.startsWith('../')) {
               return { errors: [{ text: 'Use a relative template import instead of ' + args.path + '.' }] };
             }
@@ -122,10 +137,19 @@ async function bundleTemplate(folder: string) {
             if (result.errors.length) return { errors: result.errors };
             const path = await realpath(result.path);
             if (!isInside(root, path)) return { errors: [{ text: args.path + ' points outside template/.' }] };
+            // A template runs only files its hash covers and its copies carry, so installed packages and dotfiles stay
+            // out of reach of relative imports too (ADR 0006).
+            const excluded = relative(root, path).split(sep).find((part) => part === 'node_modules' || part.startsWith('.'));
+            if (excluded) return { errors: [{ text: args.path + (excluded === 'node_modules'
+              ? ' is an installed package file. Import the package by name, which resolves through the saved dependency bundle (Template → Rebuild Dependencies).'
+              : ' is inside ' + excluded + ', which templates leave out of their hash and copies. Move it to a folder without a leading dot.') }] };
             return { path };
           });
           builder.onLoad({ filter: /.*/, namespace: 'imageflow-host' }, (args) => ({
             contents: hostModules.get(args.path),
+          }));
+          builder.onLoad({ filter: /.*/, namespace: 'imageflow-vendor' }, (args) => ({
+            contents: vendoredModule(root, manifest, args.path), resolveDir: root, loader: 'js',
           }));
         },
       }],
@@ -148,7 +172,7 @@ async function bundleTemplate(folder: string) {
       files.set(name, await readFile(source));
       urls[path] = name;
     }
-    return { files, urls };
+    return { files, urls, ...(dependencies ? { warnings: [dependencies] } : {}) };
   } catch (error) {
     const message = 'Template could not be bundled. ' + (error instanceof Error ? error.message : String(error));
     const errors = (error as Partial<BuildFailure> | null)?.errors;
@@ -174,6 +198,8 @@ export type OpenProject = ProjectFiles & {
   manifests: Record<ManifestName, Buffer>;
   // Set only on synthetic fixture books rendered by authoring checks.
   fixture?: FixtureMarking;
+  // The hash of the template files as loaded (see templateHash); network approvals hold for this hash only (ADR 0006).
+  templateHash?: string;
 };
 
 // Files for file parameters are read whole into the render data, so preview and export use the same input.
@@ -186,9 +212,11 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   const [{ document: project, source: projectFile }, { document: photoIndex, source: photoFile }] = await Promise.all([
     readProjectDocument(folder, 'project.json'), readProjectDocument(folder, 'photos.json'),
   ]);
+  // Hashed before bundling: if the template changes in between, the watcher loads the book again.
+  const hash = await templateHash(join(folder, 'template')).catch(() => undefined);
   const assets = await bundleTemplate(folder);
   const cache = fallback;
-  return readContent({ folder, assets, cache, readOnly, project, photoIndex, manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
+  return readContent({ folder, assets, cache, readOnly, project, photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
 }
 
 async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>, pinSources = false): Promise<OpenProject> {
@@ -336,7 +364,7 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
     id, folder: basename(book.folder), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
     photoSizes: Object.fromEntries([...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
-    texts: book.texts, sources: book.sources,
+    texts: book.texts, sources: book.sources, ...(book.templateHash ? { templateHash: book.templateHash } : {}),
   };
 }
 
@@ -357,6 +385,7 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
       script: base + '/template/template.js',
       css: book.assets.files.has('template.css') ? base + '/template/template.css' : undefined,
       assets: Object.fromEntries(Object.entries(book.assets.urls).map(([path, name]) => [path, base + '/template/' + name])),
+      ...(book.assets.warnings ? { warnings: book.assets.warnings } : {}),
     },
   };
 }

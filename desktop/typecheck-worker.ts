@@ -26,6 +26,8 @@ function check(): TypecheckResult {
     visited.add(actual);
     for (const entry of readdirSync(actual, { withFileTypes: true })) {
       if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      // Saved dependencies are checked through their declarations in vendor/types, not as template source.
+      if (entry.name === 'vendor' && actual === root) continue;
       const next = join(actual, entry.name), canonical = realpathSync(next);
       if (!inside(root, canonical)) throw new Error('A template source points outside template/.');
       if (statSync(canonical).isDirectory()) { readSources(next, depth + 1); continue; }
@@ -39,6 +41,9 @@ function check(): TypecheckResult {
     }
   }
   readSources(root);
+  // Declarations of the saved dependency bundle (ADR 0006), in vendor/types/packages by package name.
+  const vendorTypes = join(root, 'vendor', 'types');
+  const untyped = join(vendorTypes, 'untyped.d.ts');
   const modules: Record<string, string> = {
     imageflow: join(types, 'imageflow.d.ts'), react: join(types, 'react.d.ts'), 'react/jsx-runtime': join(types, 'jsx-runtime.d.ts'),
   };
@@ -47,6 +52,8 @@ function check(): TypecheckResult {
     jsx: ts.JsxEmit.ReactJSX, strict: true, noEmit: true, skipLibCheck: false, types: [],
     allowJs: true, checkJs: false, noUncheckedSideEffectImports: true, resolveJsonModule: true, allowImportingTsExtensions: true,
     lib: ['lib.es2022.d.ts', 'lib.dom.d.ts', 'lib.dom.iterable.d.ts'],
+    // Every bare import, from template code and from vendored declarations alike, resolves among the saved packages.
+    baseUrl: vendorTypes, paths: { '*': ['packages/*', 'packages/@types/*'] },
   };
   const host = ts.createCompilerHost(options);
   const permitted = (path: string) => {
@@ -57,7 +64,7 @@ function check(): TypecheckResult {
   host.readFile = (path) => {
     const actual = permitted(path);
     if (!actual) return undefined;
-    if (inside(root, actual)) return sources.get(actual);
+    if (inside(root, actual) && !inside(vendorTypes, actual)) return sources.get(actual);
     try { return readFileSync(actual, 'utf8'); } catch { return undefined; }
   };
   host.fileExists = (path) => host.readFile(path) !== undefined;
@@ -74,12 +81,20 @@ function check(): TypecheckResult {
     if (name === 'csstype' && inside(types, resolve(containingFile))) {
       return { resolvedFileName: join(types, 'csstype/index.d.ts'), extension: ts.Extension.Dts };
     }
-    if (!name.startsWith('./') && !name.startsWith('../')) return undefined;
+    if (!name.startsWith('./') && !name.startsWith('../')) {
+      const resolved = ts.resolveModuleName(name, containingFile, options, host).resolvedModule;
+      return resolved && inside(vendorTypes, resolve(resolved.resolvedFileName)) ? resolved : undefined;
+    }
     return ts.resolveModuleName(name, containingFile, options, host).resolvedModule;
   });
   // JSON participates only when imported; tsconfig.json remains editor configuration, never a compiler input.
-  const program = ts.createProgram([...sources.keys()].filter((path) => !path.endsWith('.json')).concat(join(types, 'assets.d.ts')), options, host);
-  const findings = ts.getPreEmitDiagnostics(program);
+  const roots = [...sources.keys()].filter((path) => !path.endsWith('.json')).concat(join(types, 'assets.d.ts'));
+  if (host.fileExists(untyped)) roots.push(untyped);
+  const globals = join(vendorTypes, 'globals.d.ts');
+  if (host.fileExists(globals)) roots.push(globals);
+  const program = ts.createProgram(roots, options, host);
+  // Third-party declarations are not the template's to fix; their problems surface where the template uses them.
+  const findings = ts.getPreEmitDiagnostics(program).filter((finding) => !finding.file || !inside(vendorTypes, resolve(finding.file.fileName)));
   const diagnostics: AuthoringDiagnostic[] = findings.slice(0, maxDiagnostics).map((finding) => {
     const position = finding.file && finding.start !== undefined ? finding.file.getLineAndCharacterOfPosition(finding.start) : undefined;
     const path = finding.file && (inside(root, resolve(finding.file.fileName))
@@ -88,7 +103,7 @@ function check(): TypecheckResult {
       message: ts.flattenDiagnosticMessageText(finding.messageText, '\n'), details: { typescriptCode: finding.code },
       ...(path ? { location: { path, ...(position ? { line: position.line + 1, column: position.character + 1 } : {}) } } : {}) };
   });
-  return { diagnostics, files: program.getSourceFiles().map((file) => file.fileName).filter((path) => inside(root, path))
+  return { diagnostics, files: program.getSourceFiles().map((file) => file.fileName).filter((path) => inside(root, path) && !inside(vendorTypes, path))
     .map((path) => slash(relative(folder, path))).sort(),
     totalDiagnostics: findings.length, truncated: findings.length > maxDiagnostics, elapsedMs: 0 };
 }

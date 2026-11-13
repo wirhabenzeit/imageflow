@@ -14,6 +14,9 @@ import type { BookMenuState, CanvasLayout, ExportMode, ImportRequest, ProjectCha
 import { identifier } from '../src/project';
 import type { RenderProject } from '../src/project';
 import { printBook, saveProof } from './export';
+import { approveNetwork, approvedNetwork } from './source-access';
+import { rebuildDependencies } from './dependencies';
+import { templateFolder } from './document-actions';
 import { importIntoProject, loadProject, projectSummary, readProjectManifest } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
@@ -33,8 +36,11 @@ import { CommittedProjectSaveError } from './persistence';
 import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { McpToolName } from '../src/mcp-contract';
+import { renderIdleMs } from '../src/render-budget';
 
-export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode'] }>;
+// `network` lists the origins this book's frames may reach now (ADR 0006): its preview, check, export and element
+// editor frames. Absent for frames that stay offline, such as template probes.
+export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[] }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 async function fingerprint(path: string) {
@@ -71,6 +77,48 @@ export class DocumentSession {
   private importedWrites = new ImportReceipts();
   private agentLeases = new Map<string, (allowed: boolean) => void>();
   private renderIds = new Set<string>();
+  // The origins this book's frames may reach (ADR 0006), and the template hash they were allowed for. A frame of a
+  // book whose template has another hash gets none, so a changed template never inherits an earlier approval.
+  private network: { hash?: string; origins: readonly string[] } = { origins: [] };
+  private networkPrepared = false;
+  private originsFor(book: OpenProject) {
+    return book.templateHash && book.templateHash === this.network.hash ? this.network.origins : [];
+  }
+  /** The network origins the user allowed for this book's template; its render frames may reach them (ADR 0006). */
+  get networkOrigins() { return this.originsFor(this.book); }
+  private askingNetwork?: Promise<string[]>;
+  /** The declared sites the library trusts for a template with this hash (ADR 0006); set by the app. */
+  networkTrust?: (hash: string, declared?: readonly string[]) => Promise<string[]>;
+
+  /** Lets the frames reach the origins already allowed for this book's template, or trusted for it, before it renders. */
+  async prepareNetwork() {
+    const book = this.book;
+    const hash = book.templateHash;
+    const origins = book.readOnly || !hash ? [] : [...new Set([...await approvedNetwork(book.folder, hash),
+      ...await this.networkTrust?.(hash).catch(() => []) ?? []])];
+    this.network = { hash, origins };
+    this.networkPrepared = true;
+  }
+
+  /**
+   * Applies a change to what this book may reach: its template changed, or Settings allowed or revoked trust. Open
+   * frames are rendered again under the new policy. When origins are withdrawn, a running export or check stops,
+   * since its frames loaded under the old policy; export saves nothing and says why.
+   */
+  async updateNetwork() {
+    if (this.closing) return;
+    const before = this.network.hash === this.book.templateHash ? this.network.origins : [];
+    await this.prepareNetwork();
+    if (this.closing) return;
+    const after = this.originsFor(this.book);
+    if (before.length === after.length && before.every((origin) => after.includes(origin))) return;
+    if (before.some((origin) => !after.includes(origin))) {
+      const reason = Object.assign(new Error('Network access for this book’s template was withdrawn during the export. No PDF was saved.'), { networkWithdrawn: true });
+      this.exportJob?.abort(reason);
+      for (const job of this.checkJobs) job.abort(reason);
+    }
+    this.notify({ value: this.activate(this.book) });
+  }
   sidebar = true;
   inspector = true;
   sources = true;
@@ -106,7 +154,8 @@ export class DocumentSession {
 
   get book() { return this.projectSession.book; }
   get summary(): ProjectSummary {
-    return { ...projectSummary(this.book, this.active.id), handle: this.projectSession.handle, history: this.projectSession.history };
+    return { ...projectSummary(this.book, this.active.id), handle: this.projectSession.handle, history: this.projectSession.history,
+      network: [...this.networkOrigins] };
   }
   notify(change: ProjectChange) {
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.changed, change);
@@ -134,6 +183,14 @@ export class DocumentSession {
     const next = await loadProject(this.book.folder, this.cache, this.book.readOnly);
     const summary = this.activate(next, true);
     if (!this.watcher) this.watchProject(next);
+    return summary;
+  }
+  /** Bundles the template's installed packages into template/vendor/ and reloads the book with them (ADR 0006). */
+  async rebuildDependencies() {
+    if (this.book.readOnly) throw new Error('Create a project to change its template.');
+    await rebuildDependencies(await templateFolder(this.book.folder));
+    const summary = await this.reload();
+    this.notify({ value: summary });
     return summary;
   }
   replyLease(id: string, allowed: boolean) { this.agentLeases.get(id)?.(allowed === true); }
@@ -209,7 +266,9 @@ export class DocumentSession {
       }
     }
     this.renderIds.add(id);
-    this.renders.set(id, { book, mode: 'edit' });
+    this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book) });
+    // A changed template gets the approvals for its own hash, if any, and the frames are rendered again with them.
+    if (this.networkPrepared && !book.readOnly && book.templateHash !== this.network.hash) queueMicrotask(() => void this.updateNetwork().catch(() => {}));
     this.window.setTitle(book.project.title);
     if (!book.readOnly) this.window.setRepresentedFilename(book.folder);
     this.changed?.(book);
@@ -438,6 +497,50 @@ export class DocumentSession {
     return { summary: this.activate(next), imported };
   }
 
+  /** The origins the template declares that this book's frames may reach, asking once for new ones (ADR 0006):
+   * element editors, and previews, checks and exports that draw <RenderedImage> pictures. Sites allowed for the
+   * template's exact version in the library need no question. Declining keeps the frames offline, so such pictures
+   * fail and export stops; the question comes back the next time an editor opens or the book opens. When the
+   * allowed origins change, the book is rendered again under a new ID, which the summary carries. */
+  async editorNetwork(id: string, declared: unknown) {
+    const book = this.currentBook(id);
+    const origins = Array.isArray(declared) ? [...new Set(declared.filter((origin): origin is string =>
+      typeof origin === 'string' && /^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/.test(origin)))].slice(0, 20) : [];
+    const hash = book.templateHash;
+    const before = new Set(this.originsFor(book));
+    if (!origins.length || book.readOnly || !hash) { this.network = { hash, origins: [] }; return { origins: [] as string[] }; }
+    while (this.askingNetwork) await this.askingNetwork.catch(() => {});
+    const ask = (async () => {
+      const trusted = await this.networkTrust?.(hash, origins).catch(() => []) ?? [];
+      const approved = new Set([...await approvedNetwork(book.folder, hash), ...trusted]);
+      const pending = origins.filter((origin) => !approved.has(origin));
+      if (pending.length && !this.window.isDestroyed()) {
+        const { response } = await dialog.showMessageBox(this.window, {
+          type: 'question', buttons: ['Allow', 'Not Now'], defaultId: 0, cancelId: 1,
+          message: 'Allow this book’s template to connect to the internet?',
+          detail: 'It loads data from these sites to draw its pages and editors, in previews and when you export:\n' + pending.join('\n') +
+            '\n\nIt can send what you edit there, too. Without them, those pictures cannot be drawn and the book cannot be exported. ' +
+            'Allow only templates you trust.',
+        });
+        if (response === 0) {
+          await approveNetwork(book.folder, pending, hash);
+          for (const origin of pending) approved.add(origin);
+        }
+      }
+      return origins.filter((origin) => approved.has(origin));
+    })();
+    this.askingNetwork = ask;
+    let allowed: string[];
+    try { allowed = await ask; }
+    finally { this.askingNetwork = undefined; }
+    // The template changed while asking: the answer was for the old one, and the new one is decided afresh.
+    if (this.book.templateHash !== hash) return { origins: [] as string[] };
+    this.network = { hash, origins: allowed };
+    const changed = allowed.length !== before.size || allowed.some((origin) => !before.has(origin));
+    return changed && this.active.id === id ? { origins: allowed, summary: this.activate(this.book) } : { origins: allowed };
+  }
+
+
   async exportBook(owner: BrowserWindow, projectId: string, mode: ExportMode) {
     this.currentBook(projectId);
     const before = await this.projectSession.inputs.capture();
@@ -457,7 +560,7 @@ export class DocumentSession {
       const id = randomUUID();
       const job = new AbortController();
       this.exportJob = job;
-      this.renders.set(id, { book, mode: 'export' });
+      this.renders.set(id, { book, mode: 'export', network: () => this.originsFor(book) });
       const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
       try {
         const fonts = mode === 'print' ? bundledFontNames(book.assets.files) : [];
@@ -474,6 +577,7 @@ export class DocumentSession {
         await saveProof(filePath, bytes, job.signal);
         return { warnings, errors };
       } catch (error) {
+        if ((job.signal.reason as { networkWithdrawn?: boolean })?.networkWithdrawn) throw job.signal.reason;
         if (job.signal.aborted) return null;
         throw error;
       } finally {
@@ -487,20 +591,27 @@ export class DocumentSession {
     inputs: ProjectInputIndex | undefined = this.projectSession?.book.folder === book.folder ? this.projectSession.inputs : undefined, draft?: CheckDraft) {
     const renditions = this.projectSession?.inputs === inputs ? this.projectSession?.renditions : undefined;
     const job = new AbortController();
-    const timeout = setTimeout(() => job.abort(new Error('The authoring check timed out.')), 90_000);
+    // The check may take as long as its renders keep making progress (render-budget); it times out only when they
+    // stall for longer than a waiting render allows, or other work stalls as long.
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => job.abort(new Error('The authoring check timed out.')), renderIdleMs('check') + 30_000);
+    };
+    arm();
     this.checkJobs.add(job);
     if (!externalSignal) this.checkJob = job;
     try {
       return await checkProject(book, this.cache, request, async (snapshot, preview, signal, inspect) => {
         const id = randomUUID();
-        this.renders.set(id, { book: snapshot, mode: 'export' });
+        this.renders.set(id, { book: snapshot, mode: 'export', network: () => this.originsFor(snapshot) });
         try {
           const url = renderOrigin + '/render/' + id;
           if (preview) {
-            const image = await captureBookPreview(url, preview, signal, inspect);
+            const image = await captureBookPreview(url, preview, signal, inspect, arm);
             return { status: image.status, preview: image };
           }
-          return { status: await checkBookRender(url, signal, inspect) };
+          return { status: await checkBookRender(url, signal, inspect, arm) };
         } finally {
           this.renders.delete(id);
         }

@@ -10,35 +10,31 @@ import type { SpreadState, Values } from './project';
 import { controlLayout } from './controls';
 import { ControlList, Field } from './Fields';
 import { useEditorFrame } from './editor-frame';
-
-// What the editor works on: every parameter of the element, with its declaration and resolved value (the saved
-// value, else the template default). Comparing this tells whether a draft was based on values that have since
-// changed, whether through project data or through the template (a new default, a changed declaration).
-// The layout (spread) parameters the editor edits count too.
-function editingContext(template: TemplateInfo, spread: SpreadState, element: string) {
-  const layout = template.spreads[spread.definition];
-  const definition = layout?.elements[element];
-  const parameters = definition?.parameters ?? {};
-  const resolved = resolveParams(parameters, spread.elements[element]?.params ?? {});
-  const layoutParameters = layout?.parameters ?? {};
-  const owned = (definition?.editor?.spread ?? []).filter((key) => Object.hasOwn(layoutParameters, key));
-  const resolvedSpread = resolveParams(layoutParameters, spread.params);
-  return JSON.stringify([spread.definition, definition?.editor?.parameters ?? [], definition?.editor?.spread ?? [], definition?.controls ?? null,
-    Object.keys(parameters).map((key) => [key, parameters[key], resolved[key]]),
-    owned.map((key) => [key, layoutParameters[key], resolvedSpread[key]])]);
-}
+import { applyEditorChanges, changedValues, editingContext, queuedEditorSave } from './editor-session';
+import type { EditorState, EditorTarget } from './editor-session';
 
 // Template components report values from an isolated frame. Apply each valid change through the app's save
 // queue, keeping the frame mounted while the book renders. Closing flushes any field still being typed.
-export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, canvasReady, edit, close, importFile, host }: {
-  project: string; template: TemplateInfo; spread: SpreadState; element: string; readOnly: boolean;
+// The same panel runs an element's editor and a document editor (`target`). `params` are the document's saved
+// parameters; `project` names the current render session, which the frame reads its context from.
+export function ElementEditorDialog({ project, template, spread, params, target, readOnly, blocked, canvasReady, edit, close, importFile, prepare, network = '', host }: {
+  project: string; template: TemplateInfo; spread: SpreadState; params: Values; target: EditorTarget; readOnly: boolean;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
+  // Settles once the frame may load: the network origins its policy allows are decided before it is served.
+  prepare?: () => Promise<string | void>;
+  // The network origins the book may reach now; when they change, the frame loads again under the new policy.
+  network?: string;
 }) {
+  const element = target.kind === 'element' ? target.element : '';
   const layout = template.spreads[spread.definition];
-  const definition = layout?.elements[element];
-  const editor = definition?.editor;
+  const definition = target.kind === 'element' ? layout?.elements[element] : undefined;
+  const documentEditor = target.kind === 'document' ? template.editors?.[target.editor] : undefined;
+  const editor = documentEditor ?? definition?.editor;
+  // The parameters the editor's `set` writes: the element's, or the document's.
+  const declared = target.kind === 'document' ? template.parameters : definition?.parameters;
+  const state: EditorState = { spread, params };
   const panel = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const draft = useRef<Values>({});
@@ -49,25 +45,50 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const [saveRejected, setSaveRejected] = useState(false);
   const rejected = useRef(false);
   const lastSave = useRef(Promise.resolve(true));
-  const savedState = useRef({ spread, template });
-  savedState.current = { spread, template };
+  const savedState = useRef({ state, template });
+  savedState.current = { state, template };
   const [closing, setClosing] = useState(false);
   const outsideAction = useRef<(() => void) | undefined>(undefined);
   const replaying = useRef(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   // Recognize our queued saves without accepting unrelated changes (Reload, Undo, or template edits).
-  const expected = useRef(spread);
-  const contexts = useRef([editingContext(template, spread, element)]);
-  const context = editingContext(template, spread, element);
+  const expected = useRef(state);
+  const contexts = useRef([editingContext(template, state, target)]);
+  const context = editingContext(template, state, target);
   const stale = !contexts.current.includes(context);
   useLayoutEffect(() => {
     const index = contexts.current.indexOf(context);
     if (index > 0) contexts.current.splice(0, index);
   }, [context]);
-  // The frame keeps the project state it opened with; saving starts a new render elsewhere, not here.
-  const [source] = useState(() => renderOrigin + '/render/' + project + '?view=editor&spread=' + encodeURIComponent(spread.id) +
-    '&element=' + encodeURIComponent(element) + (readOnly ? '&readonly' : ''));
-  const title = editor?.label ?? 'Edit ' + (definition?.label ?? element);
+  // The frame keeps the project state it opened with; saving starts a new render elsewhere, not here. Preparing may
+  // render the book again (newly allowed network origins), so the frame opens on the project as it is then.
+  const address = (id: string) => renderOrigin + '/render/' + id + '?view=editor&spread=' + encodeURIComponent(spread.id) +
+    (target.kind === 'document' ? '&editor=' + encodeURIComponent(target.editor) : '&element=' + encodeURIComponent(element)) + (readOnly ? '&readonly' : '');
+  const latestProject = useRef(project);
+  latestProject.current = project;
+  const [source, setSource] = useState(() => address(project));
+  const subject = target.kind === 'document' ? editor?.parameters.map((key) => template.parameters[key]?.label ?? key).join(', ') ?? target.editor
+    : definition?.label ?? element;
+  const title = editor?.label ?? 'Edit ' + subject;
+  const [prepared, setPrepared] = useState(!prepare);
+  useEffect(() => {
+    if (!prepare) return;
+    let current = true;
+    void prepare().catch(() => undefined).then((id) => {
+      if (!current) return;
+      setSource(address(typeof id === 'string' ? id : latestProject.current));
+      setPrepared(true);
+    });
+    return () => { current = false; };
+  }, []);
+  // A frame keeps the content security policy it loaded with, so when network access is allowed or withdrawn while
+  // the editor is open (in Settings, or by a change to the template), it loads again on the book as it is now.
+  const openedNetwork = useRef(network);
+  useEffect(() => {
+    if (network === openedNetwork.current) return;
+    openedNetwork.current = network;
+    setSource(address(latestProject.current));
+  }, [network]);
   const values = (reported: unknown): Values => reported && typeof reported === 'object' ? reported as Values : {};
   const { height, ready, error, setError, failed, flushing, flushTimedOut, flush } = useEditorFrame(frame, {
     draft(reported, reportedSpread) {
@@ -124,19 +145,26 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     action?.();
   }, [closing, canvasReady, blocked, failed, stale, saveRejected, close]);
 
+  // The book the frame's context comes from follows each new render session, so a reorder or another photo shows
+  // in the open editor; the editor's draft is kept.
+  useEffect(() => {
+    if (ready) frame.current?.contentWindow?.postMessage({ type: 'editor-context', project }, renderOrigin);
+  }, [ready, project]);
+
   const owned = editor?.parameters ?? [];
   const saved = resolveParams(definition?.parameters ?? {}, spread.elements[element]?.params ?? {});
   const current = { ...saved, ...frameDraft, ...local };
+  // A document editor's other document parameters stay in Book settings; an element's appear below its editor.
   const generated = definition ? controlLayout(definition.parameters, definition.controls, current, owned) : [];
 
   async function apply(reported: Values, reportedSpread: Values, generatedValues: Values) {
-    if (rejected.current || failed || stale || blocked || readOnly || !editor || !definition || !layout) return false;
+    if (rejected.current || failed || stale || blocked || readOnly || !editor || !declared || !layout) return false;
     const changes = [...Object.entries(reported), ...Object.entries(generatedValues)];
     const spreadChanges = Object.entries(reportedSpread);
-    const invalid = changes.filter(([key, value]) => !Object.hasOwn(definition.parameters, key) ||
-      owned.includes(key) !== Object.hasOwn(reported, key) || !isParameterValue(definition.parameters[key], value))
-      .map(([key]) => definition.parameters[key]?.label ?? key);
-    const ownedSpread = editor.spread ?? [];
+    const invalid = changes.filter(([key, value]) => !Object.hasOwn(declared, key) ||
+      owned.includes(key) !== Object.hasOwn(reported, key) || !isParameterValue(declared[key], value))
+      .map(([key]) => declared[key]?.label ?? key);
+    const ownedSpread = definition?.editor?.spread ?? [];
     invalid.push(...spreadChanges.filter(([key, value]) => !ownedSpread.includes(key) || !Object.hasOwn(layout.parameters, key) ||
       !isParameterValue(layout.parameters[key], value)).map(([key]) => layout.parameters[key]?.label ?? key));
     if (invalid.length) {
@@ -144,29 +172,16 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
       return false;
     }
     const previous = expected.current;
-    const elementValues = resolveParams(definition.parameters, previous.elements[element]?.params ?? {});
-    const layoutValues = resolveParams(layout.parameters, previous.params);
-    const changed = changes.filter(([key, value]) => elementValues[key] !== value);
-    const changedSpread = spreadChanges.filter(([key, value]) => layoutValues[key] !== value);
-    if (!changed.length && !changedSpread.length) return lastSave.current;
+    const changed = changedValues(template, previous, target, { values: Object.fromEntries(changes), spread: Object.fromEntries(spreadChanges) });
+    if (!changed) return lastSave.current;
     const next = structuredClone(previous);
-    const update = (state: SpreadState) => {
-      if (changed.length) {
-        state.elements[element] ??= { params: {} };
-        Object.assign(state.elements[element].params, Object.fromEntries(changed));
-      }
-      Object.assign(state.params, Object.fromEntries(changedSpread));
-    };
-    update(next);
+    applyEditorChanges(next, target, changed);
     expected.current = next;
-    contexts.current.push(editingContext(template, next, element));
-    const before = editingContext(template, previous, element);
-    const saving = edit(({ project: files }) => {
-      const state = files.spreads.find(({ id }) => id === spread.id);
-      // Check again when this queued edit runs, so an external change cannot be overwritten by an old frame.
-      if (rejected.current || !state || editingContext(template, state, element) !== before) return false;
-      update(state);
-    }, (definition.label ?? element) + ' updated');
+    contexts.current.push(editingContext(template, next, target));
+    const before = editingContext(template, previous, target);
+    // Checked again when this queued edit runs, so an external change cannot be overwritten by an old frame.
+    const saving = edit(({ project: files }) => rejected.current ? false : queuedEditorSave(template, files, target, before, changed) && undefined,
+      subject + ' updated');
     lastSave.current = saving;
     const applied = await saving;
     if (!applied) {
@@ -174,8 +189,8 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
       // as saved: stop this frame, reset the baseline, and make the recovery visible instead of dropping later edits.
       rejected.current = true;
       const latest = savedState.current;
-      expected.current = latest.spread;
-      contexts.current = [editingContext(latest.template, latest.spread, element)];
+      expected.current = latest.state;
+      contexts.current = [editingContext(latest.template, latest.state, target)];
       setSaveRejected(true);
     }
     return applied;
@@ -222,10 +237,10 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     </p>}
     {blocked && !stale && <p className="ee-status muted" role="status">{blocked}</p>}
     <div className="ee-body">
-    <iframe ref={frame} className="element-editor-frame" inert={!!blocked || saveRejected} title={title} src={source} style={{ height }} />
+    {prepared && <iframe ref={frame} className="element-editor-frame" inert={!!blocked || saveRejected} title={title} src={source} style={{ height }} />}
     {!ready && !error && <p className="ee-status muted">Loading the editor…</p>}
     {stale && <p className="ee-status error-text" role="alert">
-      {(definition?.label ?? element) + ' changed while this editor was open. Close and open the editor again to continue from the current values.'}
+      {subject + ' changed while this editor was open. Close and open the editor again to continue from the current values.'}
     </p>}
     {error && !stale && <p className="ee-status error-text" role="alert">{error}</p>}
     {readOnly && <p className="ee-status muted">Sample projects are read-only.</p>}

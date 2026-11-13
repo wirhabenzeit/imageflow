@@ -1,7 +1,8 @@
 // Development mode with hot reloading.
 // - Each run opens a fresh copy of the starter project in a temporary folder, and a new fresh copy whenever
 //   sample/starter changes, so the app always shows the current starter. `npm run dev -- --last` reopens the
-//   project that was open last instead (for example a real book) and does not replace it.
+//   project that was open last instead (for example a real book) and does not replace it. `--starter calendar`
+//   opens the calendar starter (any folder in sample/) instead of the photobook.
 // - Editor and render pages come from a Vite dev server: CSS changes apply in place, React components fast-refresh.
 // - Main-process and preload changes rebuild with esbuild and restart Electron; the open project is reopened.
 // - Project templates, texts, and photos already reload through the project watcher.
@@ -42,7 +43,8 @@ await stageDesktop({ dev: true, destination: desktop });
 // open yourself (dev-project.json) is still the one `--last` reopens.
 const keepLast = process.argv.includes('--last');
 const devState = join(root, '.build', keepLast ? 'dev-project.json' : 'dev-fresh-project.json');
-const starter = join(root, 'sample', 'starter');
+const starterFlag = process.argv.indexOf('--starter');
+const starter = join(root, 'sample', starterFlag >= 0 ? process.argv[starterFlag + 1] : 'starter');
 await mkdir(join(tmpdir(), 'imageflow-dev'), { recursive: true });
 const scratch = await realpath(join(tmpdir(), 'imageflow-dev'));
 let fresh;

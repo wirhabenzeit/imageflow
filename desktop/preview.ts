@@ -5,6 +5,7 @@ import type { RenderStatus } from '../src/desktop';
 import { maxPreviewEdge, parsePreviewRequest, PreviewError } from '../src/preview';
 import type { PreviewMetadata, PreviewRequest } from '../src/preview';
 import type { InspectionRequest } from '../src/inspection';
+import { renderIdleMs } from '../src/render-budget';
 
 type ReadyStatus = Extract<RenderStatus, { state: 'ready' }>;
 export type BookPreview = PreviewMetadata & {
@@ -14,11 +15,11 @@ export type BookPreview = PreviewMetadata & {
 };
 
 type RenderResult = { status: RenderStatus; preview: Window['imageflowPreview'] };
-const renderTimeoutMs = 60_000;
 
 async function withRenderedBook<T>(
   url: string, query: URLSearchParams, signal: AbortSignal | undefined,
   useRender: (window: BrowserWindow, status: ReadyStatus, preview: PreviewMetadata | undefined) => T | Promise<T>,
+  onActivity?: () => void,
 ) {
   signal?.throwIfAborted();
   const address = URL.parse(url);
@@ -37,7 +38,19 @@ async function withRenderedBook<T>(
   window.webContents.on('will-redirect', (event) => event.preventDefault());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   const lifecycle = new AbortController();
-  const stop = setTimeout(() => lifecycle.abort(new PreviewError('render-timeout', 'Timed out rendering the book.')), renderTimeoutMs);
+  // No fixed deadline: the render may take as long as its pictures need, each within its own timeout, and times out
+  // only when nothing has started or finished drawing for longer than one picture may take (render-budget).
+  const idleMs = renderIdleMs(query.get('view') === 'check' ? 'check' : 'preview');
+  let last = Date.now();
+  const stop = setInterval(() => {
+    if (Date.now() - last > idleMs) {
+      lifecycle.abort(new PreviewError('render-timeout', 'Timed out rendering the book: nothing finished drawing for ' + idleMs / 1000 + ' s.'));
+    } else if (!window.isDestroyed()) {
+      void window.webContents.executeJavaScript('globalThis.imageflowRenderActivity || 0').then((at: unknown) => {
+        if (typeof at === 'number' && at > last) { last = at; onActivity?.(); }
+      }, () => {});
+    }
+  }, 1000);
   window.webContents.once('render-process-gone', () => {
     lifecycle.abort(new PreviewError('render-failed', 'The book renderer stopped before it was ready.'));
   });
@@ -82,19 +95,20 @@ async function withRenderedBook<T>(
     if (error instanceof PreviewError) throw error;
     throw new PreviewError('render-failed', 'The book renderer stopped before it was ready.', { cause: error });
   } finally {
-    clearTimeout(stop);
+    clearInterval(stop);
     runSignal.removeEventListener('abort', abort);
     if (!window.isDestroyed()) window.destroy();
   }
 }
 
-export function checkBookRender(url: string, signal?: AbortSignal, inspect?: InspectionRequest) {
+export function checkBookRender(url: string, signal?: AbortSignal, inspect?: InspectionRequest, onActivity?: () => void) {
   const query = new URLSearchParams({ view: 'check' });
   if (inspect) query.set('inspect', JSON.stringify(inspect));
-  return withRenderedBook(url, query, signal, (_window, status) => status);
+  return withRenderedBook(url, query, signal, (_window, status) => status, onActivity);
 }
 
-export async function captureBookPreview(url: string, request: PreviewRequest, signal?: AbortSignal, inspect?: InspectionRequest): Promise<BookPreview> {
+export async function captureBookPreview(url: string, request: PreviewRequest, signal?: AbortSignal, inspect?: InspectionRequest,
+  onActivity?: () => void): Promise<BookPreview> {
   const options = parsePreviewRequest(request);
   const query = new URLSearchParams({ view: 'artwork', request: JSON.stringify(options) });
   if (inspect) query.set('inspect', JSON.stringify(inspect));
@@ -119,5 +133,5 @@ export async function captureBookPreview(url: string, request: PreviewRequest, s
     } catch (error) {
       throw new PreviewError('preview-capture-failed', 'ImageFlow could not capture the rendered artwork.', { cause: error });
     }
-  });
+  }, onActivity);
 }

@@ -1,11 +1,12 @@
 // Compile-time check that the `imageflow` types shipped with the starter template match the runtime.
 // `npm run build` fails here when one side changes without the other. Nothing in this file runs.
 import type * as Declared from '../sample/starter/template/types/imageflow';
+import type { RenderedImageProps, RenderTarget } from './rendered-image';
 import type { PrintFormat, printFormat, ResolvedFormat } from './format';
 import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
-import type { Anchor, AnchorDeclaration, BookContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
+import type { Anchor, AnchorDeclaration, BookContext, DocumentEditorProps, EditorContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
   TemplateDeclaration, Text, TextTag } from './template';
 import type { Capability, runtimeExports } from './runtime-exports';
 
@@ -32,6 +33,8 @@ export const declaredTypesMatchRuntime: [
   Same<keyof Parameters<typeof Declared.MarkdownBox>[0], keyof Parameters<typeof MarkdownBox>[0]>,
   Same<keyof Parameters<typeof Declared.Element>[0], keyof Parameters<typeof Element>[0]>,
   Same<Declared.Capability, Capability>,
+  Same<keyof Declared.RenderedImageProps, keyof RenderedImageProps>,
+  Same<keyof Declared.RenderTarget, keyof RenderTarget>,
   Same<keyof Declared.TextProps, keyof Parameters<typeof Text>[0]>,
   Same<Declared.TextTag, TextTag>,
   Same<keyof Declared.BoundGeometry, keyof BoundGeometry>,
@@ -43,5 +46,8 @@ export const declaredTypesMatchRuntime: [
   // An element editor receives exactly the props the runtime passes.
   Same<keyof Declared.ElementEditorProps, keyof ElementEditorProps>,
   Same<keyof Declared.TemplateDeclaration, keyof TemplateDeclaration>,
+  // Editors read the same context and document editors receive exactly the props the runtime passes.
+  Same<keyof Declared.EditorContext, keyof EditorContext>,
+  Same<keyof Declared.DocumentEditorProps, keyof DocumentEditorProps>,
   Assignable<Declared.OpeningSpread, NonNullable<TemplateDeclaration['openingSpreads']>[number]>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

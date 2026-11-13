@@ -3,12 +3,14 @@ import { renderOrigin } from './desktop';
 import type { BookGeometry, BookView, RenderStatus } from './desktop';
 import { reorderOffsets } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
+import type { Issue } from './desktop';
+export type PictureStatus = { type: 'pictures'; pending: number; errors: Issue[] };
 
-type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean;
+type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
   reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, viewport, hold, accept }: {
+export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept }: {
   project: string; view: BookView; query?: string; title: string;
   hold?: boolean;
   accept?: (project: string) => boolean;
@@ -17,6 +19,8 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   viewport?: () => { top: number; bottom: number; left: number; right: number; columns: number } | undefined;
   onGeometry: (geometry: BookGeometry | undefined, animateReorder?: boolean) => void;
   onStatus?: (status: RenderStatus, project: string) => void;
+  // Pictures the shown frame draws after it was ready (ADR 0006): how many are still drawing, and those that failed.
+  onPictures?: (pictures: PictureStatus, project: string) => void;
 }) {
   const target = hold ? undefined : renderOrigin + '/render/' + project + '?view=' + view + (query && '&' + query);
   const [shown, setShown] = useState<string>();
@@ -36,6 +40,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       onGeometry(frame.geometry, frame.reorder !== 'skipped');
     }
     if (frame.status) onStatus?.(frame.status, project);
+    if (frame.status?.state === 'ready' && frame.pictures) onPictures?.(frame.pictures, project);
   }
   const skipReorder = useEffectEvent((id: string, element: HTMLIFrameElement | undefined) => {
     const previous = latest.current.get(id);
@@ -47,7 +52,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     storeFrame(id, frame);
   });
 
-  const receive = useEffectEvent((event: MessageEvent<BookGeometry | RenderStatus | { type: 'viewport-request' | 'reorder-ready' }>) => {
+  const receive = useEffectEvent((event: MessageEvent<BookGeometry | RenderStatus | PictureStatus | { type: 'viewport-request' | 'reorder-ready' }>) => {
     if (event.origin !== renderOrigin || !event.data) return;
     const id = ids.find((key) => refs.current.get(key)?.contentWindow === event.source);
     if (!id) return;
@@ -72,6 +77,12 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       });
       frame.reorder = unchanged ? 'ready' : 'skipped';
       if (!unchanged) element.contentWindow?.postMessage({ type: 'cancel-reorder' }, renderOrigin);
+    } else if ('type' in data && data.type === 'pictures') {
+      // Kept with the frame, and passed on once it is shown.
+      frame.pictures = data;
+      if (id === shown) onPictures?.(data, new URL(id).pathname.split('/').at(-1)!);
+      storeFrame(id, frame);
+      return;
     } else if ('type' in data && data.type === 'geometry') {
       frame.geometry = data;
       if (id === shown) onGeometry(data);

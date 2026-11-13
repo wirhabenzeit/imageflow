@@ -1,6 +1,7 @@
 import { asset, box, defineTemplate, Element, file, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { ElementEditorProps, ImageFlowNode, LayoutPickerProps, Photo, Rect, RenderContext } from 'imageflow';
 import './styles.css';
+import { MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
 
 // Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page.
 // `ctx.geometry.design(canvas)` scales them to the chosen format: horizontal values with the trim width, vertical
@@ -304,12 +305,14 @@ function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerPro
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.6.0',
+  version: '0.7.0',
   label: 'Photobook',
   description: 'A travel journal with photographs, stories, maps, and room for your own layouts.',
   contract: 1,
   requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper',
-    'editor-native-controls', 'layout-families', 'editor-spread-parameters', 'opening-spreads'],
+    'editor-native-controls', 'layout-families', 'editor-spread-parameters', 'opening-spreads', 'editor-network', 'rendered-images'],
+  // The Map layout loads OpenFreeMap styles and tiles once the user allows it, in its editor, the page and export.
+  network: [mapOrigin],
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
     landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
@@ -364,6 +367,23 @@ export default defineTemplate({
           <RouteMap track={ctx.elements.route.params.track} viewport={ctx.elements.route.params} mode={ctx.mode}
             rect={at.right(page - margin - 60, margin, 60, 60)} />
           <Caption context={ctx} box={ctx.boxes.hero} className="caption overlay" rect={at.left(margin, 268, 2 * page - 2 * margin, 10)} />
+        </Paper>;
+      },
+    }),
+    map: spread({
+      label: 'Map',
+      parameters: { mapTitle: p.string({ label: 'Map title', default: '', maxLength: 80, placeholder: 'Shown on the map' }) },
+      elements: { map: {
+        label: 'Map',
+        parameters: mapParameters,
+        editor: { label: 'Edit map', parameters: [...mapEditorParameters], component: MapEditor },
+      } },
+      render: (ctx) => {
+        const at = ctx.geometry.design(canvas);
+        const { trackColor, trackWidth, ...values } = ctx.elements.map.params;
+        return <Paper context={ctx} bled={{ left: true, right: true }}>
+          <MapView values={values} trackColor={trackColor} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
+          {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(at.left(margin, margin, 150, 22))}>{ctx.params.mapTitle}</h2>}
         </Paper>;
       },
     }),

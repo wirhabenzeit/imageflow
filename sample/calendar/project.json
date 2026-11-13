@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "title": "Along the coast 2027",
+  "template": {
+    "id": "imageflow-calendar",
+    "version": "1.0.0"
+  },
+  "params": {
+    "markedDates": "17.05, 24.12, 25.12, 26.12, 31.12"
+  },
+  "spreads": [
+    {
+      "id": "cover",
+      "definition": "cover",
+      "params": {
+        "title": "Along the coast",
+        "year": "2027"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "shore"
+        }
+      }
+    },
+    {
+      "id": "jan",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "segla"
+        }
+      }
+    },
+    {
+      "id": "feb",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "cottage"
+        }
+      }
+    },
+    {
+      "id": "mar",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "light"
+        }
+      }
+    },
+    {
+      "id": "apr",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "shore"
+        }
+      }
+    },
+    {
+      "id": "may",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "segla"
+        }
+      }
+    },
+    {
+      "id": "jun",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "cottage"
+        }
+      }
+    },
+    {
+      "id": "jul",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "light"
+        }
+      }
+    },
+    {
+      "id": "aug",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "shore"
+        }
+      }
+    },
+    {
+      "id": "sep",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "segla"
+        }
+      }
+    },
+    {
+      "id": "oct",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "cottage"
+        }
+      }
+    },
+    {
+      "id": "nov",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "light"
+        }
+      }
+    },
+    {
+      "id": "dec",
+      "definition": "month",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "shore"
+        }
+      }
+    }
+  ]
+}

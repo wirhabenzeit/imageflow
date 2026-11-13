@@ -1,7 +1,9 @@
 import { createContext, useContext, useLayoutEffect, useRef } from 'react';
+import { RenderedImage } from './rendered-image';
+import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
-import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, printFormat, pt, spanFits } from './format';
+import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanFits } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
 import { identifier, values } from './project';
 import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
@@ -134,10 +136,29 @@ export type ElementEditorProps = {
   // The layout's (spread) parameters: all of them to read, and `setSpread` for the ones the editor declares.
   spread: Values; setSpread: (changes: Values) => void;
   document: Values; format: ResolvedFormat;
+  // What `render` reads about the spread the editor was opened from, read-only and kept current (see EditorContext).
+  context: EditorContext;
   readOnly: boolean; commit: () => void; cancel: () => void;
   // The app's own control for one of the editor's parameters, bound to the draft, and the file import it uses.
   // `scope: 'spread'` names one of the layout parameters the editor declares instead of an element parameter.
   Control: (props: { parameter: string; label?: string; scope?: 'element' | 'spread' }) => ReactNode;
+  importFile: (accept: readonly string[]) => Promise<string | undefined>;
+};
+// The read-only view of the book an editor is opened from: the values `render` reads for that spread, without the
+// components. It follows the book while the editor is open (a reorder, another photo, a document setting), so a
+// helper such as the calendar's month can serve `render` and the editor alike. Markdown flow positions are not known
+// outside the book render, so `boxes[id].text` is null.
+export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'elements' | 'page' | 'format' | 'formatId' | 'book'> & {
+  // The spread's ID and its layout.
+  spread: string; layout: string;
+};
+// A document editor edits some of the template's document parameters, opened from any node marked with them, such
+// as a calendar's days. `values` holds every document parameter with the draft applied; `set` changes the editor's own.
+export type DocumentEditorProps = {
+  values: Values; set: (changes: Values) => void;
+  context: EditorContext; format: ResolvedFormat;
+  readOnly: boolean; commit: () => void; cancel: () => void;
+  Control: (props: { parameter: string; label?: string }) => ReactNode;
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };
 // A layout family's picker chooses one of the family's variants. It runs in a sandboxed frame like an element
@@ -154,6 +175,13 @@ const layoutFamily = z.object({
     label: z.string().min(1).optional(),
     component: z.custom<(props: LayoutPickerProps) => ReactNode>((value) => typeof value === 'function', 'Expected a picker component.'),
   }).optional(),
+});
+// A document editor owns some document parameters. Nodes marked only with those parameters open it, with the context
+// of the spread they are on. Its parameters get no control in Book settings.
+const documentEditor = z.object({
+  label: z.string().min(1).optional(),
+  parameters: z.array(identifier).min(1, 'A document editor needs at least one document parameter to edit.'),
+  component: z.custom<(props: DocumentEditorProps) => ReactNode>((value) => typeof value === 'function', 'Expected an editor component.'),
 });
 const elementEditor = z.object({
   label: z.string().min(1).optional(),
@@ -244,6 +272,11 @@ export const templateSchema = z.preprocess(withSpans, z.object({
         missing.join(', ') + '. Update ImageFlow, or remove them from requires. This app provides: ' + capabilities.join(', ') + '.' });
     }
   }),
+  // HTTPS origins the template's element editors may reach (ADR 0006), after the user allows them for the book.
+  // Book previews, checks and export never reach the network.
+  network: z.array(z.string().regex(/^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/,
+    'Use an HTTPS origin such as https://tiles.example.com, or https://*.example.com for its subdomains, without a path.'))
+    .max(20).optional(),
   format: formatSchema.optional(),
   formats: z.record(identifier, formatSchema).optional(),
   defaultFormat: identifier.optional(),
@@ -256,6 +289,20 @@ export const templateSchema = z.preprocess(withSpans, z.object({
       for (const message of declarationConflicts(spreads)) context.addIssue({ code: 'custom', message });
     }),
   openingSpreads: z.array(openingSpread).optional(),
+  // Editors of document parameters, by ID.
+  editors: z.record(identifier, documentEditor).optional(),
+}).superRefine(({ parameters, editors }, context) => {
+  const owners = new Map<string, string>();
+  for (const [id, editor] of Object.entries(editors ?? {})) {
+    for (const key of editor.parameters) {
+      const path = ['editors', id, 'parameters'];
+      if (!Object.hasOwn(parameters, key)) {
+        context.addIssue({ code: 'custom', path, message: 'Document editor ' + id + ' edits ' + key + ', which the template\'s parameters do not declare.' });
+      } else if (owners.has(key)) {
+        context.addIssue({ code: 'custom', path, message: 'Document parameter ' + key + ' is edited by both ' + owners.get(key) + ' and ' + id + '. Give it to one editor.' });
+      } else owners.set(key, id);
+    }
+  }
 }).superRefine(({ spreads, layoutFamilies }, context) => {
   for (const { path, message } of familyProblems(spreads, layoutFamilies)) context.addIssue({ code: 'custom', message, path });
 }).superRefine((template, context) => {
@@ -340,11 +387,12 @@ type DeclaredSpread = Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | '
 // definition unchanged.
 const spreadBuilder = <T,>(definition: T) => definition;
 export type TemplateDeclaration = {
-  id: string; version: string; label?: string; description?: string; contract: 1; requires?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
+  id: string; version: string; label?: string; description?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
   openingSpreads?: { layout: string; params?: Values }[];
+  editors?: Record<string, { label?: string; parameters: string[]; component: (props: DocumentEditorProps) => ReactNode }>;
 };
 // `spreads` may be a function of the builder; the declaration ImageFlow validates always has the built record.
 // Applied by defineTemplate and again when the template loads, for templates exported without defineTemplate.
@@ -362,6 +410,9 @@ export function templateInfo(template: Template): TemplateInfo {
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
     parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
+    ...(template.editors ? { editors: Object.fromEntries(Object.entries(template.editors).map(([id, { label, parameters }]) =>
+      [id, { ...(label ? { label } : {}), parameters }])) } : {}),
+    ...(template.network?.length ? { network: [...new Set(template.network)] } : {}),
     layoutFamilies: Object.fromEntries(Object.entries(template.layoutFamilies ?? {}).map(([id, { label, picker }]) => [id, {
       label, ...(picker ? { picker: { ...(picker.label ? { label: picker.label } : {}) } } : {}),
     }])),
@@ -593,15 +644,12 @@ export function issue(found: TemplateIssue): Required<IssueMarker> {
 
 export const runtime = {
   defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
+  RenderedImage,
 } satisfies Record<typeof runtimeExports[number], unknown>;
 
-// `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
-export function SpreadView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false }: {
-  book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState;
-  page: RenderContext['page']; index: BookIndex; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
-}) {
+// The values `render` reads for one spread: its parameters, the document's, and its boxes and elements.
+function spreadValues(book: RenderProject, template: Template, spread: SpreadState, positions: Record<string, FlowPosition>): SpreadValues {
   const definition = template.spreads[spread.definition];
-  if (!definition) throw new Error('Spread ' + spread.id + ' uses an unknown definition: ' + spread.definition + '.');
   const boxes = Object.fromEntries(Object.entries(definition.boxes).map(([id, box]) => {
     const assigned = spread.boxes[id];
     const params = resolveParams(box.parameters, assigned?.params ?? {});
@@ -616,18 +664,71 @@ export function SpreadView({ book, template, format, spread, page, index, positi
   const elements = Object.fromEntries(Object.entries(definition.elements).map(([id, element]) => [
     id, { params: resolveParams(element.parameters, spread.elements[id]?.params ?? {}) },
   ]));
-  const values: SpreadValues = {
-    params: resolveParams(definition.parameters, spread.params), document: resolveParams(template.parameters, book.project.params), boxes, elements,
+  return { params: resolveParams(definition.parameters, spread.params), document: resolveParams(template.parameters, book.project.params), boxes, elements };
+}
+
+/**
+ * The read-only context of an editor opened from this spread: what `render` reads, computed from the saved book the
+ * same way. Undefined when the spread no longer exists or its layout is unknown. `key` is a serializable summary,
+ * so a caller can tell whether a newer book changed anything the editor sees.
+ */
+export function editorContext(book: RenderProject, template: Template, spreadId: string): { context: EditorContext; key: string } | undefined {
+  const { spreads } = book.project;
+  const index = spreads.findIndex(({ id }) => id === spreadId);
+  const spread = spreads[index];
+  const definition = spread && template.spreads[spread.definition];
+  if (!definition) return undefined;
+  const sequence = pageSequence(spreads.map((state) => template.spreads[state.definition]?.span ?? 'spread'), template.format);
+  const index_ = bookIndex(book, template, sequence);
+  const format = resolveFormat(template.format);
+  const values = spreadValues(book, template, spread, {});
+  const page = sequence.spreads[index].page;
+  const context: EditorContext = {
+    ...values, page, format: spanFits(definition.span, template.format) ? format : lenientFormat(format), formatId: template.formatId,
+    book: bookContext(index_, spread.id), spread: spread.id, layout: spread.definition,
   };
+  return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, values, template.formatId]) };
+}
+
+/** The editor context from a newer book, with the format that book chose, as the book render chooses it. */
+export const refreshedEditorContext = (book: RenderProject, template: Template, spreadId: string) =>
+  editorContext(book, chooseFormat(template, book.project.format), spreadId);
+
+/**
+ * The context an editor sees: the saved book with its draft applied, so helpers reading `context` agree with what
+ * the editor shows. A document editor's draft is its own document parameters; an element editor's is the element's
+ * values (including the generated controls' draft) and the layout parameters it owns.
+ */
+export function withEditorDraft(context: EditorContext, draft: { document: Values } | { element: string; values: Values; spread: Values }): EditorContext {
+  if ('document' in draft) return { ...context, document: { ...context.document, ...draft.document } };
+  return { ...context, params: { ...context.params, ...draft.spread },
+    elements: { ...context.elements, [draft.element]: { params: { ...context.elements[draft.element]?.params, ...draft.values } } } };
+}
+
+// `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
+export function SpreadView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false }: {
+  book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState;
+  page: RenderContext['page']; index: BookIndex; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
+}) {
+  const definition = template.spreads[spread.definition];
+  if (!definition) throw new Error('Spread ' + spread.id + ' uses an unknown definition: ' + spread.definition + '.');
+  const values = spreadValues(book, template, spread, positions);
   // A layout drawn in a format it does not fit gets lenient geometry, through ctx.geometry and ctx.format alike.
   const fits = spanFits(definition.span, template.format);
-  const content = definition.render({
-    ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode,
-    // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
-    edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
-    book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),
-    PhotoBox, MarkdownBox, Element, Text,
-  });
+  // Purity guards (Book check and export only) attribute impure calls to the layout rendering now.
+  renderingSpread(spread.id);
+  let content: ReturnType<typeof definition.render>;
+  try {
+    content = definition.render({
+      ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode,
+      // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
+      edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
+      book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),
+      PhotoBox, MarkdownBox, Element, Text,
+    });
+  } finally {
+    renderingSpread(undefined);
+  }
   return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, documentParameters: template.parameters, values, lazyPhotos }}>
     {content}</SpreadData.Provider>;
 }

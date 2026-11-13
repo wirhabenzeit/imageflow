@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
 import type { BookMenuState, CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
+import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
 import type { OpenProject } from './project';
 import { photoFile } from './photos';
@@ -32,6 +33,7 @@ import type { SettingsPane } from '../src/settings';
 import { mcpTools } from '../src/mcp-contract';
 import { starters } from '../src/starters';
 import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-library';
+import { TemplateTrust, trustedOrigins } from './template-trust';
 import { isTemplateArchive, templateArchiveExtension, writeTemplateArchive } from './template-archive';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
 import { describeImport } from '../src/library';
@@ -55,6 +57,7 @@ let cache: string;
 let settings: SettingsStore;
 let recents: RecentDocuments;
 let library: TemplateLibrary;
+let trust: TemplateTrust;
 const sessions: RenderSessions = new Map();
 const documents = new Map<number, DocumentSession>();
 const identities = new Map<string, DocumentSession>();
@@ -125,8 +128,11 @@ async function serve(request: Request) {
   const session = sessions.get(id);
   if (!session) return new Response(null, { status: 404 });
   if (!resource) {
+    // The frames of a book whose template declares network origins may reach the ones the user allowed: element
+    // editors, and previews, checks and exports that draw <RenderedImage> pictures (ADR 0006).
+    const origins = session.network?.() ?? [];
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
-      'Content-Security-Policy': csp + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
+      'Content-Security-Policy': renderPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });
   }
   if (resource === 'data') return Response.json(renderData(session.book, id, session.mode));
@@ -232,7 +238,7 @@ function captureCover(document: DocumentSession, book: OpenProject, closing = fa
   state.job = job;
   state.task = (async () => {
     const id = randomUUID();
-    sessions.set(id, { book, mode: 'export' });
+    sessions.set(id, { book, mode: 'export', network: () => document.networkOrigins });
     try {
       const cover = await captureBookPreview(renderOrigin + '/render/' + id,
         { target: { page: 1 }, maxEdge: 320, format: 'jpeg' }, job.signal);
@@ -303,6 +309,9 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
           markCoverDirty(document);
         }
       });
+      document.networkTrust = bookNetworkTrust;
+      // Frames may reach what is already allowed from the first render on, without a question (ADR 0006).
+      await document.prepareNetwork().catch((error) => console.warn('ImageFlow could not read network approvals', error));
       const current = document;
       const webContentsId = editor.webContents.id;
       documents.set(webContentsId, document);
@@ -360,7 +369,7 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
 const isSystemFile = (path: string) => isDocument(path) || isTemplateArchive(path);
 async function openFromSystem(path: string) {
   if (isTemplateArchive(path)) {
-    void library.import(path, (plan) => confirmReplace(undefined, plan)).then((result) => reportImports(lastDocument?.window ?? startWindow ?? undefined, [result], true))
+    void importTemplate(undefined, path).then((result) => reportImports(lastDocument?.window ?? startWindow ?? undefined, [result], true))
       .catch((error) => report(startWindow ?? lastDocument?.window, error));
     return;
   }
@@ -406,7 +415,7 @@ async function createBook(stage: string, template: ResolvedTemplate, sample: boo
   const { entry, folder, info } = template;
   const file = join(stage, 'project.json');
   if (sample && template.sample) {
-    await cp(template.sample, stage, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+    await cp(template.sample, stage, { recursive: true, filter: (path) => basename(path) !== '.imageflow' && basename(path) !== 'node_modules' });
     const project = JSON.parse(await readFile(file, 'utf8'));
     project.template = { ...project.template, hash: entry.hash };
     await writeFile(file, JSON.stringify(project, null, 2) + '\n');
@@ -476,6 +485,66 @@ async function confirmReplace(owner: BrowserWindow | undefined, plan: ImportPlan
   return response === 0;
 }
 
+/**
+ * Shows what a template brings beyond the app before it enters the library (ADR 0006): its bundled npm packages and
+ * the sites its element editors connect to. The user may allow those sites for this exact version at once.
+ */
+async function reviewImport(owner: BrowserWindow | undefined, plan: ImportPlan) {
+  const network = plan.info.network ?? [];
+  if (!plan.packages.length && !network.length) return { ok: true, allow: false };
+  const name = (plan.info.label ?? plan.info.id) + ' ' + plan.info.version;
+  const detail = [
+    ...(plan.packages.length ? ['It includes these npm packages, bundled into the template:',
+      ...plan.packages.map(({ name, version, license }) => '  ' + name + ' ' + version + (license ? ' (' + license + ')' : '')), ''] : []),
+    ...(network.length ? ['To draw its pages and editors, while you edit and when you export, it connects to:', ...network.map((origin) => '  ' + origin),
+      'It can send what you edit there. Exporting books made from it needs these sites.', ''] : []),
+    'Templates contain code: only import templates from people you trust.',
+  ].join('\n');
+  const options = {
+    type: 'question' as const, buttons: ['Import', 'Cancel'], defaultId: 0, cancelId: 1,
+    message: 'Import ' + name + '?', detail,
+    ...(network.length ? { checkboxLabel: 'Allow these sites in every book made from this version', checkboxChecked: false } : {}),
+  };
+  const { response, checkboxChecked } = owner && !owner.isDestroyed() ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
+  return { ok: response === 0, allow: response === 0 && network.length > 0 && !!checkboxChecked };
+}
+
+/** Imports one template into the library, reviewing it first and remembering network trust the user gave. */
+async function importTemplate(owner: BrowserWindow | undefined, path: string) {
+  let allowed: ImportPlan | undefined;
+  const result = await library.import(path, (plan) => confirmReplace(owner, plan), async (plan) => {
+    const review = await reviewImport(owner, plan);
+    if (review.allow) allowed = plan;
+    return review.ok;
+  });
+  if (allowed && (result.status === 'imported' || result.status === 'replaced')) {
+    await trust.allow(allowed.hash, allowed.info.network ?? [], { id: allowed.info.id ?? '', version: allowed.info.version }).catch((error) => console.warn('ImageFlow could not save template trust', error));
+    // Lists already showing the new entry learn that it is trusted.
+    publishLibrary();
+  }
+  return result;
+}
+
+/**
+ * The sites a book's frames may reach without asking, because its template, as it is now, is trusted: those of
+ * `declared`, or before the template has rendered, all the trust covers.
+ */
+async function bookNetworkTrust(hash: string, declared?: readonly string[]) {
+  const builtIn = await library.builtInNetwork(hash);
+  const allowed = builtIn ?? await trust.allowed(hash);
+  return declared ? trustedOrigins(declared, { builtIn: builtIn !== undefined, allowed }) : allowed;
+}
+
+/** Library entries with why their network access needs no question, for Settings and New Book. */
+async function libraryWithTrust() {
+  return Promise.all((await library.list()).map(async (entry) => {
+    if (!entry.network?.length) return entry;
+    if (entry.source === 'built-in') return { ...entry, networkTrust: 'built-in' as const };
+    const allowed = new Set(await trust.allowed(entry.hash));
+    return entry.network.every((origin) => allowed.has(origin)) ? { ...entry, networkTrust: 'allowed' as const } : entry;
+  }));
+}
+
 /** Imports template folders the user chooses. Templates are code, so the panel says to import only trusted ones. */
 async function importTemplates(owner: BrowserWindow | undefined): Promise<LibraryImportResult[]> {
   const options = { title: 'Import Templates', buttonLabel: 'Import',
@@ -485,7 +554,7 @@ async function importTemplates(owner: BrowserWindow | undefined): Promise<Librar
   const choice = owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
   if (choice.canceled) return [];
   const results: LibraryImportResult[] = [];
-  for (const path of choice.filePaths) results.push(await library.import(path, (plan) => confirmReplace(owner, plan)));
+  for (const path of choice.filePaths) results.push(await importTemplate(owner, path));
   return results;
 }
 
@@ -519,7 +588,7 @@ async function exportBookTemplate(document: DocumentSession) {
 }
 
 async function saveTemplate(document: DocumentSession) {
-  const result = await library.import(await templateFolder(document.book.folder), (plan) => confirmReplace(document.window, plan));
+  const result = await importTemplate(document.window, await templateFolder(document.book.folder));
   await reportImports(document.window, [result], true);
 }
 
@@ -624,6 +693,12 @@ function installMenu(formats: Record<string, string>) {
       { id: 'open-template', label: 'Open Template Folder', click: (_item, owner) => {
         const document = focusedDocument(owner);
         if (document) void document.run(() => openDocumentLocation(document, 'template')).then((result) => { if ('error' in result) report(document.window, result.error); });
+      } },
+      { id: 'rebuild-dependencies', label: 'Rebuild Dependencies', click: (_item, owner) => {
+        const document = focusedDocument(owner);
+        if (document) void document.run(() => document.rebuildDependencies()).then((result) => {
+          if ('error' in result) report(document.window, result.error);
+        });
       } },
     ] },
     { label: 'View', submenu: [
@@ -842,6 +917,7 @@ void app.whenReady().then(async () => {
     starters.map((starter) => ({ template: join(sampleFolder(starter.folder), 'template'), sample: sampleFolder(starter.folder), defaultName: starter.defaultName })),
     probeTemplate, (path) => shell.trashItem(path), capabilities.join(',') + '@' + app.getVersion());
   library.onChange(publishLibrary);
+  trust = new TemplateTrust(join(app.getPath('userData'), 'template-trust.json'));
   const renditions = await configureRenditionCache(cache, join(app.getPath('userData'), 'Cache', 'renditions'));
   await maintainSources();
   const sourceMaintenance = setInterval(() => { if (![...documents.values()].some((document) => document.busy)) void maintainSources(); }, 5 * 60 * 1000);
@@ -978,7 +1054,7 @@ void app.whenReady().then(async () => {
   });
   ipcMain.handle(channels.library, async (event) => {
     if (!appOwner(event) && !pickerOwner(event)) return { error: 'Request is only available to an app window.' };
-    try { return { value: await library.list() }; }
+    try { return { value: await libraryWithTrust() }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.libraryImport, async (event) => {
@@ -997,6 +1073,19 @@ void app.whenReady().then(async () => {
       if (!file) return { value: null };
       await library.export(id, file);
       return { value: file };
+    } catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.libraryTrust, async (event, id: unknown, allow: unknown) => {
+    const owner = settingsOwner(event);
+    if (!owner || typeof id !== 'string' || typeof allow !== 'boolean') return { error: 'Request is only available to Settings.' };
+    try {
+      const entry = (await library.list()).find((item) => item.id === id && item.source === 'imported');
+      if (!entry?.network?.length) throw new Error('This template does not ask for network access.');
+      if (allow) await trust.allow(entry.hash, entry.network, entry); else await trust.revoke(entry.hash);
+      publishLibrary();
+      // Open books from this template follow at once: their frames are rendered again under the new policy (ADR 0006).
+      for (const document of documents.values()) void document.updateNetwork().catch((error) => console.warn('ImageFlow could not update network access', error));
+      return { value: true };
     } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.libraryRemove, async (event, id: unknown) => {
@@ -1048,6 +1137,12 @@ void app.whenReady().then(async () => {
   });
   ipcMain.on(channels.agentLeaseReply, (event, id: string, allowed: boolean) => { editorOwner(event)?.replyLease(id, allowed); });
   ipcMain.handle(channels.import, (event, id: string, request: ImportRequest) => fromEditor(event, (document) => document.importFiles(document.window, id, request)));
+  ipcMain.handle(channels.network, async (event, id: string, origins: unknown) => {
+    const document = editorOwner(event);
+    if (!document || quitting) return { error: 'Request is only available to an open book.' };
+    try { return { value: await document.editorNetwork(id, origins) }; }
+    catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.handle(channels.export, (event, id: string, mode: ExportMode) => fromEditor(event, (document) => document.exportBook(document.window, id, mode)));
   ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) => fromEditor(event, (document) => document.checkOpenBook(document.currentBook(id), request)));

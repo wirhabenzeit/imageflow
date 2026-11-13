@@ -33,7 +33,11 @@ function expected(param: Parameter) {
  * valid values, and those that are ignored, each with a message saying why. Untyped template code can pass
  * anything, so `changes` is not trusted to be an object.
  */
-export function editorChanges(parameters: Parameters, owned: readonly string[], changes: unknown, scope: 'element' | 'spread' = 'element'): { allowed: Values; rejected: RejectedChange[] } {
+export function editorChanges(parameters: Parameters, owned: readonly string[], changes: unknown, scope: 'element' | 'spread' = 'element',
+  editor: 'element' | 'document' = 'element'): { allowed: Values; rejected: RejectedChange[] } {
+  // What `set()` writes to: an element's parameters, or a document editor's document parameters.
+  const kind = scope === 'spread' ? 'layout' : editor;
+  const elsewhere = scope === 'spread' ? ' in the spread scope' : editor === 'document' ? ', so it is edited in Book settings' : ', so it is edited by the generated controls';
   const setter = scope === 'spread' ? 'setSpread' : 'set';
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) {
     return { allowed: {}, rejected: [{ key: '', message: setter + '() expects an object of parameter values, such as ' + setter + '({ ' + (owned[0] ?? 'parameter') + ': … }).' }] };
@@ -44,8 +48,8 @@ export function editorChanges(parameters: Parameters, owned: readonly string[], 
     const param = Object.hasOwn(parameters, key) ? parameters[key] : undefined;
     if (!owned.includes(key)) {
       rejected.push({ key, message: setter + '() ignored ' + key + ': ' + (param
-        ? 'it is not one of this editor\'s parameters' + (scope === 'element' ? ', so it is edited by the generated controls' : ' in the spread scope') + '. This editor edits ' + list(owned) + '.'
-        : 'the ' + (scope === 'spread' ? 'layout' : 'element') + ' has no such parameter. This editor edits ' + list(owned) + '.') });
+        ? 'it is not one of this editor\'s parameters' + elsewhere + '. This editor edits ' + list(owned) + '.'
+        : 'the ' + kind + ' has no such parameter. This editor edits ' + list(owned) + '.') });
     } else if (!param || !isParameterValue(param, value)) {
       rejected.push({ key, message: setter + '() ignored ' + key + ': ' + show(value) + ' is not a valid value' +
         (param ? '; ' + param.label + ' takes ' + expected(param) : '') + '.' });

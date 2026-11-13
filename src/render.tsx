@@ -1,4 +1,7 @@
 import { sourcePath } from './source-locations';
+import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
+import { configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, watchRenderedImages } from './rendered-image';
+import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
 import * as jsx from 'react/jsx-runtime';
@@ -19,8 +22,8 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, normalizeTemplate, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
-import type { AnchorLookup } from './template';
+import { bookIndex, chooseFormat, editorContext, normalizeTemplate, refreshedEditorContext, withEditorDraft, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import type { AnchorLookup, EditorContext } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
@@ -33,11 +36,13 @@ import type { ElementInspection, ElementMeasurement } from './inspection';
 import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import { Field, ProjectFilesContext } from './Fields';
 import { editorChanges, unknownControl } from './editor-changes';
+import { pictureTimeoutMs } from './render-budget';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
 function publish(status: RenderStatus) {
   window.imageflowRenderStatus = status;
+  (globalThis as { imageflowRenderActivity?: number }).imageflowRenderActivity = Date.now();
   if (window.parent !== window) post(status);
 }
 
@@ -822,22 +827,29 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
   };
 }
 
-// Runs a template-supplied element editor. The component edits a draft of the editor's parameters; the frame
-// reports the draft, its height, and commit or cancel to the app, which validates and saves. The frame never
-// changes project data itself.
-function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, elementId: string, readOnly: boolean) {
+// Runs a template-supplied editor: an element's, or a document editor opened from a spread. The component edits a
+// draft of the editor's parameters; the frame reports the draft, its height, and commit or cancel to the app, which
+// validates and saves. The frame never changes project data itself. Its read-only context follows the book: the app
+// names each newer render session, and the frame recomputes the context from it.
+function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, target: { element: string } | { editor: string }, readOnly: boolean) {
   const spread = book.project.spreads.find(({ id }) => id === spreadId);
   const layout = spread && template.spreads[spread.definition];
-  const element = layout?.elements[elementId];
-  const editor = element?.editor;
-  if (!spread || !layout || !element || !editor) throw new Error('This element has no editor.');
-  const saved = resolveParams(element.parameters, spread.elements[elementId]?.params ?? {});
+  const documentEditor = 'editor' in target && Object.hasOwn(template.editors ?? {}, target.editor) ? template.editors![target.editor] : undefined;
+  const element = 'element' in target ? layout?.elements[target.element] : undefined;
+  const elementId = 'element' in target ? target.element : '';
+  const editor = documentEditor ?? element?.editor;
+  const opened = editorContext(book, template, spreadId);
+  if (!spread || !layout || !editor || !opened || (!documentEditor && !element)) throw new Error('This element has no editor.');
+  // The editor's own scope: the element's parameters, or the document's for a document editor.
+  const declared = documentEditor ? template.parameters : element!.parameters;
+  const saved = documentEditor ? resolveParams(template.parameters, book.project.params) : resolveParams(element!.parameters, spread.elements[elementId]?.params ?? {});
   const savedSpread = resolveParams(layout.parameters, spread.params);
-  const ownedSpread = editor.spread ?? [];
-  const document = resolveParams(template.parameters, book.project.params);
-  const format = resolveFormat(template.format);
+  const ownedSpread = documentEditor ? [] : element!.editor?.spread ?? [];
   const claimed = (values: Values) => Object.fromEntries(editor.parameters.map((key) => [key, values[key]]));
   const claimedSpread = (values: Values) => Object.fromEntries(ownedSpread.map((key) => [key, values[key]]));
+  let seen = opened.context;
+  let contextKey = opened.key;
+  let updateContext: ((context: EditorContext) => void) | undefined;
   root.className = 'if-editor';
   // The project's file registry for file controls. An import adds to it, so it is state the host can update.
   let projectFiles = book.project.files;
@@ -877,8 +889,8 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   const changes = (scope: 'element' | 'spread', next: Values) => {
     if (readOnly || failed) return;
     const owned = scope === 'element' ? editor.parameters : ownedSpread;
-    const parameters = scope === 'element' ? element.parameters : layout.parameters;
-    const { allowed, rejected } = editorChanges(parameters, owned, next, scope);
+    const parameters = scope === 'element' ? declared : layout.parameters;
+    const { allowed, rejected } = editorChanges(parameters, owned, next, scope, documentEditor ? 'document' : 'element');
     for (const { message } of rejected) warn(message);
     if (!Object.keys(allowed).length) return;
     if (scope === 'element') draft = { ...draft, ...allowed };
@@ -900,8 +912,28 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     post({ type: 'editor-import', request, accept: accept.filter((extension) => typeof extension === 'string'), mode });
     return new Promise<string | undefined>((resolve) => pending.set(request, resolve));
   };
+  // A newer render session of the book: recompute the context from it. Only the newest request counts, and the
+  // component rerenders only when something it can see changed. A spread that is gone keeps the last context; the
+  // app closes the editor.
+  let contextRequests = 0;
+  const refreshContext = (session: string) => {
+    const request = ++contextRequests;
+    void fetch('/render/' + session + '/data').then((response) => response.json()).then((latest: RenderProject) => {
+      if (request !== contextRequests || failed) return;
+      // The latest book may have chosen another format; the context follows it like the book render does.
+      const next = refreshedEditorContext(latest, template, spreadId);
+      if (!next || next.key === contextKey) return;
+      seen = next.context;
+      contextKey = next.key;
+      updateContext?.(seen);
+    }).catch(() => undefined);
+  };
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1)) return;
+    if (event.data?.type === 'editor-context') {
+      if (typeof event.data.project === 'string' && /^[\w-]+$/.test(event.data.project)) refreshContext(event.data.project);
+      return;
+    }
     if (event.data?.type === 'editor-flush') {
       // Closing the panel finishes a field that applies on blur, through set(), before confirming the close.
       // A failure is reported instead; earlier live changes remain saved.
@@ -916,7 +948,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       // The dialog's generated controls, for the element's other parameters: shown to the component, never claimed.
       const values = event.data.values && typeof event.data.values === 'object' ? event.data.values as Values : {};
       const others = Object.entries(values).filter(([key, value]) => !editor.parameters.includes(key) &&
-        Object.hasOwn(element.parameters, key) && isParameterValue(element.parameters[key], value));
+        Object.hasOwn(declared, key) && isParameterValue(declared[key], value));
       if (!others.length) return;
       draft = { ...draft, ...Object.fromEntries(others) };
       update?.({ element: draft, spread: spreadDraft });
@@ -942,8 +974,8 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   // The app's control for one of this editor's parameters, writing to the draft like `set` (or `setSpread`).
   function Control({ parameter, label, scope = 'element' }: { parameter: string; label?: string; scope?: 'element' | 'spread' }) {
     const values = React.useContext(EditorValues)[scope === 'spread' ? 'spread' : 'element'];
-    const [owned, declared] = scope === 'spread' ? [ownedSpread, layout!.parameters] : [editor!.parameters, element!.parameters];
-    const param = owned.includes(parameter) && Object.hasOwn(declared, parameter) ? declared[parameter] : undefined;
+    const [owned, parameters] = scope === 'spread' ? [ownedSpread, layout!.parameters] : [editor!.parameters, declared];
+    const param = owned.includes(parameter) && Object.hasOwn(parameters, parameter) ? parameters[parameter] : undefined;
     if (!param) throw new Error(unknownControl(parameter, owned, scope));
     const value = isParameterValue(param, values[parameter]) ? values[parameter] : param.default;
     return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
@@ -953,18 +985,29 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   function Host() {
     const [values, setValues] = React.useState({ element: draft, spread: spreadDraft });
     const [files, setFiles] = React.useState(projectFiles);
+    const [current, setContext] = React.useState(seen);
     React.useEffect(() => {
       update = setValues;
       updateFiles = setFiles;
+      updateContext = setContext;
       // Effects run only once the component has mounted without throwing.
       post({ type: 'editor-ready' });
-      return () => { update = undefined; updateFiles = undefined; };
+      return () => { update = undefined; updateFiles = undefined; updateContext = undefined; };
     }, []);
+    // The context shows the saved book with this editor's draft applied, so a helper reading `context` agrees with
+    // what the editor shows: a document editor's own document parameters, or an element editor's element values
+    // (including the generated controls' draft) and the layout parameters it owns.
+    const shown = React.useMemo(() => withEditorDraft(current, documentEditor ? { document: claimed(values.element) }
+      : { element: elementId, values: values.element, spread: claimedSpread(values.spread) }), [current, values]);
     const context = React.useMemo(() => ({ files, defaultMode: book.project.importMode ?? 'copy', importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
     return React.createElement(ProjectFilesContext.Provider, { value: context },
       React.createElement(EditorValues.Provider, { value: values },
-        React.createElement(editor!.component, { values: values.element, set, spread: values.spread, setSpread, document, format, readOnly,
-          commit, cancel, Control, importFile })));
+        documentEditor
+          // A document editor's `values` are only its own parameters; every other setting is read from `context`, so there
+          // is one current copy of each. `format` and an element editor's `document` follow the context too.
+          ? React.createElement(documentEditor.component, { values: claimed(values.element), set, context: shown, format: shown.format, readOnly, commit, cancel, Control, importFile })
+          : React.createElement(element!.editor!.component, { values: values.element, set, spread: values.spread, setSpread, document: shown.document,
+            format: shown.format, context: shown, readOnly, commit, cancel, Control, importFile })));
   }
 
   // Errors from the component's event handlers and async work do not reach React's error handling.
@@ -1107,6 +1150,9 @@ export async function startRender(root: HTMLElement) {
     setTemplateAssets(book.template.assets);
     setTemplateFiles(book.files);
     Object.assign(globalThis, { ImageFlowRuntime: runtime, ImageFlowReact: React, ImageFlowJSX: jsx });
+    // Book check, export and artwork frames record impure calls from template code, including at module load.
+    const guards = book.mode === 'edit' ? undefined : installPurityGuards(window as unknown as Record<string, unknown>,
+      new URL(book.template.script, location.href).pathname, undefined, renderingImages);
     const [module] = await Promise.all([import(/* @vite-ignore */ book.template.script), loadStyles(book.template.css)]);
     // The project's format choice is resolved first; everything below works with that one format.
     // `spreads` may be a builder function when the template was exported without defineTemplate.
@@ -1133,7 +1179,8 @@ export async function startRender(root: HTMLElement) {
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
     if (book.mode === 'edit' && query.get('view') === 'editor') {
-      renderEditor(root, book, template, query.get('spread') ?? '', query.get('element') ?? '', query.has('readonly'));
+      renderEditor(root, book, template, query.get('spread') ?? '', query.has('editor') ? { editor: query.get('editor')! } : { element: query.get('element') ?? '' },
+        query.has('readonly'));
       return;
     }
     if (book.mode === 'edit' && query.get('view') === 'layout-picker') {
@@ -1153,6 +1200,14 @@ export async function startRender(root: HTMLElement) {
       for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
     }
     const lazy = edit && view === 'book';
+    // Pictures drawn by <RenderedImage>: at the screen's resolution in the editor (smaller for thumbnails), cheaply
+    // in the Book check, and at the format's target resolution for export (ADR 0006).
+    const target = template.format.output.resolution?.target ?? 300;
+    configureRenderedImages(edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
+      concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview }
+      : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
+        : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
+          : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
     if (edit && view === 'layouts') {
       await renderLayouts(root, book, template, info, query.get('spread') ?? '');
       return;
@@ -1178,6 +1233,9 @@ export async function startRender(root: HTMLElement) {
     })));
     if (renderError) throw renderError;
     if (layoutFailures.size) throw new LayoutRenderError(layoutFailures);
+    // A check or export is final only once every asynchronous picture is drawn or has failed; the editor shows
+    // them as they arrive.
+    const pictureFailures = lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
     const images = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
@@ -1193,6 +1251,8 @@ export async function startRender(root: HTMLElement) {
       ...placeControlWarnings(declaration, rendered).map(({ code, message: text, path, details, suggestion, spread }) =>
         ({ ...(spread ? located(spread, text) : message(text)), code, details: { ...details, path }, suggestion })),
       ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
+      ...(book.template.warnings ?? []).map((text) => ({ ...message(text), code: 'template-dependencies',
+        suggestion: 'Run npm install in template/, then choose Template → Rebuild Dependencies.' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
     ];
@@ -1208,6 +1268,16 @@ export async function startRender(root: HTMLElement) {
       suggestion: 'Use select_format with one of the template formats, or declare format ' + book.project.format + ' again in the template.' });
     }
     errors.push(...fileErrors(book, template.parameters, book.project.params, 'Document'));
+    const pictureIssues = (failures: RenderedImageFailure[]): Issue[] => failures.map((failed) => ({
+      ...(failed.spread ? located(failed.spread, failed.message) : message(failed.message)), code: 'rendered-image-failed',
+      ...(failed.element ? { element: failed.element } : {}), details: { label: failed.label, timedOut: failed.timedOut ? 1 : 0 },
+      suggestion: failed.timedOut ? 'Check the internet connection, then check or export again.'
+        : 'Check that the template’s network sites are allowed for this book and reachable, then check or export again.' }));
+    errors.push(...pictureIssues(pictureFailures));
+    for (const { api, spread } of guards?.calls ?? []) {
+      errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api))), code: 'render-impure',
+        details: { api }, suggestion: impureSuggestion });
+    }
     for (const spread of spreads) {
       const definition = template.spreads[spread.definition];
       if (!definition) continue;
@@ -1350,6 +1420,22 @@ export async function startRender(root: HTMLElement) {
       state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions, anchors: index.anchors,
       ...(inspection ? { inspection } : {}),
     });
+    // The editor's book view does not wait for its pictures. It reports them to the live Book check as they start,
+    // finish or fail, so a map that failed on the page is never missing from the check.
+    if (lazy && window.parent !== window) {
+      let queued = false;
+      const report = () => {
+        if (queued) return;
+        queued = true;
+        setTimeout(() => {
+          queued = false;
+          const { pending, failures } = renderedImageState();
+          post({ type: 'pictures', pending, errors: pictureIssues(failures) });
+        }, 50);
+      };
+      watchRenderedImages(report);
+      report();
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The template could not be rendered.';
     if (error instanceof PreviewError) window.imageflowPreview = { state: 'error', code: error.code };

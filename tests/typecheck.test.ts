@@ -34,6 +34,17 @@ test('installed types check a standalone starter without project packages or tru
   assert.ok(!result.files.includes('template/types/imageflow.d.ts'));
 });
 
+test('the calendar starter typechecks and ships the same authoring declarations as the photobook starter', async (t) => {
+  const { folder, check } = await fixture(t);
+  await cp(resolve('sample/calendar/template'), join(folder, 'template'), { recursive: true });
+  assert.deepEqual((await check()).diagnostics, []);
+  const types = await readdir(resolve('sample/starter/template/types'));
+  assert.deepEqual(await readdir(resolve('sample/calendar/template/types')), types);
+  for (const name of types) {
+    assert.equal(await readFile(resolve('sample/calendar/template/types', name), 'utf8'), await readFile(resolve('sample/starter/template/types', name), 'utf8'), name);
+  }
+});
+
 test('type errors retain exact locations while project declaration copies cannot replace installed modules', async (t) => {
   const { folder, entry, check } = await fixture(t);
   await mkdir(join(folder, 'template/types'));

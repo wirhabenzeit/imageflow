@@ -15,6 +15,8 @@ import { revealIn } from './reveal';
 import { EditPopover, MarkedFields } from './EditPopover';
 import { CropEditor } from './CropEditor';
 import { ElementEditorDialog } from './ElementEditor';
+import { documentEditorFor, editorOwnedDocument, editorTargetGone } from './editor-session';
+import type { EditorTarget } from './editor-session';
 import { LayoutPickerDialog } from './LayoutPickerDialog';
 import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
@@ -26,6 +28,7 @@ import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { Edit } from './Inspector';
 import { BookCheckIndicator } from './BookCheck';
+import type { PictureStatus } from './BookFrame';
 import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
 import { keptMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
@@ -139,8 +142,8 @@ export function App() {
   // each layout has its own crop. `saved` holds the project id the last crop edit started from; after the photo is
   // deselected, `settling` keeps its overlay until the book has re-rendered, so the frame does not flash back.
   const [cropping, setCropping] = useState<{ spread: string; box: string; layout: string; saved?: string; settling?: string }>();
-  // A template-supplied element editor that is open.
-  const [elementEditor, setElementEditor] = useState<{ spread: string; element: string }>();
+  // A template-supplied editor that is open: an element's, or a document editor opened from a spread.
+  const [elementEditor, setElementEditor] = useState<EditorTarget>();
   const [layoutPicker, setLayoutPicker] = useState<{ spread: string; family: string; layout: string }>();
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
@@ -548,6 +551,24 @@ export function App() {
     return () => { mounted = false; command(); changed(); progress(); lease(); release(); appError(); };
   }, [api]);
 
+  // Network origins the template declares (ADR 0006): decided once per book and template version (its hash) when it
+  // first renders, and again whenever an element editor opens. Newly allowed origins reload the frames so they may
+  // reach them.
+  const networkAsked = useRef(new Set<string>());
+  // Resolves to the project ID to render from now on.
+  function decideNetwork(declared: TemplateInfo | undefined, always = false): Promise<string | void> {
+    const before = current.current;
+    if (!api || !before || before.readOnly || !declared?.network?.length) return Promise.resolve(before?.id);
+    const key = before.folder + '\n' + (before.templateHash ?? '') + '\n' + declared.network.join(' ');
+    if (!always && networkAsked.current.has(key)) return Promise.resolve(before.id);
+    networkAsked.current.add(key);
+    return api.editorNetwork(before.id, declared.network).then((result) => {
+      if (!('value' in result) || !result.value.summary || current.current !== before) return current.current?.id;
+      adopt(result.value.summary);
+      return result.value.summary.id;
+    });
+  }
+
   // The book frame renders every spread, so its status doubles as the book check.
   const acceptCandidate = (id: string) => candidateId.current === id;
   function bookStatus(status: RenderStatus, id: string) {
@@ -561,6 +582,7 @@ export function App() {
       setReload(undefined);
       setLastReady(status);
       setTemplate(status.template);
+      void decideNetwork(status.template);
       setCropping((previous) => previous?.settling && previous.settling !== id ? undefined : previous);
     } else {
       candidateId.current = undefined;
@@ -572,6 +594,12 @@ export function App() {
     }
     setCheck(status.state === 'ready' ? { id, errors: status.errors, warnings: status.warnings } :
       { id, errors: [{ message: status.message }], warnings: [] });
+  }
+  // Pictures the book view draws after it is ready (ADR 0006): their failures and how many are still drawing.
+  function bookPictures(pictures: PictureStatus, id: string) {
+    if (!acceptCandidate(id) && readyId.current !== id) return;
+    setCheck((previous) => !previous || previous.id !== id ? previous : { ...previous, pictures: pictures.pending,
+      errors: [...previous.errors.filter(({ code }) => code !== 'rendered-image-failed'), ...pictures.errors] });
   }
   const checkCurrent = !!check && check.id === summary?.id;
   const spreadIssues = new Map<string, 'error' | 'warning'>();
@@ -906,6 +934,7 @@ export function App() {
       setNotice('The book preview is updating; try again in a moment.');
       return;
     }
+    if (openDocumentEditor(target)) return;
     deselectPhoto();
     select(target.spread, false);
     openEditing({ spread: target.spread, key: targetKey(target) });
@@ -919,7 +948,18 @@ export function App() {
     setEditing(undefined);
     deselectPhoto();
     select(spread, false);
-    setElementEditor({ spread, element });
+    setElementEditor({ kind: 'element', spread, element });
+    return true;
+  }
+  // A node marked only with document parameters a document editor owns opens that editor, with this spread's context.
+  function openDocumentEditor(target: Target) {
+    const editor = template && documentEditorFor(template, target.edits);
+    const layout = spreads.find(({ id }) => id === target.spread)?.definition;
+    if (!editor || !layout || readyId.current !== summary?.id) return false;
+    setEditing(undefined);
+    deselectPhoto();
+    select(target.spread, false);
+    setElementEditor({ kind: 'document', spread: target.spread, layout, editor });
     return true;
   }
   function startCrop(spread: string, box: string) {
@@ -1039,6 +1079,11 @@ export function App() {
     if (!changed.size) return;
     setCropping((crop) => crop && changed.has(crop.spread) ? undefined : crop);
     setEditing((open) => open && !open.held && changed.has(open.spread) ? undefined : open);
+  }, [spreads]);
+  // An editor whose spread was deleted closes, as does a document editor whose spread switched layout and so lost
+  // the node it was opened from. Reordering keeps it open; its context follows.
+  useEffect(() => {
+    setElementEditor((open) => open && editorTargetGone(spreads, open) ? undefined : open);
   }, [spreads]);
 
   function drop(event: DragEvent<HTMLElement>) {
@@ -1208,8 +1253,11 @@ export function App() {
                 const title = event.target.value.trim();
                 if (title && title !== summary.project.title) edit(({ project }) => { project.title = title; });
               }} /></label>
-            {template && <Fields schema={template.parameters} values={summary.project.params}
+            {template && <Fields schema={template.parameters} values={summary.project.params} exclude={editorOwnedDocument(template)}
               update={(id, value) => edit(({ project }) => { project.params[id] = value; })} />}
+            {template && Object.entries(template.editors ?? {}).map(([id, { label, parameters }]) => <p key={id} className="muted">
+              {parameters.map((key) => template.parameters[key]?.label ?? key).join(', ')} {parameters.length === 1 ? 'is' : 'are'} edited on
+              the page{label ? ' with ' + label : ''}: click where the book shows {parameters.length === 1 ? 'it' : 'them'}.</p>)}
           </fieldset>
         </details>}
         {summary && <>
@@ -1282,7 +1330,7 @@ export function App() {
                   path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')) ||
                   (target.owner?.id === top.id && (target.owner.type === 'element') === (top.type === 'element'))));
                 if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
-                else if (target) openEditing({ spread: target.spread, key: targetKey(target) });
+                else if (target && !openDocumentEditor(target)) openEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
                 // Double-clicking a Markdown box shows its text in Quick Look.
@@ -1302,7 +1350,7 @@ export function App() {
                 setHovered(sheet);
                 setHoveredTarget(target && targetKey(target));
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
-              <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus}
+              <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus} onPictures={bookPictures}
                 viewport={viewport} hold={holdPreview} accept={acceptCandidate} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const i = spreads.findIndex((item) => item.id === id);
@@ -1408,11 +1456,12 @@ export function App() {
         edit={edit} highlight={setHighlight} issues={issue} select={select} />}
       </div>
     </div>
-    {summary && template && elementEditor && spreads.some(({ id }) => id === elementEditor.spread) &&
-      <ElementEditorDialog host={canvasWrap.current} key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
-        spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
+    {summary && template && elementEditor && !editorTargetGone(spreads, elementEditor) &&
+      <ElementEditorDialog host={canvasWrap.current} key={JSON.stringify(elementEditor)} project={summary.id} template={template}
+        spread={spreads.find(({ id }) => id === elementEditor.spread)!} params={summary.project.params} target={elementEditor} readOnly={summary.readOnly}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
-        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile} />}
+        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile}
+          prepare={template?.network?.length ? () => decideNetwork(template, true) : undefined} network={summary.network?.join(' ')} />}
     {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&
       <LayoutPickerDialog key={layoutPicker.spread + ':' + layoutPicker.family} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === layoutPicker.spread)!} family={layoutPicker.family} layout={layoutPicker.layout}
