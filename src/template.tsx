@@ -681,6 +681,21 @@ export function editorContext(book: RenderProject, template: Template, spreadId:
   return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, values, template.formatId]) };
 }
 
+/** The editor context from a newer book, with the format that book chose, as the book render chooses it. */
+export const refreshedEditorContext = (book: RenderProject, template: Template, spreadId: string) =>
+  editorContext(book, chooseFormat(template, book.project.format), spreadId);
+
+/**
+ * The context an editor sees: the saved book with its draft applied, so helpers reading `context` agree with what
+ * the editor shows. A document editor's draft is its own document parameters; an element editor's is the element's
+ * values (including the generated controls' draft) and the layout parameters it owns.
+ */
+export function withEditorDraft(context: EditorContext, draft: { document: Values } | { element: string; values: Values; spread: Values }): EditorContext {
+  if ('document' in draft) return { ...context, document: { ...context.document, ...draft.document } };
+  return { ...context, params: { ...context.params, ...draft.spread },
+    elements: { ...context.elements, [draft.element]: { params: { ...context.elements[draft.element]?.params, ...draft.values } } } };
+}
+
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
 export function SpreadView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false }: {
   book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState;

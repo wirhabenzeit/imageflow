@@ -7,7 +7,7 @@ import type { EditorTarget } from '../src/editor-session';
 import { p } from '../src/parameters';
 import { projectSchema } from '../src/project';
 import type { Project, RenderProject } from '../src/project';
-import { chooseFormat, editorContext, templateInfo, templateSchema } from '../src/template';
+import { chooseFormat, editorContext, refreshedEditorContext, templateInfo, templateSchema, withEditorDraft } from '../src/template';
 
 // A calendar-like template: month pages declare an anchor, and a document editor owns the marked dates.
 const format = {
@@ -174,4 +174,27 @@ test('a document editor sets only its own document parameters', () => {
     "set() ignored accent: it is not one of this editor's parameters, so it is edited in Book settings. This editor edits markedDates.",
     'set() ignored holidays: the document has no such parameter. This editor edits markedDates.',
   ]);
+});
+
+test('a refreshed context follows the format the newer book chose', () => {
+  const large = { ...format, label: 'Large', trim: { width: mm(200), height: mm(200) } };
+  const both = chooseFormat(templateSchema.parse({ ...declaration(), format: undefined, formats: { small: format, large }, defaultFormat: 'small' }));
+  const state = project(months());
+  const opened = refreshedEditorContext(rendered(state), both, 'feb')!;
+  assert.equal(opened.context.formatId, 'small');
+  const switched = refreshedEditorContext(rendered({ ...state, format: 'large' }), both, 'feb')!;
+  assert.notEqual(switched.key, opened.key);
+  assert.equal(switched.context.formatId, 'large');
+  assert.equal(switched.context.format.trim.width, opened.context.format.trim.width * 2);
+});
+
+test('the context shows the editor draft: document values, or element values and owned layout values', () => {
+  const { context } = editorContext(rendered(project(months(), { markedDates: '25.12' })), template, 'feb')!;
+  const documentDraft = withEditorDraft(context, { document: { markedDates: '25.12, 2027-02-14' } });
+  assert.equal(documentDraft.document.markedDates, '25.12, 2027-02-14');
+  assert.equal(documentDraft.document.firstMonth, '2027-01-01');
+  const elementDraft = withEditorDraft(context, { element: 'grid', values: { size: 2 }, spread: {} });
+  assert.equal(context.elements.grid.params.size, 3);
+  assert.equal(elementDraft.elements.grid.params.size, 2);
+  assert.equal(elementDraft.document.markedDates, '25.12');
 });

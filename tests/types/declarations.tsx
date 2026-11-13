@@ -299,7 +299,10 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, sp
 // Document editors are typed from the document parameters and the IDs they own, and read the spread's context.
 const calendarDocument = { marked: p.string({ label: 'Marked', default: '' }), first: p.date({ label: 'First', default: '2027-01-01' }) };
 function Days({ values, set, context, Control }: DocumentEditorProps<typeof calendarDocument, 'marked'>) {
-  const first: string = values.first;
+  // `values` holds only the editor's own parameters; other settings come from the context.
+  // @ts-expect-error
+  values.first;
+  const first: string = context.document.first + values.marked;
   const page: number | undefined = context.page.number;
   const month: string = context.document.first;
   const anchors = context.book.anchors('month');

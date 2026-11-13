@@ -1,5 +1,6 @@
 import { box, defineTemplate, inch, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { DocumentEditorProps, ImageFlowNode, Photo, Rect, RenderContext } from 'imageflow';
+import { changeMark, daysIn, markedDays, markedEntries, markOf, monthFor } from './marks';
 import './styles.css';
 
 // A wall calendar without facing pages: a cover, then one page per month. Each page is a full-bleed photo with a
@@ -47,13 +48,6 @@ const documentParameters = {
 };
 type Context = RenderContext<{ label: string }, typeof documentParameters>;
 
-// Dates are plain calendar dates; UTC keeps them free of the computer's time zone.
-const monthAt = (first: string, offset: number) => {
-  const date = new Date(first + 'T00:00:00Z');
-  date.setUTCMonth(date.getUTCMonth() + offset, 1);
-  return date;
-};
-const daysIn = (month: Date) => new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
 const clean = (name: string) => name.replace(/\./g, '').trim();
 // "NOV", "MÄR": the short month name, capitalised like the printed strip.
 const monthName = (month: Date, language: Language) =>
@@ -62,51 +56,6 @@ const monthName = (month: Date, language: Language) =>
 const weekdayName = (date: Date, language: Language) => {
   const name = clean(new Intl.DateTimeFormat(language, { timeZone: 'UTC', weekday: 'short' }).format(date)).slice(0, 2);
   return name.charAt(0).toLocaleUpperCase(language) + name.slice(1);
-};
-// Marked days are dates for the whole calendar: "25.12" every year or "2027-04-16" once, separated by commas,
-// semicolons or new lines. Every entry is kept, so ones that are not dates can be reported instead of dropped.
-type MarkedDate = { month: number; day: number; year?: number };
-const markedEntries = (value: string) => value.split(/[\s,;]+/).filter(Boolean).map((entry): { entry: string; date?: MarkedDate } => {
-  const yearly = /^(\d{1,2})\.(\d{1,2})\.?$/.exec(entry);
-  const once = /^(\d{4})-(\d{2})-(\d{2})$/.exec(entry);
-  const [year, month, day] = once ? [Number(once[1]), Number(once[2]), Number(once[3])]
-    : yearly ? [undefined, Number(yearly[2]), Number(yearly[1])] : [undefined, 0, 0];
-  // A yearly 29.02 is valid: it shows in leap years.
-  const longest = month >= 1 && month <= 12 ? new Date(Date.UTC(year ?? 2024, month, 0)).getUTCDate() : 0;
-  return day >= 1 && day <= longest ? { entry, date: { month, day, year } } : { entry };
-});
-/** The marked days of one month. */
-const markedDays = (value: string, month: Date) => new Set(markedEntries(value).flatMap(({ date }) =>
-  date && date.month === month.getUTCMonth() + 1 && (date.year === undefined || date.year === month.getUTCFullYear())
-    && date.day <= daysIn(month) ? [date.day] : []));
-/** How a day of a month is marked: once (that date only), every year, both, or not at all. */
-const markOf = (value: string, month: Date, day: number) => {
-  const matches = markedEntries(value).filter(({ date }) => date && date.month === month.getUTCMonth() + 1 && date.day === day);
-  return { once: matches.some(({ date }) => date!.year === month.getUTCFullYear()), yearly: matches.some(({ date }) => date!.year === undefined) };
-};
-const pad = (value: number) => String(value).padStart(2, '0');
-const onceEntry = (month: Date, day: number) => month.getUTCFullYear() + '-' + pad(month.getUTCMonth() + 1) + '-' + pad(day);
-const yearlyEntry = (month: Date, day: number) => pad(day) + '.' + pad(month.getUTCMonth() + 1);
-/**
- * The marked dates with entries for this day added or removed. Entries that are not dates and entries for other
- * days stay as they were; the list is rewritten comma-separated.
- */
-function changeMark(value: string, month: Date, day: number, change: { once?: boolean; yearly?: boolean }) {
-  const kept = markedEntries(value).filter(({ date }) => !date || date.month !== month.getUTCMonth() + 1 || date.day !== day ||
-    (date.year === undefined ? change.yearly === undefined : date.year !== month.getUTCFullYear() || change.once === undefined));
-  const current = markOf(value, month, day);
-  const once = change.once ?? current.once;
-  const yearly = change.yearly ?? current.yearly;
-  return [...kept.map(({ entry }) => entry), ...(yearly ? [yearlyEntry(month, day)] : []), ...(once ? [onceEntry(month, day)] : [])].join(', ');
-}
-
-/**
- * The month a month page shows: the first month, moved on by the month pages before this one. A pure function of
- * what `render` and an editor's `context` both have, so the page and its day picker always agree.
- */
-const monthFor = (context: Pick<Context, 'page' | 'book' | 'document'>) => {
-  const index = Math.max(0, context.book.anchors('month').findIndex((anchor) => anchor.page === context.page.number));
-  return monthAt(context.document.firstMonth, index);
 };
 
 // Type sizes are designed for A3 and scale with the trim width, like the positions do.
@@ -172,7 +121,8 @@ const place = (text: string, photo: Photo | null) => text.trim() || photo?.capti
 // yearly entry, since one click should not change every year's calendar.
 function MarkedDaysEditor({ values, set, context, readOnly, Control }: DocumentEditorProps<typeof documentParameters, 'markedDates'>) {
   const month = monthFor(context);
-  const language = values.language;
+  // `values` holds only the marked dates; every other setting is read from the context, which follows the book.
+  const language = context.document.language;
   const marked = values.markedDates;
   const year = month.getUTCFullYear();
   const monthLabel = new Intl.DateTimeFormat(language, { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(month);
@@ -198,9 +148,10 @@ function MarkedDaysEditor({ values, set, context, readOnly, Control }: DocumentE
     <p className="marked-days-note">Click a day to mark it in {year}. Days with a ring are marked every year.</p>
     <ul className="marked-days-list">
       {days.filter(({ once, yearly }) => once || yearly).map(({ day, once, yearly }) => <li key={day}>
-        <span>{yearly ? dayLabel(day, false) + ', every year' : dayLabel(day, true)}</span>
+        <span>{yearly ? dayLabel(day, false) + ', every year' + (once ? ', and once in ' + year : '') : dayLabel(day, true)}</span>
+        {/* Removing the yearly mark keeps a one-off mark of the same day, which then shows on its own. */}
         {yearly
-          ? <button type="button" disabled={readOnly} onClick={() => change(day, { yearly: false, once: false })}>Unmark every year</button>
+          ? <button type="button" disabled={readOnly} onClick={() => change(day, { yearly: false })}>Unmark every year</button>
           : <button type="button" disabled={readOnly} onClick={() => change(day, { yearly: true, once: false })}>Mark every year</button>}
       </li>)}
     </ul>

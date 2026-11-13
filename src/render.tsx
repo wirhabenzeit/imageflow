@@ -17,7 +17,7 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, editorContext, normalizeTemplate, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import { bookIndex, chooseFormat, editorContext, normalizeTemplate, refreshedEditorContext, withEditorDraft, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup, EditorContext } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
@@ -808,8 +808,6 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   const saved = documentEditor ? resolveParams(template.parameters, book.project.params) : resolveParams(element!.parameters, spread.elements[elementId]?.params ?? {});
   const savedSpread = resolveParams(layout.parameters, spread.params);
   const ownedSpread = documentEditor ? [] : element!.editor?.spread ?? [];
-  const document = resolveParams(template.parameters, book.project.params);
-  const format = resolveFormat(template.format);
   const claimed = (values: Values) => Object.fromEntries(editor.parameters.map((key) => [key, values[key]]));
   const claimedSpread = (values: Values) => Object.fromEntries(ownedSpread.map((key) => [key, values[key]]));
   let seen = opened.context;
@@ -885,7 +883,8 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     const request = ++contextRequests;
     void fetch('/render/' + session + '/data').then((response) => response.json()).then((latest: RenderProject) => {
       if (request !== contextRequests || failed) return;
-      const next = editorContext(latest, template, spreadId);
+      // The latest book may have chosen another format; the context follows it like the book render does.
+      const next = refreshedEditorContext(latest, template, spreadId);
       if (!next || next.key === contextKey) return;
       seen = next.context;
       contextKey = next.key;
@@ -958,17 +957,20 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       post({ type: 'editor-ready' });
       return () => { update = undefined; updateFiles = undefined; updateContext = undefined; };
     }, []);
-    // The context shows the saved book with this editor's draft applied, so a helper reading `context.document`
-    // agrees with what the editor shows.
-    const shown = React.useMemo(() => documentEditor ? { ...current, document: { ...current.document, ...claimed(values.element) } }
-      : { ...current, params: { ...current.params, ...claimedSpread(values.spread) } }, [current, values]);
+    // The context shows the saved book with this editor's draft applied, so a helper reading `context` agrees with
+    // what the editor shows: a document editor's own document parameters, or an element editor's element values
+    // (including the generated controls' draft) and the layout parameters it owns.
+    const shown = React.useMemo(() => withEditorDraft(current, documentEditor ? { document: claimed(values.element) }
+      : { element: elementId, values: values.element, spread: claimedSpread(values.spread) }), [current, values]);
     const context = React.useMemo(() => ({ files, defaultMode: book.project.importMode ?? 'copy', importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
     return React.createElement(ProjectFilesContext.Provider, { value: context },
       React.createElement(EditorValues.Provider, { value: values },
         documentEditor
-          ? React.createElement(documentEditor.component, { values: values.element, set, context: shown, format, readOnly, commit, cancel, Control, importFile })
-          : React.createElement(element!.editor!.component, { values: values.element, set, spread: values.spread, setSpread, document, format,
-            context: shown, readOnly, commit, cancel, Control, importFile })));
+          // A document editor's `values` are only its own parameters; every other setting is read from `context`, so there
+          // is one current copy of each. `format` and an element editor's `document` follow the context too.
+          ? React.createElement(documentEditor.component, { values: claimed(values.element), set, context: shown, format: shown.format, readOnly, commit, cancel, Control, importFile })
+          : React.createElement(element!.editor!.component, { values: values.element, set, spread: values.spread, setSpread, document: shown.document,
+            format: shown.format, context: shown, readOnly, commit, cancel, Control, importFile })));
   }
 
   // Errors from the component's event handlers and async work do not reach React's error handling.

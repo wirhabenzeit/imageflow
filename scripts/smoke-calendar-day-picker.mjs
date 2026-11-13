@@ -113,23 +113,35 @@ try {
   assert.equal(await dialog.getByRole('alert').count(), 0, 'A reorder refreshes the context without a conflict');
   await press('6');
   await waitFor((state) => state.params.markedDates === sample + ', 2027-01-06', 'the refreshed picker marks the new month');
+  // Other settings come from the context too: a new language reaches the open picker without a conflict.
+  const german = await read();
+  german.params.language = 'de';
+  await write(german);
+  await picker.locator('h3', { hasText: 'Januar 2027' }).waitFor();
+  assert.equal(await dialog.getByRole('alert').count(), 0, 'A language change refreshes the context without a conflict');
   await close();
-  await write({ ...saved, params: { markedDates: sample } });
+  // 17 May is marked every year and once in 2027.
+  await write({ ...saved, params: { markedDates: sample + ', 2027-05-17' } });
   await frame.locator('[data-spread="feb"] .month-name', { hasText: 'FEB' }).waitFor();
 
-  // A yearly date shows as marked and is not toggled by a click; the picker offers to remove the yearly entry.
+  // A yearly date shows as marked and is not toggled by a click; the picker offers to remove the yearly entry,
+  // which keeps the one-off mark of the same day.
   await openPicker('may');
   assert.equal(await picker.locator('h3').textContent(), 'May 2027');
   const seventeenth = picker.getByRole('button', { name: '17', exact: true });
   assert.equal(await seventeenth.getAttribute('class'), 'yearly');
   assert.equal(await seventeenth.isDisabled(), true);
+  assert.equal(await picker.locator('.marked-days-list li').first().locator('span').textContent(), 'May 17, every year, and once in 2027');
   await press('Unmark every year');
-  await waitFor((state) => state.params.markedDates === '24.12, 25.12, 26.12, 31.12', 'the yearly entry is removed');
+  await waitFor((state) => state.params.markedDates === '24.12, 25.12, 26.12, 31.12, 2027-05-17', 'the yearly entry is removed, the one-off kept');
+  await idle();
+  assert.equal(await seventeenth.getAttribute('class'), 'once');
   // A one-off date can become a yearly one.
   await press('9');
   await waitFor((state) => state.params.markedDates.endsWith('2027-05-09'), 'a one-off date');
-  await press('Mark every year');
-  await waitFor((state) => state.params.markedDates === '24.12, 25.12, 26.12, 31.12, 09.05', 'the date repeats every year');
+  await idle();
+  await picker.locator('.marked-days-list li', { hasText: 'May 9, 2027' }).getByRole('button', { name: 'Mark every year' }).click();
+  await waitFor((state) => state.params.markedDates === '24.12, 25.12, 26.12, 31.12, 2027-05-17, 09.05', 'the date repeats every year');
 
   // A change to the marked dates from elsewhere stops the picker: it saves nothing until it is reopened.
   const external = await read();

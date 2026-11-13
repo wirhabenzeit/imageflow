@@ -225,7 +225,9 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
   spread: ParameterValues<S>;
   /** Changes only the layout parameters this editor lists in `spread`, in the same draft as `set`. */
   setSpread: EditorFunction<SK, EditorChanges<S, SK>, void>;
+  /** The document settings, as `context.document`: current while the editor is open. */
   document: ParameterValues<D>;
+  /** The format, as `context.format`: it follows a format change while the editor is open. */
   format: ResolvedFormat;
   /** The spread the editor was opened from, as `render` sees it, kept current while the editor is open. */
   context: EditorContext<SpreadDeclaration, D>;
@@ -275,20 +277,22 @@ export type ElementEditor<K extends string = string, P extends Parameters = Para
  * The read-only view of the book an editor is opened from: the values `render` reads for that spread (its
  * parameters, the document's, boxes with their photos' metadata, elements, page numbers, the book's anchors and the
  * format), plus the spread's ID and layout. It follows the book while the editor stays open: reordering spreads,
- * another photo or a changed document setting refresh it. The editor's own draft is applied to it. Markdown boxes'
+ * another photo, a changed document setting or format refresh it. The editor's own draft is applied to it: an
+ * element editor's element values and owned layout parameters, or a document editor's own document parameters. Markdown boxes'
  * `text` is null, since flow positions are known only to the book render. Pure helpers that take
  * `Pick<RenderContext, 'page' | 'book' | 'document'>` serve `render` and editors alike.
  */
 export type EditorContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
   Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'elements' | 'page' | 'format' | 'formatId' | 'book'> & { spread: string; layout: string };
 /**
- * Props of a document editor. `values` holds all document parameters with the draft applied; `set` changes the
- * editor's own (`K`). `context` is the spread the editor was opened from. Requires `document-editors`.
+ * Props of a document editor. `values` holds only the editor's own document parameters (`K`), with the draft
+ * applied, and `set` changes them. Every other setting is read from `context`, the spread the editor was opened
+ * from, which follows the book while the editor is open. `format` is `context.format`. Requires `document-editors`.
  *
  *     function MarkedDays({ values, set, context }: DocumentEditorProps<typeof documentParameters, 'markedDates'>) { ... }
  */
 export type DocumentEditorProps<D extends Parameters = Parameters, K extends keyof D & string = keyof D & string> = {
-  values: ParameterValues<D>;
+  values: ParameterValues<Pick<D, K>>;
   /** Changes some of this editor's own document parameters in the draft. Other keys and invalid values are ignored and reported. */
   set: EditorFunction<K, EditorChanges<D, K>, void>;
   context: EditorContext<SpreadDeclaration, D>;
