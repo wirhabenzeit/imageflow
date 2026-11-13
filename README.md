@@ -50,6 +50,8 @@ npm run test:desktop
 
 The ad-hoc-signed app appears in `out/ImageFlow-darwin-arm64/ImageFlow.app` on Apple Silicon or `out/ImageFlow-darwin-x64/ImageFlow.app` on Intel. `npm run test:packaged` also checks the packaged document declaration, icon, real Finder open events, and packaged proof/print workflows. The desktop checks require Poppler and exercise PDF geometry, line breaks, preflight, imports, autosave, live reload, and randomized Markdown continuation.
 
+Set `APPLE_SIGNING_IDENTITY` to a Developer ID Application identity to sign with hardened runtime. `npm run package:mac:release` also notarizes and staples the app and DMG, verifies their tickets, and creates the update ZIP. [Mac signing and notarization](docs/signing.md) covers the credentials, GitHub Actions secret setup, artifact names and verification. `npm run test:packaged:existing` checks a release build without rebuilding it, including its MCP bridge.
+
 For everyday pull requests, GitHub Actions runs `check` (build, app/template/API type checks, and unit tests on Linux) and `desktop` (two focused Apple silicon Mac smoke checks). `npm run test:desktop:smoke` checks app launch, book opening and rendering, proof PDF output, durable saves and orderly shutdown. It builds and stages the app but leaves unit tests to `check`.
 
 The separate **Full desktop suite** workflow runs `npm run test:desktop` after pushes to `main` and can be started manually from Actions. It covers the broader editing, layout, template, source, appearance and MCP workflows. It does not run on every PR. Packaged-app checks belong to the release workflow.

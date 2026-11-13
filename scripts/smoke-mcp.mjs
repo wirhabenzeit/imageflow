@@ -10,6 +10,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import sharp from 'sharp';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const packaged = process.argv.includes('--packaged');
+const executable = packaged ? join(root, 'out', 'ImageFlow-darwin-' + process.arch, 'ImageFlow.app/Contents/MacOS/ImageFlow') : electron;
 const work = await mkdtemp(join(root, '.build', 'mcp-smoke-'));
 const folder = join(work, 'book.imageflow');
 await Promise.all(['template', 'inbox', 'photos'].map((name) => mkdir(join(folder, name), { recursive: true })));
@@ -34,7 +36,7 @@ await Promise.all([
   writeFile(join(folder, 'photos.json'), '{}'),
   sharp({create:{width:100,height:100,channels:3,background:'#00ff00'}}).png().toFile(join(folder,'inbox','green.png')),
 ]);
-const app = await _electron.launch({executablePath:electron,args:[join(root,'.build/desktop'),'--user-data-dir='+join(work,'profile')],env:{...process.env,IMAGEFLOW_HIDE_WINDOW:'1'}});
+const app = await _electron.launch({executablePath:executable,args:[...(packaged ? [] : [join(root,'.build/desktop')]),'--user-data-dir='+join(work,'profile')],env:{...process.env,IMAGEFLOW_HIDE_WINDOW:'1'}});
 let client;
 try {
   const window = await testBook(app, folder, false);
@@ -50,7 +52,7 @@ try {
   await configuration.waitFor();
   const config=JSON.parse(await configuration.inputValue()).mcpServers.imageflow;
   // Agents start the bridge with ImageFlow's own executable in Node mode; no separate Node installation.
-  assert.equal(config.command,electron);
+  assert.equal(config.command,executable);
   assert.deepEqual(config.env,{ELECTRON_RUN_AS_NODE:'1'});
   assert.match(await connectionDialog.getByRole('textbox',{name:'Claude Code command'}).inputValue(),/^claude mcp add --scope user -e ELECTRON_RUN_AS_NODE=1 imageflow -- /);
   await connectionDialog.getByText('Waiting for an agent to connect.', { exact: true }).waitFor();
