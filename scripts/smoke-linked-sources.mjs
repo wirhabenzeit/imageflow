@@ -129,9 +129,16 @@ try {
   assert.match(collectionError, /Cannot include all assets/);
   await page.screenshot({ path: join(root, '.build/linked-missing-sources.png') });
   await manager.getByRole('button', { name: 'Done', exact: true }).click();
-  state = await current(page);
-  const checked = await page.evaluate((id) => window.imageflow.checkBook(id, {}), state.id);
-  assert.ok(checked.value.diagnostics.some((finding) => finding.code === 'source-unavailable'));
+  let checked;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    state = await current(page);
+    checked = await page.evaluate((id) => window.imageflow.checkBook(id, {}), state.id);
+    const stale = checked.value?.diagnostics.some((finding) => finding.code === 'source-changed');
+    if (!stale && checked.error !== 'ImageFlow is finishing another operation in this book.') break;
+    await ready(page);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(checked.value?.diagnostics.some((finding) => finding.code === 'source-unavailable'), JSON.stringify(checked));
   const print = join(work, 'Missing-print.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, print);
   const blocked = await page.evaluate((id) => window.imageflow.exportBook(id, 'print'), state.id);
