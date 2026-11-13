@@ -1,0 +1,141 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+      - name: Check tag against package version
+        id: version
+        run: node scripts/release-metadata.mjs
+
+  mac:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      IMAGEFLOW_HIDE_WINDOW: '1'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      RELEASE_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+          cache: npm
+      - name: Check runner architecture
+        run: node -e "if (process.arch !== process.env.RELEASE_ARCH) throw new Error('Release runner architecture does not match the target')"
+      - name: Cache Electron downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            .build/electron-cache
+            ~/Library/Caches/electron
+          key: ${{ runner.os }}-${{ runner.arch }}-electron-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - name: Install PDF test tools
+        run: brew install poppler
+      - name: Prepare signing credentials
+        env:
+          P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: |
+          umask 077
+          IMAGEFLOW_KEYCHAIN="$RUNNER_TEMP/imageflow-signing.keychain-db"
+          IMAGEFLOW_KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          printf '::add-mask::%s\n' "$IMAGEFLOW_KEYCHAIN_PASSWORD"
+          printf %s "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/ImageFlow.p12"
+          printf %s "$API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/ImageFlow-AuthKey.p8"
+          security create-keychain -p "$IMAGEFLOW_KEYCHAIN_PASSWORD" "$IMAGEFLOW_KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$IMAGEFLOW_KEYCHAIN"
+          security unlock-keychain -p "$IMAGEFLOW_KEYCHAIN_PASSWORD" "$IMAGEFLOW_KEYCHAIN"
+          security import "$RUNNER_TEMP/ImageFlow.p12" -k "$IMAGEFLOW_KEYCHAIN" -P "$P12_PASSWORD" -f pkcs12 -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$IMAGEFLOW_KEYCHAIN_PASSWORD" "$IMAGEFLOW_KEYCHAIN"
+          security list-keychains -d user -s "$IMAGEFLOW_KEYCHAIN"
+          printf 'APPLE_SIGNING_KEYCHAIN=%s\n' "$IMAGEFLOW_KEYCHAIN" >> "$GITHUB_ENV"
+          printf 'APPLE_API_KEY=%s\n' "$RUNNER_TEMP/ImageFlow-AuthKey.p8" >> "$GITHUB_ENV"
+      - name: Build and test signed app
+        run: npm run test:packaged
+      - name: Notarize tested app and create artifacts
+        run: npm run notarize:mac -- --arch "$RELEASE_ARCH"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ImageFlow-release-mac-${{ matrix.arch }}
+          path: |
+            out/*.zip
+            out/*.dmg
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/imageflow-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/ImageFlow.p12" "$RUNNER_TEMP/ImageFlow-AuthKey.p8"
+
+  draft:
+    needs: [version, mac]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_PRERELEASE: ${{ needs.version.outputs.prerelease }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ImageFlow-release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Create or update draft release
+        run: |
+          assets=(release-assets/*.zip release-assets/*.dmg)
+          if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/release.json"; then
+            jq -e '.isDraft == true' "$RUNNER_TEMP/release.json" > /dev/null || { echo 'Refusing to modify a published release'; exit 1; }
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          else
+            flags=(--draft --verify-tag --generate-notes --title "ImageFlow $RELEASE_TAG")
+            if [[ "$RELEASE_PRERELEASE" == true ]]; then flags+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" "${assets[@]}" "${flags[@]}"
+          fi
+          gh release view "$RELEASE_TAG" --json isDraft,url,assets > "$RUNNER_TEMP/release.json"
+          jq -e '.isDraft == true and (.assets | length >= 2)' "$RUNNER_TEMP/release.json" > /dev/null
+          printf 'Draft release: %s\n' "$(jq -r .url "$RUNNER_TEMP/release.json")" >> "$GITHUB_STEP_SUMMARY"
