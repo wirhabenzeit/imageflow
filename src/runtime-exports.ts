@@ -33,5 +33,8 @@ export const contract1Capabilities = [
 ] as const;
 // All supported features, including the baseline names accepted in older templates' `requires` lists.
 // Future additive extensions go here, and templates using those extensions declare them in `requires`.
-export const capabilities = [...contract1Capabilities] as const;
+export const capabilities = [...contract1Capabilities,
+  // `presentation: 'inline'` on element and document editors: editing on the page, in the frame it was opened from.
+  'inline-editors',
+] as const;
 export type Capability = typeof capabilities[number];

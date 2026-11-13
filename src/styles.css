@@ -332,6 +332,29 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .studio .crop-toolbar button[aria-label^="Zoom"] { width: 26px; padding: 0; font-size: 15px; }
 .crop-toolbar input[type="range"] { width: 110px; accent-color: var(--accent); }
 .crop-params { display: flex; align-items: center; gap: 10px; padding-left: 4px; border-left: 1px solid var(--control-border); }
+/* An inline element editor: its frame on the page at the element's printed size, scaled like the sheet, above the
+   artwork and below toolbars. It stays invisible (with the artwork showing) until the editor is ready. */
+.inline-editor { position: absolute; z-index: 5; transform-origin: 0 0; visibility: hidden; }
+.inline-editor.showing { visibility: visible; box-shadow: 0 0 0 calc(2px / var(--inline-zoom, 1)) var(--accent); }
+.studio .inline-editor-frame { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
+/* Its toolbar: the element's other parameters and the way to the panel, in one row like the crop toolbar. */
+.studio .inline-editor-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; width: max-content; }
+.inline-editor-bar > :is(button, .inline-editor-title) { flex: none; }
+.inline-editor-title { padding: 0 4px; font-weight: 600; }
+/* On a narrow canvas the fields wrap onto a second row, so nothing overlaps; the width only follows the canvas. */
+.inline-editor-fields { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0; padding: 0 0 0 10px;
+  border-width: 0 0 0 1px; min-width: 0; }
+.inline-editor-fields .field { display: flex; align-items: center; gap: 6px; margin: 0; white-space: nowrap; }
+.inline-editor-fields .field-name { color: var(--muted); }
+.inline-editor-fields :is(.pc-row, .pc-segmented) { flex-wrap: nowrap; }
+.inline-editor-fields input[type="range"] { width: 80px; }
+.inline-editor-fields .pc-number { width: 52px; }
+.inline-editor-fields .control-group { display: contents; }
+.inline-editor-fields .control-group > legend, .inline-editor-fields .control-description { display: none; }
+/* A problem shows above the toolbar, so it never resizes the toolbar or moves the page. */
+.inline-editor-status { position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%); max-width: min(560px, 80vw);
+  margin: 0; padding: 4px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px;
+  border-radius: 7px; border: 1px solid var(--control-border); background: var(--popup-surface); box-shadow: 0 4px 14px #0002; }
 .crop-params .pc-switch { margin: 0; }
 /* A placed photo being moved to another box */
 .photo-move-ghost { position: fixed; z-index: 20; width: 72px; height: 72px; object-fit: cover; transform: translate(-50%, -50%);

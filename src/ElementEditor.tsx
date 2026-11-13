@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
 import type { ImportMode } from './source-locations';
 import { renderOrigin } from './desktop';
-import type { BookGeometry, TemplateInfo } from './desktop';
+import type { BookGeometry, Rect, TemplateInfo } from './desktop';
 import type { Edit } from './Inspector';
 import { isParameterValue, resolveParams } from './parameters';
 import type { SpreadState, Values } from './project';
@@ -17,10 +17,22 @@ import type { EditorState, EditorTarget } from './editor-session';
 // queue, keeping the frame mounted while the book renders. Closing flushes any field still being typed.
 // The same panel runs an element's editor and a document editor (`target`). `params` are the document's saved
 // parameters; `project` names the current render session, which the frame reads its context from.
-export function ElementEditorDialog({ project, template, spread, params, target, readOnly, blocked, canvasReady, edit, close, importFile, prepare, network = '', host, geometry }: {
+//
+// Inline (`presentation: 'inline'`), the same frame sits on the page instead, in the rectangle of the element or
+// marked node it edits (`placement`, in the stage's coordinates), at its printed size scaled like the page, and the
+// app hides that occurrence's artwork once the editor is ready (`shown`). The frame stays mounted while the book
+// redraws, scrolls or zooms around it; only its position and scale follow. The element's other parameters, and
+// moving the editor to the panel, sit in a toolbar under the canvas, so no panel covers the artwork.
+export type InlinePlacement = Rect & { zoom: number };
+export function ElementEditorDialog({ project, template, spread, params, target, readOnly, blocked, canvasReady, edit, close, importFile, prepare, network = '', host, geometry,
+  presentation = 'dialog', placement, stage, shown, toPanel }: {
   project: string; template: TemplateInfo; spread: SpreadState; params: Values; target: EditorTarget; readOnly: boolean;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
   geometry?: BookGeometry;
+  presentation?: 'dialog' | 'inline';
+  // Inline only: where the frame goes (undefined while the node is not on the page), the stage it is drawn in, whether
+  // the frame is showing in place of the artwork, and moving this editor to the panel.
+  placement?: InlinePlacement; stage?: HTMLElement | null; shown?: (showing: boolean) => void; toPanel?: () => void;
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
   // Settles once the frame may load: the network origins its policy allows are decided before it is served.
@@ -36,7 +48,9 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   // The parameters the editor's `set` writes: the element's, or the document's.
   const declared = target.kind === 'document' ? template.parameters : definition?.parameters;
   const state: EditorState = { spread, params };
+  const inline = presentation === 'inline';
   const panel = useRef<HTMLDivElement>(null);
+  const inlineBox = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const draft = useRef<Values>({});
   const spreadDraft = useRef<Values>({});
@@ -64,7 +78,8 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   // The frame keeps the project state it opened with; saving starts a new render elsewhere, not here. Preparing may
   // render the book again (newly allowed network origins), so the frame opens on the project as it is then.
   const address = (id: string) => renderOrigin + '/render/' + id + '?view=editor&spread=' + encodeURIComponent(spread.id) +
-    (target.kind === 'document' ? '&editor=' + encodeURIComponent(target.editor) : '&element=' + encodeURIComponent(element)) + (readOnly ? '&readonly' : '');
+    (target.kind === 'document' ? '&editor=' + encodeURIComponent(target.editor) : '&element=' + encodeURIComponent(element)) + (readOnly ? '&readonly' : '') +
+    (inline ? '&presentation=inline' : '');
   const latestProject = useRef(project);
   latestProject.current = project;
   const [source, setSource] = useState(() => address(project));
@@ -118,7 +133,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   latestClose.current = requestClose;
   useEffect(() => {
     const outside = (event: MouseEvent) => {
-      if (replaying.current || panel.current?.contains(event.target as Node)) return;
+      if (replaying.current || panel.current?.contains(event.target as Node) || inlineBox.current?.contains(event.target as Node)) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
       // Complete the active field and its save first, then perform this same click once. Pointer gestures and
@@ -218,18 +233,74 @@ export function ElementEditorDialog({ project, template, spread, params, target,
     if (ready && Object.keys(local).length) frame.current?.contentWindow?.postMessage({ type: 'editor-values', values: local }, renderOrigin);
   }, [ready, local]);
 
-  if (!host) return null;
-  return createPortal(<div ref={panel} className="item-controls element-editor" role="dialog" aria-label={title}
-    onPointerDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}
-    onDoubleClick={(event) => event.stopPropagation()}
-    onMouseMove={(event) => event.stopPropagation()} onMouseLeave={(event) => event.stopPropagation()}
-    onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
-    onDragLeave={(event) => event.stopPropagation()}
-    onDrop={(event) => { event.preventDefault(); event.stopPropagation(); }}
-    onKeyDown={(event) => {
+  // Inline: the frame keeps its last place while the node is briefly off the page (a layout switch re-rendering),
+  // hidden, instead of unmounting and losing the editor's state. The page's scale reaches the frame for its own UI.
+  const lastPlacement = useRef(placement);
+  if (placement) lastPlacement.current = placement;
+  const at = placement ?? lastPlacement.current;
+  const showing = inline && ready && !!placement && !failed;
+  const latestShown = useRef(shown);
+  latestShown.current = shown;
+  useEffect(() => {
+    latestShown.current?.(showing);
+  }, [showing]);
+  useEffect(() => () => latestShown.current?.(false), []);
+  // The frame takes focus once it shows (it is inert while loading), without scrolling the canvas to it.
+  useEffect(() => {
+    if (showing) frame.current?.focus({ preventScroll: true });
+  }, [showing]);
+  const zoom = at?.zoom;
+  useEffect(() => {
+    if (inline && ready && zoom) frame.current?.contentWindow?.postMessage({ type: 'editor-scale', scale: zoom }, renderOrigin);
+  }, [inline, ready, zoom]);
+
+  // Events inside the editor stay there: the canvas below neither selects, moves nor drops onto what is under it.
+  const contain = {
+    onPointerDown: (event: React.PointerEvent) => event.stopPropagation(), onClick: (event: React.MouseEvent) => event.stopPropagation(),
+    onDoubleClick: (event: React.MouseEvent) => event.stopPropagation(),
+    onMouseMove: (event: React.MouseEvent) => event.stopPropagation(), onMouseLeave: (event: React.MouseEvent) => event.stopPropagation(),
+    onDragOver: (event: React.DragEvent) => { event.preventDefault(); event.stopPropagation(); },
+    onDragLeave: (event: React.DragEvent) => event.stopPropagation(),
+    onDrop: (event: React.DragEvent) => { event.preventDefault(); event.stopPropagation(); },
+    onKeyDown: (event: React.KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); }
       else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); requestClose(); }
-    }}>
+    },
+  };
+  const disabled = readOnly || failed || stale || !!blocked || saveRejected;
+  const fields = generated.length > 0 && <ControlList nodes={generated} field={(node, param) => <Field key={node.key} param={param} value={current[node.key]}
+    description={inline ? undefined : node.description} change={(next) => {
+      const updated = { ...local, [node.key]: next };
+      setLocal(updated);
+      void apply(draft.current, spreadDraft.current, updated);
+    }} />} />;
+
+  if (inline) {
+    // One line at most, above the toolbar, so a problem never moves the toolbar or the page.
+    const problem = saveRejected ? 'The last change could not be saved. Reopen the editor to retry.'
+      : stale ? subject + ' changed. Reopen the editor to continue.'
+        : error || (blocked ?? '') || (warnings.length ? warnings.length + ' editor warnings: ' + warnings.join(' ') : '') ||
+          (readOnly ? 'Read Only' : '');
+    return <>
+      {stage && at && createPortal(<div ref={inlineBox} className={'inline-editor' + (showing ? ' showing' : '')} aria-hidden={!showing || undefined} {...contain}
+        style={{ left: at.x, top: at.y, width: at.width / at.zoom, height: at.height / at.zoom, transform: 'scale(' + at.zoom + ')',
+          '--inline-zoom': at.zoom } as React.CSSProperties}>
+        {prepared && <iframe ref={frame} className="element-editor-frame inline-editor-frame" inert={!!blocked || saveRejected || !showing} title={title} src={source} />}
+      </div>, stage)}
+      {host && createPortal(<div ref={panel} className="item-controls crop-toolbar inline-editor-bar" role="toolbar" aria-label={title} {...contain}>
+        {problem && <p className={'inline-editor-status' + (error || stale || saveRejected ? ' error-text' : '')} role={error || stale || saveRejected ? 'alert' : 'status'}
+          title={problem}>{problem}</p>}
+        <strong className="inline-editor-title">{subject}</strong>
+        {fields && <fieldset className="crop-params inline-editor-fields" disabled={disabled}>{fields}</fieldset>}
+        {toPanel && <button type="button" aria-label="Open in Panel" title="Open in panel" disabled={flushing !== undefined}
+          onClick={() => requestClose(toPanel)}><Icon name="panel" /></button>}
+        <button type="button" className="primary" disabled={flushing !== undefined} onClick={() => requestClose()}>Done</button>
+      </div>, host)}
+    </>;
+  }
+
+  if (!host) return null;
+  return createPortal(<div ref={panel} className="item-controls element-editor" role="dialog" aria-label={title} {...contain}>
     <header className="ee-header">
       <h2>{title}</h2>{readOnly && <span className="muted">Read Only</span>}
       <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)"
@@ -245,14 +316,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
     </div>
     <div className="ee-body">
     {prepared && <iframe ref={frame} className="element-editor-frame" inert={!!blocked || saveRejected} title={title} src={source} style={{ height }} />}
-    {generated.length > 0 && <fieldset className="ee-fields" disabled={readOnly || failed || stale || !!blocked || saveRejected}>
-      <ControlList nodes={generated} field={(node, param) => <Field key={node.key} param={param} value={current[node.key]}
-        description={node.description} change={(next) => {
-          const updated = { ...local, [node.key]: next };
-          setLocal(updated);
-          void apply(draft.current, spreadDraft.current, updated);
-        }} />} />
-    </fieldset>}
+    {fields && <fieldset className="ee-fields" disabled={disabled}>{fields}</fieldset>}
     </div>
   </div>, host);
 }

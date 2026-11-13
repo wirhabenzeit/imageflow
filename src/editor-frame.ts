@@ -58,7 +58,7 @@ options: { initialHeight?: number; minimumHeight?: number; focusOnReady?: boolea
     } else if (data.type === 'editor-ready') {
       setReady(true);
       setGeneration((value) => value + 1);
-      if (options.focusOnReady !== false) frame.current?.focus();
+      if (options.focusOnReady !== false) frame.current?.focus({ preventScroll: true });
     } else if (data.type === 'editor-draft') {
       if (!failed) setError('');
       handlers.draft(data.values, data.spread);

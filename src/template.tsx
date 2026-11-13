@@ -131,6 +131,10 @@ function editTarget(book: RenderProject, prefix: string, parameters: Parameters 
 export type FlowPosition = { part: number; parts: number; title?: string };
 // An element may supply its own editor for some of its parameters. The component runs in a sandboxed frame
 // and reports changes; ImageFlow owns the non-modal panel, validation, live saving and Undo.
+// An editor asks for 'inline' (requires 'inline-editors'): it then edits on the page, in the frame of the element or
+// marked node it was opened from. It falls back to the panel ('dialog') where it cannot, such as a rotated element.
+export type EditorPresentation = 'dialog' | 'inline';
+const presentation = z.enum(['dialog', 'inline']).default('dialog');
 export type ElementEditorProps = {
   values: Values; set: (changes: Values) => void;
   // The layout's (spread) parameters: all of them to read, and `setSpread` for the ones the editor declares.
@@ -139,6 +143,8 @@ export type ElementEditorProps = {
   // What `render` reads about the spread the editor was opened from, read-only and kept current (see EditorContext).
   context: EditorContext;
   readOnly: boolean; commit: () => void; cancel: () => void;
+  // Where the editor is shown: on the page in the element's frame ('inline'), or in the panel ('dialog').
+  presentation: EditorPresentation;
   // The app's own control for one of the editor's parameters, bound to the draft, and the file import it uses.
   // `scope: 'spread'` names one of the layout parameters the editor declares instead of an element parameter.
   Control: (props: { parameter: string; label?: string; scope?: 'element' | 'spread' }) => ReactNode;
@@ -160,6 +166,7 @@ export type DocumentEditorProps = {
   values: Values; set: (changes: Values) => void;
   context: EditorContext; format: ResolvedFormat;
   readOnly: boolean; commit: () => void; cancel: () => void;
+  presentation: EditorPresentation;
   Control: (props: { parameter: string; label?: string }) => ReactNode;
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };
@@ -184,6 +191,7 @@ const documentEditor = z.object({
   label: z.string().min(1).optional(),
   parameters: z.array(identifier).min(1, 'A document editor needs at least one document parameter to edit.'),
   component: z.custom<(props: DocumentEditorProps) => ReactNode>((value) => typeof value === 'function', 'Expected an editor component.'),
+  presentation,
 });
 const elementEditor = z.object({
   label: z.string().min(1).optional(),
@@ -192,7 +200,7 @@ const elementEditor = z.object({
   parameters: z.array(identifier),
   spread: z.array(identifier).optional(),
   component: z.custom<(props: ElementEditorProps) => ReactNode>((value) => typeof value === 'function', 'Expected an editor component.'),
-  presentation: z.literal('dialog').default('dialog'),
+  presentation,
 }).refine(({ parameters, spread }) => parameters.length + (spread?.length ?? 0) > 0,
   'An element editor needs at least one parameter to edit, of the element or of the layout (spread).');
 // `controls` arranges a scope's generated controls; see src/controls.ts. Problems are reported at the scope.
@@ -303,6 +311,18 @@ export const templateSchema = z.preprocess(withSpans, z.object({
       } else owners.set(key, id);
     }
   }
+}).superRefine(({ requires, spreads, editors }, context) => {
+  // An additive extension (ADR 0007): a template showing an editor inline says so, so an older app rejects it at load.
+  if (requires?.includes('inline-editors')) return;
+  const message = "presentation: 'inline' needs requires: ['inline-editors'].";
+  for (const [id, editor] of Object.entries(editors ?? {})) {
+    if (editor.presentation === 'inline') context.addIssue({ code: 'custom', path: ['editors', id, 'presentation'], message });
+  }
+  for (const [layout, { elements }] of Object.entries(spreads)) {
+    for (const [id, { editor }] of Object.entries(elements)) {
+      if (editor?.presentation === 'inline') context.addIssue({ code: 'custom', path: ['spreads', layout, 'elements', id, 'editor', 'presentation'], message });
+    }
+  }
 }).superRefine(({ spreads, layoutFamilies }, context) => {
   for (const { path, message } of familyProblems(spreads, layoutFamilies)) context.addIssue({ code: 'custom', message, path });
 }).superRefine((template, context) => {
@@ -392,7 +412,7 @@ export type TemplateDeclaration = {
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
   openingSpreads?: { layout: string; params?: Values }[];
-  editors?: Record<string, { label?: string; parameters: string[]; component: (props: DocumentEditorProps) => ReactNode }>;
+  editors?: Record<string, { label?: string; parameters: string[]; component: (props: DocumentEditorProps) => ReactNode; presentation?: EditorPresentation }>;
 };
 // `spreads` may be a function of the builder; the declaration ImageFlow validates always has the built record.
 // Applied by defineTemplate and again when the template loads, for templates exported without defineTemplate.
@@ -410,8 +430,8 @@ export function templateInfo(template: Template): TemplateInfo {
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
     parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
-    ...(template.editors ? { editors: Object.fromEntries(Object.entries(template.editors).map(([id, { label, parameters }]) =>
-      [id, { ...(label ? { label } : {}), parameters }])) } : {}),
+    ...(template.editors ? { editors: Object.fromEntries(Object.entries(template.editors).map(([id, { label, parameters, presentation }]) =>
+      [id, { ...(label ? { label } : {}), parameters, presentation }])) } : {}),
     ...(template.network?.length ? { network: [...new Set(template.network)] } : {}),
     layoutFamilies: Object.fromEntries(Object.entries(template.layoutFamilies ?? {}).map(([id, { label, picker }]) => [id, {
       label, ...(picker ? { picker: { ...(picker.label ? { label: picker.label } : {}) } } : {}),

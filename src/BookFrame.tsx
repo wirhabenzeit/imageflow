@@ -9,10 +9,15 @@ export type PictureStatus = { type: 'pictures'; pending: number; errors: Issue[]
 type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
   reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number };
 
+// The occurrence an inline editor is drawn over, whose artwork the book view hides while it edits.
+export type InlineEditing = { spread: string; element: string } | { spread: string; edits: string; occurrence: number };
+
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept }: {
+export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing }: {
   project: string; view: BookView; query?: string; title: string;
   hold?: boolean;
+  // Every frame of the book view is told, including a candidate before it is shown, so the artwork never flashes.
+  inlineEditing?: InlineEditing;
   accept?: (project: string) => boolean;
   // The part of the frame on screen, for frames that load photos lazily, and the grid columns of the book view (0 for
   // one column); sent when a frame asks for it.
@@ -84,6 +89,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       storeFrame(id, frame);
       return;
     } else if ('type' in data && data.type === 'geometry') {
+      if (latestEditing.current) (event.source as Window).postMessage({ type: 'inline-editing', ...latestEditing.current }, renderOrigin);
       frame.geometry = data;
       if (id === shown) onGeometry(data);
     } else if ('state' in data && id === target && !frame.status) {
@@ -107,6 +113,15 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     }
     storeFrame(id, frame);
   });
+  const latestEditing = useRef(inlineEditing);
+  latestEditing.current = inlineEditing;
+  const editingKey = JSON.stringify(inlineEditing ?? null);
+  useEffect(() => {
+    // Frames still loading are told with their first geometry, above.
+    for (const { element, geometry } of latest.current.values()) {
+      if (geometry) element?.contentWindow?.postMessage({ type: 'inline-editing', ...inlineEditing }, renderOrigin);
+    }
+  }, [editingKey]);
   useEffect(() => {
     const listener = (event: MessageEvent) => receive(event);
     window.addEventListener('message', listener);

@@ -239,6 +239,8 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
   readOnly: boolean;
   commit(): void;
   cancel(): void;
+  /** Where the editor is shown: `'inline'` on the page, in the element's frame, or `'dialog'` in the editor panel. */
+  presentation: EditorPresentation;
   /**
    * ImageFlow's own control for one of this editor's parameters, bound to the draft: the same text field, slider,
    * choice or file chooser the generated controls use, including importing a file. Compose it with your own UI:
@@ -276,8 +278,16 @@ export type ElementEditor<K extends string = string, P extends Parameters = Para
   /** Layout parameters saved with the element in one edit; each belongs to one editor and has no sidebar control. */
   spread?: readonly (keyof S & string)[];
   component: EditorFunction<Owned, ElementEditorProps<P, Owned, D, S, OwnedSpread>, ImageFlowNode>;
-  presentation?: 'dialog';
+  /**
+   * `'inline'` edits on the page: the component runs in the element's own frame, at its printed size and position, in
+   * place of its artwork, and the element's other parameters appear in a toolbar under the canvas. Needs
+   * `requires: ['inline-editors']`. A rotated or skewed element, or one too small to use, opens in the panel instead,
+   * and the toolbar can move any inline editor to the panel. Default `'dialog'`: the editor panel.
+   */
+  presentation?: EditorPresentation;
 };
+/** Where an editor is shown. `'inline'` is an extension: declare `requires: ['inline-editors']`. */
+export type EditorPresentation = 'dialog' | 'inline';
 /**
  * The read-only view of the book an editor is opened from: the values `render` reads for that spread (its
  * parameters, the document's, boxes with their photos' metadata, elements, page numbers, the book's anchors and the
@@ -310,6 +320,8 @@ export type DocumentEditorProps<D extends Parameters = Parameters, K extends key
   readOnly: boolean;
   commit(): void;
   cancel(): void;
+  /** Where the editor is shown: `'inline'` over the marked node it was opened from, or `'dialog'` in the editor panel. */
+  presentation: EditorPresentation;
   /** ImageFlow's own control for one of this editor's parameters, bound to the draft. */
   Control: EditorFunction<K, { parameter: K; label?: string }, ImageFlowElement>;
   importFile(accept: readonly string[]): Promise<string | undefined>;
@@ -324,6 +336,11 @@ export type DocumentEditor<D extends Parameters = Parameters, K extends keyof D 
   /** The document parameters this editor edits. */
   parameters: readonly K[];
   component: EditorFunction<K, DocumentEditorProps<D, K>, ImageFlowNode>;
+  /**
+   * `'inline'` edits on the page, in the frame of the marked node the editor was opened from, in place of that node.
+   * Needs `requires: ['inline-editors']`. Default `'dialog'`: the editor panel.
+   */
+  presentation?: EditorPresentation;
 };
 export type ElementDeclaration = { label: string; parameters?: Parameters; controls?: Controls; editor?: ElementEditor };
 export type SpreadDeclaration = {
@@ -543,11 +560,14 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
   readonly [typedDocument]?: D;
   readonly [typedFamily]?: F;
 };
-/** Known feature names. All names below are in the contract-1 baseline and need no `requires` entries. */
+/**
+ * Known feature names. The contract-1 baseline needs no `requires` entries; later extensions, listed after it, do:
+ * `inline-editors` (`presentation: 'inline'` on element and document editors).
+ */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
-  'editor-network' | 'rendered-images';
+  'editor-network' | 'rendered-images' | 'inline-editors';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 

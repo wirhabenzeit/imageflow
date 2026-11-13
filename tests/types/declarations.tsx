@@ -336,3 +336,18 @@ const numericEnumValue: '2024' | '10' | 'older' = numericEnum.default;
 p.enum({ label: 'Year', options: { 2024: 'This year' }, default: 2024 });
 // @ts-expect-error missing numeric key
 p.enum({ label: 'Year', options: { 2024: 'This year' }, default: '2025' });
+
+// #102: editors shown on the page. `presentation` is typed, and editors read where they are shown.
+function OnPage({ presentation, values }: ElementEditorProps<typeof route, 'zoom'>) {
+  const where: 'inline' | 'dialog' = presentation;
+  return <div>{where}{values.zoom}</div>;
+}
+function DaysOnPage({ presentation }: DocumentEditorProps<typeof calendarDocument, 'marked'>) { return <div>{presentation === 'inline' ? 'page' : 'panel'}</div>; }
+defineTemplate({ id: 't', version: '1', contract: 1, format, requires: ['inline-editors'], parameters: calendarDocument,
+  editors: { days: { parameters: ['marked'], component: DaysOnPage, presentation: 'inline' } },
+  spreads: ({ spread }) => ({ a: spread({ label: 'A', elements: { e: { label: 'E', parameters: route,
+    editor: { parameters: ['zoom'], component: OnPage, presentation: 'inline' } } }, render: () => <Spread /> }) }) });
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: calendarDocument,
+  // @ts-expect-error only the panel and the page
+  editors: { days: { parameters: ['marked'], component: DaysOnPage, presentation: 'sidebar' } },
+  spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });

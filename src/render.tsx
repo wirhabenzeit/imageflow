@@ -23,7 +23,7 @@ import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
 import { bookIndex, chooseFormat, editorContext, normalizeTemplate, refreshedEditorContext, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
-import type { AnchorLookup, EditorContext } from './template';
+import type { AnchorLookup, EditorContext, EditorPresentation } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
@@ -453,7 +453,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     const bounds = root.getBoundingClientRect();
     const geometry: BookGeometry = {
       type: 'geometry', width: Math.ceil(bounds.width), height: Math.ceil(bounds.height), ...(gridColumns ? { columns: gridColumns } : {}),
-      sheets: sheets.map(({ spread, sheet }) => ({ spread, ...relative(sheet) })),
+      sheets: sheets.map(({ spread, sheet }) => ({ spread, ...relative(sheet), zoom: Number(sheet.style.getPropertyValue('--if-zoom')) || 1 })),
       boxes: sheets.flatMap(({ spread, sheet }) => {
         const scale = Number(sheet.style.getPropertyValue('--if-zoom')) || 1;
         const origin = measuredBounds(sheet.querySelector<HTMLElement>('.if-spread')!, sheet, format);
@@ -470,7 +470,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       }),
       // Nodes that edit the same fields on a sheet, such as a heading shown twice, are told apart by occurrence.
       targets: sheets.flatMap(({ spread, sheet }) => numberOccurrences([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
-        spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node),
+        spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node), upright: upright(node, sheet),
         ...(node.dataset.textFallback ? { textFallback: { parameter: node.dataset.edit!, text: node.dataset.textFallback,
           label: node.dataset.textFallbackLabel ?? 'inherited text' } } : {}),
         ...(node.dataset.box ? { owner: { type: 'box' as const, id: node.dataset.box } }
@@ -480,6 +480,27 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     post(geometry);
   }
   root.classList.add('if-book', 'if-view-' + view);
+  if (view === 'book') {
+    // An inline editor is drawn over one element, or one marked node, while it is open; the app asks this frame to
+    // hide that occurrence's artwork meanwhile, and to show it again after. Only this preview frame changes.
+    let hidden: HTMLElement[] = [];
+    window.addEventListener('message', (event: MessageEvent) => {
+      if (event.source !== parent || event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'inline-editing') return;
+      for (const node of hidden) node.removeAttribute('data-if-editing');
+      hidden = [];
+      const { spread, element, edits, occurrence } = event.data;
+      const sheet = sheets.find((item) => item.spread === spread)?.sheet;
+      if (!sheet) return;
+      if (typeof element === 'string') {
+        hidden = [...sheet.querySelectorAll<HTMLElement>('[data-element]')].filter((node) => node.dataset.element === element);
+      } else if (typeof edits === 'string') {
+        const marked = [...sheet.querySelectorAll<HTMLElement>('[data-edit]')]
+          .filter((node) => node.dataset.edit!.split(' ').filter(Boolean).join(' ') === edits)[Number(occurrence) || 0];
+        if (marked) hidden = [marked];
+      }
+      for (const node of hidden) node.setAttribute('data-if-editing', '');
+    });
+  }
   fit();
   new ResizeObserver(fit).observe(root);
   // A custom editor consumes actual element sizes, including CSS layout changes within a stable viewport.
@@ -852,7 +873,8 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
 // draft of the editor's parameters; the frame reports the draft, its height, and commit or cancel to the app, which
 // validates and saves. The frame never changes project data itself. Its read-only context follows the book: the app
 // names each newer render session, and the frame recomputes the context from it.
-function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, target: { element: string } | { editor: string }, readOnly: boolean) {
+function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, target: { element: string } | { editor: string }, readOnly: boolean,
+  presentation: EditorPresentation) {
   const spread = book.project.spreads.find(({ id }) => id === spreadId);
   const layout = spread && template.spreads[spread.definition];
   const documentEditor = 'editor' in target && Object.hasOwn(template.editors ?? {}, target.editor) ? template.editors![target.editor] : undefined;
@@ -871,7 +893,9 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   let seen = opened.context;
   let contextKey = opened.key;
   let updateContext: ((context: EditorContext) => void) | undefined;
-  root.className = 'if-editor';
+  // Inline, the frame is the element's own rectangle at its printed size, which the app scales with the page; it
+  // reports the scale as --if-inline-scale, so UI in the editor can keep its screen size.
+  root.className = presentation === 'inline' ? 'if-editor if-editor-inline' : 'if-editor';
   // The project's file registry for file controls. An import adds to it, so it is state the host can update.
   let projectFiles = book.project.files;
   let updateFiles: ((files: Record<string, SourceReference>) => void) | undefined;
@@ -958,6 +982,11 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       if (typeof event.data.project === 'string' && /^[\w-]+$/.test(event.data.project)) refreshContext(event.data.project, event.data.elementRects);
       return;
     }
+    if (event.data?.type === 'editor-scale') {
+      const scale = Number(event.data.scale);
+      if (Number.isFinite(scale) && scale > 0) root.style.setProperty('--if-inline-scale', String(scale));
+      return;
+    }
     if (event.data?.type === 'editor-flush') {
       // Closing the panel finishes a field that applies on blur, through set(), before confirming the close.
       // A failure is reported instead; earlier live changes remain saved.
@@ -1029,9 +1058,9 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
         documentEditor
           // A document editor's `values` are only its own parameters; every other setting is read from `context`, so there
           // is one current copy of each. `format` and an element editor's `document` follow the context too.
-          ? React.createElement(documentEditor.component, { values: claimed(values.element), set, context: shown, format: shown.format, readOnly, commit, cancel, Control, importFile })
+          ? React.createElement(documentEditor.component, { values: claimed(values.element), set, context: shown, format: shown.format, readOnly, commit, cancel, presentation, Control, importFile })
           : React.createElement(element!.editor!.component, { values: values.element, set, spread: values.spread, setSpread, document: shown.document,
-            format: shown.format, context: shown, readOnly, commit, cancel, Control, importFile })));
+            format: shown.format, context: shown, readOnly, commit, cancel, presentation, Control, importFile })));
   }
 
   // Errors from the component's event handlers and async work do not reach React's error handling.
@@ -1050,7 +1079,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       commit();
     }
   });
-  new ResizeObserver(() => post({ type: 'editor-size', height: Math.ceil(root.getBoundingClientRect().height) })).observe(root);
+  if (presentation !== 'inline') new ResizeObserver(() => post({ type: 'editor-size', height: Math.ceil(root.getBoundingClientRect().height) })).observe(root);
   const react = createRoot(root, { onUncaughtError: fail, onCaughtError: fail });
   flushSync(() => react.render(React.createElement(Host)));
 }
@@ -1220,7 +1249,7 @@ export async function startRender(root: HTMLElement) {
     }
     if (book.mode === 'edit' && query.get('view') === 'editor') {
       renderEditor(root, book, template, query.get('spread') ?? '', query.has('editor') ? { editor: query.get('editor')! } : { element: query.get('element') ?? '' },
-        query.has('readonly'));
+        query.has('readonly'), query.get('presentation') === 'inline' ? 'inline' : 'dialog');
       return;
     }
     if (book.mode === 'edit' && query.get('view') === 'layout-picker') {

@@ -25,7 +25,8 @@ export const mapParameters = {
   trackColor: p.color({ label: 'Track colour', default: '#c8432b' }),
   trackWidth: p.number({ label: 'Track width', default: 1, min: .3, max: 3, step: .1, unit: 'mm' }),
 };
-export const mapEditorParameters = ['track', 'style', 'longitude', 'latitude', 'zoom'] as const;
+// The editor owns the view; the track, style and colours are the element's generated controls.
+export const mapEditorParameters = ['longitude', 'latitude', 'zoom'] as const;
 type MapValues = { track: string; style: MapStyle; longitude: number; latitude: number; zoom: number };
 export type MapEditorProps = ElementEditorProps<typeof mapParameters, typeof mapEditorParameters[number]>;
 
@@ -118,12 +119,17 @@ export function MapView({ values, trackColor, trackWidth, rect, Element }: {
   </Element>;
 }
 
-export function MapEditor({ values, set, readOnly, Control, context }: MapEditorProps) {
+// The map's editor frames the view on the page itself (`presentation: 'inline'`): it is the element, at its printed
+// size, so dragging and zooming show the composition as printed, with the track and attribution where the page draws
+// them. It owns only the view; the track, style and colours are generated controls in the editor's toolbar. In the
+// panel (the fallback, or when moved there) the same map is shown at the page's aspect ratio.
+export function MapEditor({ values, set, readOnly, context, presentation, children }: MapEditorProps & { children?: ImageFlowNode }) {
   const holder = React.useRef<HTMLDivElement>(null);
   const map = React.useRef<MapLibreMap>(undefined);
   const latest = React.useRef(values);
   latest.current = values;
-  const [state, setState] = React.useState<{ error?: string }>({});
+  const [error, setError] = React.useState('');
+  const inline = presentation === 'inline';
   const measured = context.elements.map.rect;
   // Keep an existing map stable while the book redraws, but never invent its first output size.
   const lastRect = React.useRef(measured);
@@ -133,8 +139,40 @@ export function MapEditor({ values, set, readOnly, Control, context }: MapEditor
   const width = React.useRef(printWidth);
   width.current = printWidth;
   const { points, problem } = readTrack(values.track);
-  // The editor map is smaller than the print, so it shows the same area at a lower zoom.
-  const editorZoom = (zoom: number) => zoom - Math.log2(width.current / (holder.current?.clientWidth || width.current));
+  // The editor map's CSS pixels per printed CSS pixel: 1 inline, where the frame has the printed size; less in the panel.
+  const ratio = () => (holder.current?.clientWidth || width.current) / (width.current || 1);
+  // A smaller editor map shows the same area at a lower zoom.
+  const editorZoom = (zoom: number) => zoom + Math.log2(ratio());
+  const savedView = (target: MapLibreMap) => {
+    const center = target.getCenter();
+    const round = (value: number, digits: number) => Number(value.toFixed(digits));
+    return { longitude: round(center.lng, 5), latitude: round(center.lat, 5), zoom: round(Math.min(18, Math.max(0, target.getZoom() - Math.log2(ratio()))), 2) };
+  };
+
+  // The track as a line on the editor map, in the page's colour and width; redrawn when they or the style change.
+  const drawTrack = (target: MapLibreMap) => {
+    const { points: current } = readTrack(latest.current.track);
+    const data = { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: current ?? [] } };
+    const paint = { 'line-color': latest.current.trackColor, 'line-width': latest.current.trackWidth * cssPerMm * ratio() };
+    const source = target.getSource('track') as { setData?: (value: typeof data) => void } | undefined;
+    if (source?.setData) {
+      source.setData(data);
+      for (const [key, value] of Object.entries(paint)) target.setPaintProperty('track', key, value);
+      return;
+    }
+    target.addSource('track', { type: 'geojson', data });
+    target.addLayer({ id: 'track', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint });
+  };
+  const fitTrack = () => {
+    const { points: current } = readTrack(latest.current.track);
+    const target = map.current;
+    if (!current || !target) return;
+    const lngs = current.map(([lng]) => lng), lats = current.map(([, lat]) => lat);
+    target.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 40 * ratio(), animate: false });
+    set(savedView(target));
+  };
+  const latestFit = React.useRef(fitTrack);
+  latestFit.current = fitTrack;
 
   React.useEffect(() => {
     if (!rect) return;
@@ -142,27 +180,36 @@ export function MapEditor({ values, set, readOnly, Control, context }: MapEditor
     void loadMapLibre().then((maplibregl) => {
       if (removed || !holder.current) return;
       const view = latest.current;
-      const created = new maplibregl.Map({
-        container: holder.current, style: styleUrl(view.style), center: [view.longitude, view.latitude], zoom: editorZoom(view.zoom),
-        interactive: !readOnly, attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false, touchPitch: false,
-      });
+      let created: MapLibreMap;
+      try {
+        created = new maplibregl.Map({
+          container: holder.current, style: styleUrl(view.style), center: [view.longitude, view.latitude], zoom: editorZoom(view.zoom),
+          interactive: !readOnly, attributionControl: inline ? false : { compact: true }, dragRotate: false, pitchWithRotate: false, touchPitch: false,
+        });
+      } catch (failure) {
+        // Such as no WebGL: the page keeps showing its drawn map, and the problem shows over it.
+        setError('The map cannot be shown here: ' + (failure instanceof Error ? failure.message : String((failure as { message?: string })?.message ?? failure)));
+        return;
+      }
       created.touchZoomRotate.disableRotation();
       created.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-      created.on('moveend', (event) => {
-        // Only the user's own moves change the saved view.
-        if (!('originalEvent' in event) || !event.originalEvent || readOnly) return;
-        const center = created.getCenter();
-        const round = (value: number, digits: number) => Number(value.toFixed(digits));
-        set({ longitude: round(center.lng, 5), latitude: round(center.lat, 5),
-          zoom: round(Math.min(18, Math.max(0, created.getZoom() + Math.log2(width.current / created.getContainer().clientWidth))), 2) });
+      if (!readOnly) created.addControl(fitControl(() => latestFit.current()), 'top-right');
+      // Only the user's own moves change the saved view: a drag, the wheel, a pinch or the zoom buttons, not the moves
+      // the editor makes itself (following a resize). Scroll zoom starts and ends without an input event of its own.
+      let input = false;
+      for (const name of ['wheel', 'mousedown', 'touchstart', 'dblclick'] as const) created.on(name, () => { input = true; });
+      created.on('movestart', (event) => { if ('originalEvent' in event && event.originalEvent) input = true; });
+      created.on('moveend', () => {
+        if (!input || readOnly) return;
+        input = false;
+        set(savedView(created));
       });
       created.on('error', (event) => {
-        if (!created.isStyleLoaded()) setState({ error: 'The map could not load (' + (event.error?.message ?? 'no connection') + '). It needs ' +
-          mapOrigin + ': close the editor, open it again and choose Allow when asked.' });
+        if (!created.isStyleLoaded()) setError('The map could not load (' + (event.error?.message ?? 'no connection') + '). It needs ' + mapOrigin + '.');
       });
-      created.on('style.load', () => drawTrack(created));
+      created.on('style.load', () => { setError(''); drawTrack(created); });
       map.current = created;
-    }, (error: unknown) => setState({ error: 'The map library could not load: ' + String(error) }));
+    }, (failure: unknown) => setError('The map library could not load: ' + String(failure)));
     return () => { removed = true; map.current?.remove(); map.current = undefined; };
   }, [!!rect, readOnly]);
   React.useEffect(() => {
@@ -171,39 +218,41 @@ export function MapEditor({ values, set, readOnly, Control, context }: MapEditor
     current.resize();
     current.jumpTo({ center: [latest.current.longitude, latest.current.latitude], zoom: editorZoom(latest.current.zoom) });
   }, [rect?.width, rect?.height]);
-
-  // The track as a line on the editor map; redrawn when the style or the track changes.
-  const drawTrack = (target: MapLibreMap) => {
-    const { points: current } = readTrack(latest.current.track);
-    const data = { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: current ?? [] } };
-    const source = target.getSource('track') as { setData?: (value: typeof data) => void } | undefined;
-    if (source?.setData) { source.setData(data); return; }
-    target.addSource('track', { type: 'geojson', data });
-    target.addLayer({ id: 'track', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#c8432b', 'line-width': 3 } });
-  };
-  React.useEffect(() => { if (map.current?.isStyleLoaded()) drawTrack(map.current); }, [values.track]);
+  React.useEffect(() => { if (map.current?.isStyleLoaded()) drawTrack(map.current); }, [values.track, values.trackColor, values.trackWidth]);
   React.useEffect(() => { map.current?.setStyle(styleUrl(values.style)); }, [values.style]);
+  React.useEffect(() => {
+    const button = holder.current?.querySelector<HTMLButtonElement>('.map-fit-track');
+    if (button) button.disabled = !points;
+  });
 
-  const fitTrack = () => {
-    if (!points || !map.current) return;
-    const lngs = points.map(([lng]) => lng), lats = points.map(([, lat]) => lat);
-    map.current.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 40, animate: false });
-    const center = map.current.getCenter();
-    set({ longitude: Number(center.lng.toFixed(5)), latitude: Number(center.lat.toFixed(5)),
-      zoom: Number(Math.min(18, map.current.getZoom() + Math.log2(printWidth / map.current.getContainer().clientWidth)).toFixed(2)) });
-  };
-  return <div className="map-editor">
-    <Control parameter="track" />
-    <div className="map-editor-styles" role="radiogroup" aria-label="Map style">
-      {(Object.keys(styles) as MapStyle[]).map((style) => <button key={style} type="button" role="radio" aria-checked={values.style === style}
-        disabled={readOnly} onClick={() => set({ style })}>{styles[style]}</button>)}
-      <button type="button" disabled={readOnly || !points} onClick={fitTrack}>Fit track</button>
-    </div>
+  // A problem is drawn over the map, so it never moves the map or the page around it.
+  const message = error || problem;
+  return <div className={'map-editor' + (inline ? ' map-editor-inline' : '')}>
     <div ref={holder} className="map-editor-map" role="application" aria-label="Map view"
       data-output-x={measured?.x} data-output-y={measured?.y} data-output-width={measured?.width} data-output-height={measured?.height}
-      style={rect ? { aspectRatio: (rect.width / rect.height).toFixed(4) } : undefined} />
-    <p className="map-editor-error" role="status">{state.error ?? problem ?? ''}</p>
-    <p className="map-editor-note">{mapAttribution}</p>
+      style={!inline && rect ? { aspectRatio: (rect.width / rect.height).toFixed(4) } : undefined} />
+    {inline && <>{children}<span className="map-attribution">{mapAttribution}</span></>}
+    {message && <p className="map-editor-problem" role="alert">{message}</p>}
   </div>;
+}
+
+// A map control, in the style of MapLibre's zoom buttons, that frames the whole track.
+function fitControl(fit: () => void) {
+  let container: HTMLElement | undefined;
+  return {
+    onAdd() {
+      container = document.createElement('div');
+      container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'map-fit-track';
+      button.title = 'Fit track';
+      button.setAttribute('aria-label', 'Fit track');
+      button.innerHTML = '<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M4 8V4h4M12 4h4v4M16 12v4h-4M8 16H4v-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
+      button.addEventListener('click', fit);
+      container.append(button);
+      return container;
+    },
+    onRemove() { container?.remove(); },
+  };
 }

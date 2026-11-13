@@ -87,12 +87,15 @@
 .map-attribution { position: absolute; right: 8mm; bottom: 7mm; padding: .6mm 1.4mm; background: #ffffffd0; color: #333;
   font: 500 8pt/1.2 "Field Sans"; }
 .map-title { margin: 0; padding: 3mm 5mm; background: #fffffff0; color: var(--ink); font: 600 20pt/1.15 "Field Serif"; width: fit-content; }
-.map-editor { color: var(--if-editor-text); font-family: "Field Sans", system-ui, sans-serif; display: grid; gap: 10px; }
-.map-editor-styles, .map-editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
-.map-editor-styles button, .map-editor-actions button { height: 28px; padding: 0 10px; border: 1px solid var(--if-editor-border); border-radius: 6px;
-  background: var(--if-editor-control); color: var(--if-editor-text); font: inherit; }
-.map-editor-styles button[aria-checked="true"] { background: var(--if-editor-selection); border-color: var(--if-editor-accent); }
-.map-editor-actions .primary { background: var(--if-editor-accent); border-color: var(--if-editor-accent); color: #fff; }
+.map-editor { position: relative; color: var(--if-editor-text); font-family: "Field Sans", system-ui, sans-serif; }
 .map-editor-map { width: 100%; border: 1px solid var(--if-editor-border); border-radius: 6px; overflow: hidden; }
-.map-editor-note { margin: 0; font-size: 12px; color: var(--if-editor-muted); }
-.map-editor-error { height: 2.8em; overflow: auto; margin: 0; font-size: 12px; line-height: 1.4; color: #c0392b; }
+/* On the page, the editor is the map element at its printed size: no border, the page's attribution and title on top.
+   Its buttons and messages keep their screen size, whatever the page's zoom (--if-inline-scale). */
+.map-editor-inline { position: absolute; inset: 0; overflow: hidden; background: #e8ebe4; }
+.map-editor-inline .map-editor-map { position: absolute; inset: 0; height: 100%; border: 0; border-radius: 0; }
+.map-editor-inline :is(.map-attribution, .map-title-overlay) { pointer-events: none; }
+.map-editor-inline :is(.maplibregl-ctrl-top-right, .map-editor-problem) { zoom: calc(1 / var(--if-inline-scale, 1)); }
+.map-editor-problem { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 80px); margin: 0; padding: 4px 8px; border-radius: 6px;
+  background: #fffffff0; color: #a5281b; font: 12px/1.35 system-ui, sans-serif; box-shadow: 0 1px 4px #0003; }
+.map-fit-track { display: grid !important; place-items: center; color: #333; }
+.map-fit-track:disabled { color: #aaa; }
