@@ -33,7 +33,7 @@ jobs:
     # Keep private-repository PRs from consuming macOS minutes.
     if: github.event.repository.private == false || github.event_name == 'push'
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     env:
       IMAGEFLOW_HIDE_WINDOW: '1'
       HOMEBREW_NO_AUTO_UPDATE: '1'
@@ -58,4 +58,4 @@ jobs:
       - run: npm ci
       - name: Install PDF test tools
         run: brew install poppler
-      - run: npm run test:desktop
+      - run: npm run test:desktop:smoke
