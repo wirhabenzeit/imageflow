@@ -93,7 +93,16 @@ try {
   };
   const editorReady = async ({ sized = true } = {}) => {
     await editorDialog.waitFor();
-    await w.waitForFunction(() => !document.querySelector('.element-editor .ee-status.muted'));
+    await w.waitForFunction(() => !document.querySelector('.element-editor .ee-status.muted')).catch(async (error) => {
+      // Name which state the editor is stuck in: loading (no editor-ready from the frame) or blocked (and why).
+      const state = await w.evaluate(() => ({
+        status: [...document.querySelectorAll('.element-editor .ee-status')].map((node) => node.className + ': ' + node.textContent),
+        frame: document.querySelector('iframe.element-editor-frame')?.getAttribute('src'),
+        books: [...document.querySelectorAll('iframe.book-frame-book')].map((node) => [node.getAttribute('src'), node.dataset]),
+        preview: document.querySelector('.preview-state, .preview-message')?.textContent,
+      }));
+      throw new Error(error.message + '\nEditor state: ' + JSON.stringify(state));
+    });
     if (!sized) return;
     await w.waitForFunction(() => {
       const frame = document.querySelector('iframe.element-editor-frame');
