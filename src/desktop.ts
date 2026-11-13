@@ -56,7 +56,7 @@ export type ProjectSummary = ProjectFiles & {
   texts: Record<string, string>;
   sources?: Record<string, SourceStatus>;
 };
-export type Result<T> = { value: T } | { error: string };
+export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
 export type HistoryState = { undo?: string; redo?: string };
 // How an MCP client starts ImageFlow's stdio bridge. It does not change when the connection is enabled again.
 export type McpLaunch = { command: string; args: string[]; env: Record<string, string> };
