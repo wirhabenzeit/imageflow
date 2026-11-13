@@ -1,4 +1,7 @@
 import { sourcePath } from './source-locations';
+import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
+import { configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, watchRenderedImages } from './rendered-image';
+import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
 import * as jsx from 'react/jsx-runtime';
@@ -8,6 +11,8 @@ import { editorURL } from './desktop';
 import { bookLayout } from './desktop';
 import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { cssMM, pageLabel, pageNumbers, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, toMillimeters } from './format';
+import { animateReorder } from './reorder-motion';
+import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat, UnitPages } from './format';
 import { parseDocument } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
@@ -31,11 +36,13 @@ import type { ElementInspection, ElementMeasurement } from './inspection';
 import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import { Field, ProjectFilesContext } from './Fields';
 import { editorChanges, unknownControl } from './editor-changes';
+import { pictureTimeoutMs } from './render-budget';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
 function publish(status: RenderStatus) {
   window.imageflowRenderStatus = status;
+  (globalThis as { imageflowRenderActivity?: number }).imageflowRenderActivity = Date.now();
   if (window.parent !== window) post(status);
 }
 
@@ -385,6 +392,36 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
 // one column and book order runs left to right, then continues on the next row. The book grows vertically.
 type GridRequest = { columns: number };
 function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, initial?: GridRequest) {
+  if (view === 'thumbs') {
+    let animations: Animation[] = [];
+    window.addEventListener('message', (event: MessageEvent) => {
+      if (event.source !== parent || event.origin !== 'imageflow://editor') return;
+      if (event.data?.type === 'prepare-reorder' && Array.isArray(event.data.offsets)) {
+        animations.forEach(animation => animation.cancel());
+        animations = [];
+        if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          for (const offset of event.data.offsets as ReorderOffset[]) {
+            if (typeof offset.spread !== 'string' || !Number.isFinite(offset.x) || !Number.isFinite(offset.y)) continue;
+            const slot = sheets.find(sheet => sheet.spread === offset.spread)?.sheet.parentElement;
+            if (!slot) continue;
+            const animation = animateReorder(slot, offset);
+            animation.pause();
+            animation.currentTime = 0;
+            animations.push(animation);
+          }
+        }
+        post({ type: 'reorder-ready' });
+      } else if (event.data?.type === 'play-reorder' && Number.isFinite(event.data.start)) {
+        for (const animation of animations) {
+          animation.play();
+          animation.startTime = event.data.start - performance.timeOrigin;
+        }
+      } else if (event.data?.type === 'cancel-reorder') {
+        animations.forEach(animation => animation.cancel());
+        animations = [];
+      }
+    });
+  }
   const { pad, gap, columns = 1, columnGap = 0 } = bookLayout[view];
   root.style.setProperty('--if-pad', pad + 'px');
   root.style.setProperty('--if-gap', gap + 'px');
@@ -1113,6 +1150,9 @@ export async function startRender(root: HTMLElement) {
     setTemplateAssets(book.template.assets);
     setTemplateFiles(book.files);
     Object.assign(globalThis, { ImageFlowRuntime: runtime, ImageFlowReact: React, ImageFlowJSX: jsx });
+    // Book check, export and artwork frames record impure calls from template code, including at module load.
+    const guards = book.mode === 'edit' ? undefined : installPurityGuards(window as unknown as Record<string, unknown>,
+      new URL(book.template.script, location.href).pathname, undefined, renderingImages);
     const [module] = await Promise.all([import(/* @vite-ignore */ book.template.script), loadStyles(book.template.css)]);
     // The project's format choice is resolved first; everything below works with that one format.
     // `spreads` may be a builder function when the template was exported without defineTemplate.
@@ -1160,6 +1200,14 @@ export async function startRender(root: HTMLElement) {
       for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
     }
     const lazy = edit && view === 'book';
+    // Pictures drawn by <RenderedImage>: at the screen's resolution in the editor (smaller for thumbnails), cheaply
+    // in the Book check, and at the format's target resolution for export (ADR 0006).
+    const target = template.format.output.resolution?.target ?? 300;
+    configureRenderedImages(edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
+      concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview }
+      : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
+        : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
+          : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
     if (edit && view === 'layouts') {
       await renderLayouts(root, book, template, info, query.get('spread') ?? '');
       return;
@@ -1185,6 +1233,9 @@ export async function startRender(root: HTMLElement) {
     })));
     if (renderError) throw renderError;
     if (layoutFailures.size) throw new LayoutRenderError(layoutFailures);
+    // A check or export is final only once every asynchronous picture is drawn or has failed; the editor shows
+    // them as they arrive.
+    const pictureFailures = lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
     const images = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
@@ -1200,6 +1251,8 @@ export async function startRender(root: HTMLElement) {
       ...placeControlWarnings(declaration, rendered).map(({ code, message: text, path, details, suggestion, spread }) =>
         ({ ...(spread ? located(spread, text) : message(text)), code, details: { ...details, path }, suggestion })),
       ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
+      ...(book.template.warnings ?? []).map((text) => ({ ...message(text), code: 'template-dependencies',
+        suggestion: 'Run npm install in template/, then choose Template → Rebuild Dependencies.' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
     ];
@@ -1215,6 +1268,16 @@ export async function startRender(root: HTMLElement) {
       suggestion: 'Use select_format with one of the template formats, or declare format ' + book.project.format + ' again in the template.' });
     }
     errors.push(...fileErrors(book, template.parameters, book.project.params, 'Document'));
+    const pictureIssues = (failures: RenderedImageFailure[]): Issue[] => failures.map((failed) => ({
+      ...(failed.spread ? located(failed.spread, failed.message) : message(failed.message)), code: 'rendered-image-failed',
+      ...(failed.element ? { element: failed.element } : {}), details: { label: failed.label, timedOut: failed.timedOut ? 1 : 0 },
+      suggestion: failed.timedOut ? 'Check the internet connection, then check or export again.'
+        : 'Check that the template’s network sites are allowed for this book and reachable, then check or export again.' }));
+    errors.push(...pictureIssues(pictureFailures));
+    for (const { api, spread } of guards?.calls ?? []) {
+      errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api))), code: 'render-impure',
+        details: { api }, suggestion: impureSuggestion });
+    }
     for (const spread of spreads) {
       const definition = template.spreads[spread.definition];
       if (!definition) continue;
@@ -1357,6 +1420,22 @@ export async function startRender(root: HTMLElement) {
       state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions, anchors: index.anchors,
       ...(inspection ? { inspection } : {}),
     });
+    // The editor's book view does not wait for its pictures. It reports them to the live Book check as they start,
+    // finish or fail, so a map that failed on the page is never missing from the check.
+    if (lazy && window.parent !== window) {
+      let queued = false;
+      const report = () => {
+        if (queued) return;
+        queued = true;
+        setTimeout(() => {
+          queued = false;
+          const { pending, failures } = renderedImageState();
+          post({ type: 'pictures', pending, errors: pictureIssues(failures) });
+        }, 50);
+      };
+      watchRenderedImages(report);
+      report();
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The template could not be rendered.';
     if (error instanceof PreviewError) window.imageflowPreview = { state: 'error', code: error.code };

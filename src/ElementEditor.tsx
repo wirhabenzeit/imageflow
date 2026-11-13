@@ -17,11 +17,15 @@ import type { EditorState, EditorTarget } from './editor-session';
 // queue, keeping the frame mounted while the book renders. Closing flushes any field still being typed.
 // The same panel runs an element's editor and a document editor (`target`). `params` are the document's saved
 // parameters; `project` names the current render session, which the frame reads its context from.
-export function ElementEditorDialog({ project, template, spread, params, target, readOnly, blocked, canvasReady, edit, close, importFile, host }: {
+export function ElementEditorDialog({ project, template, spread, params, target, readOnly, blocked, canvasReady, edit, close, importFile, prepare, network = '', host }: {
   project: string; template: TemplateInfo; spread: SpreadState; params: Values; target: EditorTarget; readOnly: boolean;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
+  // Settles once the frame may load: the network origins its policy allows are decided before it is served.
+  prepare?: () => Promise<string | void>;
+  // The network origins the book may reach now; when they change, the frame loads again under the new policy.
+  network?: string;
 }) {
   const element = target.kind === 'element' ? target.element : '';
   const layout = template.spreads[spread.definition];
@@ -56,12 +60,35 @@ export function ElementEditorDialog({ project, template, spread, params, target,
     const index = contexts.current.indexOf(context);
     if (index > 0) contexts.current.splice(0, index);
   }, [context]);
-  // The frame keeps the project state it opened with; saving starts a new render elsewhere, not here.
-  const [source] = useState(() => renderOrigin + '/render/' + project + '?view=editor&spread=' + encodeURIComponent(spread.id) +
-    (target.kind === 'document' ? '&editor=' + encodeURIComponent(target.editor) : '&element=' + encodeURIComponent(element)) + (readOnly ? '&readonly' : ''));
+  // The frame keeps the project state it opened with; saving starts a new render elsewhere, not here. Preparing may
+  // render the book again (newly allowed network origins), so the frame opens on the project as it is then.
+  const address = (id: string) => renderOrigin + '/render/' + id + '?view=editor&spread=' + encodeURIComponent(spread.id) +
+    (target.kind === 'document' ? '&editor=' + encodeURIComponent(target.editor) : '&element=' + encodeURIComponent(element)) + (readOnly ? '&readonly' : '');
+  const latestProject = useRef(project);
+  latestProject.current = project;
+  const [source, setSource] = useState(() => address(project));
   const subject = target.kind === 'document' ? editor?.parameters.map((key) => template.parameters[key]?.label ?? key).join(', ') ?? target.editor
     : definition?.label ?? element;
   const title = editor?.label ?? 'Edit ' + subject;
+  const [prepared, setPrepared] = useState(!prepare);
+  useEffect(() => {
+    if (!prepare) return;
+    let current = true;
+    void prepare().catch(() => undefined).then((id) => {
+      if (!current) return;
+      setSource(address(typeof id === 'string' ? id : latestProject.current));
+      setPrepared(true);
+    });
+    return () => { current = false; };
+  }, []);
+  // A frame keeps the content security policy it loaded with, so when network access is allowed or withdrawn while
+  // the editor is open (in Settings, or by a change to the template), it loads again on the book as it is now.
+  const openedNetwork = useRef(network);
+  useEffect(() => {
+    if (network === openedNetwork.current) return;
+    openedNetwork.current = network;
+    setSource(address(latestProject.current));
+  }, [network]);
   const values = (reported: unknown): Values => reported && typeof reported === 'object' ? reported as Values : {};
   const { height, ready, error, setError, failed, flushing, flushTimedOut, flush } = useEditorFrame(frame, {
     draft(reported, reportedSpread) {
@@ -210,7 +237,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
     </p>}
     {blocked && !stale && <p className="ee-status muted" role="status">{blocked}</p>}
     <div className="ee-body">
-    <iframe ref={frame} className="element-editor-frame" inert={!!blocked || saveRejected} title={title} src={source} style={{ height }} />
+    {prepared && <iframe ref={frame} className="element-editor-frame" inert={!!blocked || saveRejected} title={title} src={source} style={{ height }} />}
     {!ready && !error && <p className="ee-status muted">Loading the editor…</p>}
     {stale && <p className="ee-status error-text" role="alert">
       {subject + ' changed while this editor was open. Close and open the editor again to continue from the current values.'}

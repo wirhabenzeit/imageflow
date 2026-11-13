@@ -1,4 +1,6 @@
 import { createContext, useContext, useLayoutEffect, useRef } from 'react';
+import { RenderedImage } from './rendered-image';
+import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
 import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanFits } from './format';
@@ -270,6 +272,11 @@ export const templateSchema = z.preprocess(withSpans, z.object({
         missing.join(', ') + '. Update ImageFlow, or remove them from requires. This app provides: ' + capabilities.join(', ') + '.' });
     }
   }),
+  // HTTPS origins the template's element editors may reach (ADR 0006), after the user allows them for the book.
+  // Book previews, checks and export never reach the network.
+  network: z.array(z.string().regex(/^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/,
+    'Use an HTTPS origin such as https://tiles.example.com, or https://*.example.com for its subdomains, without a path.'))
+    .max(20).optional(),
   format: formatSchema.optional(),
   formats: z.record(identifier, formatSchema).optional(),
   defaultFormat: identifier.optional(),
@@ -380,7 +387,7 @@ type DeclaredSpread = Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | '
 // definition unchanged.
 const spreadBuilder = <T,>(definition: T) => definition;
 export type TemplateDeclaration = {
-  id: string; version: string; label?: string; description?: string; contract: 1; requires?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
+  id: string; version: string; label?: string; description?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
@@ -405,6 +412,7 @@ export function templateInfo(template: Template): TemplateInfo {
     parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
     ...(template.editors ? { editors: Object.fromEntries(Object.entries(template.editors).map(([id, { label, parameters }]) =>
       [id, { ...(label ? { label } : {}), parameters }])) } : {}),
+    ...(template.network?.length ? { network: [...new Set(template.network)] } : {}),
     layoutFamilies: Object.fromEntries(Object.entries(template.layoutFamilies ?? {}).map(([id, { label, picker }]) => [id, {
       label, ...(picker ? { picker: { ...(picker.label ? { label: picker.label } : {}) } } : {}),
     }])),
@@ -636,6 +644,7 @@ export function issue(found: TemplateIssue): Required<IssueMarker> {
 
 export const runtime = {
   defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
+  RenderedImage,
 } satisfies Record<typeof runtimeExports[number], unknown>;
 
 // The values `render` reads for one spread: its parameters, the document's, and its boxes and elements.
@@ -706,13 +715,20 @@ export function SpreadView({ book, template, format, spread, page, index, positi
   const values = spreadValues(book, template, spread, positions);
   // A layout drawn in a format it does not fit gets lenient geometry, through ctx.geometry and ctx.format alike.
   const fits = spanFits(definition.span, template.format);
-  const content = definition.render({
-    ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode,
-    // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
-    edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
-    book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),
-    PhotoBox, MarkdownBox, Element, Text,
-  });
+  // Purity guards (Book check and export only) attribute impure calls to the layout rendering now.
+  renderingSpread(spread.id);
+  let content: ReturnType<typeof definition.render>;
+  try {
+    content = definition.render({
+      ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode,
+      // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
+      edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
+      book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),
+      PhotoBox, MarkdownBox, Element, Text,
+    });
+  } finally {
+    renderingSpread(undefined);
+  }
   return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, documentParameters: template.parameters, values, lazyPhotos }}>
     {content}</SpreadData.Provider>;
 }

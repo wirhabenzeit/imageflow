@@ -8,6 +8,7 @@ import { parseDocument } from '../src/project';
 import { issueText } from '../src/desktop';
 import type { ExportMode, Issue, RenderStatus } from '../src/desktop';
 import { isUnavailableSource } from '../src/source-diagnostics';
+import { renderIdleMs } from '../src/render-budget';
 
 const name = PDFName.of;
 
@@ -67,13 +68,16 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
       // A subresource can abort the load while the document is still usable.
       if (window.webContents.getURL() !== url) throw error;
     }
+    // Waits while the book makes progress: every picture has its own timeout, so the export gives up only when
+    // nothing has started or finished for longer than one picture may take (render-budget).
     const status: RenderStatus = await window.webContents.executeJavaScript(`
       new Promise((resolve) => {
         const start = Date.now();
         function check() {
           if (window.imageflowRenderStatus) resolve(window.imageflowRenderStatus);
-          else if (Date.now() - start > 90000) resolve({ state: 'error', message: 'Timed out rendering the book.' });
-          else setTimeout(check, 50);
+          else if (Date.now() - Math.max(start, window.imageflowRenderActivity || 0) > ${renderIdleMs('export')}) {
+            resolve({ state: 'error', message: 'Timed out rendering the book: nothing finished drawing for ${renderIdleMs('export') / 1000} s.' });
+          } else setTimeout(check, 50);
         }
         check();
       })

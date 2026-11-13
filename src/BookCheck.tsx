@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Issue } from './desktop';
 
-export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[] };
+// `pictures`: how many <RenderedImage> pictures the book view is still drawing; their failures join `errors` as they come.
+export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[]; pictures?: number };
 
 // A labeled book-check status in the footer, with a popover for findings.
 export function BookCheckIndicator({ check, checking, spread, select, request = 0 }: {
@@ -36,16 +37,18 @@ export function BookCheckIndicator({ check, checking, spread, select, request = 
   }, [request]);
 
   if (!check) return null;
-  const title = 'Book check · ' + label + (checking ? ' · updating…' : '');
+  const drawing = !checking && !!check.pictures;
+  const title = 'Book check · ' + label + (checking ? ' · updating…' : drawing ? ' · drawing pictures…' : '');
   return <div ref={root} className={'book-check-list book-check-' + level + (checking ? ' book-check-stale' : '')}>
     <button type="button" className="book-check-toggle" aria-expanded={open} title={title}
       onClick={() => setOpen(!open)}>
       <span className="visually-hidden">{title}</span>
-      <span aria-hidden="true">{checking ? 'Checking book…' : items.length ? label : 'Book check: no issues'}</span>
+      <span aria-hidden="true">{checking ? 'Checking book…' : drawing ? (items.length ? label + ' · drawing pictures…' : 'Drawing pictures…')
+        : items.length ? label : 'Book check: no issues'}</span>
     </button>
     {open && <div className="book-check-panel" role="dialog" aria-label="Book check">
       <p className="book-check-heading">Book check · {label}</p>
-      {!items.length && <p>{checking ? 'Checking book…' : 'No issues found.'}</p>}
+      {!items.length && <p>{checking ? 'Checking book…' : drawing ? 'No issues so far; pictures are still drawing.' : 'No issues found.'}</p>}
       <ul>{items.map(({ issue, level }, i) => <li key={i} className={'issue-' + level + (issue.spread === spread ? ' issue-current' : '')}>
         {issue.spread && issue.where ? <button type="button" className="link" onClick={() => {
           select(issue.spread!);

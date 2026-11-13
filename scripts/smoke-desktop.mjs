@@ -1,3 +1,4 @@
+import { packagedMacExecutable } from './mac-paths.mjs';
 import { menuAction, exportAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -62,7 +63,7 @@ let instance;
 try {
   instance = await _electron.launch({
     executablePath: packaged
-      ? join(root, 'out', 'ImageFlow-darwin-' + process.arch, 'ImageFlow.app', 'Contents', 'MacOS', 'ImageFlow')
+      ? packagedMacExecutable(root)
       : electronPath,
     args: [...(packaged ? [] : [join(build, 'desktop')]), '--user-data-dir=' + join(runDir, 'profile')],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' },

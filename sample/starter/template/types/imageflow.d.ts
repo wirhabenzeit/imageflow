@@ -535,7 +535,8 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
-  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors';
+  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
+  'editor-network' | 'rendered-images';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -547,6 +548,7 @@ export type TemplateDeclaration = {
   description?: string;
   contract: 1;
   requires?: readonly Capability[];
+  network?: readonly string[];
   format?: PrintFormat;
   formats?: Record<string, PrintFormat>;
   defaultFormat?: string;
@@ -604,6 +606,13 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
    * instead of failing in a layout. Apps older than this field ignore it.
    */
   requires?: readonly Capability[];
+  /**
+   * HTTPS origins this template's element editors may reach, such as `['https://tiles.openfreemap.org']` or
+   * `'https://*.example.com'`, without paths. ImageFlow asks the user once per book; until they allow it, editors
+   * run offline. Book previews, the Book check and export never reach the network: an editor saves what pages need
+   * with `saveFile`. Requires `editor-network`.
+   */
+  network?: readonly string[];
   /** Book settings, shown in Book settings and read through `ctx.document`. */
   parameters?: D & ParametersChecked<D>;
   /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */
@@ -811,6 +820,37 @@ export function asset(path: string): string;
  * latter in the Book check. Parse the text yourself and mark problems on a rendered node with `data-issue="…"`.
  */
 export function file(id: string): { name: string; extension: string; text: string } | undefined;
+
+/** Where and how big a `<RenderedImage>` draws. */
+export type RenderTarget = {
+  /** The element's size in CSS pixels (96 per inch), as laid out on the page. */
+  width: number; height: number;
+  /** Device pixels per CSS pixel: the screen's in previews, the format's target resolution ÷ 96 in export. */
+  pixelRatio: number;
+  mode: 'preview' | 'check' | 'export';
+  /** Aborted when the element goes away, its inputs change, or ImageFlow stops waiting for it. */
+  signal: AbortSignal;
+};
+export type RenderedImageProps = {
+  /** Draws the picture for the target: a PNG or JPEG `Blob`, or a canvas. Reject to report a failure. */
+  draw: (target: RenderTarget) => Promise<Blob | HTMLCanvasElement | OffscreenCanvas>;
+  /** Everything `draw` depends on, as JSON-like data; the picture is drawn again when it changes. */
+  inputs: unknown;
+  /** Names the picture in messages, such as `'Map'`. */
+  label?: string;
+  alt?: string;
+  className?: string;
+  style?: CSSProperties;
+};
+/**
+ * A picture that template code draws asynchronously, such as a map from a WebGL library and remote tiles
+ * (requires `rendered-images`). ImageFlow gives `draw` the element's size, the output resolution and a cancellation
+ * signal, runs a few at a time, and waits for all of them, with a timeout, before a Book check or export is final.
+ * Inside `draw`, timers, WebGL, workers and requests to the template's `network` origins are allowed. The picture
+ * belongs to that render only: it is drawn again in every preview and export and never saved in the book. A failure
+ * or timeout is a `rendered-image-failed` error, so export never prints a page without it.
+ */
+export function RenderedImage(props: RenderedImageProps): ImageFlowElement;
 
 // Only the declarations marked `export` above are part of the module.
 export {};

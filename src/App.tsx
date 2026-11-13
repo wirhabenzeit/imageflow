@@ -1,6 +1,6 @@
 import { SourceManager, SaveCopy } from './SourceManager';
 import type { ImportMode } from './source-locations';
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, gridColumns, renderOrigin, spreadCommands } from './desktop';
 import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
@@ -28,6 +28,7 @@ import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { Edit } from './Inspector';
 import { BookCheckIndicator } from './BookCheck';
+import type { PictureStatus } from './BookFrame';
 import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
 import { keptMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
@@ -37,6 +38,7 @@ import type { ResolvedFormat } from './format';
 import type { ProjectFiles, SpreadState } from './project';
 import { insertionProblem, spreadOrder } from './spread-order';
 import { spreadMime, useSpreadReorder } from './useSpreadReorder';
+import { animateReorder, reorderOffsets } from './reorder-motion';
 
 type Owner = { type: 'photo' | 'markdown' | 'element'; id: string };
 // `hidden`: the box or element is declared but not on the page, so the editor opens at the spread's corner.
@@ -121,8 +123,11 @@ export function App() {
   // like "Flow 1 of 2" do not vanish for a moment and shift the panel.
   const [lastReady, setLastReady] = useState<RenderStatus>();
   const [geometry, setGeometry] = useState<BookGeometry>();
-  const [thumbs, setThumbs] = useState<BookGeometry>();
-  const [inView, setInView] = useState<string[]>([]);
+  const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean }>({ animate: true });
+  const thumbs = thumbnailState.geometry;
+  function setThumbs(geometry: BookGeometry | undefined, animate = true) {
+    setThumbnailState({ geometry, animate });
+  }
   const [hovered, setHovered] = useState<string>();
   const [hoveredTarget, setHoveredTarget] = useState<string>();
   // The inline editor that is open: for a marked node (a target), or for a box or element itself (`owner`).
@@ -176,6 +181,36 @@ export function App() {
   const canvasWrap = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const thumbList = useRef<HTMLDivElement>(null);
+  const previousThumbs = useRef<BookGeometry>(undefined);
+  const thumbAnimations = useRef<Animation[]>([]);
+  useLayoutEffect(() => {
+    thumbAnimations.current.forEach(animation => animation.cancel());
+    thumbAnimations.current = [];
+    const offsets = reorderOffsets(previousThumbs.current, thumbs);
+    previousThumbs.current = thumbs;
+    if (!thumbnailState.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    for (const offset of offsets) {
+      const node = thumbList.current?.querySelector<HTMLElement>('.spread-thumb[data-spread="' + CSS.escape(offset.spread) + '"]');
+      if (node) thumbAnimations.current.push(animateReorder(node, offset));
+    }
+    return () => { thumbAnimations.current.forEach(animation => animation.cancel()); };
+  }, [thumbs, thumbnailState.animate]);
+  useEffect(() => {
+    const cancel = () => {
+      thumbAnimations.current.forEach(animation => animation.cancel());
+      for (const frame of thumbList.current?.querySelectorAll<HTMLIFrameElement>('iframe') ?? []) {
+        frame.contentWindow?.postMessage({ type: 'cancel-reorder' }, renderOrigin);
+      }
+    };
+    const list = thumbList.current;
+    list?.addEventListener('pointerdown', cancel, true);
+    list?.addEventListener('dragstart', cancel, true);
+    return () => {
+      list?.removeEventListener('pointerdown', cancel, true);
+      list?.removeEventListener('dragstart', cancel, true);
+      cancel();
+    };
+  }, [projectInstance]);
   const pendingReveal = useRef<string>(undefined);
   const queue = useRef(Promise.resolve());
   const agentLocked = useRef(false);
@@ -516,6 +551,24 @@ export function App() {
     return () => { mounted = false; command(); changed(); progress(); lease(); release(); appError(); };
   }, [api]);
 
+  // Network origins the template declares (ADR 0006): decided once per book and template version (its hash) when it
+  // first renders, and again whenever an element editor opens. Newly allowed origins reload the frames so they may
+  // reach them.
+  const networkAsked = useRef(new Set<string>());
+  // Resolves to the project ID to render from now on.
+  function decideNetwork(declared: TemplateInfo | undefined, always = false): Promise<string | void> {
+    const before = current.current;
+    if (!api || !before || before.readOnly || !declared?.network?.length) return Promise.resolve(before?.id);
+    const key = before.folder + '\n' + (before.templateHash ?? '') + '\n' + declared.network.join(' ');
+    if (!always && networkAsked.current.has(key)) return Promise.resolve(before.id);
+    networkAsked.current.add(key);
+    return api.editorNetwork(before.id, declared.network).then((result) => {
+      if (!('value' in result) || !result.value.summary || current.current !== before) return current.current?.id;
+      adopt(result.value.summary);
+      return result.value.summary.id;
+    });
+  }
+
   // The book frame renders every spread, so its status doubles as the book check.
   const acceptCandidate = (id: string) => candidateId.current === id;
   function bookStatus(status: RenderStatus, id: string) {
@@ -529,6 +582,7 @@ export function App() {
       setReload(undefined);
       setLastReady(status);
       setTemplate(status.template);
+      void decideNetwork(status.template);
       setCropping((previous) => previous?.settling && previous.settling !== id ? undefined : previous);
     } else {
       candidateId.current = undefined;
@@ -540,6 +594,12 @@ export function App() {
     }
     setCheck(status.state === 'ready' ? { id, errors: status.errors, warnings: status.warnings } :
       { id, errors: [{ message: status.message }], warnings: [] });
+  }
+  // Pictures the book view draws after it is ready (ADR 0006): their failures and how many are still drawing.
+  function bookPictures(pictures: PictureStatus, id: string) {
+    if (!acceptCandidate(id) && readyId.current !== id) return;
+    setCheck((previous) => !previous || previous.id !== id ? previous : { ...previous, pictures: pictures.pending,
+      errors: [...previous.errors.filter(({ code }) => code !== 'rendered-image-failed'), ...pictures.errors] });
   }
   const checkCurrent = !!check && check.id === summary?.id;
   const spreadIssues = new Map<string, 'error' | 'warning'>();
@@ -578,10 +638,6 @@ export function App() {
         frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
       }
     }
-    if (!range || !geometry) return;
-    const ids = geometry.sheets.filter(({ x, y, width, height }) => y < range.bottom && y + height > range.top &&
-      x < range.right && x + width > range.left).map(({ spread }) => spread);
-    setInView((previous) => previous.join() === ids.join() ? previous : ids);
   }
   useEffect(() => {
     measureView();
@@ -1224,7 +1280,7 @@ export function App() {
                 return <button key={id} data-spread={id}
                   aria-current={spreadSelected && index === i ? 'page' : undefined} aria-label={label(definition, i) + ' ' + pageLabels[i]}
                   title={pagesLabel(i) + ' · ' + label(definition, i) + (level ? ' · ' + (level === 'error' ? 'Has errors' : 'Has warnings') : '')}
-                  className={'spread-thumb' + (inView.includes(id) ? ' in-view' : '') + (reorder.dragging === id ? ' reordering' : '')} tabIndex={index === i ? 0 : -1}
+                  className={'spread-thumb' + (reorder.dragging === id ? ' reordering' : '')} tabIndex={index === i ? 0 : -1}
                   draggable={canReorder && (canMoveSpread(id, i - 1) || canMoveSpread(id, i + 1))}
                   onDragStart={(event) => reorder.start(event, id)} onDragEnd={reorder.end}
                   style={rect ? { left: rect.x - 5, top: rect.y - 5, width: rect.width + 10, height: rect.height + 30 } : undefined}
@@ -1294,7 +1350,7 @@ export function App() {
                 setHovered(sheet);
                 setHoveredTarget(target && targetKey(target));
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
-              <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus}
+              <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus} onPictures={bookPictures}
                 viewport={viewport} hold={holdPreview} accept={acceptCandidate} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const i = spreads.findIndex((item) => item.id === id);
@@ -1404,7 +1460,8 @@ export function App() {
       <ElementEditorDialog host={canvasWrap.current} key={JSON.stringify(elementEditor)} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} params={summary.project.params} target={elementEditor} readOnly={summary.readOnly}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
-        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile} />}
+        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile}
+          prepare={template?.network?.length ? () => decideNetwork(template, true) : undefined} network={summary.network?.join(' ')} />}
     {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&
       <LayoutPickerDialog key={layoutPicker.spread + ':' + layoutPicker.family} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === layoutPicker.spread)!} family={layoutPicker.family} layout={layoutPicker.layout}

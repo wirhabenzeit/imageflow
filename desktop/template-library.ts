@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import type { TemplateInfo } from '../src/desktop';
-import type { LibraryEntry, LibraryImportResult } from '../src/library';
+import type { LibraryEntry, LibraryImportResult, TemplatePackage } from '../src/library';
+import { templatePackages } from './dependencies';
 import { extractTemplateArchive, isTemplateArchive, writeTemplateArchive } from './template-archive';
 
 // The template library: templates a new book can be created from. A book copies its template when it is created,
@@ -88,9 +89,10 @@ type Metadata = {
 /** Loads a template in the renderer and returns its declarations, or throws TemplateImportError. */
 export type ValidateTemplate = (folder: string) => Promise<TemplateInfo>;
 export type BuiltIn = { template: string; sample?: string; defaultName?: string };
-export type ImportPlan =
+export type ImportPlan = (
   | { kind: 'new' | 'newer' | 'same'; info: TemplateInfo; current?: LibraryEntry }
-  | { kind: 'changed' | 'older'; info: TemplateInfo; current: LibraryEntry };
+  | { kind: 'changed' | 'older'; info: TemplateInfo; current: LibraryEntry }
+) & { hash: string; packages: TemplatePackage[] };
 export type ImportResult = LibraryImportResult;
 export type ResolvedTemplate = Awaited<ReturnType<TemplateLibrary['resolve']>>;
 
@@ -99,6 +101,7 @@ function entryFrom(info: TemplateInfo | undefined, fallback: { id: string; versi
   return {
     id: info?.id ?? fallback.id, version: info?.version ?? fallback.version ?? '', label: info?.label ?? info?.id ?? fallback.id,
     ...(info?.description ? { description: info.description } : {}),
+    ...(info?.network?.length ? { network: [...info.network] } : {}),
     formats: info ? Object.values(info.formats).length ? Object.values(info.formats) : [info.format.label] : [],
     layouts: info ? Object.values(info.spreads).map(({ label }) => label) : [],
     openingSpreads: info?.openingSpreads?.length ?? 0,
@@ -133,8 +136,9 @@ export class TemplateLibrary {
         try { info = await this.validate(source.template); }
         catch (error) { problem = error instanceof Error ? error.message : String(error); }
         const id = info?.id ?? 'built-in-' + this.builtIns.size;
+        const packages = await templatePackages(source.template);
         this.builtIns.set(id, { folder: source.template, info, sample: source.sample, defaultName: source.defaultName,
-          entry: entryFrom(info, { id }, { source: 'built-in', hash, ...(source.sample ? { sample: true } : {}),
+          entry: entryFrom(info, { id }, { source: 'built-in', hash, ...(packages.length ? { packages } : {}), ...(source.sample ? { sample: true } : {}),
             ...(problem ? { unavailable: problem } : {}) }) });
       }
     })();
@@ -171,8 +175,9 @@ export class TemplateLibrary {
         }
         await writeFile(join(this.root, name.name, 'library.json'), JSON.stringify(metadata, null, 2) + '\n').catch(() => {});
       }
+      const packages = await templatePackages(folder);
       entries.push({ folder, info: metadata.info, entry: entryFrom(metadata.info, { id: name.name }, {
-        source: 'imported', hash: metadata.hash, importedAt: metadata.importedAt,
+        source: 'imported', hash: metadata.hash, importedAt: metadata.importedAt, ...(packages.length ? { packages } : {}),
         ...(metadata.importedFrom ? { importedFrom: metadata.importedFrom } : {}),
         ...(metadata.problem ? { unavailable: metadata.problem } : {}),
       }) });
@@ -184,6 +189,18 @@ export class TemplateLibrary {
     const files = await templateFiles(folder);
     const [hash, info] = await Promise.all([templateHash(folder, files), this.validate(folder)]);
     return { hash, info, files };
+  }
+
+  /** Whether a template with this hash ships with the app. */
+  async isBuiltIn(hash: string) {
+    return (await this.builtInNetwork(hash)) !== undefined;
+  }
+
+  /** The network origins a built-in template with this hash declares, or undefined when no built-in has the hash. */
+  async builtInNetwork(hash: string) {
+    await this.loadBuiltIns();
+    const found = hash ? [...this.builtIns.values()].find(({ entry }) => entry.hash === hash) : undefined;
+    return found ? found.entry.network ?? [] : undefined;
   }
 
   /** Every template a book can be created from: built-ins, replaced by an imported template with the same ID. */
@@ -227,28 +244,31 @@ export class TemplateLibrary {
    * Validates a template folder and says how importing it relates to the entry with the same ID. Nothing is written.
    * A template that fails to load throws TemplateImportError with the app's diagnostics.
    */
-  async plan(source: string): Promise<ImportPlan & { hash: string }> {
+  async plan(source: string): Promise<ImportPlan> {
     const { hash, info } = await this.describe(source);
     if (!info.id) throw new TemplateImportError('The template did not report its ID.');
+    const packages = await templatePackages(source);
     const current = (await this.list()).find((entry) => entry.id === info.id);
-    if (!current) return { kind: 'new', info, hash };
-    if (current.hash === hash) return { kind: 'same', info, hash, current };
+    if (!current) return { kind: 'new', info, hash, packages };
+    if (current.hash === hash) return { kind: 'same', info, hash, current, packages };
     const order = compareVersions(info.version, current.version);
-    return { kind: order > 0 ? 'newer' : order < 0 ? 'older' : 'changed', info, hash, current } as ImportPlan & { hash: string };
+    return { kind: order > 0 ? 'newer' : order < 0 ? 'older' : 'changed', info, hash, current, packages } as ImportPlan;
   }
 
   /**
    * Imports a template folder or an `.imageflow-template` file. `confirm` decides when the import would replace an
-   * entry with the same or a later version. An entry it replaces goes to the Trash.
+   * entry with the same or a later version. `review`, when given, sees every import that would change the library,
+   * after `confirm`, so the user can see the packages and network access it brings (ADR 0006); false cancels it.
+   * An entry it replaces goes to the Trash.
    */
-  async import(source: string, confirm: (plan: ImportPlan) => Promise<boolean>): Promise<ImportResult> {
-    if (!isTemplateArchive(source)) return this.importFolder(source, source, confirm);
+  async import(source: string, confirm: (plan: ImportPlan) => Promise<boolean>, review?: (plan: ImportPlan) => Promise<boolean>): Promise<ImportResult> {
+    if (!isTemplateArchive(source)) return this.importFolder(source, source, confirm, review);
     // A file is unpacked into a hidden folder of the library first, and imported from there like a folder.
     const unpacked = join(this.root, '.unpack-' + randomUUID());
     try {
       await mkdir(this.root, { recursive: true });
       await extractTemplateArchive(source, unpacked);
-      return await this.importFolder(unpacked, source, confirm);
+      return await this.importFolder(unpacked, source, confirm, review);
     } catch (error) {
       return { source, status: 'failed', message: error instanceof Error ? error.message : String(error),
         details: error instanceof TemplateImportError ? error.details : [] };
@@ -257,8 +277,9 @@ export class TemplateLibrary {
     }
   }
 
-  private async importFolder(folder: string, source: string, confirm: (plan: ImportPlan) => Promise<boolean>): Promise<ImportResult> {
-    let plan: ImportPlan & { hash: string };
+  private async importFolder(folder: string, source: string, confirm: (plan: ImportPlan) => Promise<boolean>,
+    review?: (plan: ImportPlan) => Promise<boolean>): Promise<ImportResult> {
+    let plan: ImportPlan;
     try { plan = await this.plan(folder); }
     catch (error) {
       return { source, status: 'failed', message: error instanceof Error ? error.message : String(error),
@@ -268,6 +289,7 @@ export class TemplateLibrary {
     const named = { id: info.id, label: info.label ?? info.id, version: info.version };
     if (plan.kind === 'same') return { source, status: 'unchanged', ...named };
     if ((plan.kind === 'changed' || plan.kind === 'older') && !await confirm(plan)) return { source, status: 'cancelled', ...named };
+    if (review && !await review(plan)) return { source, status: 'cancelled', ...named };
     const replaced = !!plan.current && plan.current.source === 'imported';
     const task = this.writes.then(() => this.commit(folder, source, info, plan.hash));
     this.writes = task.catch(() => {});

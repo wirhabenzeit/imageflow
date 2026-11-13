@@ -19,7 +19,7 @@ export const channels = {
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
   sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
-  open: 'project:open', save: 'project:save', import: 'project:import',
+  open: 'project:open', save: 'project:save', import: 'project:import', network: 'project:editor-network',
   command: 'project:command', changed: 'project:changed',
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
   check: 'project:check', cancelCheck: 'project:cancel-check',
@@ -27,7 +27,7 @@ export const channels = {
   settings: 'app:settings', updateSettings: 'app:update-settings', settingsChanged: 'app:settings-changed',
   showSettings: 'app:show-settings', settingsPane: 'app:settings-pane', fitSettings: 'app:fit-settings',
   library: 'library:list', libraryChanged: 'library:changed', libraryImport: 'library:import', libraryRemove: 'library:remove',
-  libraryExport: 'library:export',
+  libraryExport: 'library:export', libraryTrust: 'library:trust',
   history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed', mcpInstall: 'mcp:install',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
 } as const;
@@ -46,6 +46,10 @@ export type Command = SpreadCommand | 'book-settings' | 'book-check' | `book-for
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState;
+  // The template's hash as loaded; network approvals hold for one hash (ADR 0006).
+  templateHash?: string;
+  // The network origins this book's frames may reach now (ADR 0006).
+  network?: string[];
   // Thumbnail URL and pixel size per readable photo; Markdown source per readable text.
   photos: Record<string, string>;
   photoSizes: Record<string, { width: number; height: number }>;
@@ -89,6 +93,8 @@ export type DesktopApi = {
   removeTemplate(id: string): Promise<Result<boolean>>;
   // Asks where to save a library entry as an .imageflow-template file; the file, or null when the user cancels.
   exportTemplate(id: string): Promise<Result<string | null>>;
+  // Allows or stops allowing the network sites a library entry's exact version declares, in every book made from it.
+  trustTemplate(id: string, allow: boolean): Promise<Result<boolean>>;
   documentAction(action: 'reveal' | 'template' | 'text', id?: string): Promise<Result<void>>;
   getSettings(): Promise<Result<AppSettings>>;
   updateSettings(patch: Partial<AppSettings>): Promise<Result<AppSettings>>;
@@ -111,6 +117,9 @@ export type DesktopApi = {
   onAgentLease(listener: (id: string) => boolean): () => void;
   onAgentRelease(listener: () => void): () => void;
   importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[] } | null>>;
+  // Asks once per book to let its frames reach the template's declared origins; resolves to those allowed, with a new
+  // summary to render when that changed what the frames may reach.
+  editorNetwork(id: string, origins: string[]): Promise<Result<{ origins: string[]; summary?: ProjectSummary }>>;
   pathsForFiles(files: File[]): string[];
   exportBook(id: string, mode: ExportMode): Promise<Result<{ warnings: Issue[]; errors: Issue[] } | null>>;
   cancelExport(): Promise<void>;
@@ -145,6 +154,8 @@ export type TemplateInfo = {
   openingSpreads?: { layout: string; params: Values }[];
   // Editors of document parameters, by ID, with the parameters each owns (the components stay in the render frame).
   editors?: Record<string, { label?: string; parameters: string[] }>;
+  // HTTPS origins the template's element editors may reach once the user allows them (ADR 0006).
+  network?: string[];
   // The format in use, its ID, and the labels of all formats the template offers.
   format: PrintFormat; formatId: string; formats: Record<string, string>;
   // Each format's structure (facing pages, delivery, ends, page count), by format ID ('default' for a template with

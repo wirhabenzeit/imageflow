@@ -38,7 +38,7 @@ export async function stageDesktop({ packaged = false, dev = false, destination 
       ])),
     ...photoDependencies.map((name) => cp(join(root, 'node_modules', name), join(destination, 'node_modules', name), { recursive: true })),
     packaged ? Promise.resolve() : cp(sample, join(destination, 'sample'), {
-      recursive: true, filter: (path) => basename(path) !== '.imageflow',
+      recursive: true, filter: (path) => basename(path) !== '.imageflow' && basename(path) !== 'node_modules',
     }),
     packaged ? Promise.resolve() : cp(dirname(dirname(esbuildBinary)), join(destination, 'node_modules', platform), { recursive: true }),
     writeFile(join(destination, 'package.json'), JSON.stringify({

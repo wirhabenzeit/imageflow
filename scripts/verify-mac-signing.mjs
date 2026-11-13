@@ -1,0 +1,78 @@
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+
+const execute = promisify(execFile);
+export function run(command, args, { input, ...options } = {}) {
+  const result = execute(command, args, { maxBuffer: 4 * 1024 * 1024, ...options });
+  if (input !== undefined) result.child.stdin.end(input);
+  return result;
+}
+
+async function nativeFiles(folder) {
+  const found = [];
+  for (const entry of await readdir(folder, { withFileTypes: true })) {
+    const path = join(folder, entry.name);
+    if (entry.isDirectory()) found.push(...await nativeFiles(path));
+    else if (entry.isFile() && /\.(node|dylib)$/.test(entry.name)) found.push(path);
+  }
+  return found;
+}
+
+export async function verifyMacVersion(app, expected, execute = run) {
+  const { stdout } = await execute('plutil', ['-convert', 'json', '-o', '-', join(app, 'Contents/Info.plist')]);
+  const actual = JSON.parse(stdout).CFBundleShortVersionString;
+  assert.equal(actual, expected, `Packaged app version ${actual ?? '(missing)'} does not match package.json version ${expected}. Rebuild the app before notarizing it.`);
+}
+
+export async function signingEntitlements(bundle, execute = run) {
+  const { stdout, stderr } = await execute('codesign', ['--display', '--entitlements', ':-', bundle]);
+  const xml = [stdout, stderr].map((output) => {
+    const start = output.search(/<\?xml|<plist\b/);
+    return start < 0 ? undefined : output.slice(start);
+  }).find(Boolean);
+  assert.ok(xml, 'Missing signing entitlements for ' + bundle + '. Sign the app and helpers with the JIT entitlement before release.');
+  const { stdout: json } = await execute('plutil', ['-convert', 'json', '-o', '-', '-'], { input: xml });
+  return JSON.parse(json);
+}
+
+export async function verifyMacSigning(app, identity) {
+  await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
+  const details = async (path) => (await run('codesign', ['--display', '--verbose=4', path])).stderr;
+  const main = await details(app);
+  const team = /^TeamIdentifier=(.+)$/m.exec(main)?.[1];
+  assert.ok(team && team !== 'not set', 'Developer ID builds must have a Team ID.');
+  assert.match(main, /Authority=Developer ID Application:/);
+  if (identity) assert.ok(main.includes('Authority=' + identity + '\n'), 'The app must use the selected Developer ID identity.');
+  const frameworks = join(app, 'Contents/Frameworks');
+  const helpers = (await readdir(frameworks)).filter((name) => name.endsWith('.app')).map((name) => join(frameworks, name));
+  assert.ok(helpers.length, 'Electron helper apps must be present.');
+  for (const bundle of [app, ...helpers]) {
+    const info = await details(bundle);
+    assert.match(info, /flags=.*\bruntime\b/, 'Hardened runtime is required: ' + bundle);
+    assert.equal(/^TeamIdentifier=(.+)$/m.exec(info)?.[1], team);
+    const entitlements = await signingEntitlements(bundle);
+    assert.equal(entitlements['com.apple.security.cs.allow-jit'], true);
+    assert.ok(!entitlements['com.apple.security.cs.allow-unsigned-executable-memory']);
+    assert.ok(!entitlements['com.apple.security.cs.disable-library-validation']);
+    assert.ok(!entitlements['com.apple.security.get-task-allow']);
+  }
+  const natives = await nativeFiles(join(app, 'Contents/Resources/app.asar.unpacked/node_modules/@img'));
+  assert.ok(natives.some((path) => path.endsWith('.node')), 'sharp must be unpacked and signed.');
+  assert.ok(natives.some((path) => path.endsWith('.dylib')), 'libvips must be unpacked and signed.');
+  for (const path of [join(app, 'Contents/Resources/esbuild'), ...natives]) {
+    await run('codesign', ['--verify', '--strict', path]);
+    assert.equal(/^TeamIdentifier=(.+)$/m.exec(await details(path))?.[1], team, 'Native binary must share the app Team ID: ' + path);
+  }
+  console.log('Developer ID, hardened runtime, JIT-only entitlements, Electron helpers, esbuild, sharp and libvips signatures verified.');
+}
+
+export async function verifyNotarization(path, app = false) {
+  await run('xcrun', ['stapler', 'validate', path]);
+  const { stdout, stderr } = await run('spctl', ['--assess', '--verbose=4', '--type',
+    ...(app ? ['execute'] : ['open', '--context', 'context:primary-signature']), path]);
+  assert.match(stdout + stderr, /source=Notarized Developer ID/, 'Gatekeeper must accept the notarized ' + (app ? 'app' : 'DMG') + ': ' + path);
+  console.log('Notarization ticket and Gatekeeper acceptance verified: ' + path);
+}

@@ -2,7 +2,7 @@
 // bundler exposes exactly these names, and the shipped declarations must declare the same set (src/template-types.ts).
 export const runtimeExports = [
   'defineTemplate', 'spreadFor', 'p', 'mm', 'pt', 'inch', 'printFormat', 'Spread', 'PhotoBox', 'MarkdownBox', 'Element', 'asset', 'file',
-  'geometry', 'box', 'issue', 'capabilities',
+  'geometry', 'box', 'issue', 'capabilities', 'RenderedImage',
 ] as const;
 
 // Template API features this runtime provides beyond contract 1 as first released. A template lists the ones it
@@ -25,5 +25,10 @@ export const capabilities = [
   'editor-context',
   // `editors`: editors of document parameters, opened from nodes marked with them.
   'document-editors',
+  // `network`: HTTPS origins element editors may reach once the user allows them (ADR 0006).
+  'editor-network',
+  // `<RenderedImage>`: host-managed asynchronous pictures, which may use the `network` origins in previews, checks
+  // and export (ADR 0006).
+  'rendered-images',
 ] as const;
 export type Capability = typeof capabilities[number];

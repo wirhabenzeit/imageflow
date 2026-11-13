@@ -71,7 +71,7 @@ export type RenderProject = {
   files: Record<string, ProjectFile>;
   problems: string[];
   sources?: Record<string, SourceStatus>;
-  template: { script: string; css?: string; assets: Record<string, string> };
+  template: { script: string; css?: string; assets: Record<string, string>; warnings?: string[] };
   mode: 'edit' | 'export';
   // A synthetic authoring fixture book. Its artwork carries a banner and fixture labels so it is never mistaken for the book.
   fixture?: FixtureMarking;

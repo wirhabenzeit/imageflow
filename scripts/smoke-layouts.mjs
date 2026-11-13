@@ -110,7 +110,7 @@ try {
   });
   await layoutReady('last-notes');
   assert.equal(await pickerHasNoOverlap(), true);
-  assert.equal(await picker.getByRole('radio').count(), 7);
+  assert.equal(await picker.getByRole('radio').count(), 8);
   await w.locator('.inspector').screenshot({ path: join(root, '.build', 'layout-picker-ready.png') });
   // Revisit cached URLs across single-page and full-spread choice sets.
   for (const spread of ['closing', 'last-notes', 'title', 'last-notes', 'closing', 'last-notes']) {
@@ -244,7 +244,7 @@ try {
   assert.equal((await settlements()).definition, 'grid9');
   assert.equal(await frame.locator('[data-spread="settlements"] [data-box]').count(), 9);
   assert.equal(await layout('Photo grid').getAttribute('aria-checked'), 'true');
-  assert.equal(await picker.getByRole('radio').count(), 7);
+  assert.equal(await picker.getByRole('radio').count(), 8);
   assert.deepEqual((await status()).warnings, []);
   await rerendered(() => button('Undo').click());
   assert.deepEqual(await settlements(), state);
