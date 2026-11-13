@@ -17,8 +17,8 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, normalizeTemplate, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
-import type { AnchorLookup } from './template';
+import { bookIndex, chooseFormat, editorContext, normalizeTemplate, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import type { AnchorLookup, EditorContext } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
@@ -790,22 +790,31 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
   };
 }
 
-// Runs a template-supplied element editor. The component edits a draft of the editor's parameters; the frame
-// reports the draft, its height, and commit or cancel to the app, which validates and saves. The frame never
-// changes project data itself.
-function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, elementId: string, readOnly: boolean) {
+// Runs a template-supplied editor: an element's, or a document editor opened from a spread. The component edits a
+// draft of the editor's parameters; the frame reports the draft, its height, and commit or cancel to the app, which
+// validates and saves. The frame never changes project data itself. Its read-only context follows the book: the app
+// names each newer render session, and the frame recomputes the context from it.
+function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, target: { element: string } | { editor: string }, readOnly: boolean) {
   const spread = book.project.spreads.find(({ id }) => id === spreadId);
   const layout = spread && template.spreads[spread.definition];
-  const element = layout?.elements[elementId];
-  const editor = element?.editor;
-  if (!spread || !layout || !element || !editor) throw new Error('This element has no editor.');
-  const saved = resolveParams(element.parameters, spread.elements[elementId]?.params ?? {});
+  const documentEditor = 'editor' in target && Object.hasOwn(template.editors ?? {}, target.editor) ? template.editors![target.editor] : undefined;
+  const element = 'element' in target ? layout?.elements[target.element] : undefined;
+  const elementId = 'element' in target ? target.element : '';
+  const editor = documentEditor ?? element?.editor;
+  const opened = editorContext(book, template, spreadId);
+  if (!spread || !layout || !editor || !opened || (!documentEditor && !element)) throw new Error('This element has no editor.');
+  // The editor's own scope: the element's parameters, or the document's for a document editor.
+  const declared = documentEditor ? template.parameters : element!.parameters;
+  const saved = documentEditor ? resolveParams(template.parameters, book.project.params) : resolveParams(element!.parameters, spread.elements[elementId]?.params ?? {});
   const savedSpread = resolveParams(layout.parameters, spread.params);
-  const ownedSpread = editor.spread ?? [];
+  const ownedSpread = documentEditor ? [] : element!.editor?.spread ?? [];
   const document = resolveParams(template.parameters, book.project.params);
   const format = resolveFormat(template.format);
   const claimed = (values: Values) => Object.fromEntries(editor.parameters.map((key) => [key, values[key]]));
   const claimedSpread = (values: Values) => Object.fromEntries(ownedSpread.map((key) => [key, values[key]]));
+  let seen = opened.context;
+  let contextKey = opened.key;
+  let updateContext: ((context: EditorContext) => void) | undefined;
   root.className = 'if-editor';
   // The project's file registry for file controls. An import adds to it, so it is state the host can update.
   let projectFiles = book.project.files;
@@ -845,8 +854,8 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   const changes = (scope: 'element' | 'spread', next: Values) => {
     if (readOnly || failed) return;
     const owned = scope === 'element' ? editor.parameters : ownedSpread;
-    const parameters = scope === 'element' ? element.parameters : layout.parameters;
-    const { allowed, rejected } = editorChanges(parameters, owned, next, scope);
+    const parameters = scope === 'element' ? declared : layout.parameters;
+    const { allowed, rejected } = editorChanges(parameters, owned, next, scope, documentEditor ? 'document' : 'element');
     for (const { message } of rejected) warn(message);
     if (!Object.keys(allowed).length) return;
     if (scope === 'element') draft = { ...draft, ...allowed };
@@ -868,8 +877,27 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     post({ type: 'editor-import', request, accept: accept.filter((extension) => typeof extension === 'string'), mode });
     return new Promise<string | undefined>((resolve) => pending.set(request, resolve));
   };
+  // A newer render session of the book: recompute the context from it. Only the newest request counts, and the
+  // component rerenders only when something it can see changed. A spread that is gone keeps the last context; the
+  // app closes the editor.
+  let contextRequests = 0;
+  const refreshContext = (session: string) => {
+    const request = ++contextRequests;
+    void fetch('/render/' + session + '/data').then((response) => response.json()).then((latest: RenderProject) => {
+      if (request !== contextRequests || failed) return;
+      const next = editorContext(latest, template, spreadId);
+      if (!next || next.key === contextKey) return;
+      seen = next.context;
+      contextKey = next.key;
+      updateContext?.(seen);
+    }).catch(() => undefined);
+  };
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1)) return;
+    if (event.data?.type === 'editor-context') {
+      if (typeof event.data.project === 'string' && /^[\w-]+$/.test(event.data.project)) refreshContext(event.data.project);
+      return;
+    }
     if (event.data?.type === 'editor-flush') {
       // Closing the panel finishes a field that applies on blur, through set(), before confirming the close.
       // A failure is reported instead; earlier live changes remain saved.
@@ -884,7 +912,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       // The dialog's generated controls, for the element's other parameters: shown to the component, never claimed.
       const values = event.data.values && typeof event.data.values === 'object' ? event.data.values as Values : {};
       const others = Object.entries(values).filter(([key, value]) => !editor.parameters.includes(key) &&
-        Object.hasOwn(element.parameters, key) && isParameterValue(element.parameters[key], value));
+        Object.hasOwn(declared, key) && isParameterValue(declared[key], value));
       if (!others.length) return;
       draft = { ...draft, ...Object.fromEntries(others) };
       update?.({ element: draft, spread: spreadDraft });
@@ -910,8 +938,8 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   // The app's control for one of this editor's parameters, writing to the draft like `set` (or `setSpread`).
   function Control({ parameter, label, scope = 'element' }: { parameter: string; label?: string; scope?: 'element' | 'spread' }) {
     const values = React.useContext(EditorValues)[scope === 'spread' ? 'spread' : 'element'];
-    const [owned, declared] = scope === 'spread' ? [ownedSpread, layout!.parameters] : [editor!.parameters, element!.parameters];
-    const param = owned.includes(parameter) && Object.hasOwn(declared, parameter) ? declared[parameter] : undefined;
+    const [owned, parameters] = scope === 'spread' ? [ownedSpread, layout!.parameters] : [editor!.parameters, declared];
+    const param = owned.includes(parameter) && Object.hasOwn(parameters, parameter) ? parameters[parameter] : undefined;
     if (!param) throw new Error(unknownControl(parameter, owned, scope));
     const value = isParameterValue(param, values[parameter]) ? values[parameter] : param.default;
     return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
@@ -921,18 +949,26 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   function Host() {
     const [values, setValues] = React.useState({ element: draft, spread: spreadDraft });
     const [files, setFiles] = React.useState(projectFiles);
+    const [current, setContext] = React.useState(seen);
     React.useEffect(() => {
       update = setValues;
       updateFiles = setFiles;
+      updateContext = setContext;
       // Effects run only once the component has mounted without throwing.
       post({ type: 'editor-ready' });
-      return () => { update = undefined; updateFiles = undefined; };
+      return () => { update = undefined; updateFiles = undefined; updateContext = undefined; };
     }, []);
+    // The context shows the saved book with this editor's draft applied, so a helper reading `context.document`
+    // agrees with what the editor shows.
+    const shown = React.useMemo(() => documentEditor ? { ...current, document: { ...current.document, ...claimed(values.element) } }
+      : { ...current, params: { ...current.params, ...claimedSpread(values.spread) } }, [current, values]);
     const context = React.useMemo(() => ({ files, defaultMode: book.project.importMode ?? 'copy', importFile: readOnly ? undefined : (accept: string[], mode?: ImportMode) => importFile(accept, mode) }), [files]);
     return React.createElement(ProjectFilesContext.Provider, { value: context },
       React.createElement(EditorValues.Provider, { value: values },
-        React.createElement(editor!.component, { values: values.element, set, spread: values.spread, setSpread, document, format, readOnly,
-          commit, cancel, Control, importFile })));
+        documentEditor
+          ? React.createElement(documentEditor.component, { values: values.element, set, context: shown, format, readOnly, commit, cancel, Control, importFile })
+          : React.createElement(element!.editor!.component, { values: values.element, set, spread: values.spread, setSpread, document, format,
+            context: shown, readOnly, commit, cancel, Control, importFile })));
   }
 
   // Errors from the component's event handlers and async work do not reach React's error handling.
@@ -1101,7 +1137,8 @@ export async function startRender(root: HTMLElement) {
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
     if (book.mode === 'edit' && query.get('view') === 'editor') {
-      renderEditor(root, book, template, query.get('spread') ?? '', query.get('element') ?? '', query.has('readonly'));
+      renderEditor(root, book, template, query.get('spread') ?? '', query.has('editor') ? { editor: query.get('editor')! } : { element: query.get('element') ?? '' },
+        query.has('readonly'));
       return;
     }
     if (book.mode === 'edit' && query.get('view') === 'layout-picker') {

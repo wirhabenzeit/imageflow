@@ -1,5 +1,5 @@
 import { box, defineTemplate, inch, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
-import type { ImageFlowNode, Photo, Rect, RenderContext } from 'imageflow';
+import type { DocumentEditorProps, ImageFlowNode, Photo, Rect, RenderContext } from 'imageflow';
 import './styles.css';
 
 // A wall calendar without facing pages: a cover, then one page per month. Each page is a full-bleed photo with a
@@ -40,6 +40,7 @@ const documentParameters = {
   language: p.enum({ label: 'Month and day names', default: 'en', options: ['en', 'de', 'fr', 'es', 'it', 'nl'], labels: languages }),
   strip: p.color({ label: 'Strip colour', default: '#121212' }),
   // Dates, not days of a page: birthdays and holidays stay on their date when pages move.
+  // Edited on the month pages: clicking a page's days opens the day picker (see MarkedDaysEditor).
   markedDates: p.string({ label: 'Marked days', default: '', maxLength: 600, multiline: true,
     placeholder: '25.12 every year, 2027-04-16 once' }),
   highlight: p.color({ label: 'Marked day colour', default: '#f2a93b' }),
@@ -78,6 +79,35 @@ const markedEntries = (value: string) => value.split(/[\s,;]+/).filter(Boolean).
 const markedDays = (value: string, month: Date) => new Set(markedEntries(value).flatMap(({ date }) =>
   date && date.month === month.getUTCMonth() + 1 && (date.year === undefined || date.year === month.getUTCFullYear())
     && date.day <= daysIn(month) ? [date.day] : []));
+/** How a day of a month is marked: once (that date only), every year, both, or not at all. */
+const markOf = (value: string, month: Date, day: number) => {
+  const matches = markedEntries(value).filter(({ date }) => date && date.month === month.getUTCMonth() + 1 && date.day === day);
+  return { once: matches.some(({ date }) => date!.year === month.getUTCFullYear()), yearly: matches.some(({ date }) => date!.year === undefined) };
+};
+const pad = (value: number) => String(value).padStart(2, '0');
+const onceEntry = (month: Date, day: number) => month.getUTCFullYear() + '-' + pad(month.getUTCMonth() + 1) + '-' + pad(day);
+const yearlyEntry = (month: Date, day: number) => pad(day) + '.' + pad(month.getUTCMonth() + 1);
+/**
+ * The marked dates with entries for this day added or removed. Entries that are not dates and entries for other
+ * days stay as they were; the list is rewritten comma-separated.
+ */
+function changeMark(value: string, month: Date, day: number, change: { once?: boolean; yearly?: boolean }) {
+  const kept = markedEntries(value).filter(({ date }) => !date || date.month !== month.getUTCMonth() + 1 || date.day !== day ||
+    (date.year === undefined ? change.yearly === undefined : date.year !== month.getUTCFullYear() || change.once === undefined));
+  const current = markOf(value, month, day);
+  const once = change.once ?? current.once;
+  const yearly = change.yearly ?? current.yearly;
+  return [...kept.map(({ entry }) => entry), ...(yearly ? [yearlyEntry(month, day)] : []), ...(once ? [onceEntry(month, day)] : [])].join(', ');
+}
+
+/**
+ * The month a month page shows: the first month, moved on by the month pages before this one. A pure function of
+ * what `render` and an editor's `context` both have, so the page and its day picker always agree.
+ */
+const monthFor = (context: Pick<Context, 'page' | 'book' | 'document'>) => {
+  const index = Math.max(0, context.book.anchors('month').findIndex((anchor) => anchor.page === context.page.number));
+  return monthAt(context.document.firstMonth, index);
+};
 
 // Type sizes are designed for A3 and scale with the trim width, like the positions do.
 const scale = (context: Pick<Context, 'format'>, value: number, unit: 'pt' | 'mm') => (value * context.format.trim.width / canvas.width).toFixed(2) + unit;
@@ -136,6 +166,52 @@ function Days({ month, language, marked, edit, rect, geometry, finding }: {
 // The place shown on a month page: its own text, else the photo's caption.
 const place = (text: string, photo: Photo | null) => text.trim() || photo?.caption?.trim() || photo?.title?.trim() || '';
 
+// The day picker, opened by clicking the days of a month page. It edits the document's marked dates for the month
+// that page shows, which it reads from its context: moving the page to another month updates the open picker.
+// A click marks that date once; a day marked every year shows as marked, and the picker offers to remove the
+// yearly entry, since one click should not change every year's calendar.
+function MarkedDaysEditor({ values, set, context, readOnly, Control }: DocumentEditorProps<typeof documentParameters, 'markedDates'>) {
+  const month = monthFor(context);
+  const language = values.language;
+  const marked = values.markedDates;
+  const year = month.getUTCFullYear();
+  const monthLabel = new Intl.DateTimeFormat(language, { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(month);
+  const dayLabel = (day: number, withYear: boolean) => new Intl.DateTimeFormat(language, { timeZone: 'UTC', day: 'numeric', month: 'long',
+    ...(withYear ? { year: 'numeric' } : {}) }).format(new Date(Date.UTC(year, month.getUTCMonth(), day)));
+  // Weeks start on Monday; 1 January 2024 was a Monday.
+  const offset = (month.getUTCDay() + 6) % 7;
+  const weekdays = Array.from({ length: 7 }, (_, i) => weekdayName(new Date(Date.UTC(2024, 0, 1 + i)), language));
+  const days = Array.from({ length: daysIn(month) }, (_, i) => ({ day: i + 1, ...markOf(marked, month, i + 1) }));
+  const change = (day: number, next: { once?: boolean; yearly?: boolean }) => set({ markedDates: changeMark(marked, month, day, next) });
+  const rejected = markedEntries(marked).filter(({ date }) => !date).map(({ entry }) => entry);
+  return <div className="marked-days-editor">
+    <h3>{monthLabel}</h3>
+    <div className="marked-days-grid" role="group" aria-label={'Marked days in ' + monthLabel}>
+      {weekdays.map((name) => <strong key={name}>{name}</strong>)}
+      {Array.from({ length: offset }, (_, i) => <span key={'blank' + i} />)}
+      {/* A day marked every year is not toggled by a click, so one click never changes every year's calendar. */}
+      {days.map(({ day, once, yearly }) => <button key={day} type="button" className={yearly ? 'yearly' : once ? 'once' : undefined}
+        aria-pressed={once || yearly} disabled={readOnly || yearly}
+        title={yearly ? 'Marked every year: remove it below' : once ? 'Marked in ' + year + '. Click to unmark.' : 'Click to mark in ' + year + '.'}
+        onClick={() => change(day, { once: !once })}>{day}</button>)}
+    </div>
+    <p className="marked-days-note">Click a day to mark it in {year}. Days with a ring are marked every year.</p>
+    <ul className="marked-days-list">
+      {days.filter(({ once, yearly }) => once || yearly).map(({ day, once, yearly }) => <li key={day}>
+        <span>{yearly ? dayLabel(day, false) + ', every year' : dayLabel(day, true)}</span>
+        {yearly
+          ? <button type="button" disabled={readOnly} onClick={() => change(day, { yearly: false, once: false })}>Unmark every year</button>
+          : <button type="button" disabled={readOnly} onClick={() => change(day, { yearly: true, once: false })}>Mark every year</button>}
+      </li>)}
+    </ul>
+    {rejected.length > 0 && <p className="marked-days-note">Not shown, because they are not dates: {rejected.join(', ')}</p>}
+    <details className="marked-days-all">
+      <summary>All marked days</summary>
+      <Control parameter="markedDates" label="Marked days (25.12 every year, 2027-04-16 once)" />
+    </details>
+  </div>;
+}
+
 export default defineTemplate({
   id: 'imageflow-calendar',
   version: '1.0.0',
@@ -143,13 +219,16 @@ export default defineTemplate({
   description: 'A landscape wall calendar: one full-bleed photo a month, with the place and the days on a dark strip.',
   contract: 1,
   requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component',
-    'format-helper', 'opening-spreads', 'single-pages'],
+    'format-helper', 'opening-spreads', 'single-pages', 'editor-context', 'document-editors'],
   formats: {
     a3: calendarFormat('45 × 30 cm (A3 landscape) · 6835 × 4866 px', 6835, 4866),
     a2: calendarFormat('60 × 45 cm (A2 landscape) · 9417 × 6677 px', 9417, 6677),
   },
   defaultFormat: 'a3',
   parameters: documentParameters,
+  editors: {
+    markedDays: { label: 'Marked days', parameters: ['markedDates'], component: MarkedDaysEditor },
+  },
   spreads: ({ spread }) => ({
     cover: spread({
       label: 'Cover',
@@ -178,7 +257,7 @@ export default defineTemplate({
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         const index = Math.max(0, ctx.book.anchors('month').findIndex((anchor) => anchor.page === ctx.page.number));
-        const month = monthAt(ctx.document.firstMonth, index);
+        const month = monthFor(ctx);
         const language = ctx.document.language;
         const marked = ctx.document.markedDates;
         // Entries that are not dates are reported once, on the first month page.

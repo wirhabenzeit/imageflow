@@ -227,6 +227,8 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
   setSpread: EditorFunction<SK, EditorChanges<S, SK>, void>;
   document: ParameterValues<D>;
   format: ResolvedFormat;
+  /** The spread the editor was opened from, as `render` sees it, kept current while the editor is open. */
+  context: EditorContext<SpreadDeclaration, D>;
   readOnly: boolean;
   commit(): void;
   cancel(): void;
@@ -268,6 +270,46 @@ export type ElementEditor<K extends string = string, P extends Parameters = Para
   spread?: readonly (keyof S & string)[];
   component: EditorFunction<Owned, ElementEditorProps<P, Owned, D, S, OwnedSpread>, ImageFlowNode>;
   presentation?: 'dialog';
+};
+/**
+ * The read-only view of the book an editor is opened from: the values `render` reads for that spread (its
+ * parameters, the document's, boxes with their photos' metadata, elements, page numbers, the book's anchors and the
+ * format), plus the spread's ID and layout. It follows the book while the editor stays open: reordering spreads,
+ * another photo or a changed document setting refresh it. The editor's own draft is applied to it. Markdown boxes'
+ * `text` is null, since flow positions are known only to the book render. Pure helpers that take
+ * `Pick<RenderContext, 'page' | 'book' | 'document'>` serve `render` and editors alike.
+ */
+export type EditorContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
+  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'elements' | 'page' | 'format' | 'formatId' | 'book'> & { spread: string; layout: string };
+/**
+ * Props of a document editor. `values` holds all document parameters with the draft applied; `set` changes the
+ * editor's own (`K`). `context` is the spread the editor was opened from. Requires `document-editors`.
+ *
+ *     function MarkedDays({ values, set, context }: DocumentEditorProps<typeof documentParameters, 'markedDates'>) { ... }
+ */
+export type DocumentEditorProps<D extends Parameters = Parameters, K extends keyof D & string = keyof D & string> = {
+  values: ParameterValues<D>;
+  /** Changes some of this editor's own document parameters in the draft. Other keys and invalid values are ignored and reported. */
+  set: EditorFunction<K, EditorChanges<D, K>, void>;
+  context: EditorContext<SpreadDeclaration, D>;
+  format: ResolvedFormat;
+  readOnly: boolean;
+  commit(): void;
+  cancel(): void;
+  /** ImageFlow's own control for one of this editor's parameters, bound to the draft. */
+  Control: EditorFunction<K, { parameter: K; label?: string }, ImageFlowElement>;
+  importFile(accept: readonly string[]): Promise<string | undefined>;
+};
+/**
+ * An editor for document parameters, declared in the template's `editors`. A node marked only with parameters it
+ * owns, such as `ctx.edit('document.markedDates')`, opens it in ImageFlow's editor panel with that spread's
+ * `context`; its parameters get no control in Book settings. Each document parameter belongs to one editor.
+ */
+export type DocumentEditor<D extends Parameters = Parameters, K extends keyof D & string = keyof D & string> = {
+  label?: string;
+  /** The document parameters this editor edits. */
+  parameters: readonly K[];
+  component: EditorFunction<K, DocumentEditorProps<D, K>, ImageFlowNode>;
 };
 export type ElementDeclaration = { label: string; parameters?: Parameters; controls?: Controls; editor?: ElementEditor };
 export type SpreadDeclaration = {
@@ -489,7 +531,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
-  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages';
+  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -508,6 +550,7 @@ export type TemplateDeclaration = {
   layoutFamilies?: Record<string, LayoutFamily>;
   spreads: Record<string, SpreadDefinition>;
   openingSpreads?: readonly OpeningSpread[];
+  editors?: Record<string, DocumentEditor>;
 };
 
 /**
@@ -561,6 +604,8 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   parameters?: D & ParametersChecked<D>;
   /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */
   layoutFamilies?: { [K in L]: LayoutFamily };
+  /** Editors of document parameters, by ID, opened from nodes marked with their parameters. Requires `document-editors`. */
+  editors?: Record<string, DocumentEditor<D, any>>;
 };
 /**
  * The spreads a new book starts with, in order. Without it, a new book starts with no spreads and the editor asks for

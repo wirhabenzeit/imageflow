@@ -21,5 +21,9 @@ export const capabilities = [
   'opening-spreads',
   // `facingPages: false` formats and `span: 'page'` layouts: one page per unit instead of facing spreads.
   'single-pages',
+  // `context` in custom editors: the spread they were opened from, as `render` sees it, kept current.
+  'editor-context',
+  // `editors`: editors of document parameters, opened from nodes marked with them.
+  'document-editors',
 ] as const;
 export type Capability = typeof capabilities[number];

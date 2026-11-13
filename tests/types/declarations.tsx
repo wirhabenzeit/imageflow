@@ -1,7 +1,7 @@
 // Compile-time checks of the authoring types, run by `npm run build` (`tsc -p tests/types`). Each
 // `@ts-expect-error` is a declaration a template author must be told about; the build fails if it compiles.
 import { box, defineTemplate, mm, p, printFormat, Spread, spreadFor } from 'imageflow';
-import type { ElementEditorProps, LayoutPickerProps } from 'imageflow';
+import type { DocumentEditorProps, ElementEditorProps, LayoutPickerProps } from 'imageflow';
 
 const format = printFormat({ label: 'F', trim: { width: mm(100), height: mm(100) }, bleed: mm(0), safe: mm(5),
   pageCount: { min: 2, max: 20, step: 2 }, ends: 'inside-covers' });
@@ -295,3 +295,25 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, sp
 defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, spreads: { a: imported },
   // @ts-expect-error
   openingSpreads: [{ layout: 'a', params: { foo: ['x'] } }] });
+
+// Document editors are typed from the document parameters and the IDs they own, and read the spread's context.
+const calendarDocument = { marked: p.string({ label: 'Marked', default: '' }), first: p.date({ label: 'First', default: '2027-01-01' }) };
+function Days({ values, set, context, Control }: DocumentEditorProps<typeof calendarDocument, 'marked'>) {
+  const first: string = values.first;
+  const page: number | undefined = context.page.number;
+  const month: string = context.document.first;
+  const anchors = context.book.anchors('month');
+  set({ marked: first + month + anchors.length + page });
+  // @ts-expect-error
+  set({ first: '2027-02-01' });
+  // @ts-expect-error
+  set({ marked: 3 });
+  // @ts-expect-error
+  const a = <Control parameter="first" />;
+  return <div>{a}<Control parameter="marked" />{context.spread}{context.layout}</div>;
+}
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: calendarDocument,
+  editors: { days: { label: 'Days', parameters: ['marked'], component: Days } },
+  spreads: ({ spread }) => ({ a: spread({ label: 'A', render: (ctx) => <Spread><ol {...ctx.edit('document.marked')} /></Spread> }) }) });
+// Element editors read the same context.
+function WithContext({ context }: ElementEditorProps<typeof route, 'zoom'>) { return <div>{context.page.left}{context.formatId}</div>; }

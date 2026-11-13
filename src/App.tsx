@@ -15,6 +15,8 @@ import { revealIn } from './reveal';
 import { EditPopover, MarkedFields } from './EditPopover';
 import { CropEditor } from './CropEditor';
 import { ElementEditorDialog } from './ElementEditor';
+import { documentEditorFor, editorOwnedDocument, editorTargetGone } from './editor-session';
+import type { EditorTarget } from './editor-session';
 import { LayoutPickerDialog } from './LayoutPickerDialog';
 import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
@@ -135,8 +137,8 @@ export function App() {
   // each layout has its own crop. `saved` holds the project id the last crop edit started from; after the photo is
   // deselected, `settling` keeps its overlay until the book has re-rendered, so the frame does not flash back.
   const [cropping, setCropping] = useState<{ spread: string; box: string; layout: string; saved?: string; settling?: string }>();
-  // A template-supplied element editor that is open.
-  const [elementEditor, setElementEditor] = useState<{ spread: string; element: string }>();
+  // A template-supplied editor that is open: an element's, or a document editor opened from a spread.
+  const [elementEditor, setElementEditor] = useState<EditorTarget>();
   const [layoutPicker, setLayoutPicker] = useState<{ spread: string; family: string; layout: string }>();
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
@@ -876,6 +878,7 @@ export function App() {
       setNotice('The book preview is updating; try again in a moment.');
       return;
     }
+    if (openDocumentEditor(target)) return;
     deselectPhoto();
     select(target.spread, false);
     openEditing({ spread: target.spread, key: targetKey(target) });
@@ -889,7 +892,18 @@ export function App() {
     setEditing(undefined);
     deselectPhoto();
     select(spread, false);
-    setElementEditor({ spread, element });
+    setElementEditor({ kind: 'element', spread, element });
+    return true;
+  }
+  // A node marked only with document parameters a document editor owns opens that editor, with this spread's context.
+  function openDocumentEditor(target: Target) {
+    const editor = template && documentEditorFor(template, target.edits);
+    const layout = spreads.find(({ id }) => id === target.spread)?.definition;
+    if (!editor || !layout || readyId.current !== summary?.id) return false;
+    setEditing(undefined);
+    deselectPhoto();
+    select(target.spread, false);
+    setElementEditor({ kind: 'document', spread: target.spread, layout, editor });
     return true;
   }
   function startCrop(spread: string, box: string) {
@@ -1009,6 +1023,11 @@ export function App() {
     if (!changed.size) return;
     setCropping((crop) => crop && changed.has(crop.spread) ? undefined : crop);
     setEditing((open) => open && !open.held && changed.has(open.spread) ? undefined : open);
+  }, [spreads]);
+  // An editor whose spread was deleted closes, as does a document editor whose spread switched layout and so lost
+  // the node it was opened from. Reordering keeps it open; its context follows.
+  useEffect(() => {
+    setElementEditor((open) => open && editorTargetGone(spreads, open) ? undefined : open);
   }, [spreads]);
 
   function drop(event: DragEvent<HTMLElement>) {
@@ -1178,8 +1197,11 @@ export function App() {
                 const title = event.target.value.trim();
                 if (title && title !== summary.project.title) edit(({ project }) => { project.title = title; });
               }} /></label>
-            {template && <Fields schema={template.parameters} values={summary.project.params}
+            {template && <Fields schema={template.parameters} values={summary.project.params} exclude={editorOwnedDocument(template)}
               update={(id, value) => edit(({ project }) => { project.params[id] = value; })} />}
+            {template && Object.entries(template.editors ?? {}).map(([id, { label, parameters }]) => <p key={id} className="muted">
+              {parameters.map((key) => template.parameters[key]?.label ?? key).join(', ')} {parameters.length === 1 ? 'is' : 'are'} edited on
+              the page{label ? ' with ' + label : ''}: click where the book shows {parameters.length === 1 ? 'it' : 'them'}.</p>)}
           </fieldset>
         </details>}
         {summary && <>
@@ -1252,7 +1274,7 @@ export function App() {
                   path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')) ||
                   (target.owner?.id === top.id && (target.owner.type === 'element') === (top.type === 'element'))));
                 if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
-                else if (target) openEditing({ spread: target.spread, key: targetKey(target) });
+                else if (target && !openDocumentEditor(target)) openEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
                 // Double-clicking a Markdown box shows its text in Quick Look.
@@ -1378,9 +1400,9 @@ export function App() {
         edit={edit} highlight={setHighlight} issues={issue} select={select} />}
       </div>
     </div>
-    {summary && template && elementEditor && spreads.some(({ id }) => id === elementEditor.spread) &&
-      <ElementEditorDialog host={canvasWrap.current} key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
-        spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
+    {summary && template && elementEditor && !editorTargetGone(spreads, elementEditor) &&
+      <ElementEditorDialog host={canvasWrap.current} key={JSON.stringify(elementEditor)} project={summary.id} template={template}
+        spread={spreads.find(({ id }) => id === elementEditor.spread)!} params={summary.project.params} target={elementEditor} readOnly={summary.readOnly}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
         canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile} />}
     {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&

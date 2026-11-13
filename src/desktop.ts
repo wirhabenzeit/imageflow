@@ -143,6 +143,8 @@ export type TemplateInfo = {
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string } }>;
   // The spreads a new book from this template starts with; empty when it starts without spreads.
   openingSpreads?: { layout: string; params: Values }[];
+  // Editors of document parameters, by ID, with the parameters each owns (the components stay in the render frame).
+  editors?: Record<string, { label?: string; parameters: string[] }>;
   // The format in use, its ID, and the labels of all formats the template offers.
   format: PrintFormat; formatId: string; formats: Record<string, string>;
   // Each format's structure (facing pages, delivery, ends, page count), by format ID ('default' for a template with

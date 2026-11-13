@@ -5,7 +5,7 @@ import type { PrintFormat, printFormat, ResolvedFormat } from './format';
 import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
-import type { Anchor, AnchorDeclaration, BookContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
+import type { Anchor, AnchorDeclaration, BookContext, DocumentEditorProps, EditorContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
   TemplateDeclaration, Text, TextTag } from './template';
 import type { Capability, runtimeExports } from './runtime-exports';
 
@@ -43,5 +43,8 @@ export const declaredTypesMatchRuntime: [
   // An element editor receives exactly the props the runtime passes.
   Same<keyof Declared.ElementEditorProps, keyof ElementEditorProps>,
   Same<keyof Declared.TemplateDeclaration, keyof TemplateDeclaration>,
+  // Editors read the same context and document editors receive exactly the props the runtime passes.
+  Same<keyof Declared.EditorContext, keyof EditorContext>,
+  Same<keyof Declared.DocumentEditorProps, keyof DocumentEditorProps>,
   Assignable<Declared.OpeningSpread, NonNullable<TemplateDeclaration['openingSpreads']>[number]>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
