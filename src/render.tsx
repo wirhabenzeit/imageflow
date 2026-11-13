@@ -1,6 +1,6 @@
 import { sourcePath } from './source-locations';
 import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
-import { configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, watchRenderedImages } from './rendered-image';
+import { configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
@@ -795,7 +795,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   let renderError: unknown;
   const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
   flushSync(() => react.render(previews.map(({ definition, span, spread }) => (
-    <div className="if-spread-container" data-span={span} data-spread={definition} key={definition}>
+    <div className="if-spread-container" data-span={span} data-spread={definition} data-layout={definition} key={definition}>
       <SpreadView book={book} spread={spread} template={template} format={format} positions={{}}
         page={sequence.spreads[index].page} index={anchors} renderPhotos />
     </div>
@@ -815,6 +815,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
     return { spread: definition, sheet };
   });
   layoutBook(root, sheets, 'layouts', format);
+  await settleRestoredImages();
   publish({ state: 'ready', template: info, pages: sequence.count, units: [], errors: [], warnings: [], flow: {}, anchors: anchors.anchors });
 }
 
@@ -1244,7 +1245,7 @@ export async function startRender(root: HTMLElement) {
     const target = template.format.output.resolution?.target ?? 300;
     configureRenderedImages(edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
       concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
-      previewCache: view === 'layouts' ? location.pathname + '/picture/' : undefined }
+      previewCache: view !== 'book' ? location.pathname + '/picture/' : undefined }
       : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
         : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
           : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
@@ -1267,7 +1268,7 @@ export async function startRender(root: HTMLElement) {
     flushSync(() => react.render(visible.map(({ spread, i }) => {
       const view = <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
         page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy} />;
-      return <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} key={spread.id}>
+      return <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} data-layout={spread.definition} key={spread.id}>
         {edit ? view : <LayoutBoundary spread={spread.id} failures={layoutFailures}>{view}</LayoutBoundary>}
       </div>;
     })));
@@ -1276,6 +1277,7 @@ export async function startRender(root: HTMLElement) {
     // A check or export is final only once every asynchronous picture is drawn or has failed; the editor shows
     // them as they arrive.
     const pictureFailures = lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
+    if (edit && view === 'thumbs') await settleRestoredImages();
     const images = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });

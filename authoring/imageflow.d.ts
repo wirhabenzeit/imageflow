@@ -862,7 +862,7 @@ export type RenderedImageProps = {
  * (part of the contract-1 baseline). ImageFlow gives `draw` the element's size, the output resolution and a cancellation
  * signal, runs a few at a time, and waits for all of them, with a timeout, before a Book check or export is final.
  * Inside `draw`, timers, WebGL, workers and requests to the template's `network` origins are allowed. The picture
- * is never saved in the book. Layout thumbnails may reuse a picture with identical inputs and output size within
+ * is never saved in the book. Page and layout thumbnails may reuse a picture with identical inputs and output size within
  * the book window; checks and exports always draw afresh. A failure
  * or timeout is a `rendered-image-failed` error, so export never prints a page without it.
  */

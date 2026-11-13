@@ -103,6 +103,8 @@ body { margin: 0; }
 .spread-thumbs { position: relative; padding: 8px; }
 .spread-thumbs.placed { padding: 0; }
 .spread-thumbs .book-frame { z-index: 1; }
+/* Prepare replacements behind the displayed page artwork, without tinting it as the new frame loads. */
+.spread-thumbs .book-frame-pending { z-index: 0; }
 .studio .spread-thumb {
   display: flex; align-items: flex-end; width: 100%; margin-bottom: 4px; padding: 0 5px 3px;
   border: 0; border-radius: 6px; background: transparent; font-size: 11px; font-weight: 500; text-align: left;

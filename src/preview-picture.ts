@@ -1,4 +1,4 @@
-// Only the layout thumbnail renderer enables this. Each book window owns a bounded, in-memory cache shared by
+// The page and layout thumbnail renderers enable this. Each book window owns a bounded, in-memory cache shared by
 // its render sessions, scoped by the host to the template's code and current network permissions.
 export async function previewPictureUrl(base: string, identity: unknown) {
   const bytes = new TextEncoder().encode(JSON.stringify(identity));

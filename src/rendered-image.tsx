@@ -2,7 +2,7 @@
 // drawn by a WebGL library from remote tiles, renders through <RenderedImage>. The host tells it the element's size,
 // the output resolution and a cancellation signal, limits how many run at once, and waits for all of them, with a
 // timeout, before a Book check or an export page is final. The result is an image owned by the frame: rendering
-// never changes the book's saved content. Layout thumbnails can reuse pictures from their book window's cache.
+// never changes the book's saved content. Thumbnails can reuse pictures from their book window's cache.
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { previewPictureUrl, readPreviewPicture, savePreviewPicture } from './preview-picture';
@@ -37,6 +37,7 @@ let settings: Settings = { mode: 'preview', pixelRatio: 1, concurrency: 2, timeo
 let running = 0;
 const queue: (() => void)[] = [];
 const pending = new Set<Promise<unknown>>();
+const restoring = new Set<Promise<void>>();
 const failures = new Map<HTMLElement, RenderedImageFailure>();
 
 /** Set by the render frame before it renders layouts. */
@@ -63,6 +64,19 @@ export const renderingImages = () => running > 0;
 export async function settleRenderedImages(): Promise<RenderedImageFailure[]> {
   while (pending.size) await Promise.allSettled([...pending]);
   return [...failures].filter(([node]) => node.isConnected).map(([, failure]) => failure);
+}
+
+// A replacement thumbnail frame must restore cached pictures before it becomes visible. Cache misses still draw
+// progressively: a slow new map must not delay every other page's initial thumbnail.
+export async function settleRestoredImages() {
+  while (restoring.size) await Promise.allSettled([...restoring]);
+}
+
+function restorePicture() {
+  let done!: () => void;
+  const restored = new Promise<void>((resolve) => { done = resolve; });
+  restoring.add(restored);
+  return () => { restoring.delete(restored); done(); };
 }
 
 // When a picture last started or finished drawing; jobs waiting for this frame wait while it moves (render-budget).
@@ -127,51 +141,56 @@ export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', class
       failures.set(node, { label, message, timedOut, spread: node.closest<HTMLElement>('[data-spread]')?.dataset.spread,
         element: node.closest<HTMLElement>('[data-element]')?.dataset.element });
     };
-    const task = slot(async () => {
+    const restored = previewCache && mode === 'preview' ? restorePicture() : () => {};
+    const task = (async () => {
       if (controller.signal.aborted) return;
       if (!width || !height) throw new Error('the element has no size on the page.');
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => { controller.abort(); reject(Object.assign(new Error(label + ' did not finish rendering within ' +
-          Math.round(timeoutMs / 1000) + ' s.'), { timedOut: true })); }, timeoutMs);
+      const spread = node.closest<HTMLElement>('[data-spread]');
+      const pictureIndex = spread ? [...spread.querySelectorAll('.if-rendered-image')].indexOf(node) : 0;
+      const cacheUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache,
+        [spread?.dataset.layout ?? spread?.dataset.spread, pictureIndex, draw.toString(), inputs ?? null, width, height, pixelRatio]) : undefined;
+      const cached = cacheUrl ? await readPreviewPicture(cacheUrl, controller.signal) : undefined;
+      if (controller.signal.aborted) return;
+      if (!cached) restored();
+      const blob = cached ?? await slot(async () => {
+        controller.signal.throwIfAborted();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => { controller.abort(); reject(Object.assign(new Error(label + ' did not finish rendering within ' +
+            Math.round(timeoutMs / 1000) + ' s.'), { timedOut: true })); }, timeoutMs);
+        });
+        try { return await Promise.race([draw({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]); }
+        finally { clearTimeout(timer); }
       });
-      try {
-        const spread = node.closest<HTMLElement>('[data-spread]');
-        const pictureIndex = spread ? [...spread.querySelectorAll('.if-rendered-image')].indexOf(node) : 0;
-        const cacheUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache,
-          [spread?.dataset.spread, pictureIndex, draw.toString(), inputs ?? null, width, height, pixelRatio]) : undefined;
-        const cached = cacheUrl ? await readPreviewPicture(cacheUrl, controller.signal) : undefined;
-        if (controller.signal.aborted) return;
-        const blob = cached ?? await Promise.race([draw({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]);
-        if (controller.signal.aborted) return;
-        url = URL.createObjectURL(blob);
-        img.src = url;
-        await img.decode();
-        if (controller.signal.aborted) return;
-        // The picture covers the box, cropped to its proportions, so its resolution is the lower of the two axes. It
-        // must have the pixels asked for on both; a small or stretched picture would print blurred.
-        const ratio = Math.min(img.naturalWidth / width, img.naturalHeight / height);
-        if (ratio < pixelRatio * 0.98) {
-          const needed = Math.floor(width * pixelRatio) + ' × ' + Math.floor(height * pixelRatio);
-          throw new Error('the picture is ' + img.naturalWidth + ' × ' + img.naturalHeight + ' px, but the box needs at least ' + needed +
-            ' px' + (mode === 'export' ? ' (' + Math.round(pixelRatio * 96) + ' ppi)' : '') + '.');
-        }
-        node.dataset.ppi = String(Math.round(ratio * 96));
-        if (cacheUrl && !cached) await savePreviewPicture(cacheUrl, blob);
-        if (controller.signal.aborted) return;
-        img.style.display = 'block';
-        node.dataset.rendered = 'ready';
-        node.removeAttribute('title');
-      } finally { clearTimeout(timer); }
-    }).catch((error) => {
+      if (controller.signal.aborted) return;
+      url = URL.createObjectURL(blob);
+      img.src = url;
+      await img.decode();
+      if (controller.signal.aborted) return;
+      // The picture covers the box, cropped to its proportions, so its resolution is the lower of the two axes. It
+      // must have the pixels asked for on both; a small or stretched picture would print blurred.
+      const ratio = Math.min(img.naturalWidth / width, img.naturalHeight / height);
+      if (ratio < pixelRatio * 0.98) {
+        const needed = Math.floor(width * pixelRatio) + ' × ' + Math.floor(height * pixelRatio);
+        throw new Error('the picture is ' + img.naturalWidth + ' × ' + img.naturalHeight + ' px, but the box needs at least ' + needed +
+          ' px' + (mode === 'export' ? ' (' + Math.round(pixelRatio * 96) + ' ppi)' : '') + '.');
+      }
+      node.dataset.ppi = String(Math.round(ratio * 96));
+      if (cacheUrl && !cached) await savePreviewPicture(cacheUrl, blob);
+      if (controller.signal.aborted) return;
+      img.style.display = 'block';
+      node.dataset.rendered = 'ready';
+      node.removeAttribute('title');
+    })().catch((error) => {
       const timedOut = !!(error as { timedOut?: boolean })?.timedOut;
       fail(timedOut ? messageOf(error) : label + ' could not be rendered: ' + messageOf(error), timedOut);
-    });
+    }).finally(restored);
     pending.add(task);
     changed();
     void task.finally(() => { pending.delete(task); changed(); });
     return () => {
       controller.abort();
+      restored();
       failures.delete(node);
       if (url) URL.revokeObjectURL(url);
       changed();

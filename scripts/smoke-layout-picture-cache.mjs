@@ -14,6 +14,7 @@ await cp(join(root, 'sample/starter'), book, { recursive: true, filter: (path) =
 const mapFile = join(book, 'template/map.tsx');
 const drawing = `async function drawMap(view, target) {
   window.__mapDraws = (window.__mapDraws ?? 0) + 1;
+  (window.__mapDrawDetails ??= []).push({ view, width: target.width, height: target.height, ratio: target.pixelRatio });
   await new Promise(resolve => setTimeout(resolve, 500));
   target.signal.throwIfAborted();
   const canvas = document.createElement('canvas');
@@ -27,7 +28,19 @@ const drawing = `async function drawMap(view, target) {
 \n`;
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
+const pictures = [];
 try {
+  await app.context().addInitScript(() => {
+    if (location.hostname !== 'editor' || location.pathname !== '/') return;
+    window.__holdThumbs = false;
+    window.__thumbMessages = [];
+    window.addEventListener('message', (event) => {
+      const candidate = document.querySelector('iframe.book-frame-thumbs[data-current]');
+      if (!window.__holdThumbs || event.source !== candidate?.contentWindow || event.origin !== 'imageflow://render') return;
+      event.stopImmediatePropagation();
+      window.__thumbMessages.push({ data: event.data, origin: event.origin, source: event.source });
+    });
+  });
   // Leave the copied template unchanged: its hash must match the trusted built-in template, so startup grants
   // its network origins after activating the document. Replacing only draw() in the browser keeps that path real.
   await app.context().route('**/template/template.js', async (route) => {
@@ -42,6 +55,10 @@ try {
     await route.fulfill({ contentType: 'text/javascript', body });
   });
   const page = await testBook(app, book);
+  page.on('response', (response) => {
+    if (!response.url().includes('/picture/')) return;
+    pictures.push({ method: response.request().method(), status: response.status(), url: response.url() });
+  });
   const startup = (await page.evaluate(() => window.imageflow.currentProject())).value;
   assert.deepEqual(startup.network, ['https://tiles.openfreemap.org'], 'The book starts with approved network access');
   const layouts = () => page.frameLocator('iframe.book-frame-layouts[data-current]');
@@ -86,5 +103,50 @@ try {
   await page.waitForFunction((old) => document.querySelector('iframe.book-frame-layouts[data-current][data-ready]')?.getAttribute('src') !== old, previous);
   await ready('settlements');
   assert.equal(await draws(), 1, 'Changed template code invalidates cached pictures');
-  console.log('Layout picture cache passed: reuse across pages and sessions, changed inputs and template invalidation.');
-} finally { await app.close(); await rm(work, { recursive: true, force: true }); }
+
+  // An actual map on page Y must survive editing a different page X in the sidebar's whole-book frame.
+  const thumbnails = () => page.frameLocator('iframe.book-frame-thumbs[data-current]');
+  const thumbUrl = () => page.locator('iframe.book-frame-thumbs[data-current]').getAttribute('src');
+  const nextThumbs = (old) => page.waitForFunction((old) => {
+    const frame = document.querySelector('iframe.book-frame-thumbs[data-current][data-ready]');
+    return frame && frame.getAttribute('src') !== old;
+  }, old);
+  const mapPage = '[data-spread="water"] [data-rendered]';
+  const mapBook = JSON.parse(await readFile(manifest, 'utf8'));
+  mapBook.spreads.find(({ id }) => id === 'water').definition = 'map';
+  const beforeMap = await thumbUrl();
+  await writeFile(manifest, JSON.stringify(mapBook));
+  await nextThumbs(beforeMap);
+  await thumbnails().locator(mapPage + '[data-rendered="ready"]').waitFor();
+  const firstMap = await thumbnails().locator('body').evaluate(() => window.__mapDrawDetails);
+
+  // Hold promotion at the exact ready message, so a cached map painted only after promotion cannot pass.
+  await page.evaluate(() => {
+    window.__holdThumbs = true;
+    window.__thumbMessages = [];
+  });
+  const beforeEdit = await thumbUrl();
+  await page.getByRole('spinbutton', { name: 'Gap', exact: true }).fill('7');
+  await page.getByRole('spinbutton', { name: 'Gap', exact: true }).press('Enter');
+  await page.waitForFunction(() => window.__thumbMessages.some(({ data }) => data.state === 'ready'));
+  assert.notEqual(await thumbUrl(), beforeEdit, 'Inspect the replacement frame, not the previous sidebar');
+  assert.equal(await page.locator('iframe.book-frame-thumbs[data-current]').getAttribute('data-ready'), null,
+    'The replacement is still held before promotion');
+  assert.equal(await thumbnails().locator('body').evaluate(() => window.__mapDraws ?? 0), 0,
+    'An edit on another page does not redraw the sidebar map: ' + JSON.stringify({ firstMap,
+      replacement: await thumbnails().locator('body').evaluate(() => window.__mapDrawDetails) }));
+  assert.equal(await thumbnails().locator(mapPage).getAttribute('data-rendered'), 'ready',
+    'The cached map is restored before the replacement sidebar frame is promoted');
+  assert.equal(await thumbnails().locator(mapPage + ' img').evaluate((image) => getComputedStyle(image).display), 'block');
+  assert.equal(await page.locator('iframe.book-frame-thumbs[data-current]').evaluate((frame) => getComputedStyle(frame).zIndex), '0',
+    'The pending frame cannot tint the displayed map');
+  assert.equal(await page.locator('iframe.book-frame-thumbs:not([aria-hidden="true"])').evaluate((frame) => getComputedStyle(frame).zIndex), '1');
+  await page.evaluate(() => {
+    window.__holdThumbs = false;
+    for (const message of window.__thumbMessages) window.dispatchEvent(new MessageEvent('message', message));
+    window.__thumbMessages = [];
+  });
+  await page.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
+  console.log('Picture cache passed: layout navigation, sidebar map stability through unrelated edits, input and template invalidation.');
+} catch (error) { console.error('Picture requests:', pictures); throw error; }
+finally { await app.close(); await rm(work, { recursive: true, force: true }); }
