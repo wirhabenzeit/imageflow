@@ -1,13 +1,24 @@
-import { mkdir, mkdtemp, rename, rm, symlink } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rename, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { notarize } from '@electron/notarize';
-import { run, verifyNotarization } from './verify-mac-signing.mjs';
+import { run, verifyMacSigning, verifyNotarization } from './verify-mac-signing.mjs';
 
 export function macArtifactPaths(root, version, arch) {
   return {
     zip: join(root, 'out', `ImageFlow-${version}-mac-${arch}.zip`),
     dmg: join(root, 'out', `ImageFlow-${version}-${arch}.dmg`),
   };
+}
+
+export async function notarizeMacRelease(options) {
+  const { root, app, version, arch, identity, notarization } = options;
+  await Promise.all(Object.values(macArtifactPaths(root, version, arch)).map((path) => rm(path, { force: true })));
+  await access(notarization.appleApiKey);
+  await verifyMacSigning(app, identity);
+  console.log('Submitting the signed app for notarization…');
+  await notarize({ appPath: app, ...notarization });
+  await verifyNotarization(app, true);
+  return macReleaseArtifacts(options);
 }
 
 export async function macReleaseArtifacts({ root, app, version, arch, identity, keychain, notarization }) {

@@ -21,13 +21,14 @@ async function nativeFiles(folder) {
   return found;
 }
 
-export async function verifyMacSigning(app) {
+export async function verifyMacSigning(app, identity) {
   await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
   const details = async (path) => (await run('codesign', ['--display', '--verbose=4', path])).stderr;
   const main = await details(app);
   const team = /^TeamIdentifier=(.+)$/m.exec(main)?.[1];
   assert.ok(team && team !== 'not set', 'Developer ID builds must have a Team ID.');
   assert.match(main, /Authority=Developer ID Application:/);
+  if (identity) assert.ok(main.includes('Authority=' + identity + '\n'), 'The app must use the selected Developer ID identity.');
   const frameworks = join(app, 'Contents/Frameworks');
   const helpers = (await readdir(frameworks)).filter((name) => name.endsWith('.app')).map((name) => join(frameworks, name));
   assert.ok(helpers.length, 'Electron helper apps must be present.');

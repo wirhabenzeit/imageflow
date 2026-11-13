@@ -3,13 +3,12 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { packager } from '@electron/packager';
-import { notarize } from '@electron/notarize';
 import electronChecksums from 'electron/checksums.json' with { type: 'json' };
 import metadata from '../package.json' with { type: 'json' };
 import { esbuildBinary, sample, stageDesktop } from './stage-desktop.mjs';
 import { macBuildOptions } from './mac-build-options.mjs';
-import { verifyMacSigning, verifyNotarization } from './verify-mac-signing.mjs';
-import { macArtifactPaths, macReleaseArtifacts } from './mac-release-artifacts.mjs';
+import { verifyMacSigning } from './verify-mac-signing.mjs';
+import { macArtifactPaths, notarizeMacRelease } from './mac-release-artifacts.mjs';
 
 if (process.platform !== 'darwin') throw new Error('Run the macOS build on a Mac.');
 
@@ -84,12 +83,9 @@ try {
   });
   const app = join(output, 'ImageFlow.app');
   console.log('Mac app: ' + app);
-  if (options.identity) await verifyMacSigning(app);
+  if (options.identity) await verifyMacSigning(app, options.identity);
   if (options.notarization) {
-    console.log('Submitting the signed app for notarization…');
-    await notarize({ appPath: app, ...options.notarization });
-    await verifyNotarization(app, true);
-    await macReleaseArtifacts({ root, app, version: metadata.version, ...options });
+    await notarizeMacRelease({ root, app, version: metadata.version, ...options });
   }
 } finally {
   await rm(staging, { recursive: true, force: true });

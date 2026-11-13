@@ -8,6 +8,7 @@ Use a Mac matching the target architecture (arm64 for v1). Xcode Command Line To
 - `npm run package:mac:release` requires the signing identity and all three notarization variables below. It notarizes and staples the app, verifies Gatekeeper acceptance, creates and signs a DMG, notarizes and staples that DMG, then produces the update ZIP from the stapled app.
 - `npm run test:packaged` builds a local app and runs the packaged checks, including the MCP bridge launched through ImageFlow's own executable in Node mode.
 - `npm run test:packaged:existing` runs those checks against the app already in `out/`. Use this after a release build to avoid rebuilding the notarized app.
+- `npm run notarize:mac` notarizes the signed app already in `out/` and creates the release artifacts. Release jobs can build, run `test:packaged:existing`, then notarize that exact tested app without rebuilding it.
 
 The outputs are:
 
