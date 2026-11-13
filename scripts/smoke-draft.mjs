@@ -105,6 +105,9 @@ try {
   const markdown = join(work, 'drop.md');
   await writeFile(markdown, 'A small story imported through the canvas.\n');
   await changed(() => dropFile(photo, '[data-box="hero"]'));
+  // Importing adds a library source before the separate placement save completes.
+  await window.waitForFunction(async () => /^ph-/.test((await window.imageflow.currentProject()).value.project.spreads[1].boxes.hero.photo ?? ''));
+  await ready();
   const photoId = (await read()).spreads[1].boxes.hero.photo;
   assert.match(photoId, /^ph-/);
   assert.ok((await read('photos.json'))[photoId]);
@@ -118,6 +121,8 @@ try {
   await changed(() => button('Undo').click());
   assert.equal((await read('photos.json'))[photoId].caption, undefined);
   await changed(() => dropFile(markdown, '[data-box="body"]'));
+  await window.waitForFunction(async () => /^tx-/.test((await window.imageflow.currentProject()).value.project.spreads[1].boxes.body.text ?? ''));
+  await ready();
   const textId = (await read()).spreads[1].boxes.body.text;
   assert.match(textId, /^tx-/);
   assert.match(await preview().locator('[data-spread="arriving"] [data-box="body"]').textContent(), /imported through the canvas/);
