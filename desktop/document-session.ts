@@ -14,6 +14,7 @@ import type { BookMenuState, CanvasLayout, ExportMode, ImportRequest, ProjectCha
 import { identifier } from '../src/project';
 import type { RenderProject } from '../src/project';
 import { printBook, saveProof } from './export';
+import { approveNetwork, approvedNetwork } from './source-access';
 import { importIntoProject, loadProject, projectSummary, readProjectManifest, saveGeneratedFile } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
@@ -34,7 +35,8 @@ import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { McpToolName } from '../src/mcp-contract';
 
-export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode'] }>;
+// `network` lists the origins this book's element editors may reach now (ADR 0006); absent for export renders.
+export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[] }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 async function fingerprint(path: string) {
@@ -71,6 +73,9 @@ export class DocumentSession {
   private importedWrites = new ImportReceipts();
   private agentLeases = new Map<string, (allowed: boolean) => void>();
   private renderIds = new Set<string>();
+  // Declared origins the user allowed for this book's element editors, as last confirmed by the editor.
+  private editorOrigins: readonly string[] = [];
+  private askingNetwork?: Promise<string[]>;
   sidebar = true;
   inspector = true;
   sources = true;
@@ -216,7 +221,7 @@ export class DocumentSession {
       }
     }
     this.renderIds.add(id);
-    this.renders.set(id, { book, mode: 'edit' });
+    this.renders.set(id, { book, mode: 'edit', network: () => this.editorOrigins });
     this.window.setTitle(book.project.title);
     if (!book.readOnly) this.window.setRepresentedFilename(book.folder);
     this.changed?.(book);
@@ -443,6 +448,36 @@ export class DocumentSession {
     this.projectSession!.adoptExternal(book);
     this.projectSession!.record(next, 'Import sources', !!request.target);
     return { summary: this.activate(next), imported };
+  }
+
+  /** The origins the template declares that this book's element editors may reach, asking once for new ones
+   * (ADR 0006). Declining keeps editors working offline; they ask again the next time an editor opens. */
+  async editorNetwork(id: string, declared: unknown) {
+    const book = this.currentBook(id);
+    const origins = Array.isArray(declared) ? [...new Set(declared.filter((origin): origin is string =>
+      typeof origin === 'string' && /^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/.test(origin)))].slice(0, 20) : [];
+    if (!origins.length || book.readOnly) return (this.editorOrigins = []) as string[];
+    while (this.askingNetwork) await this.askingNetwork.catch(() => {});
+    const ask = (async () => {
+      const approved = new Set(await approvedNetwork(book.folder));
+      const pending = origins.filter((origin) => !approved.has(origin));
+      if (pending.length && !this.window.isDestroyed()) {
+        const { response } = await dialog.showMessageBox(this.window, {
+          type: 'question', buttons: ['Allow', 'Not Now'], defaultId: 0, cancelId: 1,
+          message: 'Allow this book’s template to connect to the internet while you edit?',
+          detail: 'Its editors want to load data from:\n' + pending.join('\n') + '\n\nThey can send what you edit there, too. The printed book never ' +
+            'depends on these sites: editors save what pages need into the book. Allow only templates you trust.',
+        });
+        if (response === 0) {
+          await approveNetwork(book.folder, pending);
+          for (const origin of pending) approved.add(origin);
+        }
+      }
+      return origins.filter((origin) => approved.has(origin));
+    })();
+    this.askingNetwork = ask;
+    try { return (this.editorOrigins = await ask) as string[]; }
+    finally { this.askingNetwork = undefined; }
   }
 
   /** Stores a file an element editor generated (ADR 0006). Registering it is not undoable; assigning it is. */

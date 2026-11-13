@@ -497,7 +497,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
-  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'image-files' | 'editor-save-file';
+  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'image-files' | 'editor-save-file' | 'editor-network';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -509,6 +509,7 @@ export type TemplateDeclaration = {
   description?: string;
   contract: 1;
   requires?: readonly Capability[];
+  network?: readonly string[];
   format?: PrintFormat;
   formats?: Record<string, PrintFormat>;
   defaultFormat?: string;
@@ -565,6 +566,13 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
    * instead of failing in a layout. Apps older than this field ignore it.
    */
   requires?: readonly Capability[];
+  /**
+   * HTTPS origins this template's element editors may reach, such as `['https://tiles.openfreemap.org']` or
+   * `'https://*.example.com'`, without paths. ImageFlow asks the user once per book; until they allow it, editors
+   * run offline. Book previews, the Book check and export never reach the network: an editor saves what pages need
+   * with `saveFile`. Requires `editor-network`.
+   */
+  network?: readonly string[];
   /** Book settings, shown in Book settings and read through `ctx.document`. */
   parameters?: D & ParametersChecked<D>;
   /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */

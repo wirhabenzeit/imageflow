@@ -1395,7 +1395,8 @@ export function App() {
       <ElementEditorDialog host={canvasWrap.current} key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
-        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile} saveFile={saveProjectFile} />}
+        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile} saveFile={saveProjectFile}
+          prepare={api && summary && template?.network?.length ? () => api.editorNetwork(summary.id, template.network!) : undefined} />}
     {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&
       <LayoutPickerDialog key={layoutPicker.spread + ':' + layoutPicker.family} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === layoutPicker.spread)!} family={layoutPicker.family} layout={layoutPicker.layout}

@@ -1,6 +1,6 @@
 # 0006: Template dependencies, editor network access and generated files
 
-Status: accepted, 2026-11-13. Phases 1 (render purity) and 2 (image files, `saveFile`, collection) implemented. Motivated by a real map layout in the photobook starter, replacing the basemap-less GPX inset.
+Status: accepted, 2026-11-13. Phases 1 (render purity), 2 (image files, `saveFile`, collection) and 3 (editor network) implemented. Motivated by a real map layout in the photobook starter, replacing the basemap-less GPX inset.
 
 ## Problem
 
@@ -44,7 +44,7 @@ The bundle size limit and the existing rules (no paths outside `template/`, no l
 
 `defineTemplate` gains `network: string[]`, a list of HTTPS origins, e.g. `['https://tiles.openfreemap.org']`. Wildcards are limited to one leading label (`https://*.example.com`).
 
-- **Consent.** Importing a template with `network` shows the origins in the import sheet; opening a book whose template declares new origins asks once per book identity, stored with the app-owned approvals from [0005](0005-linked-sources.md). Declining keeps the book usable; editors then load without network.
+- **Consent.** The first time an element editor opens in a book whose template declares origins not yet allowed, ImageFlow asks, listing them. The answer is stored per book identity with the app-owned approvals from [0005](0005-linked-sources.md). Declining keeps the book usable; that editor loads without network, and the question comes back the next time an editor opens. Showing the origins in the template import sheet as well is a follow-up.
 - **CSP.** The editor frame's response builds `connect-src`, `img-src` and `font-src` from the approved origins, and adds `worker-src blob:` and `child-src blob:` for libraries that spawn workers. Book previews, thumbnails, checks and export frames keep today's policy unchanged.
 - **No credentials from the app.** The editor frame stays sandboxed, without cookies or the app's session. API keys, if a provider needs one, are a document parameter the user enters (`p.text({ secret: true })` stored outside `project.json` is a possible follow-up, not part of this decision).
 - The MCP authoring context lists a template's declared and approved origins.

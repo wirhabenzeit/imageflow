@@ -30,13 +30,15 @@ function editingContext(template: TemplateInfo, spread: SpreadState, element: st
 
 // Template components report values from an isolated frame. Apply each valid change through the app's save
 // queue, keeping the frame mounted while the book renders. Closing flushes any field still being typed.
-export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, canvasReady, edit, close, importFile, saveFile, host }: {
+export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, canvasReady, edit, close, importFile, saveFile, prepare, host }: {
   project: string; template: TemplateInfo; spread: SpreadState; element: string; readOnly: boolean;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
   // Stores a file the editor generated; rejects with a message the editor's author should see.
   saveFile?: (name: string, bytes: Uint8Array) => Promise<{ id: string; project: string } | undefined>;
+  // Settles once the frame may load: the network origins its policy allows are decided before it is served.
+  prepare?: () => Promise<unknown>;
 }) {
   const layout = template.spreads[spread.definition];
   const definition = layout?.elements[element];
@@ -70,6 +72,13 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
   const [source] = useState(() => renderOrigin + '/render/' + project + '?view=editor&spread=' + encodeURIComponent(spread.id) +
     '&element=' + encodeURIComponent(element) + (readOnly ? '&readonly' : ''));
   const title = editor?.label ?? 'Edit ' + (definition?.label ?? element);
+  const [prepared, setPrepared] = useState(!prepare);
+  useEffect(() => {
+    if (!prepare) return;
+    let current = true;
+    void prepare().catch(() => undefined).finally(() => { if (current) setPrepared(true); });
+    return () => { current = false; };
+  }, []);
   const values = (reported: unknown): Values => reported && typeof reported === 'object' ? reported as Values : {};
   const { height, ready, error, setError, failed, flushing, flushTimedOut, flush } = useEditorFrame(frame, {
     draft(reported, reportedSpread) {
@@ -232,7 +241,7 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     </p>}
     {blocked && !stale && <p className="ee-status muted" role="status">{blocked}</p>}
     <div className="ee-body">
-    <iframe ref={frame} className="element-editor-frame" inert={!!blocked || saveRejected} title={title} src={source} style={{ height }} />
+    {prepared && <iframe ref={frame} className="element-editor-frame" inert={!!blocked || saveRejected} title={title} src={source} style={{ height }} />}
     {!ready && !error && <p className="ee-status muted">Loading the editor…</p>}
     {stale && <p className="ee-status error-text" role="alert">
       {(definition?.label ?? element) + ' changed while this editor was open. Close and open the editor again to continue from the current values.'}

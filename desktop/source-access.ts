@@ -71,3 +71,22 @@ export async function transferSourceAccess(from: string, to: string, entries: So
     book.writes = task.catch(() => {}); await task;
   }
 }
+
+// Network origins the user allowed this book's element editors to reach (ADR 0006), kept with the source grants:
+// app-owned, outside the book, and bound to the book's filesystem identity.
+const networkKey = (origin: string) => 'network:' + origin;
+export async function approvedNetwork(folder: string) {
+  const { book } = await accessFor(folder);
+  return Object.keys(book.grants).filter((key) => key.startsWith('network:')).map((key) => key.slice('network:'.length));
+}
+/** Called only after the user allowed these origins. */
+export async function approveNetwork(folder: string, origins: string[]) {
+  const { key, book } = await accessFor(folder);
+  const task = book.writes.then(async () => {
+    const grants = { ...book.grants, ...Object.fromEntries(origins.map((origin) => [networkKey(origin), { path: origin }])) };
+    await saveGrants(key, grants);
+    book.grants = grants;
+  });
+  book.writes = task.catch(() => {});
+  await task;
+}

@@ -23,5 +23,7 @@ export const capabilities = [
   'single-pages',
   // `imageFile(id)` for PNG, JPEG and WebP file parameters, and `saveFile` in custom element editors (ADR 0006).
   'image-files', 'editor-save-file',
+  // `network`: HTTPS origins element editors may reach once the user allows them (ADR 0006).
+  'editor-network',
 ] as const;
 export type Capability = typeof capabilities[number];

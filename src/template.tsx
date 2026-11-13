@@ -247,6 +247,11 @@ export const templateSchema = z.preprocess(withSpans, z.object({
         missing.join(', ') + '. Update ImageFlow, or remove them from requires. This app provides: ' + capabilities.join(', ') + '.' });
     }
   }),
+  // HTTPS origins the template's element editors may reach (ADR 0006), after the user allows them for the book.
+  // Book previews, checks and export never reach the network.
+  network: z.array(z.string().regex(/^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/,
+    'Use an HTTPS origin such as https://tiles.example.com, or https://*.example.com for its subdomains, without a path.'))
+    .max(20).optional(),
   format: formatSchema.optional(),
   formats: z.record(identifier, formatSchema).optional(),
   defaultFormat: identifier.optional(),
@@ -343,7 +348,7 @@ type DeclaredSpread = Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | '
 // definition unchanged.
 const spreadBuilder = <T,>(definition: T) => definition;
 export type TemplateDeclaration = {
-  id: string; version: string; label?: string; description?: string; contract: 1; requires?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
+  id: string; version: string; label?: string; description?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
@@ -365,6 +370,7 @@ export function templateInfo(template: Template): TemplateInfo {
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
     parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
+    ...(template.network?.length ? { network: [...new Set(template.network)] } : {}),
     layoutFamilies: Object.fromEntries(Object.entries(template.layoutFamilies ?? {}).map(([id, { label, picker }]) => [id, {
       label, ...(picker ? { picker: { ...(picker.label ? { label: picker.label } : {}) } } : {}),
     }])),

@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
 import type { BookMenuState, CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
+import { editorPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
 import type { OpenProject } from './project';
 import { photoFile } from './photos';
@@ -125,8 +126,12 @@ async function serve(request: Request) {
   const session = sessions.get(id);
   if (!session) return new Response(null, { status: 404 });
   if (!resource) {
+    // Element editor frames of a template that declares network origins may reach the ones the user allowed
+    // (ADR 0006). Every other frame, and every check and export, keeps the offline policy.
+    const editor = new URL(request.url).searchParams.get('view') === 'editor';
+    const origins = editor ? session.network?.() ?? [] : [];
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
-      'Content-Security-Policy': csp + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
+      'Content-Security-Policy': editorPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });
   }
   if (resource === 'data') return Response.json(renderData(session.book, id, session.mode));
@@ -1054,6 +1059,12 @@ void app.whenReady().then(async () => {
   });
   ipcMain.on(channels.agentLeaseReply, (event, id: string, allowed: boolean) => { editorOwner(event)?.replyLease(id, allowed); });
   ipcMain.handle(channels.import, (event, id: string, request: ImportRequest) => fromEditor(event, (document) => document.importFiles(document.window, id, request)));
+  ipcMain.handle(channels.network, async (event, id: string, origins: unknown) => {
+    const document = editorOwner(event);
+    if (!document || quitting) return { error: 'Request is only available to an open book.' };
+    try { return { value: await document.editorNetwork(id, origins) }; }
+    catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.handle(channels.saveFile, (event, id: string, request: { name: unknown; bytes: unknown }) => fromEditor(event, (document) => document.saveGeneratedFile(id, request)));
   ipcMain.handle(channels.export, (event, id: string, mode: ExportMode) => fromEditor(event, (document) => document.exportBook(document.window, id, mode)));
   ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
