@@ -27,6 +27,11 @@ export function TemplateSettings({ api, library }: { api?: DesktopApi; library: 
     const result = await api!.removeTemplate(id);
     setMessage('error' in result ? result.error : result.value ? 'Moved to the Trash. Books made from it are not affected.' : '');
   });
+  const trustTemplate = (id: string, allow: boolean) => run(async () => {
+    setResults([]);
+    const result = await api!.trustTemplate(id, allow);
+    setMessage('error' in result ? result.error : '');
+  });
   const exportTemplate = (id: string) => run(async () => {
     setResults([]);
     const result = await api!.exportTemplate(id);
@@ -51,6 +56,17 @@ export function TemplateSettings({ api, library }: { api?: DesktopApi; library: 
         {entry.description && <p className="settings-note">{entry.description}</p>}
         <p className="settings-note">{[entry.formats.join(', '), entry.layouts.length + (entry.layouts.length === 1 ? ' layout' : ' layouts'),
           entry.id].filter(Boolean).join(' · ')}{entry.replacesBuiltIn ? ' · Replaces the built-in template' : ''}</p>
+        {entry.packages?.length ? <p className="settings-note">Packages: {entry.packages.map(({ name, version, license }) =>
+          name + ' ' + version + (license ? ' (' + license + ')' : '')).join(', ')}</p> : null}
+        {entry.network?.length ? <div className="template-network">
+          <p className="settings-note">Editors connect to: {entry.network.join(', ')}</p>
+          <p className="settings-note">{entry.networkTrust === 'built-in' ? 'Allowed in every book: this template comes with ImageFlow.'
+            : entry.networkTrust === 'allowed' ? 'Allowed in every book made from this version, until its files change.'
+              : 'Each book made from it asks before its editors go online.'}</p>
+          {entry.source === 'imported' && <button type="button" disabled={busy || !api}
+            aria-label={(entry.networkTrust ? 'Stop allowing network access for ' : 'Allow network access for ') + entry.label}
+            onClick={() => void trustTemplate(entry.id, !entry.networkTrust)}>{entry.networkTrust ? 'Stop Allowing' : 'Allow in Every Book'}</button>}
+        </div> : null}
         {entry.unavailable && <p className="settings-note error-text">Can't be used: {entry.unavailable}</p>}
       </li>)}
     </ul>

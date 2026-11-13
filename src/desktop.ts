@@ -27,7 +27,7 @@ export const channels = {
   settings: 'app:settings', updateSettings: 'app:update-settings', settingsChanged: 'app:settings-changed',
   showSettings: 'app:show-settings', settingsPane: 'app:settings-pane', fitSettings: 'app:fit-settings',
   library: 'library:list', libraryChanged: 'library:changed', libraryImport: 'library:import', libraryRemove: 'library:remove',
-  libraryExport: 'library:export',
+  libraryExport: 'library:export', libraryTrust: 'library:trust',
   history: 'project:history', mcp: 'mcp:settings', mcpChanged: 'mcp:changed', mcpInstall: 'mcp:install',
   agentLease: 'project:agent-lease', agentLeaseReply: 'project:agent-lease-reply', agentRelease: 'project:agent-release',
 } as const;
@@ -89,6 +89,8 @@ export type DesktopApi = {
   removeTemplate(id: string): Promise<Result<boolean>>;
   // Asks where to save a library entry as an .imageflow-template file; the file, or null when the user cancels.
   exportTemplate(id: string): Promise<Result<string | null>>;
+  // Allows or stops allowing the network sites a library entry's exact version declares, in every book made from it.
+  trustTemplate(id: string, allow: boolean): Promise<Result<boolean>>;
   documentAction(action: 'reveal' | 'template' | 'text', id?: string): Promise<Result<void>>;
   getSettings(): Promise<Result<AppSettings>>;
   updateSettings(patch: Partial<AppSettings>): Promise<Result<AppSettings>>;

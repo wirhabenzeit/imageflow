@@ -19,5 +19,8 @@
   "untyped": [],
   "licenses": {
     "maplibre-gl": "LICENSES/maplibre-gl.txt"
+  },
+  "licenseNames": {
+    "maplibre-gl": "BSD-3-Clause"
   }
 }

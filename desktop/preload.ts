@@ -22,6 +22,7 @@ const api: DesktopApi = {
   importTemplates: () => ipcRenderer.invoke(channels.libraryImport),
   removeTemplate: (id) => ipcRenderer.invoke(channels.libraryRemove, id),
   exportTemplate: (id) => ipcRenderer.invoke(channels.libraryExport, id),
+  trustTemplate: (id, allow) => ipcRenderer.invoke(channels.libraryTrust, id, allow),
   documentAction: (action, id) => ipcRenderer.invoke(channels.documentAction, action, id),
   getSettings: () => ipcRenderer.invoke(channels.settings),
   updateSettings: (patch) => ipcRenderer.invoke(channels.updateSettings, patch),

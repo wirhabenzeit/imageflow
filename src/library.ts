@@ -1,3 +1,6 @@
+// A package in a template's saved dependency bundle (ADR 0006). `license` is the package's declared licence, or ''.
+export type TemplatePackage = { name: string; version: string; license: string };
+
 // A template in the template library, as the New Book picker and the Templates pane in Settings show it.
 export type LibraryEntry = {
   id: string; version: string; label: string; description?: string;
@@ -7,6 +10,10 @@ export type LibraryEntry = {
   source: 'built-in' | 'imported'; replacesBuiltIn?: boolean;
   importedAt?: string; importedFrom?: string;
   hash: string;
+  // What the template's code brings beyond the app (ADR 0006): bundled npm packages and the sites its element editors
+  // may reach. `networkTrust` says why books made from this exact version need not ask: it ships with the app, or
+  // the user allowed it for this hash. Without it, each book asks once.
+  packages?: TemplatePackage[]; network?: string[]; networkTrust?: 'built-in' | 'allowed';
   // A built-in template with a sample book: photos, texts and spreads a new book can start with.
   sample?: boolean;
   // Why this app cannot create a book from the template, such as a feature it requires that the app lacks.

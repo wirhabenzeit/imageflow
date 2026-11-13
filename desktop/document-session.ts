@@ -78,6 +78,8 @@ export class DocumentSession {
   // Declared origins the user allowed for this book's element editors, as last confirmed by the editor.
   private editorOrigins: readonly string[] = [];
   private askingNetwork?: Promise<string[]>;
+  /** The declared sites the template's library trust covers for this book as it is now (ADR 0006); set by the app. */
+  networkTrust?: (folder: string, declared: readonly string[]) => Promise<string[]>;
   sidebar = true;
   inspector = true;
   sources = true;
@@ -461,7 +463,8 @@ export class DocumentSession {
   }
 
   /** The origins the template declares that this book's element editors may reach, asking once for new ones
-   * (ADR 0006). Declining keeps editors working offline; they ask again the next time an editor opens. */
+   * (ADR 0006). Sites allowed for the template's exact version in the library need no question. Declining keeps
+   * editors working offline; they ask again the next time an editor opens. */
   async editorNetwork(id: string, declared: unknown) {
     const book = this.currentBook(id);
     const origins = Array.isArray(declared) ? [...new Set(declared.filter((origin): origin is string =>
@@ -469,7 +472,8 @@ export class DocumentSession {
     if (!origins.length || book.readOnly) return (this.editorOrigins = []) as string[];
     while (this.askingNetwork) await this.askingNetwork.catch(() => {});
     const ask = (async () => {
-      const approved = new Set(await approvedNetwork(book.folder));
+      const trusted = await this.networkTrust?.(book.folder, origins).catch(() => []) ?? [];
+      const approved = new Set([...await approvedNetwork(book.folder), ...trusted]);
       const pending = origins.filter((origin) => !approved.has(origin));
       if (pending.length && !this.window.isDestroyed()) {
         const { response } = await dialog.showMessageBox(this.window, {

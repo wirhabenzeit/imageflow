@@ -184,3 +184,31 @@ test('a book is made from one snapshot: an import waits until the template has b
     assert.equal((await library.withTemplate('travel', async ({ entry }) => entry.version)), '2.0.0');
   } finally { await done(); }
 });
+
+test('imports are reviewed with their packages and network sites, and a declined review imports nothing', async () => {
+  const { work, library, done } = await setup();
+  try {
+    const folder = await template(work, 'maps', { id: 'maps', version: '1.0.0', label: 'Maps' });
+    await mkdir(join(folder, 'vendor'), { recursive: true });
+    await writeFile(join(folder, 'vendor', 'manifest.json'), JSON.stringify({ version: 1, lockfile: '', packages: { 'map-lib': '2.1.0', 'b-lib': '1.0.0' },
+      modules: {}, untyped: [], licenses: { 'map-lib': 'LICENSES/map-lib.txt', 'b-lib': 'MIT' }, licenseNames: { 'map-lib': 'BSD-3-Clause' } }));
+    const seen: { kind: string; packages: unknown; hash: string }[] = [];
+    const review = (answer: boolean) => async (plan: Parameters<Parameters<TemplateLibrary['import']>[2] & {}>[0]) => {
+      seen.push({ kind: plan.kind, packages: plan.packages, hash: plan.hash });
+      return answer;
+    };
+    assert.equal((await library.import(folder, no, review(false))).status, 'cancelled');
+    assert.deepEqual(await readdir(join(work, 'Templates')).catch(() => []), []);
+    assert.equal((await library.import(folder, no, review(true))).status, 'imported');
+    assert.deepEqual(seen.map(({ kind }) => kind), ['new', 'new']);
+    assert.deepEqual(seen[0].packages, [{ name: 'b-lib', version: '1.0.0', license: 'MIT' }, { name: 'map-lib', version: '2.1.0', license: 'BSD-3-Clause' }]);
+    const entry = (await library.list()).find(({ id }) => id === 'maps')!;
+    assert.deepEqual(entry.packages, seen[0].packages);
+    assert.equal(entry.hash, seen[0].hash);
+    // The same files again change nothing, so there is nothing to review.
+    assert.equal((await library.import(folder, no, review(true))).status, 'unchanged');
+    assert.equal(seen.length, 2);
+    assert.equal(await library.isBuiltIn(entry.hash), false);
+    assert.equal(await library.isBuiltIn((await library.list())[0].hash), true);
+  } finally { await done(); }
+});

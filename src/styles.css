@@ -666,6 +666,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .template-list > li { padding: 10px 12px; border-top: 1px solid var(--edge); }
 .template-list > li:first-child { border-top: 0; }
 .template-list > li.unavailable strong { color: var(--muted); }
+.template-network { display: grid; justify-items: start; gap: 2px; margin-top: 4px; }
+.template-network p { margin: 0; overflow-wrap: anywhere; }
 .template-list .settings-note { margin-top: 3px; }
 .template-row { display: flex; align-items: baseline; gap: 6px; font-size: 13px; }
 .template-source { margin-left: auto; font-size: 11px; color: var(--muted); }

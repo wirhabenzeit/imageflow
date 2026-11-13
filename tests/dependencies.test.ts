@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { build } from 'esbuild';
-import { readDependencyManifest, rebuildDependencies, templateImports } from '../desktop/dependencies';
+import { readDependencyManifest, rebuildDependencies, templateImports, templatePackages } from '../desktop/dependencies';
 import { bundleTemplate } from '../desktop/project';
 import { checkTemplateTypes } from '../desktop/typecheck';
 
@@ -61,6 +61,7 @@ test('the rebuild saves bundled modules, CSS, versions, licences and declaration
   assert.deepEqual(manifest.untyped, ['untyped-lib']);
   assert.equal(manifest.licenses['tiny-lib'], 'LICENSES/tiny-lib.txt');
   assert.equal(manifest.licenses['untyped-lib'], 'ISC');
+  assert.deepEqual(await templatePackages(root), [{ name: 'tiny-lib', version: '1.0.0', license: '' }, { name: 'untyped-lib', version: '0.3.0', license: 'ISC' }]);
   assert.match(await readFile(join(root, 'vendor/LICENSES/tiny-lib.txt'), 'utf8'), /tiny-lib authors/);
   assert.match(await readFile(join(root, 'vendor/.gitignore'), 'utf8'), /^!\*$/m, 'ignore rules above must not drop vendored files');
   assert.equal(await readFile(join(root, 'vendor/types/packages/tiny-lib/helper.d.ts'), 'utf8'), 'export type Helper = (n: number) => number;\n');

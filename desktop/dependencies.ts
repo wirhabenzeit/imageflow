@@ -6,6 +6,7 @@ import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { Loader } from 'esbuild';
 import { z } from 'zod';
+import type { TemplatePackage } from '../src/library';
 
 export const vendorFolder = 'vendor';
 // Modules the host provides; templates and their dependencies share the app's copies.
@@ -19,6 +20,8 @@ const manifestSchema = z.object({
   // Packages without declarations: the type check sees them as `any` and warns.
   untyped: z.array(z.string()),
   licenses: z.record(z.string(), z.string()),
+  // Each package's declared licence (its package.json `license`), shown before a template is imported.
+  licenseNames: z.record(z.string(), z.string()).optional(),
 });
 export type DependencyManifest = z.infer<typeof manifestSchema>;
 
@@ -37,6 +40,16 @@ export async function readDependencyManifest(root: string): Promise<DependencyMa
   const parsed = manifestSchema.safeParse(JSON.parse(source));
   if (!parsed.success) throw new Error('template/vendor/manifest.json is invalid. Rebuild the template dependencies.');
   return parsed.data;
+}
+
+/** The packages in a template's saved bundle, with versions and licences, as the library shows them before import. */
+export async function templatePackages(root: string): Promise<TemplatePackage[]> {
+  const manifest = await readDependencyManifest(root).catch(() => undefined);
+  if (!manifest) return [];
+  return Object.entries(manifest.packages).sort(([a], [b]) => a.localeCompare(b)).map(([name, version]) => {
+    const declared = manifest.licenseNames?.[name] ?? manifest.licenses[name] ?? '';
+    return { name, version, license: declared.startsWith('LICENSES/') ? '' : declared };
+  });
 }
 
 async function lockfileHash(root: string) {
@@ -198,7 +211,7 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
       nodePaths: [modules],
     });
     const outputs = Object.entries(result.metafile.outputs);
-    const manifest: DependencyManifest = { version: 1, lockfile: await lockfileHash(root), packages: {}, modules: {}, untyped: [], licenses: {} };
+    const manifest: DependencyManifest = { version: 1, lockfile: await lockfileHash(root), packages: {}, modules: {}, untyped: [], licenses: {}, licenseNames: {} };
     specifiers.forEach((specifier, i) => {
       const js = outputs.find(([path]) => basename(path) === 'm' + i + '.js');
       const css = outputs.find(([path]) => basename(path) === 'm' + i + '.css');
@@ -231,6 +244,7 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
         await writeFile(join(staging, 'LICENSES', target), texts.join('\n\n'));
         manifest.licenses[name] = 'LICENSES/' + target;
       } else manifest.licenses[name] = typeof info.license === 'string' ? info.license : '';
+      manifest.licenseNames![name] = typeof info.license === 'string' ? info.license : '';
     }
     manifest.untyped = await vendorTypes(root, [...new Set(specifiers.filter((specifier) => extname(specifier) !== '.css').map(packageName))],
       join(staging, 'types', 'packages'));
