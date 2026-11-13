@@ -12,28 +12,38 @@ const work = await mkdtemp(join(root, '.build/layout-picture-cache-'));
 const book = join(work, 'Book.imageflow');
 await cp(join(root, 'sample/starter'), book, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
 const mapFile = join(book, 'template/map.tsx');
-const source = await readFile(mapFile, 'utf8');
-const start = source.indexOf('async function drawMap(');
-const end = source.indexOf('/** The map as the page draws it:');
-assert.ok(start > 0 && end > start);
-const drawing = `async function drawMap(view: { longitude: number }, target: RenderTarget) {
-  (window as any).__mapDraws = ((window as any).__mapDraws ?? 0) + 1;
+const drawing = `async function drawMap(view, target) {
+  window.__mapDraws = (window.__mapDraws ?? 0) + 1;
   await new Promise(resolve => setTimeout(resolve, 500));
   target.signal.throwIfAborted();
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil(target.width * target.pixelRatio);
   canvas.height = Math.ceil(target.height * target.pixelRatio);
-  const ctx = canvas.getContext('2d')!;
+  const ctx = canvas.getContext('2d');
   ctx.fillStyle = view.longitude === 10 ? '#008040' : '#4060a0';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   return canvas;
 }
 \n`;
-await writeFile(mapFile, source.slice(0, start) + drawing + source.slice(end));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
+  // Leave the copied template unchanged: its hash must match the trusted built-in template, so startup grants
+  // its network origins after activating the document. Replacing only draw() in the browser keeps that path real.
+  await app.context().route('**/template/template.js', async (route) => {
+    const originalUrl = route.request().url() + '?original=1';
+    const body = drawing + `
+      const original = window.ImageFlowRuntime.RenderedImage;
+      window.ImageFlowRuntime.RenderedImage = (props) => window.ImageFlowReact.createElement(original,
+        { ...props, draw: (target) => drawMap(props.inputs, target) });
+      const template = await import(${JSON.stringify(originalUrl)});
+      export default template.default;
+    `;
+    await route.fulfill({ contentType: 'text/javascript', body });
+  });
   const page = await testBook(app, book);
+  const startup = (await page.evaluate(() => window.imageflow.currentProject())).value;
+  assert.deepEqual(startup.network, ['https://tiles.openfreemap.org'], 'The book starts with approved network access');
   const layouts = () => page.frameLocator('iframe.book-frame-layouts[data-current]');
   const ready = async (spread) => {
     await page.waitForFunction((spread) => {

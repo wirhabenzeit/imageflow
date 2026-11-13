@@ -301,8 +301,7 @@ export class DocumentSession {
       }
     }
     this.renderIds.add(id);
-    this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book), pictures: this.previewPictures,
-      pictureScope: JSON.stringify([book.templateHash, this.originsFor(book)]) });
+    this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book), pictures: this.previewPictures });
     // A changed template gets the approvals for its own hash, if any, and the frames are rendered again with them.
     if (this.networkPrepared && !book.readOnly && book.templateHash !== this.network.hash) queueMicrotask(() => void this.updateNetwork().catch(() => {}));
     this.window.setTitle(bookName(book.folder));

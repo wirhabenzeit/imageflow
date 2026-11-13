@@ -146,6 +146,9 @@ async function serve(request: Request) {
     // The frames of a book whose template declares network origins may reach the ones the user allowed: element
     // editors, and previews, checks and exports that draw <RenderedImage> pictures (ADR 0006).
     const origins = session.network?.() ?? [];
+    // Network preparation finishes after the session is activated. Scope its pictures to the policy actually
+    // served to the frame, so an already-approved book can cache its first preview as well as later saves.
+    session.pictureScope ??= JSON.stringify([session.book.templateHash, origins]);
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': renderPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });
