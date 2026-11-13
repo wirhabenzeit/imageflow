@@ -729,7 +729,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
   // A preview is the spread itself in another layout: switching only changes which of its content is shown.
   // A family with its own picker shows one preview, which stands for the family.
-  const previews = layoutPreviews(template.spreads, spreads[index].definition, template.layoutFamilies, template.format).map((definition) => ({
+  const previews = layoutPreviews(template.spreads, spreads[index].definition, template.layoutFamilies, template.format, { index, count: spreads.length }).map((definition) => ({
     definition, span: template.spreads[definition].span, spread: { ...spreads[index], definition, id: definition },
   }));
   // Previews read the anchors of the book as saved, so a contents layout shows the real pages.

@@ -30,10 +30,10 @@ import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
 import { keptMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
 import type { SourceKind, SourceRef } from './source-items';
-import { hasFacingPages, pageLabel, pageSequence, pagesText, resolveFormat, sheetPages } from './format';
+import { hasFacingPages, hasSingleEnds, pageLabel, pageSequence, pagesText, resolveFormat, sheetPages } from './format';
 import type { ResolvedFormat } from './format';
 import type { ProjectFiles, SpreadState } from './project';
-import { spreadOrder } from './spread-order';
+import { insertionProblem, spreadOrder } from './spread-order';
 import { spreadMime, useSpreadReorder } from './useSpreadReorder';
 
 type Owner = { type: 'photo' | 'markdown' | 'element'; id: string };
@@ -201,7 +201,9 @@ export function App() {
   // An empty book adds its first spread; otherwise a spread-wide layout is needed, or a page layout without facing pages.
   const canAdd = canChangeBook && !!template && (!spread ? firstSpreadLayouts(template.spreads, template.format).length > 0
     : Object.values(template.spreads).some(({ span }) => span === (hasFacingPages(template.format) ? 'spread' : 'page')));
-  const canDuplicate = canChangeBook && !!template && spreadSelected && !!spread;
+  // A single opening or closing page cannot be duplicated where the format requires one of each.
+  const canDuplicate = canChangeBook && !!template && spreadSelected && !!spread &&
+    !(hasSingleEnds(template.format) && ['left', 'right'].includes(template.spreads[spread.definition]?.span ?? ''));
   const canDelete = canChangeBook && spreadSelected && !!spread;
   const canMoveUp = canReorder && spreadSelected && !!spread && canMoveSpread(spread.id, index - 1);
   const canMoveDown = canReorder && spreadSelected && !!spread && canMoveSpread(spread.id, index + 1);
@@ -672,7 +674,9 @@ export function App() {
     const next = duplicate ? { ...structuredClone(spread), id: crypto.randomUUID() } : newSpread(entry![0]);
     edit(({ project }) => {
       const position = project.spreads.findIndex(({ id }) => id === spread.id);
+      // Next to the selected spread, but never before a single opening page or after a single closing page.
       const insert = template.spreads[spread.definition]?.span === 'left' ? position : position + 1;
+      if (insertionProblem(project.spreads, insert, template.spreads[next.definition]?.span ?? 'spread', template)) return false;
       project.spreads.splice(insert, 0, next);
     }, undefined, next.id);
   }

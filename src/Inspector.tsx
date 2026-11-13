@@ -24,7 +24,9 @@ function LayoutPicker({ summary, spread, template, choose, openPicker }: {
   const [geometry, setGeometry] = useState<BookGeometry>();
   const [pointed, setPointed] = useState<string>();
   const families = template.layoutFamilies ?? {};
-  const choices = layoutPreviews(template.spreads, spread.definition, families, template.format);
+  const { spreads } = summary.project;
+  const choices = layoutPreviews(template.spreads, spread.definition, families, template.format,
+    { index: spreads.findIndex(({ id }) => id === spread.id), count: spreads.length });
   const familyOf = (id: string) => pickerFamily(template.spreads, id, families);
   const name = (id: string) => familyOf(id) ? families[familyOf(id)!].label : template.spreads[id].label;
   // The retained preview and its hit targets must describe the same set of layouts until the next frame is ready.
