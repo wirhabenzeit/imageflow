@@ -984,7 +984,7 @@ export function App() {
     return true;
   }
   // A node marked only with document parameters a document editor owns opens that editor, with this spread's context.
-  function openDocumentEditor(target: Target) {
+  function openDocumentEditor(target: Target, click?: OpenEditor['click']) {
     const editor = template && documentEditorFor(template, target.edits);
     const layout = spreads.find(({ id }) => id === target.spread)?.definition;
     if (!editor || !layout || readyId.current !== summary?.id) return false;
@@ -993,7 +993,7 @@ export function App() {
     select(target.spread, false);
     const presentation = target.hidden ? 'dialog' : presentationFor(template.editors?.[editor]?.presentation, target);
     setElementEditor({ kind: 'document', spread: target.spread, layout, editor, presentation,
-      ...(presentation === 'inline' ? { at: targetKey(target) } : {}) });
+      ...(presentation === 'inline' ? { at: targetKey(target), ...(click ? { click } : {}) } : {}) });
     return true;
   }
   // An inline document editor follows the marked node it was opened from (see anchoredTarget), and both kinds follow
@@ -1399,7 +1399,7 @@ export function App() {
                   path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')) ||
                   (target.owner?.id === top.id && (target.owner.type === 'element') === (top.type === 'element'))));
                 if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
-                else if (target && !openDocumentEditor(target)) openEditing({ spread: target.spread, key: targetKey(target) });
+                else if (target && !openDocumentEditor(target, { x: event.clientX, y: event.clientY, alt: event.altKey })) openEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
                 // Double-clicking a Markdown box shows its text in Quick Look.
@@ -1525,7 +1525,7 @@ export function App() {
     </div>
     {summary && template && elementEditor && !editorTargetGone(spreads, elementEditor) &&
       <ElementEditorDialog host={canvasWrap.current} key={JSON.stringify(elementEditor)} project={summary.id} template={template}
-        presentation={elementEditor.presentation} placement={placement} stage={stage.current} shown={setInlineShown}
+        presentation={elementEditor.presentation} placement={placement} click={elementEditor.click} stage={stage.current} shown={setInlineShown}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} params={summary.project.params} target={elementEditor} readOnly={summary.readOnly}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
         canvasReady={canvasReady} geometry={geometry} edit={edit} close={() => {

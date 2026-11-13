@@ -25,7 +25,7 @@ import type { EditorState, EditorTarget } from './editor-session';
 // moving the editor to the panel, sit in a toolbar under the canvas, so no panel covers the artwork.
 export type InlinePlacement = Rect & { zoom: number };
 export function ElementEditorDialog({ project, template, spread, params, target, readOnly, blocked, canvasReady, edit, close, importFile, prepare, network = '', host, geometry,
-  presentation = 'dialog', placement, stage, shown }: {
+  presentation = 'dialog', placement, stage, shown, click }: {
   project: string; template: TemplateInfo; spread: SpreadState; params: Values; target: EditorTarget; readOnly: boolean;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
   geometry?: BookGeometry;
@@ -33,6 +33,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   // Inline only: where the frame goes (undefined while the node is not on the page), the stage it is drawn in, whether
   // the frame is showing in place of the artwork, and moving this editor to the panel.
   placement?: InlinePlacement; stage?: HTMLElement | null; shown?: (showing: boolean) => void;
+  click?: { x: number; y: number; alt: boolean };
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
   // Settles once the frame may load: the network origins its policy allows are decided before it is served.
@@ -248,6 +249,14 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   // The frame takes focus once it shows (it is inert while loading), without scrolling the canvas to it.
   useEffect(() => {
     if (showing) frame.current?.focus({ preventScroll: true });
+  }, [showing]);
+  // The click on the page that opened the editor acts in it too, at the same place, once it shows.
+  const clicked = useRef(false);
+  useEffect(() => {
+    if (!showing || !click || clicked.current || !inlineBox.current || !at) return;
+    clicked.current = true;
+    const box = inlineBox.current.getBoundingClientRect();
+    frame.current?.contentWindow?.postMessage({ type: 'editor-click', x: (click.x - box.left) / at.zoom, y: (click.y - box.top) / at.zoom, altKey: click.alt }, renderOrigin);
   }, [showing]);
   const zoom = at?.zoom;
   useEffect(() => {

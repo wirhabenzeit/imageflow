@@ -187,8 +187,10 @@ try {
   const january = page.locator('.month').first();
   const days = january.locator('.days');
   await days.scrollIntoViewIfNeeded();
-  const daysBox = await days.boundingBox();
-  await w.mouse.click(daysBox.x + daysBox.width / 2, daysBox.y + daysBox.height / 2);
+  const original = await marked();
+  // One click on a day opens the days on the page and marks that day.
+  const tenth = await january.locator('.days li').nth(9).boundingBox();
+  await w.mouse.click(tenth.x + tenth.width / 2, tenth.y + tenth.height / 2);
   const dayEditor = w.locator('.inline-editor.showing');
   await dayEditor.waitFor();
   assert.equal(await w.locator('.element-editor').count(), 0, 'no editor panel');
@@ -219,10 +221,8 @@ try {
     near(pickerBox.y + rows[n - 1].y * scale, row.y, 1.5, 'day ' + n + ' top');
     near(rows[n - 1].height * scale, row.height, 1.5, 'day ' + n + ' height');
   }
-  const original = await marked();
-  await click(10);
   for (let i = 0; i < 50 && !(await marked()).includes('2027-01-10'); i++) await new Promise((resolve) => setTimeout(resolve, 200));
-  assert.ok((await marked()).includes('2027-01-10'), 'a click marks the date once');
+  assert.ok((await marked()).includes('2027-01-10'), 'the click that opened the days marks the date once');
   await picker.locator('li.marked button[aria-pressed="true"]').filter({ hasText: /^10/ }).waitFor();
   await click(11, 'Alt');
   for (let i = 0; i < 50 && !(await marked()).includes('11.01'); i++) await new Promise((resolve) => setTimeout(resolve, 200));

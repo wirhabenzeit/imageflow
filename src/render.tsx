@@ -1015,6 +1015,15 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       update?.({ element: draft, spread: spreadDraft });
       return;
     }
+    if (event.data?.type === 'editor-click' && presentation === 'inline') {
+      // The click on the page that opened this editor, at the same place in it.
+      const { x, y, altKey } = event.data;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      const target = window.document.elementFromPoint(x, y);
+      if (!(target instanceof HTMLElement)) return;
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, altKey: !!altKey }));
+      return;
+    }
     if (event.data?.type === 'editor-files') {
       // A file the app's controls imported for this element: the frame reads the project's files again.
       const session = typeof event.data.project === 'string' && /^[\w-]+$/.test(event.data.project) ? event.data.project : undefined;

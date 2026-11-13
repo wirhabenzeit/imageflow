@@ -10,7 +10,9 @@ import type { InlineEditing } from './BookFrame';
 // on-screen box is only a bounding box, and transformed interaction geometry is out of scope), too small to use, or
 // not on the page.
 export type Presentation = 'dialog' | 'inline';
-export type OpenEditor = EditorTarget & { presentation: Presentation; at?: string };
+// `click` is the click on the page that opened an inline document editor (client coordinates and ⌥), passed on to the
+// editor once it shows, so one click on a calendar day both opens the days and marks it.
+export type OpenEditor = EditorTarget & { presentation: Presentation; at?: string; click?: { x: number; y: number; alt: boolean } };
 type Target = BookGeometry['targets'][number];
 
 // Below this, in screen pixels, an inline editor is too small to use; it opens in the panel.
