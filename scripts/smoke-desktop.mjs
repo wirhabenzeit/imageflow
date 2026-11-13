@@ -105,7 +105,11 @@ try {
   }, output);
   await exportAction(window, 'Export proof PDF');
   // The two-page sample is shorter than its format allows; proof export reports that error and keeps it in Book check.
-  await expectStatus('Proof PDF saved. 1 error in Book check.');
+  // The detailed summary and Book check finish independently, especially on a cold app launch.
+  await window.waitForFunction(() => document.querySelector('.status-error') ||
+    document.querySelector('.status')?.textContent?.startsWith('Proof PDF saved'), null, { timeout: 45000 });
+  assert.match(await status.textContent(), /^Proof PDF saved\./);
+  await window.waitForFunction(() => /Book check · 1 error/.test(document.querySelector('.book-check-toggle')?.textContent ?? ''));
   assert.match(await window.locator('.book-check-toggle').textContent(), /Book check · 1 error/);
   checkProof(await PDFDocument.load(await readFile(output)), previewLines);
 
