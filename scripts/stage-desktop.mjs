@@ -30,8 +30,7 @@ export async function stageDesktop({ packaged = false, dev = false, destination 
     dev ? Promise.resolve() : cp(join(root, 'dist'), join(destination, 'dist'), { recursive: true }),
     cp(join(root, 'node_modules', 'esbuild'), join(destination, 'node_modules', 'esbuild'), { recursive: true }),
     cp(join(root, 'node_modules', 'typescript'), join(destination, 'node_modules', 'typescript'), { recursive: true }),
-    cp(join(root, 'sample/starter/template/types'), join(destination, 'authoring-types'), { recursive: true })
-      .then(() => cp(join(root, 'authoring'), join(destination, 'authoring-types'), { recursive: true }))
+    cp(join(root, 'authoring'), join(destination, 'authoring-types'), { recursive: true })
       .then(() => Promise.all([
         cp(join(root, 'node_modules/@types/react'), join(destination, 'authoring-types/react-runtime'), { recursive: true }),
         cp(join(root, 'node_modules/csstype'), join(destination, 'authoring-types/csstype'), { recursive: true }),

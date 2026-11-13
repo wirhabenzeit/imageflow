@@ -130,7 +130,6 @@ test('the type check resolves packages from the saved declarations, without node
   const runtime = join(folder, '..', 'runtime-' + Date.now());
   t.after(() => rm(runtime, { recursive: true, force: true }));
   await mkdir(runtime);
-  await cp(resolve('sample/starter/template/types'), join(runtime, 'authoring-types'), { recursive: true });
   await cp(resolve('authoring'), join(runtime, 'authoring-types'), { recursive: true });
   await cp(resolve('node_modules/@types/react'), join(runtime, 'authoring-types/react-runtime'), { recursive: true });
   await cp(resolve('node_modules/csstype'), join(runtime, 'authoring-types/csstype'), { recursive: true });

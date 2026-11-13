@@ -24,6 +24,7 @@ type IndexState = { entries: Map<string, IndexedDigest>; generation: number; clo
 const maximumIndexedFiles = 8192;
 
 const ignoredName = (name: string) => name === '.DS_Store' || name === '.imageflow' ||
+  name === '.imageflow-sdk' ||
   // Installed packages only feed Rebuild Dependencies; books use the saved bundle in template/vendor (ADR 0006).
   name === 'node_modules' ||
   name.startsWith('.imageflow-write-') || /(?:\.sw[opx]|\.tmp|~)$/.test(name);

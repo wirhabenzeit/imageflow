@@ -3,8 +3,9 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib';
 import { TemplateImportError, templateFiles } from './template-library';
+import { authoringSnapshot, authoringSnapshotFolder } from './authoring-sdk';
 
-// `.imageflow-template` files: a zip archive of a template's files, as listed by templateFiles. The archive is
+// `.imageflow-template` files: authored templateFiles plus an optional installed SDK snapshot. The archive is
 // deterministic (sorted names, fixed timestamps), so exporting the same template twice gives the same bytes, and
 // importing it gives the same hash as the folder it came from.
 
@@ -37,8 +38,9 @@ function pathProblem(name: string) {
 }
 
 /** Writes the template in `folder` to an `.imageflow-template` file. The file is replaced only once it is complete. */
-export async function writeTemplateArchive(folder: string, file: string) {
-  const files = await templateFiles(folder);
+export async function writeTemplateArchive(folder: string, file: string, typesRoot?: string) {
+  const generated = typesRoot ? await authoringSnapshot(typesRoot, folder) : new Map<string, Buffer>();
+  const files = [...await templateFiles(folder), ...generated.keys()].sort();
   // The export must be a file this app can import again, so the import's limits apply here first.
   if (files.length > maxEntries) throw new Error('The template has ' + files.length + ' files; a template file holds at most ' + maxEntries + '.');
   for (const path of files) {
@@ -50,7 +52,7 @@ export async function writeTemplateArchive(folder: string, file: string) {
   const central: Buffer[] = [];
   let offset = 0;
   for (const path of files) {
-    const data = await readFile(join(folder, ...path.split('/')));
+    const data = generated.get(path) ?? await readFile(join(folder, ...path.split('/')));
     total += data.length;
     if (total > maxBytes) throw new Error('The template is too large to export: a template file holds at most 512 MB.');
     const deflated = deflateRawSync(data, { level: 9 });
@@ -110,7 +112,8 @@ const invalid = (detail: string) => new TemplateImportError('This file is not a 
 
 /**
  * Unpacks an `.imageflow-template` file into `destination`, which must not exist yet. Only the files a template
- * folder would contribute are written: dotfiles, `node_modules/` and macOS's `__MACOSX/` are skipped, and an archive
+ * folder would contribute, plus the reserved SDK snapshot, are written. Other dotfiles, `node_modules/` and
+ * macOS's `__MACOSX/` are skipped, and an archive
  * that holds one folder with the template inside (as Finder's Compress makes) is unpacked from that folder. Entries
  * that would leave the destination, links, encrypted entries and damaged data are refused before anything is written.
  */
@@ -146,7 +149,7 @@ export async function extractTemplateArchive(file: string, destination: string) 
     const problem = pathProblem(name);
     if (problem) throw invalid(problem);
     const parts = name.split('/');
-    if (parts.some((part) => part.startsWith('.') || part === 'node_modules' || part === '__MACOSX')) continue;
+    if (parts.some((part) => (part.startsWith('.') && part !== authoringSnapshotFolder) || part === 'node_modules' || part === '__MACOSX')) continue;
     if (madeOn === 3 && (mode & 0o170000) === 0o120000) throw invalid(name + ' is a symbolic link. Templates must contain their files.');
     if (flags & 1) throw invalid(name + ' is encrypted.');
     if (method !== 0 && method !== 8) throw invalid(name + ' is compressed in a way this app does not read.');

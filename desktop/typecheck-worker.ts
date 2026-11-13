@@ -25,7 +25,7 @@ function check(): TypecheckResult {
     if (visited.has(actual)) return;
     visited.add(actual);
     for (const entry of readdirSync(actual, { withFileTypes: true })) {
-      if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === '.imageflow-sdk') continue;
       // Saved dependencies are checked through their declarations in vendor/types, not as template source.
       if (entry.name === 'vendor' && actual === root) continue;
       const next = join(actual, entry.name), canonical = realpathSync(next);
