@@ -71,6 +71,7 @@ Use them in a trusted macOS release job after checkout, Node setup and `npm ci`.
     security unlock-keychain -p "$IMAGEFLOW_KEYCHAIN_PASSWORD" "$IMAGEFLOW_KEYCHAIN"
     security import "$RUNNER_TEMP/ImageFlow.p12" -k "$IMAGEFLOW_KEYCHAIN" -P "$P12_PASSWORD" -f pkcs12 -T /usr/bin/codesign
     security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$IMAGEFLOW_KEYCHAIN_PASSWORD" "$IMAGEFLOW_KEYCHAIN"
+    security list-keychains -d user -s "$IMAGEFLOW_KEYCHAIN"
     printf 'APPLE_SIGNING_KEYCHAIN=%s\n' "$IMAGEFLOW_KEYCHAIN" >> "$GITHUB_ENV"
     printf 'APPLE_API_KEY=%s\n' "$RUNNER_TEMP/ImageFlow-AuthKey.p8" >> "$GITHUB_ENV"
 - name: Build release artifacts
