@@ -13,7 +13,7 @@ import { pathToFileURL } from 'node:url';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL } from '../src/desktop';
 import type { BookMenuState, CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
-import { editorPolicy } from './csp';
+import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
 import type { OpenProject } from './project';
 import { photoFile } from './photos';
@@ -128,12 +128,11 @@ async function serve(request: Request) {
   const session = sessions.get(id);
   if (!session) return new Response(null, { status: 404 });
   if (!resource) {
-    // Element editor frames of a template that declares network origins may reach the ones the user allowed
-    // (ADR 0006). Every other frame, and every check and export, keeps the offline policy.
-    const editor = new URL(request.url).searchParams.get('view') === 'editor';
-    const origins = editor ? session.network?.() ?? [] : [];
+    // The frames of a book whose template declares network origins may reach the ones the user allowed: element
+    // editors, and previews, checks and exports that draw <RenderedImage> pictures (ADR 0006).
+    const origins = session.network?.() ?? [];
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
-      'Content-Security-Policy': editorPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
+      'Content-Security-Policy': renderPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });
   }
   if (resource === 'data') return Response.json(renderData(session.book, id, session.mode));
@@ -141,12 +140,6 @@ async function serve(request: Request) {
     const asset = resource.slice('template/'.length);
     const bytes = session.book.assets.files.get(asset);
     if (bytes) return response(bytes, assetTypes[extname(asset).toLowerCase()] ?? 'application/octet-stream');
-  }
-  const fileMatch = /^file\/([\w-]+)$/.exec(resource);
-  if (fileMatch) {
-    const snapshot = session.book.fileImages?.get(fileMatch[1]);
-    const type = snapshot ? assetTypes[session.book.files[fileMatch[1]]?.extension ?? ''] : undefined;
-    if (snapshot && type) return response(await readFile(snapshot), type);
   }
   const photoMatch = /^(photo|thumb)\/([\w-]+)(?:\/([1-9]\d{0,5}))?$/.exec(resource);
   if (photoMatch) {
@@ -245,7 +238,7 @@ function captureCover(document: DocumentSession, book: OpenProject, closing = fa
   state.job = job;
   state.task = (async () => {
     const id = randomUUID();
-    sessions.set(id, { book, mode: 'export' });
+    sessions.set(id, { book, mode: 'export', network: () => document.networkOrigins });
     try {
       const cover = await captureBookPreview(renderOrigin + '/render/' + id,
         { target: { page: 1 }, maxEdge: 320, format: 'jpeg' }, job.signal);
@@ -317,6 +310,8 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
         }
       });
       document.networkTrust = bookNetworkTrust;
+      // Frames may reach what is already allowed from the first render on, without a question (ADR 0006).
+      await document.prepareNetwork().catch((error) => console.warn('ImageFlow could not read network approvals', error));
       const current = document;
       const webContentsId = editor.webContents.id;
       documents.set(webContentsId, document);
@@ -501,8 +496,8 @@ async function reviewImport(owner: BrowserWindow | undefined, plan: ImportPlan) 
   const detail = [
     ...(plan.packages.length ? ['It includes these npm packages, bundled into the template:',
       ...plan.packages.map(({ name, version, license }) => '  ' + name + ' ' + version + (license ? ' (' + license + ')' : '')), ''] : []),
-    ...(network.length ? ['While you edit, its editors connect to:', ...network.map((origin) => '  ' + origin),
-      'They can send what you edit there. Printed books never depend on these sites.', ''] : []),
+    ...(network.length ? ['To draw its pages and editors, while you edit and when you export, it connects to:', ...network.map((origin) => '  ' + origin),
+      'It can send what you edit there. Exporting books made from it needs these sites.', ''] : []),
     'Templates contain code: only import templates from people you trust.',
   ].join('\n');
   const options = {
@@ -528,10 +523,15 @@ async function importTemplate(owner: BrowserWindow | undefined, path: string) {
   return result;
 }
 
-/** The declared sites a book's editors may reach without asking: its template, as it is now, is trusted. */
-async function bookNetworkTrust(folder: string, declared: readonly string[]) {
+/**
+ * The sites a book's frames may reach without asking, because its template, as it is now, is trusted: those of
+ * `declared`, or before the template has rendered, all the trust covers.
+ */
+async function bookNetworkTrust(folder: string, declared?: readonly string[]) {
   const hash = await templateHash(await templateFolder(folder));
-  return trustedOrigins(declared, { builtIn: await library.isBuiltIn(hash), allowed: await trust.allowed(hash) });
+  const builtIn = await library.builtInNetwork(hash);
+  const allowed = builtIn ?? await trust.allowed(hash);
+  return declared ? trustedOrigins(declared, { builtIn: builtIn !== undefined, allowed }) : allowed;
 }
 
 /** Library entries with why their network access needs no question, for Settings and New Book. */
@@ -1140,7 +1140,6 @@ void app.whenReady().then(async () => {
     try { return { value: await document.editorNetwork(id, origins) }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
-  ipcMain.handle(channels.saveFile, (event, id: string, request: { name: unknown; bytes: unknown }) => fromEditor(event, (document) => document.saveGeneratedFile(id, request)));
   ipcMain.handle(channels.export, (event, id: string, mode: ExportMode) => fromEditor(event, (document) => document.exportBook(document.window, id, mode)));
   ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) => fromEditor(event, (document) => document.checkOpenBook(document.currentBook(id), request)));

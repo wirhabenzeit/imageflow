@@ -19,7 +19,7 @@ export const channels = {
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
   sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
-  open: 'project:open', save: 'project:save', import: 'project:import', saveFile: 'project:save-file', network: 'project:editor-network',
+  open: 'project:open', save: 'project:save', import: 'project:import', network: 'project:editor-network',
   command: 'project:command', changed: 'project:changed',
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
   check: 'project:check', cancelCheck: 'project:cancel-check',
@@ -113,10 +113,9 @@ export type DesktopApi = {
   onAgentLease(listener: (id: string) => boolean): () => void;
   onAgentRelease(listener: () => void): () => void;
   importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[] } | null>>;
-  // A file an element editor generated (ADR 0006), stored in the book under a new ID.
-  saveFile(id: string, request: { name: string; bytes: Uint8Array }): Promise<Result<{ summary: ProjectSummary; id: string }>>;
-  // Asks once per book to let element editors reach the template's declared origins; resolves to those allowed.
-  editorNetwork(id: string, origins: string[]): Promise<Result<string[]>>;
+  // Asks once per book to let its frames reach the template's declared origins; resolves to those allowed, with a new
+  // summary to render when that changed what the frames may reach.
+  editorNetwork(id: string, origins: string[]): Promise<Result<{ origins: string[]; summary?: ProjectSummary }>>;
   pathsForFiles(files: File[]): string[];
   exportBook(id: string, mode: ExportMode): Promise<Result<{ warnings: Issue[]; errors: Issue[] } | null>>;
   cancelExport(): Promise<void>;

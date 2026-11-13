@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { editorPolicy } from '../desktop/csp';
+import { renderPolicy } from '../desktop/csp';
 import { templateSchema } from '../src/template';
 
 const offline = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data:";
 
-test('an editor frame policy adds only the allowed origins, plus blob workers for libraries that need them', () => {
-  assert.equal(editorPolicy(offline, []), offline);
-  const policy = editorPolicy(offline, ['https://tiles.example.com', 'https://*.maps.example']);
+test('a render frame policy adds only the allowed origins, plus blob workers for libraries that need them', () => {
+  assert.equal(renderPolicy(offline, []), offline.replace("img-src 'self' data:", "img-src 'self' data: blob:"), 'offline frames show drawn pictures only');
+  assert.match(renderPolicy(offline, []), /connect-src 'self';/);
+  const policy = renderPolicy(offline, ['https://tiles.example.com', 'https://*.maps.example']);
   assert.match(policy, /connect-src 'self' https:\/\/tiles\.example\.com https:\/\/\*\.maps\.example;/);
   assert.match(policy, /img-src 'self' data: blob: https:\/\/tiles\.example\.com https:\/\/\*\.maps\.example/);
   assert.match(policy, /font-src 'self' https:\/\/tiles\.example\.com/);

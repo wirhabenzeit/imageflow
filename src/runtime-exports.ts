@@ -1,8 +1,8 @@
 // The named exports of the `imageflow` module that templates import. The renderer provides them at runtime, the
 // bundler exposes exactly these names, and the shipped declarations must declare the same set (src/template-types.ts).
 export const runtimeExports = [
-  'defineTemplate', 'spreadFor', 'p', 'mm', 'pt', 'inch', 'printFormat', 'Spread', 'PhotoBox', 'MarkdownBox', 'Element', 'asset', 'file', 'imageFile',
-  'geometry', 'box', 'issue', 'capabilities',
+  'defineTemplate', 'spreadFor', 'p', 'mm', 'pt', 'inch', 'printFormat', 'Spread', 'PhotoBox', 'MarkdownBox', 'Element', 'asset', 'file',
+  'geometry', 'box', 'issue', 'capabilities', 'RenderedImage',
 ] as const;
 
 // Template API features this runtime provides beyond contract 1 as first released. A template lists the ones it
@@ -21,9 +21,10 @@ export const capabilities = [
   'opening-spreads',
   // `facingPages: false` formats and `span: 'page'` layouts: one page per unit instead of facing spreads.
   'single-pages',
-  // `imageFile(id)` for PNG, JPEG and WebP file parameters, and `saveFile` in custom element editors (ADR 0006).
-  'image-files', 'editor-save-file',
   // `network`: HTTPS origins element editors may reach once the user allows them (ADR 0006).
   'editor-network',
+  // `<RenderedImage>`: host-managed asynchronous pictures, which may use the `network` origins in previews, checks
+  // and export (ADR 0006).
+  'rendered-images',
 ] as const;
 export type Capability = typeof capabilities[number];

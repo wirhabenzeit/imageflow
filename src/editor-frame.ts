@@ -9,7 +9,6 @@ export type FrameMessage =
   | { type: 'editor-commit'; values: unknown; spread?: unknown } | { type: 'editor-flushed'; request: number; values: unknown; spread?: unknown }
   | { type: 'editor-cancel' }
   | { type: 'editor-import'; request: number; accept: unknown; mode?: unknown } | { type: 'editor-notice'; message: unknown }
-  | { type: 'editor-save-file'; request: number; name: unknown; bytes: unknown }
   | { type: 'editor-warning'; message: unknown } | { state: 'error'; message: string };
 
 // The plumbing both editor dialogs share: listening to their own frame only, its readiness and height, a failure
@@ -23,7 +22,6 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
   cancel(): void;
   warning?(message: unknown): void;
   import?(data: Extract<FrameMessage, { type: 'editor-import' }>): void;
-  saveFile?(data: Extract<FrameMessage, { type: 'editor-save-file' }>): void;
 }, flushError = 'The editor did not respond, so nothing was saved. Try Done again, or Cancel.') {
   const [height, setHeight] = useState(240);
   const [ready, setReady] = useState(false);
@@ -66,8 +64,6 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
       if (!failed && typeof data.message === 'string') setError(data.message);
     } else if (data.type === 'editor-import') {
       handlers.import?.(data);
-    } else if (data.type === 'editor-save-file') {
-      handlers.saveFile?.(data);
     } else if (data.type === 'editor-size') {
       setHeight(Math.max(120, Math.min(data.height, window.innerHeight * 0.7)));
     } else if (data.type === 'editor-flushed') {

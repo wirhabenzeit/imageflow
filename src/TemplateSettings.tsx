@@ -59,10 +59,10 @@ export function TemplateSettings({ api, library }: { api?: DesktopApi; library: 
         {entry.packages?.length ? <p className="settings-note">Packages: {entry.packages.map(({ name, version, license }) =>
           name + ' ' + version + (license ? ' (' + license + ')' : '')).join(', ')}</p> : null}
         {entry.network?.length ? <div className="template-network">
-          <p className="settings-note">Editors connect to: {entry.network.join(', ')}</p>
+          <p className="settings-note">Connects to: {entry.network.join(', ')}</p>
           <p className="settings-note">{entry.networkTrust === 'built-in' ? 'Allowed in every book: this template comes with ImageFlow.'
             : entry.networkTrust === 'allowed' ? 'Allowed in every book made from this version, until its files change.'
-              : 'Each book made from it asks before its editors go online.'}</p>
+              : 'Each book made from it asks before it goes online.'}</p>
           {entry.source === 'imported' && <button type="button" disabled={busy || !api}
             aria-label={(entry.networkTrust ? 'Stop allowing network access for ' : 'Allow network access for ') + entry.label}
             onClick={() => void trustTemplate(entry.id, !entry.networkTrust)}>{entry.networkTrust ? 'Stop Allowing' : 'Allow in Every Book'}</button>}

@@ -1,0 +1,136 @@
+// Host-managed asynchronous rendering (ADR 0006). A layout element whose picture takes time to make, such as a map
+// drawn by a WebGL library from remote tiles, renders through <RenderedImage>. The host tells it the element's size,
+// the output resolution and a cancellation signal, limits how many run at once, and waits for all of them, with a
+// timeout, before a Book check or an export page is final. The result is an image owned by the frame: rendering
+// never changes the book's saved content, and nothing is kept after the frame closes.
+import { useLayoutEffect, useRef } from 'react';
+import type { CSSProperties } from 'react';
+
+export type RenderMode = 'preview' | 'check' | 'export';
+export type RenderTarget = {
+  // The element's size in CSS pixels (96 per inch), as laid out on the page.
+  width: number; height: number;
+  // Device pixels per CSS pixel: the screen's for previews, the format's target resolution ÷ 96 for export.
+  pixelRatio: number;
+  mode: RenderMode;
+  // Aborted when the element unmounts, its inputs change, or the host gives up on it.
+  signal: AbortSignal;
+};
+export type RenderedPicture = Blob | HTMLCanvasElement | OffscreenCanvas;
+export type RenderedImageProps = {
+  // Draws the picture for the target. Throw (or reject) to report a failure; the message is shown to the user.
+  draw: (target: RenderTarget) => Promise<RenderedPicture>;
+  // Everything `draw` depends on, as JSON-like data. The picture is drawn again when it changes.
+  inputs: unknown;
+  // Names the picture in progress and failure messages, such as 'Map'.
+  label?: string;
+  alt?: string;
+  className?: string;
+  style?: CSSProperties;
+};
+
+type Settings = { mode: RenderMode; pixelRatio: number; concurrency: number; timeoutMs: number };
+export type RenderedImageFailure = { label: string; message: string; spread?: string; element?: string; timedOut: boolean };
+
+let settings: Settings = { mode: 'preview', pixelRatio: 1, concurrency: 2, timeoutMs: 60_000 };
+let running = 0;
+const queue: (() => void)[] = [];
+const pending = new Set<Promise<unknown>>();
+const failures = new Map<HTMLElement, RenderedImageFailure>();
+
+/** Set by the render frame before it renders layouts. */
+export function configureRenderedImages(next: Partial<Settings>) {
+  settings = { ...settings, ...next };
+}
+
+/** Whether a picture is being drawn now; the purity guards allow the declared rendering work meanwhile. */
+export const renderingImages = () => running > 0;
+
+/** Waits until every picture started so far, and any they start, has finished; returns the failures still on the page. */
+export async function settleRenderedImages(): Promise<RenderedImageFailure[]> {
+  while (pending.size) await Promise.allSettled([...pending]);
+  return [...failures].filter(([node]) => node.isConnected).map(([, failure]) => failure);
+}
+
+async function slot<T>(work: () => Promise<T>) {
+  if (running >= settings.concurrency) await new Promise<void>((resolve) => queue.push(resolve));
+  running++;
+  try { return await work(); }
+  finally { running--; queue.shift()?.(); }
+}
+
+async function toBlob(picture: RenderedPicture): Promise<Blob> {
+  if (picture instanceof Blob) return picture;
+  if ('convertToBlob' in picture) return picture.convertToBlob({ type: 'image/png' });
+  return new Promise((resolve, reject) => picture.toBlob((blob) => blob ? resolve(blob) : reject(new Error('The canvas could not be encoded.')), 'image/png'));
+}
+
+// Libraries also reject with plain objects or events that carry a message.
+const messageOf = (error: unknown) => error instanceof Error ? error.message
+  : error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string' ? (error as { message: string }).message : String(error);
+
+/**
+ * An image drawn asynchronously by template code, at the element's size and the output's resolution. Until it is
+ * ready the box shows a quiet placeholder; a failure shows on the page and is a Book check error, so a missing
+ * picture never becomes an incomplete print silently.
+ */
+export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', className, style }: RenderedImageProps) {
+  const wrapper = useRef<HTMLDivElement>(null);
+  const image = useRef<HTMLImageElement>(null);
+  const latest = useRef(draw);
+  latest.current = draw;
+  const key = JSON.stringify(inputs ?? null);
+  useLayoutEffect(() => {
+    const node = wrapper.current!;
+    const img = image.current!;
+    const controller = new AbortController();
+    const { mode, pixelRatio, timeoutMs } = settings;
+    let url: string | undefined;
+    node.dataset.rendered = 'pending';
+    img.style.display = 'none';
+    failures.delete(node);
+    const fail = (message: string, timedOut: boolean) => {
+      if (controller.signal.aborted && !timedOut) return;
+      node.dataset.rendered = 'failed';
+      node.title = message;
+      failures.set(node, { label, message, timedOut, spread: node.closest<HTMLElement>('[data-spread]')?.dataset.spread,
+        element: node.closest<HTMLElement>('[data-element]')?.dataset.element });
+    };
+    const task = slot(async () => {
+      if (controller.signal.aborted) return;
+      const width = node.offsetWidth;
+      const height = node.offsetHeight;
+      if (!width || !height) throw new Error('the element has no size on the page.');
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { controller.abort(); reject(Object.assign(new Error(label + ' did not finish rendering within ' +
+          Math.round(timeoutMs / 1000) + ' s.'), { timedOut: true })); }, timeoutMs);
+      });
+      try {
+        const blob = await Promise.race([latest.current({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]);
+        if (controller.signal.aborted) return;
+        url = URL.createObjectURL(blob);
+        img.src = url;
+        await img.decode();
+        if (controller.signal.aborted) return;
+        img.style.display = 'block';
+        node.dataset.rendered = 'ready';
+        node.removeAttribute('title');
+      } finally { clearTimeout(timer); }
+    }).catch((error) => {
+      const timedOut = !!(error as { timedOut?: boolean })?.timedOut;
+      fail(timedOut ? messageOf(error) : label + ' could not be rendered: ' + messageOf(error), timedOut);
+    });
+    pending.add(task);
+    void task.finally(() => pending.delete(task));
+    return () => {
+      controller.abort();
+      failures.delete(node);
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [key]);
+  return <div ref={wrapper} className={'if-rendered-image' + (className ? ' ' + className : '')} style={style} data-rendered="pending"
+    data-rendered-label={label}>
+    <img ref={image} alt={alt} style={{ display: 'none', width: '100%', height: '100%' }} />
+  </div>;
+}

@@ -422,19 +422,6 @@ export function App() {
       }
     }));
   }
-  // A file an element editor generated (ADR 0006). Registering it is not undoable; the editor's assignment is.
-  function saveProjectFile(name: string, bytes: Uint8Array) {
-    const generation = inputGeneration.current;
-    return new Promise<{ id: string; project: string } | undefined>((resolve, reject) => enqueue(async () => {
-      const before = current.current;
-      if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
-      const result = await api.saveFile(before.id, { name, bytes }).catch((error: unknown) => ({ error: String(error) }));
-      if ('error' in result) return reject(new Error(result.error));
-      if (current.current !== before) return resolve(undefined);
-      adopt(result.value.summary);
-      resolve({ id: result.value.id, project: result.value.summary.id });
-    }));
-  }
   // importParameterFile only reads refs, the preload API and state setters, so it may be kept from the first render.
   const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, defaultMode: summary?.project.importMode ?? 'copy', importFile: importParameterFile }), [summary?.project.files, summary?.project.importMode]);
 
@@ -561,6 +548,23 @@ export function App() {
     return () => { mounted = false; command(); changed(); progress(); lease(); release(); appError(); };
   }, [api]);
 
+  // Network origins the template declares (ADR 0006): decided once per book and declaration when it first renders,
+  // and again whenever an element editor opens. Newly allowed origins reload the frames so they may reach them.
+  const networkAsked = useRef(new Set<string>());
+  // Resolves to the project ID to render from now on.
+  function decideNetwork(declared: TemplateInfo | undefined, always = false): Promise<string | void> {
+    const before = current.current;
+    if (!api || !before || before.readOnly || !declared?.network?.length) return Promise.resolve(before?.id);
+    const key = before.folder + '\n' + declared.network.join(' ');
+    if (!always && networkAsked.current.has(key)) return Promise.resolve(before.id);
+    networkAsked.current.add(key);
+    return api.editorNetwork(before.id, declared.network).then((result) => {
+      if (!('value' in result) || !result.value.summary || current.current !== before) return current.current?.id;
+      adopt(result.value.summary);
+      return result.value.summary.id;
+    });
+  }
+
   // The book frame renders every spread, so its status doubles as the book check.
   const acceptCandidate = (id: string) => candidateId.current === id;
   function bookStatus(status: RenderStatus, id: string) {
@@ -574,6 +578,7 @@ export function App() {
       setReload(undefined);
       setLastReady(status);
       setTemplate(status.template);
+      void decideNetwork(status.template);
       setCropping((previous) => previous?.settling && previous.settling !== id ? undefined : previous);
     } else {
       candidateId.current = undefined;
@@ -1425,8 +1430,8 @@ export function App() {
       <ElementEditorDialog host={canvasWrap.current} key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
-        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile} saveFile={saveProjectFile}
-          prepare={api && summary && template?.network?.length ? () => api.editorNetwork(summary.id, template.network!) : undefined} />}
+        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile}
+          prepare={template?.network?.length ? () => decideNetwork(template, true) : undefined} />}
     {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&
       <LayoutPickerDialog key={layoutPicker.spread + ':' + layoutPicker.family} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === layoutPicker.spread)!} family={layoutPicker.family} layout={layoutPicker.layout}

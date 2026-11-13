@@ -152,3 +152,12 @@ html:has(.if-book), html:has(.if-book) body { background: transparent; }
 .if-editor .if-control .pc-segmented button[aria-checked="true"] { background: var(--if-editor-control); box-shadow: 0 1px 2px #0002; }
 .if-editor .if-control .pc-file select { flex: 1; min-width: 0; }
 .if-editor .if-control input.pc-number { width: 64px; }
+
+/* <RenderedImage> (ADR 0006): a quiet placeholder while the picture renders, and a visible failure. */
+:where(.if-rendered-image) { position: relative; overflow: hidden; }
+.if-rendered-image[data-rendered="pending"] { background: repeating-linear-gradient(135deg, rgb(0 0 0 / 4%) 0 6px, rgb(0 0 0 / 7%) 6px 12px); }
+.if-rendered-image[data-rendered="failed"] { background: rgb(190 40 40 / 10%); outline: 1px dashed rgb(190 40 40 / 60%); outline-offset: -1px; }
+.if-rendered-image[data-rendered="failed"]::after {
+  content: attr(title); position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; text-align: center;
+  font: 12px/1.3 system-ui, sans-serif; color: rgb(140 20 20);
+}

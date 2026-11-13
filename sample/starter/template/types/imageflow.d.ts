@@ -244,14 +244,6 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
    * imported file stays in the project. `file(id)` reads it at once.
    */
   importFile(accept: readonly string[]): Promise<string | undefined>;
-  /**
-   * Stores content this editor generated, such as an image it drew or data it fetched, as a new file in the book
-   * and resolves to its file ID (undefined in read-only mode or when the book refuses it). Accepts PNG, JPEG, WebP
-   * (up to 50 MB) and GPX, JSON, GeoJSON, TXT or CSV text (up to 20 MB); `name` gives the extension. Each call
-   * makes a new file. Assign the ID with `set`; files nothing refers to any more, including Undo, are deleted.
-   * Requires `editor-save-file`.
-   */
-  saveFile(data: Blob | ArrayBuffer | ArrayBufferView | string, options: { name: string }): Promise<string | undefined>;
 };
 /**
  * Typed props are checked strictly against the declaration, so an editor typed for `'zoon'` cannot be the editor of
@@ -497,7 +489,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
-  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'image-files' | 'editor-save-file' | 'editor-network';
+  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-network' | 'rendered-images';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -778,12 +770,37 @@ export function asset(path: string): string;
  * latter in the Book check. Parse the text yourself and mark problems on a rendered node with `data-issue="…"`.
  */
 export function file(id: string): { name: string; extension: string; text: string } | undefined;
+
+/** Where and how big a `<RenderedImage>` draws. */
+export type RenderTarget = {
+  /** The element's size in CSS pixels (96 per inch), as laid out on the page. */
+  width: number; height: number;
+  /** Device pixels per CSS pixel: the screen's in previews, the format's target resolution ÷ 96 in export. */
+  pixelRatio: number;
+  mode: 'preview' | 'check' | 'export';
+  /** Aborted when the element goes away, its inputs change, or ImageFlow stops waiting for it. */
+  signal: AbortSignal;
+};
+export type RenderedImageProps = {
+  /** Draws the picture for the target: a PNG or JPEG `Blob`, or a canvas. Reject to report a failure. */
+  draw: (target: RenderTarget) => Promise<Blob | HTMLCanvasElement | OffscreenCanvas>;
+  /** Everything `draw` depends on, as JSON-like data; the picture is drawn again when it changes. */
+  inputs: unknown;
+  /** Names the picture in messages, such as `'Map'`. */
+  label?: string;
+  alt?: string;
+  className?: string;
+  style?: CSSProperties;
+};
 /**
- * An image file parameter's value (PNG, JPEG or WebP): a URL for `<img src>` or a CSS background, and its pixel
- * size, for example to check resolution. Undefined when no file is assigned, the file is not an image, or it is
- * missing or unreadable. Requires `image-files`.
+ * A picture that template code draws asynchronously, such as a map from a WebGL library and remote tiles
+ * (requires `rendered-images`). ImageFlow gives `draw` the element's size, the output resolution and a cancellation
+ * signal, runs a few at a time, and waits for all of them, with a timeout, before a Book check or export is final.
+ * Inside `draw`, timers, WebGL, workers and requests to the template's `network` origins are allowed. The picture
+ * belongs to that render only: it is drawn again in every preview and export and never saved in the book. A failure
+ * or timeout is a `rendered-image-failed` error, so export never prints a page without it.
  */
-export function imageFile(id: string): { name: string; extension: string; url: string; width: number; height: number } | undefined;
+export function RenderedImage(props: RenderedImageProps): ImageFlowElement;
 
 // Only the declarations marked `export` above are part of the module.
 export {};

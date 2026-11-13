@@ -193,8 +193,14 @@ export class TemplateLibrary {
 
   /** Whether a template with this hash ships with the app. */
   async isBuiltIn(hash: string) {
+    return (await this.builtInNetwork(hash)) !== undefined;
+  }
+
+  /** The network origins a built-in template with this hash declares, or undefined when no built-in has the hash. */
+  async builtInNetwork(hash: string) {
     await this.loadBuiltIns();
-    return !!hash && [...this.builtIns.values()].some(({ entry }) => entry.hash === hash);
+    const found = hash ? [...this.builtIns.values()].find(({ entry }) => entry.hash === hash) : undefined;
+    return found ? found.entry.network ?? [] : undefined;
   }
 
   /** Every template a book can be created from: built-ins, replaced by an imported template with the same ID. */

@@ -1,4 +1,5 @@
 import { createContext, useContext, useLayoutEffect, useRef } from 'react';
+import { RenderedImage } from './rendered-image';
 import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
@@ -140,8 +141,6 @@ export type ElementEditorProps = {
   // `scope: 'spread'` names one of the layout parameters the editor declares instead of an element parameter.
   Control: (props: { parameter: string; label?: string; scope?: 'element' | 'spread' }) => ReactNode;
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
-  // Stores content the editor generated (an image it drew, data it fetched) as a new file in the book (ADR 0006).
-  saveFile: (data: Blob | ArrayBuffer | ArrayBufferView | string, options: { name: string }) => Promise<string | undefined>;
 };
 // A layout family's picker chooses one of the family's variants. It runs in a sandboxed frame like an element
 // editor; its draft is a layout ID, and ImageFlow applies it on Done as an ordinary layout switch.
@@ -567,13 +566,6 @@ export function file(id: string): { name: string; extension: string; text: strin
   const found = id && Object.hasOwn(files, id) ? files[id] : undefined;
   return found?.text === undefined ? undefined : { name: found.name, extension: found.extension, text: found.text };
 }
-// An image file parameter's value (PNG, JPEG or WebP): its URL and pixel size, for an <img> or CSS background.
-// Undefined when none is assigned, the file is not an image, or it cannot be read (the Book check reports that).
-export function imageFile(id: string): { name: string; extension: string; url: string; width: number; height: number } | undefined {
-  const found = id && Object.hasOwn(files, id) ? files[id] : undefined;
-  const image = found?.image;
-  return found && image?.url ? { name: found.name, extension: found.extension, url: image.url, width: image.width, height: image.height } : undefined;
-}
 
 // Reusable box declarations. The ID stays explicit where the declaration is used: `boxes: { hero: box.photo('Hero') }`.
 export const box = {
@@ -608,7 +600,8 @@ export function issue(found: TemplateIssue): Required<IssueMarker> {
 }
 
 export const runtime = {
-  defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, PhotoBox, MarkdownBox, Element, asset, file, imageFile, geometry, box, issue, capabilities,
+  defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
+  RenderedImage,
 } satisfies Record<typeof runtimeExports[number], unknown>;
 
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.

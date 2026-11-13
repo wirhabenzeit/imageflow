@@ -1,10 +1,11 @@
-// A real map page (ADR 0006). The editor shows a MapLibre map with OpenFreeMap styles: drag, scroll and the
-// buttons frame it, and Update print map renders the view at print resolution and saves it into the book with
-// saveFile. The page draws that saved image, the GPX track on top as vector lines, and the map's attribution, so
-// printing never needs the network.
+// A real map page (ADR 0006). The page draws the map live with MapLibre GL and OpenFreeMap styles through
+// <RenderedImage>: at screen resolution in the editor, and again at the format's target resolution when the book is
+// exported. The GPX track lies on top as vector lines, with the map's attribution. Only the map's settings are saved
+// in the book; the editor frames the view by dragging and zooming. Export needs the internet, and a later export may
+// look different if the map provider changes its maps or styles.
 import React from 'react';
-import { file, geometry, imageFile, issue, p } from 'imageflow';
-import type { ElementEditorProps, ImageFlowNode, Rect, ResolvedFormat } from 'imageflow';
+import { file, geometry, issue, p, RenderedImage } from 'imageflow';
+import type { ElementEditorProps, ImageFlowNode, Rect, RenderTarget, ResolvedFormat } from 'imageflow';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
@@ -23,20 +24,14 @@ export const mapParameters = {
   zoom: p.number({ label: 'Zoom', default: 8.5, min: 0, max: 18, step: .01 }),
   trackColor: p.color({ label: 'Track colour', default: '#c8432b' }),
   trackWidth: p.number({ label: 'Track width', default: 1, min: .3, max: 3, step: .1, unit: 'mm' }),
-  // The saved print image and the view it shows; set together by Update print map.
-  snapshot: p.file({ label: 'Print map', accept: ['.png', '.jpg'] }),
-  snapshotView: p.string({ label: 'Print map view', default: '', maxLength: 200 }),
 };
-export const mapEditorParameters = ['track', 'style', 'longitude', 'latitude', 'zoom', 'snapshot', 'snapshotView'] as const;
-type MapValues = { track: string; style: MapStyle; longitude: number; latitude: number; zoom: number; snapshot: string; snapshotView: string };
+export const mapEditorParameters = ['track', 'style', 'longitude', 'latitude', 'zoom'] as const;
+type MapValues = { track: string; style: MapStyle; longitude: number; latitude: number; zoom: number };
 export type MapEditorProps = ElementEditorProps<typeof mapParameters, typeof mapEditorParameters[number]>;
 
 const cssPerMm = 96 / 25.4;
 // The map's area: the whole spread with its bleed.
 export const mapRect = (format: ResolvedFormat) => geometry.spread(format, 'bleed');
-// What the print image shows; it is outdated when any of this changes, including the format's size.
-const viewKey = (values: MapValues, rect: Rect) => [values.style, values.longitude.toFixed(5), values.latitude.toFixed(5), values.zoom.toFixed(2),
-  rect.width.toFixed(1) + 'x' + rect.height.toFixed(1)].join(' ');
 
 // Web Mercator, as MapLibre uses it: x and y in 0–1 across the world, and 512 CSS pixels per world at zoom 0.
 const mercator = ([longitude, latitude]: number[]) => {
@@ -53,7 +48,7 @@ export function trackPoints(text: string) {
   return points;
 }
 
-/** The track in the element's CSS pixels, for the same view the print image shows. */
+/** The track in the element's CSS pixels, for the same view the map shows. */
 function projectTrack(points: number[][], values: MapValues, width: number, height: number) {
   const world = 512 * 2 ** values.zoom;
   const [cx, cy] = mercator([values.longitude, values.latitude]);
@@ -70,77 +65,65 @@ function readTrack(id: string) {
   catch (error) { return { points: undefined, problem: source.name + ' ' + (error instanceof Error ? error.message : 'could not be read') + '.' }; }
 }
 
-/** The map as the page draws it: the saved print image, the track over it, and the attribution. */
-export function MapView({ values, trackColor, trackWidth, rect, mode, Element }: {
-  values: MapValues; trackColor: string; trackWidth: number; rect: Rect; mode: 'edit' | 'export';
-  Element: (props: { id: 'map'; rect: Rect; className?: string; children?: ImageFlowNode }) => ImageFlowNode;
-}) {
-  const image = imageFile(values.snapshot);
-  const width = rect.width * cssPerMm, height = rect.height * cssPerMm;
-  const { points, problem } = readTrack(values.track);
-  const findings = [
-    problem && issue({ code: 'gpx-invalid', message: problem + ' The track is left out.', element: 'map', parameter: 'track', file: values.track,
-      suggestion: 'Assign a GPX file that contains a track or route, or clear the GPX track.' }),
-    !image && issue({ code: 'map-not-generated', severity: 'error', message: 'The map has no print image yet.', element: 'map', parameter: 'snapshot',
-      suggestion: 'Open the map editor and choose Update print map.' }),
-    image && values.snapshotView !== viewKey(values, rect) && issue({ code: 'map-outdated', message: 'The print image shows an earlier view of the map.',
-      element: 'map', parameter: 'snapshot', suggestion: 'Open the map editor and choose Update print map.' }),
-  ].filter((finding) => !!finding);
-  return <Element id="map" className="map" rect={rect}>
-    {image ? <img className="map-image" src={image.url} alt="" />
-      : mode === 'edit' && <span className="map-empty">Map: click to place it, then choose Update print map</span>}
-    {points && <svg className="map-track" viewBox={'0 0 ' + width.toFixed(1) + ' ' + height.toFixed(1)} preserveAspectRatio="none" aria-label="Route">
-      <polyline points={projectTrack(points, values, width, height)} style={{ stroke: trackColor, strokeWidth: trackWidth * cssPerMm }} />
-    </svg>}
-    <span className="map-attribution">{mapAttribution}</span>
-    {findings.map((finding, i) => <span key={i} hidden {...finding} />)}
-  </Element>;
-}
-
 type MapLibre = typeof import('maplibre-gl');
-// MapLibre is loaded only when an editor opens, so book pages never evaluate it. Its package is CommonJS, so the
+// MapLibre is evaluated only when a map is drawn, so other pages never load it. Its package is CommonJS, so the
 // bundle exposes it as the default export.
 const loadMapLibre = () => import('maplibre-gl').then((module) => ((module as { default?: MapLibre }).default ?? module) as MapLibre);
 
-/** Renders the view off screen at the print size and resolution and returns it as an image. */
-async function printImage(maplibregl: MapLibre, values: MapValues, rect: Rect, dpi: number) {
-  const width = Math.round(rect.width * cssPerMm), height = Math.round(rect.height * cssPerMm);
+/**
+ * Draws the view off screen at the element's size and the target's resolution, once every tile and the style have
+ * loaded. A style or tile that fails to load fails the whole map, so a print never has holes in it.
+ */
+async function drawMap(view: { style: MapStyle; longitude: number; latitude: number; zoom: number }, target: RenderTarget) {
+  const maplibregl = await loadMapLibre();
+  target.signal.throwIfAborted();
   const holder = document.createElement('div');
-  holder.style.cssText = 'position:fixed;left:-20000px;top:0;width:' + width + 'px;height:' + height + 'px;';
+  holder.style.cssText = 'position:fixed;left:-20000px;top:0;width:' + target.width + 'px;height:' + target.height + 'px;';
   document.body.append(holder);
   const map = new maplibregl.Map({
-    container: holder, style: styleUrl(values.style), center: [values.longitude, values.latitude], zoom: values.zoom,
-    interactive: false, attributionControl: false, fadeDuration: 0, pixelRatio: dpi / 96, maxCanvasSize: [16384, 16384],
+    container: holder, style: styleUrl(view.style), center: [view.longitude, view.latitude], zoom: view.zoom,
+    interactive: false, attributionControl: false, fadeDuration: 0, pixelRatio: target.pixelRatio, maxCanvasSize: [16384, 16384],
     canvasContextAttributes: { preserveDrawingBuffer: true },
   });
   try {
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('The map did not finish loading within a minute.')), 60_000);
-      map.once('idle', () => { clearTimeout(timer); resolve(); });
-      map.on('error', (event) => { if (!map.loaded()) { clearTimeout(timer); reject(event.error ?? new Error('The map could not load.')); } });
+      const abort = () => reject(new Error('stopped'));
+      target.signal.addEventListener('abort', abort, { once: true });
+      map.on('error', (event) => reject(new Error((event.error?.message ?? 'a map resource did not load') + ' (' + mapOrigin + ')')));
+      map.once('idle', () => { target.signal.removeEventListener('abort', abort); resolve(); });
     });
-    const canvas = map.getCanvas();
-    let blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-    let name = 'map.png';
-    // Very large maps are saved as JPEG to stay well inside the book's file size limit.
-    if (blob && blob.size > 40_000_000) {
-      blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', .92));
-      name = 'map.jpg';
-    }
-    if (!blob) throw new Error('The map image could not be created.');
-    return { blob, name, pixels: canvas.width + ' × ' + canvas.height };
+    return map.getCanvas();
   } finally {
-    map.remove();
-    holder.remove();
+    // The canvas is encoded before the map goes; removing it after a tick keeps the drawing buffer until then.
+    setTimeout(() => { map.remove(); holder.remove(); }, 0);
   }
 }
 
-export function MapEditor({ values, set, readOnly, Control, saveFile, format }: MapEditorProps) {
+/** The map as the page draws it: the map picture, the track over it, and the attribution. */
+export function MapView({ values, trackColor, trackWidth, rect, Element }: {
+  values: MapValues; trackColor: string; trackWidth: number; rect: Rect;
+  Element: (props: { id: 'map'; rect: Rect; className?: string; children?: ImageFlowNode }) => ImageFlowNode;
+}) {
+  const width = rect.width * cssPerMm, height = rect.height * cssPerMm;
+  const { points, problem } = readTrack(values.track);
+  const view = { style: values.style, longitude: values.longitude, latitude: values.latitude, zoom: values.zoom };
+  return <Element id="map" className="map" rect={rect}>
+    <RenderedImage className="map-image" label="Map" inputs={{ ...view, width: rect.width, height: rect.height }} draw={(target) => drawMap(view, target)} />
+    {points && <svg className="map-track" viewBox={'0 0 ' + width.toFixed(1) + ' ' + height.toFixed(1)} preserveAspectRatio="none" aria-label="Route">
+      <polyline points={projectTrack(points, values, width, height)} style={{ stroke: trackColor, strokeWidth: trackWidth * cssPerMm }} />
+    </svg>}
+    <span className="map-attribution">{mapAttribution}</span>
+    {problem && <span hidden {...issue({ code: 'gpx-invalid', message: problem + ' The track is left out.', element: 'map', parameter: 'track',
+      file: values.track, suggestion: 'Assign a GPX file that contains a track or route, or clear the GPX track.' })} />}
+  </Element>;
+}
+
+export function MapEditor({ values, set, readOnly, Control, format }: MapEditorProps) {
   const holder = React.useRef<HTMLDivElement>(null);
   const map = React.useRef<MapLibreMap>(undefined);
   const latest = React.useRef(values);
   latest.current = values;
-  const [state, setState] = React.useState<{ busy?: boolean; note?: string; error?: string }>({});
+  const [state, setState] = React.useState<{ error?: string }>({});
   const rect = mapRect(format);
   const printWidth = rect.width * cssPerMm;
   const { points, problem } = readTrack(values.track);
@@ -197,21 +180,6 @@ export function MapEditor({ values, set, readOnly, Control, saveFile, format }: 
     set({ longitude: Number(center.lng.toFixed(5)), latitude: Number(center.lat.toFixed(5)),
       zoom: Number(Math.min(18, map.current.getZoom() + Math.log2(printWidth / map.current.getContainer().clientWidth)).toFixed(2)) });
   };
-  const update = async () => {
-    setState({ busy: true, note: 'Rendering the print map…' });
-    try {
-      const view = latest.current;
-      const dpi = format.resolution?.target ?? 300;
-      const { blob, name, pixels } = await printImage(await loadMapLibre(), view, rect, dpi);
-      const id = await saveFile(blob, { name });
-      if (!id) throw new Error('The book did not save the map.');
-      set({ snapshot: id, snapshotView: viewKey(view, rect) });
-      setState({ note: 'Print map updated: ' + pixels + ' pixels at ' + dpi + ' ppi.' });
-    } catch (error) {
-      setState({ error: error instanceof Error ? error.message : String(error) });
-    }
-  };
-  const outdated = values.snapshotView !== viewKey(values, rect);
   return <div className="map-editor">
     <Control parameter="track" />
     {problem && <p className="map-editor-note error">{problem}</p>}
@@ -222,12 +190,9 @@ export function MapEditor({ values, set, readOnly, Control, saveFile, format }: 
     </div>
     <div ref={holder} className="map-editor-map" role="application" aria-label="Map view"
       style={{ aspectRatio: (rect.width / rect.height).toFixed(4) }} />
-    <div className="map-editor-actions">
-      <button type="button" className="primary" disabled={readOnly || state.busy} onClick={() => void update()}>Update print map</button>
-      <span className={'map-editor-note' + (state.error ? ' error' : '')} role="status">
-        {state.error ?? state.note ?? (outdated ? 'The printed map does not show this view yet.' : 'The printed map shows this view.')}
-      </span>
-    </div>
+    <p className={'map-editor-note' + (state.error ? ' error' : '')} role="status">
+      {state.error ?? 'Drag and zoom to frame the page. The page draws this view, and export draws it again at print resolution.'}
+    </p>
     <p className="map-editor-note">{mapAttribution}</p>
   </div>;
 }

@@ -30,15 +30,13 @@ function editingContext(template: TemplateInfo, spread: SpreadState, element: st
 
 // Template components report values from an isolated frame. Apply each valid change through the app's save
 // queue, keeping the frame mounted while the book renders. Closing flushes any field still being typed.
-export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, canvasReady, edit, close, importFile, saveFile, prepare, host }: {
+export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, canvasReady, edit, close, importFile, prepare, host }: {
   project: string; template: TemplateInfo; spread: SpreadState; element: string; readOnly: boolean;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
-  // Stores a file the editor generated; rejects with a message the editor's author should see.
-  saveFile?: (name: string, bytes: Uint8Array) => Promise<{ id: string; project: string } | undefined>;
   // Settles once the frame may load: the network origins its policy allows are decided before it is served.
-  prepare?: () => Promise<unknown>;
+  prepare?: () => Promise<string | void>;
 }) {
   const layout = template.spreads[spread.definition];
   const definition = layout?.elements[element];
@@ -68,15 +66,23 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
     const index = contexts.current.indexOf(context);
     if (index > 0) contexts.current.splice(0, index);
   }, [context]);
-  // The frame keeps the project state it opened with; saving starts a new render elsewhere, not here.
-  const [source] = useState(() => renderOrigin + '/render/' + project + '?view=editor&spread=' + encodeURIComponent(spread.id) +
-    '&element=' + encodeURIComponent(element) + (readOnly ? '&readonly' : ''));
+  // The frame keeps the project state it opened with; saving starts a new render elsewhere, not here. Preparing may
+  // render the book again (newly allowed network origins), so the frame opens on the project as it is then.
+  const address = (id: string) => renderOrigin + '/render/' + id + '?view=editor&spread=' + encodeURIComponent(spread.id) +
+    '&element=' + encodeURIComponent(element) + (readOnly ? '&readonly' : '');
+  const latestProject = useRef(project);
+  latestProject.current = project;
+  const [source, setSource] = useState(() => address(project));
   const title = editor?.label ?? 'Edit ' + (definition?.label ?? element);
   const [prepared, setPrepared] = useState(!prepare);
   useEffect(() => {
     if (!prepare) return;
     let current = true;
-    void prepare().catch(() => undefined).finally(() => { if (current) setPrepared(true); });
+    void prepare().catch(() => undefined).then((id) => {
+      if (!current) return;
+      setSource(address(typeof id === 'string' ? id : latestProject.current));
+      setPrepared(true);
+    });
     return () => { current = false; };
   }, []);
   const values = (reported: unknown): Values => reported && typeof reported === 'object' ? reported as Values : {};
@@ -100,14 +106,6 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
         { type: 'editor-imported', request: data.request, ...imported }, renderOrigin);
       if (readOnly || failed || stale || blocked || rejected.current || !importFile || !accept.length) reply();
       else void importFile(accept, data.mode === 'copy' || data.mode === 'link' ? data.mode : undefined).then(reply, () => reply());
-    },
-    saveFile(data) {
-      const post = (message: Record<string, unknown>) => frame.current?.contentWindow?.postMessage({ request: data.request, ...message }, renderOrigin);
-      const refuse = (message: string) => post({ type: 'editor-save-failed', message });
-      if (readOnly || failed || stale || blocked || rejected.current || !saveFile) return refuse('The book cannot save files right now.');
-      if (typeof data.name !== 'string' || !(data.bytes instanceof Uint8Array)) return refuse('saveFile received no file.');
-      void saveFile(data.name, data.bytes).then((saved) => saved ? post({ type: 'editor-imported', ...saved }) : refuse('The file was not saved.'),
-        (error: unknown) => refuse(error instanceof Error ? error.message : 'The file was not saved.'));
     },
   }, 'The editor has not finished the current field. Click × again to close without the unfinished typing.');
 

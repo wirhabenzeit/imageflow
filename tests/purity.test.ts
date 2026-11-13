@@ -55,3 +55,16 @@ test('messages name what kind of impurity a call is', () => {
   assert.match(impureMessage('OffscreenCanvas.getContext(\'webgl\')'), /GPU/);
   assert.match(impureMessage('requestAnimationFrame'), /schedules work/);
 });
+
+test('declared asynchronous rendering may use timers, the GPU and the network while it runs', () => {
+  const { log, target } = fakeWindow();
+  let drawing = true;
+  const guards = installPurityGuards(target, script, () => 'at draw (http://render/render/view/template/template.js:3:4)', () => drawing);
+  (target.fetch as (url: string) => string)('https://tiles.example/2.pbf');
+  new (target.HTMLCanvasElement as new () => { getContext(kind: string): unknown })().getContext('webgl2');
+  assert.deepEqual(guards.calls, [], 'calls while a picture is drawn are not impure');
+  drawing = false;
+  (target.setTimeout as (callback: () => void) => number)(() => {});
+  assert.deepEqual(guards.calls.map(({ api }) => api), ['setTimeout']);
+  assert.deepEqual(log, ['fetch https://tiles.example/2.pbf', 'context webgl2', 'timeout']);
+});

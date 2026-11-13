@@ -310,7 +310,7 @@ export default defineTemplate({
   description: 'A travel journal with photographs, stories, maps, and room for your own layouts.',
   contract: 1,
   requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper',
-    'editor-native-controls', 'layout-families', 'editor-spread-parameters', 'opening-spreads', 'image-files', 'editor-save-file', 'editor-network'],
+    'editor-native-controls', 'layout-families', 'editor-spread-parameters', 'opening-spreads', 'editor-network', 'rendered-images'],
   // The map editor loads OpenFreeMap styles and tiles once the user allows it; printed pages use the saved image.
   network: [mapOrigin],
   formats: {
@@ -382,7 +382,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         const { trackColor, trackWidth, ...values } = ctx.elements.map.params;
         return <Paper context={ctx} bled={{ left: true, right: true }}>
-          <MapView values={values} trackColor={trackColor} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} mode={ctx.mode} Element={ctx.Element} />
+          <MapView values={values} trackColor={trackColor} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
           {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(at.left(margin, margin, 150, 22))}>{ctx.params.mapTitle}</h2>}
         </Paper>;
       },

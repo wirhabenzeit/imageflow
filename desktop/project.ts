@@ -1,8 +1,6 @@
 import { constants } from 'node:fs';
-import { isUtf8 } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import sharp from 'sharp';
+import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import * as ReactExports from 'react';
 import { dependencyWarning, isBareImport, missingDependency, readDependencyManifest, vendoredModule } from './dependencies';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -190,8 +188,6 @@ export type OpenProject = ProjectFiles & {
   folder: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
   texts: Record<string, string>; files: Record<string, ProjectFile>; problems: string[]; readOnly: boolean;
   sources?: Record<string, SourceStatus>;
-  // Image files of file parameters: the immutable snapshot each is served from, never sent to a renderer.
-  fileImages?: Map<string, string>;
   manifests: Record<ManifestName, Buffer>;
   // Set only on synthetic fixture books rendered by authoring checks.
   fixture?: FixtureMarking;
@@ -199,14 +195,7 @@ export type OpenProject = ProjectFiles & {
 
 // Files for file parameters are read whole into the render data, so preview and export use the same input.
 export const maximumFileSize = 20 * 1024 * 1024;
-// Image files are served to the page instead of being read into the render data, so they may be larger.
-export const maximumImageFileSize = 50 * 1024 * 1024;
-export const imageFileExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp']);
-// What an element editor may save with saveFile (ADR 0006): images, and text formats a template reads with file().
-export const generatedFileExtensions = new Set([...imageFileExtensions, '.gpx', '.json', '.geojson', '.txt', '.csv']);
-// Files an element editor generated carry the `gn-` ID prefix; files the user chose carry `fl-`.
-export const isGeneratedFile = (id: string) => id.startsWith('gn-');
-const fileName = (path: string) => basename(path).replace(/^(?:fl|gn)-[0-9a-f-]{12}-/, '');
+const fileName = (path: string) => basename(path).replace(/^fl-[0-9a-f-]{12}-/, '');
 
 export async function loadProject(path: string, fallback: string, readOnly = false, pinSources = false): Promise<OpenProject> {
   const folder = await realpath(path);
@@ -223,11 +212,10 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
   const photos = new Map<string, ProjectPhoto>();
   const texts: Record<string, string> = {};
   const files: Record<string, ProjectFile> = {};
-  const fileImages = new Map<string, string>();
   const sources: Record<string, SourceStatus> = {};
   const problems: string[] = [];
   const entries = sourceEntries(book);
-  if (!entries.length) return { ...book, photos, texts, files, fileImages, sources, problems };
+  if (!entries.length) return { ...book, photos, texts, files, sources, problems };
   const store = await SourceStore.forBook(book.folder, book.cache);
   for (let i = 0; i < entries.length; i += 8) {
     await Promise.all(entries.slice(i, i + 8).map(async (source) => {
@@ -246,25 +234,13 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
       } else if (source.kind === 'markdown') {
         if (stored) texts[source.id] = await readFile(stored.snapshot, 'utf8');
       } else {
-        const extension = extname(source.path).toLowerCase();
-        const generated = isGeneratedFile(source.id) ? { generated: true } : {};
-        let content: Partial<ProjectFile> = {};
-        if (stored && imageFileExtensions.has(extension)) {
-          try {
-            const { width, height } = await sharp(stored.snapshot).metadata();
-            if (!width || !height) throw new Error('has no dimensions');
-            content = { image: { width, height } };
-            fileImages.set(source.id, stored.snapshot);
-          } catch {
-            content = { problem: 'The image could not be read.' };
-          }
-        } else if (stored) content = { text: await readFile(stored.snapshot, 'utf8') };
-        files[source.id] = { name: fileName(source.path), extension, ...generated, ...content, ...(status.problem ? { problem: status.problem } : {}) };
+        files[source.id] = { name: fileName(source.path), extension: extname(source.path).toLowerCase(),
+          ...(stored ? { text: await readFile(stored.snapshot, 'utf8') } : {}), ...(status.problem ? { problem: status.problem } : {}) };
       }
     }));
   }
   await store.settled();
-  return { ...book, photos, texts, files, fileImages, sources, problems: problems.sort() };
+  return { ...book, photos, texts, files, sources, problems: problems.sort() };
 }
 
 function projectJson(value: unknown) {
@@ -332,9 +308,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       if (!info.isFile() || !extensions.has(extname(file).toLowerCase())) continue;
       if (request.kind === 'photo') await photoDetails(file);
       if (request.kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
-      if (request.kind === 'file' && imageFileExtensions.has(extname(file).toLowerCase())) {
-        if (info.size > maximumImageFileSize) throw new Error(basename(file) + ' is larger than 50 MB.');
-      } else if (request.kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
+      if (request.kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
       const previous = request.kind === 'photo'
         ? Object.entries(photoIndex).find(([, photo]) => (!!photo.linked === (mode === 'link') || isInside(book.folder, file)) && (photo.linked ? photo.path : join(book.folder, photo.path)) === file)?.[0]
         : Object.entries(registry).find(([, ref]) => (sourceLinked(ref) === (mode === 'link') || isInside(book.folder, file)) && (sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref))) === file)?.[0];
@@ -373,67 +347,6 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   }
 }
 
-/** Stores bytes an element editor generated (ADR 0006) as a new document-owned file and registers it. The file gets
- * a new `gn-` ID every time; assigning it to a parameter is a separate, undoable edit. */
-export async function saveGeneratedFile(book: OpenProject, request: { name: string; bytes: Uint8Array }) {
-  const extension = extname(request.name).toLowerCase();
-  if (!generatedFileExtensions.has(extension)) {
-    throw new Error('saveFile accepts ' + [...generatedFileExtensions].join(', ') + ' files, not ' + (extension || 'a name without extension') + '.');
-  }
-  const image = imageFileExtensions.has(extension);
-  if (request.bytes.byteLength > (image ? maximumImageFileSize : maximumFileSize)) {
-    throw new Error(request.name + ' is larger than ' + (image ? 50 : 20) + ' MB.');
-  }
-  if (image) {
-    const { format } = await sharp(request.bytes).metadata().catch(() => ({ format: undefined }));
-    const expected = extension === '.png' ? 'png' : extension === '.webp' ? 'webp' : 'jpeg';
-    if (format !== expected) throw new Error(request.name + ' is not a valid ' + extension.slice(1).toUpperCase() + ' image.');
-  } else if (!isUtf8(request.bytes)) throw new Error(request.name + ' is not UTF-8 text.');
-  const project = structuredClone(book.project);
-  const folder = join(book.folder, 'files');
-  await mkdir(folder, { recursive: true });
-  if (await realpath(folder) !== folder) throw new Error('files/ must be a folder inside the project.');
-  const id = 'gn-' + randomUUID().slice(0, 12);
-  const name = basename(request.name).replace(/[^\p{L}\p{N} ._-]/gu, '-').slice(0, 100);
-  const relativePath = 'files/' + id + '-' + name;
-  const path = join(book.folder, relativePath);
-  await writeFile(path, request.bytes, { flag: 'wx' });
-  try {
-    project.files[id] = relativePath;
-    const next = await updateProject(book, { project, photoIndex: book.photoIndex }, true);
-    return { book: next, id, path };
-  } catch (error) {
-    if (!(error instanceof CommittedProjectSaveError)) await rm(path, { force: true });
-    throw error;
-  }
-}
-
-/** Generated files no longer referenced by the given project states: the current one and every Undo/Redo state.
- * A reference is the file ID appearing as a value anywhere outside the file registry. */
-export function unreferencedGeneratedFiles(current: Project, retained: Project[]) {
-  const generated = Object.keys(current.files).filter(isGeneratedFile);
-  if (!generated.length) return [];
-  const text = [current, ...retained].map(({ files: _files, ...rest }) => JSON.stringify(rest)).join('\n');
-  return generated.filter((id) => !text.includes(JSON.stringify(id)));
-}
-
-/** Removes generated files from the registry and the disk. The registry is saved first, through the recoverable
- * save path, so an interrupted save never leaves the saved state referring to a deleted file. */
-export async function removeGeneratedFiles(book: OpenProject, ids: string[]) {
-  const project = structuredClone(book.project);
-  const paths: string[] = [];
-  for (const id of ids) {
-    const ref = project.files[id];
-    if (!isGeneratedFile(id) || ref === undefined || sourceLinked(ref)) continue;
-    paths.push(join(book.folder, sourcePath(ref)));
-    delete project.files[id];
-  }
-  if (!paths.length) return { book, removed: [] as string[] };
-  const next = await updateProject(book, { project, photoIndex: book.photoIndex }, true);
-  for (const path of paths) if (isInside(join(book.folder, 'files'), path)) await rm(path, { force: true });
-  return { book: next, removed: paths };
-}
-
 export function projectSummary(book: OpenProject, id: string): ProjectSummary {
   const base = renderOrigin + '/render/' + id;
   return {
@@ -454,8 +367,7 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
       return [id, { width, height, caption, title, credit, altText, src: base + '/photo/' + id }];
     })),
     texts: book.texts,
-    files: Object.fromEntries(Object.entries(book.files).map(([id, file]) => [id, file.image
-      ? { ...file, image: { ...file.image, url: base + '/file/' + id } } : file])),
+    files: book.files,
     problems: book.problems, sources: book.sources,
     ...(book.fixture ? { fixture: book.fixture } : {}),
     template: {

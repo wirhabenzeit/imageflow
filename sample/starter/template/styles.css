@@ -90,9 +90,8 @@
 /* Map layout: the saved print image fills the spread; the track and attribution are drawn over it. */
 .map { overflow: hidden; background: #e8ebe4; }
 .map-image, .map-track { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.map-image { object-fit: cover; }
+.map-image img { object-fit: cover; }
 .map-track polyline { fill: none; stroke-linejoin: round; stroke-linecap: round; }
-.map-empty { position: absolute; inset: 0; display: grid; place-items: center; font: 500 11pt/1.3 "Field Sans"; color: #243b30a0; }
 .map-attribution { position: absolute; right: 8mm; bottom: 7mm; padding: .6mm 1.4mm; background: #ffffffd0; color: #333;
   font: 500 8pt/1.2 "Field Sans"; }
 .map-title { margin: 0; padding: 3mm 5mm; background: #fffffff0; color: var(--ink); font: 600 20pt/1.15 "Field Serif"; width: fit-content; }

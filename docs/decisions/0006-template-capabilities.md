@@ -1,6 +1,6 @@
-# 0006: Template dependencies, editor network access and generated files
+# 0006: Template dependencies, network access and asynchronous rendering
 
-Status: accepted, 2026-11-13. Phases 1 (render purity), 2 (image files, `saveFile`, collection), 3 (editor network), 4 (npm dependencies) and 5 (the starter's Map layout) implemented. The Map layout is added beside the Panorama GPX inset rather than replacing it for now. Follow-ups: an MCP tool for the rebuild, and a desktop test that edits the map against a stubbed tile server. Motivated by a real map layout in the photobook starter, replacing the basemap-less GPX inset.
+Status: accepted, 2026-11-13; revised the same day. Phases 1 (render purity), 2 (asynchronous rendering), 3 (network), 4 (npm dependencies) and 5 (the starter's Map layout) implemented. The Map layout is added beside the Panorama GPX inset rather than replacing it for now. Persistent snapshots and generated files are deferred (see [Deferred](#deferred)); reproducible offline printing is tracked in #92. Motivated by a real map layout in the photobook starter, replacing the basemap-less GPX inset.
 
 ## Problem
 
@@ -12,18 +12,18 @@ A map page wants a real basemap with drag, zoom and a choice of styles. The natu
 
 Building maps into the app would solve one case. The goal here is that templates can do this kind of thing themselves.
 
-## Principle: rich at edit time, pure at print time
+## Principle
 
-Template code may be as capable as it needs to be **while the user edits**. Everything a printed page depends on must be **saved into the book first**. `render` stays pure and offline, export stays deterministic, and a book still opens and prints on a Mac with no network and no `node_modules`.
+**Rendering may load declared external resources and finish asynchronously. Rendering never modifies the book's saved content.**
 
-This splits the work in two:
+A first draft of this decision kept printing offline: the editor would draw the map and save it into the book as an image, and the page would show that snapshot. That needed generated files with their own garbage collection, a stale-snapshot check and an explicit *Update map* step, and the print was only as sharp as the last snapshot. Offline, reproducible printing is not a requirement for v1, so the page now draws the map itself: live in the preview, and again at the output resolution when exporting. What a page depends on is still explicit: the template's declared `network` origins, which the user allows, and the element's parameters.
 
-| | Element editor frame | Render / export frame |
+| | Element editor | Page preview, Book check, export |
 |---|---|---|
 | npm dependencies | yes | yes (same bundle) |
-| Network | declared hosts only | none |
-| Effects, WebGL, workers | yes | no (unchanged) |
-| Writes | parameters, and generated files (new) | none |
+| Network | declared origins, once allowed | declared origins, once allowed |
+| Effects, WebGL, workers | yes | only inside `<RenderedImage>` drawing |
+| Writes | parameters | none |
 
 ## Decision
 
@@ -40,65 +40,70 @@ A template may contain `package.json` and a lockfile. A book and the library alw
 
 The bundle size limit and the existing rules (no paths outside `template/`, no links) apply to `vendor/` as to any other template file.
 
-### 2. Declared network access for editors only
+### 2. Host-managed asynchronous rendering
+
+`imageflow` exports `<RenderedImage draw inputs label alt className style />` (capability `rendered-images`). It is the one place a layout may do asynchronous or GPU work.
+
+- **The host drives it.** When the element mounts, or its `inputs` (JSON-like data) change, the host calls `draw({ width, height, pixelRatio, mode, signal })`: the box's size in CSS pixels as laid out, the device pixels per CSS pixel to draw at, the mode (`preview`, `check` or `export`) and an `AbortSignal`. `draw` resolves to a canvas, an `OffscreenCanvas` or an image `Blob`, and rejects to fail. The host turns the result into an image owned by the frame; nothing is written to the book and nothing outlives the frame.
+- **Resolution.** Previews draw at the screen's density (at most 2×, and 0.5× for thumbnails and checks). Export draws at the format's target resolution ÷ 96 (300 ppi when the format sets none), so a map in a PDF is as sharp as a photo would need to be.
+- **Concurrency.** The host runs at most two drawings at once in the book view and one elsewhere, so a long book does not open a WebGL context per page.
+- **Waiting.** A Book check and every export page wait until all pictures on the page, and any they start, have finished, with a timeout (60 s for previews and checks, 120 s per picture for export). The edit view does not wait; pictures fill in as they finish, with a quiet placeholder until then.
+- **Cancellation.** The signal is aborted when the element unmounts, its inputs change, or the timeout passes. A late result is discarded.
+- **Failure.** A rejected or timed-out drawing shows its message on the page and is a `rendered-image-failed` Book check error naming the label, spread and element, so export stops rather than printing a page without its map. A library error that is a plain object or event with a `message` is reported by that message.
+- **Readiness is the template's job.** The host cannot know when a library has finished; `draw` decides. The starter's map resolves on MapLibre's `idle` event and rejects on any `error` event (a style, tile or glyph that failed to load), so a half-loaded map never counts as ready.
+
+### 3. Declared network access
 
 `defineTemplate` gains `network: string[]`, a list of HTTPS origins, e.g. `['https://tiles.openfreemap.org']`. Wildcards are limited to one leading label (`https://*.example.com`).
 
-- **Consent.** The first time an element editor opens in a book whose template declares origins not yet allowed, ImageFlow asks, listing them. The answer is stored per book identity with the app-owned approvals from [0005](0005-linked-sources.md). Declining keeps the book usable; that editor loads without network, and the question comes back the next time an editor opens. Importing a template into the library also lists its packages and origins, and the user may allow the origins for that exact version: the grant is stored app-wide by template hash, so books whose template still has that hash (and books from built-in templates) need not ask, and any change to the template's files ends it. Settings → Templates shows the packages, origins and trust, and can allow or revoke it.
-- **CSP.** The editor frame's response builds `connect-src`, `img-src` and `font-src` from the approved origins, and adds `worker-src blob:` and `child-src blob:` for libraries that spawn workers. Book previews, thumbnails, checks and export frames keep today's policy unchanged.
-- **No credentials from the app.** The editor frame stays sandboxed, without cookies or the app's session. API keys, if a provider needs one, are a document parameter the user enters (`p.text({ secret: true })` stored outside `project.json` is a possible follow-up, not part of this decision).
+- **Consent.** The first time a book whose template declares origins not yet allowed renders, or one of its element editors opens, ImageFlow asks, listing them and saying that previews and export need them. The answer is stored per book identity with the app-owned approvals from [0005](0005-linked-sources.md). Declining keeps the book usable offline: its pictures fail, so the Book check reports them and export stops, and the question comes back when an editor opens. Importing a template into the library also lists its packages and origins, and the user may allow the origins for that exact version: the grant is stored app-wide by template hash, so books whose template still has that hash need not ask, and any change to the template's files ends it. Built-in templates are trusted for the origins they declare. Settings → Templates shows the packages, origins and trust, and can allow or revoke it. Allowing reloads the open book with the new policy.
+- **CSP.** Every frame of a book with allowed origins (element editors, the book view, thumbnails, checks and export) builds `connect-src`, `img-src` and `font-src` from them, and adds `worker-src blob:` and `child-src blob:` for libraries that spawn workers. `img-src` always allows `blob:` for rendered pictures. Undeclared origins stay blocked everywhere.
+- **No credentials from the app.** Frames stay sandboxed, without cookies or the app's session. API keys, if a provider needs one, are a document parameter the user enters (`p.text({ secret: true })` stored outside `project.json` is a possible follow-up, not part of this decision).
 - The MCP authoring context lists a template's declared and approved origins.
 
-### 3. Editors can save generated files
+### 4. Purity, and how it is checked
 
-Element editors receive `saveFile(data, { name, type })`, which stores bytes in the book and resolves to a file ID, mirroring `importFile`. The editor assigns the ID to a file parameter with `set`. Assignment is undoable; the file itself is kept, as with imports.
-
-- File parameters today are UTF-8 text up to 20 MB. This adds **image file parameters**: `p.file({ accept: ['.png', '.jpg'], kind: 'image' })`. In `render`, `file(id)` for an image parameter returns `{ url, width, height, name }` instead of text, served from the render origin like photos, so it passes the existing image-resolution and colour checks at export.
-- Generated files are document-owned (always copied, never linked) and are listed in Manage Sources as *Generated by <element>*. A new `saveFile` always creates a new ID; files are never overwritten in place.
-- **Cleanup is new work, not existing behaviour.** Today's cleanup prunes only app-owned caches outside books; nothing removes files inside a book. Generated files get their own collection rule. A generated file is kept while any of these references it: the saved `project.json`; any state in the open session's Undo or Redo history; a running preview, check or export job, which pins its inputs as photos are pinned today. It is deleted once no reference remains, checked after each save, when history is trimmed and when the book closes; deletion goes through the recoverable save journal, so an interrupted save cannot lose a file the saved state needs. Files a user imported are never collected by this rule.
-- **Editors save only on purpose.** The map editor calls `saveFile` on Done or an explicit *Update map* button, not on idle pauses. An editor that calls `saveFile` more than a few times within one open session gets a console warning, and drafts it replaces before Done are collected immediately, since no saved state or history refers to them.
-- `saveFile` accepts PNG, JPEG, SVG, GPX/JSON/text; up to 50 MB.
-
-### 4. Purity at print time, and how it is checked
-
-`render` and `anchors` stay pure. Today that is an authoring requirement: the render CSP already stops requests to other origins, but nothing reports an impure template, and a WebGL context or a timer in `render` goes unnoticed. With npm libraries in reach, this ADR adds enforcement:
+`render` and `anchors` stay synchronous functions of their input, and they never change the book. Everything asynchronous goes through `<RenderedImage>`. With npm libraries in reach, this ADR adds enforcement:
 
 - **Detection in checks.** Book check and export frames install guards before the template loads: `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Worker`, `importScripts`, `HTMLCanvasElement.getContext` and `OffscreenCanvas` with `webgl`/`webgl2`/`webgpu`, and `setTimeout`/`setInterval`/`requestAnimationFrame` called during render. A call is recorded with the spread and element being rendered and reported as a `render-impure` error naming the API; export refuses to print a book with such an error. A 2D canvas stays allowed, since it is synchronous and deterministic enough for charts drawn during render.
-- **Network stays blocked regardless.** The render, check and export CSPs are unchanged, so a guard that is bypassed still cannot reach the network.
-- **Validation.** Fixture templates that fetch, open a WebGL context, start a worker and set a timer in `render` each fail the Book check with `render-impure`; the same calls inside an element editor do not.
-- Export never waits for the network. If a page depends on a generated file that is missing, the Book check reports it like any other missing source.
-- Trust: templates are still code you choose to run. `network` makes the reach of that code explicit and limits it to editing. The guards report mistakes; they are not a security boundary.
+- **Declared work is exempt.** While a `<RenderedImage>` is drawing, the guards record nothing: its requests, WebGL context, workers and timers are the declared rendering work. The CSP still limits it to the allowed origins.
+- **Validation.** Fixture templates that fetch, open a WebGL context, start a worker and set a timer in `render` each fail the Book check with `render-impure`; the same calls inside an element editor or a `<RenderedImage>` drawing do not.
+- Trust: templates are still code you choose to run. `network` makes the reach of that code explicit. The guards report mistakes; they are not a security boundary.
 
 ## The map layout under this contract
 
-The starter's route element becomes a map element, all in template code:
+The starter's Map layout (`sample/starter/template/map.tsx`), all in template code:
 
 - `package.json` depends on `maplibre-gl`. `network: ['https://tiles.openfreemap.org']`. OpenFreeMap needs no key and serves OpenMapTiles vector styles (Liberty, Bright, Positron) with OpenStreetMap data.
-- Parameters: `track` (GPX file), `style` (enum), `center` and `zoom` (numbers), `bearing`, `trackColor`, `trackWidth`, and `snapshot` (image file, owned by the editor).
-- The **Edit map** editor shows a MapLibre map with the GPX track as a GeoJSON layer. Drag, scroll and buttons move it; a segmented control picks the style. On Done or *Update map* it renders the current view at the element's print size and the format's target resolution, using an offscreen MapLibre instance with `pixelRatio` set so that the canvas matches the box at 300 dpi. A full A4 landscape spread is about 4960 × 3510 px, inside common WebGL limits; the editor reports when a box would exceed `MAX_TEXTURE_SIZE` and caps the resolution.
-- `render` draws `snapshot` as an image, the GPX track on top as SVG (so the line stays vector in the PDF), and an attribution line: "© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors". The attribution cannot be turned off, only restyled.
-- Without a snapshot the element shows the track alone (as today) and the Book check warns that the basemap has not been generated.
+- Parameters: `track` (GPX file), `style` (enum), `longitude`, `latitude` and `zoom` (numbers; the zoom is a print zoom independent of the screen size), `trackColor`, `trackWidth`.
+- The **Edit map** editor shows an interactive MapLibre map with the GPX track as a GeoJSON layer. Drag, scroll and buttons move it; a segmented control picks the style. The view is saved as ordinary parameters as it changes.
+- `render` draws the basemap with `<RenderedImage label="Map">`: an off-screen MapLibre map at the box's size with `pixelRatio` from the target, resolved on `idle`. The GPX track goes on top as SVG, so the line stays vector in the PDF, with an attribution line: "© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors". The attribution cannot be turned off, only restyled.
+- A full A4 landscape spread at 300 ppi is about 4960 × 3510 px, inside common WebGL limits.
 
 Keyed providers (MapTiler, Mapbox, Stadia) can be added by template authors through `network` and a key parameter. Their terms on caching and print vary by plan, so the starter does not use them.
 
 ## Consequences
 
 - Templates can use ordinary npm libraries, for maps, charts, QR codes, elevation profiles, without app changes.
-- Printing stays reproducible: a book's output depends only on files inside it.
-- Templates with `network` are more powerful code; the consent step and per-frame CSP keep that power to the editor.
+- Maps are drawn at print resolution, and there is no snapshot to fall out of date.
+- Printing a book with a map needs the network and the provider. If a provider changes its style or data, a reprint can differ; if it is down, the Book check fails and export stops instead of printing an incomplete page. Offline, reproducible printing returns with #92.
+- Templates with `network` are more powerful code; the consent step and per-frame CSP limit that power to the declared origins.
+- Export takes longer for pages with pictures, bounded by the per-picture timeout.
 - The template package gains a generated `vendor/` folder. Authors need `npm install` and an explicit rebuild to change dependencies; a book never picks up installed packages by itself.
-- Raster basemaps are only as sharp as the snapshot. A vector basemap (vector tiles drawn as SVG in `render`) stays possible later on top of the same mechanism: the editor would save clipped tile data instead of an image.
+
+## Deferred
+
+- **Persistent snapshots and generated files.** Saving a rendered picture into the book (an editor `saveFile`, image file parameters, and collection of files no saved state or Undo history refers to) was designed in the first draft and is left out of v1. It returns, if needed, for offline and reproducible printing (#92).
 
 ## Phases
 
 1. Render purity guards and the `render-impure` check, with their fixtures. This lands first so that later phases can rely on it.
-2. Image file parameters, `saveFile`, and collection of generated files (references from saved state, Undo/Redo and running jobs; journal-safe deletion), with tests for each reference kind.
-3. `network` with consent and the editor CSP.
+2. `<RenderedImage>`: the host lifecycle (size, resolution, signal, concurrency, waiting with a timeout), `rendered-image-failed`, and the guard exemption.
+3. `network` with consent and the CSP for editors, previews, checks and export.
 4. npm dependencies: *Rebuild Dependencies*, `vendor/` with manifest, types and licences, manifest-based resolution in the bundler and the TypeScript check, and the stale-bundle warning. Tests cover a book with a stale `node_modules` rendering the saved bundle, and `check_book` with `typescript: true` resolving vendored types.
-5. The starter's map layout, replacing the GPX-only inset, with docs and a desktop workflow test that edits the map with a stubbed tile server and exports offline.
+5. The starter's Map layout, with docs and a desktop test (`smoke-map`) that renders the preview, checks, exports a proof PDF at print resolution against a stubbed map server, and reports a failing server.
 
 ## Open questions
 
-- Should the snapshot regenerate automatically when the format or box size changes, or only when the user reopens the editor? (Proposed: the Book check warns when the snapshot's pixel size no longer meets the target resolution.)
-- Should `network` approval be per book, per template version, or per app?
-- Is one vendored bundle enough, or do large dependencies need code splitting so book previews do not load editor-only code such as MapLibre?
+- Is one vendored bundle enough, or do large dependencies need code splitting so book previews do not load editor-only code?
+- Should export cache pictures drawn for the same inputs and resolution within one run, so a check before export does not draw everything twice?

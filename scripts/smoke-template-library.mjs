@@ -40,7 +40,7 @@ const editorNetwork = (page) => page.evaluate(async () => {
   const frame = [...document.querySelectorAll('iframe.book-frame-book[data-ready]:not([aria-hidden="true"])')].at(-1);
   const result = await window.imageflow.editorNetwork(new URL(frame.src).pathname.split('/').at(-1), ['https://tiles.openfreemap.org']);
   if ('error' in result) throw new Error(result.error);
-  return result.value;
+  return result.value.origins;
 });
 const saveAs = (filePath) => app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, filePath);
 // Hidden render windows come and go while templates are checked, so windows are found by URL.
@@ -85,14 +85,14 @@ try {
   assert.equal(review.checkboxLabel, 'Allow these sites in every book made from this version');
   const travelEntry = list.getByRole('listitem').filter({ has: settings.getByText('Travel journal', { exact: true }) });
   await travelEntry.getByText('Packages: maplibre-gl 5.24.1 (BSD-3-Clause)').waitFor();
-  await travelEntry.getByText('Editors connect to: https://tiles.openfreemap.org').waitFor();
-  await travelEntry.getByText('Each book made from it asks before its editors go online.').waitFor();
+  await travelEntry.getByText('Connects to: https://tiles.openfreemap.org').waitFor();
+  await travelEntry.getByText('Each book made from it asks before it goes online.').waitFor();
   await list.getByRole('listitem').filter({ has: settings.getByText('Photobook', { exact: true }) }).getByText('Allowed in every book: this template comes with ImageFlow.').waitFor();
   // Settings can allow the sites for this version, and stop allowing them.
   await settings.getByRole('button', { name: 'Allow network access for Travel journal' }).click();
   await travelEntry.getByText('Allowed in every book made from this version, until its files change.').waitFor();
   await settings.getByRole('button', { name: 'Stop allowing network access for Travel journal' }).click();
-  await travelEntry.getByText('Each book made from it asks before its editors go online.').waitFor();
+  await travelEntry.getByText('Each book made from it asks before it goes online.').waitFor();
   await list.getByText('Travel journal', { exact: true }).waitFor();
   assert.deepEqual(await readdir(library), ['travel'], 'a failed import leaves nothing in the library');
   await picker.getByRole('radio', { name: /Travel journal/ }).waitFor();
@@ -165,7 +165,7 @@ try {
   await writeFile(join(book, 'template', 'index.tsx'), retitled('1.1.0'));
   await answer(1);
   assert.deepEqual(await editorNetwork(editor), []);
-  assert.equal((await messages())[0].message, 'Allow this book’s template to connect to the internet while you edit?');
+  assert.equal((await messages())[0].message, 'Allow this book’s template to connect to the internet?');
   await answer(0);
   await menu('Save Template to Library');
   await shown('Travel journal 1.1.0 replaced the earlier version in the library.');

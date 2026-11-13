@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
-import { dirname, extname, join, relative, sep } from 'node:path';
+import { dirname, extname, join, relative } from 'node:path';
 import { channels, desktopScheme, renderOrigin } from '../src/desktop';
 import type { BookMenuState, CanvasLayout, ExportMode, ImportRequest, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
@@ -17,7 +17,7 @@ import { printBook, saveProof } from './export';
 import { approveNetwork, approvedNetwork } from './source-access';
 import { rebuildDependencies } from './dependencies';
 import { templateFolder } from './document-actions';
-import { importIntoProject, loadProject, projectSummary, readProjectManifest, saveGeneratedFile } from './project';
+import { importIntoProject, loadProject, projectSummary, readProjectManifest } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
 import { bundledFontNames } from './fonts';
@@ -37,7 +37,8 @@ import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { McpToolName } from '../src/mcp-contract';
 
-// `network` lists the origins this book's element editors may reach now (ADR 0006); absent for export renders.
+// `network` lists the origins this book's frames may reach now (ADR 0006): its preview, check, export and element
+// editor frames. Absent for frames that stay offline, such as template probes.
 export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[] }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
@@ -77,9 +78,18 @@ export class DocumentSession {
   private renderIds = new Set<string>();
   // Declared origins the user allowed for this book's element editors, as last confirmed by the editor.
   private editorOrigins: readonly string[] = [];
+  /** The network origins the user allowed for this book's template; its render frames may reach them (ADR 0006). */
+  get networkOrigins() { return this.editorOrigins; }
   private askingNetwork?: Promise<string[]>;
   /** The declared sites the template's library trust covers for this book as it is now (ADR 0006); set by the app. */
-  networkTrust?: (folder: string, declared: readonly string[]) => Promise<string[]>;
+  networkTrust?: (folder: string, declared?: readonly string[]) => Promise<string[]>;
+
+  /** Lets the frames reach the origins already allowed for this book or trusted for its template, before it renders. */
+  async prepareNetwork() {
+    const book = this.book;
+    if (book.readOnly) return;
+    this.editorOrigins = [...new Set([...await approvedNetwork(book.folder), ...await this.networkTrust?.(book.folder) ?? []])];
+  }
   sidebar = true;
   inspector = true;
   sources = true;
@@ -91,9 +101,6 @@ export class DocumentSession {
     private renders: RenderSessions, private unlockProject: ProjectLock | undefined,
     private changed?: (book: OpenProject) => void) {
     this.projectSession = new ProjectSession(book);
-    this.projectSession.removing = (paths) => {
-      for (const path of paths) this.importedWrites.set(path.split('/').join(sep), '', this.observedChanges.has(path.split('/').join(sep)));
-    };
     this.queue = new AuthoringQueue({ ready: () => !this.busy && !this.closing, maxPending: 32 });
     this.service = createAuthoringService({
       session: () => this.closing ? undefined : this.projectSession, cache, docs: join(app.getAppPath(), 'docs/template-api.md'),
@@ -199,10 +206,6 @@ export class DocumentSession {
       await this.queue.whenIdle();
       // Published saves must settle before releasing the single-writer capability.
       while (this.busy) await new Promise((resolve) => setTimeout(resolve, 10));
-      // Undo and Redo end with the window, so generated files only they referred to can go now.
-      if (this.unlockProject) await this.projectSession.collectGenerated(false).catch((error: unknown) => {
-        console.error('ImageFlow could not remove unused generated files', error);
-      });
       try { await this.unlockProject?.(); }
       finally {
         this.unlockProject = undefined;
@@ -462,14 +465,17 @@ export class DocumentSession {
     return { summary: this.activate(next), imported };
   }
 
-  /** The origins the template declares that this book's element editors may reach, asking once for new ones
-   * (ADR 0006). Sites allowed for the template's exact version in the library need no question. Declining keeps
-   * editors working offline; they ask again the next time an editor opens. */
+  /** The origins the template declares that this book's frames may reach, asking once for new ones (ADR 0006):
+   * element editors, and previews, checks and exports that draw <RenderedImage> pictures. Sites allowed for the
+   * template's exact version in the library need no question. Declining keeps the frames offline, so such pictures
+   * fail and export stops; the question comes back the next time an editor opens or the book opens. When the
+   * allowed origins change, the book is rendered again under a new ID, which the summary carries. */
   async editorNetwork(id: string, declared: unknown) {
     const book = this.currentBook(id);
     const origins = Array.isArray(declared) ? [...new Set(declared.filter((origin): origin is string =>
       typeof origin === 'string' && /^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/.test(origin)))].slice(0, 20) : [];
-    if (!origins.length || book.readOnly) return (this.editorOrigins = []) as string[];
+    const before = new Set(this.editorOrigins);
+    if (!origins.length || book.readOnly) { this.editorOrigins = []; return { origins: [] as string[] }; }
     while (this.askingNetwork) await this.askingNetwork.catch(() => {});
     const ask = (async () => {
       const trusted = await this.networkTrust?.(book.folder, origins).catch(() => []) ?? [];
@@ -478,9 +484,10 @@ export class DocumentSession {
       if (pending.length && !this.window.isDestroyed()) {
         const { response } = await dialog.showMessageBox(this.window, {
           type: 'question', buttons: ['Allow', 'Not Now'], defaultId: 0, cancelId: 1,
-          message: 'Allow this book’s template to connect to the internet while you edit?',
-          detail: 'Its editors want to load data from:\n' + pending.join('\n') + '\n\nThey can send what you edit there, too. The printed book never ' +
-            'depends on these sites: editors save what pages need into the book. Allow only templates you trust.',
+          message: 'Allow this book’s template to connect to the internet?',
+          detail: 'It loads data from these sites to draw its pages and editors, in previews and when you export:\n' + pending.join('\n') +
+            '\n\nIt can send what you edit there, too. Without them, those pictures cannot be drawn and the book cannot be exported. ' +
+            'Allow only templates you trust.',
         });
         if (response === 0) {
           await approveNetwork(book.folder, pending);
@@ -490,27 +497,14 @@ export class DocumentSession {
       return origins.filter((origin) => approved.has(origin));
     })();
     this.askingNetwork = ask;
-    try { return (this.editorOrigins = await ask) as string[]; }
+    let allowed: string[];
+    try { allowed = await ask; }
     finally { this.askingNetwork = undefined; }
+    this.editorOrigins = allowed;
+    const changed = allowed.length !== before.size || allowed.some((origin) => !before.has(origin));
+    return changed && this.active.id === id ? { origins: allowed, summary: this.activate(this.book) } : { origins: allowed };
   }
 
-  /** Stores a file an element editor generated (ADR 0006). Registering it is not undoable; assigning it is. */
-  async saveGeneratedFile(id: string, request: { name: unknown; bytes: unknown }) {
-    const book = this.currentBook(id);
-    if (book.readOnly) throw new Error('Create a project to save files.');
-    if (typeof request?.name !== 'string' || !request.name || request.name.length > 200 || !(request.bytes instanceof Uint8Array)) {
-      throw new Error('Invalid file.');
-    }
-    const destination = join(book.folder, 'files');
-    const createdDirectory = !await fingerprint(destination);
-    const { book: next, id: file, path } = await saveGeneratedFile(book, { name: request.name, bytes: request.bytes });
-    for (const written of createdDirectory ? [destination, path] : [path]) {
-      const relativePath = relative(book.folder, written);
-      this.importedWrites.set(relativePath, await fingerprint(written), this.observedChanges.has(relativePath));
-    }
-    this.projectSession.record(next, 'Generate file', false);
-    return { summary: this.activate(next), id: file };
-  }
 
   async exportBook(owner: BrowserWindow, projectId: string, mode: ExportMode) {
     this.currentBook(projectId);
@@ -531,7 +525,7 @@ export class DocumentSession {
       const id = randomUUID();
       const job = new AbortController();
       this.exportJob = job;
-      this.renders.set(id, { book, mode: 'export' });
+      this.renders.set(id, { book, mode: 'export', network: () => this.editorOrigins });
       const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
       try {
         const fonts = mode === 'print' ? bundledFontNames(book.assets.files) : [];
@@ -567,7 +561,7 @@ export class DocumentSession {
     try {
       return await checkProject(book, this.cache, request, async (snapshot, preview, signal, inspect) => {
         const id = randomUUID();
-        this.renders.set(id, { book: snapshot, mode: 'export' });
+        this.renders.set(id, { book: snapshot, mode: 'export', network: () => this.editorOrigins });
         try {
           const url = renderOrigin + '/render/' + id;
           if (preview) {

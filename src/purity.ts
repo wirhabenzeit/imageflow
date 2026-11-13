@@ -28,11 +28,14 @@ export function renderingSpread(spread: string | undefined) {
  * path of the bundled template, so the app's own timers and requests are never reported. Calls still go through:
  * the frame's CSP decides what actually reaches the network.
  */
-export function installPurityGuards(target: Target, scriptPath: string, stack: () => string = () => new Error().stack ?? ''): PurityGuards {
+export function installPurityGuards(target: Target, scriptPath: string, stack: () => string = () => new Error().stack ?? '',
+  // True while declared asynchronous rendering runs (<RenderedImage>), which may use timers, WebGL, workers and the
+  // template's network origins.
+  exempt: () => boolean = () => false): PurityGuards {
   const calls: ImpureCall[] = [];
   const seen = new Set<string>();
   const record = (api: string) => {
-    if (!stack().includes(scriptPath)) return;
+    if (exempt() || !stack().includes(scriptPath)) return;
     const key = api + '\u0000' + (current ?? '');
     if (seen.has(key)) return;
     seen.add(key);
