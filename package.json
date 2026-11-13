@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "@electron/notarize": "3.1.2",
+    "@electron/osx-sign": "2.7.2",
     "@electron/packager": "20.3.0",
     "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "22.19.11",

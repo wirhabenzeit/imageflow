@@ -8,7 +8,7 @@ export function SourceManager({ api, summary, template, adopt, close }: {
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<{ message: string; code?: string }>();
   const [notice, setNotice] = useState('');
   const entries = sourceEntries(summary);
   const parameters = template ? [template.parameters, ...Object.values(template.spreads).flatMap((spread) => [spread.parameters,
@@ -17,12 +17,12 @@ export function SourceManager({ api, summary, template, adopt, close }: {
   const linked = entries.filter((entry) => entry.linked).length;
   useEffect(() => { dialog.current?.showModal(); }, []);
   async function act(request: SourceAction) {
-    setBusy(true); setError(''); setNotice('');
+    setBusy(true); setError(undefined); setNotice('');
     try {
       const result = await api.sourceAction({ ...request, accept });
-      if ('error' in result) setError(result.error);
+      if ('error' in result) setError({ message: result.error, code: result.code });
       else { adopt(result.value.summary); setNotice(result.value.message ?? 'Sources updated'); }
-    } catch (error) { setError(error instanceof Error ? error.message : 'Could not update sources.'); }
+    } catch (error) { setError({ message: error instanceof Error ? error.message : 'Could not update sources.' }); }
     finally { setBusy(false); }
   }
   return <dialog className="source-manager" ref={dialog} aria-labelledby="source-manager-title" onCancel={(event) => { if (busy) event.preventDefault(); }} onClose={close}>
@@ -42,7 +42,7 @@ export function SourceManager({ api, summary, template, adopt, close }: {
             {entry.linked && <button disabled={busy || !!unavailable} onClick={() => void act({ action: 'copy', key: entry.key })}>Copy into Book</button>}</td></tr>;
       })}
     </tbody></table></div>
-    {error && <p role="alert" className="error-text">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {error && <p role="alert" data-error-code={error.code} className="error-text">{error.message}</p>}{notice && <p role="status">{notice}</p>}
     <footer><button disabled={busy} onClick={() => dialog.current?.close()}>Done</button></footer>
   </dialog>;
 }

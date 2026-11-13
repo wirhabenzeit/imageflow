@@ -4,8 +4,11 @@ import metadata from '../package.json' with { type: 'json' };
 
 export function releaseMetadata({ refType, tag, version }) {
   if (refType !== 'tag') throw new Error('Releases must run from a version tag.');
-  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(version);
-  if (!match || match[0] !== version || match[4]?.split('.').some((part) => /^0\d+$/.test(part))) {
+  if (typeof version !== 'string') throw new Error('package.json version must be a semantic version.');
+  if (version.includes('+')) throw new Error('Release versions must not contain semver build metadata (+...).');
+  // Unlike $, this lookahead requires the absolute end, including after a newline.
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?![\s\S])/.exec(version);
+  if (!match || match[4]?.split('.').some((part) => /^0\d+$/.test(part))) {
     throw new Error('package.json version must be a semantic version.');
   }
   if (tag !== 'v' + version) throw new Error('Release tag ' + tag + ' does not match package.json version ' + version + '.');

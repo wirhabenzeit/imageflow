@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { testBook, menuAction } from './ui-actions.mjs';
+import { testBook, menuAction, retryBookRefresh } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/linked-smoke-')));
@@ -117,28 +117,19 @@ try {
   await manager.waitFor();
   // A linked-file refresh may still own the book just after the renderer becomes ready.
   // Retry only that explicit busy response; any other error must fail with its actual message.
-  let collectionError;
-  for (let attempt = 0; attempt < 5; attempt++) {
+  const collection = await retryBookRefresh(async () => {
     await manager.getByRole('button', { name: 'Include All Assets', exact: true }).click();
     const alert = manager.getByRole('alert');
     await alert.waitFor();
-    collectionError = await alert.innerText();
-    if (collectionError !== 'ImageFlow is finishing another operation in this book.') break;
-    await ready(page);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  assert.match(collectionError, /Cannot include all assets/);
+    return { error: await alert.innerText(), code: await alert.getAttribute('data-error-code') };
+  }, () => ready(page));
+  assert.match(collection.error, /Cannot include all assets/);
   await page.screenshot({ path: join(root, '.build/linked-missing-sources.png') });
   await manager.getByRole('button', { name: 'Done', exact: true }).click();
-  let checked;
-  for (let attempt = 0; attempt < 5; attempt++) {
+  const checked = await retryBookRefresh(async () => {
     state = await current(page);
-    checked = await page.evaluate((id) => window.imageflow.checkBook(id, {}), state.id);
-    const stale = checked.value?.diagnostics.some((finding) => finding.code === 'source-changed');
-    if (!stale && checked.error !== 'ImageFlow is finishing another operation in this book.') break;
-    await ready(page);
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
+    return page.evaluate((id) => window.imageflow.checkBook(id, {}), state.id);
+  }, () => ready(page));
   assert.ok(checked.value?.diagnostics.some((finding) => finding.code === 'source-unavailable'), JSON.stringify(checked));
   const print = join(work, 'Missing-print.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, print);
