@@ -80,8 +80,8 @@ export function PhotoContent({ summary, spread, box, label, change, inspect, adj
       </div>
     </div>
     {assigned && <div className="crop-controls">
-      <p className="muted">{placement.zoom !== 1 ? 'Zoomed ' + placement.zoom.toFixed(1) + '×' : 'Fills the frame'}
-        {moved ? ' · moved' : ''}{moved && !ownCrop ? ' · from another layout' : ''}</p>
+      <p className="muted crop-summary">{[placement.zoom !== 1 ? 'Zoomed ' + placement.zoom.toFixed(1) + '×' : '',
+        moved ? 'Moved' : '', moved && !ownCrop ? 'From another layout' : ''].filter(Boolean).join(' · ')}</p>
       <div className="box-actions">
         {adjustCrop && <button type="button" onClick={adjustCrop}>Adjust crop…</button>}
         <button type="button" disabled={!moved} onClick={() => change((item) => {

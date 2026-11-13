@@ -1179,7 +1179,18 @@ export function App() {
     return () => window.removeEventListener('keydown', listener);
   }, []);
 
+  function spreadDeleteKey(event: KeyboardEvent) {
+    if (!['Backspace', 'Delete'].includes(event.key) || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.defaultPrevented) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('input, textarea, select, [contenteditable]') || !target.closest('.spread-thumb, .canvas')) return;
+    if (!canDelete || editing || cropping || elementEditor || quick) return;
+    event.preventDefault();
+    deleteSpread();
+  }
+
   function thumbKeys(event: KeyboardEvent) {
+    spreadDeleteKey(event);
+    if (event.defaultPrevented) return;
     // The Book menu's proposed move shortcuts (#50) also work while a thumbnail has focus.
     if (event.metaKey && event.altKey && !event.shiftKey && !event.ctrlKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
       event.preventDefault();
@@ -1330,7 +1341,10 @@ export function App() {
       {!panels.leftHidden ? <PanelDivider side="left" size={panels.left} resize={resizePanel} onResizing={setResizing} /> : <div />}
       <div className="workspace-center">
         <div ref={canvasWrap} className="canvas-wrap">
-          <main ref={canvas} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" onScroll={measureView}
+          <main ref={canvas} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" tabIndex={0} onScroll={measureView}
+            onKeyDown={spreadDeleteKey} onPointerDown={(event) => {
+              if (!(event.target as HTMLElement).closest('input, textarea, select, button, [contenteditable]')) event.currentTarget.focus({ preventScroll: true });
+            }}
             onDragOver={(event) => {
               if (!writable || !canvasReady || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime)) return;
               event.preventDefault();
@@ -1479,8 +1493,9 @@ export function App() {
           setLayoutPicker((current) => current?.spread === spread.id && current.family === family ? undefined : { spread: spread.id, family, layout });
         }}
         expandedFamily={layoutPicker?.spread === spread.id ? layoutPicker.family : undefined}
-        familyPicker={template && layoutPicker?.spread === spread.id && <LayoutFamilyPicker key={summary.id + ':' + layoutPicker.family}
-          project={summary.id} template={template} spread={spread} family={layoutPicker.family} layout={layoutPicker.layout}
+        familyPicker={template && layoutPicker?.spread === spread.id && <LayoutFamilyPicker
+          key={JSON.stringify([summary.handle, spread.id, layoutPicker.family, summary.templateHash, template.format, summary.network])}
+          project={summary.id} template={template} spread={spread} params={summary.project.params} family={layoutPicker.family}
           readOnly={summary.readOnly} blocked={previewNotice || undefined} edit={editCanvas} close={() => setLayoutPicker(undefined)} />}
         edit={edit} highlight={setHighlight} issues={issue} select={select} />}
       </div>

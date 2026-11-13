@@ -184,7 +184,7 @@ try {
   // B → C (no photo boxes) → A: the replacement and removal hold, the other photos and their crops return.
   await rerendered(() => layout('Text spread').click());
   assert.equal(await kept(), 'Set aside · 3 photos');
-  // The family's preview opens its picker, which starts on the first variant for a spread outside the family.
+  // Opening a family outside it leaves every variant unselected until a choice is applied.
   const pickerRegion = w.getByRole('region', { name: 'Grid size' });
   const pickerFrame = w.frameLocator('.inline-layout-picker iframe');
   const gridSize = (name) => pickerFrame.getByRole('radio', { name, exact: true });
@@ -195,6 +195,8 @@ try {
   };
   await layout('Photo grid').click();
   await pickerReady();
+  assert.equal(await gridSize('2 × 2').getAttribute('aria-checked'), 'false');
+  assert.equal(await gridSize('3 × 3').getAttribute('aria-checked'), 'false');
   assert.equal(await w.locator('dialog.layout-picker-dialog').count(), 0);
   // The canvas and sidebar remain interactive while the inline picker is open.
   assert.equal(await button('Add').isEnabled(), true);
@@ -213,7 +215,29 @@ try {
   if (!(await pickerRegion.count())) await button('Grid size…').click();
   await pickerReady();
   assert.equal(await gridSize('2 × 2').getAttribute('aria-checked'), 'true');
+  await w.locator('.inline-layout-picker iframe').evaluate((node) => { node.dataset.reuseProbe = 'retained'; });
+  const pickerHeight = await pickerRegion.evaluate((node) => node.getBoundingClientRect().height);
+  await w.evaluate(() => {
+    window.__pickerHeights = [];
+    window.__pickerMeasure = setInterval(() => {
+      const node = document.querySelector('.inline-layout-picker');
+      window.__pickerHeights.push(node?.getBoundingClientRect().height ?? 0);
+    }, 10);
+  });
   await rerendered(() => gridSize('3 × 3').click());
+  await w.waitForFunction(() => document.querySelector('iframe.book-frame-layouts[data-current][data-ready]'));
+  assert.equal(await w.locator('.inline-layout-picker iframe').getAttribute('data-reuse-probe'), 'retained', 'Saving a choice retains the picker frame');
+  const heights = await w.evaluate(() => { clearInterval(window.__pickerMeasure); return window.__pickerHeights; });
+  assert.ok(heights.every((height) => Math.abs(height - pickerHeight) < 1), 'Saving a choice keeps the picker height stable');
+  const position = await pickerRegion.evaluate((node) => {
+    const family = document.querySelector('.layout-family[aria-expanded="true"]').getBoundingClientRect();
+    const next = [...document.querySelectorAll('.layout-option')].map((item) => item.getBoundingClientRect())
+      .filter((rect) => rect.top > family.bottom + 1).sort((a, b) => a.top - b.top)[0];
+    const picker = node.getBoundingClientRect();
+    return { familyBottom: family.bottom, pickerTop: picker.top, pickerBottom: picker.bottom, nextTop: next?.top };
+  });
+  assert.ok(position.pickerTop >= position.familyBottom && position.pickerTop - position.familyBottom < 12, 'The picker sits directly under its preview row: ' + JSON.stringify(position));
+  assert.ok(position.nextTop >= position.pickerBottom, 'Following layout rows clear the inline picker');
   assert.equal(await statusLine(), '');
   assert.equal((await settlements()).definition, 'grid9');
   assert.equal(await frame.locator('[data-spread="settlements"] [data-box]').count(), 9);

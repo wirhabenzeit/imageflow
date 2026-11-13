@@ -3,6 +3,7 @@ import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node
 import { join, relative, sep } from 'node:path';
 import type { TemplateInfo } from '../src/desktop';
 import type { LibraryEntry, LibraryImportResult, TemplatePackage } from '../src/library';
+import { resolveFormat } from '../src/format';
 import { templatePackages } from './dependencies';
 import { extractTemplateArchive, isTemplateArchive, writeTemplateArchive } from './template-archive';
 
@@ -98,11 +99,13 @@ export type ResolvedTemplate = Awaited<ReturnType<TemplateLibrary['resolve']>>;
 
 function entryFrom(info: TemplateInfo | undefined, fallback: { id: string; version?: string }, extra: Omit<LibraryEntry,
   'id' | 'version' | 'label' | 'formats' | 'layouts' | 'openingSpreads'>): LibraryEntry {
+  const geometry = info && resolveFormat(info.format);
   return {
     id: info?.id ?? fallback.id, version: info?.version ?? fallback.version ?? '', label: info?.label ?? info?.id ?? fallback.id,
     ...(info?.description ? { description: info.description } : {}),
     ...(info?.network?.length ? { network: [...info.network] } : {}),
     formats: info ? Object.values(info.formats).length ? Object.values(info.formats) : [info.format.label] : [],
+    ...(geometry ? { shape: geometry.pageWidth === geometry.height ? 'Square' as const : geometry.pageWidth > geometry.height ? 'Landscape' as const : 'Portrait' as const } : {}),
     layouts: info ? Object.values(info.spreads).map(({ label }) => label) : [],
     openingSpreads: info?.openingSpreads?.length ?? 0,
     ...extra,

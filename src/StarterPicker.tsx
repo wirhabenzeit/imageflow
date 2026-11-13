@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { DesktopApi } from './desktop';
 import { TemplatePreview } from './TemplatePreview';
 import { useLibrary } from './useLibrary';
+import { templateFormatSummary } from './library';
 
 export function StarterPicker({ api }: { api?: DesktopApi }) {
   const { entries, error } = useLibrary(api);
@@ -50,7 +51,7 @@ export function StarterPicker({ api }: { api?: DesktopApi }) {
             }} data-template={template.id}>
             <TemplatePreview api={api} entry={template} natural />
             <strong>{template.label}</strong>
-            <small title={template.formats[0]}>{template.formats[0]}</small>
+            <small title={template.formats.join('\n')}>{templateFormatSummary(template)}</small>
           </button>)}
         </div>
       </section>)}

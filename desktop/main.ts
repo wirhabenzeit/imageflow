@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, relative, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
 import type { BookMenuState, CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
@@ -235,7 +236,7 @@ function showStart() {
 function showTemplates() {
   if (quitting) return;
   if (templatesWindow && !templatesWindow.isDestroyed()) { focus(templatesWindow); return; }
-  const owner = new BrowserWindow({ title: 'Manage Templates', width: 760, height: 560, minWidth: 580, minHeight: 400,
+  const owner = new BrowserWindow({ title: 'Templates', width: 760, height: 560, minWidth: 580, minHeight: 400,
     show: false, webPreferences: windowOptions() });
   templatesWindow = owner;
   secureWindow(owner);
@@ -514,8 +515,16 @@ function templatePreview(id: string, hash: string, origins: string[]) {
       const first = book.project.spreads[0];
       if (!first) return null;
       sessions.set(session, { book, mode: 'export', network: () => origins });
-      const preview = await captureBookPreview(renderOrigin + '/render/' + session,
+      let preview = await captureBookPreview(renderOrigin + '/render/' + session,
         { target: { spread: first.id }, maxEdge: 320, format: 'jpeg' }, controller.signal);
+      // A blank opening page says little about a template. Prefer an illustrated sample spread in that case.
+      const pixels = await sharp(preview.bytes).stats();
+      if (pixels.channels.every(({ stdev }) => stdev < .75)) {
+        const illustrated = book.project.spreads.find((spread) => spread.id !== first.id &&
+          Object.values(spread.boxes).some(({ photo }) => !!photo && book.photos.has(photo)));
+        if (illustrated) preview = await captureBookPreview(renderOrigin + '/render/' + session,
+          { target: { spread: illustrated.id }, maxEdge: 320, format: 'jpeg' }, controller.signal);
+      }
       return 'data:image/jpeg;base64,' + Buffer.from(preview.bytes).toString('base64');
     } catch { return null; }
     finally {
@@ -790,7 +799,8 @@ function installMenu() {
           const document = focusedDocument(owner); if (document?.layout.mode === 'grid') document.window.webContents.send(channels.command, `grid-columns-${columns}`);
         } })) },
       registered('guides', 'toggle-guides', 'checkbox'), { type: 'separator' },
-      registered('zoom-in'), registered('zoom-out'), registered('zoom-actual'), registered('zoom-fit'), { type: 'separator' }, { role: 'togglefullscreen' },
+      registered('zoom-in'), { ...registered('zoom-in'), id: 'zoom-in-equals', accelerator: 'CmdOrCtrl+=', visible: false, acceleratorWorksWhenHidden: true },
+      registered('zoom-out'), registered('zoom-actual'), registered('zoom-fit'), { type: 'separator' }, { role: 'togglefullscreen' },
     ] },
     { role: 'windowMenu', submenu: [{ label: 'Welcome to ImageFlow', accelerator: 'CmdOrCtrl+Shift+1', click: () => showStart() },
       { type: 'separator' }, { role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
@@ -819,6 +829,8 @@ function updateMenus() {
   }
   const inAssets = !!document && owner === assetsWindows.get(document)?.window;
   const native = (!inBook && !inAssets) || (inBook && state.textEditing);
+  const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
+  if (zoomAlias) zoomAlias.enabled = commandState('zoom-in', state).enabled;
   for (const direction of ['undo', 'redo']) {
     const own = menu?.getMenuItemById(direction), text = menu?.getMenuItemById('native-' + direction);
     if (own) own.visible = !native;

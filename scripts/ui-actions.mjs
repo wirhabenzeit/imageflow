@@ -56,7 +56,7 @@ export async function menuAction(app, name) {
   const labels = { 'New project…': 'New Book…', 'Open project…': 'Open…', 'Export Print PDF…': 'Export for Print…', 'Export Proof PDF…': 'Export PDF…', Reload: 'Reload from Disk', 'Reload Book': 'Reload from Disk',
     'Agent Connections…': 'Connect an Agent…', 'Move Spread Down': 'Move Down', 'Move Spread Up': 'Move Up', 'Add Spread': 'New Spread',
     'Show Book Check': 'Check Book', 'Save a Copy…': 'Duplicate…' };
-  const ids = { 'Undo Book Edit': 'undo', 'Redo Book Edit': 'redo', 'Undo Project Edit': 'undo', 'Redo Project Edit': 'redo' };
+  const ids = { 'Delete Spread': 'delete-spread', 'Undo Book Edit': 'undo', 'Redo Book Edit': 'redo', 'Undo Project Edit': 'undo', 'Redo Project Edit': 'redo' };
   const page = activePages.get(app) ?? app.windows().find((page) => page.url() === 'imageflow://editor/') ?? await app.firstWindow();
   await app.evaluate(({ Menu, BrowserWindow }, { label, commandId, id }) => {
     const walk = (menu) => menu.items.flatMap((item) => [item, ...item.submenu ? walk(item.submenu) : []]);

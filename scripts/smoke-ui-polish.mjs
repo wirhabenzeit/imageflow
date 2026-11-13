@@ -6,6 +6,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { testBook, menuAction } from './ui-actions.mjs';
 
+const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/ui-polish-'));
 let book = join(work, 'Book.imageflow');
@@ -37,11 +38,44 @@ try {
   const beforeTyping = await current(page);
   await title.focus(); await title.press('End'); await page.keyboard.insertText(' typing');
   await until(() => app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('native-undo').visible), 'Text fields use native Undo');
-  await page.keyboard.press('Meta+z');
+  await page.keyboard.press(modifier + '+z');
   assert.equal(await title.inputValue(), originalTitle);
   assert.deepEqual((await current(page)).history, beforeTyping.history);
   assert.equal((await current(page)).photoIndex.segla.title, beforeTyping.photoIndex.segla.title);
+  const spreadCount = (await current(page)).project.spreads.length;
+  await page.locator('.source-photo[data-id="segla"]').press('Escape');
+  assert.equal(await page.getByRole('dialog', { name: /Quick Look/ }).count(), 0, 'Escape does not open Quick Look');
+  await page.locator('.source-photo[data-id="segla"]').press('Space');
+  await page.getByRole('dialog', { name: /Quick Look/ }).waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog', { name: /Quick Look/ }).waitFor({ state: 'detached' });
+  await title.focus(); await title.press('End'); await page.keyboard.insertText('X'); await title.press('Backspace');
+  assert.equal(await title.inputValue(), originalTitle);
+  assert.equal((await current(page)).project.spreads.length, spreadCount, 'Typing Backspace cannot delete a spread');
+  assert.equal(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('delete-spread').accelerator ?? null), null, 'No native bare-Delete accelerator intercepts text fields');
   await page.locator('.spread-thumb').first().click();
+  // The unshifted zoom alias targets the book, and Delete remains local to a spread selection.
+  await page.locator('.canvas').focus();
+  const width = await page.locator('.stage').evaluate((node) => node.getBoundingClientRect().width);
+  assert.equal(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('zoom-in-equals').accelerator), 'CmdOrCtrl+=');
+  await command(page, 'zoom-in-equals');
+  await until(async () => await page.locator('.stage').evaluate((node) => node.getBoundingClientRect().width) > width + 1, 'Zoom In alias reaches the book');
+  await command(page, 'zoom-fit');
+  await page.locator('.spread-thumb[data-spread="march"]').click();
+  await ready();
+  await page.locator('.inspector').getByRole('button', { name: 'Edit Calendar grid', exact: true }).click();
+  const editorTitle = page.frameLocator('.element-editor-frame').getByRole('textbox', { name: 'Calendar title', exact: true });
+  await editorTitle.fill('AB'); await editorTitle.press('End'); await editorTitle.press('Backspace');
+  assert.equal(await editorTitle.inputValue(), 'A', 'Backspace edits text inside the custom editor');
+  assert.equal((await current(page)).project.spreads.length, spreadCount);
+  await editorTitle.press('Escape');
+  await page.locator('.element-editor-frame').waitFor({ state: 'detached' });
+  await page.locator('.spread-thumb[data-spread="march"]').focus();
+  await page.keyboard.press('Backspace');
+  await until(async () => (await current(page)).project.spreads.length === spreadCount - 1, 'Backspace deletes the focused spread');
+  await command(page, 'undo');
+  await until(async () => (await current(page)).project.spreads.length === spreadCount, 'The spread deletion is undoable');
+  await ready();
 
   await menuAction(app, 'Assets…');
   await until(() => app.windows().some((page) => page.url() === 'imageflow://editor/assets'));
@@ -52,7 +86,7 @@ try {
   const total = await rows.count();
   await rows.nth(0).click(); await rows.nth(2).click({ modifiers: ['Shift'] });
   assert.equal(await rows.and(assets.locator('[aria-selected="true"]')).count(), 3);
-  await assets.keyboard.press('Meta+a');
+  await assets.keyboard.press(modifier + '+a');
   assert.equal(await rows.and(assets.locator('[aria-selected="true"]')).count(), total);
   await assets.keyboard.press('Home');
   assert.equal(await rows.and(assets.locator('[aria-selected="true"]')).count(), 1);
@@ -108,7 +142,7 @@ try {
   await until(() => app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('undo').label === 'Undo Revert to Last Opened'));
   await command(page, 'undo');
   await until(async () => (await current(page)).project.title === 'Changed after opening', 'Revert can be undone');
-  console.log('UI polish passed: native text Undo, asset selection and Undo/Redo, nonblocking Quick Look, Rename, Move and Last Opened.');
+  console.log('UI polish passed: text Undo and Backspace, local spread Delete, zoom alias, asset selection and Undo/Redo, Quick Look, Rename, Move and Last Opened.');
 } catch (error) {
   console.error('UI diagnostic:', await Promise.all(app.windows().filter((page) => page.url() === 'imageflow://editor/').map(async (page) => ({ status: await page.locator('.status').innerText(), book: await current(page) }))));
   throw error;

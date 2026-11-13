@@ -346,8 +346,8 @@ export type SpreadDeclaration = {
 export type VariantTags = Record<string, string | number | boolean>;
 export type LayoutVariant = { id: string; label: string; variant: VariantTags };
 /**
- * Props of a layout family's picker. `current` is the variant chosen in the picker's draft (at first the spread's own
- * layout, when it is a variant); `saved` is the spread's layout. `choose` immediately applies another variant as one undoable layout switch;
+ * Props of a layout family's picker. `current` is the chosen layout (initially the spread's saved layout, which can
+ * be outside this family, so no variant is selected); `saved` is the spread's layout. `choose` immediately applies another variant as one undoable layout switch;
  * `find` returns the variant whose tags include all the given ones. The picker expands inline in the sidebar.
  * `commit` applies the current choice; `cancel` closes the picker without reverting applied choices.
  */

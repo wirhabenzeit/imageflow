@@ -21,7 +21,7 @@ export const commandRegistry = {
   'manage-sources': { label: 'Assets…', enabled: book },
   'add-spread': { label: 'New Spread', accelerator: 'CmdOrCtrl+Shift+N', enabled: spread('add-spread') },
   'duplicate-spread': { label: 'Duplicate Spread', accelerator: 'CmdOrCtrl+D', enabled: spread('duplicate-spread') },
-  'delete-spread': { label: 'Delete Spread', accelerator: 'Backspace', enabled: spread('delete-spread') },
+  'delete-spread': { label: 'Delete Spread ⌫', enabled: spread('delete-spread') },
   'move-spread-up': { label: 'Move Up', accelerator: 'Alt+CmdOrCtrl+Up', enabled: spread('move-spread-up') },
   'move-spread-down': { label: 'Move Down', accelerator: 'Alt+CmdOrCtrl+Down', enabled: spread('move-spread-down') },
   'book-check': { label: 'Check Book', accelerator: 'CmdOrCtrl+Shift+K', enabled: s => s.document },

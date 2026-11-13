@@ -391,7 +391,8 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
 // Fits sheets to the frame width and reports where sheets and boxes landed. In book grid mode, each sheet fits
 // one column and book order runs left to right, then continues on the next row. The book grows vertically.
 type GridRequest = { columns: number };
-function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest) {
+function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest,
+  expansion?: { after: string; height: number }) {
   if (view === 'thumbs') {
     let animations: Animation[] = [];
     window.addEventListener('message', (event: MessageEvent) => {
@@ -442,12 +443,14 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     const count = gridColumns || columns;
     root.style.setProperty('--if-columns', String(count));
     const column = (width - pad * 2 - (gridColumns ? gap : columnGap) * (count - 1)) / count;
-    for (const { sheet } of sheets) {
+    const expandedRow = expansion ? Math.floor(sheets.findIndex(({ spread }) => spread === expansion.after) / count) : -1;
+    for (const [index, { sheet }] of sheets.entries()) {
       const fitted = column / sheet.offsetWidth;
       const scale = Math.max(0.01, Math.min(fitted, 1));
       const slot = sheet.parentElement!;
       slot.style.width = sheet.offsetWidth * scale + 'px';
       slot.style.height = sheet.offsetHeight * scale + 'px';
+      if (view === 'layouts') slot.style.marginBottom = expandedRow >= 0 && Math.floor(index / count) === expandedRow ? expansion!.height + 'px' : '';
       sheet.style.setProperty('--if-zoom', String(scale));
     }
     const bounds = root.getBoundingClientRect();
@@ -778,7 +781,8 @@ async function settle(images: HTMLImageElement[]) {
 
 // Renders one spread in every layout of the template, carrying its content over the way switching layouts does.
 // Markdown boxes show their source from the beginning; the previews are for choosing a layout, not for proofing.
-async function renderLayouts(root: HTMLElement, book: RenderProject, template: Template, info: TemplateInfo, spreadId: string) {
+async function renderLayouts(root: HTMLElement, book: RenderProject, template: Template, info: TemplateInfo, spreadId: string,
+  expansion?: { after: string; height: number }) {
   const { spreads } = book.project;
   const index = spreads.findIndex(({ id }) => id === spreadId);
   if (index < 0) throw new Error('Spread does not exist.');
@@ -814,7 +818,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
     for (const [source, targets] of sources) flow.run(markdownToHtml(book.texts[source]), targets, 'columns');
     return { spread: definition, sheet };
   });
-  layoutBook(root, sheets, 'layouts', format);
+  layoutBook(root, sheets, 'layouts', format, undefined, expansion);
   publish({ state: 'ready', template: info, pages: sequence.count, units: [], errors: [], warnings: [], flow: {}, anchors: anchors.anchors });
 }
 
@@ -1056,7 +1060,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
 
 // Runs a layout family's picker. Its draft is one of the family's layout IDs; the frame reports it, its height, and
 // commit or cancel to the app, which checks the choice and switches the layout. The frame changes nothing itself.
-function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, familyId: string, initial: string,
+function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, familyId: string,
   readOnly: boolean) {
   const spread = book.project.spreads.find(({ id }) => id === spreadId);
   const family = template.layoutFamilies && Object.hasOwn(template.layoutFamilies, familyId) ? template.layoutFamilies[familyId] : undefined;
@@ -1064,13 +1068,14 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   if (!spread || !family || !picker) throw new Error('This layout family has no picker.');
   const ids = familyLayouts(template.spreads, familyId);
   const variants = ids.map((id) => ({ id, label: template.spreads[id].label, variant: { ...template.spreads[id].variant } }));
-  const document = resolveParams(template.parameters, book.project.params);
+  let document = resolveParams(template.parameters, book.project.params);
   const format = resolveFormat(template.format);
   root.className = 'if-editor';
-  const start = [initial, spread.definition].find((id) => ids.includes(id)) ?? ids[0];
+  let saved = spread.definition;
+  let disabled = readOnly;
 
   // The draft lives outside React so choose() followed directly by commit() sends the newest choice.
-  let draft = start;
+  let draft = saved;
   let failed = false;
   const fail = (error: unknown) => {
     if (failed) return;
@@ -1079,9 +1084,9 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
     post({ state: 'error', message: 'The picker stopped working: ' + reason });
   };
   const reported = new Set<string>();
-  let update: ((id: string) => void) | undefined;
+  let update: (() => void) | undefined;
   const choose = (id: string) => {
-    if (readOnly || failed) return;
+    if (disabled || failed) return;
     if (typeof id !== 'string' || !ids.includes(id)) {
       // Reported once per value, like an unknown parameter in an element editor; the draft stays as it was.
       const name = String(id);
@@ -1093,16 +1098,26 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
     }
     draft = id;
     post({ type: 'editor-draft', values: { layout: draft } });
-    update?.(draft);
+    update?.();
   };
   const find = (tags: VariantTags) => {
     const wanted = Object.entries(tags ?? {});
     return variants.find(({ variant }) => wanted.every(([key, value]) => Object.hasOwn(variant, key) && variant[key] === value))?.id;
   };
-  const commit = () => { if (!failed) post({ type: 'editor-commit', values: { layout: draft } }); };
+  const commit = () => { if (!failed && ids.includes(draft)) post({ type: 'editor-commit', values: { layout: draft } }); };
   const cancel = () => post({ type: 'editor-cancel' });
   window.addEventListener('message', (event) => {
-    if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'editor-flush') return;
+    if (event.source !== parent || event.origin !== editorURL.slice(0, -1)) return;
+    if (event.data?.type === 'layout-picker-state') {
+      if (typeof event.data.saved !== 'string' || !Object.hasOwn(template.spreads, event.data.saved) || typeof event.data.readOnly !== 'boolean') return;
+      saved = event.data.saved;
+      draft = saved;
+      document = resolveParams(template.parameters, event.data.document ?? {});
+      disabled = event.data.readOnly;
+      update?.();
+      return;
+    }
+    if (event.data?.type !== 'editor-flush') return;
     const request = event.data.request;
     if (typeof request !== 'number') return;
     try { (window.document.activeElement as HTMLElement | null)?.blur?.(); }
@@ -1111,14 +1126,14 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   });
 
   function Host() {
-    const [current, setCurrent] = React.useState(draft);
+    const [, refresh] = React.useReducer((value: number) => value + 1, 0);
     React.useEffect(() => {
-      update = setCurrent;
+      update = refresh;
       post({ type: 'editor-ready' });
       return () => { update = undefined; };
     }, []);
     return React.createElement(picker!.component, {
-      variants, current, saved: spread!.definition, choose, find, document, format, readOnly, commit, cancel,
+      variants, current: draft, saved, choose, find, document, format, readOnly: disabled, commit, cancel,
     });
   }
 
@@ -1201,22 +1216,23 @@ export async function startRender(root: HTMLElement) {
     }
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
+    if (book.mode === 'edit') {
+      const focus = () => post({ type: 'editor-focus', text: !!document.activeElement?.matches('textarea, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"])') });
+      document.addEventListener('focusin', focus); document.addEventListener('focusout', focus); window.addEventListener('focus', focus);
+      setTimeout(focus, 0);
+    }
     if (book.mode === 'edit' && query.get('view') === 'editor') {
       renderEditor(root, book, template, query.get('spread') ?? '', query.has('editor') ? { editor: query.get('editor')! } : { element: query.get('element') ?? '' },
         query.has('readonly'));
       return;
     }
     if (book.mode === 'edit' && query.get('view') === 'layout-picker') {
-      renderLayoutPicker(root, book, template, query.get('spread') ?? '', query.get('family') ?? '', query.get('layout') ?? '', query.has('readonly'));
+      renderLayoutPicker(root, book, template, query.get('spread') ?? '', query.get('family') ?? '', query.has('readonly'));
       return;
     }
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
     const { chains, positions } = textAssignments(book, template);
-    if (book.mode === 'edit') {
-      const focus = () => post({ type: 'editor-focus', text: !!document.activeElement?.matches('textarea, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"])') });
-      document.addEventListener('focusin', focus); document.addEventListener('focusout', focus);
-    }
     const edit = book.mode === 'edit';
     const check = !edit && query.get('view') === 'check';
     const artwork = !edit && query.get('view') === 'artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
@@ -1236,7 +1252,9 @@ export async function startRender(root: HTMLElement) {
         : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
           : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
     if (edit && view === 'layouts') {
-      await renderLayouts(root, book, template, info, query.get('spread') ?? '');
+      const height = Number(query.get('gapHeight'));
+      const expansion = query.has('gapAfter') && height > 0 && height <= 1000 ? { after: query.get('gapAfter')!, height } : undefined;
+      await renderLayouts(root, book, template, info, query.get('spread') ?? '', expansion);
       return;
     }
     const activeChains = [...chains];

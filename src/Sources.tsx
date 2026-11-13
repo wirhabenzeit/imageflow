@@ -39,7 +39,7 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
       if (items.length) focus(items[event.key === 'Home' ? 0 : items.length - 1].id);
-    } else if (event.key === ' ' || event.key === 'Escape') {
+    } else if (event.key === ' ') {
       event.preventDefault();
       if (current) quickLook({ kind: tab, id: current });
     }

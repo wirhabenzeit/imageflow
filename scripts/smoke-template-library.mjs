@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
+import sharp from 'sharp';
 import { clickClosingWindow } from './ui-actions.mjs';
 
 // The template library: import from its own window, live updates in an open New Book picker, removal, a failed import,
@@ -74,7 +75,15 @@ try {
   const list = settings.getByRole('listbox', { name: 'Templates' });
   await list.getByText('Photobook', { exact: true }).waitFor();
   await list.getByRole('option').filter({ has: settings.getByText('Photobook', { exact: true }) }).locator('.template-preview img').waitFor();
-  assert.equal(await settings.getByRole('main', { name: 'Manage Templates' }).count(), 1);
+  assert.equal(await settings.getByRole('main', { name: 'Templates' }).count(), 1);
+  const cover = await settings.evaluate(async () => {
+    const { value } = await window.imageflow.library();
+    const book = value.find(({ id }) => id === 'imageflow-starter');
+    return (await window.imageflow.templatePreview(book.id, book.hash)).value;
+  });
+  assert.ok(cover, 'The photobook has a generated preview');
+  const pixels = await sharp(Buffer.from(cover.split(',')[1], 'base64')).stats();
+  assert.ok(pixels.channels.some(({ stdev }) => stdev > 1), 'The photobook preview contains visible content');
 
   // Import shows the packages and network sites the template brings; the sites are not allowed unless asked to.
   await answer(0);

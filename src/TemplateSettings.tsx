@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { DesktopApi } from './desktop';
 import { TemplatePreview } from './TemplatePreview';
-import { describeImport } from './library';
+import { describeImport, templateFormatSummary } from './library';
 import { useListSelection } from './list-selection';
 import type { LibraryImportResult } from './library';
 import type { useLibrary } from './useLibrary';
@@ -68,10 +68,10 @@ export function TemplateSettings({ api, library }: { api?: DesktopApi; library: 
       <section className="template-detail" aria-label="Template details">
         {entry && <>
           <TemplatePreview api={api} entry={entry} natural />
-          <h2>{entry.label} <small className="muted">{entry.version}</small></h2>
+          <h2 title={entry.source === 'imported' ? entry.id : undefined}>{entry.label} <small className="muted">{entry.version}</small></h2>
           {entry.description && <p>{entry.description}</p>}
-          <dl><dt>Formats</dt><dd>{entry.formats.join(', ')}</dd><dt>Layouts</dt><dd>{entry.layouts.join(', ')}</dd>
-            <dt>ID</dt><dd>{entry.id}</dd>
+          <dl><dt>Formats</dt><dd title={entry.formats.join('\n')}>{templateFormatSummary(entry)}</dd>
+            <dt>Layouts</dt><dd title={entry.layouts.join('\n')}>{entry.layouts.length} layouts</dd>
             {entry.source === 'imported' && <><dt>Imported</dt><dd>{entry.importedAt ? new Date(entry.importedAt).toLocaleDateString() : ''}</dd></>}
           </dl>
           {entry.packages?.length ? <section><h3>Packages</h3><ul>{entry.packages.map(({ name, version, license }) =>

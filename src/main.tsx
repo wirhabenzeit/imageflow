@@ -13,7 +13,7 @@ if (window.location.hostname === 'render' && window.location.pathname.startsWith
   document.title = 'Assets';
   void import('./AssetsWindow').then(({ AssetsWindow }) => createRoot(root).render(<AssetsWindow api={window.imageflow} />));
 } else if (window.location.pathname === '/templates') {
-  document.title = 'Manage Templates';
+  document.title = 'Templates';
   void import('./TemplateWindow').then(({ TemplateWindow }) => createRoot(root).render(<TemplateWindow api={window.imageflow} />));
 } else if (window.location.pathname === '/settings') {
   document.title = 'Settings';

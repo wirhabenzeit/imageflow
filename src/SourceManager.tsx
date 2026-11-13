@@ -94,7 +94,8 @@ export function SourceManager({ api, summary, adopt, disabled = false, quickLook
           onDoubleClick={() => { if (!locked && !problem) void act({ action: 'reveal', keys: list.selected.includes(entry.key) ? list.selected : [entry.key] }); }}>
           <span className="asset-icon">{entry.kind === 'photo' && summary.photos[entry.id] ? <img src={summary.photos[entry.id]} alt="" />
             : <span aria-hidden="true">{entry.kind === 'photo' ? '▧' : entry.kind === 'markdown' ? 'Aa' : '▤'}</span>}</span>
-          <span className="asset-name" title={entry.path}><span className="asset-description"><strong>{fileName(entry.path)}</strong><span className="muted">{entry.path}</span></span></span>
+          <span className="asset-name" title={entry.path}><span className="asset-description"><strong>{fileName(entry.path)}</strong>
+            {(entry.linked || problem) && <span className="muted">{entry.path}</span>}</span></span>
           <span className="asset-status">{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
             {entry.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>
