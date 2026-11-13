@@ -8,8 +8,8 @@ import { PDFDocument } from 'pdf-lib';
 import { _electron } from 'playwright-core';
 
 // #27: the calendar starter opens without Book check findings, numbers its months from the page position, and
-// exports a print PDF of 13 single pages in both formats. `--screenshots <folder>` also saves the editor and the
-// print PDFs there, for reviewing the design.
+// exports a print PDF of single pages in both formats, with or without its cover. `--screenshots <folder>` also
+// saves the editor and the print PDFs there, for reviewing the design.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const build = join(root, '.build');
 const flag = process.argv.indexOf('--screenshots');
@@ -19,7 +19,6 @@ const project = join(work, 'Calendar.imageflow');
 await cp(join(root, 'sample', 'calendar'), project, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
 if (screenshots) await mkdir(screenshots, { recursive: true });
 
-const points = (millimetres) => millimetres * 72 / 25.4;
 const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 0.5, message + ': ' + actual + ' ≉ ' + expected);
 let app;
 try {
@@ -47,13 +46,17 @@ try {
     const [area, last] = [await january.locator('.days').locator('..').boundingBox(), await january.locator('.days li').last().boundingBox()];
     assert.ok(last.y + last.height <= area.y + area.height + 1, 'day 31 fits: ' + JSON.stringify({ area, last }));
   };
-  const printed = async (format, trim) => {
-    const file = join(screenshots ?? work, 'calendar-' + format + '.pdf');
+  // The printer's sizes are 400 dpi pixels with 31 px of bleed on each side.
+  const pixels = (value) => value * 72 / 400;
+  const printed = async (format, size, pages = 13) => {
+    const file = join(screenshots ?? work, 'calendar-' + format + '-' + pages + '.pdf');
     const pdf = await exported('Export print PDF', file, 'Print PDF saved');
-    assert.equal(pdf.getPageCount(), 13);
+    assert.equal(pdf.getPageCount(), pages);
     for (const page of pdf.getPages()) {
-      near(page.getMediaBox().width, points(trim.width + 6), format + ' page width');
-      near(page.getMediaBox().height, points(trim.height + 6), format + ' page height');
+      near(page.getMediaBox().width, pixels(size.width), format + ' page width');
+      near(page.getMediaBox().height, pixels(size.height), format + ' page height');
+      near(page.getTrimBox().x, pixels(31), format + ' bleed');
+      near(page.getTrimBox().width, pixels(size.width - 62), format + ' trim width');
     }
   };
 
@@ -75,7 +78,7 @@ try {
   assert.equal(await frame.locator('.cover .year').textContent(), '2027');
   await daysFit();
   if (screenshots) await w.screenshot({ path: join(screenshots, 'editor.png') });
-  await printed('a3', { width: 420, height: 297 });
+  await printed('a3', { width: 6835, height: 4866 });
 
   // A first month later in the year renumbers the pages, and the cover shows both years.
   await w.getByText('Book settings', { exact: true }).click();
@@ -87,13 +90,24 @@ try {
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await frame.locator('.month-name').first().filter({ hasText: 'JAN' }).waitFor();
 
-  // The A4 format keeps the proportions and passes the print checks too.
+  // Without the cover the months stay January to December, and twelve pages still print.
+  await w.locator('.spread-thumb').first().click();
+  await w.waitForFunction(() => !document.querySelector('button[aria-label="Delete"]')?.disabled);
+  await w.getByRole('button', { name: 'Delete', exact: true }).click();
+  await frame.locator('.cover').waitFor({ state: 'detached' });
+  const coverless = await renderStatus();
+  assert.equal(coverless.pages, 12);
+  assert.deepEqual(coverless.errors, [], JSON.stringify(coverless.errors));
+  assert.deepEqual(await months(), ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']);
+  await printed('a3', { width: 6835, height: 4866 }, 12);
+
+  // The 60 × 45 format keeps the proportions and passes the print checks too.
   const before = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
-  await w.getByRole('combobox', { name: 'Format' }).selectOption('a4');
+  await w.getByRole('combobox', { name: 'Format' }).selectOption('a2');
   await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, before);
   assert.deepEqual((await renderStatus()).errors, []);
   await daysFit();
-  await printed('a4', { width: 297, height: 210 });
+  await printed('a2', { width: 9417, height: 6677 }, 12);
   console.log('ImageFlow calendar starter passed.');
 } finally {
   await app?.close();

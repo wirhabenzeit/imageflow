@@ -1,28 +1,34 @@
-import { box, defineTemplate, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
+import { box, defineTemplate, inch, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { ImageFlowNode, Photo, RenderContext } from 'imageflow';
 import './styles.css';
 
 // A wall calendar without facing pages: a cover, then one page per month. Each page is a full-bleed photo with a
 // narrow strip on the right: the photo's place written down the strip, a thin rule, the month, and its days.
 //
-// Layouts are drawn on a 420 × 297 design page (A3 landscape), measured from the trim edge. `ctx.geometry.design`
-// scales positions to the chosen format; type sizes are scaled with `fit` so A4 keeps the A3 proportions.
+// Layouts are drawn on a 420 × 297 design page (A-series landscape), measured from the trim edge.
+// `ctx.geometry.design` scales positions to the chosen format; type sizes are scaled with `fit` so every format keeps
+// the same proportions.
 const canvas = { width: 420, height: 297 };
 const strip = { x: 393, width: 27 };
 const rule = 70;
 
+// The printer specifies each format as a 400 dpi document in pixels, bleed included, with 31 px of bleed on every
+// side. The trim is what remains: 60 × 45 is 9417 × 6677 px, so 9355 × 6615 px, or 594 × 420 mm (A2).
+const dpi = 400;
+const bleedPixels = 31;
+const pixels = (value: number) => inch(value / dpi);
 const calendarFormat = (label: string, width: number, height: number) => printFormat({
   label,
-  trim: { width: mm(width), height: mm(height) },
+  trim: { width: pixels(width - 2 * bleedPixels), height: pixels(height - 2 * bleedPixels) },
   facingPages: false,
-  bleed: mm(3),
+  bleed: pixels(bleedPixels),
   safe: mm(5),
-  // A cover and twelve months; longer calendars (18 months) fit too.
-  pageCount: { min: 13, max: 19, step: 1 },
+  // Any number of pages: twelve months with or without a cover, or longer calendars.
+  pageCount: { min: 1, max: 36, step: 1 },
   output: {
-    resolution: { minimum: 150, target: 250, maximum: 300 }, minimumTextSize: pt(4),
+    resolution: { minimum: 150, target: 300, maximum: dpi }, minimumTextSize: pt(6),
     fonts: { allowType3: false, allowSystemFonts: false },
-    maximumFileSize: { pages: 500_000_000 },
+    maximumFileSize: { pages: 1_000_000_000 },
   },
 });
 
@@ -120,8 +126,8 @@ export default defineTemplate({
   requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component',
     'format-helper', 'opening-spreads', 'single-pages'],
   formats: {
-    a3: calendarFormat('A3 landscape · 42 × 29.7 cm', 420, 297),
-    a4: calendarFormat('A4 landscape · 29.7 × 21 cm', 297, 210),
+    a3: calendarFormat('45 × 30 cm (A3 landscape) · 6835 × 4866 px', 6835, 4866),
+    a2: calendarFormat('60 × 45 cm (A2 landscape) · 9417 × 6677 px', 9417, 6677),
   },
   defaultFormat: 'a3',
   parameters: documentParameters,
