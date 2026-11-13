@@ -1,8 +1,10 @@
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { BookGeometry, BookView, RenderStatus } from './desktop';
+import { reorderOffsets } from './reorder-motion';
 
-type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean };
+type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean;
+  reorder?: 'preparing' | 'ready' };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
 export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, viewport, hold, accept }: {
@@ -22,7 +24,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   const refs = useRef(new Map<string, HTMLIFrameElement>());
   const ids = [shown, shown === target ? undefined : target].filter((id): id is string => id !== undefined);
 
-  const receive = useEffectEvent((event: MessageEvent<BookGeometry | RenderStatus | { type: 'viewport-request' }>) => {
+  const receive = useEffectEvent((event: MessageEvent<BookGeometry | RenderStatus | { type: 'viewport-request' | 'reorder-ready' }>) => {
     if (event.origin !== renderOrigin || !event.data) return;
     const id = ids.find((key) => refs.current.get(key)?.contentWindow === event.source);
     if (!id) return;
@@ -37,7 +39,10 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     const previous = latest.current.get(id);
     // Revisiting a URL creates a new iframe. Readiness belongs to that instance, not its previous mount.
     const frame: FrameState = previous?.element === element ? { ...previous } : { element };
-    if ('type' in data && data.type === 'geometry') {
+    if ('type' in data && data.type === 'reorder-ready') {
+      if (frame.reorder !== 'preparing') return;
+      frame.reorder = 'ready';
+    } else if ('type' in data && data.type === 'geometry') {
       frame.geometry = data;
       if (id === shown) onGeometry(data);
     } else if ('state' in data && id === target && !frame.status) {
@@ -45,12 +50,22 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     } else return;
 
     if (id === target && !frame.published && frame.status && (frame.status.state === 'error' || frame.geometry)) {
-      frame.published = true;
-      if (frame.status.state === 'ready') {
-        setShown(id);
-        onGeometry(frame.geometry);
+      const offsets = view === 'thumbs' && shown && frame.status.state === 'ready' && !matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? reorderOffsets(latest.current.get(shown)?.geometry, frame.geometry) : [];
+      if (offsets.length && !frame.reorder) {
+        // Prepare the hidden candidate at its previous positions before revealing
+        // it; otherwise the artwork flashes at its destination for one frame.
+        frame.reorder = 'preparing';
+        element.contentWindow?.postMessage({ type: 'prepare-reorder', offsets }, renderOrigin);
       }
-      onStatus?.(frame.status, project);
+      if (frame.reorder !== 'preparing') {
+        frame.published = true;
+        if (frame.status.state === 'ready') {
+          setShown(id);
+          onGeometry(frame.geometry);
+        }
+        onStatus?.(frame.status, project);
+      }
     }
     latest.current = new Map(ids.map((key) => [key, key === id ? frame : latest.current.get(key) ?? {}]));
     setFrames(Object.fromEntries(latest.current));
@@ -60,6 +75,11 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     window.addEventListener('message', listener);
     return () => window.removeEventListener('message', listener);
   }, []);
+  useLayoutEffect(() => {
+    if (shown && latest.current.get(shown)?.reorder === 'ready') {
+      refs.current.get(shown)?.contentWindow?.postMessage({ type: 'play-reorder', start: performance.timeOrigin + performance.now() }, renderOrigin);
+    }
+  }, [shown]);
 
   return ids.map((id) => {
     const frame = frames[id];

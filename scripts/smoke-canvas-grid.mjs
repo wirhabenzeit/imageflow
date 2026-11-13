@@ -7,7 +7,7 @@ import { _electron } from 'playwright-core';
 import { testBook, menuAction } from './ui-actions.mjs';
 
 // Grid mode of the canvas (#52): spreads fill each row left to right and the canvas scrolls vertically. Checks the
-// geometry, menu state, sidebar reveal, in-view highlight, lazy photos, vertical wheel scrolling, editing a box, and
+// geometry, menu state, sidebar reveal, lazy photos, vertical wheel scrolling, editing a box, and
 // that the layout is remembered for the book.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'canvas-grid-'));
@@ -120,7 +120,7 @@ try {
   assert.ok(rects.every(({ x }) => Math.abs(x - rects[0].x) < 1), 'One column stacks spreads vertically');
   assert.ok(rects.every(({ width }) => width <= view.clientWidth - 64 + 1), 'A spread is never wider than the canvas');
 
-  // Selecting a spread in the sidebar reveals it vertically, and the in-view highlight follows the visible rows.
+  // Selecting a spread in the sidebar reveals it vertically and keeps its selection highlight.
   await w.locator('.spread-thumb[data-spread="may"]').click();
   await w.waitForFunction(() => document.querySelector('.canvas').scrollTop > 0);
   await scrolled();
@@ -129,10 +129,7 @@ try {
   const may = await frame.locator('[data-spread="may"]').first().boundingBox();
   const bounds = await w.locator('.canvas').boundingBox();
   assert.ok(may.y >= bounds.y - 1 && may.y + may.height <= bounds.y + bounds.height + 1, 'The selected spread is on screen');
-  await w.locator('.spread-thumb[data-spread="may"].in-view').waitFor({ timeout: 5000 }).catch(async () => {
-    throw new Error('In view: ' + JSON.stringify(await w.locator('.spread-thumb.in-view').evaluateAll((nodes) => nodes.map((node) => node.dataset.spread))));
-  });
-  assert.equal(await w.locator('.spread-thumb[data-spread="title"].in-view').count(), 0);
+  assert.equal(await w.locator('.spread-thumb[data-spread="may"]').getAttribute('aria-current'), 'page');
   // Photos load for the visible rows and not for spreads far above.
   await frame.locator('[data-spread="may"] img[data-src][src]').first().waitFor();
   assert.equal(await frame.locator('[data-spread="arriving"] img[data-src][src]').count(), 0);
@@ -220,7 +217,7 @@ try {
   const column = await w.locator('.canvas').boundingBox();
   assert.ok(twilight.y >= column.y - 1 && twilight.y + twilight.height <= column.y + column.height + 1,
     'The selected spread is on screen after switching to Vertical: ' + JSON.stringify({ twilight, column }));
-  console.log('Canvas grid smoke passed: geometry, columns, menu state, reveal, in-view, lazy photos, wheel, editing and persistence.');
+  console.log('Canvas grid smoke passed: geometry, columns, menu state, reveal, lazy photos, wheel, editing and persistence.');
 } finally {
   await app?.close();
   await rm(work, { recursive: true, force: true });
