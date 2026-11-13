@@ -21,6 +21,23 @@ async function nativeFiles(folder) {
   return found;
 }
 
+export async function verifyMacVersion(app, expected, execute = run) {
+  const { stdout } = await execute('plutil', ['-convert', 'json', '-o', '-', join(app, 'Contents/Info.plist')]);
+  const actual = JSON.parse(stdout).CFBundleShortVersionString;
+  assert.equal(actual, expected, `Packaged app version ${actual ?? '(missing)'} does not match package.json version ${expected}. Rebuild the app before notarizing it.`);
+}
+
+export async function signingEntitlements(bundle, execute = run) {
+  const { stdout, stderr } = await execute('codesign', ['--display', '--entitlements', ':-', bundle]);
+  const xml = [stdout, stderr].map((output) => {
+    const start = output.search(/<\?xml|<plist\b/);
+    return start < 0 ? undefined : output.slice(start);
+  }).find(Boolean);
+  assert.ok(xml, 'Missing signing entitlements for ' + bundle + '. Sign the app and helpers with the JIT entitlement before release.');
+  const { stdout: json } = await execute('plutil', ['-convert', 'json', '-o', '-', '-'], { input: xml });
+  return JSON.parse(json);
+}
+
 export async function verifyMacSigning(app, identity) {
   await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
   const details = async (path) => (await run('codesign', ['--display', '--verbose=4', path])).stderr;
@@ -36,10 +53,7 @@ export async function verifyMacSigning(app, identity) {
     const info = await details(bundle);
     assert.match(info, /flags=.*\bruntime\b/, 'Hardened runtime is required: ' + bundle);
     assert.equal(/^TeamIdentifier=(.+)$/m.exec(info)?.[1], team);
-    const { stdout, stderr } = await run('codesign', ['--display', '--entitlements', ':-', bundle]);
-    const xml = stdout.includes('<?xml') ? stdout : stderr.slice(stderr.indexOf('<?xml'));
-    const { stdout: json } = await run('plutil', ['-convert', 'json', '-o', '-', '-'], { input: xml });
-    const entitlements = JSON.parse(json);
+    const entitlements = await signingEntitlements(bundle);
     assert.equal(entitlements['com.apple.security.cs.allow-jit'], true);
     assert.ok(!entitlements['com.apple.security.cs.allow-unsigned-executable-memory']);
     assert.ok(!entitlements['com.apple.security.cs.disable-library-validation']);
@@ -57,9 +71,8 @@ export async function verifyMacSigning(app, identity) {
 
 export async function verifyNotarization(path, app = false) {
   await run('xcrun', ['stapler', 'validate', path]);
-  if (app) {
-    const { stdout, stderr } = await run('spctl', ['--assess', '--verbose=4', '--type', 'execute', path]);
-    assert.match(stdout + stderr, /source=Notarized Developer ID/);
-  }
-  console.log('Notarization ticket verified: ' + path);
+  const { stdout, stderr } = await run('spctl', ['--assess', '--verbose=4', '--type',
+    ...(app ? ['execute'] : ['open', '--context', 'context:primary-signature']), path]);
+  assert.match(stdout + stderr, /source=Notarized Developer ID/, 'Gatekeeper must accept the notarized ' + (app ? 'app' : 'DMG') + ': ' + path);
+  console.log('Notarization ticket and Gatekeeper acceptance verified: ' + path);
 }

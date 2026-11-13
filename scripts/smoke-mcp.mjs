@@ -1,3 +1,4 @@
+import { packagedMacExecutable } from './mac-paths.mjs';
 import { testBook, menuAction, agentSettings, closeSettings } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -11,7 +12,7 @@ import sharp from 'sharp';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const packaged = process.argv.includes('--packaged');
-const executable = packaged ? join(root, 'out', 'ImageFlow-darwin-' + process.arch, 'ImageFlow.app/Contents/MacOS/ImageFlow') : electron;
+const executable = packaged ? packagedMacExecutable(root) : electron;
 const work = await mkdtemp(join(root, '.build', 'mcp-smoke-'));
 const folder = join(work, 'book.imageflow');
 await Promise.all(['template', 'inbox', 'photos'].map((name) => mkdir(join(folder, name), { recursive: true })));
