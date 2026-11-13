@@ -23,6 +23,7 @@ const common = {
     resolution: resolution.optional(),
     minimumTextSize: positiveLength.optional(),
     maximumFileSize: z.object({ pages: z.number().positive(), cover: z.number().positive().optional() }).optional(),
+    // Deprecated compatibility field. Print always rejects Type 3 and unbundled fonts, with or without it.
     fonts: z.object({ allowType3: z.literal(false), allowSystemFonts: z.literal(false) }).optional(),
   }),
 };

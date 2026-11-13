@@ -43,7 +43,7 @@ async function drawChecked({ width, height, pixelRatio }) {
   canvas.getContext('2d').fillRect(0, 0, canvas.width, canvas.height);
   return canvas;
 }
-export default defineTemplate({ id: 'network-test', version: '1', contract: 1, requires: ['editor-network', 'rendered-images'],
+export default defineTemplate({ id: 'network-test', version: '1', contract: 1,
   network: ['https://tiles.allowed.invalid'],
   format: { label: 'Square', trim: { width: mm(150), height: mm(150) },
     bleed: { top: mm(3), bottom: mm(3), outside: mm(3), binding: mm(0) }, safe: { top: mm(8), bottom: mm(8), outside: mm(8), binding: mm(8) },

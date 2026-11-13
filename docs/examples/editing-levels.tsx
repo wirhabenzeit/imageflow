@@ -32,7 +32,6 @@ function PatternEditor({ values, set, readOnly, Control }: ElementEditorProps<ty
 
 export default defineTemplate({
   id: 'example-editing-levels', version: '1.0.0', contract: 1,
-  requires: ['spread-builder', 'bound-geometry', 'format-helper', 'typed-components', 'editor-controls', 'editor-native-controls'],
   format,
   spreads: ({ spread }) => ({
     marks: spread({

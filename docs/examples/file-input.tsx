@@ -20,7 +20,7 @@ function parseDistances(text: string): { values: number[] } | { line: number } {
 }
 
 export default defineTemplate({
-  id: 'example-file-input', version: '1.0.0', contract: 1, requires: ['spread-builder', 'bound-geometry', 'format-helper', 'template-issues', 'typed-components'],
+  id: 'example-file-input', version: '1.0.0', contract: 1,
   format,
   spreads: ({ spread }) => ({
     chart: spread({

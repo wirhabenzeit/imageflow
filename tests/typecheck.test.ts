@@ -120,7 +120,8 @@ test('every shipped example template type-checks against the installed declarati
   }
   // Layout-typed components and requires reject what the layout or the app does not have.
   const minimal = await readFile(resolve('docs/examples/minimal.tsx'), 'utf8');
-  await writeFile(entry, minimal.replace('<ctx.PhotoBox id="hero"', '<ctx.PhotoBox id="heor"').replace("'typed-components']", "'typed-components', 'teleport']"));
+  await writeFile(entry, minimal.replace('<ctx.PhotoBox id="hero"', '<ctx.PhotoBox id="heor"')
+    .replace('contract: 1,', "contract: 1, requires: ['teleport'],"));
   const messages = (await check()).diagnostics.map(({ message }) => message).join('\n');
   assert.match(messages, /"heor"/);
   assert.match(messages, /"teleport"/);

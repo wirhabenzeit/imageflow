@@ -16,7 +16,7 @@ function Stats({ distance, days, unit }: { distance: number; days: number; unit:
 }
 
 export default defineTemplate({
-  id: 'example-generated-element', version: '1.0.0', contract: 1, requires: ['spread-builder', 'bound-geometry', 'format-helper', 'typed-components'],
+  id: 'example-generated-element', version: '1.0.0', contract: 1,
   format,
   spreads: ({ spread }) => ({
     summary: spread({

@@ -17,7 +17,6 @@ const format = printFormat({
 // bundled in template/fonts/ and loaded with @font-face from a CSS file the template imports (see the starter).
 export default defineTemplate({
   id: 'example-minimal', version: '1.0.0', contract: 1,
-  requires: ['spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'typed-components'],
   format,
   // Book settings, declared once. `spread` below types `ctx.document` from them.
   parameters: { accent: p.color({ label: 'Heading colour', default: '#243b30' }) },

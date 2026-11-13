@@ -542,9 +542,12 @@ test('context reports the installed template API and returns shipped examples on
   await writeFile(join(work, 'examples', 'notes.md'), 'Not an example.');
   const plain = await call('get_authoring_context');
   assert.equal(plain.examples, undefined);
-  const api = (plain.capabilities as { templateApi: { contract: number; capabilities: string[]; exports: string[] } }).templateApi;
+  const api = (plain.capabilities as { templateApi: { contract: number; baseline: string[]; capabilities: string[]; exports: string[] } }).templateApi;
   assert.equal(api.contract, 1);
   assert.ok(api.capabilities.includes('anchors') && api.exports.includes('geometry'));
+  // Agents can distinguish guaranteed features from later extensions without writing redundant requires lists.
+  assert.ok(['single-pages', 'document-editors', 'editor-context', 'editor-network', 'rendered-images'].every((name) => api.baseline.includes(name)));
+  assert.ok(api.baseline.every((name) => api.capabilities.includes(name)));
   const withExamples = await call('get_authoring_context', { includeExamples: true });
   assert.deepEqual(withExamples.examples, [
     { name: 'a-minimal', description: 'The smallest template.', source: '// The smallest template.\nexport default {};\n' },

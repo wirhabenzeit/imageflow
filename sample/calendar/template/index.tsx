@@ -28,7 +28,6 @@ const calendarFormat = (label: string, width: number, height: number) => printFo
   pageCount: { min: 1, max: 36, step: 1 },
   output: {
     resolution: { minimum: 150, target: 300, maximum: dpi }, minimumTextSize: pt(6),
-    fonts: { allowType3: false, allowSystemFonts: false },
     maximumFileSize: { pages: 1_000_000_000 },
   },
 });
@@ -169,8 +168,6 @@ export default defineTemplate({
   label: 'Wall calendar',
   description: 'A landscape wall calendar: one full-bleed photo a month, with the place and the days on a dark strip.',
   contract: 1,
-  requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component',
-    'format-helper', 'opening-spreads', 'single-pages', 'editor-context', 'document-editors'],
   formats: {
     a3: calendarFormat('45 × 30 cm (A3 landscape) · 6835 × 4866 px', 6835, 4866),
     a2: calendarFormat('60 × 45 cm (A2 landscape) · 9417 × 6677 px', 9417, 6677),

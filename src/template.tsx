@@ -263,17 +263,15 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   label: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().min(1).max(300).optional(),
   contract: z.literal(1),
-  // Features beyond the first contract-1 release. Apps that predate `requires` ignore it; their bundler still
-  // rejects imports of helpers they do not export.
+  // Optional extensions beyond the contract-1 baseline. Baseline names in older templates remain valid.
   requires: z.array(z.string()).optional().superRefine((required, context) => {
     const missing = (required ?? []).filter((name) => !(capabilities as readonly string[]).includes(name));
     if (missing.length) {
       context.addIssue({ code: 'custom', message: 'This template requires ImageFlow features this app does not provide: ' +
-        missing.join(', ') + '. Update ImageFlow, or remove them from requires. This app provides: ' + capabilities.join(', ') + '.' });
+        missing.join(', ') + '. Update ImageFlow. This app provides: ' + capabilities.join(', ') + '.' });
     }
   }),
-  // HTTPS origins the template's element editors may reach (ADR 0006), after the user allows them for the book.
-  // Book previews, checks and export never reach the network.
+  // HTTPS origins editors and RenderedImage.draw may reach after user approval (ADR 0006).
   network: z.array(z.string().regex(/^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/,
     'Use an HTTPS origin such as https://tiles.example.com, or https://*.example.com for its subdomains, without a path.'))
     .max(20).optional(),

@@ -17,7 +17,7 @@ const template = `import { defineTemplate, mm, printFormat, Spread } from 'image
 import './style.css';
 
 export default defineTemplate({
-  id: 'calendar-smoke', version: '1', contract: 1, requires: ['single-pages'],
+  id: 'calendar-smoke', version: '1', contract: 1,
   formats: {
     calendar: printFormat({ label: 'Calendar · A4', trim: { width: mm(210), height: mm(297) }, facingPages: false,
       bleed: { all: mm(3), left: mm(5) }, safe: mm(10), pageCount: { min: 3, max: 3, step: 1 } }),
