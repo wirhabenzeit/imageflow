@@ -8,46 +8,73 @@ export function mm(value: number): Length;
 export function pt(value: number): Length;
 export function inch(value: number): Length;
 
+/** Insets of a format with facing pages: `outside` is the edge away from the fold, `binding` the edge at it. */
 type Insets = { top: Length; bottom: Length; outside: Length; binding: Length };
-export type Span = 'spread' | 'left' | 'right';
+/** Insets of a format without facing pages, named by the page's own edges. */
+type PageInsets = { top: Length; bottom: Length; left: Length; right: Length };
+/**
+ * The pages a layout occupies. `'spread'` (two facing pages), `'left'` and `'right'` (a single page at a book end)
+ * fit formats with facing pages; `'page'` fits formats without them (`facingPages: false`).
+ */
+export type Span = 'spread' | 'left' | 'right' | 'page';
 export type Resolution = { minimum: number; target: number; maximum: number };
 
-export type PrintFormat = {
+type FormatOutput = {
+  container: 'pdf';
+  colorSpace: 'sRGB';
+  transparency: 'allow' | 'forbid';
+  /** Effective photo resolution in ppi. Below `minimum` blocks print export; export downsamples to `maximum`. */
+  resolution?: Resolution;
+  minimumTextSize?: Length;
+  /** Maximum PDF size in bytes. */
+  maximumFileSize?: { pages: number; cover?: number };
+  fonts?: { allowType3: false; allowSystemFonts: false };
+};
+/** A format with facing pages: layouts are designed as spreads. */
+export type FacingFormat = {
   label: string;
   trim: { width: Length; height: Length };
   bleed: Insets;
   safe: Insets;
   structure: {
+    /** Default `true`. */
+    facingPages?: true;
     delivery: 'pages' | 'spreads';
     ends: 'single-pages' | 'inside-covers';
     pageCount: { min: number; max: number; step: 2 | 4 };
   };
-  output: {
-    container: 'pdf';
-    colorSpace: 'sRGB';
-    transparency: 'allow' | 'forbid';
-    /** Effective photo resolution in ppi. Below `minimum` blocks print export; export downsamples to `maximum`. */
-    resolution?: Resolution;
-    minimumTextSize?: Length;
-    /** Maximum PDF size in bytes. */
-    maximumFileSize?: { pages: number; cover?: number };
-    fonts?: { allowType3: false; allowSystemFonts: false };
-  };
+  output: FormatOutput;
 };
+/**
+ * A format without facing pages, such as a wall calendar, cards or posters: every unit is one page, designed, checked
+ * and exported on its own. Layouts use `span: 'page'`. Requires the `single-pages` capability.
+ */
+export type SinglePageFormat = {
+  label: string;
+  trim: { width: Length; height: Length };
+  bleed: PageInsets;
+  safe: PageInsets;
+  structure: {
+    facingPages: false;
+    pageCount: { min: number; max: number; step: 1 | 2 | 4 };
+  };
+  output: FormatOutput;
+};
+export type PrintFormat = FacingFormat | SinglePageFormat;
 
 /** One length for every side, or `{ all, ...sides }` where the named sides override `all`, or all four sides. */
 export type InsetsShorthand = Length | (Partial<Insets> & { all: Length }) | Insets;
-/**
- * Builds a complete `PrintFormat` with less repetition: insets take one length for every side, and `ends`, `delivery`
- * and the PDF output basics have defaults. The result is an ordinary, fully specified `PrintFormat`. It describes
- * geometry, not a printer product: copy page counts, resolution and file limits from your printer's specification.
- *
- *     printFormat({ label: 'Square · 20 × 20 cm', trim: { width: mm(200), height: mm(200) },
- *       bleed: { all: mm(3), binding: mm(0) }, safe: mm(12), pageCount: { min: 24, max: 120, step: 2 } })
- */
-export function printFormat(options: {
+/** `InsetsShorthand` with the side names of a format without facing pages. */
+export type PageInsetsShorthand = Length | (Partial<PageInsets> & { all: Length }) | PageInsets;
+type FormatOptions = {
   label: string;
   trim: { width: Length; height: Length };
+  /** Defaults to `{ container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' }`; given fields replace these. */
+  output?: Partial<FormatOutput>;
+};
+type FacingFormatOptions = FormatOptions & {
+  /** Default `true`. */
+  facingPages?: true;
   bleed: InsetsShorthand;
   safe: InsetsShorthand;
   pageCount: { min: number; max: number; step: 2 | 4 };
@@ -55,22 +82,50 @@ export function printFormat(options: {
   delivery?: 'pages' | 'spreads';
   /** Default `'single-pages'`. */
   ends?: 'single-pages' | 'inside-covers';
-  /** Defaults to `{ container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' }`; given fields replace these. */
-  output?: Partial<PrintFormat['output']>;
-}): PrintFormat;
+};
+type SinglePageFormatOptions = FormatOptions & {
+  facingPages: false;
+  bleed: PageInsetsShorthand;
+  safe: PageInsetsShorthand;
+  pageCount: { min: number; max: number; step: 1 | 2 | 4 };
+  /** Formats without facing pages have no delivery choice: every page is its own PDF page. */
+  delivery?: never;
+  /** Formats without facing pages have no book ends. */
+  ends?: never;
+};
+/**
+ * Builds a complete `PrintFormat` with less repetition: insets take one length for every side, and `ends`, `delivery`
+ * and the PDF output basics have defaults. The result is an ordinary, fully specified `PrintFormat`. It describes
+ * geometry, not a printer product: copy page counts, resolution and file limits from your printer's specification.
+ *
+ *     printFormat({ label: 'Square · 20 × 20 cm', trim: { width: mm(200), height: mm(200) },
+ *       bleed: { all: mm(3), binding: mm(0) }, safe: mm(12), pageCount: { min: 24, max: 120, step: 2 } })
+ *
+ * With `facingPages: false` every unit is one page and the insets use `left` and `right`:
+ *
+ *     printFormat({ label: 'Wall calendar · A4', trim: { width: mm(210), height: mm(297) }, facingPages: false,
+ *       bleed: mm(3), safe: mm(8), pageCount: { min: 13, max: 13, step: 1 } })
+ */
+export function printFormat(options: SinglePageFormatOptions): SinglePageFormat;
+export function printFormat(options: FacingFormatOptions): FacingFormat;
+export function printFormat(options: FacingFormatOptions | SinglePageFormatOptions): PrintFormat;
 
-type MillimeterInsets = { top: number; bottom: number; outside: number; binding: number };
-/** The print format in millimetres, as passed to `render`. */
-export type ResolvedFormat = {
+type Millimeters = {
   trim: { width: number; height: number };
-  bleed: MillimeterInsets;
-  safe: MillimeterInsets;
+  /** Width of one PDF page with its bleed. */
   pageWidth: number;
+  /** Width of the sheet a layout draws on, with bleed: the spread, or the page without facing pages. */
   spreadWidth: number;
   outputWidth: number;
   height: number;
   resolution?: Resolution;
 };
+/** The print format in millimetres, as passed to `render`. Check `facingPages` before reading side-specific insets. */
+export type ResolvedFormat =
+  | Millimeters & { facingPages: true; bleed: { top: number; bottom: number; outside: number; binding: number };
+    safe: { top: number; bottom: number; outside: number; binding: number } }
+  | Millimeters & { facingPages: false; bleed: { top: number; bottom: number; left: number; right: number };
+    safe: { top: number; bottom: number; left: number; right: number } };
 
 // Parameters
 
@@ -279,12 +334,12 @@ type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K
 
 /**
  * A place other spreads can refer to, such as a chapter opening listed in a table of contents. `side` names the page
- * of a two-page spread (default: its first page). Several spreads may declare the same ID; `book.anchors(id)` lists
- * them all.
+ * of a two-page spread (default: its first page); without facing pages it is ignored and the anchor's `side` is
+ * `'page'`. Several spreads may declare the same ID; `book.anchors(id)` lists them all.
  */
 export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
 /** A declared anchor with the book page it is on. */
-export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' };
+export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
 /** The whole book as seen from one spread. */
 export type BookContext = {
   /** Number of pages in the book. */
@@ -350,7 +405,9 @@ export type TextProps<Path extends string = string> = Styling & Placement & Issu
 export type BoundGeometry = {
   /** One page of the spread. Works for single first and last pages too. */
   page(side: 'left' | 'right', area?: Area): Rect;
-  /** Both pages. Its `safe` area keeps only the outer, top and bottom insets. */
+  /** The page, in a format without facing pages: `ctx.geometry.page('safe')`. */
+  page(area?: Area): Rect;
+  /** Both pages. Its `safe` area keeps only the outer, top and bottom insets. Throws without facing pages. */
   spread(area?: Area): Rect;
   /** Design coordinates on a fixed canvas scaled to this format's trim; see `geometry.design`. */
   design(canvas: { width: number; height: number }): DesignCanvas;
@@ -365,8 +422,8 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   document: ParameterValues<D>;
   boxes: { [K in keyof S['boxes']]: BoxContext<S['boxes'][K]> };
   elements: { [K in keyof S['elements']]: { params: ValuesOf<S['elements'][K]> } };
-  /** Book page numbers of this spread's pages. */
-  page: { left?: number; right?: number };
+  /** Book page numbers of this spread's pages: `left` and `right`, or `number` for a page without facing pages. */
+  page: { left?: number; right?: number; number?: number };
   format: ResolvedFormat;
   /** The chosen key of `formats`, or `'default'` for a template with a single `format`. */
   formatId: string;
@@ -400,7 +457,7 @@ export type UntypedRenderContext = {
   document: Values;
   boxes: Record<string, { params: Values; photo?: Photo | null; text?: FlowPosition | null }>;
   elements: Record<string, { params: Values }>;
-  page: { left?: number; right?: number };
+  page: { left?: number; right?: number; number?: number };
   format: ResolvedFormat;
   formatId: string;
   mode: 'edit' | 'export';
@@ -432,7 +489,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
-  'layout-families' | 'editor-spread-parameters' | 'opening-spreads';
+  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -638,7 +695,7 @@ export const box: {
 
 /**
  * A rectangle in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the
- * trim width), y from the top trim edge. Place a platform component with `rect={rect}`, or any node with `style={geometry.css(rect)}`, inside `<Spread>`.
+ * trim width), y from the top trim edge. Without facing pages, x is from the page's left trim edge. Place a platform component with `rect={rect}`, or any node with `style={geometry.css(rect)}`, inside `<Spread>`.
  */
 export type Rect = { x: number; y: number; width: number; height: number };
 /**
@@ -651,13 +708,17 @@ export type Area = 'trim' | 'safe' | 'bleed';
 export type DesignCanvas = {
   left(x: number, y: number, width: number, height: number): Rect;
   right(x: number, y: number, width: number, height: number): Rect;
+  /** The page of a format without facing pages. `left` and `right` throw there, and `page` throws with facing pages. */
+  page(x: number, y: number, width: number, height: number): Rect;
   width(value: number): number;
   height(value: number): number;
 };
 export const geometry: {
   /** One page of the spread. Works for single first and last pages too. */
   page(format: ResolvedFormat, side: 'left' | 'right', area?: Area): Rect;
-  /** Both pages. Its `safe` area keeps only the outer, top and bottom insets. */
+  /** The page, in a format without facing pages. */
+  page(format: ResolvedFormat, area?: Area): Rect;
+  /** Both pages. Its `safe` area keeps only the outer, top and bottom insets. Throws without facing pages. */
   spread(format: ResolvedFormat, area?: Area): Rect;
   /** Shrinks a rectangle by millimetres on every side, or on the named sides. */
   inset(rect: Rect, by: number | { top?: number; right?: number; bottom?: number; left?: number }): Rect;

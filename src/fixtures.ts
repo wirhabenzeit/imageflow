@@ -3,6 +3,7 @@ import type { SpreadDefinition, TemplateInfo } from './desktop';
 import type { Parameter, Parameters } from './parameters';
 import { identifier } from './project';
 import type { Project, SpreadState, Values } from './project';
+import { spanFits } from './format';
 
 // Authoring fixtures render layouts with synthetic content in a separate book, so an agent can test layouts that the
 // saved book does not use yet, and see how they cope with long, empty or awkward content. Nothing is saved.
@@ -80,6 +81,13 @@ function inapplicable(fixture: FixtureCase, inputs: Inputs) {
   }
 }
 
+// Whether a layout fits a format of the template: page layouts need a format without facing pages, the others one
+// with them. Fixtures render each layout only in the formats it fits.
+export function fixtureFits(template: TemplateInfo, layout: string, format: string) {
+  const structure = template.structures?.[format] ?? (format === template.formatId ? template.format.structure : undefined);
+  return structure ? spanFits(template.spreads[layout].span, { structure }) : template.spreads[layout].span !== 'page';
+}
+
 export function availableFormats(template: TemplateInfo) {
   const declared = Object.keys(template.formats);
   return declared.length ? declared : [template.formatId];
@@ -113,6 +121,20 @@ export function planFixtures(template: TemplateInfo, request: FixtureRequest): F
   }
   const untested = declaredFormats.filter((format) => !formats.includes(format) && !skipped.some((skip) => skip.format === format));
   if (untested.length) skipped.push(...untested.map((format) => ({ format, reason: 'Not requested. Pass formats: "all" to test every format.' })));
+  // A layout no tested format fits is not rendered; one that fits only some of them is left out of the others.
+  const unfit = layouts.filter((layout) => !formats.some((format) => fixtureFits(template, layout, format)));
+  for (const layout of unfit) {
+    skipped.push({ layout, reason: template.spreads[layout].span === 'page'
+      ? "A single-page layout (span: 'page') needs a format without facing pages, and no tested format is one."
+      : 'A layout for facing pages needs a format with facing pages, and no tested format has them.' });
+  }
+  layouts = layouts.filter((layout) => !unfit.includes(layout));
+  for (const layout of layouts) {
+    for (const format of formats) {
+      if (!fixtureFits(template, layout, format)) skipped.push({ layout, format, reason: 'The layout does not fit this format: ' +
+        (template.spreads[layout].span === 'page' ? 'it is a single page, and the format has facing pages.' : 'it is for facing pages, and the format has none.') });
+    }
+  }
   const cases = request.cases ? [...new Set(request.cases)] : [...fixtureCases];
   const cells: FixtureCell[] = [];
   for (const layout of layouts) {
@@ -136,7 +158,7 @@ export function planFixtures(template: TemplateInfo, request: FixtureRequest): F
       const cell = cells.find((candidate) => candidate.layout === layout && candidate.case === fixture);
       if (!cell) throw new FixtureError('FIXTURE_NOT_FOUND', 'Fixture ' + layout + '/' + fixture + ' is not tested by this check. Check the skipped list or request that layout and case.');
       return cell;
-    }) : cells.slice(0, fixtureLimits.previewCells);
+    }) : cells.filter((cell) => fixtureFits(template, cell.layout, printFormat)).slice(0, fixtureLimits.previewCells);
     if (shown.length) plan.preview = { ...options, printFormat, cells: shown };
   }
   return plan;

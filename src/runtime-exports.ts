@@ -19,5 +19,7 @@ export const capabilities = [
   'editor-spread-parameters',
   // `openingSpreads`: the spreads a new book starts with.
   'opening-spreads',
+  // `facingPages: false` formats and `span: 'page'` layouts: one page per unit instead of facing spreads.
+  'single-pages',
 ] as const;
 export type Capability = typeof capabilities[number];

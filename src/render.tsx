@@ -7,8 +7,8 @@ import { createRoot } from 'react-dom/client';
 import { editorURL } from './desktop';
 import { bookLayout } from './desktop';
 import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
-import { cssMM, pageSequence, resolveFormat, toMillimeters } from './format';
-import type { PrintSide, ResolvedFormat } from './format';
+import { cssMM, pageLabel, pageNumbers, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, toMillimeters } from './format';
+import type { PrintSide, ResolvedFormat, UnitPages } from './format';
 import { parseDocument } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
@@ -244,6 +244,7 @@ function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: nu
   const bounds = sheet.getBoundingClientRect();
   const mmPerPixel = format.spreadWidth / bounds.width;
   const { bleed, safe, trim } = format;
+  const pages = sheetPages(format);
   const text = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
   // The smallest text below the minimum and the largest safe-area overshoot, each with the box or element it is in.
@@ -257,13 +258,14 @@ function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: nu
     range.selectNodeContents(node);
     for (const rect of range.getClientRects()) {
       if (!rect.width || !rect.height) continue;
-      const x = (rect.left - bounds.left) * mmPerPixel - bleed.outside;
+      // x from the sheet's left bleed edge, y from the top trim edge; the text's centre picks its page.
+      const x = (rect.left - bounds.left) * mmPerPixel;
       const y = (rect.top - bounds.top) * mmPerPixel - bleed.top;
       const w = rect.width * mmPerPixel;
       const h = rect.height * mmPerPixel;
-      const right = x + w / 2 >= trim.width;
-      const leftSafe = right ? trim.width + safe.binding : safe.outside;
-      const rightSafe = right ? trim.width * 2 - safe.outside : trim.width - safe.binding;
+      const page = pages.find(({ trimX }, i) => i === pages.length - 1 || x + w / 2 < trimX + trim.width)!;
+      const leftSafe = page.trimX + page.safeLeft;
+      const rightSafe = page.trimX + trim.width - page.safeRight;
       const overshootMm = Math.max(leftSafe - x, x + w - rightSafe, safe.top - y, y + h - (trim.height - safe.bottom));
       if (overshootMm > .2 && (!outside || overshootMm > outside.overshootMm)) outside = { overshootMm, owner: ownerOf(parent) };
     }
@@ -477,14 +479,15 @@ class LayoutBoundary extends React.Component<{ spread: string; failures: Map<str
 
 // Both PDF pages and artwork captures start from a fully flowed sheet and use the same bleed offsets.
 function sheetCrop(format: ResolvedFormat, side: PrintSide, bounds: PreviewMetadata['bounds']) {
-  const { trim, bleed, pageWidth, spreadWidth, height } = format;
-  const widthMm = side === 'spread' ? spreadWidth : pageWidth;
-  const rightOffset = trim.width + bleed.outside;
-  if (bounds === 'bleed') return { x: side === 'right' ? rightOffset - bleed.binding : 0, y: 0, widthMm, heightMm: height };
-  return {
-    x: side === 'right' ? rightOffset : bleed.outside, y: bleed.top,
-    widthMm: trim.width * (side === 'spread' ? 2 : 1), heightMm: trim.height,
-  };
+  const { trim, bleed, spreadWidth, height } = format;
+  if (side === 'spread') {
+    if (bounds === 'bleed') return { x: 0, y: 0, widthMm: spreadWidth, heightMm: height };
+    return { x: sheetBleed(format).left, y: bleed.top, widthMm: trim.width * 2, heightMm: trim.height };
+  }
+  const pages = sheetPages(format);
+  const page = pages.find((candidate) => candidate.side === side) ?? pages[0];
+  if (bounds === 'bleed') return { x: page.bleedX, y: 0, widthMm: page.bleedWidth, heightMm: height };
+  return { x: page.trimX, y: bleed.top, widthMm: trim.width, heightMm: trim.height };
 }
 
 function croppedSheet(sheet: HTMLElement, crop: ReturnType<typeof sheetCrop>, pixels?: { width: number; height: number }) {
@@ -526,19 +529,25 @@ function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: Retu
   document.body.append(pages);
 }
 
-function artworkTarget(spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, target: Exclude<ReturnType<typeof parsePreviewRequest>['target'], { spreads: string[] }>) {
+function artworkTarget(spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, target: Exclude<ReturnType<typeof parsePreviewRequest>['target'], { spreads: string[] }>): { index: number; side: PrintSide; page: UnitPages; spread: string } {
   if ('page' in target) {
-    const index = sequence.spreads.findIndex(({ page }) => page.left === target.page || page.right === target.page);
+    const index = sequence.spreads.findIndex(({ page }) => pageNumbers(page).includes(target.page));
     if (index < 0) throw new PreviewError('preview-target-not-found', 'Page ' + target.page + ' does not exist in this book.');
-    const side = sequence.spreads[index].page.left === target.page ? 'left' : 'right';
-    return { index, side, page: { [side]: target.page }, spread: spreads[index].id } as const;
+    const { page } = sequence.spreads[index];
+    const side = page.number !== undefined ? 'page' : page.left === target.page ? 'left' : 'right';
+    return { index, side, page: side === 'page' ? { number: target.page } : { [side]: target.page }, spread: spreads[index].id };
   }
   const index = spreads.findIndex(({ id }) => id === target.spread);
   if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' does not exist in this book.');
   const { span, page } = sequence.spreads[index];
-  const side = ('side' in target ? target.side : undefined) ?? span;
+  // A unit without facing pages is one page; a single-page layout in a facing format is drawn as a spread.
+  const side = ('side' in target ? target.side : undefined) ?? (page.number !== undefined ? 'page' : span === 'page' ? 'spread' : span);
+  if (page.number !== undefined) {
+    if (side !== 'page') throw new PreviewError('preview-target-not-found', 'Page ' + target.spread + ' has no ' + side + ' side: this format has no facing pages.');
+    return { index, side, page, spread: target.spread };
+  }
   if (side === 'spread') return { index, side, page, spread: target.spread };
-  const number = page[side];
+  const number = side === 'page' ? undefined : page[side];
   if (!number) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' has no ' + side + ' page.');
   return { index, side, page: { [side]: number }, spread: target.spread };
 }
@@ -603,10 +612,9 @@ function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, lab
   }
   if (guides) {
     const { trim, bleed, safe } = format;
-    for (const page of [0, 1]) {
-      const x = bleed.outside + page * trim.width;
-      add({ x, y: bleed.top, width: trim.width, height: trim.height }, { border: '0.3mm solid #e6007e' });
-      add({ x: x + (page ? safe.binding : safe.outside), y: bleed.top + safe.top, width: trim.width - safe.outside - safe.binding,
+    for (const { trimX, safeLeft, safeRight } of sheetPages(format)) {
+      add({ x: trimX, y: bleed.top, width: trim.width, height: trim.height }, { border: '0.3mm solid #e6007e' });
+      add({ x: trimX + safeLeft, y: bleed.top + safe.top, width: trim.width - safeLeft - safeRight,
         height: trim.height - safe.top - safe.bottom }, { border: '0.3mm dashed #00a3e0' });
     }
   }
@@ -648,7 +656,7 @@ function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: Spread
       const { x, y, width, height, label: labelRect } = grid.cells[i], crop = crops[i];
       const image = croppedSheet(sheets[index], crop, { width, height });
       Object.assign(image.style, { position: 'absolute', left: x + 'px', top: y + 'px' });
-      const label = fixture ? 'FIXTURE · ' + (fixture.labels[spread] ?? spread) : spread + ' · ' + Object.values(page).join('–');
+      const label = fixture ? 'FIXTURE · ' + (fixture.labels[spread] ?? spread) : spread + ' · ' + pageLabel(page);
       const caption = document.createElement('div');
       caption.textContent = label;
       Object.assign(caption.style, { position: 'absolute', left: labelRect.x + 'px', top: labelRect.y + 'px',
@@ -721,7 +729,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
   // A preview is the spread itself in another layout: switching only changes which of its content is shown.
   // A family with its own picker shows one preview, which stands for the family.
-  const previews = layoutPreviews(template.spreads, spreads[index].definition, template.layoutFamilies).map((definition) => ({
+  const previews = layoutPreviews(template.spreads, spreads[index].definition, template.layoutFamilies, template.format).map((definition) => ({
     definition, span: template.spreads[definition].span, spread: { ...spreads[index], definition, id: definition },
   }));
   // Previews read the anchors of the book as saved, so a contents layout shows the real pages.
@@ -1120,9 +1128,7 @@ export async function startRender(root: HTMLElement) {
     const activeChains = [...chains];
     const visible = spreads.map((spread, i) => ({ spread, i }));
     const where = spreads.map((spread, i) => {
-      const { left, right } = sequence.spreads[i].page;
-      const pages = left && right ? 'Pages ' + left + '–' + right : 'Page ' + (left ?? right);
-      return pages + ' · ' + (template.spreads[spread.definition]?.label ?? spread.definition);
+      return pagesText(sequence.spreads[i].page) + ' · ' + (template.spreads[spread.definition]?.label ?? spread.definition);
     });
     if (edit) root.className = 'if-preview';
     const lookups = new Map<string, AnchorLookup>();
