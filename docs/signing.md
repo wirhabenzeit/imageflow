@@ -5,10 +5,10 @@ Use a Mac matching the target architecture (arm64 for v1). Xcode Command Line To
 ## Build commands
 
 - `npm run package:mac` produces a local app. Without `APPLE_SIGNING_IDENTITY`, it uses the existing ad-hoc signature. With a Developer ID Application identity, it signs with hardened runtime and verifies the app, Electron helpers, esbuild, sharp and libvips.
-- `npm run package:mac:release` requires the signing identity and all three notarization variables below. It notarizes and staples the app, verifies Gatekeeper acceptance, creates and signs a DMG, notarizes and staples that DMG, then produces the update ZIP from the stapled app.
+- `npm run package:mac:release` requires the signing identity and all three notarization variables below. It checks that the packaged app version matches `package.json`, notarizes and staples the app, verifies Gatekeeper acceptance, creates and signs a DMG, notarizes and staples that DMG, checks the DMG with Gatekeeper, then produces the update ZIP from the stapled app.
 - `npm run test:packaged` builds a local app and runs the packaged checks, including the MCP bridge launched through ImageFlow's own executable in Node mode.
 - `npm run test:packaged:existing` runs those checks against the app already in `out/`. Use this after a release build to avoid rebuilding the notarized app.
-- `npm run notarize:mac` notarizes the signed app already in `out/` and creates the release artifacts. Release jobs can build, run `test:packaged:existing`, then notarize that exact tested app without rebuilding it.
+- `npm run notarize:mac` checks the version of the signed app already in `out/`, notarizes it and creates the release artifacts. Release jobs can build, run `test:packaged:existing`, then notarize that exact tested app without rebuilding it.
 
 The outputs are:
 
@@ -51,7 +51,7 @@ In Keychain Access, export only the Developer ID Application identity, including
 | `APPLE_API_KEY_ID` | API Key ID |
 | `APPLE_API_ISSUER` | Issuer ID |
 
-Use them in a trusted macOS release job after checkout, Node setup and `npm ci`. Ordinary PR checks do not need signing credentials. The following steps import the identity into a temporary keychain, give Apple's signing tools access to that key, and remove the credentials after the job:
+Use them in a trusted macOS release job after checkout, Node setup and `npm ci`. Ordinary PR checks do not need signing credentials. The following steps import the identity into a temporary keychain, give Apple's signing tools access to that key, restore the runner’s original keychain search list, and remove the credentials after the job. Cleanup still removes credential files if restoring the search list fails:
 
 ```yaml
 - name: Prepare signing credentials
@@ -61,6 +61,8 @@ Use them in a trusted macOS release job after checkout, Node setup and `npm ci`.
     API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
   run: |
     umask 077
+    security list-keychains -d user > "$RUNNER_TEMP/ImageFlow-keychains-before.tmp"
+    mv "$RUNNER_TEMP/ImageFlow-keychains-before.tmp" "$RUNNER_TEMP/ImageFlow-keychains-before.txt"
     IMAGEFLOW_KEYCHAIN="$RUNNER_TEMP/imageflow-signing.keychain-db"
     IMAGEFLOW_KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
     printf '::add-mask::%s\n' "$IMAGEFLOW_KEYCHAIN_PASSWORD"
@@ -89,8 +91,21 @@ Use them in a trusted macOS release job after checkout, Node setup and `npm ci`.
 - name: Remove signing credentials
   if: always()
   run: |
-    security delete-keychain "$RUNNER_TEMP/imageflow-signing.keychain-db" || true
-    rm -f "$RUNNER_TEMP/ImageFlow.p12" "$RUNNER_TEMP/ImageFlow-AuthKey.p8"
+    IMAGEFLOW_CLEANUP_STATUS=0
+    if [[ -f "$RUNNER_TEMP/ImageFlow-keychains-before.txt" ]]; then
+      python3 - "$RUNNER_TEMP/ImageFlow-keychains-before.txt" <<'PYKEYCHAINS' || IMAGEFLOW_CLEANUP_STATUS=$?
+    import pathlib, shlex, subprocess, sys
+    previous = shlex.split(pathlib.Path(sys.argv[1]).read_text())
+    subprocess.run(["security", "list-keychains", "-d", "user", "-s", *previous], check=True)
+    restored = subprocess.check_output(["security", "list-keychains", "-d", "user"], text=True)
+    assert shlex.split(restored) == previous, "Could not restore the original keychain search list"
+    PYKEYCHAINS
+    fi
+    if [[ -f "$RUNNER_TEMP/imageflow-signing.keychain-db" ]]; then
+      security delete-keychain "$RUNNER_TEMP/imageflow-signing.keychain-db" || IMAGEFLOW_CLEANUP_STATUS=$?
+    fi
+    rm -f "$RUNNER_TEMP/ImageFlow.p12" "$RUNNER_TEMP/ImageFlow-AuthKey.p8" "$RUNNER_TEMP/ImageFlow-keychains-before.txt" "$RUNNER_TEMP/ImageFlow-keychains-before.tmp"
+    exit "$IMAGEFLOW_CLEANUP_STATUS"
 ```
 
 ## Verification
@@ -103,6 +118,7 @@ codesign --display --verbose=4 out/ImageFlow-darwin-arm64/ImageFlow.app
 spctl --assess --verbose=4 --type execute out/ImageFlow-darwin-arm64/ImageFlow.app
 xcrun stapler validate out/ImageFlow-darwin-arm64/ImageFlow.app
 xcrun stapler validate out/ImageFlow-<version>-arm64.dmg
+spctl --assess --verbose=4 --type open --context context:primary-signature out/ImageFlow-<version>-arm64.dmg
 ```
 
 Gatekeeper should report `accepted` and `source=Notarized Developer ID`. Main and helper apps use hardened runtime and the JIT entitlement. Unsigned executable memory, disabled library validation and debugger access are not granted. The RunAsNode fuse remains enabled because both the MCP bridge and template typechecking use ImageFlow's own executable; the packaged MCP smoke test exercises that path.

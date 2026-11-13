@@ -1,3 +1,4 @@
+import { packagedMacExecutable } from './mac-paths.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -20,7 +21,7 @@ await sharp({ create: { width: 3200, height: 2400, channels: 3, background: '#27
 await writeFile(text, '# Linked story\n\nWords from outside the book.');
 await cp(join(root, 'sample/starter/files/senja-road.gpx'), file);
 const packaged = process.argv.includes('--packaged');
-const app = await _electron.launch({ executablePath: packaged ? join(root, 'out', 'ImageFlow-darwin-' + process.arch, 'ImageFlow.app/Contents/MacOS/ImageFlow') : electron, args: [...(packaged ? [] : [join(root, '.build/desktop')]), '--user-data-dir=' + join(work, 'profile')], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
+const app = await _electron.launch({ executablePath: packaged ? packagedMacExecutable(root) : electron, args: [...(packaged ? [] : [join(root, '.build/desktop')]), '--user-data-dir=' + join(work, 'profile')], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 const stderr = [];
 app.process().stderr.on('data', (bytes) => stderr.push(String(bytes)));
 const current = async (page) => (await page.evaluate(() => window.imageflow.currentProject())).value;
