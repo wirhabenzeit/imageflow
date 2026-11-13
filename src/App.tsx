@@ -1405,6 +1405,7 @@ export function App() {
               </CropEditor>}
               {editing && inline && summary && <EditPopover key={editing.session}
                 project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} host={canvasWrap.current}
+                textFallback={inline.target.textFallback}
                 readOnly={summary.readOnly} blocked={blockedInline || undefined}
                 edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}
                 actions={!editing.owner && editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)

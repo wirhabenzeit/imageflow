@@ -446,10 +446,11 @@ type Placement = { rect?: Rect };
 export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | 'div' | 'blockquote' | 'figcaption';
 /**
  * Props of `ctx.Text`. It shows the string parameter's value in an `as` tag (default `p`) and marks it for editing.
- * When the value is empty, the editor shows `placeholder` (default: the parameter's `placeholder`, else its label);
- * the exported book shows nothing there.
+ * Empty or whitespace-only values inherit `fallback`, without saving it. `fallbackLabel` identifies its source
+ * in the editor; `hidden` suppresses the node explicitly. With neither value nor fallback, edit mode shows
+ * `placeholder` (default: the parameter's placeholder or label), and export shows an empty node.
  */
-export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & { parameter: Path; as?: TextTag; placeholder?: string };
+export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & { parameter: Path; as?: TextTag; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
 
 /** The geometry helpers with the spread's format already applied: `ctx.geometry.page('left', 'bleed')`. */
 export type BoundGeometry = {

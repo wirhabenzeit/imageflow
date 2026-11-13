@@ -561,19 +561,25 @@ function parameterAt({ definition, documentParameters, values }: Pick<NonNullabl
 }
 
 // Shows a string parameter and marks the node for editing. Empty, it shows an editor-only placeholder.
-export function Text({ parameter, as = 'p', placeholder, className, style, rect, ...marker }: Styling & Placement & IssueMarker &
-  { parameter: string; as?: TextTag; placeholder?: string }) {
+export function Text({ parameter, as = 'p', placeholder, fallback, fallbackLabel = 'inherited text', hidden = false, className, style, rect, ...marker }: Styling & Placement & IssueMarker &
+  { parameter: string; as?: TextTag; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean }) {
   const data = useSpread();
   const { param, value } = parameterAt(data, parameter);
   if (!param) throw new Error('Text shows parameter ' + parameter + ', which this layout does not declare.');
   if (!textTags.has(as)) throw new Error('Text cannot render as ' + as + '. Use one of ' + [...textTags].join(', ') + '.');
-  const text = value === undefined ? '' : String(value);
+  if (hidden) return null;
+  const saved = value === undefined ? '' : String(value);
+  const inherited = !saved.trim() && !!fallback?.trim();
+  const text = saved.trim() ? saved : inherited ? fallback! : '';
   const empty = !text && data.book.mode === 'edit';
   const hint = placeholder ?? (param.type === 'string' && param.placeholder ? param.placeholder : param.label);
   const Tag = as;
   // The edit marker stays in export, like ctx.edit(), so checks can name the parameter this text shows.
-  return <Tag data-edit={parameter} data-empty={empty ? '' : undefined} className={className} style={place(rect, style)} {...issueOn(marker)}>
-    {empty ? <span className="if-text-placeholder">{hint}</span> : text}
+  return <Tag data-edit={parameter} data-empty={empty ? '' : undefined}
+    data-text-fallback={fallback?.trim() ? fallback : undefined} data-text-fallback-label={fallback?.trim() ? fallbackLabel : undefined}
+    className={className} style={place(rect, style)} {...issueOn(marker)}>
+    {empty ? <span className="if-text-placeholder">{hint}</span> : inherited && data.book.mode === 'edit'
+      ? <span className="if-text-inherited" title={'Using ' + fallbackLabel}>{text}</span> : text}
   </Tag>;
 }
 

@@ -468,6 +468,8 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       // Nodes that edit the same fields on a sheet, such as a heading shown twice, are told apart by occurrence.
       targets: sheets.flatMap(({ spread, sheet }) => numberOccurrences([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
         spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node),
+        ...(node.dataset.textFallback ? { textFallback: { parameter: node.dataset.edit!, text: node.dataset.textFallback,
+          label: node.dataset.textFallbackLabel ?? 'inherited text' } } : {}),
         ...(node.dataset.box ? { owner: { type: 'box' as const, id: node.dataset.box } }
           : node.dataset.element ? { owner: { type: 'element' as const, id: node.dataset.element } } : {}),
       })))),

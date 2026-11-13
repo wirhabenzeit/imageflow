@@ -112,3 +112,29 @@ test('platform components forward issue() markers to their own node', () => {
   ]);
   assert.deepEqual(marked, [['if-spread', 'on-spread'], ['hero', 'on-photo'], ['story', 'on-markdown'], ['note', 'on-element']]);
 });
+
+test('Text inherits display-only fallback for empty values, with explicit hiding and editor hints', () => {
+  const source = { id: 'text', version: '1', contract: 1, parameters: {},
+    format: { label: 'F', trim: { width: mm(100), height: mm(100) },
+      bleed: { top: mm(0), bottom: mm(0), outside: mm(0), binding: mm(0) }, safe: { top: mm(5), bottom: mm(5), outside: mm(5), binding: mm(5) },
+      structure: { delivery: 'pages', ends: 'inside-covers', pageCount: { min: 2, max: 20, step: 2 } },
+      output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' } } };
+  const render = (value: string, mode: 'edit' | 'export', hidden = false, fallback = '<Photo caption>') => {
+    const template = chooseFormat(templateSchema.parse({ ...source, spreads: { main: { label: 'Main',
+      parameters: { place: { type: 'string', label: 'Place', default: '' } }, render: (ctx: RenderContext) =>
+        createElement(runtime.Spread, {}, createElement(ctx.Text, { parameter: 'place', fallback, fallbackLabel: 'photo caption', hidden })) } } }));
+    const project = projectSchema.parse({ schemaVersion: 1, title: 'Text', template: { id: 'text', version: '1' },
+      spreads: [{ id: 'one', definition: 'main', params: { place: value } }] });
+    const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode, template: { script: '', assets: {} } } as RenderProject;
+    const html = renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
+      page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
+    assert.equal(project.spreads[0].params.place, value);
+    return html;
+  };
+  assert.match(render('', 'edit'), /class="if-text-inherited" title="Using photo caption">&lt;Photo caption&gt;/);
+  assert.match(render(' \n ', 'export'), />&lt;Photo caption&gt;<\/p>/);
+  assert.doesNotMatch(render('', 'export'), /if-text-inherited/);
+  assert.match(render('Custom', 'export'), />Custom<\/p>/);
+  assert.doesNotMatch(render('', 'edit', true), /data-edit="place"/);
+  assert.match(render(' ', 'edit', false, ''), /if-text-placeholder/);
+});

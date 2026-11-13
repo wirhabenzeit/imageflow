@@ -1,5 +1,5 @@
 import { box, defineTemplate, inch, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
-import type { DocumentEditorProps, ImageFlowNode, Photo, Rect, RenderContext } from 'imageflow';
+import type { DocumentEditorProps, ImageFlowNode, Rect, RenderContext } from 'imageflow';
 import { changeMark, daysIn, markedDays, markedEntries, markOf, monthFor } from './marks';
 import './styles.css';
 
@@ -77,15 +77,6 @@ const photoRect = (context: Pick<Context, 'geometry'>) => {
   return { ...bleed, width: context.geometry.design(canvas).page(strip.x, 0, 0, 0).x - bleed.x };
 };
 
-/** Text written down the strip, from its top: the place on month pages, the title on the cover. */
-function StripCaption({ context, text, placeholder, edit, className = 'place' }: {
-  context: Pick<Context, 'geometry' | 'mode'>; text: string; placeholder: string; edit: object; className?: string;
-}) {
-  const rect = context.geometry.design(canvas).page(strip.x, 8, strip.width, rule - 14);
-  if (!text && context.mode !== 'edit') return null;
-  return <p {...edit} className={text ? className : className + ' empty'} style={context.geometry.css(rect)}>{text || placeholder}</p>;
-}
-
 function Rule({ context }: { context: Pick<Context, 'geometry'> }) {
   const at = context.geometry.design(canvas);
   const trim = context.geometry.page();
@@ -108,7 +99,6 @@ function Days({ month, language, marked, edit, rect, geometry, finding }: {
 }
 
 // The place shown on a month page: its own text, else the photo's caption.
-const place = (text: string, photo: Photo | null) => text.trim() || photo?.caption?.trim() || photo?.title?.trim() || '';
 
 // The day picker, opened by clicking the days of a month page. It edits the document's marked dates for the month
 // that page shows, which it reads from its context: moving the page to another month updates the open picker.
@@ -185,7 +175,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <Page context={ctx} className="cover">
           <ctx.PhotoBox id="hero" rect={photoRect(ctx)} />
-          <StripCaption context={ctx} text={ctx.params.title} placeholder="Title" edit={ctx.edit('title')} className="place title" />
+          <ctx.Text parameter="title" placeholder="Title" className="place title" rect={at.page(strip.x, 8, strip.width, rule - 14)} />
           <Rule context={ctx} />
           <ctx.Text parameter="year" className="year" rect={at.page(strip.x, rule + 6, strip.width, 297 - rule - 14)} />
         </Page>;
@@ -193,7 +183,8 @@ export default defineTemplate({
     }),
     month: spread({
       label: 'Month',
-      parameters: { place: p.string({ label: 'Place', default: '', maxLength: 40, placeholder: "The photo's caption" }) },
+      parameters: { place: p.string({ label: 'Place', default: '', maxLength: 40, placeholder: "The photo's caption" }),
+        showPlace: p.boolean({ label: 'Show place', default: true }) },
       boxes: { hero: box.photo('Photo') },
       // Every month page declares an anchor, so a page knows how many months come before it. Adding, removing or
       // moving pages renumbers the months.
@@ -212,7 +203,9 @@ export default defineTemplate({
           suggestion: 'Write 25.12 for every year or 2027-04-16 for one date, separated by commas.' }) : {};
         return <Page context={ctx} className="month">
           <ctx.PhotoBox id="hero" rect={photoRect(ctx)} />
-          <StripCaption context={ctx} text={place(ctx.params.place, ctx.boxes.hero.photo)} placeholder="Place" edit={ctx.edit('place')} />
+          <ctx.Text parameter="place" fallback={ctx.boxes.hero.photo?.caption?.trim() || ctx.boxes.hero.photo?.title?.trim()}
+            fallbackLabel="photo caption or title" hidden={!ctx.params.showPlace} placeholder="Place" className="place"
+            rect={at.page(strip.x, 8, strip.width, rule - 14)} />
           <Rule context={ctx} />
           <p className="month-name" style={ctx.geometry.css(at.page(strip.x, rule + 5, strip.width, 8))}>{monthName(month, language)}</p>
           <Days month={month} language={language} marked={marked} edit={ctx.edit('document.markedDates')} finding={finding}
