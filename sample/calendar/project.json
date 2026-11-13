@@ -11,7 +11,8 @@
       "id": "cover",
       "definition": "cover",
       "params": {
-        "title": "Along the coast"
+        "title": "Along the coast",
+        "year": "2027"
       },
       "boxes": {
         "hero": {

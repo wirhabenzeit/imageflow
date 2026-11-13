@@ -73,20 +73,20 @@ try {
   assert.equal(await february.first().textContent(), '1Mo');
   assert.deepEqual(await frame.locator('.month').nth(1).locator('.weekend .day').allTextContents(),
     ['6', '7', '13', '14', '20', '21', '27', '28']);
-  // The place falls back to the photo's caption; the cover counts the months for its year.
+  // The place falls back to the photo's caption; the cover's year is its own text.
   assert.equal(await frame.locator('.month .place').first().textContent(), 'Segla, Senja');
   assert.equal(await frame.locator('.cover .year').textContent(), '2027');
   await daysFit();
   if (screenshots) await w.screenshot({ path: join(screenshots, 'editor.png') });
   await printed('a3', { width: 6835, height: 4866 });
 
-  // A first month later in the year renumbers the pages, and the cover shows both years.
+  // A first month later in the year renumbers the pages; the cover's year stays as written.
   await w.getByText('Book settings', { exact: true }).click();
   const first = w.getByLabel('First month', { exact: true });
   await first.fill('2026-09');
   await frame.locator('.month-name').first().filter({ hasText: 'SEP' }).waitFor();
   assert.deepEqual((await months()).slice(0, 5), ['SEP', 'OCT', 'NOV', 'DEC', 'JAN']);
-  assert.equal(await frame.locator('.cover .year').textContent(), '2026–27');
+  assert.equal(await frame.locator('.cover .year').textContent(), '2027');
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
   await frame.locator('.month-name').first().filter({ hasText: 'JAN' }).waitFor();
 

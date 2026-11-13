@@ -134,20 +134,18 @@ export default defineTemplate({
   spreads: ({ spread }) => ({
     cover: spread({
       label: 'Cover',
-      parameters: { title: p.string({ label: 'Title', default: 'A year outside', maxLength: 40, placeholder: 'Written down the strip' }) },
+      parameters: {
+        title: p.string({ label: 'Title', default: 'A year outside', maxLength: 40, placeholder: 'Written down the strip' }),
+        year: p.string({ label: 'Year', default: '2027', maxLength: 9, placeholder: 'Year' }),
+      },
       boxes: { hero: box.photo('Cover photo') },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
-        // The cover shows the calendar's years, from the first month page to the last.
-        const months = Math.max(1, ctx.book.anchors('month').length);
-        const [first, last] = [monthAt(ctx.document.firstMonth, 0), monthAt(ctx.document.firstMonth, months - 1)];
-        const years = first.getUTCFullYear() === last.getUTCFullYear() ? String(first.getUTCFullYear())
-          : first.getUTCFullYear() + '–' + String(last.getUTCFullYear()).slice(-2);
         return <Page context={ctx} className="cover">
           <ctx.PhotoBox id="hero" rect={photoRect(ctx)} />
           <StripCaption context={ctx} text={ctx.params.title} placeholder="Title" edit={ctx.edit('title')} className="place title" />
           <Rule context={ctx} />
-          <p className="year" {...ctx.edit('document.firstMonth')} style={ctx.geometry.css(at.page(strip.x, rule + 6, strip.width, 297 - rule - 14))}>{years}</p>
+          <ctx.Text parameter="year" className="year" rect={at.page(strip.x, rule + 6, strip.width, 297 - rule - 14)} />
         </Page>;
       },
     }),
@@ -159,7 +157,7 @@ export default defineTemplate({
         marked: p.string({ label: 'Marked days', default: '', maxLength: 120, placeholder: 'Day numbers, such as 3, 14' }),
       } } },
       // Every month page declares an anchor, so a page knows how many months come before it. Adding, removing or
-      // moving pages renumbers the months, and the cover counts them for its years.
+      // moving pages renumbers the months.
       anchors: () => [{ id: 'month' }],
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
