@@ -114,8 +114,19 @@ try {
   await menuAction(app, 'Manage Sources…');
   const manager = page.getByRole('dialog', { name: 'Book sources' });
   await manager.waitFor();
-  await manager.getByRole('button', { name: 'Include All Assets', exact: true }).click();
-  await manager.getByRole('alert').filter({ hasText: 'Cannot include all assets' }).waitFor();
+  // A linked-file refresh may still own the book just after the renderer becomes ready.
+  // Retry only that explicit busy response; any other error must fail with its actual message.
+  let collectionError;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await manager.getByRole('button', { name: 'Include All Assets', exact: true }).click();
+    const alert = manager.getByRole('alert');
+    await alert.waitFor();
+    collectionError = await alert.innerText();
+    if (collectionError !== 'ImageFlow is finishing another operation in this book.') break;
+    await ready(page);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.match(collectionError, /Cannot include all assets/);
   await page.screenshot({ path: join(root, '.build/linked-missing-sources.png') });
   await manager.getByRole('button', { name: 'Done', exact: true }).click();
   state = await current(page);
