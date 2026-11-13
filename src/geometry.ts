@@ -95,13 +95,20 @@ export function grid(rect: Rect, options: { columns: number; rows?: number; gap?
 // of the chosen format, horizontally with its width and vertically with its height. Only positions and sizes
 // scale; type sizes stay in points. `width`/`height` convert design lengths, such as a gap, to millimetres.
 export function design(format: ResolvedFormat, canvas: { width: number; height: number }, mode: Mode = {}) {
+  if (![canvas.width, canvas.height].every((value) => Number.isFinite(value) && value > 0)) throw new Error('Design canvas dimensions must be positive finite numbers.');
   const sx = format.trim.width / canvas.width, sy = format.trim.height / canvas.height;
   const at = (offset: number) => (x: number, y: number, width: number, height: number): Rect =>
     ({ x: offset + x * sx, y: y * sy, width: width * sx, height: height * sy });
   // Each function checks the format when called, so a template can hold the canvas without calling the other kind.
   const on = (side: Side | undefined) => (x: number, y: number, width: number, height: number) =>
     at(pageRect(format, side, 'trim', mode).x)(x, y, width, height);
-  return { left: on('left'), right: on('right'), page: on(undefined), width: (value: number) => value * sx, height: (value: number) => value * sy };
+  return { left: on('left'), right: on('right'), page: on(undefined), width: (value: number) => value * sx, height: (value: number) => value * sy,
+    scaleX: sx, scaleY: sy,
+    // Axis is explicit: typography can follow one axis or scale uniformly when the aspect ratio changes.
+    length: (value: number, unit: 'mm' | 'pt' | 'px', axis: 'x' | 'y' | 'min' | 'max') => {
+      const scale = axis === 'x' ? sx : axis === 'y' ? sy : axis === 'min' ? Math.min(sx, sy) : Math.max(sx, sy);
+      return (value * scale).toFixed(2) + unit;
+    } };
 }
 
 export function css(rect: Rect): CSSProperties {

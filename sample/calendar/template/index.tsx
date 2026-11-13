@@ -1,5 +1,5 @@
 import { box, defineTemplate, inch, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
-import type { DocumentEditorProps, ImageFlowNode, Photo, Rect, RenderContext } from 'imageflow';
+import type { DocumentEditorProps, ImageFlowNode, Rect, RenderContext } from 'imageflow';
 import { changeMark, daysIn, markedDays, markedEntries, markOf, monthFor } from './marks';
 import './styles.css';
 
@@ -7,7 +7,7 @@ import './styles.css';
 // narrow strip on the right: the photo's place written down the strip, a thin rule, the month, and its days.
 //
 // Layouts are drawn on a 420 × 297 design page (A-series landscape), measured from the trim edge.
-// `ctx.geometry.design` scales positions to the chosen format; type sizes are scaled with `fit` so every format keeps
+// `ctx.geometry.design` scales positions to the chosen format; type sizes use the design canvas’s explicit x-axis scaling so every format keeps
 // the same proportions.
 const canvas = { width: 420, height: 297 };
 const strip = { x: 393, width: 27 };
@@ -28,7 +28,6 @@ const calendarFormat = (label: string, width: number, height: number) => printFo
   pageCount: { min: 1, max: 36, step: 1 },
   output: {
     resolution: { minimum: 150, target: 300, maximum: dpi }, minimumTextSize: pt(6),
-    fonts: { allowType3: false, allowSystemFonts: false },
     maximumFileSize: { pages: 1_000_000_000 },
   },
 });
@@ -38,7 +37,7 @@ type Language = keyof typeof languages;
 
 const documentParameters = {
   firstMonth: p.date({ label: 'First month', default: '2027-01-01', precision: 'month' }),
-  language: p.enum({ label: 'Month and day names', default: 'en', options: ['en', 'de', 'fr', 'es', 'it', 'nl'], labels: languages }),
+  language: p.enum({ label: 'Month and day names', default: 'en', options: languages }),
   strip: p.color({ label: 'Strip colour', default: '#121212' }),
   // Dates, not days of a page: birthdays and holidays stay on their date when pages move.
   // Edited on the month pages: clicking a page's days opens the day picker (see MarkedDaysEditor).
@@ -58,10 +57,6 @@ const weekdayName = (date: Date, language: Language) => {
   return name.charAt(0).toLocaleUpperCase(language) + name.slice(1);
 };
 
-// Type sizes are designed for A3 and scale with the trim width, like the positions do.
-const scale = (context: Pick<Context, 'format'>, value: number, unit: 'pt' | 'mm') => (value * context.format.trim.width / canvas.width).toFixed(2) + unit;
-const fit = (context: Pick<Context, 'format'>, points: number) => scale(context, points, 'pt');
-
 /** The page: the photo fills everything left of the strip, both reaching into the bleed. */
 function Page({ context, className, children }: { context: Pick<Context, 'document' | 'geometry' | 'format'>; className: string; children?: ImageFlowNode }) {
   const { document, geometry } = context;
@@ -69,8 +64,8 @@ function Page({ context, className, children }: { context: Pick<Context, 'docume
   const bleed = geometry.page('bleed');
   const left = at.page(strip.x, 0, 0, 0).x;
   return <Spread className={'wall-calendar ' + className} style={{ '--strip': document.strip, '--highlight': document.highlight,
-    '--place-size': fit(context, 19), '--caption-size': fit(context, 17), '--day-size': fit(context, 10.5), '--weekday-size': fit(context, 6.5), '--year-size': fit(context, 38),
-    '--day-row': scale(context, 6.25, 'mm'), '--day-gap': scale(context, 1.4, 'mm') }}>
+    '--place-size': at.length(19, 'pt', 'x'), '--caption-size': at.length(17, 'pt', 'x'), '--day-size': at.length(10.5, 'pt', 'x'), '--weekday-size': at.length(6.5, 'pt', 'x'), '--year-size': at.length(38, 'pt', 'x'),
+    '--day-row': at.length(6.25, 'mm', 'x'), '--day-gap': at.length(1.4, 'mm', 'x') }}>
     <div className="strip" style={geometry.css({ ...bleed, x: left, width: bleed.x + bleed.width - left })} />
     {children}
   </Spread>;
@@ -81,15 +76,6 @@ const photoRect = (context: Pick<Context, 'geometry'>) => {
   const bleed = context.geometry.page('bleed');
   return { ...bleed, width: context.geometry.design(canvas).page(strip.x, 0, 0, 0).x - bleed.x };
 };
-
-/** Text written down the strip, from its top: the place on month pages, the title on the cover. */
-function StripCaption({ context, text, placeholder, edit, className = 'place' }: {
-  context: Pick<Context, 'geometry' | 'mode'>; text: string; placeholder: string; edit: object; className?: string;
-}) {
-  const rect = context.geometry.design(canvas).page(strip.x, 8, strip.width, rule - 14);
-  if (!text && context.mode !== 'edit') return null;
-  return <p {...edit} className={text ? className : className + ' empty'} style={context.geometry.css(rect)}>{text || placeholder}</p>;
-}
 
 function Rule({ context }: { context: Pick<Context, 'geometry'> }) {
   const at = context.geometry.design(canvas);
@@ -111,9 +97,6 @@ function Days({ month, language, marked, edit, rect, geometry, finding }: {
     })}
   </ol>;
 }
-
-// The place shown on a month page: its own text, else the photo's caption.
-const place = (text: string, photo: Photo | null) => text.trim() || photo?.caption?.trim() || photo?.title?.trim() || '';
 
 // The day picker, opened by clicking the days of a month page. It edits the document's marked dates for the month
 // that page shows, which it reads from its context: moving the page to another month updates the open picker.
@@ -169,8 +152,6 @@ export default defineTemplate({
   label: 'Wall calendar',
   description: 'A landscape wall calendar: one full-bleed photo a month, with the place and the days on a dark strip.',
   contract: 1,
-  requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component',
-    'format-helper', 'opening-spreads', 'single-pages', 'editor-context', 'document-editors'],
   formats: {
     a3: calendarFormat('45 × 30 cm (A3 landscape) · 6835 × 4866 px', 6835, 4866),
     a2: calendarFormat('60 × 45 cm (A2 landscape) · 9417 × 6677 px', 9417, 6677),
@@ -192,7 +173,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <Page context={ctx} className="cover">
           <ctx.PhotoBox id="hero" rect={photoRect(ctx)} />
-          <StripCaption context={ctx} text={ctx.params.title} placeholder="Title" edit={ctx.edit('title')} className="place title" />
+          <ctx.Text parameter="title" placeholder="Title" className="place title" rect={at.page(strip.x, 8, strip.width, rule - 14)} />
           <Rule context={ctx} />
           <ctx.Text parameter="year" className="year" rect={at.page(strip.x, rule + 6, strip.width, 297 - rule - 14)} />
         </Page>;
@@ -200,7 +181,8 @@ export default defineTemplate({
     }),
     month: spread({
       label: 'Month',
-      parameters: { place: p.string({ label: 'Place', default: '', maxLength: 40, placeholder: "The photo's caption" }) },
+      parameters: { place: p.string({ label: 'Place', default: '', maxLength: 40, placeholder: "The photo's caption" }),
+        showPlace: p.boolean({ label: 'Show place', default: true }) },
       boxes: { hero: box.photo('Photo') },
       // Every month page declares an anchor, so a page knows how many months come before it. Adding, removing or
       // moving pages renumbers the months.
@@ -219,7 +201,9 @@ export default defineTemplate({
           suggestion: 'Write 25.12 for every year or 2027-04-16 for one date, separated by commas.' }) : {};
         return <Page context={ctx} className="month">
           <ctx.PhotoBox id="hero" rect={photoRect(ctx)} />
-          <StripCaption context={ctx} text={place(ctx.params.place, ctx.boxes.hero.photo)} placeholder="Place" edit={ctx.edit('place')} />
+          <ctx.Text parameter="place" fallback={ctx.boxes.hero.photo?.caption?.trim() || ctx.boxes.hero.photo?.title?.trim()}
+            fallbackLabel="photo caption or title" hidden={!ctx.params.showPlace} placeholder="Place" className="place"
+            rect={at.page(strip.x, 8, strip.width, rule - 14)} />
           <Rule context={ctx} />
           <p className="month-name" style={ctx.geometry.css(at.page(strip.x, rule + 5, strip.width, 8))}>{monthName(month, language)}</p>
           <Days month={month} language={language} marked={marked} edit={ctx.edit('document.markedDates')} finding={finding}

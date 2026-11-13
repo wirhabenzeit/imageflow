@@ -2,7 +2,7 @@ import { sourcePath, sourceLinked } from '../src/source-locations';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { capabilities as templateCapabilities, runtimeExports } from '../src/runtime-exports';
+import { capabilities as templateCapabilities, contract1Capabilities, runtimeExports } from '../src/runtime-exports';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from '../src/authoring-check';
 import type { AuthoringDiagnostic } from '../src/authoring';
 import type { ImportRequest } from '../src/desktop';
@@ -440,7 +440,7 @@ export function createAuthoringService(hooks: Hooks) {
             fixtures: { cases: [...fixtureCases], maxLayouts: fixtureLimits.layouts, maxFormats: fixtureLimits.formats,
               maxFixturesPerFormat: fixtureLimits.cellsPerFormat, maxPreviewFixtures: fixtureLimits.previewCells },
             elementInspection: true, detailPreviews: true, maxContactSheetSpreads: 12,
-            templateApi: { contract: 1, capabilities: [...templateCapabilities], exports: [...runtimeExports] },
+            templateApi: { contract: 1, baseline: [...contract1Capabilities], capabilities: [...templateCapabilities], exports: [...runtimeExports] },
             diagnostics: 'Stable codes with spread/box/element/source locations, measured details and suggested fixes.',
             draftProtection: 'All agent mutations wait until active human editors are closed or blurred.',
             imports: 'Only project/inbox paths. All selected files are validated before import; source files remain available to Undo.',

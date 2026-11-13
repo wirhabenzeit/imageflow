@@ -87,6 +87,24 @@ test('a zip of the template folder itself unpacks from inside it, without macOS 
   } finally { await rm(work, { recursive: true, force: true }); }
 });
 
+test('import discards foreign SDK snapshots at every depth, with or without an enclosing folder', async () => {
+  const work = await mkdtemp(join(tmpdir(), 'imageflow-archive-'));
+  try {
+    for (const prefix of ['', 'travel/']) {
+      const file = join(work, 'sdk.imageflow-template');
+      await writeFile(file, zip([
+        { name: prefix + 'index.tsx', data: 'source' },
+        { name: prefix + '.imageflow-sdk/api.json', data: 'foreign SDK' },
+        { name: prefix + 'photos/.imageflow-sdk/payload.js', data: 'foreign payload' },
+        { name: prefix + 'spreads/nested/.imageflow-sdk/extra.d.ts', data: 'foreign types' },
+      ]));
+      const out = join(work, prefix ? 'wrapped' : 'plain');
+      await extractTemplateArchive(file, out);
+      assert.deepEqual(await readdir(out, { recursive: true }), ['index.tsx']);
+    }
+  } finally { await rm(work, { recursive: true, force: true }); }
+});
+
 test('entries outside the template, links, damage and files without index.tsx are refused before anything is written', async () => {
   const work = await mkdtemp(join(tmpdir(), 'imageflow-archive-'));
   try {

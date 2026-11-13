@@ -61,6 +61,8 @@ test('a project revision is deterministic across copies and ignores temporary, c
 
   await mkdir(join(folder, '.imageflow'));
   await writeFile(join(folder, '.imageflow', 'thumbnail.png'), 'cache');
+  await mkdir(join(folder, 'template', '.imageflow-sdk'));
+  await writeFile(join(folder, 'template', '.imageflow-sdk', 'imageflow.d.ts'), 'generated snapshot');
   await writeFile(join(folder, 'template', '.DS_Store'), 'macOS metadata');
   await writeFile(join(folder, 'template', 'styles.css.swp'), 'editor swap');
   await writeFile(join(folder, 'template', 'styles.css.tmp'), 'editor temporary');

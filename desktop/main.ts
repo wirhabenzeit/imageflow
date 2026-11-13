@@ -35,6 +35,7 @@ import { starters } from '../src/starters';
 import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-library';
 import { TemplateTrust, trustedOrigins } from './template-trust';
 import { isTemplateArchive, templateArchiveExtension, writeTemplateArchive } from './template-archive';
+import { writeAuthoringSnapshot } from './authoring-sdk';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
 import { describeImport } from '../src/library';
 import type { LibraryImportResult, NewBookChoice } from '../src/library';
@@ -419,9 +420,11 @@ async function createBook(stage: string, template: ResolvedTemplate, sample: boo
     const project = JSON.parse(await readFile(file, 'utf8'));
     project.template = { ...project.template, hash: entry.hash };
     await writeFile(file, JSON.stringify(project, null, 2) + '\n');
+    await writeAuthoringSnapshot(join(stage, 'template'), join(__dirname, 'authoring-types'));
     return;
   }
   await copyTemplate(folder, join(stage, 'template'));
+  await writeAuthoringSnapshot(join(stage, 'template'), join(__dirname, 'authoring-types'));
   await Promise.all(['photos', 'texts', 'files'].map((name) => mkdir(join(stage, name))));
   await writeFile(join(stage, 'photos.json'), '{}\n');
   await writeFile(file, JSON.stringify({
@@ -584,7 +587,7 @@ async function chooseTemplateFile(owner: BrowserWindow, name: string) {
 async function exportBookTemplate(document: DocumentSession) {
   const { id, version } = document.book.project.template;
   const file = await chooseTemplateFile(document.window, id + ' ' + version);
-  if (file) await writeTemplateArchive(await templateFolder(document.book.folder), file);
+  if (file) await writeTemplateArchive(await templateFolder(document.book.folder), file, join(__dirname, 'authoring-types'));
 }
 
 async function saveTemplate(document: DocumentSession) {
@@ -915,7 +918,7 @@ void app.whenReady().then(async () => {
   // IMAGEFLOW_TEMPLATES points tests and development at another library folder.
   library = new TemplateLibrary(process.env.IMAGEFLOW_TEMPLATES || join(app.getPath('userData'), 'Templates'),
     starters.map((starter) => ({ template: join(sampleFolder(starter.folder), 'template'), sample: sampleFolder(starter.folder), defaultName: starter.defaultName })),
-    probeTemplate, (path) => shell.trashItem(path), capabilities.join(',') + '@' + app.getVersion());
+    probeTemplate, (path) => shell.trashItem(path), capabilities.join(',') + '@' + app.getVersion(), join(__dirname, 'authoring-types'));
   library.onChange(publishLibrary);
   trust = new TemplateTrust(join(app.getPath('userData'), 'template-trust.json'));
   const renditions = await configureRenditionCache(cache, join(app.getPath('userData'), 'Cache', 'renditions'));

@@ -11,7 +11,6 @@ const ids = ['one', 'two', 'three', 'four', 'five', 'six'] as const;
 
 export default defineTemplate({
   id: 'example-grid-bleed', version: '1.0.0', contract: 1,
-  requires: ['spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-helpers', 'box-records', 'typed-components'],
   format,
   spreads: ({ spread }) => ({
     grid: spread({

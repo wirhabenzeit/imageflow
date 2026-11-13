@@ -23,8 +23,9 @@ const tiles = Object.fromEntries(await Promise.all(Object.entries(colours).map(a
 const named = ([r, g, b]) => r > 150 && g < 90 ? 'liberty' : b > 150 && r < 90 ? 'bright' : Math.abs(r - 128) < 20 && Math.abs(g - 128) < 20 ? 'positron'
   : g > r && g > b ? 'background' : 'unknown ' + [r, g, b].join(',');
 
-// Software WebGL, so the test runs on machines without a GPU.
-const app = await _electron.launch({ executablePath: electron, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
+// Use native WebGL on macOS and software WebGL on headless Linux.
+const gpu = process.platform === 'darwin' ? [] : ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+const app = await _electron.launch({ executablePath: electron, args: [...gpu, join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
   await app.evaluate(({ session }, tiles) => {
@@ -105,11 +106,42 @@ try {
   assert.equal(named((await drawn('map-b')).centre), 'positron');
 
   // Editing: choosing a style in the map editor saves it, and the page draws the new view.
+  await frame.locator('[data-spread="map-a"] [data-element="map"]').scrollIntoViewIfNeeded();
+  await w.waitForTimeout(150);
   const box = await frame.locator('[data-spread="map-a"] [data-element="map"]').boundingBox();
   await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   const dialog = w.getByRole('dialog', { name: 'Edit map' });
   await dialog.waitFor();
   const editor = w.frameLocator('iframe.element-editor-frame');
+  const mapOutput = editor.locator('.map-editor-map[data-output-width]');
+  await mapOutput.waitFor();
+  const outputSize = () => mapOutput.evaluate((node) => ({ x: Number(node.dataset.outputX), y: Number(node.dataset.outputY),
+    width: Number(node.dataset.outputWidth), height: Number(node.dataset.outputHeight) }));
+  const waitSize = async (rect) => {
+    for (let i = 0; i < 100; i++) {
+      const size = await outputSize();
+      if (Object.entries(rect).every(([axis, value]) => Math.abs(size[axis] - value) < .2)) return;
+      await w.waitForTimeout(100);
+    }
+    assert.fail('The editor did not receive measured output: ' + JSON.stringify(await outputSize()));
+  };
+  const original = await outputSize();
+  const originalStyle = await frame.locator('[data-spread="map-a"] [data-element="map"]').getAttribute('style');
+  // Measured output is independent of the whole spread: CSS can assign this map a smaller, differently shaped box.
+  await frame.locator('[data-spread="map-a"] [data-element="map"]').evaluate((node) => {
+    node.style.width = '180mm'; node.style.height = '100mm';
+  });
+  await waitSize({ width: 180, height: 100 });
+  assert.ok(Math.abs((await outputSize()).width - 180) < .2);
+  await frame.locator('[data-spread="map-a"] [data-element="map"]').evaluate((node, style) => node.setAttribute('style', style), originalStyle);
+  await waitSize(original);
+  // Moving a box without resizing it refreshes position as well as size.
+  await frame.locator('[data-spread="map-a"] [data-element="map"]').evaluate((node) => {
+    node.style.left = '17mm'; node.style.top = '29mm';
+  });
+  await waitSize({ ...original, x: 17, y: 29 });
+  await frame.locator('[data-spread="map-a"] [data-element="map"]').evaluate((node, style) => node.setAttribute('style', style), originalStyle);
+  await waitSize(original);
   // Chooses a style in the map editor and waits until the editor shows it chosen. The hidden test window can drop
   // the first clicks into a newly opened frame, so a click that did not arrive is repeated.
   const choose = async (name) => {
@@ -147,6 +179,13 @@ try {
   // A change of format draws the maps again at their new size.
   await configure({ delay: 0 });
   const square = await drawn('map-a');
+  await frame.locator('[data-spread="map-a"] [data-element="map"]').scrollIntoViewIfNeeded();
+  await w.waitForTimeout(150);
+  const reopen = await frame.locator('[data-spread="map-a"] [data-element="map"]').boundingBox();
+  await w.mouse.click(reopen.x + reopen.width / 2, reopen.y + reopen.height / 2);
+  await dialog.waitFor();
+  await mapOutput.waitFor();
+  const squareOutput = await outputSize();
   const before = await w.locator(current).getAttribute('src');
   await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(file, 'utf8')), format: 'landscape' }, null, 2) + '\n');
   await w.waitForFunction((src) => {
@@ -157,6 +196,10 @@ try {
   assert.notEqual(landscape.width / landscape.height, square.width / square.height, 'the format changed the box');
   assert.ok(landscape.natural >= landscape.width * 0.98 && landscape.naturalHeight >= landscape.height * 0.98, JSON.stringify(landscape));
   assert.equal(named(landscape.centre), 'liberty');
+  await waitSize({ width: landscape.width / (96 / 25.4), height: landscape.height / (96 / 25.4) });
+  assert.notEqual((await outputSize()).width / (await outputSize()).height, squareOutput.width / squareOutput.height, 'open editor follows the new format geometry');
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click();
+  await dialog.waitFor({ state: 'detached' });
 
   // Export waits for both maps on a slow server, draws them again at 250 ppi across the spread's 3 mm bleed, and
   // puts them in the PDF.

@@ -148,7 +148,9 @@ export type ElementEditorProps = {
 // components. It follows the book while the editor is open (a reorder, another photo, a document setting), so a
 // helper such as the calendar's month can serve `render` and the editor alike. Markdown flow positions are not known
 // outside the book render, so `boxes[id].text` is null.
-export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'elements' | 'page' | 'format' | 'formatId' | 'book'> & {
+export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book'> & {
+  // Measured bounds in trim coordinates (mm), null before the current page is ready or when not rendered.
+  elements: Record<string, { params: Values; rect: Rect | null }>;
   // The spread's ID and its layout.
   spread: string; layout: string;
 };
@@ -263,17 +265,15 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   label: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().min(1).max(300).optional(),
   contract: z.literal(1),
-  // Features beyond the first contract-1 release. Apps that predate `requires` ignore it; their bundler still
-  // rejects imports of helpers they do not export.
+  // Optional extensions beyond the contract-1 baseline. Baseline names in older templates remain valid.
   requires: z.array(z.string()).optional().superRefine((required, context) => {
     const missing = (required ?? []).filter((name) => !(capabilities as readonly string[]).includes(name));
     if (missing.length) {
       context.addIssue({ code: 'custom', message: 'This template requires ImageFlow features this app does not provide: ' +
-        missing.join(', ') + '. Update ImageFlow, or remove them from requires. This app provides: ' + capabilities.join(', ') + '.' });
+        missing.join(', ') + '. Update ImageFlow. This app provides: ' + capabilities.join(', ') + '.' });
     }
   }),
-  // HTTPS origins the template's element editors may reach (ADR 0006), after the user allows them for the book.
-  // Book previews, checks and export never reach the network.
+  // HTTPS origins editors and RenderedImage.draw may reach after user approval (ADR 0006).
   network: z.array(z.string().regex(/^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/,
     'Use an HTTPS origin such as https://tiles.example.com, or https://*.example.com for its subdomains, without a path.'))
     .max(20).optional(),
@@ -563,19 +563,25 @@ function parameterAt({ definition, documentParameters, values }: Pick<NonNullabl
 }
 
 // Shows a string parameter and marks the node for editing. Empty, it shows an editor-only placeholder.
-export function Text({ parameter, as = 'p', placeholder, className, style, rect, ...marker }: Styling & Placement & IssueMarker &
-  { parameter: string; as?: TextTag; placeholder?: string }) {
+export function Text({ parameter, as = 'p', placeholder, fallback, fallbackLabel = 'inherited text', hidden = false, className, style, rect, ...marker }: Styling & Placement & IssueMarker &
+  { parameter: string; as?: TextTag; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean }) {
   const data = useSpread();
   const { param, value } = parameterAt(data, parameter);
   if (!param) throw new Error('Text shows parameter ' + parameter + ', which this layout does not declare.');
   if (!textTags.has(as)) throw new Error('Text cannot render as ' + as + '. Use one of ' + [...textTags].join(', ') + '.');
-  const text = value === undefined ? '' : String(value);
+  if (hidden) return null;
+  const saved = value === undefined ? '' : String(value);
+  const inherited = !saved.trim() && !!fallback?.trim();
+  const text = saved.trim() ? saved : inherited ? fallback! : '';
   const empty = !text && data.book.mode === 'edit';
   const hint = placeholder ?? (param.type === 'string' && param.placeholder ? param.placeholder : param.label);
   const Tag = as;
   // The edit marker stays in export, like ctx.edit(), so checks can name the parameter this text shows.
-  return <Tag data-edit={parameter} data-empty={empty ? '' : undefined} className={className} style={place(rect, style)} {...issueOn(marker)}>
-    {empty ? <span className="if-text-placeholder">{hint}</span> : text}
+  return <Tag data-edit={parameter} data-empty={empty ? '' : undefined}
+    data-text-fallback={fallback?.trim() ? fallback : undefined} data-text-fallback-label={fallback?.trim() ? fallbackLabel : undefined}
+    className={className} style={place(rect, style)} {...issueOn(marker)}>
+    {empty ? <span className="if-text-placeholder">{hint}</span> : inherited && data.book.mode === 'edit'
+      ? <span className="if-text-inherited" title={'Using ' + fallbackLabel}>{text}</span> : text}
   </Tag>;
 }
 
@@ -685,6 +691,7 @@ export function editorContext(book: RenderProject, template: Template, spreadId:
   const page = sequence.spreads[index].page;
   const context: EditorContext = {
     ...values, page, format: spanFits(definition.span, template.format) ? format : lenientFormat(format), formatId: template.formatId,
+    elements: Object.fromEntries(Object.entries(values.elements).map(([id, element]) => [id, { ...element, rect: null }])),
     book: bookContext(index_, spread.id), spread: spread.id, layout: spread.definition,
   };
   return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, values, template.formatId]) };
@@ -694,6 +701,17 @@ export function editorContext(book: RenderProject, template: Template, spreadId:
 export const refreshedEditorContext = (book: RenderProject, template: Template, spreadId: string) =>
   editorContext(book, chooseFormat(template, book.project.format), spreadId);
 
+/** Page measurements are separate from saved values, so a pending or hidden element has no guessed geometry. */
+export function withEditorGeometry(context: EditorContext, measurements: unknown): EditorContext {
+  const rects = plainRecord(measurements) ? measurements : {};
+  return { ...context, elements: Object.fromEntries(Object.entries(context.elements).map(([id, element]) => {
+    const rect = rects[id];
+    const valid = plainRecord(rect) && ['x', 'y', 'width', 'height'].every((key) => typeof rect[key] === 'number' && Number.isFinite(rect[key])) &&
+      (rect.width as number) > 0 && (rect.height as number) > 0;
+    return [id, { ...element, rect: valid ? { x: rect.x as number, y: rect.y as number, width: rect.width as number, height: rect.height as number } : null }];
+  })) };
+}
+
 /**
  * The context an editor sees: the saved book with its draft applied, so helpers reading `context` agree with what
  * the editor shows. A document editor's draft is its own document parameters; an element editor's is the element's
@@ -702,7 +720,7 @@ export const refreshedEditorContext = (book: RenderProject, template: Template, 
 export function withEditorDraft(context: EditorContext, draft: { document: Values } | { element: string; values: Values; spread: Values }): EditorContext {
   if ('document' in draft) return { ...context, document: { ...context.document, ...draft.document } };
   return { ...context, params: { ...context.params, ...draft.spread },
-    elements: { ...context.elements, [draft.element]: { params: { ...context.elements[draft.element]?.params, ...draft.values } } } };
+    elements: { ...context.elements, [draft.element]: { ...context.elements[draft.element], params: { ...context.elements[draft.element]?.params, ...draft.values } } } };
 }
 
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.

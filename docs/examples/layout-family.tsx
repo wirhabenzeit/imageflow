@@ -50,7 +50,6 @@ function GridPicker({ variants, current, choose, find, readOnly }: LayoutPickerP
 
 export default defineTemplate({
   id: 'example-layout-family', version: '1.0.0', contract: 1,
-  requires: ['spread-builder', 'bound-geometry', 'format-helper', 'typed-components', 'box-records', 'layout-families'],
   format,
   layoutFamilies: { grid: { label: 'Photo grid', picker: { label: 'Photo grid', component: GridPicker } } },
   spreads: ({ spread }) => ({

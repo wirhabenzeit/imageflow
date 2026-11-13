@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { closest, declarationWarnings as check } from '../src/declaration-check';
 import type { Schema } from '../src/declaration-check';
-import { mm, printFormat, pt, resolveFormat } from '../src/format';
+import { formatSchema, mm, printFormat, pt, resolveFormat } from '../src/format';
 import { geometry } from '../src/geometry';
 import { p } from '../src/parameters';
 import { projectSchema } from '../src/project';
@@ -18,6 +18,19 @@ const declarationWarnings = (declared: unknown) => check(declared, templateSchem
 const format = printFormat({
   label: 'Square', trim: { width: mm(200), height: mm(200) }, bleed: { all: mm(3), binding: mm(0) }, safe: mm(12),
   pageCount: { min: 2, max: 20, step: 2 }, ends: 'inside-covers',
+});
+
+test('enum label maps normalize to the existing saved parameter shape', () => {
+  const choices = { en: 'English', de: 'Deutsch' };
+  const short = p.enum({ label: 'Language', options: choices, default: 'de' });
+  assert.deepEqual(short, p.enum({ label: 'Language', options: ['en', 'de'], labels: choices, default: 'de' }));
+  assert.equal(templateSchema.safeParse({ id: 'enum', version: '1', contract: 1, format, parameters: { language: short },
+    spreads: { main: { label: 'Main', render: () => null } } }).success, true);
+  choices.de = 'German';
+  assert.equal(short.labels.de, 'Deutsch');
+  const numeric = p.enum({ label: 'Year', options: { older: 'Older', 2024: 'This year', 10: 'Ten', 2: 'Two' }, default: '2024' });
+  assert.deepEqual(numeric.options, ['2', '10', '2024', 'older']);
+  assert.deepEqual(p.enum({ label: 'Year', options: ['older', '2024', '10', '2'], default: '2024' }).options, ['older', '2024', '10', '2']);
 });
 
 test('printFormat expands inset shorthands into an ordinary, complete PrintFormat', () => {
@@ -40,6 +53,43 @@ test('box.photos declares explicitly named photo boxes', () => {
   assert.deepEqual(box.photos(['one', 'two'], (id, i) => 'Photo ' + (i + 1) + ' ' + id), {
     one: { type: 'photo', label: 'Photo 1 one', parameters: {} }, two: { type: 'photo', label: 'Photo 2 two', parameters: {} },
   });
+});
+
+test('font policy fields may be omitted and legacy false-only declarations stay valid', () => {
+  assert.ok(formatSchema.safeParse(format).success);
+  const legacy = { ...format, output: { ...format.output, fonts: { allowType3: false, allowSystemFonts: false } } };
+  assert.ok(formatSchema.safeParse(legacy).success);
+  const declared = { id: 'legacy', version: '1', contract: 1, format: legacy, spreads: { main: { label: 'Main', render: () => null } } };
+  assert.deepEqual(declarationWarnings(declared), []);
+  for (const field of ['allowType3', 'allowSystemFonts']) {
+    const parsed = formatSchema.safeParse({ ...legacy, output: { ...legacy.output, fonts: { ...legacy.output.fonts, [field]: true } } });
+    assert.equal(parsed.success, false);
+    assert.ok(parsed.error!.issues.some(({ path }) => path.join('.') === 'output.fonts.' + field));
+  }
+});
+
+test('contract 1 accepts calendar and map declarations without feature opt-ins', () => {
+  const declared = defineTemplate({
+    id: 'baseline', version: '1', contract: 1,
+    format: printFormat({ label: 'Calendar', facingPages: false, trim: { width: mm(210), height: mm(297) },
+      bleed: mm(3), safe: mm(10), pageCount: { min: 1, max: 12, step: 1 } }),
+    parameters: { markedDates: p.string({ label: 'Marked dates', default: '' }) },
+    editors: { dates: { parameters: ['markedDates'], component: () => null } },
+    network: ['https://tiles.example.com'],
+    openingSpreads: [{ layout: 'month' }],
+    spreads: ({ spread }) => ({ month: spread({
+      label: 'Month', boxes: { hero: box.photo('Photo') }, elements: { map: { label: 'Map' } },
+      render: (ctx) => createElement(runtime.Spread, {}, createElement(ctx.Element, { id: 'map' },
+        createElement(runtime.RenderedImage, { draw: async () => new Blob(), inputs: {} }))),
+    }) }),
+  });
+  const parsed = templateSchema.parse(declared);
+  assert.equal(parsed.requires, undefined);
+  assert.equal(parsed.spreads.month.span, 'page');
+  assert.ok(parsed.editors?.dates);
+  assert.deepEqual(parsed.network, ['https://tiles.example.com']);
+  assert.deepEqual(declarationWarnings(declared), []);
+  assert.equal(templateSchema.safeParse({ ...parsed, contract: 2 }).success, false);
 });
 
 test('spreads declared as a builder function normalize to the record ImageFlow validates', () => {

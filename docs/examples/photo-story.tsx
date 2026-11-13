@@ -13,7 +13,6 @@ const story = box.markdown('Story', { flowOrder: 1 });
 
 export default defineTemplate({
   id: 'example-photo-story', version: '1.0.0', contract: 1,
-  requires: ['anchors', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-helpers', 'typed-components'],
   format,
   spreads: ({ spread }) => ({
     story: spread({

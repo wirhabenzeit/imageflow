@@ -75,6 +75,28 @@ try {
     ['6', '7', '13', '14', '20', '21', '27', '28']);
   // The place falls back to the photo's caption; the cover's year is its own text.
   assert.equal(await frame.locator('.month .place').first().textContent(), 'Segla, Senja');
+  const caption = frame.locator('.month .place').first();
+  await caption.locator('.if-text-inherited').waitFor();
+  const captionEditor = w.getByRole('dialog', { name: 'Edit Place', exact: true });
+  const openCaption = async () => {
+    await caption.scrollIntoViewIfNeeded();
+    const box = await caption.boundingBox();
+    await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await captionEditor.waitFor();
+  };
+  await openCaption();
+  assert.match(await captionEditor.innerText(), /Using photo caption or title: Segla, Senja/);
+  const override = captionEditor.getByRole('textbox');
+  await override.fill('Custom place');
+  await captionEditor.getByRole('button', { name: 'Close', exact: true }).click();
+  await frame.locator('.month .place', { hasText: 'Custom place' }).waitFor();
+  await openCaption();
+  assert.match(await captionEditor.innerText(), /Leave empty to use photo caption or title/);
+  await override.fill('');
+  await captionEditor.getByRole('button', { name: 'Close', exact: true }).click();
+  await caption.locator('.if-text-inherited', { hasText: 'Segla, Senja' }).waitFor();
+  const inheritedSaved = JSON.parse(await readFile(join(project, 'project.json'), 'utf8'));
+  assert.notEqual(inheritedSaved.spreads.find((spread) => spread.definition === 'month').params?.place, 'Segla, Senja', 'fallback never becomes a saved override');
   assert.equal(await frame.locator('.cover .year').textContent(), '2027');
   await daysFit();
   if (screenshots) await w.screenshot({ path: join(screenshots, 'editor.png') });

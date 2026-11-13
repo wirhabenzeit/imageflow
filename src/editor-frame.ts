@@ -25,6 +25,7 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
 }, flushError = 'The editor did not respond, so nothing was saved. Try Done again, or Cancel.') {
   const [height, setHeight] = useState(240);
   const [ready, setReady] = useState(false);
+  const [generation, setGeneration] = useState(0);
   const [error, setError] = useState('');
   const [failed, setFailed] = useState(false);
   // Done waits for the frame to finish typing in progress: a field in the frame keeps typed text until it loses
@@ -54,6 +55,7 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
       }
     } else if (data.type === 'editor-ready') {
       setReady(true);
+      setGeneration((value) => value + 1);
       frame.current?.focus();
     } else if (data.type === 'editor-draft') {
       if (!failed) setError('');
@@ -92,5 +94,5 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
     return true;
   }
 
-  return { height, ready, error, setError, failed, flushing, flushTimedOut, flush };
+  return { height, ready, generation, error, setError, failed, flushing, flushTimedOut, flush };
 }

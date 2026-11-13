@@ -68,10 +68,11 @@ export function MarkedFields({ project, spread, template, edits, edit }: {
 // Edits the selected item from a stable panel at the bottom of the visible canvas: a node the template marked with `ctx.edit(...)` or
 // `ctx.Text`, or a box or element. For a box, `children` is the platform's part (its photo or text) and `title`
 // names the box.
-export function EditPopover({ project, spread, template, edits, host, readOnly, blocked, edit, close, step, actions, title, children }: {
+export function EditPopover({ project, spread, template, edits, host, readOnly, blocked, edit, close, step, actions, title, children, textFallback }: {
   project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; host?: HTMLElement | null;
   readOnly: boolean; blocked?: string; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
   actions?: ReactNode; title?: string; children?: ReactNode;
+  textFallback?: { parameter: string; text: string; label: string };
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const [drafts, setDrafts] = useState<Record<string, Value>>({});
@@ -172,6 +173,10 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
         setDraft={(value) => setDrafts((previous) => ({ ...previous, [target.path]: value }))}
         apply={(value) => apply({ [target.path]: value })} />
       {description && <small className="field-description">{description}</small>}
+      {textFallback?.parameter === target.path && <small className="field-description">
+        {String(drafts[target.path] ?? readEdit(project, spread, target)).trim() ? 'Leave empty to use ' : 'Using '}
+        {textFallback.label}: {textFallback.text}
+      </small>}
     </div>;
   });
   return createPortal(<div ref={panel} className="item-controls edit-popover" role="dialog" aria-label={'Edit ' + (title ?? visible.map(({ label }) => label).join(', '))}

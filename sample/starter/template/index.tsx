@@ -20,7 +20,6 @@ const bookFormat = (label: string, width: number, height: number) => printFormat
   pageCount: { min: 28, max: 112, step: 4 },
   output: {
     resolution: { minimum: 180, target: 250, maximum: 300 }, minimumTextSize: pt(8),
-    fonts: { allowType3: false, allowSystemFonts: false },
     maximumFileSize: { pages: 500_000_000 },
   },
 });
@@ -309,8 +308,6 @@ export default defineTemplate({
   label: 'Photobook',
   description: 'A travel journal with photographs, stories, maps, and room for your own layouts.',
   contract: 1,
-  requires: ['anchors', 'box-helpers', 'template-issues', 'typed-components', 'spread-builder', 'bound-geometry', 'text-component', 'format-helper',
-    'editor-native-controls', 'layout-families', 'editor-spread-parameters', 'opening-spreads', 'editor-network', 'rendered-images'],
   // The Map layout loads OpenFreeMap styles and tiles once the user allows it, in its editor, the page and export.
   network: [mapOrigin],
   formats: {

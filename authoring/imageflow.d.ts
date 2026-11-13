@@ -28,6 +28,7 @@ type FormatOutput = {
   minimumTextSize?: Length;
   /** Maximum PDF size in bytes. */
   maximumFileSize?: { pages: number; cover?: number };
+  /** @deprecated Omit this field. Print always rejects Type 3 and fonts outside the template bundle. */
   fonts?: { allowType3: false; allowSystemFonts: false };
 };
 /** A format with facing pages: layouts are designed as spreads. */
@@ -47,7 +48,7 @@ export type FacingFormat = {
 };
 /**
  * A format without facing pages, such as a wall calendar, cards or posters: every unit is one page, designed, checked
- * and exported on its own. Layouts use `span: 'page'`. Requires the `single-pages` capability.
+ * and exported on its own. Layouts use `span: 'page'`. Included in the contract-1 baseline.
  */
 export type SinglePageFormat = {
   label: string;
@@ -159,6 +160,7 @@ export type ParameterValues<P> = { [K in keyof P]: ParameterValue<P[K]> };
 type Options<P extends Parameter> = Omit<P, 'type'>;
 /** Rejects option names the parameter type does not have, such as `mutliline`, which ImageFlow would ignore. */
 type Known<O, Allowed> = O & { [K in Exclude<keyof O, keyof Allowed>]: never };
+type EnumKeys<C> = `${Extract<keyof C, string | number>}`;
 export const p: {
   boolean<const O extends Options<BooleanParameter>>(options: Known<O, Options<BooleanParameter>>): O & { type: 'boolean' };
   string<const O extends Options<StringParameter>>(options: Known<O, Options<StringParameter>>): O & { type: 'string' };
@@ -166,6 +168,9 @@ export const p: {
   number<const O extends Options<NumberParameter>>(options: Known<O, Options<NumberParameter>>): O & { type: 'number' };
   enum<const T extends string>(options: Common & { options: readonly T[]; default: NoInfer<T>; labels?: Partial<Record<T, string>> }):
     Common & { options: readonly T[]; default: T; labels?: Partial<Record<T, string>>; type: 'enum' };
+  /** Keys become string values in JavaScript enumeration order (array index keys first). Use arrays for an explicit order. */
+  enum<const C extends Record<string, string>>(options: Common & { options: C; default: NoInfer<EnumKeys<C>> }):
+    Common & { options: EnumKeys<C>[]; default: EnumKeys<C>; labels: C; type: 'enum' };
   color<const O extends Options<ColorParameter>>(options: Known<O, Options<ColorParameter>>): O & { type: 'color' };
   date<const O extends Options<DateParameter>>(options: Known<O, Options<DateParameter>>): O & { type: 'date' };
   file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: Known<O, Omit<FileParameter, 'type' | 'default'>>): O & { type: 'file'; default: '' };
@@ -283,11 +288,16 @@ export type ElementEditor<K extends string = string, P extends Parameters = Para
  * `Pick<RenderContext, 'page' | 'book' | 'document'>` serve `render` and editors alike.
  */
 export type EditorContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
-  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'elements' | 'page' | 'format' | 'formatId' | 'book'> & { spread: string; layout: string };
+  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book'> & {
+    spread: string; layout: string;
+    /** Actual rendered bounds in trim coordinates (mm). Null while the current page is pending or the element is hidden. */
+    elements: SpreadDeclaration extends S ? Record<string, { params: Values; rect: Rect | null }>
+      : { [K in keyof RenderContext<S, D>['elements']]: RenderContext<S, D>['elements'][K] & { rect: Rect | null } };
+  };
 /**
  * Props of a document editor. `values` holds only the editor's own document parameters (`K`), with the draft
  * applied, and `set` changes them. Every other setting is read from `context`, the spread the editor was opened
- * from, which follows the book while the editor is open. `format` is `context.format`. Requires `document-editors`.
+ * from, which follows the book while the editor is open. `format` is `context.format`. Included in the contract-1 baseline.
  *
  *     function MarkedDays({ values, set, context }: DocumentEditorProps<typeof documentParameters, 'markedDates'>) { ... }
  */
@@ -442,10 +452,11 @@ type Placement = { rect?: Rect };
 export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | 'div' | 'blockquote' | 'figcaption';
 /**
  * Props of `ctx.Text`. It shows the string parameter's value in an `as` tag (default `p`) and marks it for editing.
- * When the value is empty, the editor shows `placeholder` (default: the parameter's `placeholder`, else its label);
- * the exported book shows nothing there.
+ * Empty or whitespace-only values inherit `fallback`, without saving it. `fallbackLabel` identifies its source
+ * in the editor; `hidden` suppresses the node explicitly. With neither value nor fallback, edit mode shows
+ * `placeholder` (default: the parameter's placeholder or label), and export shows an empty node.
  */
-export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & { parameter: Path; as?: TextTag; placeholder?: string };
+export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & { parameter: Path; as?: TextTag; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
 
 /** The geometry helpers with the spread's format already applied: `ctx.geometry.page('left', 'bleed')`. */
 export type BoundGeometry = {
@@ -532,12 +543,12 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
   readonly [typedDocument]?: D;
   readonly [typedFamily]?: F;
 };
-/** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
+/** Known feature names. All names below are in the contract-1 baseline and need no `requires` entries. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
   'editor-network' | 'rendered-images';
-/** The features this app provides. */
+/** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
 /** The template as ImageFlow reads it, after `defineTemplate` has built its spreads. */
@@ -547,6 +558,7 @@ export type TemplateDeclaration = {
   label?: string;
   description?: string;
   contract: 1;
+  /** Optional extensions beyond the contract-1 baseline. Older lists of baseline features remain accepted. */
   requires?: readonly Capability[];
   network?: readonly string[];
   format?: PrintFormat;
@@ -561,7 +573,7 @@ export type TemplateDeclaration = {
 
 /**
  * A spread a new book starts with: one of the template's layouts, optionally with some of that layout's own
- * parameters set. Requires the `opening-spreads` capability.
+ * parameters set. Included in the contract-1 baseline.
  */
 export type OpeningSpread<L extends string = string> = { layout: L; params?: Values };
 
@@ -602,22 +614,21 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   description?: string;
   contract: 1;
   /**
-   * Features this template needs, such as `['anchors', 'geometry']`. An app without one of them reports which,
-   * instead of failing in a layout. Apps older than this field ignore it.
+   * Optional extensions beyond the contract-1 baseline. Omit for all currently shipped features.
+   * Older baseline lists remain valid; an unsupported extension is rejected with an update hint.
    */
   requires?: readonly Capability[];
   /**
-   * HTTPS origins this template's element editors may reach, such as `['https://tiles.openfreemap.org']` or
-   * `'https://*.example.com'`, without paths. ImageFlow asks the user once per book; until they allow it, editors
-   * run offline. Book previews, the Book check and export never reach the network: an editor saves what pages need
-   * with `saveFile`. Requires `editor-network`.
+   * HTTPS origins rendering and editors may reach after user approval, such as `['https://tiles.openfreemap.org']`
+   * or `'https://*.example.com'`, without paths. Rendering requests run inside `RenderedImage.draw`.
+   * Included in the contract-1 baseline; declaring an origin does not grant permission to use it.
    */
   network?: readonly string[];
   /** Book settings, shown in Book settings and read through `ctx.document`. */
   parameters?: D & ParametersChecked<D>;
   /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */
   layoutFamilies?: { [K in L]: LayoutFamily };
-  /** Editors of document parameters, by ID, opened from nodes marked with their parameters. Requires `document-editors`. */
+  /** Editors of document parameters, by ID, opened from nodes marked with their parameters. Included in the contract-1 baseline. */
   editors?: Record<string, DocumentEditor<D, any>>;
 };
 /**
@@ -770,6 +781,10 @@ export type DesignCanvas = {
   page(x: number, y: number, width: number, height: number): Rect;
   width(value: number): number;
   height(value: number): number;
+  /** Horizontal and vertical ratios of the current trim to the design canvas. */
+  scaleX: number; scaleY: number;
+  /** CSS length, rounded to two decimals. Choose the scaling axis explicitly, including for type sizes. */
+  length(value: number, unit: 'mm' | 'pt' | 'px', axis: 'x' | 'y' | 'min' | 'max'): string;
 };
 export const geometry: {
   /** One page of the spread. Works for single first and last pages too. */
@@ -844,7 +859,7 @@ export type RenderedImageProps = {
 };
 /**
  * A picture that template code draws asynchronously, such as a map from a WebGL library and remote tiles
- * (requires `rendered-images`). ImageFlow gives `draw` the element's size, the output resolution and a cancellation
+ * (part of the contract-1 baseline). ImageFlow gives `draw` the element's size, the output resolution and a cancellation
  * signal, runs a few at a time, and waits for all of them, with a timeout, before a Book check or export is final.
  * Inside `draw`, timers, WebGL, workers and requests to the template's `network` origins are allowed. The picture
  * belongs to that render only: it is drawn again in every preview and export and never saved in the book. A failure

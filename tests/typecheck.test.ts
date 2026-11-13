@@ -13,7 +13,6 @@ async function fixture(t: TestContext) {
   const runtime = join(work, 'runtime'), folder = join(work, 'book');
   await mkdir(join(folder, 'template'), { recursive: true });
   await mkdir(runtime);
-  await cp(resolve('sample/starter/template/types'), join(runtime, 'authoring-types'), { recursive: true });
   await cp(resolve('authoring'), join(runtime, 'authoring-types'), { recursive: true });
   await cp(resolve('node_modules/@types/react'), join(runtime, 'authoring-types/react-runtime'), { recursive: true });
   await cp(resolve('node_modules/csstype'), join(runtime, 'authoring-types/csstype'), { recursive: true });
@@ -34,15 +33,10 @@ test('installed types check a standalone starter without project packages or tru
   assert.ok(!result.files.includes('template/types/imageflow.d.ts'));
 });
 
-test('the calendar starter typechecks and ships the same authoring declarations as the photobook starter', async (t) => {
+test('the calendar starter typechecks against the canonical installed SDK', async (t) => {
   const { folder, check } = await fixture(t);
   await cp(resolve('sample/calendar/template'), join(folder, 'template'), { recursive: true });
   assert.deepEqual((await check()).diagnostics, []);
-  const types = await readdir(resolve('sample/starter/template/types'));
-  assert.deepEqual(await readdir(resolve('sample/calendar/template/types')), types);
-  for (const name of types) {
-    assert.equal(await readFile(resolve('sample/calendar/template/types', name), 'utf8'), await readFile(resolve('sample/starter/template/types', name), 'utf8'), name);
-  }
 });
 
 test('type errors retain exact locations while project declaration copies cannot replace installed modules', async (t) => {
@@ -120,7 +114,8 @@ test('every shipped example template type-checks against the installed declarati
   }
   // Layout-typed components and requires reject what the layout or the app does not have.
   const minimal = await readFile(resolve('docs/examples/minimal.tsx'), 'utf8');
-  await writeFile(entry, minimal.replace('<ctx.PhotoBox id="hero"', '<ctx.PhotoBox id="heor"').replace("'typed-components']", "'typed-components', 'teleport']"));
+  await writeFile(entry, minimal.replace('<ctx.PhotoBox id="hero"', '<ctx.PhotoBox id="heor"')
+    .replace('contract: 1,', "contract: 1, requires: ['teleport'],"));
   const messages = (await check()).diagnostics.map(({ message }) => message).join('\n');
   assert.match(messages, /"heor"/);
   assert.match(messages, /"teleport"/);

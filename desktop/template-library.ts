@@ -121,6 +121,7 @@ export class TemplateLibrary {
     private readonly validate: ValidateTemplate,
     private readonly trash: (path: string) => Promise<void>,
     private readonly capabilities: string,
+    private readonly authoringTypes?: string,
   ) {}
 
   onChange(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
@@ -337,7 +338,7 @@ export class TemplateLibrary {
     await this.loadBuiltIns();
     const found = (await this.userEntries()).find(({ entry }) => entry.id === id) ?? this.builtIns.get(id);
     if (!found) throw new Error('This template is no longer in the library.');
-    await writeTemplateArchive(found.folder, file);
+    await writeTemplateArchive(found.folder, file, this.authoringTypes);
   }
 
   /** Moves an imported template to the Trash. Built-in templates cannot be removed. */

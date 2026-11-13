@@ -5,9 +5,9 @@ export const runtimeExports = [
   'geometry', 'box', 'issue', 'capabilities', 'RenderedImage',
 ] as const;
 
-// Template API features this runtime provides beyond contract 1 as first released. A template lists the ones it
-// needs in `requires`; an app without one of them reports which, instead of failing somewhere in a layout.
-export const capabilities = [
+// Frozen contract-1 baseline. Every supported contract-1 runtime provides all of these; templates need no
+// `requires` entries for them. Keep this list fixed when adding extensions after the v1 freeze.
+export const contract1Capabilities = [
   'anchors', 'geometry', 'box-helpers', 'template-issues', 'typed-components',
   // `spreads: ({ spread }) => …`, `ctx.geometry` with `rect` props, `ctx.Text`, `printFormat`, and `box.photos`.
   'spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-records',
@@ -31,4 +31,7 @@ export const capabilities = [
   // and export (ADR 0006).
   'rendered-images',
 ] as const;
+// All supported features, including the baseline names accepted in older templates' `requires` lists.
+// Future additive extensions go here, and templates using those extensions declare them in `requires`.
+export const capabilities = [...contract1Capabilities] as const;
 export type Capability = typeof capabilities[number];

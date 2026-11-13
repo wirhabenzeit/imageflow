@@ -1,6 +1,6 @@
-// Compile-time check that the `imageflow` types shipped with the starter template match the runtime.
+// Compile-time check that the `imageflow` types in the canonical authoring SDK match the runtime.
 // `npm run build` fails here when one side changes without the other. Nothing in this file runs.
-import type * as Declared from '../sample/starter/template/types/imageflow';
+import type * as Declared from '../authoring/imageflow';
 import type { RenderedImageProps, RenderTarget } from './rendered-image';
 import type { PrintFormat, printFormat, ResolvedFormat } from './format';
 import type { BoundGeometry } from './geometry';

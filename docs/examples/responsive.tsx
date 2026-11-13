@@ -9,7 +9,6 @@ const format = (label: string, width: number, height: number) => printFormat({
 
 export default defineTemplate({
   id: 'example-responsive', version: '1.0.0', contract: 1,
-  requires: ['spread-builder', 'bound-geometry', 'text-component', 'format-helper', 'box-helpers', 'typed-components'],
   formats: { portrait: format('Portrait · 21 × 28 cm', 210, 280), landscape: format('Landscape · 28 × 21 cm', 280, 210) },
   defaultFormat: 'portrait',
   spreads: ({ spread }) => ({
