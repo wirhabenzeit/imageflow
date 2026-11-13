@@ -148,6 +148,8 @@ export function App() {
   const [elementEditor, setElementEditor] = useState<OpenEditor>();
   // Whether an inline editor is showing in place of the artwork it edits, which the book view then hides.
   const [inlineShown, setInlineShown] = useState(false);
+  // An inline editor that has closed stays over the page until the book shows its artwork again, so nothing flickers.
+  const [leavingEditor, setLeavingEditor] = useState<OpenEditor>();
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const [dropTarget, setDropTarget] = useState<string>();
@@ -1004,7 +1006,16 @@ export function App() {
     if (elementEditor && inlineTarget && inlineSheet) inlineAnchor.current = { open: elementEditor, at: targetAnchor(inlineTarget, inlineSheet) };
   }, [elementEditor, inlineTarget, inlineSheet]);
   const placement = elementEditor && inlinePlacement(geometry, elementEditor, inlineTarget);
-  const inlineEditing = elementEditor && inlineShown ? hiddenOccurrence(elementEditor, inlineTarget) : undefined;
+  const inlineEditing = elementEditor && inlineShown && elementEditor !== leavingEditor ? hiddenOccurrence(elementEditor, inlineTarget) : undefined;
+  const leaveEditor = () => {
+    setElementEditor((current) => current === leavingEditor ? undefined : current);
+    setLeavingEditor(undefined);
+  };
+  useEffect(() => {
+    if (!leavingEditor) return;
+    const timeout = setTimeout(leaveEditor, 800);
+    return () => clearTimeout(timeout);
+  }, [leavingEditor]);
   function startCrop(spread: string, box: string) {
     const blocked = cropBlocked(spread, box);
     if (blocked) {
@@ -1409,7 +1420,8 @@ export function App() {
                 setHoveredTarget(target && targetKey(target));
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
               <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus} onPictures={bookPictures}
-                viewport={viewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing} />
+                viewport={viewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
+                onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const i = spreads.findIndex((item) => item.id === id);
                 if (i < 0) return null;
@@ -1514,10 +1526,12 @@ export function App() {
     {summary && template && elementEditor && !editorTargetGone(spreads, elementEditor) &&
       <ElementEditorDialog host={canvasWrap.current} key={JSON.stringify(elementEditor)} project={summary.id} template={template}
         presentation={elementEditor.presentation} placement={placement} stage={stage.current} shown={setInlineShown}
-        toPanel={() => setElementEditor({ ...elementEditor, presentation: 'dialog', at: undefined })}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} params={summary.project.params} target={elementEditor} readOnly={summary.readOnly}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
-        canvasReady={canvasReady} geometry={geometry} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile}
+        canvasReady={canvasReady} geometry={geometry} edit={edit} close={() => {
+          if (elementEditor.presentation === 'inline' && inlineShown) setLeavingEditor(elementEditor);
+          else setElementEditor((current) => current === elementEditor ? undefined : current);
+        }} importFile={importProjectFile}
           prepare={template?.network?.length ? () => decideNetwork(template, true) : undefined} network={summary.network?.join(' ')} />}
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}

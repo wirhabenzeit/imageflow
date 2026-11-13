@@ -145,6 +145,8 @@ export type ElementEditorProps = {
   readOnly: boolean; commit: () => void; cancel: () => void;
   // Where the editor is shown: on the page in the element's frame ('inline'), or in the panel ('dialog').
   presentation: EditorPresentation;
+  // Inline: the page keeps its artwork until these settle (a few seconds at most), so the editor appears drawn.
+  waitUntil: (until: Promise<unknown>) => void;
   // The app's own control for one of the editor's parameters, bound to the draft, and the file import it uses.
   // `scope: 'spread'` names one of the layout parameters the editor declares instead of an element parameter.
   Control: (props: { parameter: string; label?: string; scope?: 'element' | 'spread' }) => ReactNode;
@@ -167,6 +169,7 @@ export type DocumentEditorProps = {
   context: EditorContext; format: ResolvedFormat;
   readOnly: boolean; commit: () => void; cancel: () => void;
   presentation: EditorPresentation;
+  waitUntil: (until: Promise<unknown>) => void;
   Control: (props: { parameter: string; label?: string }) => ReactNode;
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };

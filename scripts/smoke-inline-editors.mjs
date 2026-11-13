@@ -9,7 +9,7 @@ import { _electron } from 'playwright-core';
 // #102: inline element editors. The starter's map is framed on the page, in the map's own place, and the wall
 // calendar's days are marked by clicking them on the page. Checks placement, that dragging, zooming, toolbar
 // controls, scrolling and resizing keep the same live editor, that the artwork hides only while the editor shows,
-// saving, closing, the panel fallback, and Undo. The map server is replaced by a local style, so this runs offline.
+// saving, closing and Undo. The map server is replaced by a local style, so this runs offline.
 // `--screenshots <folder>` also saves screenshots there.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const build = join(root, '.build');
@@ -91,6 +91,9 @@ try {
   await inline.locator('.map-editor-inline .maplibregl-canvas').waitFor();
   // The title over the map stays in view, drawn by the editor.
   assert.equal(await inline.locator('.map-title-overlay').textContent(), 'Senja');
+  // In the page's own type: the same font, size, colour and spacing as the printed title.
+  const titleStyle = (node) => { const style = getComputedStyle(node); return [style.font, style.color, style.letterSpacing, style.backgroundColor].join(' | '); };
+  assert.equal(await inline.locator('.map-title-overlay').evaluate(titleStyle), await page.locator('.map-title').evaluate(titleStyle), 'the title is styled as printed');
   // The frame has the map's printed size; the page's zoom scales it.
   const printed = await inline.locator('body').evaluate(() => ({ width: innerWidth, height: innerHeight,
     scale: Number(getComputedStyle(document.querySelector('.if-editor')).getPropertyValue('--if-inline-scale')) }));
@@ -173,19 +176,6 @@ try {
   for (let i = 0; i < 50 && ((await saved()).style ?? 'liberty') !== 'liberty'; i++) await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal((await saved()).style ?? 'liberty', 'liberty', 'Undo reverts the last change');
 
-  // The toolbar moves the editor to the panel, with the same map.
-  const reopened = await page.locator('[data-element="map"]').boundingBox();
-  await w.mouse.click(reopened.x + reopened.width * .7, reopened.y + reopened.height * .6);
-  await editor.waitFor();
-  await toolbar.getByRole('button', { name: 'Open in Panel' }).click();
-  const panel = w.getByRole('dialog', { name: 'Edit map' });
-  await panel.waitFor();
-  await w.frameLocator('.element-editor iframe.element-editor-frame').locator('.map-editor .maplibregl-canvas').waitFor();
-  assert.equal(await w.locator('.inline-editor').count(), 0);
-  assert.equal(await panel.getByLabel('Map style').count(), 1, 'the panel shows the other settings');
-  if (screenshots) await w.screenshot({ path: join(screenshots, 'map-panel.png') });
-  await panel.getByRole('button', { name: 'Close' }).click();
-  await panel.waitFor({ state: 'detached' });
 
   // ── The calendar ──
   await w.close();

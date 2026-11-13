@@ -123,7 +123,7 @@ export function MapView({ values, trackColor, trackWidth, rect, Element }: {
 // size, so dragging and zooming show the composition as printed, with the track and attribution where the page draws
 // them. It owns only the view; the track, style and colours are generated controls in the editor's toolbar. In the
 // panel (the fallback, or when moved there) the same map is shown at the page's aspect ratio.
-export function MapEditor({ values, set, readOnly, context, presentation, children }: MapEditorProps & { children?: ImageFlowNode }) {
+export function MapEditor({ values, set, readOnly, context, presentation, waitUntil, children }: MapEditorProps & { children?: ImageFlowNode }) {
   const holder = React.useRef<HTMLDivElement>(null);
   const map = React.useRef<MapLibreMap>(undefined);
   const latest = React.useRef(values);
@@ -177,8 +177,11 @@ export function MapEditor({ values, set, readOnly, context, presentation, childr
   React.useEffect(() => {
     if (!rect) return;
     let removed = false;
+    // On the page, the printed map stays until this one has drawn its first view (or failed), so nothing flickers.
+    let drawn = () => {};
+    waitUntil(new Promise<void>((resolve) => { drawn = resolve; }));
     void loadMapLibre().then((maplibregl) => {
-      if (removed || !holder.current) return;
+      if (removed || !holder.current) return drawn();
       const view = latest.current;
       let created: MapLibreMap;
       try {
@@ -189,7 +192,7 @@ export function MapEditor({ values, set, readOnly, context, presentation, childr
       } catch (failure) {
         // Such as no WebGL: the page keeps showing its drawn map, and the problem shows over it.
         setError('The map cannot be shown here: ' + (failure instanceof Error ? failure.message : String((failure as { message?: string })?.message ?? failure)));
-        return;
+        return drawn();
       }
       created.touchZoomRotate.disableRotation();
       created.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
@@ -204,12 +207,14 @@ export function MapEditor({ values, set, readOnly, context, presentation, childr
         input = false;
         set(savedView(created));
       });
+      created.once('idle', drawn);
       created.on('error', (event) => {
+        drawn();
         if (!created.isStyleLoaded()) setError('The map could not load (' + (event.error?.message ?? 'no connection') + '). It needs ' + mapOrigin + '.');
       });
       created.on('style.load', () => { setError(''); drawTrack(created); });
       map.current = created;
-    }, (failure: unknown) => setError('The map library could not load: ' + String(failure)));
+    }, (failure: unknown) => { drawn(); setError('The map library could not load: ' + String(failure)); });
     return () => { removed = true; map.current?.remove(); map.current = undefined; };
   }, [!!rect, readOnly]);
   React.useEffect(() => {

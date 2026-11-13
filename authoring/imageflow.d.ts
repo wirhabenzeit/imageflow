@@ -242,6 +242,12 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
   /** Where the editor is shown: `'inline'` on the page, in the element's frame, or `'dialog'` in the editor panel. */
   presentation: EditorPresentation;
   /**
+   * Inline, the page keeps showing its artwork until the editor has drawn: call this while mounting with what it
+   * still loads (a map's first tiles, an image), and the editor replaces the artwork once that settles, after a few
+   * seconds at most. Does nothing in the panel or after the editor appeared.
+   */
+  waitUntil(until: Promise<unknown>): void;
+  /**
    * ImageFlow's own control for one of this editor's parameters, bound to the draft: the same text field, slider,
    * choice or file chooser the generated controls use, including importing a file. Compose it with your own UI:
    * `<Control parameter="track" />`. `scope="spread"` names one of the layout parameters the editor declares in
@@ -322,6 +328,12 @@ export type DocumentEditorProps<D extends Parameters = Parameters, K extends key
   cancel(): void;
   /** Where the editor is shown: `'inline'` over the marked node it was opened from, or `'dialog'` in the editor panel. */
   presentation: EditorPresentation;
+  /**
+   * Inline, the page keeps showing its artwork until the editor has drawn: call this while mounting with what it
+   * still loads (a map's first tiles, an image), and the editor replaces the artwork once that settles, after a few
+   * seconds at most. Does nothing in the panel or after the editor appeared.
+   */
+  waitUntil(until: Promise<unknown>): void;
   /** ImageFlow's own control for one of this editor's parameters, bound to the draft. */
   Control: EditorFunction<K, { parameter: K; label?: string }, ImageFlowElement>;
   importFile(accept: readonly string[]): Promise<string | undefined>;

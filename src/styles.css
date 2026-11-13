@@ -349,6 +349,12 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .inline-editor-fields :is(.pc-row, .pc-segmented) { flex-wrap: nowrap; }
 .inline-editor-fields input[type="range"] { width: 80px; }
 .inline-editor-fields .pc-number { width: 52px; }
+.inline-editor-fields .pc-file { display: flex; align-items: center; gap: 6px; margin: 0; }
+.inline-editor-fields .pc-file .content-file-icon { display: none; }
+.inline-editor-fields .pc-file .box-photo-info { display: flex; align-items: center; gap: 8px; }
+.inline-editor-fields .pc-file .box-photo-name { max-width: 140px; }
+.studio .inline-editor-fields .pc-file .box-photo-pick { width: auto; margin: 0; }
+.studio .inline-editor-fields .pc-file button.link { margin: 0; }
 .inline-editor-fields .control-group { display: contents; }
 .inline-editor-fields .control-group > legend, .inline-editor-fields .control-description { display: none; }
 /* A problem shows above the toolbar, so it never resizes the toolbar or moves the page. */

@@ -93,7 +93,8 @@
    Its buttons and messages keep their screen size, whatever the page's zoom (--if-inline-scale). */
 .map-editor-inline { position: absolute; inset: 0; overflow: hidden; background: #e8ebe4; }
 .map-editor-inline .map-editor-map { position: absolute; inset: 0; height: 100%; border: 0; border-radius: 0; }
-.map-editor-inline :is(.map-attribution, .map-title-overlay) { pointer-events: none; }
+.map-editor-inline :is(.map-attribution, .map-title-layer) { pointer-events: none; }
+.map-editor-inline .map-title-layer { position: absolute; inset: 0; background: none; }
 .map-editor-inline :is(.maplibregl-ctrl-top-right, .map-editor-problem) { zoom: calc(1 / var(--if-inline-scale, 1)); }
 .map-editor-problem { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 80px); margin: 0; padding: 4px 8px; border-radius: 6px;
   background: #fffffff0; color: #a5281b; font: 12px/1.35 system-ui, sans-serif; box-shadow: 0 1px 4px #0003; }

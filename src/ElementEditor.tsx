@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
 import type { ImportMode } from './source-locations';
@@ -8,7 +8,7 @@ import type { Edit } from './Inspector';
 import { isParameterValue, resolveParams } from './parameters';
 import type { SpreadState, Values } from './project';
 import { controlLayout } from './controls';
-import { ControlList, Field } from './Fields';
+import { ControlList, Field, ProjectFilesContext } from './Fields';
 import { useEditorFrame } from './editor-frame';
 import { applyEditorChanges, changedValues, editingContext, queuedEditorSave } from './editor-session';
 import type { EditorState, EditorTarget } from './editor-session';
@@ -25,14 +25,14 @@ import type { EditorState, EditorTarget } from './editor-session';
 // moving the editor to the panel, sit in a toolbar under the canvas, so no panel covers the artwork.
 export type InlinePlacement = Rect & { zoom: number };
 export function ElementEditorDialog({ project, template, spread, params, target, readOnly, blocked, canvasReady, edit, close, importFile, prepare, network = '', host, geometry,
-  presentation = 'dialog', placement, stage, shown, toPanel }: {
+  presentation = 'dialog', placement, stage, shown }: {
   project: string; template: TemplateInfo; spread: SpreadState; params: Values; target: EditorTarget; readOnly: boolean;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
   geometry?: BookGeometry;
   presentation?: 'dialog' | 'inline';
   // Inline only: where the frame goes (undefined while the node is not on the page), the stage it is drawn in, whether
   // the frame is showing in place of the artwork, and moving this editor to the panel.
-  placement?: InlinePlacement; stage?: HTMLElement | null; shown?: (showing: boolean) => void; toPanel?: () => void;
+  placement?: InlinePlacement; stage?: HTMLElement | null; shown?: (showing: boolean) => void;
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
   // Settles once the frame may load: the network origins its policy allows are decided before it is served.
@@ -268,12 +268,35 @@ export function ElementEditorDialog({ project, template, spread, params, target,
     },
   };
   const disabled = readOnly || failed || stale || !!blocked || saveRejected;
-  const fields = generated.length > 0 && <ControlList nodes={generated} field={(node, param) => <Field key={node.key} param={param} value={current[node.key]}
+  // A file the generated controls import (such as a new GPX track) reaches the editor's frame too, which reads its
+  // files from the render session the import started.
+  const projectFiles = useContext(ProjectFilesContext);
+  const filesForFields = {
+    ...projectFiles,
+    importFile: importFile && (async (accept: string[], mode?: ImportMode) => {
+      const imported = await importFile(accept, mode);
+      const target = frame.current?.contentWindow;
+      if (imported && target) {
+        // The new value reaches the editor only once its frame has the file, so it draws it at once.
+        await new Promise<void>((resolve) => {
+          const loaded = (event: MessageEvent) => {
+            if (event.source !== target || event.data?.type !== 'editor-files-loaded') return;
+            window.removeEventListener('message', loaded); clearTimeout(timeout); resolve();
+          };
+          const timeout = setTimeout(() => { window.removeEventListener('message', loaded); resolve(); }, 5000);
+          window.addEventListener('message', loaded);
+          target.postMessage({ type: 'editor-files', project: imported.project }, renderOrigin);
+        });
+      }
+      return imported?.id;
+    }),
+  };
+  const fields = generated.length > 0 && <ProjectFilesContext.Provider value={filesForFields}><ControlList nodes={generated} field={(node, param) => <Field key={node.key} param={param} value={current[node.key]}
     description={inline ? undefined : node.description} change={(next) => {
       const updated = { ...local, [node.key]: next };
       setLocal(updated);
       void apply(draft.current, spreadDraft.current, updated);
-    }} />} />;
+    }} />} /></ProjectFilesContext.Provider>;
 
   if (inline) {
     // One line at most, above the toolbar, so a problem never moves the toolbar or the page.
@@ -292,8 +315,6 @@ export function ElementEditorDialog({ project, template, spread, params, target,
           title={problem}>{problem}</p>}
         <strong className="inline-editor-title">{subject}</strong>
         {fields && <fieldset className="crop-params inline-editor-fields" disabled={disabled}>{fields}</fieldset>}
-        {toPanel && <button type="button" aria-label="Open in Panel" title="Open in panel" disabled={flushing !== undefined}
-          onClick={() => requestClose(toPanel)}><Icon name="panel" /></button>}
         <button type="button" className="primary" disabled={flushing !== undefined} onClick={() => requestClose()}>Done</button>
       </div>, host)}
     </>;

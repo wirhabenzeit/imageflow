@@ -8,7 +8,7 @@ import type { InlineEditing } from './BookFrame';
 // the rectangle of what it was opened from: its element, or for a document editor the marked node that was clicked
 // (`at`, that node's target key). It opens in the panel instead when that rectangle is rotated or skewed (its
 // on-screen box is only a bounding box, and transformed interaction geometry is out of scope), too small to use, or
-// not on the page; and the inline toolbar can move it to the panel.
+// not on the page.
 export type Presentation = 'dialog' | 'inline';
 export type OpenEditor = EditorTarget & { presentation: Presentation; at?: string };
 type Target = BookGeometry['targets'][number];

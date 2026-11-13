@@ -40,6 +40,12 @@ import { pictureTimeoutMs } from './render-budget';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
+// After the next painted frame. A frame that is not shown yet gets no animation frames, so a short timer stands in.
+const afterPaint = () => new Promise<void>((resolve) => {
+  const done = () => { clearTimeout(timer); resolve(); };
+  const timer = setTimeout(done, 100);
+  requestAnimationFrame(() => requestAnimationFrame(done));
+});
 function publish(status: RenderStatus) {
   window.imageflowRenderStatus = status;
   (globalThis as { imageflowRenderActivity?: number }).imageflowRenderActivity = Date.now();
@@ -488,7 +494,9 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       if (event.source !== parent || event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'inline-editing') return;
       for (const node of hidden) node.removeAttribute('data-if-editing');
       hidden = [];
-      const { spread, element, edits, occurrence } = event.data;
+      const { spread, element, edits, occurrence, key } = event.data;
+      // Answered once drawn, so the app shows a frame, or removes an editor, only when the artwork is right.
+      void afterPaint().then(() => post({ type: 'inline-editing-applied', key }));
       const sheet = sheets.find((item) => item.spread === spread)?.sheet;
       if (!sheet) return;
       if (typeof element === 'string') {
@@ -1007,6 +1015,17 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       update?.({ element: draft, spread: spreadDraft });
       return;
     }
+    if (event.data?.type === 'editor-files') {
+      // A file the app's controls imported for this element: the frame reads the project's files again.
+      const session = typeof event.data.project === 'string' && /^[\w-]+$/.test(event.data.project) ? event.data.project : undefined;
+      if (session) void fetch('/render/' + session + '/data').then((response) => response.json()).then((latest: RenderProject) => {
+        setTemplateFiles(latest.files);
+        projectFiles = latest.project.files;
+        updateFiles?.(projectFiles);
+        post({ type: 'editor-files-loaded' });
+      }).catch(fail);
+      return;
+    }
     if (event.data?.type !== 'editor-imported') return;
     const resolve = pending.get(event.data.request);
     if (!resolve) return;
@@ -1035,6 +1054,14 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       React.createElement(Field, { param: label ? { ...param, label } : param, value, change: (next) => changes(scope === 'spread' ? 'spread' : 'element', { [parameter]: next }) }));
   }
 
+  // Inline, the editor replaces the page's artwork only once it has drawn: after its fonts, what it asked to wait for
+  // with `waitUntil` while mounting (such as a map's first tiles, at most a few seconds), and one painted frame.
+  const holds: Promise<unknown>[] = [];
+  let announced = false;
+  const waitUntil = (until: Promise<unknown>) => { if (!announced && presentation === 'inline') holds.push(Promise.resolve(until).catch(() => undefined)); };
+  const settled = () => presentation !== 'inline' ? Promise.resolve()
+    : Promise.race([Promise.all([...holds, window.document.fonts.ready]), new Promise((resolve) => setTimeout(resolve, 4000))]).then(afterPaint);
+
   function Host() {
     const [values, setValues] = React.useState({ element: draft, spread: spreadDraft });
     const [files, setFiles] = React.useState(projectFiles);
@@ -1043,8 +1070,8 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       update = setValues;
       updateFiles = setFiles;
       updateContext = setContext;
-      // Effects run only once the component has mounted without throwing.
-      post({ type: 'editor-ready' });
+      // Effects run only once the component has mounted without throwing; the component's own effects ran before.
+      void settled().then(() => { announced = true; if (!failed) post({ type: 'editor-ready' }); });
       return () => { update = undefined; updateFiles = undefined; updateContext = undefined; };
     }, []);
     // The context shows the saved book with this editor's draft applied, so a helper reading `context` agrees with
@@ -1058,9 +1085,9 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
         documentEditor
           // A document editor's `values` are only its own parameters; every other setting is read from `context`, so there
           // is one current copy of each. `format` and an element editor's `document` follow the context too.
-          ? React.createElement(documentEditor.component, { values: claimed(values.element), set, context: shown, format: shown.format, readOnly, commit, cancel, presentation, Control, importFile })
+          ? React.createElement(documentEditor.component, { values: claimed(values.element), set, context: shown, format: shown.format, readOnly, commit, cancel, presentation, waitUntil, Control, importFile })
           : React.createElement(element!.editor!.component, { values: values.element, set, spread: values.spread, setSpread, document: shown.document,
-            format: shown.format, context: shown, readOnly, commit, cancel, presentation, Control, importFile })));
+            format: shown.format, context: shown, readOnly, commit, cancel, presentation, waitUntil, Control, importFile })));
   }
 
   // Errors from the component's event handlers and async work do not reach React's error handling.

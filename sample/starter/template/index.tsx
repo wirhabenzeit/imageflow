@@ -304,9 +304,12 @@ function MapLayoutEditor(props: MapEditorProps) {
   const title = props.spread.mapTitle;
   const map = props.context.elements.map.rect;
   const at = mapTitleRect(props.format);
+  const { paper, accent } = props.document as { paper?: string; accent?: string };
+  // Inside the page's own type context (`.field-book`, its ink), so the title prints exactly as it shows here.
   return <MapEditor {...props}>
-    {typeof title === 'string' && title && map && <h2 className="map-title map-title-overlay"
-      style={geometry.css({ ...at, x: at.x - map.x, y: at.y - map.y })}>{title}</h2>}
+    {typeof title === 'string' && title && map && <div className={'field-book map-title-layer ' + (paper ?? '')} style={{ '--ink': accent }}>
+      <h2 className="map-title map-title-overlay" style={geometry.css({ ...at, x: at.x - map.x, y: at.y - map.y })}>{title}</h2>
+    </div>}
   </MapEditor>;
 }
 

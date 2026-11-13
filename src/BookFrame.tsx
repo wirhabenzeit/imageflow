@@ -7,17 +7,20 @@ import type { Issue } from './desktop';
 export type PictureStatus = { type: 'pictures'; pending: number; errors: Issue[] };
 
 type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
-  reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number };
+  reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number; hiding?: boolean };
 
 // The occurrence an inline editor is drawn over, whose artwork the book view hides while it edits.
 export type InlineEditing = { spread: string; element: string } | { spread: string; edits: string; occurrence: number };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing }: {
+export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing }: {
   project: string; view: BookView; query?: string; title: string;
   hold?: boolean;
   // Every frame of the book view is told, including a candidate before it is shown, so the artwork never flashes.
   inlineEditing?: InlineEditing;
+  // Called once the shown frame has drawn the artwork as `inlineEditing` last asked (by its key), such as shown again
+  // after an inline editor closed, so the editor leaves only when the artwork is back.
+  onInlineEditing?: (key: string) => void;
   accept?: (project: string) => boolean;
   // The part of the frame on screen, for frames that load photos lazily, and the grid columns of the book view (0 for
   // one column); sent when a frame asks for it.
@@ -57,7 +60,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     storeFrame(id, frame);
   });
 
-  const receive = useEffectEvent((event: MessageEvent<BookGeometry | RenderStatus | PictureStatus | { type: 'viewport-request' | 'reorder-ready' }>) => {
+  const receive = useEffectEvent((event: MessageEvent<BookGeometry | RenderStatus | PictureStatus | { type: 'viewport-request' | 'reorder-ready' } | { type: 'inline-editing-applied'; key: string }>) => {
     if (event.origin !== renderOrigin || !event.data) return;
     const id = ids.find((key) => refs.current.get(key)?.contentWindow === event.source);
     if (!id) return;
@@ -89,14 +92,21 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       storeFrame(id, frame);
       return;
     } else if ('type' in data && data.type === 'geometry') {
-      if (latestEditing.current) (event.source as Window).postMessage({ type: 'inline-editing', ...latestEditing.current }, renderOrigin);
+      // A candidate frame is shown only once it hides what the inline editor covers.
+      if (latestEditing.current) {
+        if (!frame.published) frame.hiding = true;
+        (event.source as Window).postMessage({ type: 'inline-editing', key: latestKey.current, ...latestEditing.current }, renderOrigin);
+      }
       frame.geometry = data;
       if (id === shown) onGeometry(data);
+    } else if ('type' in data && data.type === 'inline-editing-applied') {
+      frame.hiding = false;
+      if (id === shown && data.key === latestKey.current) latestApplied.current?.(data.key);
     } else if ('state' in data && id === target && !frame.status) {
       frame.status = data;
     } else return;
 
-    if (id === target && !frame.published && frame.status && (frame.status.state === 'error' || frame.geometry)) {
+    if (id === target && !frame.published && !frame.hiding && frame.status && (frame.status.state === 'error' || frame.geometry)) {
       const offsets = view === 'thumbs' && shown && frame.status.state === 'ready' && !matchMedia('(prefers-reduced-motion: reduce)').matches
         ? reorderOffsets(latest.current.get(shown)?.geometry, frame.geometry) : [];
       if (offsets.length && !frame.reorder) {
@@ -116,11 +126,17 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   const latestEditing = useRef(inlineEditing);
   latestEditing.current = inlineEditing;
   const editingKey = JSON.stringify(inlineEditing ?? null);
+  const latestKey = useRef(editingKey);
+  latestKey.current = editingKey;
+  const latestApplied = useRef(onInlineEditing);
+  latestApplied.current = onInlineEditing;
   useEffect(() => {
     // Frames still loading are told with their first geometry, above.
     for (const { element, geometry } of latest.current.values()) {
-      if (geometry) element?.contentWindow?.postMessage({ type: 'inline-editing', ...inlineEditing }, renderOrigin);
+      if (geometry) element?.contentWindow?.postMessage({ type: 'inline-editing', key: editingKey, ...inlineEditing }, renderOrigin);
     }
+    // Without a frame to ask, nothing is hidden.
+    if (![...latest.current.values()].some(({ geometry }) => geometry)) onInlineEditing?.(editingKey);
   }, [editingKey]);
   useEffect(() => {
     const listener = (event: MessageEvent) => receive(event);
