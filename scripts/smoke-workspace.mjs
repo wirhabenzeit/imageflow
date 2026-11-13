@@ -39,19 +39,26 @@ try {
   assert.deepEqual(await labels(), ['Hide Sidebar', 'Hide Inspector']);
   assert.equal(await w.locator('.project-head').innerText().then((text) => text.includes('28 pages')), true);
   assert.equal(await w.locator('.project-head').innerText().then((text) => text.includes('Book\nBook')), false);
-  // The check below is about the animation itself, so it must not depend on the machine's Reduce Motion setting
-  // (CI's macOS runners can have it on, which turns the transition off). The end of this script covers 'reduce'.
+  // The check below is about the animation itself, so pin Reduce Motion off; the end of this script covers 'reduce'.
   await w.emulateMedia({ reducedMotion: 'no-preference' });
   const before = await canvas();
+  // Sample from inside the page, starting before the click. Sampling only after Playwright's click and a round trip
+  // misses most of the 220 ms transition on a slower machine: CI saw one intermediate width, then the final one.
+  await w.locator('.workspace').evaluate((node) => {
+    const canvas = document.querySelector('.canvas');
+    const sample = window.collapseSample = { widths: [canvas.clientWidth], transitions: [], running: true };
+    node.addEventListener('transitionrun', (event) => { if (event.target === node) sample.transitions.push(event.propertyName); });
+    const tick = () => { sample.widths.push(canvas.clientWidth); if (sample.running) requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
   await w.getByRole('button', { name: 'Toggle project panel', exact: true }).click();
   assert.equal(await w.getByRole('complementary', { name: 'Project', exact: true }).count(), 0);
-  const widths = await w.locator('.canvas').evaluate(async (node) => {
-    const widths = [];
-    for (let frame = 0; frame < 16; frame++) { await new Promise(requestAnimationFrame); widths.push(node.clientWidth); }
-    return widths;
-  });
-  const transition = await w.locator('.workspace').evaluate((node) => getComputedStyle(node).transitionDuration);
-  assert.ok(new Set(widths).size > 2, 'Panel collapse animates through intermediate canvas widths (transition ' + transition + ', widths ' + widths.join(' ') + ')');
+  await settle();
+  const collapse = await w.evaluate(() => { window.collapseSample.running = false; return window.collapseSample; });
+  const [first, last] = [collapse.widths[0], collapse.widths.at(-1)];
+  const detail = ' (transitions ' + collapse.transitions.join(' ') + '; widths ' + collapse.widths.join(' ') + ')';
+  assert.ok(collapse.transitions.includes('grid-template-columns'), 'Panel collapse runs a grid transition' + detail);
+  assert.ok(collapse.widths.some((width) => width > first && width < last), 'Panel collapse animates through intermediate canvas widths' + detail);
   await settle();
   assert.ok((await canvas()).width > before.width + 200);
   await menuAction(app, 'Hide Inspector');
