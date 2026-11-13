@@ -9,6 +9,7 @@ import { esbuildBinary, sample, stageDesktop } from './stage-desktop.mjs';
 import { macBuildOptions } from './mac-build-options.mjs';
 import { verifyMacSigning } from './verify-mac-signing.mjs';
 import { notarizeMacRelease } from './mac-release-artifacts.mjs';
+import { macSigningOptions } from './mac-signing-options.mjs';
 
 if (process.platform !== 'darwin') throw new Error('Run the macOS build on a Mac.');
 
@@ -64,18 +65,7 @@ async function packageApp() {
       icon: join(root, 'resources', 'ImageFlow.icns'),
       prune: false,
       overwrite: true,
-      osxSign: {
-        identity: options.identity || '-',
-        identityValidation: !!options.identity,
-        ...(options.keychain ? { keychain: options.keychain } : {}),
-        continueOnError: false,
-        batchCodesignCalls: true,
-        preAutoEntitlements: false,
-        optionsForFile: () => ({
-          hardenedRuntime: !!options.identity,
-          ...(options.identity ? { entitlements: join(root, 'resources/entitlements.mac.plist') } : {}),
-        }),
-      },
+      osxSign: macSigningOptions(root, options),
     });
     const app = join(output, 'ImageFlow.app');
     console.log('Mac app: ' + app);

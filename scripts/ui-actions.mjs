@@ -3,6 +3,21 @@ import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const activePages = new WeakMap();
 
+// Retry only machine-readable transient responses, never user-facing message text.
+export async function retryBookRefresh(operation, ready, { attempts = 5, delay = 100 } = {}) {
+  let result;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    result = await operation();
+    const stale = result.value?.diagnostics?.some((finding) => finding.code === 'source-changed');
+    if (result.code !== 'BOOK_BUSY' && !stale) break;
+    if (attempt + 1 < attempts) {
+      await ready();
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  return result;
+}
+
 // A native window can disappear before Electron acknowledges the click that closes it.
 export async function clickClosingWindow(page, button) {
   const closed = page.waitForEvent('close');
