@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
 const script = (name: string) => pathToFileURL(resolve('scripts', name + '.mjs')).href;
-function check(source: string) {
+function capture(source: string) {
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
     import { generateKeyPairSync } from 'node:crypto';
@@ -13,7 +13,7 @@ function check(source: string) {
     import { findRelease, publishDraft } from ${JSON.stringify(script('release-draft'))};
     import { retryBookRefresh } from ${JSON.stringify(script('ui-actions'))};
     import { verifyReleaseMain } from ${JSON.stringify(script('release-main'))};
-    import { withMacCredentials } from ${JSON.stringify(script('mac-credentials'))};
+    import { withMacCredentials, runCredentialChild } from ${JSON.stringify(script('mac-credentials'))};
     const key = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'pkcs8', format: 'pem' });
     const secrets = {
       APPLE_SIGNING_IDENTITY: 'Developer ID Application: Test (TEAM)', APPLE_CERTIFICATE_PASSWORD: 'test-password',
@@ -23,7 +23,49 @@ function check(source: string) {
     ${source}
   `], { encoding: 'utf8', timeout: 20000 });
   assert.equal(result.status, 0, result.stderr);
+  return result;
 }
+function check(source: string) { capture(source); }
+
+test('signing child output remains visible when the child exits unsuccessfully', () => {
+  const result = capture(`
+    await assert.rejects(runCredentialChild(['-e', "process.stdout.write('submission progress\\\\n'); process.stderr.write('signing diagnostic\\\\n'); process.exitCode = 23"]), /exited with code 23/);
+  `);
+  assert.match(result.stdout, /submission progress/);
+  assert.match(result.stderr, /signing diagnostic/);
+});
+
+test('cancellation preserves child output and waits for exit before credential cleanup can run', () => {
+  const result = capture(`
+    const { mkdtemp, access, readFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const folder = await mkdtemp(join(tmpdir(), 'imageflow-child-cancel-'));
+    const ready = join(folder, 'ready'), stopped = join(folder, 'stopped');
+    const controller = new AbortController();
+    const source = "const fs = require('node:fs'); const [ready, stopped] = process.argv.slice(1); process.on('SIGTERM', () => setTimeout(() => { fs.writeFileSync(stopped, 'closed'); process.stdout.write('child stopped', () => process.exit(0)); }, 80)); process.stdout.write('submission started'); fs.writeFileSync(ready, 'ready'); setInterval(() => {}, 1000);";
+    const child = runCredentialChild(['-e', source, ready, stopped], { signal: controller.signal });
+    const rejected = assert.rejects(child, { name: 'AbortError' });
+    try {
+      let started = false;
+      for (let attempt = 0; attempt < 500; attempt++) {
+        started = await access(ready).then(() => true, () => false);
+        if (started) break;
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      assert.ok(started, 'Child must start before cancellation');
+      controller.abort();
+      await rejected;
+      assert.equal(await readFile(stopped, 'utf8'), 'closed', 'Child must finish before the operation rejects');
+    } finally {
+      controller.abort();
+      await child.catch(() => {});
+      await rm(folder, { recursive: true, force: true });
+    }
+  `);
+  assert.match(result.stdout, /submission started/);
+  assert.match(result.stdout, /child stopped/);
+});
 
 test('release preflight rejects empty or invalid API keys before any file or build operation', () => check(`
   validateReleaseSecrets(secrets);

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -8,6 +9,20 @@ import { decodeSecret, validateReleaseSecrets } from './release-secrets.mjs';
 import { run } from './verify-mac-signing.mjs';
 
 export const keychainList = (output) => output.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => JSON.parse(line));
+
+export function runCredentialChild(args, { env, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, { env, signal, stdio: 'inherit' });
+    let failure;
+    child.on('error', (error) => { failure ??= error; });
+    // Wait for close even on cancellation, so credential cleanup follows child exit.
+    child.once('close', (code, stoppedBy) => {
+      if (failure) reject(failure);
+      else if (code !== 0) reject(new Error('Signing/notarization process ' + (stoppedBy ? 'stopped by ' + stoppedBy : 'exited with code ' + code) + '.'));
+      else resolve();
+    });
+  });
+}
 
 export async function withMacCredentials({ mode, env = process.env, temporary = env.RUNNER_TEMP, execute = run }, operation) {
   if (!['sign', 'notarize'].includes(mode)) throw new Error('Choose sign or notarize for credential access.');
@@ -73,9 +88,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     await withMacCredentials({ mode }, (env) => {
       controller.signal.throwIfAborted();
-      return run(process.execPath, [join(root, 'scripts', mode === 'sign' ? 'sign-mac.mjs' : 'notarize-mac.mjs'), ...(values.arch ? ['--arch', values.arch] : [])], { env, signal: controller.signal }).then(({ stdout, stderr }) => {
-        process.stdout.write(stdout); process.stderr.write(stderr);
-      });
+      return runCredentialChild([join(root, 'scripts', mode === 'sign' ? 'sign-mac.mjs' : 'notarize-mac.mjs'), ...(values.arch ? ['--arch', values.arch] : [])], { env, signal: controller.signal });
     });
   } finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
 }
