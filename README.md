@@ -52,6 +52,14 @@ npm run test:desktop
 
 The ad-hoc-signed app appears in `out/ImageFlow-darwin-arm64/ImageFlow.app` on Apple Silicon or `out/ImageFlow-darwin-x64/ImageFlow.app` on Intel. `npm run test:packaged` also checks the packaged document declaration, icon, real Finder open events, and packaged proof/print workflows. The desktop checks require Poppler and exercise PDF geometry, line breaks, preflight, imports, autosave, live reload, and randomized Markdown continuation.
 
+For everyday pull requests, GitHub Actions runs `check` (build, app/template/API type checks, and unit tests on Linux) and `desktop` (two focused Apple silicon Mac smoke checks). `npm run test:desktop:smoke` checks app launch, book opening and rendering, proof PDF output, durable saves and orderly shutdown. It builds and stages the app but leaves unit tests to `check`.
+
+The separate **Full desktop suite** workflow runs `npm run test:desktop` after pushes to `main` and can be started manually from Actions. It covers the broader editing, layout, template, source, appearance and MCP workflows. It does not run on every PR. Packaged-app checks belong to the release workflow.
+
+Both workflows use Node.js 22 from the supported `engines.node` range, install Poppler for the PDF checks, cache npm and Electron downloads, and cancel older runs for the same ref. If the repository becomes private, the PR workflow's `desktop` job runs only on pushes to `main` to conserve macOS minutes.
+
+Once both jobs have passed on GitHub, require the `check` and `desktop` status checks in the `main` branch protection rule or ruleset. Select the checks produced by this workflow, with GitHub Actions as their source. Revisit the required `desktop` check if the repository becomes private, since its PR job will then be skipped.
+
 The draft exports single-page or spread PDFs. The starter book targets the WhiteWall photo-paper format. Printer upload and a physical proof are separate validation steps.
 
 [v1 implementation plan](docs/v1-implementation-plan.md) · [Template API and compatibility](docs/template-api.md) · [Historical design proposal](docs/content-template-contract.md)

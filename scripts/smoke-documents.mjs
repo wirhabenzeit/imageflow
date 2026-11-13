@@ -6,6 +6,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { clickClosingWindow } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/documents-smoke-')));
@@ -15,6 +16,7 @@ const duplicate = join(work, 'Duplicate.imageflow');
 const profile = join(work, 'profile');
 const errors = [];
 let client;
+let failed = false;
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + profile], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 app.process().stderr.on('data', (data) => errors.push(String(data)));
 await app.evaluate(({ app }) => {
@@ -26,6 +28,13 @@ await app.evaluate(({ app }) => {
 function watch(page) { page.setDefaultTimeout(25000); page.on('pageerror', (error) => errors.push(error.message)); }
 async function ready(page) { watch(page); await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor(); }
 async function current(page) { return (await page.evaluate(() => window.imageflow.currentProject())).value; }
+function nextStarter() {
+  // A recent-book cover can create a hidden render window while New Book is opening.
+  return app.waitForEvent('window', { predicate: async (page) => {
+    try { await page.waitForURL('imageflow://editor/new'); return true; }
+    catch { return false; }
+  } });
+}
 async function launchAction(page, action) {
   const before = new Set(app.windows());
   const result = await page.evaluate((action) => window.imageflow.openProject(action), action);
@@ -43,7 +52,7 @@ async function save(page, title) {
   assert.ok(result.value, JSON.stringify(result));
   // Native saves normally return directly to the editor; publish through Reload for this IPC-driven fixture.
   await page.evaluate(() => window.imageflow.openProject('reload'));
-  await page.reload();
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await ready(page);
   return result.value;
 }
@@ -57,7 +66,7 @@ try {
     globalThis.newBookSaveCalls = 0;
     dialog.showSaveDialog = async () => { globalThis.newBookSaveCalls++; return { canceled: false, filePath }; };
   }, first);
-  const pickerPromise = app.waitForEvent('window');
+  const pickerPromise = nextStarter();
   await start.getByRole('button', { name: 'New Book…', exact: true }).click();
   const picker = await pickerPromise;
   watch(picker);
@@ -68,9 +77,7 @@ try {
   if (process.platform === 'darwin') await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/new').getParentWindow().emit('sheet-begin');
   });
-  const pickerClosed = picker.waitForEvent('close');
-  await picker.getByRole('button', { name: 'Continue…' }).click();
-  await pickerClosed;
+  await clickClosingWindow(picker, picker.getByRole('button', { name: 'Continue…' }));
   if (process.platform === 'darwin') {
     await app.evaluate(() => new Promise((resolve) => setImmediate(resolve)));
     assert.equal(await app.evaluate(() => globalThis.newBookSaveCalls), 0, 'Wait for native sheet dismissal before opening Save');
@@ -86,12 +93,20 @@ try {
   await ready(one);
   assert.equal((await current(one)).project.title, 'First');
   for (const cancelWithButton of [true, false]) {
-    const nextPicker = app.waitForEvent('window');
+    const nextPicker = nextStarter();
     const cancelled = one.evaluate(() => window.imageflow.openProject('new'));
+    // Closing the app after another assertion fails rejects this pending IPC. Preserve the original failure.
+    void cancelled.catch(() => {});
     const modal = await nextPicker;
     watch(modal);
     await modal.getByRole('heading', { name: 'Choose a template' }).waitFor();
-    if (cancelWithButton) await modal.getByRole('button', { name: 'Cancel', exact: true }).click(); else await modal.close();
+    if (cancelWithButton) {
+      await clickClosingWindow(modal, modal.getByRole('button', { name: 'Cancel', exact: true }));
+    } else {
+      const closed = modal.waitForEvent('close');
+      await modal.close();
+      await closed;
+    }
     assert.deepEqual(await cancelled, { value: null });
     assert.equal(await app.evaluate(() => globalThis.newBookSaveCalls), 1, 'Cancelling a template never opens Save');
     assert.equal((await current(one)).project.title, 'First');
@@ -112,7 +127,7 @@ try {
     const { value } = await window.imageflow.currentProject();
     await window.imageflow.history(value.id, 'undo');
   });
-  await one.reload(); await ready(one);
+  await one.reload({ waitUntil: 'domcontentloaded' }); await ready(one);
   await cp(first, second, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
   await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, second);
   const two = await launchAction(one, 'open');
@@ -203,7 +218,7 @@ try {
   await reopened.close();
   const moved = join(work, 'Moved.imageflow');
   await rename(second, moved);
-  await chooser.reload();
+  await chooser.reload({ waitUntil: 'domcontentloaded' });
   await chooser.getByRole('button', { name: 'Locate…' }).waitFor();
   const missing = (await chooser.evaluate(() => window.imageflow.recentDocuments())).value.find((book) => book.path === second);
   assert.equal(missing.available, false);
@@ -223,8 +238,27 @@ try {
   await stat(moved);
   assert.equal(errors.filter((message) => /TypeError|ReferenceError|Uncaught/.test(message)).length, 0, errors.join('\n'));
   console.log('ImageFlow package creation, independent windows, duplicate identity, autosave, undo, external edits, recents and recovery passed.');
+} catch (error) {
+  failed = true;
+  console.error('Document workflow failed:', error, errors.join('\n'));
+  throw error;
 } finally {
-  await client?.close();
-  await app.close();
-  await rm(work, { recursive: true, force: true });
+  let timer;
+  try {
+    await Promise.race([
+      (async () => { await client?.close(); await app.close(); })(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          app.process().kill('SIGKILL');
+          reject(new Error('Document smoke cleanup did not finish within 10 seconds.'));
+        }, 10000);
+      }),
+    ]);
+  } catch (error) {
+    if (!failed) throw error;
+    console.error('Document workflow cleanup failed:', error);
+  } finally {
+    clearTimeout(timer);
+    await rm(work, { recursive: true, force: true });
+  }
 }
