@@ -244,6 +244,14 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
    * imported file stays in the project. `file(id)` reads it at once.
    */
   importFile(accept: readonly string[]): Promise<string | undefined>;
+  /**
+   * Stores content this editor generated, such as an image it drew or data it fetched, as a new file in the book
+   * and resolves to its file ID (undefined in read-only mode or when the book refuses it). Accepts PNG, JPEG, WebP
+   * (up to 50 MB) and GPX, JSON, GeoJSON, TXT or CSV text (up to 20 MB); `name` gives the extension. Each call
+   * makes a new file. Assign the ID with `set`; files nothing refers to any more, including Undo, are deleted.
+   * Requires `editor-save-file`.
+   */
+  saveFile(data: Blob | ArrayBuffer | ArrayBufferView | string, options: { name: string }): Promise<string | undefined>;
 };
 /**
  * Typed props are checked strictly against the declaration, so an editor typed for `'zoon'` cannot be the editor of
@@ -489,7 +497,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 /** Template API features beyond the first contract-1 release. List the ones a template uses in `requires`. */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
-  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages';
+  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'image-files' | 'editor-save-file';
 /** The features this app provides. */
 export const capabilities: readonly Capability[];
 
@@ -762,6 +770,12 @@ export function asset(path: string): string;
  * latter in the Book check. Parse the text yourself and mark problems on a rendered node with `data-issue="…"`.
  */
 export function file(id: string): { name: string; extension: string; text: string } | undefined;
+/**
+ * An image file parameter's value (PNG, JPEG or WebP): a URL for `<img src>` or a CSS background, and its pixel
+ * size, for example to check resolution. Undefined when no file is assigned, the file is not an image, or it is
+ * missing or unreadable. Requires `image-files`.
+ */
+export function imageFile(id: string): { name: string; extension: string; url: string; width: number; height: number } | undefined;
 
 // Only the declarations marked `export` above are part of the module.
 export {};

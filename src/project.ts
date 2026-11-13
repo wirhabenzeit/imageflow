@@ -60,8 +60,12 @@ export type BoxState = z.infer<typeof box>;
 export type Values = z.infer<typeof values>;
 export type PhotoIndex = z.infer<typeof photoIndexSchema>;
 export type Photo = Omit<PhotoIndex[string], 'path' | 'linked'> & Dimensions;
-// A file the template reads through `file(id)`. Files are read as UTF-8 text.
-export type ProjectFile = { name: string; extension: string; text?: string; problem?: string };
+// A file the template reads through `file(id)` (UTF-8 text) or `imageFile(id)` (PNG, JPEG or WebP, by extension).
+// `generated` marks a file an element editor saved with `saveFile`.
+export type ProjectFile = {
+  name: string; extension: string; text?: string; problem?: string;
+  image?: { width: number; height: number; url?: string }; generated?: boolean;
+};
 export type ProjectFiles = { project: Project; photoIndex: PhotoIndex };
 export type RenderProject = {
   project: Project;

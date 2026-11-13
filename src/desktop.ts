@@ -19,7 +19,7 @@ export const channels = {
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
   sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
-  open: 'project:open', save: 'project:save', import: 'project:import',
+  open: 'project:open', save: 'project:save', import: 'project:import', saveFile: 'project:save-file',
   command: 'project:command', changed: 'project:changed',
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
   check: 'project:check', cancelCheck: 'project:cancel-check',
@@ -111,6 +111,8 @@ export type DesktopApi = {
   onAgentLease(listener: (id: string) => boolean): () => void;
   onAgentRelease(listener: () => void): () => void;
   importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[] } | null>>;
+  // A file an element editor generated (ADR 0006), stored in the book under a new ID.
+  saveFile(id: string, request: { name: string; bytes: Uint8Array }): Promise<Result<{ summary: ProjectSummary; id: string }>>;
   pathsForFiles(files: File[]): string[];
   exportBook(id: string, mode: ExportMode): Promise<Result<{ warnings: Issue[]; errors: Issue[] } | null>>;
   cancelExport(): Promise<void>;

@@ -43,6 +43,7 @@ const api: DesktopApi = {
   }),
   onAgentRelease: (listener) => listen(channels.agentRelease, listener),
   importFiles: (id, request) => ipcRenderer.invoke(channels.import, id, request),
+  saveFile: (id, request) => ipcRenderer.invoke(channels.saveFile, id, request),
   pathsForFiles: (files) => files.map((file) => webUtils.getPathForFile(file)).filter(Boolean),
   exportBook: (id, mode) => ipcRenderer.invoke(channels.export, id, mode),
   cancelExport: () => ipcRenderer.invoke(channels.cancel),

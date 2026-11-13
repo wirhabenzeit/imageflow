@@ -193,6 +193,19 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     warn(['The layout marks unknown parameters as editable: ' + [...unknown].join(', ') + '.'], { code: 'edit-path-unknown',
       details: { paths: [...unknown].join(' ') }, suggestion: 'Declare these parameters in the layout, or remove them from ctx.edit(...).' });
   }
+  // Image files of file parameters (imageFile(id), ADR 0006) meet the format's resolution like photos do.
+  for (const img of sheet.querySelectorAll<HTMLImageElement>('img[src]')) {
+    const file = /\/render\/[\w-]+\/file\/([\w-]+)$/.exec(new URL(img.src, location.href).pathname)?.[1];
+    const width = img.getBoundingClientRect().width * mmPerPixel / 25.4;
+    if (!file || !resolution || !img.naturalWidth || width <= 0) continue;
+    const ppi = img.naturalWidth / width;
+    if (ppi >= resolution.minimum) continue;
+    errors.push(issue('Image file ' + file + ' is ' + Math.round(ppi) + ' ppi (minimum ' + resolution.minimum + ').', {
+      code: 'file-image-resolution-low', ...ownerOf(img), source: file,
+      details: { ppi: Math.round(ppi), minimumPpi: resolution.minimum, widthPx: img.naturalWidth, drawnWidthMm: reportedMm(width * 25.4, 1) },
+      suggestion: 'Generate or choose a larger image (at least ' + Math.ceil(resolution.minimum * width) + ' px wide), or draw it smaller.',
+    }));
+  }
   const boxes = new Map<string, HTMLElement>();
   for (const box of sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')) {
     const id = box.dataset.box ?? box.dataset.element!;
@@ -869,6 +882,21 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     post({ type: 'editor-import', request, accept: accept.filter((extension) => typeof extension === 'string'), mode });
     return new Promise<string | undefined>((resolve) => pending.set(request, resolve));
   };
+  // Generated files (ADR 0006) go the same way: the app stores the bytes in the book and answers with the new ID.
+  const saveFile = async (data: Blob | ArrayBuffer | ArrayBufferView | string, options: { name: string }) => {
+    if (readOnly || failed) return undefined;
+    const name = typeof options?.name === 'string' ? options.name : '';
+    if (!name) { warn('saveFile needs a file name with an extension, such as { name: \'map.png\' }.'); return undefined; }
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data)
+      : data instanceof Blob ? new Uint8Array(await data.arrayBuffer())
+      : data instanceof ArrayBuffer ? new Uint8Array(data.slice(0))
+      : ArrayBuffer.isView(data) ? new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength))
+      : undefined;
+    if (!bytes) { warn('saveFile accepts a Blob, an ArrayBuffer, a typed array or a string.'); return undefined; }
+    const request = ++requests;
+    post({ type: 'editor-save-file', request, name, bytes });
+    return new Promise<string | undefined>((resolve) => pending.set(request, resolve));
+  };
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1)) return;
     if (event.data?.type === 'editor-flush') {
@@ -889,6 +917,13 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       if (!others.length) return;
       draft = { ...draft, ...Object.fromEntries(others) };
       update?.({ element: draft, spread: spreadDraft });
+      return;
+    }
+    if (event.data?.type === 'editor-save-failed') {
+      const resolve = pending.get(event.data.request);
+      pending.delete(event.data.request);
+      if (typeof event.data.message === 'string') warn(event.data.message.slice(0, 500));
+      resolve?.(undefined);
       return;
     }
     if (event.data?.type !== 'editor-imported') return;
@@ -933,7 +968,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     return React.createElement(ProjectFilesContext.Provider, { value: context },
       React.createElement(EditorValues.Provider, { value: values },
         React.createElement(editor!.component, { values: values.element, set, spread: values.spread, setSpread, document, format, readOnly,
-          commit, cancel, Control, importFile })));
+          commit, cancel, Control, importFile, saveFile })));
   }
 
   // Errors from the component's event handlers and async work do not reach React's error handling.

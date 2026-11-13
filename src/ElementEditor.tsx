@@ -30,11 +30,13 @@ function editingContext(template: TemplateInfo, spread: SpreadState, element: st
 
 // Template components report values from an isolated frame. Apply each valid change through the app's save
 // queue, keeping the frame mounted while the book renders. Closing flushes any field still being typed.
-export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, canvasReady, edit, close, importFile, host }: {
+export function ElementEditorDialog({ project, template, spread, element, readOnly, blocked, canvasReady, edit, close, importFile, saveFile, host }: {
   project: string; template: TemplateInfo; spread: SpreadState; element: string; readOnly: boolean;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
+  // Stores a file the editor generated; rejects with a message the editor's author should see.
+  saveFile?: (name: string, bytes: Uint8Array) => Promise<{ id: string; project: string } | undefined>;
 }) {
   const layout = template.spreads[spread.definition];
   const definition = layout?.elements[element];
@@ -89,6 +91,14 @@ export function ElementEditorDialog({ project, template, spread, element, readOn
         { type: 'editor-imported', request: data.request, ...imported }, renderOrigin);
       if (readOnly || failed || stale || blocked || rejected.current || !importFile || !accept.length) reply();
       else void importFile(accept, data.mode === 'copy' || data.mode === 'link' ? data.mode : undefined).then(reply, () => reply());
+    },
+    saveFile(data) {
+      const post = (message: Record<string, unknown>) => frame.current?.contentWindow?.postMessage({ request: data.request, ...message }, renderOrigin);
+      const refuse = (message: string) => post({ type: 'editor-save-failed', message });
+      if (readOnly || failed || stale || blocked || rejected.current || !saveFile) return refuse('The book cannot save files right now.');
+      if (typeof data.name !== 'string' || !(data.bytes instanceof Uint8Array)) return refuse('saveFile received no file.');
+      void saveFile(data.name, data.bytes).then((saved) => saved ? post({ type: 'editor-imported', ...saved }) : refuse('The file was not saved.'),
+        (error: unknown) => refuse(error instanceof Error ? error.message : 'The file was not saved.'));
     },
   }, 'The editor has not finished the current field. Click × again to close without the unfinished typing.');
 

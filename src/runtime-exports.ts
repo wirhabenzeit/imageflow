@@ -1,7 +1,7 @@
 // The named exports of the `imageflow` module that templates import. The renderer provides them at runtime, the
 // bundler exposes exactly these names, and the shipped declarations must declare the same set (src/template-types.ts).
 export const runtimeExports = [
-  'defineTemplate', 'spreadFor', 'p', 'mm', 'pt', 'inch', 'printFormat', 'Spread', 'PhotoBox', 'MarkdownBox', 'Element', 'asset', 'file',
+  'defineTemplate', 'spreadFor', 'p', 'mm', 'pt', 'inch', 'printFormat', 'Spread', 'PhotoBox', 'MarkdownBox', 'Element', 'asset', 'file', 'imageFile',
   'geometry', 'box', 'issue', 'capabilities',
 ] as const;
 
@@ -21,5 +21,7 @@ export const capabilities = [
   'opening-spreads',
   // `facingPages: false` formats and `span: 'page'` layouts: one page per unit instead of facing spreads.
   'single-pages',
+  // `imageFile(id)` for PNG, JPEG and WebP file parameters, and `saveFile` in custom element editors (ADR 0006).
+  'image-files', 'editor-save-file',
 ] as const;
 export type Capability = typeof capabilities[number];

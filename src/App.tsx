@@ -388,6 +388,19 @@ export function App() {
       }
     }));
   }
+  // A file an element editor generated (ADR 0006). Registering it is not undoable; the editor's assignment is.
+  function saveProjectFile(name: string, bytes: Uint8Array) {
+    const generation = inputGeneration.current;
+    return new Promise<{ id: string; project: string } | undefined>((resolve, reject) => enqueue(async () => {
+      const before = current.current;
+      if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
+      const result = await api.saveFile(before.id, { name, bytes }).catch((error: unknown) => ({ error: String(error) }));
+      if ('error' in result) return reject(new Error(result.error));
+      if (current.current !== before) return resolve(undefined);
+      adopt(result.value.summary);
+      resolve({ id: result.value.id, project: result.value.summary.id });
+    }));
+  }
   // importParameterFile only reads refs, the preload API and state setters, so it may be kept from the first render.
   const projectFiles = useMemo(() => ({ files: summary?.project.files ?? {}, defaultMode: summary?.project.importMode ?? 'copy', importFile: importParameterFile }), [summary?.project.files, summary?.project.importMode]);
 
@@ -1382,7 +1395,7 @@ export function App() {
       <ElementEditorDialog host={canvasWrap.current} key={elementEditor.spread + ':' + elementEditor.element} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} element={elementEditor.element} readOnly={summary.readOnly}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
-        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile} />}
+        canvasReady={canvasReady} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile} saveFile={saveProjectFile} />}
     {summary && template && layoutPicker && spreads.some(({ id }) => id === layoutPicker.spread) &&
       <LayoutPickerDialog key={layoutPicker.spread + ':' + layoutPicker.family} project={summary.id} template={template}
         spread={spreads.find(({ id }) => id === layoutPicker.spread)!} family={layoutPicker.family} layout={layoutPicker.layout}

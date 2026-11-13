@@ -135,6 +135,12 @@ async function serve(request: Request) {
     const bytes = session.book.assets.files.get(asset);
     if (bytes) return response(bytes, assetTypes[extname(asset).toLowerCase()] ?? 'application/octet-stream');
   }
+  const fileMatch = /^file\/([\w-]+)$/.exec(resource);
+  if (fileMatch) {
+    const snapshot = session.book.fileImages?.get(fileMatch[1]);
+    const type = snapshot ? assetTypes[session.book.files[fileMatch[1]]?.extension ?? ''] : undefined;
+    if (snapshot && type) return response(await readFile(snapshot), type);
+  }
   const photoMatch = /^(photo|thumb)\/([\w-]+)(?:\/([1-9]\d{0,5}))?$/.exec(resource);
   if (photoMatch) {
     const [, kind, photoId, size] = photoMatch;
@@ -1048,6 +1054,7 @@ void app.whenReady().then(async () => {
   });
   ipcMain.on(channels.agentLeaseReply, (event, id: string, allowed: boolean) => { editorOwner(event)?.replyLease(id, allowed); });
   ipcMain.handle(channels.import, (event, id: string, request: ImportRequest) => fromEditor(event, (document) => document.importFiles(document.window, id, request)));
+  ipcMain.handle(channels.saveFile, (event, id: string, request: { name: unknown; bytes: unknown }) => fromEditor(event, (document) => document.saveGeneratedFile(id, request)));
   ipcMain.handle(channels.export, (event, id: string, mode: ExportMode) => fromEditor(event, (document) => document.exportBook(document.window, id, mode)));
   ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) => fromEditor(event, (document) => document.checkOpenBook(document.currentBook(id), request)));

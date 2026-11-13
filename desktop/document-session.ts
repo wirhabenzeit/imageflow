@@ -8,13 +8,13 @@ import { randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
-import { dirname, extname, join, relative } from 'node:path';
+import { dirname, extname, join, relative, sep } from 'node:path';
 import { channels, desktopScheme, renderOrigin } from '../src/desktop';
 import type { BookMenuState, CanvasLayout, ExportMode, ImportRequest, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
 import type { RenderProject } from '../src/project';
 import { printBook, saveProof } from './export';
-import { importIntoProject, loadProject, projectSummary, readProjectManifest } from './project';
+import { importIntoProject, loadProject, projectSummary, readProjectManifest, saveGeneratedFile } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
 import { bundledFontNames } from './fonts';
@@ -82,6 +82,9 @@ export class DocumentSession {
     private renders: RenderSessions, private unlockProject: ProjectLock | undefined,
     private changed?: (book: OpenProject) => void) {
     this.projectSession = new ProjectSession(book);
+    this.projectSession.removing = (paths) => {
+      for (const path of paths) this.importedWrites.set(path.split('/').join(sep), '', this.observedChanges.has(path.split('/').join(sep)));
+    };
     this.queue = new AuthoringQueue({ ready: () => !this.busy && !this.closing, maxPending: 32 });
     this.service = createAuthoringService({
       session: () => this.closing ? undefined : this.projectSession, cache, docs: join(app.getAppPath(), 'docs/template-api.md'),
@@ -179,6 +182,10 @@ export class DocumentSession {
       await this.queue.whenIdle();
       // Published saves must settle before releasing the single-writer capability.
       while (this.busy) await new Promise((resolve) => setTimeout(resolve, 10));
+      // Undo and Redo end with the window, so generated files only they referred to can go now.
+      if (this.unlockProject) await this.projectSession.collectGenerated(false).catch((error: unknown) => {
+        console.error('ImageFlow could not remove unused generated files', error);
+      });
       try { await this.unlockProject?.(); }
       finally {
         this.unlockProject = undefined;
@@ -436,6 +443,24 @@ export class DocumentSession {
     this.projectSession!.adoptExternal(book);
     this.projectSession!.record(next, 'Import sources', !!request.target);
     return { summary: this.activate(next), imported };
+  }
+
+  /** Stores a file an element editor generated (ADR 0006). Registering it is not undoable; assigning it is. */
+  async saveGeneratedFile(id: string, request: { name: unknown; bytes: unknown }) {
+    const book = this.currentBook(id);
+    if (book.readOnly) throw new Error('Create a project to save files.');
+    if (typeof request?.name !== 'string' || !request.name || request.name.length > 200 || !(request.bytes instanceof Uint8Array)) {
+      throw new Error('Invalid file.');
+    }
+    const destination = join(book.folder, 'files');
+    const createdDirectory = !await fingerprint(destination);
+    const { book: next, id: file, path } = await saveGeneratedFile(book, { name: request.name, bytes: request.bytes });
+    for (const written of createdDirectory ? [destination, path] : [path]) {
+      const relativePath = relative(book.folder, written);
+      this.importedWrites.set(relativePath, await fingerprint(written), this.observedChanges.has(relativePath));
+    }
+    this.projectSession.record(next, 'Generate file', false);
+    return { summary: this.activate(next), id: file };
   }
 
   async exportBook(owner: BrowserWindow, projectId: string, mode: ExportMode) {
