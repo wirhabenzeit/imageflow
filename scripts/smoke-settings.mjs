@@ -51,7 +51,17 @@ async function openSettings(command = 'Settings…') {
   await page.waitForFunction(() => innerHeight === Math.min(760, Math.max(120, Math.ceil(document.querySelector('.settings-window > div').getBoundingClientRect().height))));
   const height = await page.evaluate(() => innerHeight);
   const ownerId = await (await app.browserWindow(page)).evaluate((owner) => owner.id);
-  const events = await app.evaluate((_electron, id) => globalThis.settingsSizing.filter((event) => event.id === id), ownerId);
+  // A sized DOM can be ready before Electron's ready-to-show event arrives on a slower runner.
+  const events = await app.evaluate((_electron, id) => new Promise((resolve, reject) => {
+    const deadline = Date.now() + 20000;
+    const poll = () => {
+      const events = globalThis.settingsSizing.filter((event) => event.id === id);
+      if (events.some((event) => event.kind === 'show')) return resolve(events);
+      if (Date.now() >= deadline) return reject(new Error('Settings was not shown after painting and sizing'));
+      setTimeout(poll, 20);
+    };
+    poll();
+  }), ownerId);
   const firstShow = events.findIndex((event) => event.kind === 'show');
   assert.ok(firstShow >= 0, 'Settings is shown after it has painted and been sized');
   if (!existing) {
@@ -69,7 +79,16 @@ async function closeWindow(page) {
 }
 async function checkAppearance(page, source) {
   await page.waitForFunction(async (appearance) => (await window.imageflow.getSettings()).value?.appearance === appearance, source);
-  assert.equal(await app.evaluate(({ nativeTheme }) => nativeTheme.themeSource), source);
+  // Reading the persisted setting can beat the update handler applying it to nativeTheme.
+  const applied = await app.evaluate(({ nativeTheme }, source) => new Promise((resolve) => {
+    const deadline = Date.now() + 20000;
+    const poll = () => {
+      if (nativeTheme.themeSource === source || Date.now() >= deadline) return resolve(nativeTheme.themeSource);
+      setTimeout(poll, 20);
+    };
+    poll();
+  }), source);
+  assert.equal(applied, source);
   const dark = await app.evaluate(({ nativeTheme }) => nativeTheme.shouldUseDarkColors);
   await page.waitForFunction((dark) => matchMedia('(prefers-color-scheme: dark)').matches === dark &&
     getComputedStyle(document.querySelector('.studio')).backgroundColor === (dark ? 'rgb(37, 37, 37)' : 'rgb(245, 245, 245)'), dark);

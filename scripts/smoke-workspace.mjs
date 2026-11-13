@@ -92,7 +92,7 @@ try {
   assert.ok(await w.locator('.source-items').evaluate((node) => node.scrollWidth <= node.clientWidth));
   assert.ok(await w.locator('.source-photo').evaluateAll((nodes) => new Set(nodes.map((node) => node.offsetTop)).size > 1));
   await menuAction(app, 'Hide Sources');
-  assert.equal(await w.getByRole('region', { name: 'Sources', exact: true }).count(), 0);
+  await w.getByRole('region', { name: 'Sources', exact: true }).waitFor({ state: 'detached' });
   await menuAction(app, 'Show Sources');
   assert.equal(await bottom.getAttribute('aria-valuenow'), '300');
   await bottom.focus();
