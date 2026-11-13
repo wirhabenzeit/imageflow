@@ -1,6 +1,6 @@
 # 0006: Template dependencies, editor network access and generated files
 
-Status: accepted, 2026-11-13. Phases 1 (render purity), 2 (image files, `saveFile`, collection), 3 (editor network) and 4 (npm dependencies) implemented. An MCP tool for the rebuild is a follow-up. Motivated by a real map layout in the photobook starter, replacing the basemap-less GPX inset.
+Status: accepted, 2026-11-13. Phases 1 (render purity), 2 (image files, `saveFile`, collection), 3 (editor network), 4 (npm dependencies) and 5 (the starter's Map layout) implemented. The Map layout is added beside the Panorama GPX inset rather than replacing it for now. Follow-ups: an MCP tool for the rebuild, and a desktop test that edits the map against a stubbed tile server. Motivated by a real map layout in the photobook starter, replacing the basemap-less GPX inset.
 
 ## Problem
 

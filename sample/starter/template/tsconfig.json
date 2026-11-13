@@ -1,7 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM"],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
@@ -10,9 +13,27 @@
     "skipLibCheck": false,
     "types": [],
     "paths": {
-      "imageflow": ["./types/imageflow.d.ts"],
-      "react/jsx-runtime": ["./types/jsx-runtime.d.ts"]
+      "imageflow": [
+        "./types/imageflow.d.ts"
+      ],
+      "react/jsx-runtime": [
+        "./types/jsx-runtime.d.ts"
+      ],
+      "*": [
+        "./vendor/types/node_modules/*",
+        "./vendor/types/node_modules/@types/*"
+      ]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "vendor"
+  ],
+  "files": [
+    "vendor/types/globals.d.ts"
+  ]
 }

@@ -120,8 +120,13 @@ async function vendorTypes(root: string, packages: string[], target: string) {
   }
   const modules = join(root, 'node_modules');
   const copied = new Set<string>();
-  if (entries.length) {
-    const program = ts.createProgram(entries, options, host);
+  // Ambient @types packages the copied packages depend on (such as @types/geojson): they declare globals, so
+  // nothing imports them; globals.d.ts references them for the type check and code editors.
+  const ambient = new Set<string>();
+  for (let round = 0; entries.length && round < 8; round++) {
+    const roots = [...entries, ...[...ambient].map((name) => ts.resolveModuleName(name, containing, options, host).resolvedModule?.resolvedFileName)
+      .filter((path): path is string => !!path)];
+    const program = ts.createProgram(roots, options, host);
     for (const file of program.getSourceFiles()) {
       if (!inside(modules, file.fileName)) continue;
       const path = relative(modules, file.fileName);
@@ -134,6 +139,20 @@ async function vendorTypes(root: string, packages: string[], target: string) {
         await cp(join(modules, owner, 'package.json'), join(target, owner, 'package.json')).catch(() => {});
       }
     }
+    const before = ambient.size;
+    for (const owner of copied) {
+      const info = JSON.parse(await readFile(join(modules, owner, 'package.json'), 'utf8').catch(() => '{}'));
+      for (const name of Object.keys({ ...info.dependencies, ...info.peerDependencies })) {
+        if (name.startsWith('@types/') && await stat(join(modules, name)).then(() => true, () => false)) ambient.add(name);
+      }
+    }
+    if (ambient.size === before) break;
+  }
+  if (ambient.size) {
+    await writeFile(join(target, '..', 'globals.d.ts'), [...ambient].sort().map((name) => {
+      const entry = ts.resolveModuleName(name, containing, options, host).resolvedModule?.resolvedFileName;
+      return entry ? '/// <reference path="./node_modules/' + slash(relative(modules, entry)) + '" />' : '';
+    }).filter(Boolean).join('\n') + '\n');
   }
   return untyped;
 }
@@ -228,11 +247,15 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
 /** Points code editors at the vendored declarations, as the book's type check does, when tsconfig.json is plain JSON. */
 async function updateTsconfig(root: string) {
   const path = join(root, 'tsconfig.json');
-  let config: { compilerOptions?: { paths?: Record<string, string[]> }; exclude?: string[] };
+  let config: { compilerOptions?: { paths?: Record<string, string[]> }; exclude?: string[]; files?: string[] };
   try { config = JSON.parse(await readFile(path, 'utf8')); } catch { return; }
   config.compilerOptions ??= {};
   config.compilerOptions.paths = { ...config.compilerOptions.paths,
     '*': ['./vendor/types/node_modules/*', './vendor/types/node_modules/@types/*'] };
   config.exclude = [...new Set([...(config.exclude ?? []), 'node_modules', 'vendor'])];
+  const globals = await stat(join(root, vendorFolder, 'types', 'globals.d.ts')).then(() => true, () => false);
+  const files = (config as { files?: string[] }).files?.filter((name) => name !== 'vendor/types/globals.d.ts') ?? [];
+  if (globals) (config as { files?: string[] }).files = [...files, 'vendor/types/globals.d.ts'];
+  else if ((config as { files?: string[] }).files) (config as { files?: string[] }).files = files;
   await writeFile(path, JSON.stringify(config, null, 2) + '\n');
 }

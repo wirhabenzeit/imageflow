@@ -127,6 +127,8 @@ export async function bundleTemplate(folder: string) {
               if (vendoredModule(root, manifest, args.path) === undefined) return { errors: [{ text: missingDependency(args.path) }] };
               return { path: args.path, namespace: 'imageflow-vendor' };
             }
+            // Inline images in stylesheets, such as icons in vendored CSS, need no file and stay as they are.
+            if (args.kind === 'url-token' && args.path.startsWith('data:')) return { path: args.path, external: true };
             if (!args.path.startsWith('./') && !args.path.startsWith('../')) {
               return { errors: [{ text: 'Use a relative template import instead of ' + args.path + '.' }] };
             }

@@ -27,7 +27,7 @@ async function writePackages(root: string, version = '1.0.0', factor = 2) {
   await writeFile(join(modules, 'tiny-lib/index.js'), `import { useState } from 'react';\nexport const hook = useState;\nexport const double = (n) => n * ${factor};\nexport default 21;\n`);
   await writeFile(join(modules, 'tiny-lib/index.d.ts'), `import type { Helper } from './helper';\nexport declare const double: Helper;\ndeclare const value: number;\nexport default value;\n`);
   await writeFile(join(modules, 'tiny-lib/helper.d.ts'), 'export type Helper = (n: number) => number;\n');
-  await writeFile(join(modules, 'tiny-lib/tiny.css'), '.tiny { color: rgb(1, 2, 3); }\n');
+  await writeFile(join(modules, 'tiny-lib/tiny.css'), '.tiny { color: rgb(1, 2, 3); }\n.icon { background: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27/%3E"); }\n');
   await writeFile(join(modules, 'tiny-lib/LICENSE'), 'MIT License, tiny-lib authors\n');
   await mkdir(join(modules, 'untyped-lib'), { recursive: true });
   await writeFile(join(modules, 'untyped-lib/package.json'), JSON.stringify({ name: 'untyped-lib', version: '0.3.0', main: 'index.js', license: 'ISC' }));
@@ -77,6 +77,7 @@ test('the rebuild saves bundled modules, CSS, versions, licences and declaration
   assert.match(first.js, /globalThis\.ImageFlowReact/);
   assert.match(first.js, /\* 2;/);
   assert.match(first.css, /\.tiny \{\s*color: #010203;/);
+  assert.match(first.css, /url\("?data:image\/svg\+xml/, 'inline images in vendored CSS stay inline');
   assert.equal(first.assets.warnings?.length, 1, 'untyped dependencies are reported');
 
   // Changed installed packages do not change the book until the next rebuild; the check warns instead.

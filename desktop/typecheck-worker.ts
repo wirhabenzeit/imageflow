@@ -89,6 +89,8 @@ function check(): TypecheckResult {
   // JSON participates only when imported; tsconfig.json remains editor configuration, never a compiler input.
   const roots = [...sources.keys()].filter((path) => !path.endsWith('.json')).concat(join(types, 'assets.d.ts'));
   if (host.fileExists(untyped)) roots.push(untyped);
+  const globals = join(vendorTypes, 'globals.d.ts');
+  if (host.fileExists(globals)) roots.push(globals);
   const program = ts.createProgram(roots, options, host);
   // Third-party declarations are not the template's to fix; their problems surface where the template uses them.
   const findings = ts.getPreEmitDiagnostics(program).filter((finding) => !finding.file || !inside(vendorTypes, resolve(finding.file.fileName)));

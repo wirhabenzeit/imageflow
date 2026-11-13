@@ -417,7 +417,7 @@ async function createBook(stage: string, template: ResolvedTemplate, sample: boo
   const { entry, folder, info } = template;
   const file = join(stage, 'project.json');
   if (sample && template.sample) {
-    await cp(template.sample, stage, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+    await cp(template.sample, stage, { recursive: true, filter: (path) => basename(path) !== '.imageflow' && basename(path) !== 'node_modules' });
     const project = JSON.parse(await readFile(file, 'utf8'));
     project.template = { ...project.template, hash: entry.hash };
     await writeFile(file, JSON.stringify(project, null, 2) + '\n');

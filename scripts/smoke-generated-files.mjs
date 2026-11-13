@@ -75,7 +75,11 @@ try {
   await editor.getByRole('button', { name: 'Small snapshot' }).waitFor();
 
   // Saving makes a new gn- file in files/ and the editor assigns it; the page draws it at its pixel size.
-  await editor.getByRole('button', { name: 'Small snapshot' }).click();
+  // A save that arrives while the book reloads after opening is refused, as in the app, so press again until it lands.
+  for (let attempt = 0; attempt < 5 && !/^gn-/.test(await snapshot() ?? ''); attempt++) {
+    await editor.getByRole('button', { name: 'Small snapshot' }).click();
+    for (let i = 0; i < 30 && !/^gn-/.test(await snapshot() ?? ''); i++) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
   await until(async () => /^gn-/.test(await snapshot() ?? ''), 'The small snapshot was assigned.');
   const small = await snapshot();
   assert.deepEqual(await generatedFiles(), [small + '-snapshot.png']);

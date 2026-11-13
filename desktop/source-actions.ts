@@ -110,7 +110,8 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
   const book = await loadProject(source.folder, source.cache, true);
   const result = await createDocument(destination, async (stage) => {
     await cp(book.folder, stage, { recursive: true, dereference: true, filter: async (path) => {
-      if (basename(path) === '.imageflow') return false;
+      // Installed packages are not part of the book; it uses the saved bundle in template/vendor (ADR 0006).
+      if (basename(path) === '.imageflow' || basename(path) === 'node_modules') return false;
       const actual = await realpath(path);
       if (actual !== book.folder && !within(book.folder, actual)) throw new Error('The package contains a link outside the book: ' + path);
       return true;
