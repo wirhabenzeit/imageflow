@@ -48,7 +48,9 @@ const marked = async () => JSON.parse(await readFile(join(calendar, 'project.jso
 let app;
 try {
   app = await _electron.launch({ executablePath: electron, args: [join(build, 'desktop'), '--user-data-dir=' + join(work, 'profile'), ...(process.platform === 'linux' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [])],
-    env: { ...process.env, ...(screenshots ? {} : { IMAGEFLOW_HIDE_WINDOW: '1' }) }, timeout: 15000 });
+    // The window stays shown: clicks into a scaled editor frame are hit-tested by the compositor, which a hidden
+    // window does not run, so they would miss the calendar's day buttons.
+    env: process.env, timeout: 15000 });
   // OpenFreeMap, offline: every style is a plain coloured background, which MapLibre draws without tiles.
   await app.evaluate(({ dialog, net, session }) => {
     dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });
@@ -119,11 +121,18 @@ try {
   assert.ok(after.longitude > before.longitude, 'dragging left moves east: ' + JSON.stringify([before, after]));
   assert.ok(after.latitude < before.latitude, 'dragging up moves south');
   assert.equal(after.zoom, before.zoom, 'dragging keeps the zoom');
+  // Both drags have saved before the wheel, so the view it zooms from is the last one.
+  for (let settled = 0; settled < 3;) {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const now = await saved();
+    settled = JSON.stringify(now) === JSON.stringify(after) ? settled + 1 : 0;
+    after = now;
+  }
   // Wheel zooms in place.
   await w.mouse.move(centre.x, centre.y);
-  await w.mouse.wheel(0, -400);
   let zoomed;
   for (let i = 0; i < 50 && !(zoomed && zoomed.zoom > after.zoom); i++) {
+    if (i % 15 === 0) await w.mouse.wheel(0, -400);
     await new Promise((resolve) => setTimeout(resolve, 200));
     zoomed = await saved();
   }
@@ -201,6 +210,11 @@ try {
   const pageDay = (n) => january.locator('.days li').nth(n - 1);
   const click = async (n, modifier) => {
     const row = await pageDay(n).boundingBox();
+    // Hover until the picker's button is under the pointer: the scaled frame takes input once the compositor has it.
+    for (let i = 0; i < 40 && !(await day(n).evaluate((node) => node.matches(':hover'))); i++) {
+      await w.mouse.move(row.x + row.width / 2 + (i % 2), row.y + row.height / 2);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     if (modifier) await w.keyboard.down(modifier);
     await w.mouse.click(row.x + row.width / 2, row.y + row.height / 2);
     if (modifier) await w.keyboard.up(modifier);
