@@ -1,8 +1,7 @@
 name: Full desktop suite
 
+# Manual only: start it from Actions before a release or after risky desktop changes.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

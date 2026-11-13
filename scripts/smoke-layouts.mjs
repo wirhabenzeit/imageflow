@@ -124,7 +124,7 @@ try {
   // Only layouts with the same footprint are offered: no single title or closing page for a full spread. The grid
   // family has its own picker, so its 2×2 and 3×3 variants are one preview, named after the family.
   assert.deepEqual(await picker.getByRole('radio').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label'))),
-    ['Photo and story', 'Panorama', 'Photo grid', 'Two photos', 'Text spread', 'Calendar spread', 'Contents']);
+    ['Photo and story', 'Panorama', 'Map', 'Photo grid', 'Two photos', 'Text spread', 'Calendar spread', 'Contents']);
 
   // Crops are set per layout; the one set last is the focus other layouts fill around.
   await setCrop('Upper left', { Zoom: 2, Horizontal: 0.3 });
