@@ -138,3 +138,31 @@ test('Text inherits display-only fallback for empty values, with explicit hiding
   assert.doesNotMatch(render('', 'edit', true), /data-edit="place"/);
   assert.match(render(' ', 'edit', false, ''), /if-text-placeholder/);
 });
+
+test('inline Text validates its opt-in and string binding and renders pure multiline artwork', () => {
+  const render = ({ requires = ['inline-text'], type = 'string', editing = 'inline', mode = 'edit', value = 'First\nSecond' }:
+    { requires?: string[]; type?: string; editing?: string; mode?: 'edit' | 'export'; value?: string } = {}) => {
+    const template = chooseFormat(templateSchema.parse({ id: 'text', version: '1', contract: 1, requires,
+      format: { label: 'F', trim: { width: mm(100), height: mm(100) },
+        bleed: { top: mm(0), bottom: mm(0), outside: mm(0), binding: mm(0) }, safe: { top: mm(5), bottom: mm(5), outside: mm(5), binding: mm(5) },
+        structure: { delivery: 'pages', ends: 'inside-covers', pageCount: { min: 2, max: 20, step: 2 } },
+        output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' } },
+      spreads: { main: { label: 'Main', parameters: { heading: type === 'string' ? { type, label: 'Heading', default: '', multiline: true }
+        : { type: 'number', label: 'Number', default: 1 } }, render: (ctx: RenderContext) =>
+        createElement(runtime.Spread, {}, createElement(ctx.Text, { parameter: 'heading', editing: editing as 'inline' })) } } }));
+    const project = projectSchema.parse({ schemaVersion: 1, title: 'Text', template: { id: 'text', version: '1' },
+      spreads: [{ id: 'one', definition: 'main', params: { heading: value } }] });
+    const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode, template: { script: '', assets: {} } } as RenderProject;
+    return renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
+      page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
+  };
+  assert.throws(() => render({ requires: [] }), /requires.*inline-text/);
+  assert.throws(() => render({ type: 'number' }), /string parameter/);
+  assert.throws(() => render({ editing: 'panel' }), /editing must be inline/);
+  assert.match(render(), /white-space:pre-wrap/);
+  assert.match(render({ value: '' }), /if-text-placeholder/);
+  const artwork = render({ mode: 'export' });
+  assert.match(artwork, />First\nSecond<\/p>/);
+  assert.doesNotMatch(artwork, /contenteditable|data-text-editor|iframe|textbox/);
+  assert.doesNotMatch(render({ value: '', mode: 'export' }), /if-text-placeholder/);
+});

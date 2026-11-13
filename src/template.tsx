@@ -441,7 +441,7 @@ export function templateInfo(template: Template): TemplateInfo {
 type SpreadValues = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'elements'>;
 const SpreadData = createContext<{
   book: RenderProject; spread: SpreadState; format: ResolvedFormat; renderPhotos: boolean;
-  definition: Template['spreads'][string]; documentParameters: Parameters; values: SpreadValues; lazyPhotos: boolean;
+  definition: Template['spreads'][string]; documentParameters: Parameters; values: SpreadValues; lazyPhotos: boolean; requires: readonly string[];
 } | null>(null);
 
 function useSpread() {
@@ -574,12 +574,15 @@ function parameterAt({ definition, documentParameters, values }: Pick<NonNullabl
 }
 
 // Shows a string parameter and marks the node for editing. Empty, it shows an editor-only placeholder.
-export function Text({ parameter, as = 'p', placeholder, fallback, fallbackLabel = 'inherited text', hidden = false, className, style, rect, ...marker }: Styling & Placement & IssueMarker &
-  { parameter: string; as?: TextTag; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean }) {
+export function Text({ parameter, as = 'p', editing, placeholder, fallback, fallbackLabel = 'inherited text', hidden = false, className, style, rect, ...marker }: Styling & Placement & IssueMarker &
+  { parameter: string; as?: TextTag; editing?: 'inline'; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean }) {
   const data = useSpread();
   const { param, value } = parameterAt(data, parameter);
   if (!param) throw new Error('Text shows parameter ' + parameter + ', which this layout does not declare.');
   if (!textTags.has(as)) throw new Error('Text cannot render as ' + as + '. Use one of ' + [...textTags].join(', ') + '.');
+  if (editing !== undefined && editing !== 'inline') throw new Error('Text editing must be inline when specified.');
+  if (editing === 'inline' && !data.requires.includes('inline-text')) throw new Error("Text editing=\"inline\" needs requires: ['inline-text'].");
+  if (editing === 'inline' && param.type !== 'string') throw new Error('Inline Text needs a string parameter: ' + parameter + '.');
   if (hidden) return null;
   const saved = value === undefined ? '' : String(value);
   const inherited = !saved.trim() && !!fallback?.trim();
@@ -588,9 +591,9 @@ export function Text({ parameter, as = 'p', placeholder, fallback, fallbackLabel
   const hint = placeholder ?? (param.type === 'string' && param.placeholder ? param.placeholder : param.label);
   const Tag = as;
   // The edit marker stays in export, like ctx.edit(), so checks can name the parameter this text shows.
-  return <Tag data-edit={parameter} data-empty={empty ? '' : undefined}
+  return <Tag data-edit={parameter} data-empty={empty ? '' : undefined} data-inline-text={editing === 'inline' ? '' : undefined}
     data-text-fallback={fallback?.trim() ? fallback : undefined} data-text-fallback-label={fallback?.trim() ? fallbackLabel : undefined}
-    className={className} style={place(rect, style)} {...issueOn(marker)}>
+    className={className} style={place(rect, { ...(editing === 'inline' && param.type === 'string' && param.multiline ? { whiteSpace: 'pre-wrap' } : {}), ...style })} {...issueOn(marker)}>
     {empty ? <span className="if-text-placeholder">{hint}</span> : inherited && data.book.mode === 'edit'
       ? <span className="if-text-inherited" title={'Using ' + fallbackLabel}>{text}</span> : text}
   </Tag>;
@@ -758,6 +761,6 @@ export function SpreadView({ book, template, format, spread, page, index, positi
   } finally {
     renderingSpread(undefined);
   }
-  return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, documentParameters: template.parameters, values, lazyPhotos }}>
+  return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, documentParameters: template.parameters, values, lazyPhotos, requires: template.requires ?? [] }}>
     {content}</SpreadData.Provider>;
 }

@@ -147,6 +147,10 @@ html:has(.if-book) { color-scheme: light dark; }
 html:has(.if-book), html:has(.if-book) body { background: transparent; }
 /* An empty ctx.Text in the editor: the placeholder takes the template's own type, dimmed. */
 .if-text-placeholder { opacity: .45; }
+/* The text editor uses a full template spread with only its activated occurrence visible. */
+html:has(.if-inline-text-frame), html:has(.if-inline-text-frame) body { overflow: hidden; background: transparent; }
+.if-inline-text-frame .if-sheet { visibility: hidden; }
+.if-inline-text-frame [data-text-editor] { visibility: visible; outline: none; cursor: text; }
 .if-text-inherited { text-decoration: underline dotted; text-underline-offset: .18em; }
 
 /* ImageFlow's own controls inside a custom editor (`Control`), in the editor's appearance. Scoped to .if-control so

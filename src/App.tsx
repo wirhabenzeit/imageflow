@@ -21,6 +21,8 @@ import { documentEditorFor, editorOwnedDocument, editorTargetGone } from './edit
 import { anchoredTarget, clickWithin, elementRect, hiddenOccurrence, inlinePlacement, presentationFor } from './inline-editors';
 import type { OpenEditor } from './inline-editors';
 import { LayoutFamilyPicker } from './LayoutFamilyPicker';
+import { InlineTextEditor } from './InlineTextEditor';
+import { textFits } from './inline-text';
 import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
@@ -135,9 +137,15 @@ export function App() {
   // The inline editor that is open: for a marked node (a target), or for a box or element itself (`owner`).
   // `session` names one opening of an editor: it stays while the node the editor is anchored to is renamed (`key`), so
   // the popover and its unsaved drafts are kept, and changes when the user opens another target.
-  const [editing, setEditing] = useState<{ spread: string; key: string; session: number; held?: InlineContext; owner?: Owner }>();
+  const [editing, setEditing] = useState<{ spread: string; key: string; session: number; held?: InlineContext; owner?: Owner; panel?: boolean; text?: boolean }>();
   const editorSessions = useRef(0);
-  const openEditing = (next: { spread: string; key: string; owner?: Owner }) => setEditing({ ...next, session: ++editorSessions.current });
+  const openEditing = (next: { spread: string; key: string; owner?: Owner; panel?: boolean }) => {
+    const target = geometry?.targets.find((item) => targetKey(item) === next.key);
+    const state = summary?.project.spreads.find(({ id }) => id === next.spread);
+    const text = !!(!next.owner && !next.panel && !summary?.readOnly && target && textFits(target));
+    setEditing({ ...next, session: ++editorSessions.current, text,
+      ...(text && summary && template && state && target ? { held: { project: summary.project, spread: state, template, target } } : {}) });
+  };
   // Crop mode for one photo box. After a commit, `settling` holds the project id the edit started from; the
   // overlay stays until the book has re-rendered, so the frame does not flash back to the old crop.
   // The selected photo, whose crop drags and pinches adjust. `layout` is the spread's layout when it was selected:
@@ -886,11 +894,13 @@ export function App() {
     { project: summary.project, spread: editSpread, template, target: editTarget };
   const resumeInline = !!(canvasReady && editing?.held && liveInline && inlineValues(liveInline) === inlineValues(editing.held));
   const inline = resumeInline ? liveInline : editing?.held ?? liveInline;
+  const textInline = !!(editing?.text && !editing.panel && inline);
+  const [textShown, setTextShown] = useState(false);
   function holdInlineEditor() {
     if (editing && !editing.held && liveInline) setEditing({ ...editing, held: liveInline });
   }
   useEffect(() => {
-    if (resumeInline && readyId.current === summary?.id) setEditing((open) => open && { ...open, held: undefined });
+    if (resumeInline && readyId.current === summary?.id) setEditing((open) => open && !open.text ? { ...open, held: undefined } : open);
   }, [resumeInline, summary?.id]);
 
   // Flow positions of the last finished render, kept while an edit re-renders so "Flow 1 of 2" does not flicker.
@@ -965,15 +975,15 @@ export function App() {
     openEditing({ spread, key: ownerKey(spread, owner.id), owner });
   }
   // Opens the popover of a node the template marked, such as a ctx.Text heading, from the sidebar's list.
-  function openTarget(target: Target) {
+  function openTarget(target: Target, panel = false) {
     if (readyId.current !== summary?.id) {
       setNotice('The book preview is updating; try again in a moment.');
       return;
     }
-    if (openDocumentEditor(target)) return;
+    if (!target.inlineText && openDocumentEditor(target)) return;
     deselectPhoto();
     select(target.spread, false);
-    openEditing({ spread: target.spread, key: targetKey(target) });
+    openEditing({ spread: target.spread, key: targetKey(target), panel });
   }
   function editorOf(spread: string, element: string) {
     const state = spreads.find(({ id }) => id === spread);
@@ -1012,7 +1022,8 @@ export function App() {
     if (elementEditor && inlineTarget && inlineSheet) inlineAnchor.current = { open: elementEditor, at: targetAnchor(inlineTarget, inlineSheet) };
   }, [elementEditor, inlineTarget, inlineSheet]);
   const placement = elementEditor && inlinePlacement(geometry, elementEditor, inlineTarget);
-  const inlineEditing = elementEditor && inlineShown && elementEditor !== leavingEditor ? hiddenOccurrence(elementEditor, inlineTarget) : undefined;
+  const inlineEditing = elementEditor && inlineShown && elementEditor !== leavingEditor ? hiddenOccurrence(elementEditor, inlineTarget)
+    : textInline && textShown && inline ? { spread: inline.target.spread, edits: inline.target.edits.join(' '), occurrence: inline.target.occurrence } : undefined;
   const leaveEditor = () => {
     setElementEditor((current) => current === leavingEditor ? undefined : current);
     setLeavingEditor(undefined);
@@ -1479,9 +1490,14 @@ export function App() {
                     }, notice)} />
                 </div>}
               </CropEditor>}
-              {editing && inline && summary && <EditPopover key={editing.session}
+              {editing && inline && summary && textInline && <InlineTextEditor key={editing.session}
+                projectId={summary.id} project={summary.project} spread={editSpread ?? { ...inline.spread, definition: '' }} template={template ?? inline.template} target={inline.target}
+                zoom={editSheet?.zoom ?? 1} host={canvasWrap.current} canvasReady={canvasReady} blocked={blockedInline || undefined}
+                readOnly={summary.readOnly} edit={edit} close={closeEditor} step={stepEditor} shown={setTextShown} />}
+              {editing && inline && summary && !textInline && <EditPopover key={editing.session}
                 project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} host={canvasWrap.current}
                 textFallback={inline.target.textFallback}
+                includeEditorOwned={!!inline.target.inlineText}
                 readOnly={summary.readOnly} blocked={blockedInline || undefined}
                 edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}
                 actions={!editing.owner && editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)
@@ -1521,7 +1537,7 @@ export function App() {
         usage={usage} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
         open={(owner) => { reveal(spread.id); openOwner(spread.id, owner); }}
-        openTarget={(target) => { reveal(spread.id); openTarget(target); }} place={(from, to) => place(spread.id, from, to)}
+        openTarget={(target) => { reveal(spread.id); openTarget(target, true); }} place={(from, to) => place(spread.id, from, to)}
         familyPicker={template && layoutFamily && <LayoutFamilyPicker
           key={JSON.stringify([summary.handle, spread.id, layoutFamily, summary.templateHash, template.format, summary.network])}
           project={summary.id} template={template} spread={spread} params={summary.project.params} family={layoutFamily}
