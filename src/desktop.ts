@@ -179,7 +179,7 @@ export type BookGeometry = {
   type: 'geometry'; width: number; height: number; columns?: number;
   sheets: (Rect & { spread: string })[];
   // `upright` is false when template CSS rotates or skews the box, so its rectangle is only a bounding box.
-  boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean })[];
+  boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean; rect?: Rect })[];
   // Nodes a template marked with `ctx.edit(...)`, and boxes and elements with parameters. `owner` is the box or
   // element the node is, so targets that share a rectangle stay apart; standalone marked nodes have none.
   // `occurrence` counts the earlier nodes on the sheet that edit the same fields, so repeated uses of a field, such

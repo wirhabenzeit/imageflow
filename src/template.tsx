@@ -148,7 +148,9 @@ export type ElementEditorProps = {
 // components. It follows the book while the editor is open (a reorder, another photo, a document setting), so a
 // helper such as the calendar's month can serve `render` and the editor alike. Markdown flow positions are not known
 // outside the book render, so `boxes[id].text` is null.
-export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'elements' | 'page' | 'format' | 'formatId' | 'book'> & {
+export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book'> & {
+  // Measured bounds in trim coordinates (mm), null before the current page is ready or when not rendered.
+  elements: Record<string, { params: Values; rect: Rect | null }>;
   // The spread's ID and its layout.
   spread: string; layout: string;
 };
@@ -689,6 +691,7 @@ export function editorContext(book: RenderProject, template: Template, spreadId:
   const page = sequence.spreads[index].page;
   const context: EditorContext = {
     ...values, page, format: spanFits(definition.span, template.format) ? format : lenientFormat(format), formatId: template.formatId,
+    elements: Object.fromEntries(Object.entries(values.elements).map(([id, element]) => [id, { ...element, rect: null }])),
     book: bookContext(index_, spread.id), spread: spread.id, layout: spread.definition,
   };
   return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, values, template.formatId]) };
@@ -698,6 +701,17 @@ export function editorContext(book: RenderProject, template: Template, spreadId:
 export const refreshedEditorContext = (book: RenderProject, template: Template, spreadId: string) =>
   editorContext(book, chooseFormat(template, book.project.format), spreadId);
 
+/** Page measurements are separate from saved values, so a pending or hidden element has no guessed geometry. */
+export function withEditorGeometry(context: EditorContext, measurements: unknown): EditorContext {
+  const rects = plainRecord(measurements) ? measurements : {};
+  return { ...context, elements: Object.fromEntries(Object.entries(context.elements).map(([id, element]) => {
+    const rect = rects[id];
+    const valid = plainRecord(rect) && ['x', 'y', 'width', 'height'].every((key) => typeof rect[key] === 'number' && Number.isFinite(rect[key])) &&
+      (rect.width as number) > 0 && (rect.height as number) > 0;
+    return [id, { ...element, rect: valid ? { x: rect.x as number, y: rect.y as number, width: rect.width as number, height: rect.height as number } : null }];
+  })) };
+}
+
 /**
  * The context an editor sees: the saved book with its draft applied, so helpers reading `context` agree with what
  * the editor shows. A document editor's draft is its own document parameters; an element editor's is the element's
@@ -706,7 +720,7 @@ export const refreshedEditorContext = (book: RenderProject, template: Template, 
 export function withEditorDraft(context: EditorContext, draft: { document: Values } | { element: string; values: Values; spread: Values }): EditorContext {
   if ('document' in draft) return { ...context, document: { ...context.document, ...draft.document } };
   return { ...context, params: { ...context.params, ...draft.spread },
-    elements: { ...context.elements, [draft.element]: { params: { ...context.elements[draft.element]?.params, ...draft.values } } } };
+    elements: { ...context.elements, [draft.element]: { ...context.elements[draft.element], params: { ...context.elements[draft.element]?.params, ...draft.values } } } };
 }
 
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.

@@ -7,7 +7,7 @@ import type { EditorTarget } from '../src/editor-session';
 import { p } from '../src/parameters';
 import { projectSchema } from '../src/project';
 import type { Project, RenderProject } from '../src/project';
-import { chooseFormat, editorContext, refreshedEditorContext, templateInfo, templateSchema, withEditorDraft } from '../src/template';
+import { chooseFormat, editorContext, refreshedEditorContext, templateInfo, templateSchema, withEditorDraft, withEditorGeometry } from '../src/template';
 
 // A calendar-like template: month pages declare an anchor, and a document editor owns the marked dates.
 const format = {
@@ -197,4 +197,16 @@ test('the context shows the editor draft: document values, or element values and
   assert.equal(context.elements.grid.params.size, 3);
   assert.equal(elementDraft.elements.grid.params.size, 2);
   assert.equal(elementDraft.document.markedDates, '25.12');
+});
+
+test('editor geometry uses measured rectangles, survives draft overlays and clears missing or invalid measurements', () => {
+  const { context } = editorContext(rendered(project(months())), template, 'feb')!;
+  assert.equal(context.elements.grid.rect, null);
+  const rect = { x: 12, y: 30, width: 80, height: 50 };
+  const measured = withEditorGeometry(context, { grid: rect, undeclared: rect });
+  assert.deepEqual(measured.elements.grid.rect, rect);
+  assert.equal(measured.elements.undeclared, undefined);
+  assert.deepEqual(withEditorDraft(measured, { element: 'grid', values: { size: 2 }, spread: {} }).elements.grid.rect, rect);
+  assert.equal(withEditorGeometry(measured, {}).elements.grid.rect, null);
+  assert.equal(withEditorGeometry(measured, { grid: { ...rect, width: NaN } }).elements.grid.rect, null);
 });

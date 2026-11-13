@@ -118,19 +118,26 @@ export function MapView({ values, trackColor, trackWidth, rect, Element }: {
   </Element>;
 }
 
-export function MapEditor({ values, set, readOnly, Control, format }: MapEditorProps) {
+export function MapEditor({ values, set, readOnly, Control, context }: MapEditorProps) {
   const holder = React.useRef<HTMLDivElement>(null);
   const map = React.useRef<MapLibreMap>(undefined);
   const latest = React.useRef(values);
   latest.current = values;
   const [state, setState] = React.useState<{ error?: string }>({});
-  const rect = mapRect(format);
-  const printWidth = rect.width * cssPerMm;
+  const measured = context.elements.map.rect;
+  // Keep an existing map stable while the book redraws, but never invent its first output size.
+  const lastRect = React.useRef(measured);
+  if (measured) lastRect.current = measured;
+  const rect = measured ?? lastRect.current;
+  const printWidth = (rect?.width ?? 0) * cssPerMm;
+  const width = React.useRef(printWidth);
+  width.current = printWidth;
   const { points, problem } = readTrack(values.track);
   // The editor map is smaller than the print, so it shows the same area at a lower zoom.
-  const editorZoom = (zoom: number) => zoom - Math.log2(printWidth / (holder.current?.clientWidth || printWidth));
+  const editorZoom = (zoom: number) => zoom - Math.log2(width.current / (holder.current?.clientWidth || width.current));
 
   React.useEffect(() => {
+    if (!rect) return;
     let removed = false;
     void loadMapLibre().then((maplibregl) => {
       if (removed || !holder.current) return;
@@ -147,7 +154,7 @@ export function MapEditor({ values, set, readOnly, Control, format }: MapEditorP
         const center = created.getCenter();
         const round = (value: number, digits: number) => Number(value.toFixed(digits));
         set({ longitude: round(center.lng, 5), latitude: round(center.lat, 5),
-          zoom: round(Math.min(18, Math.max(0, created.getZoom() + Math.log2(printWidth / created.getContainer().clientWidth))), 2) });
+          zoom: round(Math.min(18, Math.max(0, created.getZoom() + Math.log2(width.current / created.getContainer().clientWidth))), 2) });
       });
       created.on('error', (event) => {
         if (!created.isStyleLoaded()) setState({ error: 'The map could not load (' + (event.error?.message ?? 'no connection') + '). It needs ' +
@@ -157,7 +164,13 @@ export function MapEditor({ values, set, readOnly, Control, format }: MapEditorP
       map.current = created;
     }, (error: unknown) => setState({ error: 'The map library could not load: ' + String(error) }));
     return () => { removed = true; map.current?.remove(); map.current = undefined; };
-  }, []);
+  }, [!!rect, readOnly]);
+  React.useEffect(() => {
+    const current = map.current;
+    if (!current || !rect) return;
+    current.resize();
+    current.jumpTo({ center: [latest.current.longitude, latest.current.latitude], zoom: editorZoom(latest.current.zoom) });
+  }, [rect?.width, rect?.height]);
 
   // The track as a line on the editor map; redrawn when the style or the track changes.
   const drawTrack = (target: MapLibreMap) => {
@@ -189,9 +202,10 @@ export function MapEditor({ values, set, readOnly, Control, format }: MapEditorP
       <button type="button" disabled={readOnly || !points} onClick={fitTrack}>Fit track</button>
     </div>
     <div ref={holder} className="map-editor-map" role="application" aria-label="Map view"
-      style={{ aspectRatio: (rect.width / rect.height).toFixed(4) }} />
+      data-output-width={measured?.width} data-output-height={measured?.height}
+      style={rect ? { aspectRatio: (rect.width / rect.height).toFixed(4) } : undefined} />
     <p className={'map-editor-note' + (state.error ? ' error' : '')} role="status">
-      {state.error ?? 'Drag and zoom to frame the page. The page draws this view, and export draws it again at print resolution.'}
+      {state.error ?? (!measured ? 'Waiting for the page layout…' : 'Drag and zoom to frame the page. The page draws this view, and export draws it again at print resolution.')}
     </p>
     <p className="map-editor-note">{mapAttribution}</p>
   </div>;

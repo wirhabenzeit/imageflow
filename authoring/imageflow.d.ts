@@ -287,7 +287,12 @@ export type ElementEditor<K extends string = string, P extends Parameters = Para
  * `Pick<RenderContext, 'page' | 'book' | 'document'>` serve `render` and editors alike.
  */
 export type EditorContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
-  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'elements' | 'page' | 'format' | 'formatId' | 'book'> & { spread: string; layout: string };
+  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book'> & {
+    spread: string; layout: string;
+    /** Actual rendered bounds in trim coordinates (mm). Null while the current page is pending or the element is hidden. */
+    elements: SpreadDeclaration extends S ? Record<string, { params: Values; rect: Rect | null }>
+      : { [K in keyof RenderContext<S, D>['elements']]: RenderContext<S, D>['elements'][K] & { rect: Rect | null } };
+  };
 /**
  * Props of a document editor. `values` holds only the editor's own document parameters (`K`), with the draft
  * applied, and `set` changes them. Every other setting is read from `context`, the spread the editor was opened

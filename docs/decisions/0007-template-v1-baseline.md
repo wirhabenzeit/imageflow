@@ -1,6 +1,6 @@
 # ADR 0007: Template contract-1 baseline
 
-Status: accepted. Implements #92 C and D.
+Status: accepted. Implements #92 C–I.
 
 ## Decision
 
@@ -17,4 +17,4 @@ Type 3 fonts and fonts outside the template bundle are always rejected by print 
 - Template authors select a coherent API with `contract: 1` instead of copying feature lists.
 - The baseline, authoring declarations, complete examples and API documentation must agree.
 - Network features still require user approval. A contract guarantee is not a permission grant.
-- Text fallback, generated authoring declarations, scaling helpers, enum shorthand and editor geometry remain separate additive work from #92. Persistent offline snapshots remain in #94.
+- The authoring conveniences in #92 are included before the freeze: display-only text fallback with explicit hiding, generated portable SDK snapshots, explicit design-canvas CSS scaling, enum label maps and measured editor geometry. Persistent offline snapshots remain in #94.

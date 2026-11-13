@@ -786,7 +786,7 @@ The project also stores the document parameter values, the template `id` and `ve
 
 ## Authoring and compatibility details
 
-Use the project’s `template/tsconfig.json` and bundled `types/` to check templates without installing host packages. Run `npx tsc -p sample/starter/template` in this repository. For layouts in their own files, export the document parameters and a builder made from them:
+Use the generated `.imageflow-sdk/tsconfig.json`, or a project `tsconfig.json` that extends it, to check templates without installing host packages. Run `npm run generate:authoring` and `npx tsc -p sample/starter/template` in this repository. For layouts in their own files, export the document parameters and a builder made from them:
 
 ```tsx
 // document.ts
@@ -839,3 +839,9 @@ The canonical SDK is `authoring/`. `npm run generate:authoring` generates standa
 Creating a book writes the installed SDK into `template/.imageflow-sdk/`. Exporting a template includes a fresh snapshot in the archive without changing its source folder. Existing books are never rewritten when opened. The snapshot includes React declarations, a standalone TypeScript configuration and `api.json` identifying contract 1 and the SDK content digest. Outside ImageFlow, run `tsc -p .imageflow-sdk/tsconfig.json`, or extend that configuration from your own `tsconfig.json`.
 
 `.imageflow-sdk/` is reserved for generated tooling. It is excluded from template hashes, saved-input revisions and runtime imports; the app always checks against its installed SDK. Authored source and other declaration files remain part of template identity. An export may contain different tooling bytes after an app update while retaining the same authored-template hash.
+
+### Actual element geometry in editors
+
+`context.elements[id].rect` is the element’s measured bounding rectangle in millimetres relative to the spread’s trim origin. It comes from the current page, including CSS sizing, rather than reconstructing a whole-spread rectangle. It is `null` before the current page is ready or when the element is not rendered. CSS rotation or skew yields a bounding rectangle. Changes of format, layout or element size refresh the measurements; ordinary editor draft overlays preserve them.
+
+The map editor waits for its first measurement, uses the actual output aspect ratio and width to frame the map, and keeps its existing map stable while the book redraws. Saved map settings remain ordinary parameters.

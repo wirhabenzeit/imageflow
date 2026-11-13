@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Icon } from './Icon';
 import type { ImportMode } from './source-locations';
 import { renderOrigin } from './desktop';
-import type { TemplateInfo } from './desktop';
+import type { BookGeometry, TemplateInfo } from './desktop';
 import type { Edit } from './Inspector';
 import { isParameterValue, resolveParams } from './parameters';
 import type { SpreadState, Values } from './project';
@@ -17,9 +17,10 @@ import type { EditorState, EditorTarget } from './editor-session';
 // queue, keeping the frame mounted while the book renders. Closing flushes any field still being typed.
 // The same panel runs an element's editor and a document editor (`target`). `params` are the document's saved
 // parameters; `project` names the current render session, which the frame reads its context from.
-export function ElementEditorDialog({ project, template, spread, params, target, readOnly, blocked, canvasReady, edit, close, importFile, prepare, network = '', host }: {
+export function ElementEditorDialog({ project, template, spread, params, target, readOnly, blocked, canvasReady, edit, close, importFile, prepare, network = '', host, geometry }: {
   project: string; template: TemplateInfo; spread: SpreadState; params: Values; target: EditorTarget; readOnly: boolean;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
+  geometry?: BookGeometry;
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void;
   importFile?: (accept: string[], mode?: ImportMode) => Promise<{ id: string; project: string } | undefined>;
   // Settles once the frame may load: the network origins its policy allows are decided before it is served.
@@ -90,7 +91,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
     setSource(address(latestProject.current));
   }, [network]);
   const values = (reported: unknown): Values => reported && typeof reported === 'object' ? reported as Values : {};
-  const { height, ready, error, setError, failed, flushing, flushTimedOut, flush } = useEditorFrame(frame, {
+  const { height, ready, generation, error, setError, failed, flushing, flushTimedOut, flush } = useEditorFrame(frame, {
     draft(reported, reportedSpread) {
       draft.current = { ...draft.current, ...values(reported) };
       spreadDraft.current = { ...spreadDraft.current, ...values(reportedSpread) };
@@ -147,9 +148,11 @@ export function ElementEditorDialog({ project, template, spread, params, target,
 
   // The book the frame's context comes from follows each new render session, so a reorder or another photo shows
   // in the open editor; the editor's draft is kept.
+  const rects = JSON.stringify(Object.fromEntries((canvasReady ? geometry?.boxes ?? [] : [])
+    .filter((box) => box.spread === spread.id && box.type === 'element' && box.rect).map((box) => [box.id, box.rect])));
   useEffect(() => {
-    if (ready) frame.current?.contentWindow?.postMessage({ type: 'editor-context', project }, renderOrigin);
-  }, [ready, project]);
+    if (ready) frame.current?.contentWindow?.postMessage({ type: 'editor-context', project, elementRects: JSON.parse(rects) }, renderOrigin);
+  }, [ready, generation, project, rects]);
 
   const owned = editor?.parameters ?? [];
   const saved = resolveParams(definition?.parameters ?? {}, spread.elements[element]?.params ?? {});

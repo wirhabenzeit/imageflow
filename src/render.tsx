@@ -22,7 +22,7 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, editorContext, normalizeTemplate, refreshedEditorContext, withEditorDraft, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import { bookIndex, chooseFormat, editorContext, normalizeTemplate, refreshedEditorContext, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup, EditorContext } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
@@ -391,7 +391,7 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
 // Fits sheets to the frame width and reports where sheets and boxes landed. In book grid mode, each sheet fits
 // one column and book order runs left to right, then continues on the next row. The book grows vertically.
 type GridRequest = { columns: number };
-function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, initial?: GridRequest) {
+function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest) {
   if (view === 'thumbs') {
     let animations: Animation[] = [];
     window.addEventListener('message', (event: MessageEvent) => {
@@ -458,9 +458,12 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
         const scale = Number(sheet.style.getPropertyValue('--if-zoom')) || 1;
         return [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].map((box) => {
           const rect = relative(box);
+          const measured = measuredBounds(box, sheet, format);
+          const origin = measuredBounds(sheet.querySelector<HTMLElement>('.if-spread')!, sheet, format);
           const sized = Math.abs(rect.width - box.offsetWidth * scale) < 1.5 && Math.abs(rect.height - box.offsetHeight * scale) < 1.5;
           return {
             spread, id: (box.dataset.box ?? box.dataset.element)!, upright: sized && upright(box, sheet),
+            rect: { ...measured, x: measured.x - origin.x, y: measured.y - origin.y },
             type: (box.dataset.boxType ?? 'element') as BookGeometry['boxes'][number]['type'], ...rect,
           };
         });
@@ -479,6 +482,9 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
   root.classList.add('if-book', 'if-view-' + view);
   fit();
   new ResizeObserver(fit).observe(root);
+  // A custom editor consumes actual element sizes, including CSS layout changes within a stable viewport.
+  const elements = new ResizeObserver(() => { laidOut = ''; fit(); });
+  for (const { sheet } of sheets) for (const node of sheet.querySelectorAll<HTMLElement>('[data-element]')) elements.observe(node);
   window.addEventListener('resize', fit);
   return (next: GridRequest) => {
     if (view !== 'book') return;
@@ -796,7 +802,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
     for (const [source, targets] of sources) flow.run(markdownToHtml(book.texts[source]), targets, 'columns');
     return { spread: definition, sheet };
   });
-  layoutBook(root, sheets, 'layouts');
+  layoutBook(root, sheets, 'layouts', format);
   publish({ state: 'ready', template: info, pages: sequence.count, units: [], errors: [], warnings: [], flow: {}, anchors: anchors.anchors });
 }
 
@@ -918,22 +924,25 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
   // component rerenders only when something it can see changed. A spread that is gone keeps the last context; the
   // app closes the editor.
   let contextRequests = 0;
-  const refreshContext = (session: string) => {
+  const refreshContext = (session: string, measurements: unknown) => {
     const request = ++contextRequests;
     void fetch('/render/' + session + '/data').then((response) => response.json()).then((latest: RenderProject) => {
       if (request !== contextRequests || failed) return;
       // The latest book may have chosen another format; the context follows it like the book render does.
       const next = refreshedEditorContext(latest, template, spreadId);
-      if (!next || next.key === contextKey) return;
-      seen = next.context;
-      contextKey = next.key;
+      if (!next) return;
+      const measured = withEditorGeometry(next.context, measurements);
+      const key = next.key + JSON.stringify(Object.fromEntries(Object.entries(measured.elements).map(([id, element]) => [id, element.rect])));
+      if (key === contextKey) return;
+      seen = measured;
+      contextKey = key;
       updateContext?.(seen);
     }).catch(() => undefined);
   };
   window.addEventListener('message', (event) => {
     if (event.origin !== editorURL.slice(0, -1)) return;
     if (event.data?.type === 'editor-context') {
-      if (typeof event.data.project === 'string' && /^[\w-]+$/.test(event.data.project)) refreshContext(event.data.project);
+      if (typeof event.data.project === 'string' && /^[\w-]+$/.test(event.data.project)) refreshContext(event.data.project, event.data.elementRects);
       return;
     }
     if (event.data?.type === 'editor-flush') {
@@ -1400,7 +1409,7 @@ export async function startRender(root: HTMLElement) {
       if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + inspect.spread + ' does not exist in this book.');
       inspection = inspectElements(sheets[index], spreads[index], template, format, inspect);
     }
-    if (edit) setGrid = layoutBook(root, [...validated].map(([spread, { sheet }]) => ({ spread, sheet })), view, grid);
+    if (edit) setGrid = layoutBook(root, [...validated].map(([spread, { sheet }]) => ({ spread, sheet })), view, format, grid);
     if (lazy) {
       const load = photoLoader(root, () => onScreen);
       let timer: ReturnType<typeof setTimeout> | undefined;
