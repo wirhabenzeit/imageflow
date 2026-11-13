@@ -38,7 +38,9 @@ try {
     });
   }, library);
   const openSettings = async (label = 'Settings…') => {
-    const created = app.waitForEvent('window');
+    const created = app.waitForEvent('window', {
+      predicate: page => page.waitForURL('imageflow://editor/settings').then(() => true, () => false),
+    });
     await app.evaluate(({ Menu }, label) => Menu.getApplicationMenu().items.flatMap(item => item.submenu?.items ?? [])
       .find(item => item.label === label).click(), label);
     const page = await created;
@@ -62,11 +64,18 @@ try {
   await clearSizes();
   await page.getByRole('tab', { name: 'Templates', exact: true }).click();
   assert.equal(await page.getByRole('main').getAttribute('aria-busy'), 'true');
+  assert.equal(await page.getByRole('tab', { name: 'Templates' }).getAttribute('aria-busy'), 'true');
+  assert.equal(await page.getByRole('tab', { name: 'Templates' }).getAttribute('tabindex'), '0');
+  assert.equal(await page.locator('.settings-tab-loading').count(), 1, 'Waiting for Templates gives visible feedback');
   assert.equal(await page.getByRole('tab', { name: 'General' }).getAttribute('aria-selected'), 'true');
   assert.deepEqual(await app.evaluate(() => globalThis.settingsSizes), [], 'Slow loading does not start a resize');
 
   // Selecting General cancels the pending request; a late library result cannot switch panes.
   await page.getByRole('tab', { name: 'General', exact: true }).click();
+  await page.getByRole('tab', { name: 'General', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab', { name: 'Templates' }).evaluate(node => node === document.activeElement && node.tabIndex === 0), true);
+  await page.keyboard.press('ArrowLeft');
   await app.evaluate(() => globalThis.releaseLibrary());
   await page.waitForFunction(() => document.querySelector('main').getAttribute('aria-busy') === 'false');
   await page.getByRole('tab', { name: 'Templates', exact: true }).click();
@@ -117,5 +126,32 @@ try {
   sizes = await app.evaluate(() => globalThis.settingsSizes);
   assert.equal(sizes.length, 1);
   assert.equal(sizes[0].animate, false, 'Initial presentation keeps its nonanimated sizing');
-  console.log('Settings template transition passed: preload, slow loading, cancellation, one resize, keyboard navigation, reuse, live updates, empty library, and direct-open errors.');
+  await closeSettings(page);
+
+  // An IPC call that never settles must reach a recoverable error, not trap the tab.
+  await app.evaluate(() => {
+    globalThis.libraryGate = new Promise(resolve => { globalThis.releaseLibrary = resolve; });
+    globalThis.settingsSizes = [];
+  });
+  page = await openSettings();
+  await page.getByRole('tab', { name: 'General', selected: true }).waitFor();
+  await fit(page);
+  await clearSizes();
+  await page.getByRole('tab', { name: 'Templates', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'Loading templates is taking longer than expected.' }).waitFor();
+  await fit(page);
+  assert.equal(await page.getByText('Loading templates…', { exact: true }).count(), 0);
+  assert.equal((await app.evaluate(() => globalThis.settingsSizes)).length, 1, 'Timeout opens the complete error pane with one resize');
+  assert.equal(await page.getByRole('tab', { name: 'Templates' }).getAttribute('aria-busy'), 'false');
+  await app.evaluate((_electron, library) => { globalThis.libraryResult = library; globalThis.libraryGate = Promise.resolve(); }, library);
+  await page.getByRole('button', { name: 'Retry loading templates' }).click();
+  await page.getByRole('button', { name: 'Export Photobook' }).waitFor();
+  assert.equal(await page.getByRole('alert').count(), 0, 'Retry recovers after an expired request');
+  await app.evaluate(() => {
+    globalThis.libraryResult = { error: 'Stale response must be ignored.' };
+    globalThis.releaseLibrary();
+  });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await page.getByRole('alert').count(), 0, 'A late timed-out response cannot replace the successful retry');
+  console.log('Settings template transition passed: one resize, loading feedback, keyboard focus, cancellation, reuse, live updates, errors, bounded waits and retry.');
 } finally { await app?.close(); await rm(work, { recursive: true, force: true }); }

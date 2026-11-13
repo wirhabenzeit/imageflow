@@ -120,7 +120,11 @@ export function App() {
   // like "Flow 1 of 2" do not vanish for a moment and shift the panel.
   const [lastReady, setLastReady] = useState<RenderStatus>();
   const [geometry, setGeometry] = useState<BookGeometry>();
-  const [thumbs, setThumbs] = useState<BookGeometry>();
+  const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean }>({ animate: true });
+  const thumbs = thumbnailState.geometry;
+  function setThumbs(geometry: BookGeometry | undefined, animate = true) {
+    setThumbnailState({ geometry, animate });
+  }
   const [hovered, setHovered] = useState<string>();
   const [hoveredTarget, setHoveredTarget] = useState<string>();
   // The inline editor that is open: for a marked node (a target), or for a box or element itself (`owner`).
@@ -181,13 +185,13 @@ export function App() {
     thumbAnimations.current = [];
     const offsets = reorderOffsets(previousThumbs.current, thumbs);
     previousThumbs.current = thumbs;
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (!thumbnailState.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     for (const offset of offsets) {
       const node = thumbList.current?.querySelector<HTMLElement>('.spread-thumb[data-spread="' + CSS.escape(offset.spread) + '"]');
       if (node) thumbAnimations.current.push(animateReorder(node, offset));
     }
     return () => { thumbAnimations.current.forEach(animation => animation.cancel()); };
-  }, [thumbs]);
+  }, [thumbs, thumbnailState.animate]);
   useEffect(() => {
     const cancel = () => {
       thumbAnimations.current.forEach(animation => animation.cancel());

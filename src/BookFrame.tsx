@@ -2,9 +2,10 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 're
 import { renderOrigin } from './desktop';
 import type { BookGeometry, BookView, RenderStatus } from './desktop';
 import { reorderOffsets } from './reorder-motion';
+import type { ReorderOffset } from './reorder-motion';
 
 type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean;
-  reorder?: 'preparing' | 'ready' };
+  reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
 export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, viewport, hold, accept }: {
@@ -14,7 +15,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   // The part of the frame on screen, for frames that load photos lazily, and the grid columns of the book view (0 for
   // one column); sent when a frame asks for it.
   viewport?: () => { top: number; bottom: number; left: number; right: number; columns: number } | undefined;
-  onGeometry: (geometry: BookGeometry | undefined) => void;
+  onGeometry: (geometry: BookGeometry | undefined, animateReorder?: boolean) => void;
   onStatus?: (status: RenderStatus, project: string) => void;
 }) {
   const target = hold ? undefined : renderOrigin + '/render/' + project + '?view=' + view + (query && '&' + query);
@@ -23,6 +24,28 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   const latest = useRef(new Map<string, FrameState>());
   const refs = useRef(new Map<string, HTMLIFrameElement>());
   const ids = [shown, shown === target ? undefined : target].filter((id): id is string => id !== undefined);
+
+  function storeFrame(id: string, frame: FrameState) {
+    latest.current = new Map(ids.map((key) => [key, key === id ? frame : latest.current.get(key) ?? {}]));
+    setFrames(Object.fromEntries(latest.current));
+  }
+  function publish(id: string, frame: FrameState) {
+    frame.published = true;
+    if (frame.status?.state === 'ready') {
+      setShown(id);
+      onGeometry(frame.geometry, frame.reorder !== 'skipped');
+    }
+    if (frame.status) onStatus?.(frame.status, project);
+  }
+  const skipReorder = useEffectEvent((id: string, element: HTMLIFrameElement | undefined) => {
+    const previous = latest.current.get(id);
+    if (id !== target || refs.current.get(id) !== element || previous?.reorder !== 'preparing') return;
+    const frame: FrameState = { ...previous, reorder: 'skipped' };
+    element?.contentWindow?.postMessage({ type: 'cancel-reorder' }, renderOrigin);
+    // A timeout may skip animation, but never bypass the render revision gate.
+    if (!accept || accept(project)) publish(id, frame);
+    storeFrame(id, frame);
+  });
 
   const receive = useEffectEvent((event: MessageEvent<BookGeometry | RenderStatus | { type: 'viewport-request' | 'reorder-ready' }>) => {
     if (event.origin !== renderOrigin || !event.data) return;
@@ -41,7 +64,14 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     const frame: FrameState = previous?.element === element ? { ...previous } : { element };
     if ('type' in data && data.type === 'reorder-ready') {
       if (frame.reorder !== 'preparing') return;
-      frame.reorder = 'ready';
+      const offsets = matchMedia('(prefers-reduced-motion: reduce)').matches ? [] :
+        reorderOffsets(shown ? latest.current.get(shown)?.geometry : undefined, frame.geometry);
+      const unchanged = offsets.length === frame.offsets?.length && offsets.every((offset, i) => {
+        const prepared = frame.offsets![i];
+        return offset.spread === prepared.spread && offset.x === prepared.x && offset.y === prepared.y;
+      });
+      frame.reorder = unchanged ? 'ready' : 'skipped';
+      if (!unchanged) element.contentWindow?.postMessage({ type: 'cancel-reorder' }, renderOrigin);
     } else if ('type' in data && data.type === 'geometry') {
       frame.geometry = data;
       if (id === shown) onGeometry(data);
@@ -56,25 +86,28 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
         // Prepare the hidden candidate at its previous positions before revealing
         // it; otherwise the artwork flashes at its destination for one frame.
         frame.reorder = 'preparing';
+        frame.offsets = offsets;
+        frame.preparedAt = performance.now();
         element.contentWindow?.postMessage({ type: 'prepare-reorder', offsets }, renderOrigin);
       }
       if (frame.reorder !== 'preparing') {
-        frame.published = true;
-        if (frame.status.state === 'ready') {
-          setShown(id);
-          onGeometry(frame.geometry);
-        }
-        onStatus?.(frame.status, project);
+        publish(id, frame);
       }
     }
-    latest.current = new Map(ids.map((key) => [key, key === id ? frame : latest.current.get(key) ?? {}]));
-    setFrames(Object.fromEntries(latest.current));
+    storeFrame(id, frame);
   });
   useEffect(() => {
     const listener = (event: MessageEvent) => receive(event);
     window.addEventListener('message', listener);
     return () => window.removeEventListener('message', listener);
   }, []);
+  useEffect(() => {
+    const frame = target ? frames[target] : undefined;
+    if (!target || frame?.reorder !== 'preparing' || frame.preparedAt === undefined) return;
+    const id = target;
+    const timer = setTimeout(() => skipReorder(id, frame.element), Math.max(0, 150 - (performance.now() - frame.preparedAt)));
+    return () => clearTimeout(timer);
+  }, [frames, target]);
   useLayoutEffect(() => {
     if (shown && latest.current.get(shown)?.reorder === 'ready') {
       refs.current.get(shown)?.contentWindow?.postMessage({ type: 'play-reorder', start: performance.timeOrigin + performance.now() }, renderOrigin);

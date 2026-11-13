@@ -20,7 +20,7 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
   const [error, setError] = useState('');
   const [pane, setPane] = useState<SettingsPane>();
   const [requestedPane, setRequestedPane] = useState<SettingsPane>();
-  const library = useLibrary(api);
+  const library = useLibrary(api, { timeoutMs: 5000 });
   const templatesReady = !!library.entries || !!library.error || !api;
   const content = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -82,13 +82,15 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
     <div ref={content}>
       <div className="settings-tabs" role="tablist" aria-label="Settings sections">
         {panes.map(({ value, label, icon }) => <button key={value} id={tab(value)} role="tab" aria-selected={pane === value}
-          aria-controls="settings-pane" tabIndex={pane === value ? 0 : -1} onClick={() => setRequestedPane(value)}
+          aria-controls="settings-pane" aria-busy={requestedPane === value && pane !== value}
+          tabIndex={(requestedPane ?? pane) === value ? 0 : -1} onClick={() => setRequestedPane(value)}
           onKeyDown={(event) => {
             if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
             const next = panes[(panes.findIndex((item) => item.value === value) + (event.key === 'ArrowRight' ? 1 : panes.length - 1)) % panes.length].value;
             setRequestedPane(next);
             document.getElementById(tab(next))?.focus();
-          }}><Icon name={icon} size={22} />{label}</button>)}
+          }}>{requestedPane === value && pane !== value ? <span className="settings-tab-loading" aria-hidden="true" /> :
+            <Icon name={icon} size={22} />}{label}</button>)}
       </div>
       {pane && <div className="settings-content" id="settings-pane" role="tabpanel" aria-labelledby={tab(pane)}>
         {pane === 'general' && <div className="settings-form">

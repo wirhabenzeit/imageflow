@@ -35,7 +35,8 @@ export function TemplateSettings({ api, library }: { api?: DesktopApi; library: 
   return <div className="template-settings">
     <p className="settings-note template-intro">New books are made from these templates. Each book keeps its own copy, so removing or
       replacing a template here never changes a book.</p>
-    {error && <p role="alert" className="error-text">{error}</p>}
+    {error && <div><p role="alert" className="error-text">{error}</p>
+      <button type="button" onClick={() => void library.reload()} aria-label="Retry loading templates">Retry</button></div>}
     <ul className="template-list" aria-label="Templates">
       {!entries && !error && <li className="muted">Loading templates…</li>}
       {entries?.map((entry) => <li key={entry.id} className={entry.unavailable ? 'unavailable' : undefined}>

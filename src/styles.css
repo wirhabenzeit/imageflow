@@ -533,6 +533,9 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .settings-tabs { display: flex; justify-content: center; gap: 2px; padding: 8px 16px 6px; border-bottom: 1px solid var(--edge); background: var(--toolbar-fill); }
 .studio .settings-tabs button { display: grid; justify-items: center; gap: 1px; min-width: 68px; min-height: 0; padding: 4px 8px 3px; border: 0; border-radius: 6px; background: transparent; box-shadow: none; color: var(--muted); font-size: 11px; }
 .studio .settings-tabs button svg { stroke-width: 1.2; }
+.settings-tab-loading { width: 22px; height: 22px; border: 2px solid var(--edge); border-top-color: var(--accent); border-radius: 50%; animation: settings-loading 800ms linear infinite; }
+@keyframes settings-loading { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .settings-tab-loading { animation: none; } }
 .studio .settings-tabs button[aria-selected="true"] { background: var(--subtle-hover); color: var(--accent); }
 .studio .settings-tabs button:hover:not(:disabled) { border-color: transparent; }
 .settings-content { padding: 22px 28px 24px; }
