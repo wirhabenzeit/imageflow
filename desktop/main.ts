@@ -811,7 +811,9 @@ function installMenu() {
         } })) },
       registered('guides', 'toggle-guides', 'checkbox'), { type: 'separator' },
       registered('zoom-in'), { ...registered('zoom-in'), id: 'zoom-in-equals', accelerator: 'CmdOrCtrl+=', visible: false, acceleratorWorksWhenHidden: true },
-      registered('zoom-out'), registered('zoom-actual'), registered('zoom-fit'), { type: 'separator' }, { role: 'togglefullscreen' },
+      registered('zoom-out'), registered('zoom-actual'), registered('zoom-fit'),
+      // macOS supplies its own full-screen item, including the system keyboard shortcut.
+      ...process.platform === 'darwin' ? [] : [{ type: 'separator' as const }, { role: 'togglefullscreen' as const }],
     ] },
     { role: 'windowMenu', submenu: [{ label: 'Welcome to ImageFlow', accelerator: 'CmdOrCtrl+Shift+1', click: () => showStart() },
       { type: 'separator' }, { role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] },
