@@ -185,7 +185,7 @@ With the `spread` builder, the render context types every parameter, box and ele
 | `p.integer` | `number` | `default`, `min`, `max`, `step` |
 | `p.number` | `number` | `default`, `min`, `max`, `step`, `unit` (display only) |
 | `p.string` | `string` | `default`, `multiline`, `maxLength`, `placeholder` |
-| `p.enum` | one of `options` | `default`, `options` (values), `labels` |
+| `p.enum` | one of `options` | `default`, `options` (an array of values or a value-to-label map), optional `labels` for arrays |
 | `p.color` | `#rrggbb` | `default` |
 | `p.date` | ISO date `YYYY-MM-DD` | `default`, `min`, `max`, `precision` (`day` or `month`) |
 | `p.file` | file ID, or `''` when none is assigned | `accept` (lowercase extensions such as `'.gpx'`); see File parameters |
@@ -825,3 +825,9 @@ New projects copy the starter template. Updating the app does not replace existi
 The editor renders the whole book for the canvas and again for thumbnails. Layout choices render independently and restart Markdown from the beginning; they are composition previews, not previews of the actual continuation fragment. Review the main book and exported proof for final flow. Large-book latency and memory use need separate measurement.
 
 The API is the in-process `imageflow` template module. There is no documented public REST or automation API. Desktop IPC and frame messages in `src/desktop.ts` are internal implementation details.
+
+### Enum maps and scaled CSS lengths
+
+`p.enum({ label: 'Language', options: { en: 'English', de: 'Deutsch' }, default: 'en' })` normalizes to the existing array-of-options declaration with labels. Keys are saved values, in insertion order; TypeScript checks the default against those keys. Array options and separate labels remain supported.
+
+`const at = ctx.geometry.design({ width: 420, height: 297 })` exposes `scaleX` and `scaleY`. `at.length(19, 'pt', 'x')` returns a CSS length, rounded to two decimal places. Choose `x`, `y`, `min` or `max` explicitly, including for type sizes; positions still scale on their respective axes. Units are `mm`, `pt` or `px`. Canvas dimensions must be positive and finite. The calendar uses the x axis to preserve its existing typography.

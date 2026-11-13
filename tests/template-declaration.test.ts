@@ -20,6 +20,16 @@ const format = printFormat({
   pageCount: { min: 2, max: 20, step: 2 }, ends: 'inside-covers',
 });
 
+test('enum label maps normalize to the existing saved parameter shape', () => {
+  const choices = { en: 'English', de: 'Deutsch' };
+  const short = p.enum({ label: 'Language', options: choices, default: 'de' });
+  assert.deepEqual(short, p.enum({ label: 'Language', options: ['en', 'de'], labels: choices, default: 'de' }));
+  assert.equal(templateSchema.safeParse({ id: 'enum', version: '1', contract: 1, format, parameters: { language: short },
+    spreads: { main: { label: 'Main', render: () => null } } }).success, true);
+  choices.de = 'German';
+  assert.equal(short.labels.de, 'Deutsch');
+});
+
 test('printFormat expands inset shorthands into an ordinary, complete PrintFormat', () => {
   assert.deepEqual(format, {
     label: 'Square', trim: { width: mm(200), height: mm(200) },

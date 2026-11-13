@@ -50,6 +50,13 @@ test('insets, grids and design coordinates are explicit millimetre arithmetic', 
   assert.deepEqual(design.right(10, 10, 50, 20), { x: 220, y: 15, width: 100, height: 30 });
   assert.equal(design.width(5), 10);
   assert.equal(design.height(4), 6);
+  assert.equal(design.scaleX, 2);
+  assert.equal(design.scaleY, 1.5);
+  assert.equal(design.length(10, 'pt', 'x'), '20.00pt');
+  assert.equal(design.length(10, 'mm', 'y'), '15.00mm');
+  assert.equal(design.length(10, 'pt', 'min'), '15.00pt');
+  assert.equal(design.length(10, 'px', 'max'), '20.00px');
+  assert.throws(() => geometry.design(format, { width: 0, height: 100 }), /positive finite/);
   assert.deepEqual(geometry.css({ x: -4, y: 2.5, width: 10, height: 20 }), { position: 'absolute', left: '-4mm', top: '2.5mm', width: '10mm', height: '20mm' });
 });
 

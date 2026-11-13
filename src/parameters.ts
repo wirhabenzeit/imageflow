@@ -49,9 +49,17 @@ function parameter<T extends Parameter['type']>(type: T) {
 }
 
 type FileOptions = Omit<Extract<Parameter, { type: 'file' }>, 'type' | 'default'>;
+type EnumParameter = Extract<Parameter, { type: 'enum' }>;
+function enumParameter<const Options extends Omit<EnumParameter, 'type'>>(options: Options): Options & { type: 'enum' };
+function enumParameter<const Choices extends Record<string, string>>(options: { label: string; options: Choices; default: NoInfer<Extract<keyof Choices, string>> }):
+  { type: 'enum'; label: string; options: Extract<keyof Choices, string>[]; labels: Choices; default: Extract<keyof Choices, string> };
+function enumParameter(options: { label: string; options: string[] | Record<string, string>; default: string; labels?: Record<string, string> }) {
+  return Array.isArray(options.options) ? { ...options, type: 'enum' as const }
+    : { label: options.label, type: 'enum' as const, default: options.default, options: Object.keys(options.options), labels: { ...options.options } };
+}
 export const p = {
   boolean: parameter('boolean'), string: parameter('string'), integer: parameter('integer'),
-  number: parameter('number'), enum: parameter('enum'), color: parameter('color'), date: parameter('date'),
+  number: parameter('number'), enum: enumParameter, color: parameter('color'), date: parameter('date'),
   // A file parameter starts unassigned.
   file: <const Options extends FileOptions>(options: Options) => ({ ...options, type: 'file' as const, default: '' as const }),
 };

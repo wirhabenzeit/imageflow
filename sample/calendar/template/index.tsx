@@ -7,7 +7,7 @@ import './styles.css';
 // narrow strip on the right: the photo's place written down the strip, a thin rule, the month, and its days.
 //
 // Layouts are drawn on a 420 × 297 design page (A-series landscape), measured from the trim edge.
-// `ctx.geometry.design` scales positions to the chosen format; type sizes are scaled with `fit` so every format keeps
+// `ctx.geometry.design` scales positions to the chosen format; type sizes use the design canvas’s explicit x-axis scaling so every format keeps
 // the same proportions.
 const canvas = { width: 420, height: 297 };
 const strip = { x: 393, width: 27 };
@@ -37,7 +37,7 @@ type Language = keyof typeof languages;
 
 const documentParameters = {
   firstMonth: p.date({ label: 'First month', default: '2027-01-01', precision: 'month' }),
-  language: p.enum({ label: 'Month and day names', default: 'en', options: ['en', 'de', 'fr', 'es', 'it', 'nl'], labels: languages }),
+  language: p.enum({ label: 'Month and day names', default: 'en', options: languages }),
   strip: p.color({ label: 'Strip colour', default: '#121212' }),
   // Dates, not days of a page: birthdays and holidays stay on their date when pages move.
   // Edited on the month pages: clicking a page's days opens the day picker (see MarkedDaysEditor).
@@ -57,10 +57,6 @@ const weekdayName = (date: Date, language: Language) => {
   return name.charAt(0).toLocaleUpperCase(language) + name.slice(1);
 };
 
-// Type sizes are designed for A3 and scale with the trim width, like the positions do.
-const scale = (context: Pick<Context, 'format'>, value: number, unit: 'pt' | 'mm') => (value * context.format.trim.width / canvas.width).toFixed(2) + unit;
-const fit = (context: Pick<Context, 'format'>, points: number) => scale(context, points, 'pt');
-
 /** The page: the photo fills everything left of the strip, both reaching into the bleed. */
 function Page({ context, className, children }: { context: Pick<Context, 'document' | 'geometry' | 'format'>; className: string; children?: ImageFlowNode }) {
   const { document, geometry } = context;
@@ -68,8 +64,8 @@ function Page({ context, className, children }: { context: Pick<Context, 'docume
   const bleed = geometry.page('bleed');
   const left = at.page(strip.x, 0, 0, 0).x;
   return <Spread className={'wall-calendar ' + className} style={{ '--strip': document.strip, '--highlight': document.highlight,
-    '--place-size': fit(context, 19), '--caption-size': fit(context, 17), '--day-size': fit(context, 10.5), '--weekday-size': fit(context, 6.5), '--year-size': fit(context, 38),
-    '--day-row': scale(context, 6.25, 'mm'), '--day-gap': scale(context, 1.4, 'mm') }}>
+    '--place-size': at.length(19, 'pt', 'x'), '--caption-size': at.length(17, 'pt', 'x'), '--day-size': at.length(10.5, 'pt', 'x'), '--weekday-size': at.length(6.5, 'pt', 'x'), '--year-size': at.length(38, 'pt', 'x'),
+    '--day-row': at.length(6.25, 'mm', 'x'), '--day-gap': at.length(1.4, 'mm', 'x') }}>
     <div className="strip" style={geometry.css({ ...bleed, x: left, width: bleed.x + bleed.width - left })} />
     {children}
   </Spread>;

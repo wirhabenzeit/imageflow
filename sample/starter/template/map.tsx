@@ -17,7 +17,7 @@ export const mapAttribution = '© OpenFreeMap © OpenMapTiles © OpenStreetMap c
 
 export const mapParameters = {
   track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
-  style: p.enum({ label: 'Map style', default: 'liberty', options: ['liberty', 'bright', 'positron'], labels: styles }),
+  style: p.enum({ label: 'Map style', default: 'liberty', options: styles }),
   longitude: p.number({ label: 'Longitude', default: 17.75, min: -180, max: 180, step: .00001 }),
   latitude: p.number({ label: 'Latitude', default: 69.35, min: -85, max: 85, step: .00001 }),
   // The MapLibre zoom of the printed map: its width in CSS pixels is the element's width at 96 per inch.

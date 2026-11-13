@@ -320,3 +320,11 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: calenda
   spreads: ({ spread }) => ({ a: spread({ label: 'A', render: (ctx) => <Spread><ol {...ctx.edit('document.marked')} /></Spread> }) }) });
 // Element editors read the same context.
 function WithContext({ context }: ElementEditorProps<typeof route, 'zoom'>) { return <div>{context.page.left}{context.formatId}</div>; }
+
+// Enum maps infer saved values from their keys, with the same checks as array options.
+const languageMap = p.enum({ label: 'Language', options: { en: 'English', de: 'Deutsch' }, default: 'en' });
+const languageValue: 'en' | 'de' = languageMap.default;
+// @ts-expect-error unknown default
+p.enum({ label: 'Language', options: { en: 'English' }, default: 'fr' });
+// @ts-expect-error labels belong in the map
+p.enum({ label: 'Language', options: { en: 'English' }, default: 'en', labels: { en: 'English' } });

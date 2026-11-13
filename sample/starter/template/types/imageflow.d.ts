@@ -167,6 +167,9 @@ export const p: {
   number<const O extends Options<NumberParameter>>(options: Known<O, Options<NumberParameter>>): O & { type: 'number' };
   enum<const T extends string>(options: Common & { options: readonly T[]; default: NoInfer<T>; labels?: Partial<Record<T, string>> }):
     Common & { options: readonly T[]; default: T; labels?: Partial<Record<T, string>>; type: 'enum' };
+  /** A value-to-label map; keys become the saved options in insertion order. */
+  enum<const C extends Record<string, string>>(options: Common & { options: C; default: NoInfer<Extract<keyof C, string>> }):
+    Common & { options: Extract<keyof C, string>[]; default: Extract<keyof C, string>; labels: C; type: 'enum' };
   color<const O extends Options<ColorParameter>>(options: Known<O, Options<ColorParameter>>): O & { type: 'color' };
   date<const O extends Options<DateParameter>>(options: Known<O, Options<DateParameter>>): O & { type: 'date' };
   file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: Known<O, Omit<FileParameter, 'type' | 'default'>>): O & { type: 'file'; default: '' };
@@ -771,6 +774,10 @@ export type DesignCanvas = {
   page(x: number, y: number, width: number, height: number): Rect;
   width(value: number): number;
   height(value: number): number;
+  /** Horizontal and vertical ratios of the current trim to the design canvas. */
+  scaleX: number; scaleY: number;
+  /** CSS length, rounded to two decimals. Choose the scaling axis explicitly, including for type sizes. */
+  length(value: number, unit: 'mm' | 'pt' | 'px', axis: 'x' | 'y' | 'min' | 'max'): string;
 };
 export const geometry: {
   /** One page of the spread. Works for single first and last pages too. */
