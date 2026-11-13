@@ -15,7 +15,7 @@ import { authoringErrorResult } from '../desktop/authoring-errors';
 import { CheckRenditionCache } from '../desktop/check-cache';
 import { photoFile } from '../desktop/photos';
 
-// Rendering itself is exercised by smoke-authoring-preview; these tests exercise the consistency boundary.
+// These tests exercise the consistency boundary; rendering itself is checked by the desktop smoke tests.
 const status: Extract<RenderStatus, { state: 'ready' }> = {
   state: 'ready', pages: 2, units: [], errors: [], warnings: [], flow: {}, anchors: [],
   template: {

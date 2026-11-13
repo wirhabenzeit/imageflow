@@ -659,7 +659,7 @@ render: (ctx) => {
 }
 ```
 
-Use `page` and `spread` for physical layouts that keep margins in millimetres on every format. Use `design` to scale a composition drawn on a fixed canvas, as the starter does. These numbers are physical lengths for CSS, unlike the structured `mm()`, `pt()` and `inch()` values used in print-format declarations. The starter's layouts use these helpers; a recorded baseline (`tests/fixtures/starter-geometry.json`, checked by `scripts/smoke-starter-geometry.mjs`) confirms that they render the same millimetre geometry as the earlier hand-written CSS in both formats.
+Use `page` and `spread` for physical layouts that keep margins in millimetres on every format. Use `design` to scale a composition drawn on a fixed canvas, as the starter does. These numbers are physical lengths for CSS, unlike the structured `mm()`, `pt()` and `inch()` values used in print-format declarations. The starter's layouts use these helpers.
 
 ## Platform components
 
