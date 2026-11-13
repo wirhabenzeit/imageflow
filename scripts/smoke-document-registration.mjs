@@ -1,3 +1,4 @@
+import { packagedMacApp, packagedMacExecutable } from './mac-paths.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cp, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
@@ -7,7 +8,7 @@ import { _electron } from 'playwright-core';
 import metadata from '../package.json' with { type: 'json' };
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const bundle = join(root, 'out', 'ImageFlow-darwin-' + process.arch, 'ImageFlow.app');
+const bundle = packagedMacApp(root);
 const info = JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', join(bundle, 'Contents/Info.plist')]).toString());
 assert.equal(info.CFBundleShortVersionString, metadata.version, 'The Mac bundle must display the release version.');
 const type = info.UTExportedTypeDeclarations.find((type) => type.UTTypeIdentifier === 'ch.wirhabenzeit.imageflow.book');
@@ -22,7 +23,7 @@ const second = join(work, 'Finder Open.imageflow');
 for (const path of [first, second]) await cp(join(root, 'sample/starter'), path, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
 let app;
 try {
-  app = await _electron.launch({ executablePath: join(bundle, 'Contents/MacOS/ImageFlow'), args: ['--user-data-dir=' + join(work, 'profile'), first],
+  app = await _electron.launch({ executablePath: packagedMacExecutable(root), args: ['--user-data-dir=' + join(work, 'profile'), first],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
   const one = await app.firstWindow();
   assert.equal(await app.evaluate(({ app }) => app.getVersion()), metadata.version, 'About ImageFlow must use the release version.');
