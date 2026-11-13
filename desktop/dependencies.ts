@@ -238,6 +238,8 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
       await mkdir(join(staging, 'types'), { recursive: true });
       await writeFile(join(staging, 'types', 'untyped.d.ts'), manifest.untyped.map((name) => 'declare module ' + JSON.stringify(name) + ';').join('\n') + '\n');
     }
+    // Packages ship declarations in folders such as dist/ that ignore rules commonly drop; the saved bundle must be kept whole.
+    await writeFile(join(staging, '.gitignore'), '# The saved dependency bundle of this template (ImageFlow ADR 0006). Keep every file.\n!*\n');
     await writeFile(join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await replace();
     await updateTsconfig(root);

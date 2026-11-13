@@ -62,6 +62,7 @@ test('the rebuild saves bundled modules, CSS, versions, licences and declaration
   assert.equal(manifest.licenses['tiny-lib'], 'LICENSES/tiny-lib.txt');
   assert.equal(manifest.licenses['untyped-lib'], 'ISC');
   assert.match(await readFile(join(root, 'vendor/LICENSES/tiny-lib.txt'), 'utf8'), /tiny-lib authors/);
+  assert.match(await readFile(join(root, 'vendor/.gitignore'), 'utf8'), /^!\*$/m, 'ignore rules above must not drop vendored files');
   assert.equal(await readFile(join(root, 'vendor/types/packages/tiny-lib/helper.d.ts'), 'utf8'), 'export type Helper = (n: number) => number;\n');
   const tsconfig = JSON.parse(await readFile(join(root, 'tsconfig.json'), 'utf8'));
   assert.deepEqual(tsconfig.compilerOptions.paths['*'], ['./vendor/types/packages/*', './vendor/types/packages/@types/*']);
