@@ -391,8 +391,7 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
 // Fits sheets to the frame width and reports where sheets and boxes landed. In book grid mode, each sheet fits
 // one column and book order runs left to right, then continues on the next row. The book grows vertically.
 type GridRequest = { columns: number };
-function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest,
-  expansion?: { after: string; height: number }) {
+function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest) {
   if (view === 'thumbs') {
     let animations: Animation[] = [];
     window.addEventListener('message', (event: MessageEvent) => {
@@ -443,14 +442,12 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     const count = gridColumns || columns;
     root.style.setProperty('--if-columns', String(count));
     const column = (width - pad * 2 - (gridColumns ? gap : columnGap) * (count - 1)) / count;
-    const expandedRow = expansion ? Math.floor(sheets.findIndex(({ spread }) => spread === expansion.after) / count) : -1;
-    for (const [index, { sheet }] of sheets.entries()) {
+    for (const { sheet } of sheets) {
       const fitted = column / sheet.offsetWidth;
       const scale = Math.max(0.01, Math.min(fitted, 1));
       const slot = sheet.parentElement!;
       slot.style.width = sheet.offsetWidth * scale + 'px';
       slot.style.height = sheet.offsetHeight * scale + 'px';
-      if (view === 'layouts') slot.style.marginBottom = expandedRow >= 0 && Math.floor(index / count) === expandedRow ? expansion!.height + 'px' : '';
       sheet.style.setProperty('--if-zoom', String(scale));
     }
     const bounds = root.getBoundingClientRect();
@@ -781,8 +778,7 @@ async function settle(images: HTMLImageElement[]) {
 
 // Renders one spread in every layout of the template, carrying its content over the way switching layouts does.
 // Markdown boxes show their source from the beginning; the previews are for choosing a layout, not for proofing.
-async function renderLayouts(root: HTMLElement, book: RenderProject, template: Template, info: TemplateInfo, spreadId: string,
-  expansion?: { after: string; height: number }) {
+async function renderLayouts(root: HTMLElement, book: RenderProject, template: Template, info: TemplateInfo, spreadId: string) {
   const { spreads } = book.project;
   const index = spreads.findIndex(({ id }) => id === spreadId);
   if (index < 0) throw new Error('Spread does not exist.');
@@ -818,7 +814,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
     for (const [source, targets] of sources) flow.run(markdownToHtml(book.texts[source]), targets, 'columns');
     return { spread: definition, sheet };
   });
-  layoutBook(root, sheets, 'layouts', format, undefined, expansion);
+  layoutBook(root, sheets, 'layouts', format);
   publish({ state: 'ready', template: info, pages: sequence.count, units: [], errors: [], warnings: [], flow: {}, anchors: anchors.anchors });
 }
 
@@ -1070,7 +1066,7 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   const variants = ids.map((id) => ({ id, label: template.spreads[id].label, variant: { ...template.spreads[id].variant } }));
   let document = resolveParams(template.parameters, book.project.params);
   const format = resolveFormat(template.format);
-  root.className = 'if-editor';
+  root.className = 'if-editor if-layout-settings';
   let saved = spread.definition;
   let disabled = readOnly;
 
@@ -1253,9 +1249,7 @@ export async function startRender(root: HTMLElement) {
         : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
           : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
     if (edit && view === 'layouts') {
-      const height = Number(query.get('gapHeight'));
-      const expansion = query.has('gapAfter') && height > 0 && height <= 1000 ? { after: query.get('gapAfter')!, height } : undefined;
-      await renderLayouts(root, book, template, info, query.get('spread') ?? '', expansion);
+      await renderLayouts(root, book, template, info, query.get('spread') ?? '');
       return;
     }
     const activeChains = [...chains];

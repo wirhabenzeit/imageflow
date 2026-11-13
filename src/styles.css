@@ -217,14 +217,11 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 
 /* Layout picker: the template renders the spread in each layout; buttons sit under a transparent frame. */
 .field-label { font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
-.layout-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.layout-heading button.link { all: unset; cursor: default; font-size: 12px; color: var(--accent); white-space: nowrap; }
-.layout-heading button.link:focus-visible { outline: 2px solid var(--accent); }
 .layout-picker { position: relative; margin: 0 -6px; }
 .layout-picker:not(.placed) { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 0 6px; }
 .layout-picker .book-frame { z-index: 1; }
-.layout-picker[aria-busy="true"] .book-frame { opacity: .45; }
-.layout-picker[aria-busy="true"] .book-frame-pending { opacity: .01; }
+.layout-picker .book-frame-pending { opacity: 0; }
+.studio .layout-option:disabled { opacity: 1; }
 .studio .layout-option {
   display: flex; align-items: flex-end; padding: 0 4px 3px; min-height: 0; border: 0; border-radius: 6px;
   background: transparent; font-size: 11px; font-weight: 500; text-align: left;
@@ -347,9 +344,6 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .crop-controls p { margin: 4px 0; }
 
 .inspector .box-photo-info select.box-photo-pick { margin-top: 3px; padding: 3px 6px; font-size: 12px; }
-/* What switching to the pointed-at layout would do; reserves its line so the panel does not shift. */
-
-
 /* Template-supplied element editors */
 .element-editor { padding: 0; border: 0; border-radius: 12px; background: var(--control-surface); color: var(--text); box-shadow: 0 24px 80px #0007;
   width: min(560px, 90vw); font: 13px/1.45 var(--ui-font); }
@@ -507,10 +501,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
   .quicklook[open], .edit-popover, .inspector details.flash { animation: none; }
 }
 
-/* Hover consequences float over the Inspector instead of reserving an empty block. */
 .layout-picker-shell { position: relative; }
-.layout-consequence { position: absolute; z-index: 8; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 8px 10px; background: var(--popup-surface); border: 1px solid var(--control-border); border-radius: 6px; box-shadow: 0 4px 16px #0002; font-size: 11px; line-height: 1.45; pointer-events: none; }
-.layout-consequence[hidden] { display: none; }
 .sources { container-type: inline-size; }
 .sources-bar { overflow: visible; }
 .sources-bar .spacer { min-width: 0; flex-shrink: 1; }
@@ -682,9 +673,9 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .starter-choice .template-preview { flex: 0 0 80px; height: 100px; }
 .starter-description { min-width: 0; }
 .starter-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.inline-layout-picker { margin: 12px 0; border: 1px solid var(--edge); border-radius: 6px; overflow: hidden; background: var(--control-fill); }
-.inline-layout-picker[aria-disabled="true"] iframe { opacity: .5; }
-.inline-layout-picker p { margin: 6px 10px; font-size: 11px; }
+.layout-family-field[aria-disabled="true"] iframe { opacity: .5; }
+.layout-family-field iframe { background: transparent; }
+.layout-family-field p { margin: 0; font-size: 11px; }
 .studio .content-file-icon { display: grid; place-items: center; font: 500 20px Georgia, serif; color: var(--muted); }
 .studio .box-photo-pick { width: 100%; min-width: 0; margin-top: 3px; padding: 3px 6px; font-size: 12px; }
 .book-loading { margin: auto; padding: 60px; color: var(--muted); }
@@ -742,10 +733,6 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .ee-warnings { padding: 3px 16px; font-size: 11px; }
 .ee-header .muted { font-size: 11px; }
 .text-flow { float: right; font-size: 10px; font-weight: 400; padding-left: 8px; }
-.inline-layout-picker { position: relative; }
-.layout-family-slot { position: absolute; left: 0; right: 0; z-index: 2; }
-.layout-family-slot .inline-layout-picker { margin: 0; }
-.inline-layout-picker > p { position: absolute; bottom: 0; left: 0; right: 0; margin: 0; padding: 4px 8px; background: var(--popup-surface); }
 .project-identity span:empty { display: none; }
 .starter-choices { display: block; }
 .starter-group h2 { margin: 8px 0 12px; font-size: 12px; color: var(--muted); }

@@ -284,21 +284,16 @@ const photoGrid = <const S extends keyof typeof gridSizes>(size: S) => (ctx: Ren
   </Paper>;
 };
 
-// The grid family's picker: one "Grid size" choice drawn as small grids. It chooses by the variants' tags, so a new
-// size needs only a new layout with its tag.
+// The grid family's size is a regular segmented field beside the layout's other settings.
 function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerProps) {
-  return <div className="variant-picker" role="radiogroup" aria-label="Grid size">
+  return <div className="if-control"><div className="pc-segmented" role="radiogroup" aria-label="Grid size">
     {variants.map(({ id, variant }) => {
       const size = String(variant.size);
-      const columns = Object.hasOwn(gridSizes, size) ? gridSizes[size as keyof typeof gridSizes].columns : 1;
       return <button key={id} type="button" role="radio" aria-checked={id === current} disabled={readOnly} onClick={() => choose(id)}>
-        <span className="variant-grid" style={{ gridTemplateColumns: 'repeat(' + columns + ', 1fr)' }} aria-hidden="true">
-          {Array.from({ length: columns * columns }, (_, i) => <span key={i} />)}
-        </span>
         {size.replace('x', ' × ')}
       </button>;
     })}
-  </div>;
+  </div></div>;
 }
 
 export default defineTemplate({

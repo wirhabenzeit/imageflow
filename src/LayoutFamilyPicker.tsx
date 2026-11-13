@@ -7,9 +7,9 @@ import { describeLayoutChange, familyLayouts, planLayoutChange, switchLayout } f
 import { useEditorFrame } from './editor-frame';
 
 // A family keeps one frame while choices save. Its context follows the book without resetting height or focus.
-export function LayoutFamilyPicker({ project, template, spread, params, family, readOnly, blocked, edit, close }: {
+export function LayoutFamilyPicker({ project, template, spread, params, family, readOnly, blocked, edit }: {
   project: string; template: TemplateInfo; spread: SpreadState; params: Values; family: string; readOnly: boolean; blocked?: string;
-  edit: (change: Edit, notice?: string | (() => string)) => void; close: () => void;
+  edit: (change: Edit, notice?: string | (() => string)) => void;
 }) {
   const declared = template.layoutFamilies?.[family];
   const variants = familyLayouts(template.spreads, family);
@@ -22,7 +22,7 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
   const title = declared?.picker?.label ?? declared?.label ?? family;
   const choose = (reported: unknown) => {
     const next = reported && typeof reported === 'object' ? (reported as { layout?: unknown }).layout : undefined;
-    if (failed || stale || blocked || readOnly || next === spread.definition || applied.current === next) return;
+    if (failed || stale || blocked || readOnly || next === (applied.current ?? spread.definition)) return;
     if (typeof next !== 'string' || !variants.includes(next)) {
       setError('The picker must choose a layout from ' + (declared?.label ?? family) + '.');
       return;
@@ -31,12 +31,14 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
     let consequence = '';
     edit(({ project: files }) => {
       const state = files.spreads.find(({ id }) => id === spread.id);
-      if (!state || state.definition !== spread.definition) return;
+      if (!state || !variants.includes(state.definition) || state.definition === next) return;
       consequence = describeLayoutChange(planLayoutChange(state, next, template.spreads));
       switchLayout(state, next, template.spreads);
     }, () => consequence ? template.spreads[next].label + ' · ' + consequence : '');
   };
-  const { height, ready, error, setError, failed } = useEditorFrame(frame, { draft: choose, done: choose, cancel: close });
+  const { height, ready, error, setError, failed } = useEditorFrame(frame,
+    { draft: choose, done: choose, cancel: () => frame.current?.blur() }, undefined,
+    { initialHeight: 28, minimumHeight: 1, focusOnReady: false });
   const disabled = readOnly || stale || !!blocked || failed;
   const contextKey = JSON.stringify([spread.definition, params, disabled]);
   useEffect(() => {
@@ -44,9 +46,9 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
     frame.current?.contentWindow?.postMessage({ type: 'layout-picker-state', saved: spread.definition, document: params, readOnly: disabled }, renderOrigin);
     if (applied.current === spread.definition) applied.current = undefined;
   }, [ready, contextKey]);
-  return <div id="inline-layout-picker" className="inline-layout-picker" role="region" aria-label={title} aria-disabled={disabled} title={blocked}>
+  return <div className="field layout-family-field" role="region" aria-label={title} aria-disabled={disabled} aria-busy={!ready || undefined} title={blocked}>
+    <span className="field-name">{title}</span>
     <iframe ref={frame} className="element-editor-frame" inert={disabled} title={title} src={source} style={{ height }} />
-    {!ready && !error && <p className="muted" role="status">Loading…</p>}
     {stale && <p className="error-text" role="alert">Layouts changed. Reopen the picker.</p>}
     {error && !stale && <p className="error-text" role="alert">{error}</p>}
   </div>;

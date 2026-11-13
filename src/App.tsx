@@ -25,7 +25,7 @@ import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
 import { assignmentCounts, firstSpreadLayouts, newSpread, openingSpreadStates, readEdit, resolveEditPath, sourceUsage } from './editing';
-import { moveContent, swapContent } from './layouts';
+import { moveContent, pickerFamily, swapContent } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { Edit } from './Inspector';
@@ -145,7 +145,6 @@ export function App() {
   const [cropping, setCropping] = useState<{ spread: string; box: string; layout: string; saved?: string; settling?: string }>();
   // A template-supplied editor that is open: an element's, or a document editor opened from a spread.
   const [elementEditor, setElementEditor] = useState<EditorTarget>();
-  const [layoutPicker, setLayoutPicker] = useState<{ spread: string; family: string; layout: string }>();
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const [dropTarget, setDropTarget] = useState<string>();
@@ -239,6 +238,7 @@ export function App() {
   const spreads = summary?.project.spreads ?? [];
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
+  const layoutFamily = spread && template && pickerFamily(template.spreads, spread.definition, template.layoutFamilies);
   const sequence = template && pageSequence(spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
   const pageLabels = spreads.map((_, i) => pageLabel(sequence?.spreads[i]?.page ?? {}));
   const writable = !!summary && !summary.readOnly && !reload && !agentWorking;
@@ -1215,8 +1215,7 @@ export function App() {
   const hoveredSheet = hovered !== spread?.id ? geometry?.sheets.find(({ spread: id }) => id === hovered) : undefined;
   const previewError = typeof reload === 'object' ? reload.error : render?.state === 'error' ? render.message : '';
   const issue = previewError || error;
-  const previewNotice = agentWorking ? 'Agent is updating the book…' : previewError ? (geometry ? 'Showing the last successful preview' : 'Book preview unavailable') :
-    !canvasReady ? 'Building book preview…' : '';
+  const previewNotice = agentWorking ? 'Agent is updating the book…' : previewError ? (geometry ? 'Showing the last successful preview' : 'Book preview unavailable') : '';
   const blockedInline = editing?.held && !resumeInline && (canvasReady
     ? 'This field changed while you were editing. Close it and open the field again to continue.'
     : 'Editing is paused while the preview is out of date.');
@@ -1487,16 +1486,10 @@ export function App() {
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
         open={(owner) => { reveal(spread.id); openOwner(spread.id, owner); }}
         openTarget={(target) => { reveal(spread.id); openTarget(target); }} place={(from, to) => place(spread.id, from, to)}
-        openPicker={(family, layout) => {
-          if (readyId.current !== summary.id) return;
-          setEditing(undefined);
-          setLayoutPicker((current) => current?.spread === spread.id && current.family === family ? undefined : { spread: spread.id, family, layout });
-        }}
-        expandedFamily={layoutPicker?.spread === spread.id ? layoutPicker.family : undefined}
-        familyPicker={template && layoutPicker?.spread === spread.id && <LayoutFamilyPicker
-          key={JSON.stringify([summary.handle, spread.id, layoutPicker.family, summary.templateHash, template.format, summary.network])}
-          project={summary.id} template={template} spread={spread} params={summary.project.params} family={layoutPicker.family}
-          readOnly={summary.readOnly} blocked={previewNotice || undefined} edit={editCanvas} close={() => setLayoutPicker(undefined)} />}
+        familyPicker={template && layoutFamily && <LayoutFamilyPicker
+          key={JSON.stringify([summary.handle, spread.id, layoutFamily, summary.templateHash, template.format, summary.network])}
+          project={summary.id} template={template} spread={spread} params={summary.project.params} family={layoutFamily}
+          readOnly={!writable} blocked={previewNotice || undefined} edit={edit} />}
         edit={edit} highlight={setHighlight} issues={issue} select={select} />}
       </div>
     </div>

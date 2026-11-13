@@ -100,6 +100,12 @@ try {
   assert.equal(await pickerHasNoOverlap(), true, 'Layout labels must not overlap while the next preview is pending.');
   assert.equal(await picker.getAttribute('aria-busy'), 'true');
   assert.equal(await picker.getByRole('radio').evaluateAll((items) => items.every((item) => item.disabled)), true);
+  assert.equal(await picker.getByRole('radio').evaluateAll((items) => items.every((item) => getComputedStyle(item).opacity === '1')), true,
+    'Retained layout choices do not fade while new previews are pending');
+  assert.equal(await w.locator('iframe.book-frame-layouts:not([aria-hidden="true"])').evaluate((node) => getComputedStyle(node).opacity), '1',
+    'The displayed artwork stays fully opaque');
+  assert.equal(await w.locator('iframe.book-frame-layouts[data-current]').evaluate((node) => getComputedStyle(node).opacity), '0',
+    'A pending replacement cannot brighten the displayed artwork');
   assert.equal(await w.locator('iframe.book-frame-layouts[data-current]').getAttribute('data-ready'), null,
     'A recreated iframe cannot reuse readiness from its previous mount.');
   await w.evaluate(() => {
@@ -141,12 +147,12 @@ try {
   assert.deepEqual((await settlements()).boxes.hero.crops, { grid: { centerX: 0.3, centerY: 0.5, zoom: 2 } });
   assert.deepEqual((await settlements()).boxes.hero.focus, { centerX: 0.3, centerY: 0.5 });
 
-  // Pointing at a layout says what switching does, without changing anything.
+  // Hovering and focusing layouts do not add floating captions or change the spread.
   const before = await read();
   await layout('Two photos').hover();
-  assert.equal(await w.locator('#layout-consequence').textContent(), 'Two photos · 2 photos set aside');
+  assert.equal(await w.locator('#layout-consequence').count(), 0);
+  assert.equal(await layout('Two photos').getAttribute('title'), null);
   await layout('Text spread').focus();
-  assert.equal(await w.locator('#layout-consequence').textContent(), 'Text spread · 4 photos set aside');
   assert.deepEqual(await read(), before);
 
   // A → B: the shared boxes show, the others stay on the spread without Book check warnings.
@@ -184,23 +190,24 @@ try {
   // B → C (no photo boxes) → A: the replacement and removal hold, the other photos and their crops return.
   await rerendered(() => layout('Text spread').click());
   assert.equal(await kept(), 'Set aside · 3 photos');
-  // Opening a family outside it leaves every variant unselected until a choice is applied.
+  // A family tile selects its layout normally; its variant field appears beside the other spread settings.
   const pickerRegion = w.getByRole('region', { name: 'Grid size' });
-  const pickerFrame = w.frameLocator('.inline-layout-picker iframe');
+  const pickerFrame = w.frameLocator('.layout-family-field iframe');
   const gridSize = (name) => pickerFrame.getByRole('radio', { name, exact: true });
   const pickerReady = async () => {
     await pickerRegion.waitFor();
     await gridSize('2 × 2').waitFor();
-    await w.waitForFunction(() => !document.querySelector('.inline-layout-picker')?.textContent.includes('Loading…'));
+    await w.waitForFunction(() => document.querySelector('.layout-family-field')?.getAttribute('aria-busy') !== 'true');
   };
-  await layout('Photo grid').click();
+  await rerendered(() => layout('Photo grid').click());
   await pickerReady();
-  assert.equal(await gridSize('2 × 2').getAttribute('aria-checked'), 'false');
+  assert.equal(await gridSize('2 × 2').getAttribute('aria-checked'), 'true');
   assert.equal(await gridSize('3 × 3').getAttribute('aria-checked'), 'false');
   assert.equal(await w.locator('dialog.layout-picker-dialog').count(), 0);
-  // The canvas and sidebar remain interactive while the inline picker is open.
+  // These are ordinary, always-visible controls: no extra link, drawer or dialog.
+  assert.equal(await button('Grid size…').count(), 0);
   assert.equal(await button('Add').isEnabled(), true);
-  await rerendered(() => gridSize('2 × 2').click());
+  await gridSize('2 × 2').click();
   assert.equal(await statusLine(), '');
   state = await settlements();
   assert.deepEqual(Object.fromEntries(Object.entries(state.boxes).map(([id, box]) => [id, box.photo])),
@@ -212,32 +219,40 @@ try {
   assert.deepEqual(await settlements(), state);
   assert.deepEqual((await status()).errors, []);
   // A variant is an immediate, single Undo step. No Cancel/Done round trip.
-  if (!(await pickerRegion.count())) await button('Grid size…').click();
   await pickerReady();
   assert.equal(await gridSize('2 × 2').getAttribute('aria-checked'), 'true');
-  await w.locator('.inline-layout-picker iframe').evaluate((node) => { node.dataset.reuseProbe = 'retained'; });
+  await w.locator('.layout-family-field iframe').evaluate((node) => { node.dataset.reuseProbe = 'retained'; });
   const pickerHeight = await pickerRegion.evaluate((node) => node.getBoundingClientRect().height);
   await w.evaluate(() => {
     window.__pickerHeights = [];
+    window.__pickerVisuals = [];
     window.__pickerMeasure = setInterval(() => {
-      const node = document.querySelector('.inline-layout-picker');
+      const node = document.querySelector('.layout-family-field');
       window.__pickerHeights.push(node?.getBoundingClientRect().height ?? 0);
+      window.__pickerVisuals.push({
+        notice: document.querySelector('.preview-state, .preview-message')?.textContent ?? '',
+        controls: [...document.querySelectorAll('.layout-option')].map((node) => getComputedStyle(node).opacity),
+        frame: [...document.querySelectorAll('iframe.book-frame-layouts:not([aria-hidden="true"])')].map((node) => getComputedStyle(node).opacity),
+      });
     }, 10);
   });
   await rerendered(() => gridSize('3 × 3').click());
   await w.waitForFunction(() => document.querySelector('iframe.book-frame-layouts[data-current][data-ready]'));
-  assert.equal(await w.locator('.inline-layout-picker iframe').getAttribute('data-reuse-probe'), 'retained', 'Saving a choice retains the picker frame');
+  assert.equal(await w.locator('.layout-family-field iframe').getAttribute('data-reuse-probe'), 'retained', 'Saving a choice retains the picker frame');
   const heights = await w.evaluate(() => { clearInterval(window.__pickerMeasure); return window.__pickerHeights; });
   assert.ok(heights.every((height) => Math.abs(height - pickerHeight) < 1), 'Saving a choice keeps the picker height stable');
+  const visuals = await w.evaluate(() => window.__pickerVisuals);
+  assert.ok(visuals.every(({ notice, controls, frame }) => !notice && [...controls, ...frame].every((opacity) => opacity === '1')),
+    'A grid-size change keeps the remaining previews quiet without a rebuilding badge or opacity changes');
   const position = await pickerRegion.evaluate((node) => {
-    const family = document.querySelector('.layout-family[aria-expanded="true"]').getBoundingClientRect();
-    const next = [...document.querySelectorAll('.layout-option')].map((item) => item.getBoundingClientRect())
-      .filter((rect) => rect.top > family.bottom + 1).sort((a, b) => a.top - b.top)[0];
+    const browser = document.querySelector('.layout-picker').getBoundingClientRect();
+    const gap = document.querySelector('input[aria-label="Gap"]').closest('.field').getBoundingClientRect();
     const picker = node.getBoundingClientRect();
-    return { familyBottom: family.bottom, pickerTop: picker.top, pickerBottom: picker.bottom, nextTop: next?.top };
+    return { browserBottom: browser.bottom, pickerTop: picker.top, pickerBottom: picker.bottom, gapTop: gap.top, height: picker.height };
   });
-  assert.ok(position.pickerTop >= position.familyBottom && position.pickerTop - position.familyBottom < 12, 'The picker sits directly under its preview row: ' + JSON.stringify(position));
-  assert.ok(position.nextTop >= position.pickerBottom, 'Following layout rows clear the inline picker');
+  assert.ok(position.pickerTop >= position.browserBottom, 'Grid size follows the complete layout browser');
+  assert.ok(position.gapTop >= position.pickerBottom && position.gapTop - position.pickerBottom < 16, 'Grid size and Gap are consecutive fields');
+  assert.ok(position.height < 60, 'The grid-size field is compact');
   assert.equal(await statusLine(), '');
   assert.equal((await settlements()).definition, 'grid9');
   assert.equal(await frame.locator('[data-spread="settlements"] [data-box]').count(), 9);

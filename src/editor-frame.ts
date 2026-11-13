@@ -2,8 +2,8 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { renderOrigin } from './desktop';
 
-// The messages a template-supplied editor frame (an element editor or a layout picker) posts to its dialog. Drafts
-// and committed values are the frame's own report, so each dialog validates them before using them.
+// The messages a template-supplied editor frame (an element editor or layout-family controls) posts to its host.
+// Drafts and committed values are the frame's own report, so each host validates them before using them.
 export type FrameMessage =
   | { type: 'editor-ready' } | { type: 'editor-draft'; values: unknown; spread?: unknown } | { type: 'editor-size'; height: number }
   | { type: 'editor-commit'; values: unknown; spread?: unknown } | { type: 'editor-flushed'; request: number; values: unknown; spread?: unknown }
@@ -22,8 +22,9 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
   cancel(): void;
   warning?(message: unknown): void;
   import?(data: Extract<FrameMessage, { type: 'editor-import' }>): void;
-}, flushError = 'The editor did not respond, so nothing was saved. Try Done again, or Cancel.') {
-  const [height, setHeight] = useState(240);
+}, flushError = 'The editor did not respond, so nothing was saved. Try Done again, or Cancel.',
+options: { initialHeight?: number; minimumHeight?: number; focusOnReady?: boolean } = {}) {
+  const [height, setHeight] = useState(options.initialHeight ?? 240);
   const measured = useRef(false);
   const [ready, setReady] = useState(false);
   const [generation, setGeneration] = useState(0);
@@ -57,7 +58,7 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
     } else if (data.type === 'editor-ready') {
       setReady(true);
       setGeneration((value) => value + 1);
-      frame.current?.focus();
+      if (options.focusOnReady !== false) frame.current?.focus();
     } else if (data.type === 'editor-draft') {
       if (!failed) setError('');
       handlers.draft(data.values, data.spread);
@@ -70,7 +71,7 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
     } else if (data.type === 'editor-size') {
       if (Number.isFinite(data.height) && data.height > 0 && !measured.current) {
         measured.current = true;
-        setHeight(Math.max(120, Math.min(data.height, window.innerHeight * 0.7)));
+        setHeight(Math.max(options.minimumHeight ?? 120, Math.min(data.height, window.innerHeight * 0.7)));
       }
     } else if (data.type === 'editor-flushed') {
       if (data.request !== flushing) return;

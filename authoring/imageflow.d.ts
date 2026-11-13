@@ -346,10 +346,10 @@ export type SpreadDeclaration = {
 export type VariantTags = Record<string, string | number | boolean>;
 export type LayoutVariant = { id: string; label: string; variant: VariantTags };
 /**
- * Props of a layout family's picker. `current` is the chosen layout (initially the spread's saved layout, which can
- * be outside this family, so no variant is selected); `saved` is the spread's layout. `choose` immediately applies another variant as one undoable layout switch;
- * `find` returns the variant whose tags include all the given ones. The picker expands inline in the sidebar.
- * `commit` applies the current choice; `cancel` closes the picker without reverting applied choices.
+ * Props of a layout family's controls. `current` is the chosen layout; `saved` is the spread's saved layout.
+ * `choose` immediately applies another variant as one undoable layout switch; `find` returns the variant whose
+ * tags include all the given ones. The controls appear beside the selected spread's other settings.
+ * `commit` applies the current choice; `cancel` leaves the controls without reverting applied choices.
  */
 export type LayoutPickerProps = {
   variants: readonly LayoutVariant[];
@@ -366,7 +366,7 @@ export type LayoutPickerProps = {
 /**
  * Layouts that are variants of one design, such as a 2×2 and a 3×3 photo grid. Each variant is an ordinary layout
  * that names the family with `family`; variants must have the same `span`. With a `picker`, the sidebar shows the
- * family as one preview that expands the picker inline; without one, it shows each variant.
+ * family as one preview and its controls beside the selected spread's other settings; without one, it shows each variant.
  */
 export type LayoutFamily = {
   label: string;
