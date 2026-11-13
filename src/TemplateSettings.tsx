@@ -2,13 +2,13 @@ import { useState } from 'react';
 import type { DesktopApi } from './desktop';
 import { describeImport } from './library';
 import type { LibraryImportResult } from './library';
-import { useLibrary } from './useLibrary';
+import type { useLibrary } from './useLibrary';
 
 const date = (value?: string) => value ? new Date(value).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '';
 
 /** The Templates pane: the template library a new book is created from. */
-export function TemplateSettings({ api }: { api?: DesktopApi }) {
-  const { entries, error } = useLibrary(api);
+export function TemplateSettings({ api, library }: { api?: DesktopApi; library: ReturnType<typeof useLibrary> }) {
+  const { entries, error } = library;
   const [results, setResults] = useState<LibraryImportResult[]>([]);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -35,7 +35,8 @@ export function TemplateSettings({ api }: { api?: DesktopApi }) {
   return <div className="template-settings">
     <p className="settings-note template-intro">New books are made from these templates. Each book keeps its own copy, so removing or
       replacing a template here never changes a book.</p>
-    {error && <p role="alert" className="error-text">{error}</p>}
+    {error && <div><p role="alert" className="error-text">{error}</p>
+      <button type="button" onClick={() => void library.reload()} aria-label="Retry loading templates">Retry</button></div>}
     <ul className="template-list" aria-label="Templates">
       {!entries && !error && <li className="muted">Loading templates…</li>}
       {entries?.map((entry) => <li key={entry.id} className={entry.unavailable ? 'unavailable' : undefined}>

@@ -37,7 +37,9 @@ async function launch() {
 }
 async function openSettings(command = 'Settings…') {
   const existing = app.windows().find((page) => page.url() === settingsURL);
-  const created = existing ? undefined : app.waitForEvent('window');
+  const created = existing ? undefined : app.waitForEvent('window', {
+    predicate: (page) => page.waitForURL(settingsURL).then(() => true, () => false),
+  });
   await app.evaluate(({ Menu }, command) => {
     delete process.env.IMAGEFLOW_HIDE_WINDOW;
     Menu.getApplicationMenu().items.flatMap((item) => item.submenu?.items ?? []).find((item) => item.label === command).click();

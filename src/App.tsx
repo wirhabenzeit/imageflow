@@ -1,6 +1,6 @@
 import { SourceManager, SaveCopy } from './SourceManager';
 import type { ImportMode } from './source-locations';
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
 import { bookLayout, gridColumns, renderOrigin, spreadCommands } from './desktop';
 import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
@@ -35,6 +35,7 @@ import type { ResolvedFormat } from './format';
 import type { ProjectFiles, SpreadState } from './project';
 import { insertionProblem, spreadOrder } from './spread-order';
 import { spreadMime, useSpreadReorder } from './useSpreadReorder';
+import { animateReorder, reorderOffsets } from './reorder-motion';
 
 type Owner = { type: 'photo' | 'markdown' | 'element'; id: string };
 // `hidden`: the box or element is declared but not on the page, so the editor opens at the spread's corner.
@@ -119,8 +120,11 @@ export function App() {
   // like "Flow 1 of 2" do not vanish for a moment and shift the panel.
   const [lastReady, setLastReady] = useState<RenderStatus>();
   const [geometry, setGeometry] = useState<BookGeometry>();
-  const [thumbs, setThumbs] = useState<BookGeometry>();
-  const [inView, setInView] = useState<string[]>([]);
+  const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean }>({ animate: true });
+  const thumbs = thumbnailState.geometry;
+  function setThumbs(geometry: BookGeometry | undefined, animate = true) {
+    setThumbnailState({ geometry, animate });
+  }
   const [hovered, setHovered] = useState<string>();
   const [hoveredTarget, setHoveredTarget] = useState<string>();
   // The inline editor that is open: for a marked node (a target), or for a box or element itself (`owner`).
@@ -174,6 +178,36 @@ export function App() {
   const canvasWrap = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const thumbList = useRef<HTMLDivElement>(null);
+  const previousThumbs = useRef<BookGeometry>(undefined);
+  const thumbAnimations = useRef<Animation[]>([]);
+  useLayoutEffect(() => {
+    thumbAnimations.current.forEach(animation => animation.cancel());
+    thumbAnimations.current = [];
+    const offsets = reorderOffsets(previousThumbs.current, thumbs);
+    previousThumbs.current = thumbs;
+    if (!thumbnailState.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    for (const offset of offsets) {
+      const node = thumbList.current?.querySelector<HTMLElement>('.spread-thumb[data-spread="' + CSS.escape(offset.spread) + '"]');
+      if (node) thumbAnimations.current.push(animateReorder(node, offset));
+    }
+    return () => { thumbAnimations.current.forEach(animation => animation.cancel()); };
+  }, [thumbs, thumbnailState.animate]);
+  useEffect(() => {
+    const cancel = () => {
+      thumbAnimations.current.forEach(animation => animation.cancel());
+      for (const frame of thumbList.current?.querySelectorAll<HTMLIFrameElement>('iframe') ?? []) {
+        frame.contentWindow?.postMessage({ type: 'cancel-reorder' }, renderOrigin);
+      }
+    };
+    const list = thumbList.current;
+    list?.addEventListener('pointerdown', cancel, true);
+    list?.addEventListener('dragstart', cancel, true);
+    return () => {
+      list?.removeEventListener('pointerdown', cancel, true);
+      list?.removeEventListener('dragstart', cancel, true);
+      cancel();
+    };
+  }, [projectInstance]);
   const pendingReveal = useRef<string>(undefined);
   const queue = useRef(Promise.resolve());
   const agentLocked = useRef(false);
@@ -576,10 +610,6 @@ export function App() {
         frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
       }
     }
-    if (!range || !geometry) return;
-    const ids = geometry.sheets.filter(({ x, y, width, height }) => y < range.bottom && y + height > range.top &&
-      x < range.right && x + width > range.left).map(({ spread }) => spread);
-    setInView((previous) => previous.join() === ids.join() ? previous : ids);
   }
   useEffect(() => {
     measureView();
@@ -1202,7 +1232,7 @@ export function App() {
                 return <button key={id} data-spread={id}
                   aria-current={spreadSelected && index === i ? 'page' : undefined} aria-label={label(definition, i) + ' ' + pageLabels[i]}
                   title={pagesLabel(i) + ' · ' + label(definition, i) + (level ? ' · ' + (level === 'error' ? 'Has errors' : 'Has warnings') : '')}
-                  className={'spread-thumb' + (inView.includes(id) ? ' in-view' : '') + (reorder.dragging === id ? ' reordering' : '')} tabIndex={index === i ? 0 : -1}
+                  className={'spread-thumb' + (reorder.dragging === id ? ' reordering' : '')} tabIndex={index === i ? 0 : -1}
                   draggable={canReorder && (canMoveSpread(id, i - 1) || canMoveSpread(id, i + 1))}
                   onDragStart={(event) => reorder.start(event, id)} onDragEnd={reorder.end}
                   style={rect ? { left: rect.x - 5, top: rect.y - 5, width: rect.width + 10, height: rect.height + 30 } : undefined}
