@@ -1247,7 +1247,8 @@ export async function startRender(root: HTMLElement) {
     // in the Book check, and at the format's target resolution for export (ADR 0006).
     const target = template.format.output.resolution?.target ?? 300;
     configureRenderedImages(edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
-      concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview }
+      concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
+      previewCache: view === 'layouts' ? location.pathname + '/picture/' : undefined }
       : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
         : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
           : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });

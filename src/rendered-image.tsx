@@ -2,9 +2,10 @@
 // drawn by a WebGL library from remote tiles, renders through <RenderedImage>. The host tells it the element's size,
 // the output resolution and a cancellation signal, limits how many run at once, and waits for all of them, with a
 // timeout, before a Book check or an export page is final. The result is an image owned by the frame: rendering
-// never changes the book's saved content, and nothing is kept after the frame closes.
+// never changes the book's saved content. Layout thumbnails can reuse pictures from their book window's cache.
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { previewPictureUrl, readPreviewPicture, savePreviewPicture } from './preview-picture';
 
 export type RenderMode = 'preview' | 'check' | 'export';
 export type RenderTarget = {
@@ -29,7 +30,7 @@ export type RenderedImageProps = {
   style?: CSSProperties;
 };
 
-type Settings = { mode: RenderMode; pixelRatio: number; concurrency: number; timeoutMs: number };
+type Settings = { mode: RenderMode; pixelRatio: number; concurrency: number; timeoutMs: number; previewCache?: string };
 export type RenderedImageFailure = { label: string; message: string; spread?: string; element?: string; timedOut: boolean };
 
 let settings: Settings = { mode: 'preview', pixelRatio: 1, concurrency: 2, timeoutMs: 60_000 };
@@ -97,7 +98,7 @@ export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', class
   // settings of the render that started it, so a queued or slow drawing never mixes old and new values.
   const [size, setSize] = useState('');
   const drawnSize = useRef('');
-  const { mode, pixelRatio, timeoutMs } = settings;
+  const { mode, pixelRatio, timeoutMs, previewCache } = settings;
   const key = JSON.stringify([inputs ?? null, mode, pixelRatio, size]);
   useLayoutEffect(() => {
     const node = wrapper.current!;
@@ -135,7 +136,13 @@ export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', class
           Math.round(timeoutMs / 1000) + ' s.'), { timedOut: true })); }, timeoutMs);
       });
       try {
-        const blob = await Promise.race([draw({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]);
+        const spread = node.closest<HTMLElement>('[data-spread]');
+        const pictureIndex = spread ? [...spread.querySelectorAll('.if-rendered-image')].indexOf(node) : 0;
+        const cacheUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache,
+          [spread?.dataset.spread, pictureIndex, draw.toString(), inputs ?? null, width, height, pixelRatio]) : undefined;
+        const cached = cacheUrl ? await readPreviewPicture(cacheUrl, controller.signal) : undefined;
+        if (controller.signal.aborted) return;
+        const blob = cached ?? await Promise.race([draw({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]);
         if (controller.signal.aborted) return;
         url = URL.createObjectURL(blob);
         img.src = url;
@@ -150,6 +157,8 @@ export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', class
             ' px' + (mode === 'export' ? ' (' + Math.round(pixelRatio * 96) + ' ppi)' : '') + '.');
         }
         node.dataset.ppi = String(Math.round(ratio * 96));
+        if (cacheUrl && !cached) await savePreviewPicture(cacheUrl, blob);
+        if (controller.signal.aborted) return;
         img.style.display = 'block';
         node.dataset.rendered = 'ready';
         node.removeAttribute('title');

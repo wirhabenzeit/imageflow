@@ -118,9 +118,17 @@ async function pageHtml(dist: string) {
 }
 
 async function serve(request: Request) {
-  if (request.method !== 'GET') return new Response(null, { status: 405 });
   const { host, pathname } = new URL(request.url);
   if (host !== 'editor' && host !== 'render') return new Response(null, { status: 404 });
+  const picture = host === 'render' && /^\/render\/([a-f0-9-]{36})\/picture\/([a-f0-9]{64})$/.exec(pathname);
+  if (picture) {
+    const session = sessions.get(picture[1]);
+    if (session?.mode !== 'edit' || !session.pictures || !session.book.templateHash) return new Response(null, { status: 404 });
+    const scope = JSON.stringify([session.book.templateHash, session.network?.() ?? []]);
+    if (session.pictureScope !== scope) return new Response(null, { status: 404 });
+    return session.pictures.respond(request, scope, picture[2]);
+  }
+  if (request.method !== 'GET') return new Response(null, { status: 405 });
   const dist = join(app.getAppPath(), 'dist');
   if (!devServer && /^\/assets\/[\w.-]+\.[a-z0-9]+$/i.test(pathname)) return net.fetch(pathToFileURL(join(dist, pathname)).href);
   if (host === 'editor' && ['/', '/settings', '/start', '/new', '/assets', '/templates'].includes(pathname)) {

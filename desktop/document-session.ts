@@ -39,10 +39,12 @@ import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { McpToolName } from '../src/mcp-contract';
 import { renderIdleMs } from '../src/render-budget';
+import { PreviewPictureCache } from './preview-picture-cache';
 
 // `network` lists the origins this book's frames may reach now (ADR 0006): its preview, check, export and element
 // editor frames. Absent for frames that stay offline, such as template probes.
-export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[] }>;
+export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[];
+  pictures?: PreviewPictureCache; pictureScope?: string }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 async function fingerprint(path: string) {
@@ -79,6 +81,7 @@ export class DocumentSession {
   private importedWrites = new ImportReceipts();
   private agentLeases = new Map<string, (allowed: boolean) => void>();
   private renderIds = new Set<string>();
+  private previewPictures = new PreviewPictureCache();
   // The origins this book's frames may reach (ADR 0006), and the template hash they were allowed for. A frame of a
   // book whose template has another hash gets none, so a changed template never inherits an earlier approval.
   private network: { hash?: string; origins: readonly string[] } = { origins: [] };
@@ -271,6 +274,7 @@ export class DocumentSession {
       finally {
         this.unlockProject = undefined;
         for (const id of this.renderIds) this.renders.delete(id);
+        this.previewPictures.clear();
         await this.projectSession.close();
       }
     })();
@@ -297,7 +301,8 @@ export class DocumentSession {
       }
     }
     this.renderIds.add(id);
-    this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book) });
+    this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book), pictures: this.previewPictures,
+      pictureScope: JSON.stringify([book.templateHash, this.originsFor(book)]) });
     // A changed template gets the approvals for its own hash, if any, and the frames are rendered again with them.
     if (this.networkPrepared && !book.readOnly && book.templateHash !== this.network.hash) queueMicrotask(() => void this.updateNetwork().catch(() => {}));
     this.window.setTitle(bookName(book.folder));
