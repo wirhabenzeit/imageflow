@@ -73,7 +73,7 @@ let mcpClients: { name: string }[] = [];
 let quitting = false;
 let preparingQuit = false;
 let updates: AppUpdater;
-const quitReplies = new Map<string, { sender: number; resolve: (allowed: boolean) => void }>();
+const quitReplies = new Map<string, { sender: number; resolve: (allowed: boolean | undefined) => void }>();
 let quitReady = false;
 let quitCleanup: Promise<void> | undefined;
 let connectionSettingsQueue = Promise.resolve();
@@ -421,6 +421,9 @@ async function openDocument(path: string): Promise<DocumentSession> {
       const current = document;
       const webContentsId = editor.webContents.id;
       documents.set(webContentsId, document);
+      editor.webContents.on('render-process-gone', () => {
+        for (const reply of quitReplies.values()) if (reply.sender === webContentsId) reply.resolve(true);
+      });
       identities.set(identity, document);
       lastDocument = document;
       editor.on('focus', () => { lastDocument = current; updateMenus(); });
@@ -996,6 +999,18 @@ async function installMcp(target: McpClientTarget) {
 
 
 function appWindows() { return [...documents.values()].map((document) => document.window).concat([...markdownWindows.windows(), startWindow, settingsWindow, templatesWindow, ...[...assetsWindows.values()].map(({ window }) => window)].filter((window): window is BrowserWindow => !!window)); }
+function updateWindows() { return [...appWindows(), ...[...pickers.values()].map(({ window }) => window)].filter((owner) => !owner.isDestroyed()); }
+function updateStateFor(owner: BrowserWindow) {
+  const windows = updateWindows();
+  const focused = BrowserWindow.getFocusedWindow();
+  const target = focused && windows.includes(focused) ? focused : lastDocument?.window ?? windows.find((window) => window.isVisible()) ?? startWindow;
+  return { ...updates.state, notice: owner === target };
+}
+function publishUpdates() {
+  if (!updates) return;
+  for (const owner of updateWindows()) owner.webContents.send(channels.updateChanged, updateStateFor(owner));
+}
+
 function publishMcpSettings() {
   const value = mcpSettings();
   for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.mcpChanged, value);
@@ -1083,8 +1098,7 @@ void app.whenReady().then(async () => {
   configureSourceAccess(join(app.getPath('userData'), 'source-access'));
   nativeTheme.themeSource = settings.value.appearance;
   updates = new AppUpdater({
-    unavailable: await updateUnavailable({ packaged: app.isPackaged, platform: process.platform,
-      executable: process.execPath, downloads: app.getPath('downloads') }),
+    pending: true,
     driver: {
       initialize: () => {
         // The library configures Squirrel's feed and performs the initial check. Own the timer so
@@ -1097,7 +1111,7 @@ void app.whenReady().then(async () => {
       install: () => autoUpdater.quitAndInstall(),
     },
     changed: (state) => {
-      for (const owner of BrowserWindow.getAllWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.updateChanged, state);
+      publishUpdates();
       const restart = Menu.getApplicationMenu()?.getMenuItemById('restart-update');
       if (restart) restart.enabled = state.status === 'ready';
     },
@@ -1126,7 +1140,7 @@ void app.whenReady().then(async () => {
   sourceMaintenance.unref();
   await pruneRenditions(renditions).catch((error) => console.warn('ImageFlow could not prune image previews', error));
   powerMonitor.on('resume', () => { for (const document of documents.values()) document.projectSession.inputs.invalidate(); });
-  app.on('browser-window-focus', () => updateMenus());
+  app.on('browser-window-focus', () => { updateMenus(); publishUpdates(); });
   if (!app.isPackaged && process.env.IMAGEFLOW_BENCHMARK === '1') {
     Object.defineProperty(globalThis, 'imageflowBenchmarkInputs', { value: () => lastDocument?.projectSession.inputs.metrics });
   }
@@ -1137,6 +1151,8 @@ void app.whenReady().then(async () => {
     if (preparingQuit) return;
     preparingQuit = true;
     const locked: DocumentSession[] = [];
+    const prepared: DocumentSession[] = [];
+    const forceClose = new Set<DocumentSession>();
     void (async () => {
       // Source editors flush pending keystrokes and retain their existing cancel/failure prompts.
       for (const document of documents.values()) if (!await markdownWindows.closeFor(document)) return;
@@ -1147,35 +1163,50 @@ void app.whenReady().then(async () => {
         while (document.busy && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
         if (document.busy) throw new Error('Wait for the book to finish saving or exporting, then try again.');
         if (document.closing || document.window.isDestroyed()) continue;
-        // Pause new agent and renderer mutations while asking for the last input acknowledgement.
-        document.busy = true;
-        locked.push(document);
+        const contents = document.window.webContents;
+        if (contents.isCrashed() || contents.isLoadingMainFrame()) { forceClose.add(document); continue; }
+        // The renderer blurs plain fields and drains its save queue before freezing new input.
+        // Keep main-side saves available until that acknowledgement arrives.
+        prepared.push(document);
         const id = randomUUID();
-        const allowed = await new Promise<boolean>((resolve) => {
-          const timer = setTimeout(() => { quitReplies.delete(id); resolve(false); }, 3000);
-          quitReplies.set(id, { sender: document.window.webContents.id, resolve: (allowed) => {
+        const allowed = await new Promise<boolean | undefined>((resolve) => {
+          const timer = setTimeout(() => { quitReplies.delete(id); resolve(undefined); }, 3000);
+          quitReplies.set(id, { sender: contents.id, resolve: (allowed) => {
             clearTimeout(timer); quitReplies.delete(id); resolve(allowed);
           } });
-          document.window.webContents.send(channels.prepareQuit, id);
+          contents.send(channels.prepareQuit, id);
         });
+        if (contents.isDestroyed() || contents.isCrashed()) { forceClose.add(document); continue; }
+        if (allowed === undefined) {
+          const { response } = await dialog.showMessageBox(document.window, { type: 'warning',
+            message: 'This book window is not responding.',
+            detail: 'Quit anyway? Unsaved changes in this window may be lost. Saved book changes will be kept.',
+            buttons: ['Keep Open', 'Quit Anyway'], defaultId: 0, cancelId: 0 });
+          if (response !== 1) return;
+          forceClose.add(document);
+          continue;
+        }
         if (!allowed) {
           focus(document.window);
           throw new Error('Finish or discard the active edit in this book, then try quitting or restarting again.');
         }
+        if (document.busy) throw new Error('Wait for the book to finish saving or exporting, then try again.');
+        document.busy = true;
+        locked.push(document);
       }
       quitApproved = true;
+      quitting = true;
       // Native close callbacks settle writers and release book locks in the ordinary will-quit cleanup.
       // Their busy guard must be released now that renderer input is frozen.
       for (const document of locked) document.busy = false;
+      for (const document of forceClose) if (!document.window.isDestroyed()) document.window.destroy();
       app.quit();
     })().catch((error) => report(lastDocument?.window, error)).finally(() => {
       preparingQuit = false;
       if (!quitApproved) {
         updates.cancelRestart();
-        for (const document of locked) {
-          document.busy = false;
-          if (!document.window.isDestroyed()) document.window.webContents.send(channels.cancelQuit);
-        }
+        for (const document of locked) document.busy = false;
+        for (const document of prepared) if (!document.window.isDestroyed()) document.window.webContents.send(channels.cancelQuit);
       }
     });
   });
@@ -1449,8 +1480,9 @@ void app.whenReady().then(async () => {
     return null;
   }));
   const updateOwner = (event: IpcMainInvokeEvent) => appOwner(event) ?? pickerOwner(event) ??
-    assetsWindows.get(assetsOwner(event)!)?.window ?? markdownWindows.owner(event);
-  ipcMain.handle(channels.updateState, (event) => updateOwner(event) ? updates.state : { status: 'unavailable' });
+    assetsWindows.get(assetsOwner(event)!)?.window ?? markdownWindows.owner(event)?.window;
+  ipcMain.handle(channels.updateState, (event) => { const owner = updateOwner(event); return owner ? updateStateFor(owner) : { status: 'unavailable' }; });
+  ipcMain.handle(channels.dismissUpdate, (event) => { if (updateOwner(event)) updates.dismissNotice(); });
   ipcMain.handle(channels.checkUpdates, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.check(); });
   ipcMain.handle(channels.restartUpdate, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.restart(); });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
@@ -1653,6 +1685,14 @@ void app.whenReady().then(async () => {
   }
   if (!documents.size) showStart();
   updates.setAutomatic(settings.value.automaticUpdates);
+  // Signature/filesystem checks must not delay creating the library or the first usable window.
+  void updateUnavailable({ packaged: app.isPackaged, platform: process.platform,
+    executable: process.execPath, downloads: app.getPath('downloads') }).then((reason) => {
+      if (!quitting) updates.setEligibility(reason);
+    }).catch((error) => {
+      console.warn('ImageFlow could not prepare update checks', error);
+      if (!quitting) updates.setEligibility('Could not prepare update checks. Reopen ImageFlow to try again.');
+    });
   app.on('activate', () => { if (!documents.size && !quitting) showStart(); });
   updateMenus();
 });

@@ -4,7 +4,7 @@ import { AppUpdater } from '../desktop/updates';
 import { updateLocationHint, updateUnavailable, moveToApplications } from '../desktop/update-environment';
 import type { UpdateState } from '../src/updates';
 
-function fixture(t: { after(callback: () => void): void }, extra: { unavailable?: string; interval?: number } = {}) {
+function fixture(t: { after(callback: () => void): void }, extra: { unavailable?: string; interval?: number; pending?: boolean } = {}) {
   const calls: string[] = [], states: UpdateState[] = [];
   const updater = new AppUpdater({ driver: { initialize: () => { calls.push('initialize'); },
     check: () => { calls.push('check'); }, install: () => { calls.push('install'); } },
@@ -93,10 +93,49 @@ test('an ineligible build never initializes or checks a feed', async (t) => {
   assert.equal(await updateUnavailable({ packaged: true, platform: 'linux', executable: '/unused', downloads: '/unused' }), unavailable);
 });
 
-test('translocated, disk image and Downloads launches explain how to move the app', () => {
-  for (const path of ['/private/var/folders/a/AppTranslocation/a/d/ImageFlow.app', '/Volumes/ImageFlow/ImageFlow.app', '/Users/me/Downloads/ImageFlow.app']) {
+test('translocated and Downloads launches explain how to move the app; external drives are allowed', () => {
+  for (const path of ['/private/var/folders/a/AppTranslocation/a/d/ImageFlow.app', '/Users/me/Downloads/ImageFlow.app']) {
     assert.equal(updateLocationHint(path, '/Users/me/Downloads'), moveToApplications);
   }
+  assert.equal(updateLocationHint('/Volumes/My Drive/Apps/ImageFlow.app', '/Users/me/Downloads'), undefined);
   assert.equal(updateLocationHint('/Applications/ImageFlow.app', '/Users/me/Downloads'), undefined);
   assert.equal(updateLocationHint('/Users/me/Downloads-backup/ImageFlow.app', '/Users/me/Downloads'), undefined);
+});
+
+test('pending eligibility defers launch/manual checks and honours the latest automatic preference', (t) => {
+  const { updater, calls } = fixture(t, { pending: true });
+  updater.setAutomatic(true);
+  updater.setAutomatic(false);
+  assert.equal(updater.state.status, 'initializing');
+  assert.deepEqual(calls, []);
+  updater.setEligibility();
+  assert.deepEqual(calls, []);
+  updater.check();
+  assert.deepEqual(calls, ['initialize']);
+});
+
+test('a manual check during eligibility waits and unavailable builds never start a check', (t) => {
+  const good = fixture(t, { pending: true });
+  good.updater.check();
+  good.updater.setEligibility();
+  assert.deepEqual(good.calls, ['initialize']);
+  const bad = fixture(t, { pending: true });
+  bad.updater.setAutomatic(true);
+  bad.updater.check();
+  bad.updater.setEligibility('No signed build');
+  assert.deepEqual(bad.calls, []);
+  assert.equal(bad.updater.state.status, 'unavailable');
+});
+
+test('Later dismisses notices for the whole app while preserving the restart action', (t) => {
+  const { updater, calls } = fixture(t);
+  updater.downloaded('1.0.1');
+  updater.dismissNotice();
+  assert.equal(updater.state.dismissed, true);
+  assert.equal(updater.state.status, 'ready');
+  updater.restart();
+  assert.deepEqual(calls, ['quit']);
+  updater.cancelRestart();
+  updater.downloaded('1.0.2');
+  assert.equal(updater.state.dismissed, undefined);
 });

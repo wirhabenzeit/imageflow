@@ -273,7 +273,7 @@ export function Field({ param, value, change, description, compact = false }: { 
   const helpButton = help && !compact && <button type="button" className="field-help" aria-label={'About ' + param.label}
     aria-expanded={showHelp} title={showHelp ? undefined : help} onClick={() => setShowHelp(!showHelp)}>i</button>;
   return <div className={compact ? 'field compact-field' : 'field' + (param.type === 'list' ? ' field-list' : '')}
-    title={compact ? param.label + (help ? '\n' + help : '') : undefined}>
+    aria-invalid={invalid || undefined} data-pending={draft !== undefined && !sameValue(draft, value) || undefined} title={compact ? param.label + (help ? '\n' + help : '') : undefined}>
     {!compact && !listButton && param.type !== 'boolean' && <span className="field-name">{param.label}{helpButton}</span>}
     <ParamControl param={param} value={value} draft={draft} setDraft={type} apply={apply} compact={compact} commitOnBlur />
     {param.type === 'boolean' && helpButton}

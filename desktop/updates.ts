@@ -11,30 +11,46 @@ export interface UpdateDriver {
 export class AppUpdater {
   state: UpdateState = { status: 'idle' };
   private initialized = false;
+  private eligible = true;
+  private manualRequested = false;
   private timer?: ReturnType<typeof setInterval>;
   private restarting = false;
   private automatic = false;
   constructor(private options: {
     driver: UpdateDriver;
     unavailable?: string;
+    pending?: boolean;
     changed: (state: UpdateState) => void;
     quit: () => void;
     interval?: number;
   }) {
-    if (options.unavailable) this.state = { status: 'unavailable', message: options.unavailable };
+    this.eligible = !options.pending;
+    if (options.pending) this.state = { status: 'initializing' };
+    else if (options.unavailable) this.state = { status: 'unavailable', message: options.unavailable };
   }
   private publish(state: UpdateState) { this.state = state; this.options.changed(state); }
+  setEligibility(unavailable?: string) {
+    this.options.unavailable = unavailable;
+    this.eligible = true;
+    this.publish(unavailable ? { status: 'unavailable', message: unavailable } : { status: 'idle' });
+    this.schedule();
+    if (this.manualRequested) { this.manualRequested = false; this.check(); }
+  }
   setAutomatic(enabled: boolean) {
     if (enabled === this.automatic) return;
     this.automatic = enabled;
+    this.schedule();
+  }
+  private schedule() {
     clearInterval(this.timer);
     this.timer = undefined;
-    if (!enabled || this.options.unavailable) return;
+    if (!this.automatic || !this.eligible || this.options.unavailable) return;
     this.check();
     this.timer = setInterval(() => this.check(), this.options.interval ?? 4 * 60 * 60 * 1000);
     this.timer.unref();
   }
   check() {
+    if (!this.eligible) { this.manualRequested = true; return; }
     if (this.options.unavailable || ['checking', 'downloading', 'ready'].includes(this.state.status)) return;
     this.publish({ status: 'checking' });
     try {
@@ -45,6 +61,7 @@ export class AppUpdater {
   available() { if (this.state.status !== 'ready') this.publish({ status: 'downloading' }); }
   current() { if (this.state.status !== 'ready') this.publish({ status: 'current' }); }
   downloaded(release?: string) { this.publish({ status: 'ready', release }); }
+  dismissNotice() { if (this.state.status === 'ready') this.publish({ ...this.state, dismissed: true }); }
   failed(error: unknown) {
     console.warn('ImageFlow update check failed', error);
     if (this.state.status !== 'ready') this.publish({ status: 'error', message: 'Could not check for updates. Check your internet connection and try again.' });
@@ -62,5 +79,5 @@ export class AppUpdater {
     this.options.driver.install();
     return true;
   }
-  dispose() { clearInterval(this.timer); this.timer = undefined; }
+  dispose() { this.automatic = false; this.manualRequested = false; clearInterval(this.timer); this.timer = undefined; }
 }

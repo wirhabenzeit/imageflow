@@ -35,6 +35,9 @@ try {
   await settings.getByText('Updates are available in the signed macOS release of ImageFlow.', { exact: true }).waitFor();
   const automatic = settings.getByRole('checkbox', { name: 'Automatically check for updates' });
   assert.equal(await automatic.isChecked(), true);
+  assert.equal(await automatic.isDisabled(), true);
+  await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('update-not-available'); });
+  await settings.getByText('You’re up to date.', { exact: true }).waitFor();
   await automatic.uncheck();
   await settings.waitForFunction(async () => !(await window.imageflow.getSettings()).value.automaticUpdates);
   assert.equal(JSON.parse(await readFile(join(profile, 'settings.json'), 'utf8')).automaticUpdates, false);
@@ -49,7 +52,8 @@ try {
   await page.screenshot({ path: join(root, '.build/update-notice.png') });
   await settings.screenshot({ path: join(root, '.build/update-settings.png') });
   await page.getByRole('button', { name: 'Later', exact: true }).click();
-  assert.equal(await page.locator('.update-notice').count(), 0);
+  await page.locator('.update-notice').waitFor({ state: 'detached' });
+  assert.equal((await settings.evaluate(() => window.imageflow.updateState())).dismissed, true);
   assert.equal(await instance.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('restart-update').enabled), true);
   await settings.getByRole('button', { name: 'Restart to Update', exact: true }).last().waitFor();
   // No installation should be attempted by a cancelled quit. The eventual install sees no book lock or MCP descriptor.
@@ -81,7 +85,7 @@ try {
   await instance.evaluate(({ app }) => { app.quit(); });
   await page.waitForFunction(() => globalThis.quitMessages.length === 2);
   await page.getByText(/Finish or discard the active edit/).waitFor();
-  // A cancelled restart must not later install just because the user chose an ordinary Quit.
+  // A cancelled restart must not retain the request to relaunch. Squirrel may still apply a staged update on a later ordinary Quit.
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await page.locator('.inline-text-editor').waitFor({ state: 'detached' });
   await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();

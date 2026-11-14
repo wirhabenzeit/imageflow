@@ -107,14 +107,14 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
           </div>
           <span className="settings-label">Updates:</span>
           <div className="settings-control">
-            <label><input type="checkbox" checked={settings?.automaticUpdates ?? true} disabled={!settings}
+            <label><input type="checkbox" checked={settings?.automaticUpdates ?? true} disabled={!settings || !update || update.status === 'unavailable' || update.status === 'initializing'}
               onChange={(event) => void choose({ automaticUpdates: event.target.checked })} /> Automatically check for updates</label>
             <div className="settings-update-actions">
-              <button disabled={!api || update?.status === 'checking' || update?.status === 'downloading'} onClick={() => void api?.checkUpdates()}>Check for Updates…</button>
+              <button disabled={!api || update?.status === 'initializing' || update?.status === 'checking' || update?.status === 'downloading'} onClick={() => void api?.checkUpdates()}>Check for Updates…</button>
               {update?.status === 'ready' && <button onClick={() => void api?.restartUpdate()}>Restart to Update</button>}
             </div>
             <p className="settings-note update-status" role="status">{update?.status === 'current' ? "You’re up to date." :
-              update?.status === 'checking' ? 'Checking for updates…' : update?.status === 'downloading' ? 'Downloading update…' :
+              update?.status === 'initializing' ? 'Preparing update checks…' : update?.status === 'checking' ? 'Checking for updates…' : update?.status === 'downloading' ? 'Downloading update…' :
               update?.status === 'ready' ? 'An update is ready to install.' : update?.message ?? ''}</p>
           </div>
           {error && <p role="alert" className="error-text settings-control">{error}</p>}

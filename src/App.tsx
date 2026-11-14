@@ -267,6 +267,8 @@ export function App() {
   const agentLocked = useRef(false);
   const [agentWorking, setAgentWorking] = useState(false);
   const pendingTasks = useRef(0);
+  const quitLock = useRef(false);
+  const quitAttempt = useRef(0);
   const [saving, setSaving] = useState(false);
   const workspace = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useCanvasLayout(summary?.folder);
@@ -612,15 +614,23 @@ export function App() {
     setAgentWorking(true);
     return true;
   });
-  const prepareQuit = useEffectEvent(() => {
-    const focused = document.activeElement;
-    const typing = focused instanceof HTMLElement && (focused.matches('input, textarea, select, [contenteditable="true"]') || !!focused.closest('dialog'));
+  const finishQuit = useEffectEvent(() => {
     const reloadRunning = reloading.current && !reloadFailed.current;
-    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || typing || agentLocked.current) return false;
-    // Block new edits between the acknowledgement and native window close.
+    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || agentLocked.current ||
+        document.querySelector('.field[aria-invalid="true"], .field[data-pending="true"]')) return false;
+    quitLock.current = true;
     agentLocked.current = true;
     if (workspace.current) workspace.current.inert = true;
     return true;
+  });
+  const prepareQuit = useEffectEvent(async () => {
+    const attempt = ++quitAttempt.current;
+    // Inspector fields commit on blur. Focus in a saved field, select or harmless dialog isn't a draft.
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused.matches('input, textarea, select, [contenteditable="true"]') && !focused.closest('dialog')) focused.blur();
+    await queue.current;
+    await new Promise((resolve) => setTimeout(resolve, 0)); // React publishes validation and save results.
+    return attempt === quitAttempt.current && finishQuit();
   });
   function placeSources(keys: string[], target = spreadId, firstBox?: string) {
     if (!template || !writable || !summary) return;
@@ -648,14 +658,17 @@ export function App() {
     if (!api) return;
     const prepare = api.onPrepareQuit(() => prepareQuit());
     const cancelQuit = api.onCancelQuit(() => {
+      quitAttempt.current++;
+      if (!quitLock.current) return;
+      quitLock.current = false;
       agentLocked.current = false;
       if (workspace.current) workspace.current.inert = false;
     });
     const sourceCommand = api.onSourceCommand(onSourceCommand);
     const lease = api.onAgentLease(() => acquireAgentLease());
     const release = api.onAgentRelease(() => {
-      agentLocked.current = false;
-      if (workspace.current) workspace.current.inert = false;
+      agentLocked.current = quitLock.current;
+      if (workspace.current) workspace.current.inert = quitLock.current;
       setAgentWorking(false);
     });
     const command = api.onCommand((command) => onCommand(command));
