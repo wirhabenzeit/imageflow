@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { emptyMenuState } from './commands';
 import { bookName } from './book-name';
 import type { DesktopApi, RecentDocument } from './desktop';
+import brandMark from '../resources/brand/logo/imageflow-mark.svg';
 
 export function StartWindow({ api }: { api?: DesktopApi }) {
   const [recents, setRecents] = useState<RecentDocument[]>([]);
@@ -40,8 +41,8 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
   return <main className="studio start-window">
     <div className="start-drag" aria-hidden="true" />
     <aside className="start-actions">
-      <div className="start-brand" aria-hidden="true">◫</div>
-      <h1>ImageFlow</h1>
+      <img className="start-brand" src={brandMark} alt="" />
+      <h1>Image<span className="start-brand-flow">Flow</span></h1>
       <p>Your photographs.<br />A book of their own.</p>
       <button className="primary" disabled={!api || busy} onClick={() => void act('new')}>New Book…</button>
       <button disabled={!api || busy} onClick={() => void act('open')}>Open…</button>
