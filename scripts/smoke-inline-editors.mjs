@@ -37,7 +37,7 @@ await cp(join(root, 'sample', 'starter'), book, { recursive: true, filter: (path
 const projectFile = join(book, 'project.json');
 const project = JSON.parse(await readFile(projectFile, 'utf8'));
 project.spreads.splice(1, 0, { id: 'route', definition: 'map', params: { mapTitle: 'Senja' }, boxes: {},
-  elements: { map: { params: { track: 'senja-road', longitude: 17.4, latitude: 69.3, zoom: 9 } } } });
+  elements: { map: { params: { tracks: [{ id: 'senja', track: 'senja-road' }], longitude: 17.4, latitude: 69.3, zoom: 9 } } } });
 await writeFile(projectFile, JSON.stringify(project, null, 2) + '\n');
 const saved = async () => JSON.parse(await readFile(projectFile, 'utf8')).spreads.find(({ id }) => id === 'route').elements.map.params;
 
@@ -186,46 +186,48 @@ try {
   assert.equal((await saved()).style ?? 'liberty', 'liberty', 'Undo reverts the last change');
 
   // ── The map's tracks (#115) ──
-  // A map saved before Tracks keeps its single track, which the page still draws.
   const until = async (check, message) => {
     for (let i = 0; i < 50 && !check(await saved()); i++) await new Promise((resolve) => setTimeout(resolve, 200));
     assert.ok(check(await saved()), message + ': ' + JSON.stringify(await saved()));
   };
-  await page.locator('.map-track polyline').first().waitFor({ state: 'attached' });
-  assert.equal(await page.locator('.map-track polyline').count(), 1, 'the earlier track is drawn');
+  // The book may redraw after the Undo above, so wait for the current frame's track.
+  const tracksDrawn = async (count) => {
+    for (let i = 0; i < 50 && await w.frameLocator(ready).locator('.map-track polyline').count() !== count; i++) await new Promise((resolve) => setTimeout(resolve, 200));
+    return w.frameLocator(ready).locator('.map-track polyline').count();
+  };
+  assert.equal(await tracksDrawn(1), 1, 'the saved track is drawn');
   const mapNow = await page.locator('[data-element="map"]').boundingBox();
   await w.mouse.click(mapNow.x + mapNow.width * .7, mapNow.y + mapNow.height * .6);
   await editor.waitFor();
   // The list is one button in the toolbar, which opens it in a popover, so the toolbar keeps one row.
-  const tracksButton = toolbar.getByRole('button', { name: 'Tracks (0)' });
-  await tracksButton.click();
+  await toolbar.getByRole('button', { name: 'Tracks (1)' }).click();
   const list = toolbar.getByRole('dialog', { name: 'Tracks' });
   await list.waitFor();
   const toolbarBox = await toolbar.boundingBox();
   const listBox = await list.boundingBox();
   assert.ok(listBox.y + listBox.height <= toolbarBox.y + 1, 'the list opens above the toolbar: ' + JSON.stringify({ listBox, toolbarBox }));
   await list.getByRole('button', { name: 'Add' }).click();
-  await until((params) => params.tracks?.length === 1, 'Add saves an item');
-  const first = (await saved()).tracks[0];
-  assert.match(first.id, /^i[0-9a-f]{10}$/, 'a new item has a stable ID');
-  // The new item opens to its fields: assign the sample GPX track.
+  await until((params) => params.tracks?.length === 2, 'Add saves an item');
+  const added = (await saved()).tracks[1];
+  assert.match(added.id, /^i[0-9a-f]{10}$/, 'a new item has a stable ID');
+  // The new item opens to its fields: assign the sample GPX track and label it.
   await list.getByRole('combobox', { name: 'GPX track' }).selectOption('senja-road');
-  await until((params) => params.tracks?.[0]?.track === 'senja-road', 'the item saves its track');
-  await toolbar.getByRole('button', { name: 'Tracks (1)' }).waitFor();
-  // Duplicate it, label the copy, and move the copy up.
-  await list.getByRole('button', { name: 'Duplicate Tracks 1' }).click();
-  await until((params) => params.tracks?.length === 2, 'Duplicate saves a copy');
-  const copy = (await saved()).tracks[1];
-  assert.notEqual(copy.id, first.id, 'the copy has its own ID');
-  assert.equal(copy.track, 'senja-road');
-  await list.locator('.pc-list-item').nth(1).locator('.pc-list-summary').click();
+  await until((params) => params.tracks?.[1]?.track === 'senja-road', 'the item saves its track');
   const label = list.getByRole('textbox', { name: 'Label' });
   await label.fill('Day 2');
   await label.press('Enter');
   await until((params) => params.tracks?.[1]?.label === 'Day 2', 'the label saves on Enter');
+  await toolbar.getByRole('button', { name: 'Tracks (2)' }).waitFor();
+  // Duplicate the first, then move the new track to the top.
+  await list.getByRole('button', { name: 'Duplicate Tracks 1' }).click();
+  await until((params) => params.tracks?.length === 3, 'Duplicate saves a copy');
+  const copy = (await saved()).tracks[1];
+  assert.ok(copy.id !== 'senja' && copy.id !== added.id, 'the copy has its own ID');
+  await list.getByRole('button', { name: 'Remove Tracks 2' }).click();
+  await until((params) => params.tracks?.length === 2, 'Remove saves');
   await list.getByRole('button', { name: 'Move Tracks 2 up' }).click();
-  await until((params) => params.tracks?.[0]?.id === copy.id, 'moving up reorders by ID');
-  assert.deepEqual((await saved()).tracks.map(({ id }) => id), [copy.id, first.id]);
+  await until((params) => params.tracks?.[0]?.id === added.id, 'moving up reorders by ID');
+  assert.deepEqual((await saved()).tracks.map(({ id }) => id), [added.id, 'senja']);
   if (screenshots) await w.screenshot({ path: join(screenshots, 'map-tracks.png') });
   // Escape closes the list, not the editor.
   await w.keyboard.press('Escape');
@@ -233,14 +235,12 @@ try {
   assert.equal(await editor.count(), 1, 'the editor stays open');
   await toolbar.getByRole('button', { name: 'Done' }).click();
   await w.locator('.inline-editor').waitFor({ state: 'detached' });
-  // The page draws both tracks, in the list's order, instead of the earlier one.
   page = w.frameLocator(ready);
   await page.locator('[data-element="map"]:not([data-if-editing])').waitFor({ state: 'attached' });
-  for (let i = 0; i < 50 && await page.locator('.map-track polyline').count() !== 2; i++) await new Promise((resolve) => setTimeout(resolve, 200));
-  assert.equal(await page.locator('.map-track polyline').count(), 2, 'every track is drawn');
+  assert.equal(await tracksDrawn(2), 2, 'every track is drawn');
   // Undo reverts the move, one step per list change.
   await w.getByRole('button', { name: 'Undo', exact: true }).click();
-  await until((params) => params.tracks?.[0]?.id === first.id, 'Undo reverts the move');
+  await until((params) => params.tracks?.[0]?.id === 'senja', 'Undo reverts the move');
   assert.equal((await saved()).tracks[1].label, 'Day 2', 'Undo keeps the earlier changes');
 
 

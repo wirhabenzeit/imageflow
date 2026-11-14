@@ -229,7 +229,7 @@ const mapParameters = {
 - **Agents** set the whole array with `set_parameter`, or change one item with `insert_list_item`, `update_list_item`, `remove_list_item` and `move_list_item`, addressed by its `id` (docs/mcp.md).
 - `ctx.Text`, `ctx.edit` conditions and `controls` `when` cannot compare a list; show its items with your own markup.
 
-The starter's Map layout draws every track of its `tracks` list; *Fit tracks* frames all of them. A map saved before lists keeps its single `track` and `trackColor`: the map draws that track while `tracks` is empty, and the Book check suggests moving it into the list.
+The starter's Map layout draws every track of its `tracks` list; *Fit tracks* frames all of them. It replaces the map's earlier single `track` and `trackColor`; books saved with those are not migrated (no released books use them).
 
 ### Boxes and elements
 

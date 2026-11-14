@@ -32,22 +32,11 @@ export const mapParameters = {
   // The MapLibre zoom of the printed map: its width in CSS pixels is the element's width at 96 per inch.
   zoom: p.number({ label: 'Zoom', default: 8.5, min: 0, max: 18, step: .01 }),
   trackWidth: p.number({ label: 'Track width', default: 1, min: .3, max: 3, step: .1, unit: 'mm' }),
-  // Before Tracks, a map had one GPX track with one colour. Books saved then keep them; the map draws that track as its
-  // first while Tracks is empty, and the Book check offers to move it into Tracks. They have no controls.
-  track: p.file({ label: 'Earlier GPX track', accept: ['.gpx'] }),
-  trackColor: p.color({ label: 'Earlier track colour', default: '#c8432b' }),
 };
-export const mapControls = ['tracks', 'style', 'trackWidth'] as const;
 // The editor owns the view; the tracks, style and line width are the element's generated controls.
 export const mapEditorParameters = ['longitude', 'latitude', 'zoom'] as const;
 type Track = { id: string; track: string; colour: string; label: string };
-type MapValues = { tracks: Track[]; track: string; trackColor: string; style: MapStyle; longitude: number; latitude: number; zoom: number };
-
-/** The tracks the map draws: Tracks, or the single track of a book saved before Tracks existed. */
-export function mapTracks(values: Pick<MapValues, 'tracks' | 'track' | 'trackColor'>): Track[] {
-  if (values.tracks.length || !values.track) return values.tracks;
-  return [{ id: 'earlier-track', track: values.track, colour: values.trackColor, label: '' }];
-}
+type MapValues = { tracks: Track[]; style: MapStyle; longitude: number; latitude: number; zoom: number };
 export type MapEditorProps = ElementEditorProps<typeof mapParameters, typeof mapEditorParameters[number]>;
 
 const cssPerMm = 96 / 25.4;
@@ -135,8 +124,7 @@ export function MapView({ values, trackWidth, rect, Element }: {
   Element: (props: { id: 'map'; rect: Rect; className?: string; children?: ImageFlowNode }) => ImageFlowNode;
 }) {
   const width = rect.width * cssPerMm, height = rect.height * cssPerMm;
-  const earlier = !values.tracks.length && !!values.track;
-  const tracks = readTracks(mapTracks(values));
+  const tracks = readTracks(values.tracks);
   const view = { style: values.style, longitude: values.longitude, latitude: values.latitude, zoom: values.zoom };
   return <Element id="map" className="map" rect={rect}>
     <RenderedImage className="map-image" label="Map" inputs={{ ...view, width: rect.width, height: rect.height }} draw={(target) => drawMap(view, target)} />
@@ -146,13 +134,9 @@ export function MapView({ values, trackWidth, rect, Element }: {
     </svg>}
     <span className="map-attribution">{mapAttribution}</span>
     {tracks.map(({ id, problem, track, label }, index) => problem && <span key={id} hidden {...issue({ code: 'gpx-invalid',
-      message: (earlier ? '' : 'Track ' + (index + 1) + (label ? ' (' + label + ')' : '') + ': ') + problem + ' The track is left out.',
-      element: 'map', parameter: earlier ? 'track' : 'tracks', file: track,
-      suggestion: earlier ? 'Assign a GPX file that contains a track or route, or clear the GPX track.'
-        : 'Assign a GPX file that contains a track or route to item ' + id + ' of tracks, or remove the item with remove_list_item.' })} />)}
-    {earlier && <span hidden {...issue({ code: 'earlier-track', severity: 'warning', element: 'map', parameter: 'track', file: values.track,
-      message: 'This map has a GPX track from before Tracks. It is drawn while Tracks is empty; add it to Tracks to give it a label or draw more tracks.',
-      suggestion: 'insert_list_item into tracks with { track: "' + values.track + '", colour: "' + values.trackColor + '" }, then reset_parameter track and trackColor.' })} />}
+      message: 'Track ' + (index + 1) + (label ? ' (' + label + ')' : '') + ': ' + problem + ' The track is left out.',
+      element: 'map', parameter: 'tracks', file: track,
+      suggestion: 'Assign a GPX file that contains a track or route to item ' + id + ' of tracks, or remove the item with remove_list_item.' })} />)}
   </Element>;
 }
 
@@ -176,7 +160,7 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
   const printWidth = (rect?.width ?? 0) * cssPerMm;
   const width = React.useRef(printWidth);
   width.current = printWidth;
-  const tracks = readTracks(mapTracks(values));
+  const tracks = readTracks(values.tracks);
   const drawable = tracks.some(({ points }) => points);
   const problem = tracks.map(({ problem }) => problem).filter(Boolean).join(' ');
   // The editor map's CSS pixels per printed CSS pixel: 1 inline, where the frame has the printed size; less in the panel.
@@ -191,7 +175,7 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
 
   // The tracks as lines on the editor map, each in its colour, at the page's width; redrawn when they or the style change.
   const drawTrack = (target: MapLibreMap) => {
-    const current = readTracks(mapTracks(latest.current)).filter(({ points }) => points);
+    const current = readTracks(latest.current.tracks).filter(({ points }) => points);
     const data = { type: 'FeatureCollection' as const, features: current.map(({ points, colour }) => ({ type: 'Feature' as const, properties: { colour },
       geometry: { type: 'LineString' as const, coordinates: points! } })) };
     const paint = { 'line-color': ['get', 'colour'] as unknown as string, 'line-width': latest.current.trackWidth * cssPerMm * ratio() };
@@ -206,7 +190,7 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
   };
   // Fits every track at once.
   const fitTrack = () => {
-    const bounds = trackBounds(readTracks(mapTracks(latest.current)));
+    const bounds = trackBounds(readTracks(latest.current.tracks));
     const target = map.current;
     if (!bounds || !target) return;
     target.fitBounds(bounds, { padding: 40 * ratio(), animate: false });
@@ -266,7 +250,7 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
     current.resize();
     current.jumpTo({ center: [latest.current.longitude, latest.current.latitude], zoom: editorZoom(latest.current.zoom) });
   }, [rect?.width, rect?.height]);
-  React.useEffect(() => { if (map.current?.isStyleLoaded()) drawTrack(map.current); }, [JSON.stringify(mapTracks(values)), values.trackWidth]);
+  React.useEffect(() => { if (map.current?.isStyleLoaded()) drawTrack(map.current); }, [JSON.stringify(values.tracks), values.trackWidth]);
   React.useEffect(() => { map.current?.setStyle(styleUrl(values.style)); }, [values.style]);
   React.useEffect(() => {
     const button = holder.current?.querySelector<HTMLButtonElement>('.map-fit-track');

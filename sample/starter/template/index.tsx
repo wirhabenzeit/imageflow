@@ -1,7 +1,7 @@
 import { asset, box, defineTemplate, Element, file, geometry, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { ElementEditorProps, ImageFlowNode, LayoutPickerProps, Photo, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
-import { mapControls, MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
+import { MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
 import type { MapEditorProps } from './map';
 
 // Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page.
@@ -384,7 +384,6 @@ export default defineTemplate({
       elements: { map: {
         label: 'Map',
         parameters: mapParameters,
-        controls: mapControls,
         // Framed on the page, in the map's own place; the panel remains the fallback.
         editor: { label: 'Edit map', parameters: [...mapEditorParameters], component: MapLayoutEditor, presentation: 'inline' },
       } },
