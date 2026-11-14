@@ -616,7 +616,10 @@ export function PhotoBox({ id, className, style, rect, children, 'data-edit': ma
   // A callback needs the box's size. A `rect` gives it at once; otherwise the box is measured before it is painted.
   const [size, setSize] = useState<{ width: number; height: number } | null>(() =>
     rect && rect.width > 0 && rect.height > 0 ? { width: rect.width * pixelsPerMm, height: rect.height * pixelsPerMm } : null);
-  const [near, setNear] = useState(!lazyPhotos);
+  // Only the editor's scrolling book draws callback boxes as they come near. Presentation (export mode) copies its
+  // spreads from a hidden render, so their callback boxes draw at once there.
+  const deferred = lazyPhotos && book.mode === 'edit';
+  const [near, setNear] = useState(!deferred);
   const liveOf = () => render && book.mode === 'edit' ? livePlacements.get(spread.id + '\u0000' + id) : undefined;
   const live = useSyncExternalStore(subscribeLive, liveOf, liveOf);
   const placement = live ?? saved;
@@ -652,11 +655,11 @@ export function PhotoBox({ id, className, style, rect, children, 'data-edit': ma
 
   useLayoutEffect(() => {
     const element = frame.current;
-    if (!element || !render || !lazyPhotos) return;
+    if (!element || !render || !deferred) return;
     const listener = (event: Event) => flushSync(() => setNear(!!(event as CustomEvent<boolean>).detail));
     element.addEventListener(photoNearEvent, listener);
     return () => element.removeEventListener(photoNearEvent, listener);
-  }, [!!render, lazyPhotos]);
+  }, [!!render, deferred]);
 
   let content: ReactNode = null;
   if (photo && renderPhotos && render && size && near) {
@@ -667,7 +670,7 @@ export function PhotoBox({ id, className, style, rect, children, 'data-edit': ma
     const state = { id, uid: photoBoxUid(spread.id, id), params: resolved?.params ?? {}, photo: resolved?.photo ?? null };
     content = <PhotoRenderCall render={render} photo={shown} state={state} spread={spread.id} />;
     // Outside the editor's book view a throw fails the render as for any other template code.
-    if (lazyPhotos) {
+    if (deferred) {
       content = <PhotoRenderBoundary spread={spread.id} box={id}
         reset={JSON.stringify([shown.src, shown.placement, shown.box, state.params, state.photo])}>{content}</PhotoRenderBoundary>;
     }

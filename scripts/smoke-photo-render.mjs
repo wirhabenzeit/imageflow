@@ -100,6 +100,20 @@ try {
   const settled = await w.frameLocator(ready).locator('[data-spread="arriving"] [data-box="hero"] image.smoke-image').evaluate((node) => Number(node.getAttribute('x')));
   assert.ok(Math.abs(settled - dragged) < 2, 'saved crop matches the gesture: ' + settled + ' ≈ ' + dragged);
 
+  // Presentation copies its spreads from a hidden render, so callback boxes draw there at once, with the masked photo
+  // and its renamed clip path in the shown copy.
+  await w.locator('.spread-thumb[data-spread="arriving"]').click();
+  await w.getByRole('button', { name: 'Presentation', exact: true }).click();
+  const present = '.presentation .book-frame-present[data-current][data-ready]';
+  await w.locator(present).waitFor({ timeout: 30000 });
+  const shown = w.frameLocator(present).locator('.if-present-crop:visible [data-box="hero"] image.smoke-image');
+  await shown.waitFor();
+  assert.match(await shown.getAttribute('href'), /\/proof-photo\/segla(\/\d+)?$/);
+  assert.match(await shown.getAttribute('clip-path'), /^url\(#if-\d+-arriving-hero\.p\d+\)$/);
+  assert.equal(await w.frameLocator(present).locator('.if-present-crop:visible [data-box="hero"][data-pending]').count(), 0);
+  await w.keyboard.press('Escape');
+  await w.locator('.presentation').waitFor({ state: 'detached' });
+
   // Proof export waits for the SVG image and embeds it.
   const output = join(work, 'proof.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, output);
