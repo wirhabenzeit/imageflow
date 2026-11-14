@@ -75,16 +75,21 @@ test('offline, oversized and changed metadata fail before installation', async (
     current: () => assert.fail('Unexpected no-update result'), native: { setFeedURL: () => assert.fail('Unexpected installation'), checkForUpdates: () => assert.fail('Unexpected check') } }), /metadata changed/);
 });
 
-test('generator writes both channel heads and native payloads, and API errors never publish an empty replacement', () => {
+test('generator preserves documentation while adding feeds, and API errors never publish an empty replacement', () => {
   const generator = pathToFileURL(resolve('scripts/generate-update-feeds.mjs')).href;
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
-    import { mkdtemp, readFile, rm } from 'node:fs/promises';
+    import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
     import { tmpdir } from 'node:os'; import { join } from 'node:path';
     import { generateUpdateFeeds, publishedReleases } from ${JSON.stringify(generator)};
     const folder = await mkdtemp(join(tmpdir(), 'if-feed-'));
     try {
+      await mkdir(join(folder, 'assets'));
+      await writeFile(join(folder, 'index.html'), '<h1>Documentation</h1>');
+      await writeFile(join(folder, 'assets/docs.css'), 'body { color: black }');
       await generateUpdateFeeds(${JSON.stringify([version('1.0.0-beta.1'), version('0.9.0')])}, folder);
+      assert.equal(await readFile(join(folder, 'index.html'), 'utf8'), '<h1>Documentation</h1>');
+      assert.equal(await readFile(join(folder, 'assets/docs.css'), 'utf8'), 'body { color: black }');
       const beta = JSON.parse(await readFile(join(folder, 'updates/beta/darwin-arm64/RELEASES.json')));
       assert.equal(beta.release.version, '1.0.0-beta.1');
       assert.equal(JSON.parse(await readFile(join(folder, 'updates/releases/1.0.0-beta.1/darwin-arm64/update.json'))).version, beta.release.version);
