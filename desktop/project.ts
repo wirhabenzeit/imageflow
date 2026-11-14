@@ -375,8 +375,9 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
     project: book.project,
     mode,
     photos: Object.fromEntries([...book.photos].map(([id, photo]) => {
-      const { width, height, caption, title, credit, altText } = photo;
-      return [id, { width, height, caption, title, credit, altText, src: base + '/photo/' + id }];
+      const { width, height, caption, title, credit, altText, captured, location, camera } = photo;
+      return [id, { width, height, caption, title, credit, altText, ...(captured ? { captured } : {}), ...(location ? { location } : {}),
+        ...(camera ? { camera } : {}), src: base + '/photo/' + id }];
     })),
     texts: book.texts,
     files: book.files,
