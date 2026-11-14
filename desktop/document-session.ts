@@ -304,7 +304,7 @@ export class DocumentSession {
     this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book), pictures: this.previewPictures });
     // A changed template gets the approvals for its own hash, if any, and the frames are rendered again with them.
     if (this.networkPrepared && !book.readOnly && book.templateHash !== this.network.hash) queueMicrotask(() => void this.updateNetwork().catch(() => {}));
-    this.window.setTitle(bookName(book.folder));
+    this.window.setTitle(bookName(book.folder) + (book.readOnly ? ' — Read Only' : ''));
     if (!book.readOnly) this.window.setRepresentedFilename(book.folder);
     this.changed?.(book);
     this.watchLinkedSources(book);

@@ -399,7 +399,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .pc-file select { flex: 1; min-width: 0; }
 .studio .pc-file button { flex: none; }
 
-/* A unified, quiet document toolbar. Native traffic lights occupy the left inset on macOS. */
+/* Document actions sit below the native macOS title bar. */
 .studio {
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 56px minmax(0, 1fr) 28px;
@@ -407,7 +407,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
   font: 13px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
 .toolbar { position: relative; gap: 16px; padding: 0 14px; background: var(--toolbar-fill); border-bottom-color: var(--edge); user-select: none; }
-.mac-studio .toolbar { padding-left: 88px; -webkit-app-region: drag; }
+.mac-studio { grid-template-rows: 44px minmax(0, 1fr) 28px; }
 .toolbar :is(button, summary, details, .export-choices) { -webkit-app-region: no-drag; }
 .toolbar-actions { flex: none; gap: 8px; }
 .toolbar .project-context { flex: 1; min-width: 0; }

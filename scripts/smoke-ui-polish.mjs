@@ -118,7 +118,7 @@ try {
   await until(async () => (await current(page)).folder === 'Renamed.imageflow', 'Rename updates the live document');
   book = renamed;
   assert.equal((await current(page)).handle, beforeMove.handle);
-  await page.locator('.project-identity .document-title', { hasText: 'Renamed' }).waitFor();
+  await until(async () => (await (await app.browserWindow(page)).evaluate((window) => window.getTitle())) === 'Renamed', 'Rename updates the native title');
   const destination = join(work, 'Moved'); await mkdir(destination);
   await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, destination);
   await command(page, 'move-book');
