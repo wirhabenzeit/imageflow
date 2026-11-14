@@ -6,7 +6,7 @@ ImageFlow is a Mac app for designing photobooks and wall calendars with photos, 
 
 ImageFlow runs on Macs with Apple silicon. Download the `.dmg` from [GitHub Releases](https://github.com/wirhabenzeit/imageflow/releases), open it and drag **ImageFlow** to **Applications**.
 
-To build from source, see [Setup](../development/setup.md).
+Until the first release is published, build ImageFlow from source instead; see [Setup](../development/setup.md).
 
 ## Your first book
 
