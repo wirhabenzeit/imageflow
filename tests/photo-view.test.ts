@@ -2,18 +2,37 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { ProjectSummary } from '../src/desktop';
 import { projectSchema } from '../src/project';
-import { captureLabel, defaultPhotoView, orderedPhotos, photoGroups, photoViewChange, validPhotoView } from '../src/photo-view';
+import { captureFact, captureLabel, captureWallTime, defaultPhotoView, orderedPhotos, photoGroups, photoViewChange, validPhotoView } from '../src/photo-view';
 import { sourceList } from '../src/source-items';
 const summary: ProjectSummary = { id: 'x', folder: 'Book', readOnly: false, photos: {}, photoSizes: {}, texts: {},
   project: projectSchema.parse({ schemaVersion: 1, title: 'Book', template: { id: 't', version: '1' }, spreads: [] }),
   photoIndex: { b: { path: 'b.jpg', title: 'Photo 10', captured: '2026-11-03T00:20:00+02:00' },
     no: { path: 'no.jpg' }, a: { path: 'a.jpg', title: 'Photo 2', captured: '2026-11-02T23:50:00+02:00' },
     c: { path: 'c.jpg', captured: '2026-11-03T07:00:00+02:00' } } };
-test('capture sorting uses offsets, stable undated import order, and natural name sorting', () => {
+test('capture sorting uses camera wall time, stable undated import order, and natural name sorting', () => {
   assert.deepEqual(orderedPhotos(summary), ['a', 'b', 'c', 'no']);
   assert.deepEqual(orderedPhotos(summary, { ...defaultPhotoView, sort: 'import' }), ['b', 'no', 'a', 'c']);
   assert.ok(orderedPhotos(summary, { ...defaultPhotoView, sort: 'name' }).indexOf('a') < orderedPhotos(summary, { ...defaultPhotoView, sort: 'name' }).indexOf('b'));
   assert.deepEqual(orderedPhotos({ ...summary, photoIndex: { x: { path: 'x' }, y: { path: 'y' } } }), ['x', 'y']);
+});
+test('mixed camera offsets, unknown offsets, and estimated mtimes use consistent local dates and gaps', () => {
+  const previous = process.env.TZ;
+  process.env.TZ = 'Europe/Zurich';
+  try {
+    const mixed = { ...summary, photoIndex: {
+      camera: { path: 'camera.jpg', captured: '2026-07-05T01:00:00' },
+      phone: { path: 'phone.jpg', captured: '2026-07-05T01:15:00+02:00' },
+      file: { path: 'file.jpg', captured: '2026-07-04T23:30:00.000Z', capturedEstimated: true },
+    } };
+    assert.deepEqual(orderedPhotos(mixed), ['camera', 'phone', 'file']);
+    const ids = Object.keys(mixed.photoIndex);
+    assert.deepEqual(photoGroups(mixed, ids, { ...defaultPhotoView, group: 'gap' }).map(group => group.ids), [['camera', 'phone', 'file']]);
+    assert.equal(photoGroups(mixed, ids, { ...defaultPhotoView, group: 'day' })[0].id, '2026-07-05');
+    const local = captureWallTime(mixed.photoIndex.file.captured, true)!;
+    assert.equal(local, '2026-07-05T01:30:00');
+    assert.equal(captureLabel(mixed.photoIndex.file.captured, true), captureLabel(local));
+    assert.equal(captureFact(mixed.photoIndex.file)?.value, new Date(local + 'Z').toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }));
+  } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
 });
 test('day groups keep camera dates and filtered group counts, with undated photos trailing', () => {
   const view = { ...defaultPhotoView, group: 'day' as const };

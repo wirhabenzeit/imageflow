@@ -1,6 +1,9 @@
 import type { ProjectFiles } from './project';
 import type { SourceUsage } from './editing';
 import { sourceUsage } from './editing';
+import type { ProjectSummary } from './desktop';
+
+export const assetPageLabels = (summary: ProjectSummary) => summary.project.spreads.map(({ id }, i) => summary.pageLabels?.[id] ?? 'Spread ' + (i + 1));
 
 // Count saved references conservatively, including parameters and content kept by another layout. An asset is
 // safe to describe as unused only when no saved value references it; a filename or path is never a reference.

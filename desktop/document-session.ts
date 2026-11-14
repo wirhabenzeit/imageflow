@@ -160,7 +160,7 @@ export class DocumentSession {
   get book() { return this.projectSession.book; }
   get summary(): ProjectSummary {
     return { ...projectSummary(this.book, this.active.id), handle: this.projectSession.handle, history: this.projectSession.history,
-      network: [...this.networkOrigins] };
+      network: [...this.networkOrigins], pageLabels: this.menuState?.pageLabels };
   }
   notify(change: ProjectChange) {
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.changed, change);

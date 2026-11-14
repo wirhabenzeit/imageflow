@@ -328,7 +328,7 @@ test('mixed imports infer every file type and use the book policy, with an expli
   files.project.importMode = 'link';
   const book = await updateProject(f.book, files);
   const mixed = await importIntoProject(book, {}, [f.photo, f.text, f.file]);
-  assert.deepEqual(mixed.counts, { photos: 1, texts: 1, skipped: 1 });
+  assert.deepEqual(mixed.counts, { photos: 1, texts: 1, files: 0, skipped: 1, failed: 0 });
   const [photo, text] = mixed.imported;
   assert.equal(mixed.book.photoIndex[photo].linked, true);
   assert.deepEqual(mixed.book.project.texts[text], { path: f.text, linked: true });
@@ -338,5 +338,27 @@ test('mixed imports infer every file type and use the book policy, with an expli
   assert.match(copied.book.photoIndex[copied.imported[0]].path, /^photos\//);
   const skipped = await importIntoProject(copied.book, {}, [f.file]);
   assert.equal(skipped.book, copied.book);
-  assert.deepEqual(skipped.counts, { photos: 0, texts: 0, skipped: 1 });
+  assert.deepEqual(skipped.counts, { photos: 0, texts: 0, files: 0, skipped: 1, failed: 0 });
+});
+
+test('mixed imports skip invalid photos while keeping valid assets and reporting parameter files', async (t) => {
+  const f = await fixture(t);
+  const bad = join(f.external, 'bad.jpg');
+  const disguised = join(f.external, 'disguised.png');
+  const truncated = join(f.external, 'truncated.jpg');
+  await writeFile(bad, 'not a photo');
+  await writeFile(disguised, '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>');
+  const bytes = await sharp(f.photo).jpeg().toBuffer();
+  await writeFile(truncated, bytes.subarray(0, bytes.length - 20));
+  const result = await importIntoProject(f.book, {}, [bad, f.photo, disguised, truncated, f.text, f.file]);
+  assert.deepEqual(result.counts, { photos: 1, texts: 1, files: 0, failed: 3, skipped: 1 });
+  assert.equal(result.imported.length, 2);
+  const file = await importIntoProject(result.book, { kind: 'file', accept: ['.gpx'] }, [f.file]);
+  assert.equal(file.counts.files, 1);
+});
+test('failed imports do not leave newly created source directories behind', async (t) => {
+  const f = await fixture(t);
+  await rm(join(f.folder, 'texts'), { recursive: true, force: true });
+  await assert.rejects(importIntoProject(f.book, { kind: 'markdown', target: { spread: 'gone', box: 'story' } }, [f.text]), /no longer exists/);
+  await assert.rejects(stat(join(f.folder, 'texts')), { code: 'ENOENT' });
 });

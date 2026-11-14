@@ -21,6 +21,7 @@ export class SettingsStore {
 
   async load() {
     try {
+      // The former development-only app default does not override a book's own future-import policy.
       const { importMode: _legacy, ...saved } = JSON.parse(await readFile(this.file, 'utf8'));
       this.value = applyPatch(defaultSettings, saved);
     }

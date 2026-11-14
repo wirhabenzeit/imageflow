@@ -9,7 +9,7 @@ import { useListSelection } from './list-selection';
 import { photoMime, textMime } from './source-items';
 import type { SourceRef } from './source-items';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
-import { assetUsage } from './asset-usage';
+import { assetPageLabels, assetUsage } from './asset-usage';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { fileName } from './source-items';
@@ -29,7 +29,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const [search, setSearch] = useState('');
   const raw = sourceEntries(summary);
   const entries = [...sourceList(summary, 'photo', view.value).map(({ id }) => raw.find((entry) => entry.kind === 'photo' && entry.id === id)!), ...raw.filter((entry) => entry.kind !== 'photo')];
-  const usage = assetUsage(summary, summary.project.spreads.map((_, i) => 'Spread ' + (i + 1)));
+  const usage = assetUsage(summary, assetPageLabels(summary));
   const placements = (entry: typeof entries[number]) => usage[entry.kind === 'markdown' ? 'text' : entry.kind][entry.id] ?? [];
   const unavailable = (key: string) => !!summary.sources?.[key] && summary.sources[key].state !== 'available';
   const linked = entries.filter((entry) => entry.linked).length;
@@ -128,7 +128,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
             : <span aria-hidden="true">{entry.kind === 'photo' ? '▧' : entry.kind === 'markdown' ? 'Aa' : '▤'}</span>}</span>
           <span className="asset-name" title={entry.path}><span className="asset-description"><strong>{fileName(entry.path)}</strong>
             {(entry.linked || problem) && <span className="muted">{entry.path.split('/').slice(-2, -1)[0]}</span>}</span></span>
-          <span className="asset-status">{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
+          <span className="asset-status">{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
             {entry.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>
         </div></Fragment>;

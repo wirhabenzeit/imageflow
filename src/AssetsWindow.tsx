@@ -5,7 +5,7 @@ import { isPhotoViewCommand } from './photo-view';
 import { sourceList } from './source-items';
 import { bookName } from './book-name';
 import { QuickLook } from './Sources';
-import { assetUsage } from './asset-usage';
+import { assetPageLabels, assetUsage } from './asset-usage';
 import type { SourceRef } from './source-items';
 import { SourceManager } from './SourceManager';
 
@@ -51,7 +51,7 @@ export function AssetsWindow({ api }: { api?: DesktopApi }) {
   }, [api]);
   return <main className="studio assets-window">
     {summary && api ? <SourceManager view={photoView} api={api} summary={summary} adopt={setSummary} disabled={refreshing} quickLook={setQuick} /> : !error && <p className="muted">Loading assets…</p>}
-    {summary && quick && <QuickLook view={photoView.value} summary={summary} source={quick} usage={assetUsage(summary, summary.project.spreads.map((_, i) => 'Spread ' + (i + 1)))}
+    {summary && quick && <QuickLook view={photoView.value} summary={summary} source={quick} usage={assetUsage(summary, assetPageLabels(summary))}
       close={() => setQuick(undefined)} navigate={(step) => {
         const ids = sourceList(summary, quick.kind, photoView.value).map(({ id }) => id);
         const next = ids[ids.indexOf(quick.id) + step]; if (next) setQuick({ ...quick, id: next });

@@ -3,6 +3,8 @@ import { isPhotoViewCommand } from './photo-view';
 import { captureViewAnchor, restoreViewAnchor } from './view-anchor';
 import type { ViewAnchor } from './view-anchor';
 import { assetUsage } from './asset-usage';
+import { sourcePlacements } from './source-placement';
+import { importFeedback } from './import-feedback';
 import { Presentation } from './Presentation';
 import { commandState } from './commands';
 import type { BookMenuState } from './desktop';
@@ -448,8 +450,7 @@ export function App() {
         setSourceTab(kind);
         setSelectedSource({ kind, id: result.value.imported[0] });
       }
-      const counts = result.value.counts;
-      if (counts?.skipped) setNotice('Imported ' + counts.photos + ' photos and ' + counts.texts + ' texts. ' + counts.skipped + ' files skipped.');
+      setNotice(importFeedback(result.value.imported.length, result.value.counts));
     });
   }
 
@@ -469,6 +470,7 @@ export function App() {
         const result = await persist(() => api.importFiles(before.id, { kind: 'file', accept, mode }));
         if ('error' in result) throw new Error(result.error);
         if (!result.value || current.current !== before) return resolve(undefined);
+        setNotice(importFeedback(result.value.imported.length, result.value.counts));
         adopt(result.value.summary);
         const [id] = result.value.imported;
         resolve(id ? { id, project: result.value.summary.id } : undefined);
@@ -613,14 +615,8 @@ export function App() {
       const [kind, id] = key.split(':');
       return kind === 'photo' && summary.photoIndex[id] ? [{ kind: 'photo' as const, id }] : kind === 'markdown' && summary.project.texts[id] ? [{ kind: 'text' as const, id }] : [];
     });
-    const boxes = Object.entries(definition.boxes);
-    if (firstBox) boxes.sort(([a], [b]) => a === firstBox ? -1 : b === firstBox ? 1 : 0);
-    const available = [...boxes];
-    const assignments = sources.flatMap((source) => {
-      const at = available.findIndex(([, box]) => (box.type === 'photo') === (source.kind === 'photo'));
-      return at < 0 ? [] : [{ box: available.splice(at, 1)[0][0], source }];
-    });
-    if (!assignments.length) { setNotice('This spread has no matching boxes.'); return; }
+    const assignments = sourcePlacements(definition.boxes, state.boxes, sources, firstBox);
+    if (!assignments.length) { setNotice('This spread has no empty matching boxes.'); return; }
     select(target, false);
     edit(({ project }) => {
       const spread = project.spreads.find(({ id }) => id === target);
@@ -1327,6 +1323,9 @@ export function App() {
 
   function drop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
+    setDropTarget(undefined);
+    if (event.dataTransfer.types.includes(spreadMime)) return;
+    if (!api || !writable || busy || !summary || readyId.current !== summary.id) return;
     if (event.dataTransfer.types.includes(photosMime)) {
       const { sheet, box } = locate(event, event.dataTransfer.types);
       try {
@@ -1336,9 +1335,6 @@ export function App() {
       return;
     }
 
-    setDropTarget(undefined);
-    if (event.dataTransfer.types.includes(spreadMime)) return;
-    if (!api || !writable || busy || !summary || readyId.current !== summary.id) return;
     const { box } = locate(event);
     // Kept content dropped on its own spread moves; dropped on another spread it is another use of its source.
     const kept = event.dataTransfer.getData(keptMime);
@@ -1464,7 +1460,7 @@ export function App() {
     writable, busy: !!busy || exporting || !!reload || agentWorking, history: summary?.history,
     canExport, canPrint: canExport && checkCurrent && !check?.errors.length,
     sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom, selectedSpread: spreadId, photoView: photoView.value, selectionCount: selectedSpreads.length,
-    saving };
+    saving, pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };
   const menuKey = JSON.stringify(menuState);
   useEffect(() => { void api?.setBookMenuState(menuState); }, [api, menuKey]);
   const undoCommand = commandState('undo', menuState), redoCommand = commandState('redo', menuState);

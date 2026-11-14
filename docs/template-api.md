@@ -522,7 +522,9 @@ Saved data and its editing UI are separate. Parameters declare what is saved: ID
    - Controls that can hide themselves for good load with a `declaration-control-cycle` warning in the Book check: a control inside a group shown only depending on that control (a group shown while `show` is on that contains `show`), or controls whose conditions depend on each other (A shown only when B is on, B only when A is on). For document parameters, any page marking one of them with `ctx.edit('document.…')` or `ctx.Text` provides a way back and exempts the warning. For layout (spread) parameters, the warning is given per spread: a spread that marks one of them on the page with `ctx.edit` or `ctx.Text` gets none, since that node's popover always shows it, while another spread of the same layout that marks none of them (for example because its values hide the marked node) gets the warning on itself. Marking a box's or element's own parameter does not count: its popover follows the same `controls` and conditions.
 3. **A custom editor** for an element, below.
 
-Photo metadata includes `captured` (an ISO date and time) when available. An explicit camera UTC offset is preserved; dates without an offset retain camera-local time. `capturedEstimated` marks a file-modification-time fallback. Photo sorting and grouping are per-book view preferences and do not change the rendered book.
+Presentation uses the export artwork path (`ctx.mode === 'export'`), including final text flow and crop geometry. Templates should omit editing scaffolding there, just as for PDF output.
+
+Photo metadata includes `captured` (an ISO date and time) when available. An explicit camera UTC offset is preserved; dates without an offset retain camera-local time. `capturedEstimated` marks a file-modification-time fallback, stored as an instant. Photo views compare camera wall times as shot, and display estimated modification times in the computer's local timezone, so mixed cameras and local file dates group consistently. Sorting and grouping are per-book view preferences and do not change the rendered book.
 
 #### Where editing happens
 

@@ -5,6 +5,12 @@ import type { TemplateInfo } from './desktop';
 
 export type PresentationUnit = { spread: string; side: PrintSide; pages: number[]; label: string };
 export type PresentationView = { spread: string; side: PrintSide; bounds: 'trim' | 'bleed'; overview: boolean };
+// Overview cells need screen-sized pictures, not camera originals. Keep the full source URL for normal view.
+export function presentationPhotoSource(source: string, pixels: number, overview: boolean) {
+  if (!overview) return source;
+  const width = Math.max(128, Math.min(1024, Math.ceil(pixels / 128) * 128));
+  return source.replace(/(\/proof-photo\/[\w-]+)(?:\/\d+)?$/, '$1/' + width);
+}
 // Keep reading order independent of PDF delivery: a spread stays together unless single pages were requested.
 export function presentationUnits(spreads: SpreadState[], template: Pick<TemplateInfo, 'spreads' | 'format'>, single = false): PresentationUnit[] {
   const sequence = pageSequence(spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);

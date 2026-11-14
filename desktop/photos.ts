@@ -15,7 +15,7 @@ export async function photoDetails(original: string, maximumBytes: number | null
   const info = await stat(original, { bigint: true });
   if (!info.isFile() || (maximumBytes !== null && info.size > BigInt(maximumBytes))) throw new Error('Photos must be files up to 50 MB.');
   const metadata = await sharp(original).metadata();
-  if (!metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still image.');
+  if (!['jpeg', 'png', 'webp'].includes(metadata.format ?? '') || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still JPEG, PNG or WebP image.');
   const turned = (metadata.orientation ?? 1) >= 5;
   return {
     ...captureTime(metadata.exif, Number(info.mtimeMs)),
@@ -26,6 +26,13 @@ export async function photoDetails(original: string, maximumBytes: number | null
     observation: observation(info),
     key: createHash('sha256').update([original, info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs, 'rendition-2'].join(':')).digest('hex'),
   };
+}
+
+export async function importPhotoDetails(original: string) {
+  const details = await photoDetails(original);
+  // Metadata alone can succeed on a truncated image. Validate its pixels before adding it to the book.
+  await sharp(original, { failOn: 'warning' }).resize({ width: 1, height: 1 }).toBuffer();
+  return details;
 }
 
 const pending = new Map<string, Promise<string>>();

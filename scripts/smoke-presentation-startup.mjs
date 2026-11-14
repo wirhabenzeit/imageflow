@@ -47,7 +47,7 @@ try {
     });
     resize.observe(document, { childList: true, subtree: true });
     HTMLImageElement.prototype.decode = function () {
-      if (!held && this.matches('img[data-src]')) {
+      if (!held && this.matches('img[data-src]') && window.imageflowRenderStatus?.state !== 'ready') {
         held = true;
         // Model a fullscreen resize replacing an image whose first decode never completes. A later draw must
         // be able to report ready independently, rather than keeping the frame hidden behind that old promise.
@@ -101,6 +101,19 @@ try {
     await proof.locator('.if-present-crop:visible img[data-src][src$="/p39"]').waitFor();
     await proof.locator('.if-present-crop:visible [data-rendered="ready"]').waitFor();
     await page.screenshot({ path: join(work, 'presentation.png') });
+    const beforeOverview = requests.length;
+    await page.keyboard.press('g');
+    await proof.locator('.if-presentation.overview').waitFor();
+    const overviewSources = await proof.locator('.if-present-crop img[data-src]').evaluateAll(images => images.map(image => image.getAttribute('src')));
+    assert.equal(overviewSources.length, 40);
+    assert.ok(overviewSources.every(source => /\/proof-photo\/[\w-]+\/\d+$/.test(source)), 'Overview never requests camera originals');
+    await proof.locator('.if-present-crop img[data-src]').first().evaluate(image => image.decode());
+    assert.ok(await proof.locator('.if-present-crop img[data-src]').evaluateAll(images => images.filter(image => image.complete).every(image => image.naturalWidth <= 1024)));
+    assert.ok(requests.slice(beforeOverview).every(source => /\/\d+$/.test(source)));
+    await page.keyboard.press('Enter');
+    await proof.locator('.if-presentation:not(.overview) .if-present-crop:visible img[data-src][src$="/p39"]').waitFor();
+    await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.decode());
+    assert.equal(await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.naturalWidth), 1800, 'Leaving overview restores original photo quality');
     await page.keyboard.press('Escape');
     await page.locator('.presentation').waitFor({ state: 'detached' });
     await menuAction(app, 'Presentation');

@@ -23,9 +23,19 @@ export function photoViewChange(id: PhotoViewCommand, current: PhotoView): Parti
 export function photoDate(summary: ProjectSummary, id: string) {
   return summary.photoDates?.[id] ?? summary.photoIndex[id];
 }
-export function captureMillis(captured?: string) {
-  // Unknown offsets are compared as wall times, consistently across computers and timezones.
-  const value = captured && Date.parse(captured.length === 19 ? captured + 'Z' : captured);
+export function captureWallTime(captured?: string, estimated = false) {
+  if (!captured) return undefined;
+  if (!estimated) return captured.slice(0, 19);
+  // File mtimes are instants. Show them in the computer's local timezone; camera dates keep their as-shot wall
+  // time even when an offset is present. Retain the original instant in saved metadata for portability.
+  const date = new Date(captured);
+  if (!Number.isFinite(date.valueOf())) return undefined;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+}
+export function captureMillis(captured?: string, estimated = false) {
+  const wall = captureWallTime(captured, estimated);
+  const value = wall && Date.parse(wall + 'Z');
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 export function orderedPhotos(summary: ProjectSummary, view: PhotoView = defaultPhotoView) {
@@ -33,7 +43,8 @@ export function orderedPhotos(summary: ProjectSummary, view: PhotoView = default
   if (view.sort === 'import') return ids;
   return ids.sort((a, b) => {
     if (view.sort === 'capture') {
-      const left = captureMillis(photoDate(summary, a)?.captured), right = captureMillis(photoDate(summary, b)?.captured);
+      const leftDate = photoDate(summary, a), rightDate = photoDate(summary, b);
+      const left = captureMillis(leftDate?.captured, leftDate?.capturedEstimated), right = captureMillis(rightDate?.captured, rightDate?.capturedEstimated);
       if (left !== undefined || right !== undefined) return left === undefined ? 1 : right === undefined ? -1 : left - right;
       return 0; // Import order is the stable fallback for undated photos.
     }
@@ -51,7 +62,8 @@ export function photoGroups(summary: ProjectSummary, ids: string[], view: PhotoV
   let gap: PhotoGroup | undefined;
   const undated: string[] = [];
   for (const id of all) {
-    const captured = photoDate(summary, id)?.captured, time = captureMillis(captured);
+    const date = photoDate(summary, id);
+    const captured = captureWallTime(date?.captured, date?.capturedEstimated), time = captureMillis(captured);
     if (!captured || time === undefined) { undated.push(id); continue; }
     const day = captured.slice(0, 10);
     const label = new Date(day + 'T12:00:00Z').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
@@ -71,14 +83,16 @@ export function photoGroups(summary: ProjectSummary, ids: string[], view: PhotoV
   const shown = new Set(ids);
   return groups.map((group) => ({ ...group, ids: group.ids.filter((id) => shown.has(id)) })).filter((group) => group.ids.length > 0);
 }
-export function captureLabel(captured?: string) {
-  if (!captured || captureMillis(captured) === undefined) return '';
-  return new Date(captured.slice(0, 19) + 'Z').toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
+export function captureLabel(captured?: string, estimated = false) {
+  const wall = captureWallTime(captured, estimated);
+  if (!wall || captureMillis(wall) === undefined) return '';
+  return new Date(wall + 'Z').toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
 }
 export function captureFact(date?: { captured?: string; capturedEstimated?: boolean }) {
-  if (!date?.captured || captureMillis(date.captured) === undefined) return undefined;
+  const wall = captureWallTime(date?.captured, date?.capturedEstimated);
+  if (!date || !wall || captureMillis(wall) === undefined) return undefined;
   const estimated = date.capturedEstimated;
-  const value = new Date(date.captured.slice(0, 19) + 'Z').toLocaleString(undefined, {
+  const value = new Date(wall + 'Z').toLocaleString(undefined, {
     year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
     ...(!estimated ? { weekday: 'short', hour: '2-digit', minute: '2-digit' } as const : {}),
   });

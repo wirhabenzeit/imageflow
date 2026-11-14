@@ -1472,8 +1472,14 @@ void app.whenReady().then(async () => {
     const document = editorOwner(event);
     if (!document || !state || typeof state.enabled !== 'object' || !state.enabled ||
         typeof state.editing !== 'boolean' || typeof state.writable !== 'boolean' || typeof state.busy !== 'boolean') return;
+    const previousLabels = JSON.stringify(document.menuState?.pageLabels ?? {});
+    const pageLabels = Object.fromEntries(document.book.project.spreads.flatMap(({ id }) => {
+      const label = state.pageLabels?.[id];
+      return typeof label === 'string' ? [[id, label.slice(0, 100)]] : [];
+    }));
     document.menuState = { ...emptyMenuState, ...state,
-      enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
+      pageLabels, enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
+    if (previousLabels !== JSON.stringify(pageLabels)) publishAssets(document);
     document.window.setDocumentEdited(state.saving === true);
     if (typeof state.sidebar === 'boolean') document.sidebar = state.sidebar;
     if (typeof state.inspector === 'boolean') document.inspector = state.inspector;

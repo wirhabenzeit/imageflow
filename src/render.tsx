@@ -1,4 +1,5 @@
 import type { PresentationView } from './presentation-model';
+import { presentationPhotoSource } from './presentation-model';
 import { sourcePath } from './source-locations';
 import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
 import { activateRenderedImageSpreads, configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
@@ -670,6 +671,7 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
     const columns = Math.max(1, Math.floor(width / 240));
     const cellWidth = width / columns, cellHeight = 200;
     const keep = new Set<string>();
+    const fresh: HTMLElement[] = [];
     stage.classList.toggle('overview', state.overview);
     const rects: BookGeometry['sheets'] = [];
     visible.forEach((i, n) => {
@@ -683,7 +685,6 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
       if (!frame) {
         frame = croppedSheet(sheets[i], crop, { width: w, height: h });
         frame.classList.add('if-present-crop');
-        for (const image of frame.querySelectorAll<HTMLImageElement>('img[data-src]')) image.src = image.dataset.src!;
         if (state.overview) {
           frame.setAttribute('role', 'button');
           frame.setAttribute('aria-label', pagesText(sequence.spreads[i].page));
@@ -692,6 +693,7 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
         cache.set(key, frame);
         sources.set(frame, sheets[i]);
         stage.append(frame);
+        fresh.push(frame);
       }
       const x = state.overview ? (n % columns) * cellWidth + (cellWidth - w) / 2 : (width - w) / 2;
       const y = state.overview ? Math.floor(n / columns) * cellHeight + (cellHeight - h) / 2 : (height - h) / 2;
@@ -699,7 +701,14 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
         outline: state.overview && i === at ? '2px solid #87baff' : '' });
       if (state.overview || i === at) rects.push({ spread: spreads[i].id, x, y, width: w, height: h });
     });
-    for (const [key, frame] of cache) if (!keep.has(key)) { frame.remove(); sources.delete(frame); cache.delete(key); }
+    for (const [key, frame] of cache) if (!keep.has(key)) {
+      for (const image of frame.querySelectorAll('img')) image.removeAttribute('src');
+      frame.remove(); sources.delete(frame); cache.delete(key);
+    }
+    for (const frame of fresh) for (const image of frame.querySelectorAll<HTMLImageElement>('img[data-src]')) {
+      image.loading = state.overview ? 'lazy' : 'eager';
+      image.src = presentationPhotoSource(image.dataset.src!, image.getBoundingClientRect().width * (devicePixelRatio || 1), state.overview);
+    }
     syncPictures();
     post({ type: 'geometry', width, height: state.overview ? Math.max(height, Math.ceil(spreads.length / columns) * cellHeight) : height,
       sheets: rects, boxes: [], targets: [] });

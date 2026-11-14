@@ -75,7 +75,7 @@ export function ParamControl({ param, value, draft, setDraft, apply, autoFocus =
       {param.options.map((option, i) => <button key={option} type="button" role="radio" aria-checked={shown === option}
         data-autofocus={(autoFocus && (shown === option || (!param.options.includes(String(shown)) && i === 0))) || undefined}
         title={param.labels?.[option] ?? option} aria-label={param.labels?.[option] ?? option}
-        onClick={() => apply(option)}>{compact && /columns?/i.test(param.label) && /^[1-4]$/.test(option) ? '▯'.repeat(Number(option)) : param.labels?.[option] ?? option}</button>)}
+        onClick={() => apply(option)}>{compact && /^\d+$/.test(option) ? option : param.labels?.[option] ?? option}</button>)}
     </div>;
   }
   if (param.type === 'file') return <FileControl param={param} value={String(shown)} apply={apply} autoFocus={autoFocus} />;

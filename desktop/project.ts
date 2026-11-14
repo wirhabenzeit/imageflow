@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, readdir, realpath, rm, rmdir, stat } from 'node:fs/promises';
 import * as ReactExports from 'react';
 import { dependencyWarning, isBareImport, missingDependency, readDependencyManifest, vendoredModule } from './dependencies';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -10,7 +10,7 @@ import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
 import type { FixtureMarking, PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
 import type { ImportRequest, ProjectSummary } from '../src/desktop';
-import { photoDetails, photoExtensions } from './photos';
+import { importPhotoDetails, photoDetails, photoExtensions } from './photos';
 import { renditionCacheFor } from './rendition-cache';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
@@ -309,7 +309,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   if (mode !== 'copy' && mode !== 'link') throw new Error('Unknown import mode.');
   const imported: string[] = [];
   const copied: string[] = [];
-  const counts = { photos: 0, texts: 0, skipped: 0 };
+  const counts = { photos: 0, texts: 0, files: 0, skipped: 0, failed: 0 };
   const createdDirectories: string[] = [];
   const prepare = async (folder: string) => {
     const destination = join(book.folder, folder);
@@ -319,22 +319,26 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   };
   try {
     for (const file of paths) {
-      const info = await stat(file);
+      const info = await stat(file).catch(() => undefined);
+      if (!info) { counts.failed++; continue; }
       const extension = extname(file).toLowerCase();
       const kind = request.kind ?? (photoExtensions.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : undefined);
       const extensions = kind === 'photo' ? photoExtensions : kind === 'file' ? new Set(request.accept) : new Set(['.md']);
       if (!info.isFile() || !kind || !extensions.has(extension)) { counts.skipped++; continue; }
       const folder = kind === 'photo' ? 'photos' : kind === 'file' ? 'files' : 'texts';
       const registry = kind === 'file' ? project.files : project.texts;
-      await prepare(folder);
-      const photo = kind === 'photo' ? await photoDetails(file) : undefined;
-      if (kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
-      if (kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
+      let photo: Awaited<ReturnType<typeof importPhotoDetails>> | undefined;
+      try {
+        photo = kind === 'photo' ? await importPhotoDetails(file) : undefined;
+        if (kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
+        if (kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
+        await access(file, constants.R_OK);
+      } catch { counts.failed++; continue; }
       const previous = kind === 'photo'
         ? Object.entries(photoIndex).find(([, photo]) => (!!photo.linked === (mode === 'link') || isInside(book.folder, file)) && (photo.linked ? photo.path : join(book.folder, photo.path)) === file)?.[0]
         : Object.entries(registry).find(([, ref]) => (sourceLinked(ref) === (mode === 'link') || isInside(book.folder, file)) && (sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref))) === file)?.[0];
       if (previous) {
-        if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++;
+        if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++; else counts.files++;
         imported.push(previous);
         continue;
       }
@@ -345,10 +349,10 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       const original = await realpath(file);
       const linked = mode === 'link' && !isInside(book.folder, original);
       if (linked) await approveSource(book.folder, { key: kind + ':' + id, kind, path: original, linked }, request.accept);
-      if (!linked) { await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path); }
+      if (!linked) { await prepare(folder); await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path); }
       if (kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)), ...(photo ? { captured: photo.captured, ...(photo.capturedEstimated ? { capturedEstimated: true } : {}) } : {}) };
       else registry[id] = linked ? { path: original, linked: true } : relativePath;
-      if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++;
+      if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++; else counts.files++;
       imported.push(id);
     }
     if (!imported.length) return { book, imported, copied, createdDirectories, counts };
@@ -365,7 +369,10 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     return { book: next, imported, copied, createdDirectories, counts };
   } catch (error) {
     // A durable save intent may already refer to these assets, including when it needs recovery on next open.
-    if (!(error instanceof CommittedProjectSaveError)) await Promise.all(copied.map((path) => rm(path, { force: true })));
+    if (!(error instanceof CommittedProjectSaveError)) {
+      await Promise.all(copied.map((path) => rm(path, { force: true })));
+      for (const folder of [...createdDirectories].reverse()) await rmdir(folder).catch(() => {});
+    }
     throw error;
   }
 }

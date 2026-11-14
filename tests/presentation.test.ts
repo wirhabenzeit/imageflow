@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { presentationUnits, presentationPage } from '../src/presentation-model';
+import { presentationUnits, presentationPage, presentationPhotoSource } from '../src/presentation-model';
 import { commandState, emptyMenuState } from '../src/commands';
 import { mm, printFormat } from '../src/format';
 import { chooseFormat, templateInfo, templateSchema } from '../src/template';
 import { newSpread } from '../src/editing';
 const base = { label: 'F', trim: { width: mm(100), height: mm(120) }, bleed: mm(3), safe: mm(5), pageCount: { min: 2, max: 100, step: 2 as const } };
+test('overview photo renditions are bounded and normal presentation uses originals', () => {
+  const source = 'imageflow://render/render/id/proof-photo/photo';
+  assert.equal(presentationPhotoSource(source, 350, true), source + '/384');
+  assert.equal(presentationPhotoSource(source, 9000, true), source + '/1024');
+  assert.equal(presentationPhotoSource(source, 350, false), source);
+});
 const template = (format: ReturnType<typeof printFormat>) => templateInfo(chooseFormat(templateSchema.parse({ id: 't', version: '1', contract: 1, format,
   spreads: { full: { label: 'Full', span: 'spread', render: () => null }, cover: { label: 'Cover', span: 'right', render: () => null }, back: { label: 'Back', span: 'left', render: () => null }, page: { label: 'Page', span: 'page', render: () => null } } })));
 

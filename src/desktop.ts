@@ -47,11 +47,12 @@ export const spreadCommands = ['add-spread', 'duplicate-spread', 'move-spread-up
 export type SpreadCommand = typeof spreadCommands[number];
 export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
   writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canPrint: boolean;
-  sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView; selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode };
+  sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView; selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string> };
 export type Command = PhotoViewCommand | SpreadCommand | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'print' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
   handle?: string; history?: HistoryState; viewKey?: string;
+  pageLabels?: Record<string, string>;
   photoDates?: Record<string, { captured: string; capturedEstimated?: boolean }>;
   // The template's hash as loaded; network approvals hold for one hash (ADR 0006).
   templateHash?: string;
@@ -64,6 +65,7 @@ export type ProjectSummary = ProjectFiles & {
   texts: Record<string, string>;
   sources?: Record<string, SourceStatus>;
 };
+export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number };
 export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
 export type HistoryState = { undo?: string; redo?: string };
 // How an MCP client starts ImageFlow's stdio bridge. It does not change when the connection is enabled again.
@@ -138,7 +140,7 @@ export type DesktopApi = {
   installMcp(target: McpClientTarget): Promise<Result<string>>;
   onAgentLease(listener: (id: string) => boolean): () => void;
   onAgentRelease(listener: () => void): () => void;
-  importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[]; counts?: { photos: number; texts: number; skipped: number } } | null>>;
+  importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[]; counts?: ImportCounts } | null>>;
   // Asks once per book to let its frames reach the template's declared origins; resolves to those allowed, with a new
   // summary to render when that changed what the frames may reach.
   editorNetwork(id: string, origins: string[]): Promise<Result<{ origins: string[]; summary?: ProjectSummary }>>;

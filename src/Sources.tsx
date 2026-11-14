@@ -64,7 +64,7 @@ export function Sources({ view, summary, tab, setTab, selected, choose, usage, w
     const api = window.imageflow;
     if (!api || busy || !ids.length) return;
     const keys = ids.map((id) => (tab === 'photo' ? 'photo:' : 'markdown:') + id);
-    const result = await api.showContextMenu(assetMenu(summary, keys, true), assetMenuState(summary, busy));
+    const result = await api.showContextMenu(assetMenu(summary, keys, true, usage), assetMenuState(summary, busy));
     if (!result) return;
     if (result.command === 'asset-preview') { quickLook({ kind: tab, id: ids[0] }); return; }
     const request = result.command === 'asset-jump' ? { action: 'jump' as const, spread: result.value } :
@@ -115,7 +115,7 @@ export function Sources({ view, summary, tab, setTab, selected, choose, usage, w
       const date = photoDate(summary, id);
       return <div key={id} className="source-item source-photo" style={{ aspectRatio: summary.photoSizes[id] ? summary.photoSizes[id].width / summary.photoSizes[id].height : 1.4 }} {...common}>
         {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" draggable={false} /> : <span className="missing">Missing</span>}
-        {view.value.showTime && date?.captured && <small className="photo-capture-time" title={date.capturedEstimated ? 'Estimated from file modification time' : date.captured}>{captureLabel(date.captured)}{date.capturedEstimated ? ' ≈' : ''}</small>}
+        {view.value.showTime && date?.captured && <small className="photo-capture-time" title={date.capturedEstimated ? 'Estimated from file modification time' : date.captured}>{captureLabel(date.captured, date.capturedEstimated)}{date.capturedEstimated ? ' ≈' : ''}</small>}
         <span className="source-title">{title}</span>
         {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
         {!!placed?.length && <small className="badge" aria-label={placed.length === 1 ? 'Used once' : 'Used ' + placed.length + ' times'}>

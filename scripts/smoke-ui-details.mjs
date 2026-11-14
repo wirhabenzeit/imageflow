@@ -154,6 +154,7 @@ try {
   await popup('asset-preview');
   await assets.locator('.asset-row[data-source="photo:late"]').click({ button: 'right' });
   await fitsPreview(assets);
+  assert.ok((await app.evaluate(() => globalThis.lastContext)).some(({ id, label }) => id === 'asset-jump' && label === 'Pages 1–2'));
   const assetsWindow = await app.browserWindow(assets);
   const originalSize = await assetsWindow.evaluate((window) => window.getContentSize());
   await assetsWindow.evaluate((window) => window.setContentSize(600, 420));
@@ -168,9 +169,10 @@ try {
   await page.locator('.si-facts dt').filter({ hasText: /^Captured$/ }).waitFor();
   await page.locator('.source-photo[data-id="estimated"]').click();
   await page.locator('.si-facts dt').filter({ hasText: /^Modified$/ }).waitFor();
+  await page.locator('.spread-thumb[data-spread="two"]').click();
   await popup('asset-place');
   await page.locator('.source-photo[data-id="early"]').click({ button: 'right' });
-  await until(async () => (await current(page)).project.spreads[0].boxes.hero.photo === 'early');
+  await until(async () => (await current(page)).project.spreads[1].boxes.hero?.photo === 'early');
   await ready(page);
   await popup('asset-preview');
   await page.locator('.source-photo[data-id="early"]').click({ button: 'right' });
@@ -199,6 +201,22 @@ try {
   await toolbar.getByRole('button', { name: 'Done', exact: true }).click();
   await until(async () => (await current(page)).project.spreads[0].boxes.body.params.notes === 'Remember this');
   await ready(page);
+  // A group drop replaces its explicit target, reports a partial placement, and clears the drag outline.
+  const dropPhoto = await page.frameLocator('.canvas .book-frame-book:not(.book-frame-pending)').locator('[data-spread="one"] [data-box="hero"]').boundingBox();
+  const dataTransfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer(); data.setData('application/x-imageflow-photo', 'night');
+    data.setData('application/x-imageflow-photos', JSON.stringify(['night', 'late'])); return data;
+  });
+  const dropEvent = { dataTransfer, clientX: dropPhoto.x + dropPhoto.width / 2, clientY: dropPhoto.y + dropPhoto.height / 2 };
+  await page.locator('.canvas').dispatchEvent('dragover', dropEvent);
+  await page.locator('.box-highlight').waitFor();
+  await page.locator('.canvas').dispatchEvent('drop', dropEvent);
+  await until(async () => (await current(page)).project.spreads[0].boxes.hero.photo === 'night');
+  await page.locator('.box-highlight').waitFor({ state: 'detached' });
+  assert.match(await page.locator('.status').innerText(), /Placed 1 of 2/);
+  await ready(page); await menuAction(app, 'Undo Book Edit');
+  await until(async () => (await current(page)).project.spreads[0].boxes.hero.photo === 'late');
+  await ready(page);
   // Canvas photo context actions target the clicked box and preserve Undo history.
   await page.locator('.spread-thumb[data-spread="one"]').click();
   await popup('box-remove-photo');
@@ -207,7 +225,7 @@ try {
   await until(async () => !(await current(page)).project.spreads[0].boxes.hero.photo);
   await ready(page); await page.locator('.canvas').focus();
   await menuAction(app, 'Undo Book Edit');
-  await until(async () => (await current(page)).project.spreads[0].boxes.hero.photo === 'early');
+  await until(async () => (await current(page)).project.spreads[0].boxes.hero.photo === 'late');
   await ready(page);
   await popup('change-layout', 'Other');
   await page.locator('.spread-thumb[data-spread="one"]').click({ button: 'right' });
