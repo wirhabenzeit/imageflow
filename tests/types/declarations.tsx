@@ -22,6 +22,10 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread 
 // Declared, both forms compile, and the builder types `ctx.document` from the template's parameters.
 const foo = { foo: p.string({ label: 'Foo', default: 'x' }) };
 defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, spreads: { a: imported } });
+// Document controls name document parameters only.
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, controls: [{ group: 'Text', controls: ['foo'] }], spreads: { a: imported } });
+// @ts-expect-error
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, controls: ['fooo'], spreads: { a: imported } });
 defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, spreads: ({ spread }) => ({
   a: imported,
   b: spread({ label: 'B', render: (ctx) => <Spread>{ctx.document.foo.toUpperCase()}</Spread> }),
@@ -381,3 +385,9 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread 
     </Spread>,
   }),
 }) });
+// A template's own preview image is a path to a file in the template folder.
+defineTemplate({ id: 'preview', version: '1', contract: 1, format, preview: './preview.jpg',
+  spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });
+// @ts-expect-error a path, not an imported image or a list
+defineTemplate({ id: 'preview', version: '1', contract: 1, format, preview: ['./preview.jpg'],
+  spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });

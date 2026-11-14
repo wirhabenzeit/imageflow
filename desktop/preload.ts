@@ -9,13 +9,16 @@ function listen<T>(channel: string, listener: (value: T) => void) {
 }
 
 const api: DesktopApi = {
+  onSourceCommand: (listener) => listen(channels.sourceCommand, listener),
+  templateAction: (id, action) => ipcRenderer.invoke(channels.templateAction, id, action),
+  showContextMenu: (ids, state) => ipcRenderer.invoke(channels.contextMenu, ids, state),
   popupMenu: (items, point) => ipcRenderer.invoke(channels.popupMenu, items, point),
+  setPresentation: (active) => ipcRenderer.invoke(channels.presentation, active),
   documentProxy: (action) => ipcRenderer.invoke(channels.documentProxy, action),
   dragSources: (keys) => ipcRenderer.invoke(channels.dragSources, keys),
   showAssets: (accept) => ipcRenderer.invoke(channels.showAssets, accept),
   showTemplates: () => ipcRenderer.invoke(channels.showTemplates),
   templatePreview: (id, hash) => ipcRenderer.invoke(channels.templatePreview, id, hash),
-  sourceMenu: (key) => ipcRenderer.invoke(channels.sourceMenu, key),
   sourceAction: (request) => ipcRenderer.invoke(channels.sourceAction, request),
   saveCopy: (includeAssets) => ipcRenderer.invoke(channels.saveCopy, includeAssets),
   currentProject: () => ipcRenderer.invoke(channels.current),

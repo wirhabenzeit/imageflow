@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { BookGeometry, BookView, RenderStatus } from './desktop';
+import type { PresentationView } from './presentation-model';
 import { reorderOffsets } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { Issue } from './desktop';
@@ -16,8 +17,9 @@ export type InlineEditing = { spread: string; element: string } | { spread: stri
 export type CropPreview = { spread: string; box: string; placement: { centerX: number; centerY: number; zoom: number } };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, cropPreview }: {
+export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview }: {
   project: string; view: BookView; query?: string; title: string;
+  presentation?: PresentationView;
   hold?: boolean;
   // Told to every frame, including a candidate with its first geometry, so the template draws the gesture's crop.
   cropPreview?: CropPreview;
@@ -169,6 +171,10 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       refs.current.get(shown)?.contentWindow?.postMessage({ type: 'play-reorder', start: performance.timeOrigin + performance.now() }, renderOrigin);
     }
   }, [shown]);
+
+  useLayoutEffect(() => {
+    if (presentation && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, renderOrigin);
+  }, [presentation, shown]);
 
   return ids.map((id) => {
     const frame = frames[id];

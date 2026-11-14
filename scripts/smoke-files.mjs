@@ -175,14 +175,14 @@ try {
   assert.equal(await trackLine(), 1);
   assert.equal((await status()).errors.length, 0);
 
-  // File controls follow the global default through the editor-frame bridge.
+  // File controls follow the book’s import policy through the editor-frame bridge.
   for (const mode of ['link', 'copy']) {
     const original = join(work, mode + '-through-editor.gpx');
     await writeFile(original, await readFile(sample));
     await openDialog([original]);
+    if (((await read()).importMode ?? 'copy') !== mode) await rerendered(() => menuAction(app, 'Copy Assets into Book'));
     await openRoute();
     assert.equal(await routeEditor.getByRole('combobox', { name: 'File import mode' }).count(), 0);
-    await w.evaluate((importMode) => window.imageflow.updateSettings({ importMode }), mode);
     await routeEditor.getByRole('combobox', { name: 'GPX track' }).selectOption(':choose');
     await routeEditor.locator('.box-photo-name').filter({ hasText: mode + '-through-editor.gpx' }).waitFor();
     const selectedTrack = await routeEditor.getByRole('combobox', { name: 'GPX track' }).inputValue();

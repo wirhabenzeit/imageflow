@@ -71,3 +71,6 @@
   background: var(--if-editor-control); color: var(--if-editor-text); font: inherit; font-size: 12px; cursor: pointer; }
 .marked-days-all { margin-top: 10px; }
 .marked-days-all summary { display: inline-block; list-style: none; }
+/* A day from the calendar file: marked, with a dashed edge, and not clickable. */
+.marked-days-grid button.from-file { background: var(--if-editor-marked-background); color: var(--if-editor-marked-text); font-weight: 700;
+  border: 1px dashed var(--if-editor-background); cursor: default; opacity: 1; }
