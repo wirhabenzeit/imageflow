@@ -42,8 +42,9 @@ export async function templateFiles(folder: string) {
 }
 
 /** A hash of a template's files and their paths, so the same template has the same hash wherever it is copied. */
-export async function templateHash(folder: string, files?: string[]) {
-  return hashTemplateFiles(folder, files ?? await templateFiles(folder));
+export async function templateHash(folder: string, files?: string[], signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  return hashTemplateFiles(folder, files ?? await templateFiles(folder), signal);
 }
 
 /** Copies a template's files (see templateFiles) into `destination`, which must not exist yet. */

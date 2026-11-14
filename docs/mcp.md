@@ -75,6 +75,8 @@ The open project owns a bounded file index. Its first capture hashes registered 
 
 Context and inspection reuse the latest successful whole-book check only while both its content revision and local observation remain current. A successful preview can supply those same declarations and diagnostics without retaining its image. An explicit `check_book` always validates and renders again. A delayed watcher notification with identical content and filesystem metadata may cause one fresh check retry; actual changed inputs still invalidate the result.
 
+Template identity hashes are also reused across unchanged inspections, including pagination. Each request reconciles the library's complete authored file list and file identity/size/timestamps before and after inspection, alongside the input observation; large fonts, images and dependency bundles are reread only when that cache is invalidated. With an incomplete input revision, context keeps two hash reads for recovery checks. Hash reads accept cancellation.
+
 Each render check uses a private rendition folder. Only a completed check whose inputs remained valid can supply generated photo renditions to later checks. Reuse is limited to current photo identities and at most 2048 files / 512 MiB per open project; failed attempts are discarded. This avoids resizing unchanged originals again while still rendering the whole book for every explicit preview. Mutation preparation may also retry once for generation-only notification delays, before any save or import occurs.
 
 ### Page images

@@ -13,10 +13,10 @@ import { createRoot } from 'react-dom/client';
 import { editorURL } from './desktop';
 import { bookLayout } from './desktop';
 import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
-import { cssMM, pageLabel, pageNumbers, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, toMillimeters } from './format';
+import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, toMillimeters } from './format';
 import { animateReorder } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
-import type { PrintSide, ResolvedFormat, UnitPages } from './format';
+import type { PrintSide, ResolvedFormat } from './format';
 import { frameView, parseDocument } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
@@ -37,7 +37,7 @@ import { numberOccurrences } from './edit-targets';
 import { textEditorOwner } from './inline-text';
 import { inlineTextFrame } from './inline-text-frame';
 import { readEdit } from './editing';
-import { parsePreviewRequest, PreviewError } from './preview';
+import { artworkTarget, parsePreviewRequest, PreviewError } from './preview';
 import { previewAspectMismatch, trimAspect } from './template-preview';
 import type { PreviewFileReport } from './template-preview';
 import type { PreviewMetadata, PagePreviewMetadata } from './preview';
@@ -758,29 +758,6 @@ function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: Retu
   }
   root.hidden = true;
   document.body.append(pages);
-}
-
-function artworkTarget(spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, target: Exclude<ReturnType<typeof parsePreviewRequest>['target'], { spreads: string[] }>): { index: number; side: PrintSide; page: UnitPages; spread: string } {
-  if ('page' in target) {
-    const index = sequence.spreads.findIndex(({ page }) => pageNumbers(page).includes(target.page));
-    if (index < 0) throw new PreviewError('preview-target-not-found', 'Page ' + target.page + ' does not exist in this book.');
-    const { page } = sequence.spreads[index];
-    const side = page.number !== undefined ? 'page' : page.left === target.page ? 'left' : 'right';
-    return { index, side, page: side === 'page' ? { number: target.page } : { [side]: target.page }, spread: spreads[index].id };
-  }
-  const index = spreads.findIndex(({ id }) => id === target.spread);
-  if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' does not exist in this book.');
-  const { span, page } = sequence.spreads[index];
-  // A unit without facing pages is one page; a single-page layout in a facing format is drawn as a spread.
-  const side = ('side' in target ? target.side : undefined) ?? (page.number !== undefined ? 'page' : span === 'page' ? 'spread' : span);
-  if (page.number !== undefined) {
-    if (side !== 'page') throw new PreviewError('preview-target-not-found', 'Page ' + target.spread + ' has no ' + side + ' side: this format has no facing pages.');
-    return { index, side, page, spread: target.spread };
-  }
-  if (side === 'spread') return { index, side, page, spread: target.spread };
-  const number = side === 'page' ? undefined : page[side];
-  if (!number) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' has no ' + side + ' page.');
-  return { index, side, page: { [side]: number }, spread: target.spread };
 }
 
 function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: ResolvedFormat) {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import fs, { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -127,6 +128,52 @@ test('context verifies the whole template hash even without source reads or a co
   } });
   await assert.rejects(call('get_authoring_context', { includeSource: [] }),
     (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
+});
+
+test('paginated inspections and context reuse the template hash without rereading large assets', async (t) => {
+  const { folder, call } = await fixture(t);
+  const asset = join(folder, 'template/artwork.bin');
+  await writeFile(asset, Buffer.alloc(2 * 1024 * 1024, 1));
+  const original = readFile;
+  let reads = 0;
+  const patched = t.mock.method(fs, 'readFile', async (...args: Parameters<typeof readFile>) => {
+    if (args[0] === asset) reads++;
+    return original(...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const first = await call('inspect_book', { view: 'spreads', limit: 1 });
+    assert.ok(reads > 0, 'The initial hash reads the asset');
+    const initialReads = reads;
+    await call('inspect_book', { view: 'spreads', offset: 1, limit: 1 });
+    const context = await call('get_authoring_context');
+    assert.deepEqual(context.templateIdentity, first.templateIdentity);
+    assert.equal(reads, initialReads, 'Unchanged requests only reconcile metadata');
+    await writeFile(asset, Buffer.alloc(2 * 1024 * 1024, 2));
+    const changed = await call('inspect_book');
+    assert.notDeepEqual(changed.templateIdentity, first.templateIdentity);
+    assert.ok(reads > initialReads, 'Changed assets are rehashed');
+  } finally {
+    patched.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('cached template hashes include library files omitted from project revisions', async (t) => {
+  const { folder, call } = await fixture(t);
+  const directory = join(folder, 'template/artwork.tmp');
+  await mkdir(directory);
+  const first = await call('inspect_book');
+  // Revision capture ignores this directory, but it is part of library identity, even when initially empty.
+  const path = join(directory, 'image.svg');
+  await writeFile(path, '<svg/>');
+  const added = await call('inspect_book');
+  assert.equal(added.revision, first.revision);
+  assert.notDeepEqual(added.templateIdentity, first.templateIdentity);
+  await writeFile(path, '<svg><path/></svg>');
+  const edited = await call('inspect_book');
+  assert.equal(edited.revision, first.revision);
+  assert.notDeepEqual(edited.templateIdentity, added.templateIdentity);
 });
 
 for (const code of ['typescript-error', 'typescript-timeout']) {

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { contactSheetLayout } from '../src/authoring-artwork';
 import { parseMcpArguments } from '../src/mcp-contract';
-import { parsePreviewRequest } from '../src/preview';
+import { artworkTarget, parsePreviewRequest, PreviewError } from '../src/preview';
+import { mm, pageSequence, printFormat } from '../src/format';
 
 test('contact sheets stay bounded for all grid sizes, narrow pages and minimum resolution', () => {
   for (const count of [1, 2, 3, 7, 12]) for (const columns of [1, 2, 3, 4]) for (const maxEdge of [128, 1000, 1600]) {
@@ -40,4 +41,17 @@ test('page previews accept the single-page side through the public MCP contract'
   assert.equal((parsePreviewRequest(preview).target as { side: string }).side, 'page');
   assert.doesNotThrow(() => parseMcpArguments('check_book', { project: 'book', preview }));
   assert.throws(() => parsePreviewRequest({ target: { spread: 'cover', side: 'spread' } }));
+});
+
+test('requesting a page side in a facing-pages format explains the supported alternatives', () => {
+  const format = printFormat({ label: 'Facing pages', trim: { width: mm(100), height: mm(100) },
+    bleed: mm(0), safe: mm(5), ends: 'inside-covers', pageCount: { min: 2, max: 20, step: 2 } });
+  const spreads = [{ id: 'one' }];
+  const sequence = pageSequence(['spread'], format);
+  assert.throws(() => artworkTarget(spreads, sequence, { spread: 'one', side: 'page' }),
+    (error) => error instanceof PreviewError && error.code === 'preview-target-not-found' &&
+      error.message === 'Spread one is in a facing-pages format; use left, right or omit side.');
+  assert.equal(artworkTarget(spreads, sequence, { spread: 'one', side: 'left' }).side, 'left');
+  assert.equal(artworkTarget(spreads, sequence, { spread: 'one', side: 'right' }).side, 'right');
+  assert.equal(artworkTarget(spreads, sequence, { spread: 'one' }).side, 'spread');
 });
