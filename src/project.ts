@@ -28,8 +28,17 @@ const box = z.object({
   'A box holds one assignment, and only photos have a crop.');
 
 
+// The book format this app reads and writes (`project.json` → `schemaVersion`). A book saved by a newer app with a
+// higher number is refused with a request to update ImageFlow, and is left as it is.
+export const bookFormatVersion = 1;
+export const newerBookMessage = (version: number) => 'This book was saved by a newer version of ImageFlow (book format ' +
+  version + '; this version reads format ' + bookFormatVersion + '). Update ImageFlow to open it. The book was not changed.';
+const schemaVersion = z.literal(bookFormatVersion, {
+  error: ({ input }) => typeof input === 'number' && Number.isInteger(input) && input > bookFormatVersion ? newerBookMessage(input) : undefined,
+});
+
 export const projectSchema = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion,
   title: label,
   importMode: importModeSchema.optional(),
   // `hash` is the template source's hash when the book was created from the template library; it tells a later

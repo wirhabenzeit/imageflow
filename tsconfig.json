@@ -12,6 +12,7 @@
     "resolveJsonModule": true
   },
   "include": ["src", "desktop", "tests", "vite.config.ts"],
-  // Template-side type checks with the starter's own settings: `tsc -p tests/types`.
-  "exclude": ["tests/types"]
+  // Template-side type checks with the starter's own settings: `tsc -p tests/types`. Compatibility books carry their own
+  // template copies, checked as books (tests/compat-books.test.ts), not as app source.
+  "exclude": ["tests/types", "tests/compat/books"]
 }

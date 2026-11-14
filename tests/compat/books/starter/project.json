@@ -1,0 +1,376 @@
+{
+  "schemaVersion": 1,
+  "title": "Along the coast",
+  "template": {
+    "id": "imageflow-starter",
+    "version": "0.9.0",
+    "hash": "cd8b15dfb0a0da409a59291dfb6f426d1b96700205b3fe63d0afa099bb5ce5b6"
+  },
+  "params": {},
+  "texts": {
+    "arrival": "texts/arrival.md",
+    "notebook": "texts/notebook.md",
+    "return": "texts/return.md"
+  },
+  "files": {
+    "senja-road": "files/senja-road.gpx"
+  },
+  "spreads": [
+    {
+      "id": "title",
+      "definition": "cover",
+      "params": {
+        "heading": "Along the coast",
+        "subtitle": "Field notes from Senja"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "segla"
+        }
+      }
+    },
+    {
+      "id": "contents",
+      "definition": "contents",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "segla",
+          "crops": {
+            "contents": {
+              "centerX": 0.45,
+              "centerY": 0.4,
+              "zoom": 1.6
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "coast",
+      "definition": "opener",
+      "params": {
+        "heading": "The coast"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "light"
+        }
+      }
+    },
+    {
+      "id": "arriving",
+      "definition": "story",
+      "params": {
+        "heading": "Arriving"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "segla",
+          "params": {
+            "caption": true
+          }
+        },
+        "body": {
+          "text": "arrival"
+        }
+      }
+    },
+    {
+      "id": "headlands",
+      "definition": "panorama",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "shore",
+          "params": {
+            "caption": true
+          }
+        }
+      }
+    },
+    {
+      "id": "settlements",
+      "definition": "grid",
+      "params": {
+        "heading": "Settlements",
+        "note": "Four places along the outer road, from the ridge to the last cottage before the ferry."
+      },
+      "boxes": {
+        "hero": {
+          "photo": "segla"
+        },
+        "second": {
+          "photo": "shore"
+        },
+        "third": {
+          "photo": "cottage"
+        },
+        "fourth": {
+          "photo": "light"
+        }
+      }
+    },
+    {
+      "id": "still",
+      "definition": "statement",
+      "params": {
+        "quote": "Each turn opened a different view of the same water.",
+        "attribution": "From the notebook"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "cottage"
+        }
+      }
+    },
+    {
+      "id": "turning",
+      "definition": "storyRight",
+      "params": {
+        "heading": "A turn in the path"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "light"
+        },
+        "body": {
+          "text": "arrival"
+        }
+      }
+    },
+    {
+      "id": "details",
+      "definition": "feature3",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "shore",
+          "params": {
+            "caption": true
+          }
+        },
+        "second": {
+          "photo": "segla",
+          "crops": {
+            "feature3": {
+              "centerX": 0.42,
+              "centerY": 0.38,
+              "zoom": 2.2
+            }
+          }
+        },
+        "third": {
+          "photo": "cottage",
+          "crops": {
+            "feature3": {
+              "centerX": 0.5,
+              "centerY": 0.5,
+              "zoom": 2.4
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "notebook",
+      "definition": "text",
+      "params": {
+        "heading": "From the notebook"
+      },
+      "boxes": {
+        "body": {
+          "text": "notebook"
+        },
+        "continuation": {
+          "text": "notebook"
+        }
+      }
+    },
+    {
+      "id": "weather",
+      "definition": "opener",
+      "params": {
+        "heading": "Changing weather"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "cottage"
+        }
+      }
+    },
+    {
+      "id": "water",
+      "definition": "pair",
+      "params": {
+        "framed": false
+      },
+      "boxes": {
+        "hero": {
+          "photo": "shore",
+          "params": {
+            "caption": false
+          }
+        },
+        "second": {
+          "photo": "light",
+          "params": {
+            "caption": false
+          }
+        }
+      }
+    },
+    {
+      "id": "cottage",
+      "definition": "single",
+      "params": {
+        "note": "The white cottage looked small in the photograph. From the road it felt like the only thing for miles."
+      },
+      "boxes": {
+        "hero": {
+          "photo": "cottage",
+          "params": {
+            "shape": "arch",
+            "caption": true
+          }
+        }
+      }
+    },
+    {
+      "id": "road",
+      "definition": "panorama",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "light",
+          "params": {
+            "caption": true
+          }
+        }
+      }
+    },
+    {
+      "id": "frames",
+      "definition": "grid9",
+      "params": {
+        "heading": "Details",
+        "note": ""
+      },
+      "boxes": {
+        "hero": {
+          "photo": "segla",
+          "crops": {
+            "grid9": {
+              "centerX": 0.3,
+              "centerY": 0.3,
+              "zoom": 2
+            }
+          }
+        },
+        "second": {
+          "photo": "shore",
+          "crops": {
+            "grid9": {
+              "centerX": 0.7,
+              "centerY": 0.6,
+              "zoom": 2.5
+            }
+          }
+        },
+        "fifth": {
+          "photo": "cottage",
+          "crops": {
+            "grid9": {
+              "centerX": 0.55,
+              "centerY": 0.48,
+              "zoom": 3
+            }
+          }
+        },
+        "third": {
+          "photo": "light",
+          "crops": {
+            "grid9": {
+              "centerX": 0.2,
+              "centerY": 0.6,
+              "zoom": 2
+            }
+          }
+        },
+        "fourth": {
+          "photo": "segla",
+          "crops": {
+            "grid9": {
+              "centerX": 0.6,
+              "centerY": 0.7,
+              "zoom": 2.5
+            }
+          }
+        },
+        "sixth": {
+          "photo": "shore",
+          "crops": {
+            "grid9": {
+              "centerX": 0.25,
+              "centerY": 0.3,
+              "zoom": 2.2
+            }
+          }
+        },
+        "seventh": {
+          "photo": "cottage",
+          "crops": {
+            "grid9": {
+              "centerX": 0.3,
+              "centerY": 0.7,
+              "zoom": 2
+            }
+          }
+        },
+        "eighth": {
+          "photo": "light",
+          "crops": {
+            "grid9": {
+              "centerX": 0.75,
+              "centerY": 0.35,
+              "zoom": 2.6
+            }
+          }
+        },
+        "ninth": {
+          "photo": "segla",
+          "crops": {
+            "grid9": {
+              "centerX": 0.5,
+              "centerY": 0.15,
+              "zoom": 2.4
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "last-notes",
+      "definition": "text",
+      "params": {
+        "heading": "The last notes"
+      },
+      "boxes": {
+        "body": {
+          "text": "return"
+        },
+        "continuation": {
+          "text": "return"
+        }
+      }
+    },
+    {
+      "id": "closing",
+      "definition": "credits",
+      "params": {
+        "colophon": "Field notes from Senja, made with ImageFlow.\nThe sample photographs are placeholders: replace them with your own."
+      },
+      "boxes": {}
+    }
+  ]
+}
