@@ -78,9 +78,9 @@ The bundle size limit and the existing rules (no paths outside `template/`, no l
 The starter's Map layout (`sample/starter/template/map.tsx`), all in template code:
 
 - `package.json` depends on `maplibre-gl`. `network: ['https://tiles.openfreemap.org']`. OpenFreeMap needs no key and serves OpenMapTiles vector styles (Liberty, Bright, Positron) with OpenStreetMap data.
-- Parameters: `track` (GPX file), `style` (enum), `longitude`, `latitude` and `zoom` (numbers; the zoom is a print zoom independent of the screen size), `trackColor`, `trackWidth`.
-- The **Edit map** editor shows an interactive MapLibre map with the GPX track as a GeoJSON layer. Drag, scroll and buttons move it; a segmented control picks the style. The view is saved as ordinary parameters as it changes.
-- `render` draws the basemap with `<RenderedImage label="Map">`: an off-screen MapLibre map at the box's size with `pixelRatio` from the target, resolved on `idle`. The GPX track goes on top as SVG, so the line stays vector in the PDF, with an attribution line: "© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors". The attribution cannot be turned off, only restyled.
+- Parameters: `tracks` (a list of GPX tracks, each with a colour and a label; #115 replaced the original single `track` and `trackColor`), `style` (enum), `longitude`, `latitude` and `zoom` (numbers; the zoom is a print zoom independent of the screen size), `trackWidth`.
+- The **Edit map** editor shows an interactive MapLibre map with the GPX tracks as a GeoJSON layer, each in its colour. Drag, scroll and buttons move it; a segmented control picks the style. The view is saved as ordinary parameters as it changes.
+- `render` draws the basemap with `<RenderedImage label="Map">`: an off-screen MapLibre map at the box's size with `pixelRatio` from the target, resolved on `idle`. The GPX tracks go on top as SVG, so the line stays vector in the PDF, with an attribution line: "© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors". The attribution cannot be turned off, only restyled.
 - A full A4 landscape spread at 300 ppi is about 4960 × 3510 px, inside common WebGL limits.
 
 Keyed providers (MapTiler, Mapbox, Stadia) can be added by template authors through `network` and a key parameter. Their terms on caching and print vary by plan, so the starter does not use them.

@@ -8,7 +8,7 @@ import type { Edit } from './Inspector';
 import { isParameterValue, resolveParams } from './parameters';
 import type { SpreadState, Values } from './project';
 import { controlLayout } from './controls';
-import { ControlList, Field, ProjectFilesContext } from './Fields';
+import { CompactListsContext, ControlList, Field, ProjectFilesContext } from './Fields';
 import { useEditorFrame } from './editor-frame';
 import { applyEditorChanges, changedValues, editingContext, queuedEditorSave } from './editor-session';
 import type { EditorState, EditorTarget } from './editor-session';
@@ -323,7 +323,8 @@ export function ElementEditorDialog({ project, template, spread, params, target,
         {problem && <p className={'inline-editor-status' + (error || stale || saveRejected ? ' error-text' : '')} role={error || stale || saveRejected ? 'alert' : 'status'}
           title={problem}>{problem}</p>}
         <strong className="inline-editor-title">{subject}</strong>
-        {fields && <fieldset className="crop-params inline-editor-fields" disabled={disabled}>{fields}</fieldset>}
+        {fields && <fieldset className="crop-params inline-editor-fields" disabled={disabled}>
+          <CompactListsContext.Provider value={true}>{fields}</CompactListsContext.Provider></fieldset>}
         <button type="button" className="primary" disabled={flushing !== undefined} onClick={() => requestClose()}>Done</button>
       </div>, host)}
     </>;

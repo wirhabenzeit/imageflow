@@ -368,6 +368,65 @@ defineTemplate({ id: 'inline-text', version: '1', contract: 1, format,
       <ctx.Text parameter="heading" presentation="popover" />
     </Spread> }) }) });
 
+// List parameters (#115): `render` reads an array of items with their `id` and every field typed.
+const tracks = p.list({ label: 'Tracks', max: 12, item: {
+  track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
+  colour: p.color({ label: 'Colour', default: '#c0392b' }),
+  width: p.number({ label: 'Width', default: 1 }),
+}, default: [{ colour: '#000000' }] });
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
+  map: spread({
+    label: 'Map',
+    elements: { map: { label: 'Map', parameters: { tracks }, controls: ['tracks'] } },
+    render: (ctx) => <Spread>{ctx.elements.map.params.tracks.map((item) => <i key={item.id}>{item.track.length + item.width}{item.colour}</i>)}</Spread>,
+  }),
+}) });
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
+  map: spread({
+    label: 'Map',
+    elements: { map: { label: 'Map', parameters: { tracks } } },
+    // @ts-expect-error
+    render: (ctx) => <Spread>{ctx.elements.map.params.tracks[0].label}</Spread>,
+  }),
+}) });
+// Item fields are checked like parameters, and default items only name declared fields.
+// @ts-expect-error
+p.list({ label: 'L', item: { name: p.string({ label: 'Name', default: '', mutliline: true }) } });
+// @ts-expect-error
+p.list({ label: 'L', item: { name: p.string({ label: 'Name', default: '' }) }, default: [{ title: 'x' }] });
+// Default items take each field's value type, including only an enum's declared options.
+// @ts-expect-error a string for a number field
+p.list({ label: 'Rows', item: { count: p.number({ label: 'Count', default: 0 }) }, default: [{ count: 'wrong' }] });
+// @ts-expect-error not one of the enum's options
+p.list({ label: 'Rows', item: { side: p.enum({ label: 'Side', options: ['left', 'right'], default: 'left' }) }, default: [{ side: 'up' }] });
+// @ts-expect-error a number for a string field
+p.list({ label: 'Rows', item: { name: p.string({ label: 'Name', default: '' }) }, default: [{ id: 'a', name: 3 }] });
+p.list({ label: 'Rows', item: { side: p.enum({ label: 'Side', options: ['left', 'right'], default: 'left' }),
+  count: p.number({ label: 'Count', default: 0 }) }, default: [{ id: 'a', side: 'right' }, { count: 2 }] });
+p.list({ label: 'Rows', item: { side: p.enum({ label: 'Side', options: { l: 'Left', r: 'Right' }, default: 'l' }) },
+  default: [{ side: 'r' }] });
+// An editor can show one field of one item.
+function TrackEditor({ values, Control }: ElementEditorProps<{ tracks: typeof tracks }, 'tracks'>) {
+  return <>{values.tracks.map((item) => <Control key={item.id} parameter="tracks" itemId={item.id} field="track" />)}</>;
+}
+void TrackEditor;
+// `itemId` and `field` go together, name a declared item field, and only lists take them.
+function WrongItemControls({ Control }: ElementEditorProps<{ tracks: typeof tracks; zoom: ReturnType<typeof p.number<{ label: 'Z'; default: 1 }>> }, 'tracks' | 'zoom'>) {
+  return <>
+    {/* @ts-expect-error */}
+    <Control parameter="tracks" itemId="a" field="trak" />
+    {/* @ts-expect-error */}
+    <Control parameter="tracks" field="track" />
+    {/* @ts-expect-error */}
+    <Control parameter="zoom" itemId="a" field="track" />
+    <Control parameter="tracks" />
+    <Control parameter="zoom" />
+  </>;
+}
+void WrongItemControls;
+// Without declaration types, a list's value is an array of items.
+const untyped = (values: import('imageflow').Values) => Array.isArray(values.tracks) ? values.tracks.map((item) => item.id) : [];
+void untyped;
 // PhotoBox render callbacks: `box.params` is typed per box, and a shared callback fails on a box without its parameters.
 const tilted = (photo: PhotoRender, state: PhotoBoxState<string, { tilt: number }>) =>
   <img src={photo.src} alt={photo.alt} style={{ ...photo.style, rotate: state.params.tilt + 'deg' }} />;
