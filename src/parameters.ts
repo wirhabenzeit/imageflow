@@ -100,9 +100,19 @@ function parameter<T extends ScalarParameter['type']>(type: T) {
 }
 
 type ListOptions = { label: string; item: Record<string, ScalarParameter>; min?: number; max?: number; default?: readonly Record<string, Scalar>[] };
-// A list starts empty unless it has a default. Default items without an `id` get one from their position.
+// A list starts empty unless it has a default. Default items without an `id` get one from their position, skipping
+// IDs other default items already have.
 function listParameter<const Options extends ListOptions>(options: Options) {
-  return { ...options, type: 'list' as const, default: (options.default ?? []).map((item, index) => ({ id: 'item' + (index + 1), ...item })) };
+  const items = options.default ?? [];
+  const taken = new Set(items.map(({ id }) => id));
+  const positional = (index: number) => {
+    let id = 'item' + (index + 1);
+    for (let n = 2; taken.has(id); n++) id = 'item' + (index + 1) + '-' + n;
+    taken.add(id);
+    return id;
+  };
+  const declared = { ...options, type: 'list' as const, default: items.map((item, index): ListItem => ({ ...item, id: typeof item.id === 'string' ? item.id : positional(index) })) };
+  return declared as Omit<Options, 'default'> & { type: 'list'; default: ListItem[] };
 }
 
 type FileOptions = Omit<Extract<Parameter, { type: 'file' }>, 'type' | 'default'>;

@@ -61,8 +61,10 @@ export type FixturePlan = {
 
 type Inputs = { photos: number; markdown: number; strings: number; files: number };
 function layoutInputs(definition: SpreadDefinition): Inputs {
+  // A list's item fields count like parameters: fixtures fill one item of each list.
   const parameters: Parameter[] = [definition.parameters, ...Object.values(definition.boxes).map((box) => box.parameters),
-    ...Object.values(definition.elements).map((element) => element.parameters)].flatMap((group) => Object.values(group));
+    ...Object.values(definition.elements).map((element) => element.parameters)].flatMap((group) => Object.values(group))
+    .flatMap((param) => param.type === 'list' ? Object.values(param.item) : [param]);
   const boxes = Object.values(definition.boxes);
   return {
     photos: boxes.filter(({ type }) => type === 'photo').length, markdown: boxes.filter(({ type }) => type === 'markdown').length,
@@ -230,6 +232,11 @@ function sampleValues(parameters: Parameters, fixture: FixtureCase, ids: Fixture
       }
     } else if (param.type === 'file' && fixture === 'malformed-files') {
       values[key] = ids.file(param.accept[0]);
+    } else if (param.type === 'list') {
+      // Empty lists are empty (or as short as `min` allows); other cases fill items with the case's values, so a long
+      // label or a malformed file inside a list item is tested too.
+      const count = fixture === 'empty' ? param.min ?? 0 : Math.max(1, param.min ?? 0);
+      values[key] = Array.from({ length: count }, (_, index) => ({ id: 'fixture' + (index + 1), ...sampleValues(param.item, fixture, ids) as Record<string, string | number | boolean> }));
     }
   }
   return values;

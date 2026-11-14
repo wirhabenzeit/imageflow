@@ -199,7 +199,7 @@ export const p: {
   list<const O extends Common & { item: Record<string, ScalarParameter>; min?: number; max?: number; default?: readonly ListItemInput[] }>(
     options: Known<O, Common & { item: unknown; min?: number; max?: number; default?: unknown }> & { item: ParametersChecked<O['item']>;
       default?: DefaultItemsChecked<O['default'], O['item']> }):
-    Omit<O, 'default'> & { type: 'list'; default: ListItemValue<O['item']>[] };
+    Omit<O, 'default'> & { type: 'list'; default: ({ id: string } & Partial<ListItemValue<O['item']>>)[] };
 };
 
 // Editing UI
@@ -279,8 +279,8 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
    * `<Control parameter="track" />`. `scope="spread"` names one of the layout parameters the editor declares in
    * `spread`: `<Control parameter="heading" scope="spread" />`.
    */
-  Control: EditorFunction<K, { parameter: K; label?: string; scope?: 'element' } & ItemControl, ImageFlowElement>
-    & EditorFunction<SK, { parameter: SK; label?: string; scope: 'spread' } & ItemControl, ImageFlowElement>;
+  Control: EditorFunction<K, ControlProps<P, K, { scope?: 'element' }>, ImageFlowElement>
+    & EditorFunction<SK, ControlProps<S, SK, { scope: 'spread' }>, ImageFlowElement>;
   /**
    * Lets the user import a file into the project, offering these extensions, and resolves to its file ID (or
    * undefined when they cancel). Assign it with `set` to save the assignment immediately; the
@@ -288,15 +288,20 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
    */
   importFile(accept: readonly string[]): Promise<string | undefined>;
 };
+/** The item field names of a list parameter, or never for other parameters. */
+type ListFields<T> = T extends { type: 'list'; item: infer I } ? keyof I & string : never;
+/**
+ * The props of `Control` for each parameter. For a list parameter, `itemId` and `field` together name one field of
+ * one item, by the item's `id`, instead of the whole list: `<Control parameter="tracks" itemId={track.id} field="track" />`
+ * offers that track's file chooser and import. Other parameters take neither.
+ */
+type ControlProps<P, K extends string, Extra> = K extends K ? { parameter: K; label?: string } & Extra & (
+  | { itemId?: undefined; field?: undefined }
+  | ([ListFields<P[K & keyof P]>] extends [never] ? never : { itemId: string; field: ListFields<P[K & keyof P]> })) : never;
 /**
  * Typed props are checked strictly against the declaration, so an editor typed for `'zoon'` cannot be the editor of
  * an element that owns `'zoom'`. Untyped props (`K` is `string`) stay compatible with every declaration.
  */
-/**
- * For a list parameter, `item` and `field` name one field of one item, by the item's `id`, instead of the whole list:
- * `<Control parameter="tracks" item={track.id} field="track" />` offers that track's file chooser and import.
- */
-type ItemControl = { item?: string; field?: string };
 type EditorChanges<P extends Parameters, K extends keyof P & string> = [K] extends [never] ? Record<string, never> : Partial<Pick<ParameterValues<P>, K>>;
 type EditorFunction<K extends string, A, R> = string extends K ? { bivariant(argument: A): R }['bivariant'] : (argument: A) => R;
 type ParametersOf<T> = T extends { parameters?: infer P } ? P extends Parameters ? P : {} : {};
@@ -365,7 +370,7 @@ export type DocumentEditorProps<D extends Parameters = Parameters, K extends key
    */
   waitUntil(until: Promise<unknown>): void;
   /** ImageFlow's own control for one of this editor's parameters, bound to the draft. */
-  Control: EditorFunction<K, { parameter: K; label?: string } & ItemControl, ImageFlowElement>;
+  Control: EditorFunction<K, ControlProps<D, K, {}>, ImageFlowElement>;
   importFile(accept: readonly string[]): Promise<string | undefined>;
 };
 /**
@@ -490,7 +495,9 @@ export type Photo = {
 };
 /** Where a Markdown box sits in the chain of boxes that share its text. */
 export type FlowPosition = { part: number; parts: number; title?: string };
-export type Values = Record<string, string | number | boolean>;
+/** A list item as saved and read without declaration types: its `id` and its field values. */
+export type ListItemValues = { id: string; [field: string]: string | number | boolean };
+export type Values = Record<string, string | number | boolean | ListItemValues[]>;
 
 type ValuesOf<T> = T extends { parameters: infer P } ? ParameterValues<P> : {};
 type BoxContext<B> = B extends { type: 'photo' }

@@ -11,6 +11,12 @@ import type { ProjectCommandErrorCode } from '../src/project-commands';
 import { editorChanges } from '../src/editor-changes';
 import { changedValues } from '../src/editor-session';
 import { capabilities } from '../src/runtime-exports';
+import { fileErrors } from '../src/file-findings';
+import { fixtureRequestSchema, fixtureSpread, planFixtures } from '../src/fixtures';
+import type { FixtureCase, FixtureCell, FixtureSourceIds } from '../src/fixtures';
+import type { ListItem } from '../src/parameters';
+import type { RenderProject } from '../src/project';
+import { fileIsAssigned } from '../desktop/source-actions';
 
 const tracks = p.list({
   label: 'Tracks',
@@ -186,4 +192,54 @@ test('an open editor sees no change when a list is set to the same items', () =>
   const current = resolveParams(template.spreads.map.elements.map.parameters, state.spread.elements.map.params);
   assert.equal(changedValues(template, state, editorTarget, { values: { tracks: structuredClone(current.tracks) }, spread: {} }), undefined);
   assert.ok(changedValues(template, state, editorTarget, { values: { tracks: [] }, spread: {} }));
+});
+
+test('a list falls back to its default when dropping unreadable items leaves fewer than min', () => {
+  const atLeastTwo = p.list({ label: 'Stops', item: { place: p.string({ label: 'Place', default: '' }) }, min: 2,
+    default: [{ place: 'A' }, { place: 'B' }] }) as ListParameter;
+  assert.deepEqual(resolveValue(atLeastTwo, [{ id: 'x', place: 'X' }, { id: 'x', place: 'Y' }]),
+    [{ id: 'item1', place: 'A' }, { id: 'item2', place: 'B' }]);
+  assert.deepEqual(resolveValue(atLeastTwo, [{ id: 'x', place: 'X' }, { id: 'y', place: 'Y' }]), [{ id: 'x', place: 'X' }, { id: 'y', place: 'Y' }]);
+});
+
+test('positional default IDs skip IDs other default items use', () => {
+  const list = p.list({ label: 'L', item: { place: p.string({ label: 'Place', default: '' }) }, default: [{ id: 'item2', place: 'A' }, { place: 'B' }, { place: 'C' }] });
+  assert.deepEqual(list.default.map(({ id }) => id), ['item2', 'item2-2', 'item3']);
+  assert.equal(parameterSchema.safeParse(list).success, true);
+});
+
+test('a rejected list from an editor shows the value and its first problem', () => {
+  const { rejected } = editorChanges({ tracks }, ['tracks'], { tracks: [{ id: 'a' }, { id: 'a' }] });
+  assert.match(rejected[0].message, /\[\{"id":"a"\},\{"id":"a"\}\] is not a valid value \(it item 2 repeats the id a\)/);
+});
+
+test('the Book check reports a missing or wrong file per list item', () => {
+  const book = { project: { files: { gpx1: 'files/one.gpx', notes: 'files/notes.txt' } },
+    files: { gpx1: { name: 'one.gpx', extension: '.gpx', text: '' }, notes: { name: 'notes.txt', extension: '.txt', text: '' } } } as unknown as RenderProject;
+  const findings = fileErrors(book, { tracks }, { tracks: [{ id: 'a', track: 'gpx1' }, { id: 'b', track: 'gone' }, { id: 'c', track: 'notes' }] }, 'Map');
+  assert.deepEqual(findings.map(({ code, message, parameter, source }) => ({ code, message, parameter, source })), [
+    { code: 'file-missing', message: 'Map · Tracks 2 · GPX track: the assigned file is no longer in the project. Choose it again.', parameter: 'tracks', source: 'gone' },
+    { code: 'file-type', message: 'Map · Tracks 3 · GPX track: notes.txt is not a .gpx file. Choose another file.', parameter: 'tracks', source: 'notes' },
+  ]);
+  assert.match(findings[0].suggestion!, /\(item b, field track\)/);
+});
+
+test('a file held in a list item is assigned, so it cannot be removed', () => {
+  const book = { project: files().project } as Parameters<typeof fileIsAssigned>[0];
+  assert.equal(fileIsAssigned(book, 'gpx2'), true);
+  assert.equal(fileIsAssigned(book, 'notes'), false);
+});
+
+test('fixtures fill list items, including a malformed file and long text', () => {
+  const ids: FixtureSourceIds = { photo: { landscape: 'land', portrait: 'port' }, file: (extension) => 'bad' + extension };
+  const definition = template.spreads.map;
+  const cell = (fixture: FixtureCase) => ({ layout: 'map', case: fixture, spread: 'f-' + fixture }) as FixtureCell;
+  const items = (fixture: FixtureCase) => fixtureSpread(cell(fixture), definition, ids, 'text').elements.map.params.tracks as ListItem[];
+  assert.deepEqual(items('malformed-files'), [{ id: 'fixture1', track: 'bad.gpx', label: '' }]);
+  assert.equal((items('long-text')[0].label as string).length, 10);
+  assert.deepEqual(items('empty'), []);
+  assert.equal(items('typical').length, 1);
+  // The map's list makes the malformed-files and long-text cases applicable.
+  const plan = planFixtures({ ...template, spreads: { map: definition } }, fixtureRequestSchema.parse({}));
+  assert.ok(!plan.skipped.some(({ layout, case: fixture }) => layout === 'map' && (fixture === 'malformed-files' || fixture === 'long-text')), JSON.stringify(plan.skipped));
 });

@@ -396,9 +396,26 @@ p.list({ label: 'L', item: { name: p.string({ label: 'Name', default: '', mutlil
 p.list({ label: 'L', item: { name: p.string({ label: 'Name', default: '' }) }, default: [{ title: 'x' }] });
 // An editor can show one field of one item.
 function TrackEditor({ values, Control }: ElementEditorProps<{ tracks: typeof tracks }, 'tracks'>) {
-  return <>{values.tracks.map((item) => <Control key={item.id} parameter="tracks" item={item.id} field="track" />)}</>;
+  return <>{values.tracks.map((item) => <Control key={item.id} parameter="tracks" itemId={item.id} field="track" />)}</>;
 }
 void TrackEditor;
+// `itemId` and `field` go together, name a declared item field, and only lists take them.
+function WrongItemControls({ Control }: ElementEditorProps<{ tracks: typeof tracks; zoom: ReturnType<typeof p.number<{ label: 'Z'; default: 1 }>> }, 'tracks' | 'zoom'>) {
+  return <>
+    {/* @ts-expect-error */}
+    <Control parameter="tracks" itemId="a" field="trak" />
+    {/* @ts-expect-error */}
+    <Control parameter="tracks" field="track" />
+    {/* @ts-expect-error */}
+    <Control parameter="zoom" itemId="a" field="track" />
+    <Control parameter="tracks" />
+    <Control parameter="zoom" />
+  </>;
+}
+void WrongItemControls;
+// Without declaration types, a list's value is an array of items.
+const untyped = (values: import('imageflow').Values) => Array.isArray(values.tracks) ? values.tracks.map((item) => item.id) : [];
+void untyped;
 // A template's own preview image is a path to a file in the template folder.
 defineTemplate({ id: 'preview', version: '1', contract: 1, format, preview: './preview.jpg',
   spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });

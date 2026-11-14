@@ -1,11 +1,15 @@
-import { isParameterValue } from './parameters';
+import { isParameterValue, listProblems } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import type { Values } from './project';
 
 /** A change a custom editor asked for that was not applied, with a message naming what it can do instead. */
 export type RejectedChange = { key: string; message: string };
 
-const show = (value: unknown) => typeof value === 'string' ? JSON.stringify(value) : String(value);
+const show = (value: unknown) => {
+  if (typeof value !== 'object' || value === null) return typeof value === 'string' ? JSON.stringify(value) : String(value);
+  const text = JSON.stringify(value) ?? String(value);
+  return text.length > 200 ? text.slice(0, 199) + '…' : text;
+};
 const list = (keys: readonly string[]) => keys.length ? keys.join(', ') : 'no parameters';
 
 // What a valid value looks like, for the message about an invalid one.
@@ -53,7 +57,9 @@ export function editorChanges(parameters: Parameters, owned: readonly string[], 
         ? 'it is not one of this editor\'s parameters' + elsewhere + '. This editor edits ' + list(owned) + '.'
         : 'the ' + kind + ' has no such parameter. This editor edits ' + list(owned) + '.') });
     } else if (!param || !isParameterValue(param, value)) {
-      rejected.push({ key, message: setter + '() ignored ' + key + ': ' + show(value) + ' is not a valid value' +
+      // For a list, the first problem says which item is wrong.
+      const problem = param?.type === 'list' ? ' (it ' + listProblems(param, value)[0] + ')' : '';
+      rejected.push({ key, message: setter + '() ignored ' + key + ': ' + show(value) + ' is not a valid value' + problem +
         (param ? '; ' + param.label + ' takes ' + expected(param) : '') + '.' });
     } else allowed[key] = value as Values[string];
   }
