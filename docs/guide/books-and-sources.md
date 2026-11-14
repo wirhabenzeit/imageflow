@@ -30,7 +30,7 @@ Linked files refresh after external saves. If an original goes missing, a cached
 
 - Click, Shift-click or Command-click to select. Command-A selects the current filter.
 - Right-click or press Shift-F10 for actions. Space opens Quick Look, Return reveals files, and Delete removes assets with Undo.
-- Copy linked selections into the book, or clear the selection to copy all linked assets.
+- **Copy N Selected into Book** copies the selected linked files into the book. With nothing selected, the button reads **Copy All N into Book**.
 - Missing files are checked again when the window opens or regains focus.
 
 ## Save a copy

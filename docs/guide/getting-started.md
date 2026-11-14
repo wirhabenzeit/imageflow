@@ -29,7 +29,7 @@ The Photobook sample photos are upscaled placeholders. They pass the resolution 
 
 ![The Photobook starter in its light theme](../images/photobook-starter-light.jpg)
 
-**Wall calendar** offers A3 and A2 landscape formats, with an optional cover and one photo per month. Book settings control the first month, language and colours. Mark dates manually or import all-day events from an `.ics` file. Click a month's days to mark a date once; Option-click marks it every year. Unsupported calendar repeats mark only their first date and produce a Book check warning.
+**Wall calendar** offers A3 and A2 landscape formats, with an optional cover and one photo per month. Book settings control the first month, language and colours. Mark dates in **Marked days**, such as `25.12` for every year or `2027-04-16` for once, or import all-day events from an `.ics` file. Click a month's days to mark a date once; Option-click marks it every year. Unsupported calendar repeats mark only their first date and produce a Book check warning.
 
 Templates run code. Only open books and templates you trust.
 
