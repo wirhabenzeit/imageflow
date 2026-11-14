@@ -34,3 +34,10 @@ test('feedback contracts bound targets and require drafts for aliases everywhere
   assert.doesNotThrow(() => parseMcpArguments('check_book', { project, typescript: true,
     preview: { target: { spread: 'one', element: 'caption' } }, inspect: { spread: 'one', element: 'caption' } }));
 });
+
+test('page previews accept the single-page side through the public MCP contract', () => {
+  const preview = { target: { spread: 'cover', side: 'page' } };
+  assert.equal((parsePreviewRequest(preview).target as { side: string }).side, 'page');
+  assert.doesNotThrow(() => parseMcpArguments('check_book', { project: 'book', preview }));
+  assert.throws(() => parsePreviewRequest({ target: { spread: 'cover', side: 'spread' } }));
+});

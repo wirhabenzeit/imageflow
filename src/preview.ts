@@ -9,7 +9,7 @@ const paddingMm = z.number().min(0).max(20).default(2);
 // `spread` validates the spread target. Draft checks also accept `$alias` batch references, resolved before rendering.
 export const makePreviewRequestSchema = (spread: z.ZodType<string, string>) => z.strictObject({
   target: z.union([
-    z.strictObject({ spread, side: z.enum(['left', 'right']).optional() }),
+    z.strictObject({ spread, side: z.enum(['left', 'right', 'page']).optional() }),
     z.strictObject({ page: z.int().positive() }),
     z.strictObject({ spread, box: owner, paddingMm }),
     z.strictObject({ spread, element: owner, paddingMm }),

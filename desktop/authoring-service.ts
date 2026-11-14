@@ -29,6 +29,7 @@ import { FixtureError, fixtureCases, fixtureFits, fixtureLimits, fixtureRequestS
 import type { FixtureCell } from '../src/fixtures';
 import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
 import { cellReport, fixtureAssets, fixtureDraft, fixtureFindings, fixtureNotEvaluated } from './fixtures';
+import { templateHash } from './template-library';
 
 // Fixture checks share the bridge's two-minute call deadline with queueing, so they stop starting renders after this.
 const fixtureBudgetMs = 60_000;
@@ -404,6 +405,16 @@ export function createAuthoringService(hooks: Hooks) {
         if (document.status === 'rejected') unavailable(document.reason, index === 0 ? 'project.json' : 'photos.json');
       }
       const template = report.render?.template ?? report.template;
+      // This is the library's authored-file hash, not the saved provenance or a source-file/revision digest.
+      // Read it even when compilation fails, and verify it again before publishing context.
+      const hashes = await Promise.allSettled([templateHash(join(folder, 'template'))]);
+      if (hashes[0].status === 'rejected') unavailable(hashes[0].reason, 'template');
+      const currentHash = hashes[0].status === 'fulfilled' ? hashes[0].value : null;
+      const templateIdentity = {
+        saved: project?.template ?? null,
+        current: { id: template?.id ?? null, version: template?.version ?? null, hash: currentHash },
+        matchesSavedHash: project?.template.hash && currentHash ? project.template.hash === currentHash : null,
+      };
       let result: Record<string, unknown>;
       let verifySources: (() => Promise<void>) | undefined;
       if (name === 'get_authoring_context') {
@@ -435,9 +446,11 @@ export function createAuthoringService(hooks: Hooks) {
             'Use apply_project_changes for project.json/photos.json; never edit these manifests while the app is open.',
             'Copy new content into inbox/ and call import_sources. Then assign returned IDs with a command batch.',
             'To start or extend a template, call get_authoring_context with includeExamples and copy the closest example layout.',
+            'For an empty book, inspect template.openingSpreads and insert suitable layouts with insert_spread; openingSpreads describes new-book defaults and is not applied again automatically.',
+            'Parameter commands use saved scopes: document, spread, box or element. An element editor can also own spread parameters; use scope:spread for those fields, not scope:element.',
             'To find the parameter a request means, read each parameter\'s description with its unit, range and options; give new parameters a description when their meaning or direction is not obvious from the label.',
             'Use a layout family when layouts are variants of one design (template.layoutFamilies; family and variant on each layout); pickers should choose by variant tags, not hard-coded IDs. Switch variants with switch_layout and the layout ID.'],
-          template, diagnostics, checks: report.checks, sources,
+          template, templateIdentity, diagnostics, checks: report.checks, sources,
           templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
           apiReference: await readFile(hooks.docs, 'utf8'),
           ...(args.includeExamples ? { examples: await templateExamples(hooks.docs) } : {}),
@@ -468,13 +481,16 @@ export function createAuthoringService(hooks: Hooks) {
           kept: template ? keptOutside(spread, template.spreads) : [],
           ...(view === 'parameters' && template ? { declarations: template.spreads[spread.definition] } : {}),
         })) ?? [];
-        result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format,
+        result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format, templateIdentity,
           pages: report.render?.pages, total: records.length, offset, items: records.slice(offset, offset + limit),
           nextOffset: offset + limit < records.length ? offset + limit : null,
           ...(view === 'parameters' ? { document: { values: project?.params, declarations: template?.parameters } } : {}),
           diagnostics, checks: report.checks, history: session.history };
       }
       await verifySources?.();
+      if (settledState(hashes) !== settledState(await Promise.allSettled([templateHash(join(folder, 'template'))]))) {
+        throw new AuthoringError('SOURCE_CHANGED', 'Template files changed while inspecting. Retry for current context.');
+      }
       const documentsAfter = await readDocuments();
       const after = await contextInputs(session.inputs, signal);
       if (!sameDocuments(documents, documentsAfter) || before.failure !== after.failure ||
