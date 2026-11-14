@@ -1,29 +1,33 @@
 # Documentation site
 
-This site is built with [VitePress](https://vitepress.dev) straight from the `docs/` folder. Its configuration and theme live in `site/`, with their own `package.json`, so the app's dependencies stay separate.
+[VitePress](https://vitepress.dev) builds the site from `docs/`. Configuration, theme and separate dependencies live in `site/`.
 
 ```sh
 cd site
 npm ci
-npm run dev       # live preview at http://localhost:5173/imageflow/
-npm run build     # build into site/.vitepress/dist and check links
+npm run dev       # preview at http://localhost:5173/imageflow/
+npm run build     # build and check links
 ```
 
-## What goes where
+Output is written to `site/.vitepress/dist/`.
 
-| Section | Files |
+## Content and navigation
+
+| Section | Sources |
 | --- | --- |
 | Guide | `docs/guide/` |
-| Writing templates | `docs/templates/`, `docs/mcp.md`, and the topic files in `docs/template-api/` |
+| Templates | `docs/templates/`, `docs/mcp.md`, `docs/template-api/` |
 | Development | `docs/development/`, `docs/releasing.md`, `docs/signing.md`, `docs/decisions/` |
-| History | design notes kept for background; each shows a "historical" banner |
+| History | Design notes marked with a historical banner |
 
-The template API pages and their sidebar come from `docs/template-api/topics.json` and the topic files, the same files the MCP server and the agent skill serve, so the site never needs a separate copy. The generated `docs/template-api.md` is left out of the site. Links in the Markdown stay relative so they also work on GitHub: links to the one-page `template-api.md` land on the matching topic page, and links to files outside `docs/` (source files, examples, the skill) open on GitHub.
+The template API sidebar and topic table use `docs/template-api/topics.json`. Topic files are shared with the MCP server and template skill. The generated single-page `docs/template-api.md` is excluded.
 
-New pages need an entry in the sidebar in `site/.vitepress/config.mts`. Pages listed there as history get the historical banner.
+Keep Markdown links relative for GitHub. The site redirects single-page API links to matching topics and links outside `docs/` to GitHub.
+
+Add pages to the sidebar in `site/.vitepress/config.mts`. Its `history` list controls the historical banner.
 
 ## Checks and publishing
 
-The **Docs** workflow builds the site for every pull request and push to `main`. The build fails on links to pages that do not exist, and `site/scripts/check-links.mjs` then checks every internal link and anchor in the built HTML.
+The **Docs** workflow builds every pull request and push to `main`. VitePress rejects missing page links; `site/scripts/check-links.mjs` checks internal links and anchors in the built page content.
 
-On pushes to `main`, the same workflow publishes the site to GitHub Pages at <https://wirhabenzeit.github.io/imageflow/>. It needs **Settings → Pages → Build and deployment → Source** set to **GitHub Actions** once. The site describes `main`; before the first release, `main` and the released version are the same, and a release branch or versioned docs can follow later if they diverge.
+Pushes to `main` publish to [GitHub Pages](https://wirhabenzeit.github.io/imageflow/). Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. Set `DOCS_BASE` to override the default `/imageflow/` base path.

@@ -2,30 +2,31 @@
 
 ## Toolbar and menus
 
-The toolbar shares the title bar with the window controls. It shows the file name with a draggable document icon (Command-click the title for its location), Undo and Redo, and Export.
+The title bar shows the document name and icon, Undo, Redo and Export. Command-click the name to see its location.
 
 | Menu | Commands |
 | --- | --- |
-| File | New ⌘N, Open ⌘O, Import ⇧⌘I, Duplicate ⇧⌘S, Rename, Move To, Revert To Last Opened, Export PDF ⌘E, Export for Print ⇧⌘E |
-| Spread | New ⇧⌘N, Duplicate ⌘D, Move ⌥⌘↑ / ⌥⌘↓, Delete ⌫ |
-| Book | Assets, Check Book |
+| File | New Book ⌘N, Open ⌘O, Import ⇧⌘I, Duplicate ⇧⌘S, Rename, Move To, Revert To, Export PDF ⌘E, Export for Print ⇧⌘E |
+| Book | New Spread ⇧⌘N, Duplicate Spread ⌘D, Move Up/Down ⌥⌘↑ / ⌥⌘↓, Delete Spread ⌫, Assets, Copy Assets into Book, Check Book ⇧⌘K |
 | Templates | Manage Templates… |
-| View | Vertical / Grid / Columns, Show Guides, sidebars, Zoom, Full Screen |
+| View | Canvas layout, guides, panels, zoom, photo sorting and grouping, presentation |
 
-While you edit a text field, its keyboard commands take priority over the menus. Text fields use the system's text Undo; everything else shares the book's Undo history.
+Text fields use the system's text Undo. Other edits use the book's Undo history.
 
-## Sidebars and the Sources strip
+## Panels and sources
 
-The left sidebar holds the spread thumbnails and the template's book settings. The right sidebar is the Inspector. Toggle them with the toolbar buttons or **View → Show/Hide Sidebar** (⌃⌘S) and **Show/Hide Inspector** (⌥⌘I).
+The left sidebar holds spread thumbnails and book settings. The right sidebar is the Inspector. Toggle them with the toolbar buttons or **View → Show/Hide Sidebar** (⌃⌘S) and **Show/Hide Inspector** (⌥⌘I).
 
-The **Photos / Texts** strip at the bottom holds the book's sources. Toggle it with ⌥⌘3. Space, or double-clicking a text box, opens Quick Look.
+The **Photos / Texts** strip holds the book's sources. Toggle it with ⌥⌘3. Select a source and press Space, or double-click it, for Quick Look. **View → Sort Photos By** and **Group Photos** control the photo list.
 
-Drag a divider to resize a panel; with a divider focused, the arrow keys adjust it and Home or a double-click restores its default size. Panel sizes are remembered on this computer.
+Drag dividers to resize panels. With a divider focused, use arrow keys to resize or Home to reset; double-clicking also resets it. Sizes are remembered on this Mac.
 
-## Canvas
+## Canvas and presentation
 
-The canvas shows the book as one **Vertical** column of spreads, or as a **Grid** of one to four columns. Choose under **View**, and toggle guides with **View → Show Guides**. Selecting a spread in the sidebar scrolls to it. Each book remembers its canvas layout on this computer.
+**View → Vertical** stacks spreads in one column. **Grid** uses one to four columns, selected under **View → Columns**. **View → Show Guides** toggles guides. Each book remembers its canvas layout on this Mac.
 
-## Appearance and settings
+Choose **View → Presentation** (⇧W) to present from the current spread, or **Present from Beginning** (⌥⇧W).
 
-**ImageFlow → Settings…** (⌘,) opens a separate window that can stay open while you work. **Appearance** offers Light, Dark and System (the default). It changes the app, not the book: pages, thumbnails and exported PDFs keep the colours the template draws.
+## Appearance
+
+**ImageFlow → Settings…** (⌘,) opens settings. Under **General**, choose Light, Dark or System. This changes the app's appearance; book pages and PDFs keep the template's colours.

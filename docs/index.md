@@ -2,8 +2,8 @@
 layout: home
 hero:
   name: ImageFlow
-  text: Photobooks from your photos, Markdown and templates
-  tagline: A macOS app for designing photobooks and calendars, with layouts written as code and print-ready PDF export.
+  text: Design photobooks and calendars
+  tagline: Your photos and Markdown, editable layouts, print-ready PDFs. For macOS.
   actions:
     - theme: brand
       text: Get started
@@ -16,13 +16,13 @@ hero:
       link: /guide/agents
 features:
   - title: Using ImageFlow
-    details: Install the app, make your first book, import photos and text, check it and export it for print.
+    details: Create a book, add photos and text, and export for print.
     link: /guide/getting-started
   - title: Writing templates
-    details: Layouts, parameters, editors and print formats in TypeScript and React. The template API reference, topic by topic.
+    details: Build layouts, settings and editors in TypeScript and React.
     link: /templates/
   - title: Working on ImageFlow
-    details: Building and testing the app, releasing, signing, and the design decisions behind it.
+    details: Build, test, sign and release the app.
     link: /development/setup
 ---
 

@@ -1,45 +1,42 @@
 # Getting started
 
-ImageFlow is a Mac app for designing photobooks and wall calendars. A book combines your photos, text written in Markdown and a template that defines its layouts and print format. ImageFlow checks the book as you work and exports proof and print-ready PDFs.
+ImageFlow is a Mac app for designing photobooks and wall calendars with photos, Markdown text and editable templates. It checks your book as you work and exports proof and print-ready PDFs.
 
 ## Requirements and installation
 
-ImageFlow runs on Macs with Apple silicon.
+ImageFlow runs on Macs with Apple silicon. Download the `.dmg` from [GitHub Releases](https://github.com/wirhabenzeit/imageflow/releases), open it and drag **ImageFlow** to **Applications**.
 
-::: info Before the first release
-Signed downloads will be published on the [GitHub Releases page](https://github.com/wirhabenzeit/imageflow/releases): download the `.dmg`, open it and drag **ImageFlow** to **Applications**. Until the first release is out, build the app from source as described in [Setup](../development/setup.md).
-:::
+To build from source, see [Setup](../development/setup.md).
 
 ## Your first book
 
-1. **Open ImageFlow.** Without a book open, the start window shows your recent books, **New Book…** and **Open…**.
-2. **Choose New Book….** Pick a template from the library, then choose the book's name and where to save it. The built-in **Photobook** and **Wall calendar** templates can include their sample photos, texts and spreads, so you can explore a finished book first. Other templates start with their opening spreads, or empty.
-3. **Import your photos.** Use **File → Import** or the **Import** menu in the Sources strip, or drop JPEG, PNG and WebP files onto the photo strip or a photo box. Drag photos from the strip onto the photo boxes of a spread. See [Editing a book](editing.md).
-4. **Add text.** Drop a Markdown file onto a text box, or choose **New Text** in the Texts strip to write one inside the book.
-5. **Check the book.** The [Book check](checking-and-export.md#book-check) runs after every change. The icon at the right of the status bar shows its progress and the number of issues.
-6. **Export a proof.** **File → Export PDF…** saves the book for review. When it is ready to order, **File → Export for Print…** checks it against the print format first. See [Checking and exporting](checking-and-export.md).
+1. Open ImageFlow and choose **New Book…**.
+2. Pick a template, then name and save the book. **Photobook** and **Wall calendar** can include sample content; other templates start with their opening spreads or empty.
+3. Import JPEG, PNG or WebP photos with **File → Import…**, or drop them onto the Photos strip. Drag photos onto the spread's photo boxes.
+4. Drop a Markdown file onto a text box, or choose **New Text** in the Texts strip.
+5. Click the [Book check](checking-and-export.md#book-check) icon in the status bar to review issues.
+6. Choose **File → Export PDF…** for a proof, or **File → Export for Print…** for a checked print PDF.
 
-Every book opens in its own window. Closing the last one returns to the start window, and **Window → Welcome to ImageFlow** brings it back at any time.
+Each book opens in its own window. Closing the last book returns to the start window. **Window → Welcome to ImageFlow** opens it at any time.
 
 ::: warning Sample photos
-The Photobook starter's four sample photos are placeholders upscaled from small originals. They pass the resolution check but print soft, so replace them before you order a proof.
+The Photobook sample photos are upscaled placeholders. They pass the resolution check but print soft. Replace them before ordering.
 :::
 
-## The built-in templates
+## Built-in templates
 
-**Photobook** is a travel journal in two square and landscape formats. Its book settings choose a colour theme (light or dark), serif or sans headings, the text size of stories, the photo spacing of grids and collages, and page numbers. Its layouts include title pages, a contents page, chapter openers, photo and story spreads, quotes, panoramas, photo grids, a map with GPX tracks and a closing list of every photo with its pages and credits.
+**Photobook** is a travel journal in square and landscape formats. Book settings control colours, heading fonts, text size, photo spacing and page numbers. Layouts include title and contents pages, chapters, photo stories, quotes, panoramas, grids, GPX maps and photo credits.
 
 ![The Photobook starter in its light theme](../images/photobook-starter-light.jpg)
 
-**Wall calendar** is a landscape calendar without facing pages, in A3 and A2: an optional cover, then one page per month with a full-bleed photo and a strip holding the place, the month and its days. Book settings choose the first month, the language of month and day names, and the strip colour. **Marked days** are dates such as `25.12` every year or `2027-04-16` once. **Marked days from calendar** takes an `.ics` file exported from a calendar app and marks its all-day events, including yearly repeats. Clicking a month's days opens the day picker: a click marks a date once, and Option-click toggles a yearly mark.
+**Wall calendar** offers A3 and A2 landscape formats, with an optional cover and one photo per month. Book settings control the first month, language and colours. Mark dates manually or import all-day events from an `.ics` file. Click a month's days to mark a date once; Option-click marks it every year. Unsupported calendar repeats mark only their first date and produce a Book check warning.
 
-## Templates run code
-
-A template is a small program that draws the book's pages. Only open books and templates from people you trust.
+Templates run code. Only open books and templates you trust.
 
 ## Next steps
 
-- [Books and sources](books-and-sources.md): what a `.imageflow` document contains, and copying or linking files.
-- [The workspace](workspace.md): toolbar, sidebars, canvas and keyboard shortcuts.
-- [Writing templates](../templates/index.md): make your own layouts.
-- [Connecting agents](agents.md): let Claude, ChatGPT or Codex work on an open book.
+- [Editing a book](editing.md): spreads, photos, text and settings.
+- [Books and sources](books-and-sources.md): document contents and linked files.
+- [The workspace](workspace.md): panels, menus and shortcuts.
+- [Writing templates](../templates/index.md): create your own layouts.
+- [Connecting agents](agents.md): work with an AI agent.

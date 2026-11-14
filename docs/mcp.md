@@ -4,13 +4,13 @@ ImageFlow exposes its open authorized books to local MCP clients through a stdio
 
 ## Connect
 
-Open **ImageFlow → Settings…** and choose **Agents**. **ImageFlow → Agent Connections…** opens the same pane, and so does the **Agent ·** indicator in the status bar while access is on.
+Open **ImageFlow → Settings…** and choose **Agents**. **Help → Connect an Agent…** opens the same pane, as does the **Agent ·** status indicator while access is on.
 
 **Agent apps:** add ImageFlow to each agent app once.
 
 - **Add to Claude Desktop** writes `ImageFlow.mcpb` to ImageFlow’s settings folder and opens it in Claude Desktop, which shows its extension installer. Choose **Install** there.
 - **Add to ChatGPT & Codex** runs `codex mcp add imageflow …`. ImageFlow uses the Codex CLI bundled with the ChatGPT desktop app, or `codex` from your login shell’s `PATH`. The ChatGPT desktop app, Codex CLI and Codex IDE extension share `~/.codex/config.toml`, so one entry serves all of them. Start a new task to load the tools. ChatGPT on the web and its remote connectors cannot reach a local app.
-- **Save Template Skill** saves `imageflow-templates.zip` to Downloads: the [agent skill](../skills/imageflow-templates/SKILL.md) with the template API reference and the example templates. Upload it in Claude under **Settings → Capabilities → Skills**, or unzip it into `~/.claude/skills/` for Claude Code. The skill also helps agents that edit `template/` with file tools, without the MCP server. New books already carry it in `.claude/skills/imageflow-templates/`, so Claude Code started in or above a book folder finds it without an install.
+- **Save Template Skill** saves `imageflow-templates.zip` to Downloads: the [agent skill](../skills/imageflow-templates/SKILL.md) with the template API reference and the example templates. Upload it in Claude under **Settings → Capabilities → Skills**, or unzip it into `~/.claude/skills/` for Claude Code. The skill also helps agents that edit `template/` with file tools, without the MCP server. New books already carry it in `.claude/skills/imageflow-templates/`, so Claude Code started in a book folder finds it without an install.
 - **Claude Code and other agents** shows a `claude mcp add` command, the commands that install the ImageFlow Claude Code plugin from this repository (`.claude-plugin/`: the MCP server for an app in `/Applications` or `~/Applications`, plus the skill), and a generic `mcpServers.imageflow` stdio configuration.
 
 Agents need no separate Node.js installation. Every configuration starts the bridge with ImageFlow’s own executable in Node mode (`ELECTRON_RUN_AS_NODE=1`), so the bridge always matches the installed app. The configuration has this form:
@@ -29,7 +29,7 @@ The configuration contains absolute paths, and `~` above stands for your home fo
 
 The pane shows attached client names. Clearing the checkbox closes their app connections and removes the connection file. Selecting it again creates new credentials at the same path. An installed bridge reads the current connection file before each call, so agents reconnect without being set up again.
 
-Access is session-only: quitting ImageFlow removes the connection file. After restarting, open the intended books and select **Allow agents to use open books** again. The existing client configuration then reconnects. Automatic restoration after an update is not implemented; signed-build restart/update acceptance remains tracked in #74 and #79.
+Access is session-only: quitting ImageFlow removes the connection file. After restarting, open the intended books and select **Allow agents to use open books** again. The existing client configuration then reconnects.
 
 For a development checkout, `node scripts/build-mcp.mjs` creates `.build/mcp-bridge.cjs`. Desktop staging bundles that bridge and includes this document. Packaging keeps it outside `app.asar`. A standalone invocation with any Node.js 22.20 or newer has the following form:
 
@@ -328,7 +328,7 @@ Writer ownership is recorded in `.imageflow/writer.lock`. New locks use a privat
 
 Imported-file watcher receipts retain exact filesystem fingerprints for at most 2048 paths. A queued event pins its receipt while other work delays processing. The one-minute duplicate-event grace starts at the first verified consumption and is not renewed by repeats. Unobserved writes expire after five minutes. Evicted receipts may cause an extra reload; changed fingerprints always trigger external-change handling.
 
-Source consistency uses content revisions, filesystem metadata and watcher generations around loading/rendering. It detects ordinary concurrent edits, including edits reverted during a check. Cached digests rely on filesystem identity and timestamps changing when an unwatched file changes; this is not an immutable input snapshot. External writers can still race outside those observations. Immutable snapshots and additional client compatibility testing remain part of the full authoring release.
+Source consistency uses content revisions, filesystem metadata and watcher generations around loading/rendering. It detects ordinary concurrent edits, including edits reverted during a check. Cached digests rely on filesystem identity and timestamps changing when an unwatched file changes; this is not an immutable input snapshot. External writers can still race outside those observations.
 
 ## Verification
 
@@ -336,7 +336,7 @@ Source consistency uses content revisions, filesystem metadata and watcher gener
 
 `tests/mcp-connection.test.ts` exercises token rejection, private file/socket permissions, argument/path validation, request/response limits, cancellation, revocation, reconnection and SDK client tool discovery/image delivery. `scripts/smoke-mcp.mjs` exercises a real running ImageFlow instance with the official SDK client.
 
-`tests/authoring-context.test.ts` checks saved/current template identity, library hash parity, generated-tooling exclusions, compile failures, unavailable inputs and concurrent edits. `scripts/smoke-mcp-context.mjs` uses the SDK client against the desktop app for empty-book inspection/check/missing-preview/first-insertion, explicit single-page images, inline text and element draft refusal/completion/revision conflict/shared Undo, identically titled books, editing an unfocused book, stale handles after close/reopen, closing during a pending mutation without blocking another book, and the 30,000-byte (about 8k tokens) context budget on a copy of the starter book. It runs in the full desktop suite and, with `--packaged`, the packaged suite. These automated checks do not replace #79's real-client signed-candidate acceptance or #74's two-version update/reconnection test.
+`tests/authoring-context.test.ts` checks saved/current template identity, library hash parity, generated-tooling exclusions, compile failures, unavailable inputs and concurrent edits. `scripts/smoke-mcp-context.mjs` uses the SDK client against the desktop app for empty-book inspection/check/missing-preview/first-insertion, explicit single-page images, inline text and element draft refusal/completion/revision conflict/shared Undo, identically titled books, editing an unfocused book, stale handles after close/reopen, closing during a pending mutation without blocking another book, and the 30,000-byte (about 8k tokens) context budget on a copy of the starter book. It runs in the full desktop suite and, with `--packaged`, the packaged suite.
 
 See [the large-book benchmark](authoring-performance.md) for the reproducible 300-photo authoring workload, measured timings and hash-byte counts. The benchmark script generates its large fixture under `.build/`; originals are not committed to the repository.
 

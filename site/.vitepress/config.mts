@@ -167,7 +167,6 @@ export default defineConfig({
   transformPageData(pageData) {
     const page = pageData.relativePath.replace(/\.md$/, '');
     if (history.includes(page)) pageData.frontmatter.history = true;
-    if (page.startsWith('template-api/') || page === 'templates/index' || page === 'mcp') pageData.frontmatter.preview = true;
   },
   themeConfig: {
     nav: [
@@ -180,6 +179,5 @@ export default defineConfig({
     outline: { level: [2, 3] },
     socialLinks: [{ icon: 'github', link: repo }],
     editLink: { pattern: repo + '/edit/main/docs/:path', text: 'Edit this page on GitHub' },
-    footer: { message: 'ImageFlow documentation, built from the docs folder of the repository.' },
   },
 });
