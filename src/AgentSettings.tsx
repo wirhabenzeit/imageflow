@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { DesktopApi, McpClientTarget, McpSettings } from './desktop';
 
+const pluginCommands = '/plugin marketplace add wirhabenzeit/imageflow\n/plugin install imageflow@imageflow';
+
 /** The Agents pane in Settings: access for open books, and one-time setup per agent app. */
 export function AgentSettings({ api }: { api?: DesktopApi }) {
   const [settings, setSettings] = useState<McpSettings>();
@@ -60,12 +62,16 @@ export function AgentSettings({ api }: { api?: DesktopApi }) {
       <div className="settings-buttons">
         <button disabled={!settings || !!pending} onClick={() => void install('claude')}>Add to Claude Desktop</button>
         <button disabled={!settings || !!pending} onClick={() => void install('codex')}>Add to ChatGPT &amp; Codex</button>
+        <button disabled={!settings || !!pending} onClick={() => void install('skill')}
+          title="The template API reference and examples as an agent skill, for agents that edit templates">Save Template Skill</button>
       </div>
       {notice && <p className="settings-note" role="status">{notice}</p>}
       <details className="settings-disclosure">
         <summary>Claude Code and other agents</summary>
         <p className="settings-note">Command for Claude Code:</p>
         <textarea className="settings-code" aria-label="Claude Code command" readOnly rows={5} value={settings?.claudeCode ?? ''} />
+        <p className="settings-note">Or install the ImageFlow plugin, with this connection and the template skill, in Claude Code:</p>
+        <textarea className="settings-code" aria-label="Claude Code plugin commands" readOnly rows={2} wrap="off" value={pluginCommands} />
         <p className="settings-note">Stdio configuration for other MCP clients:</p>
         <textarea className="settings-code" aria-label="MCP connection configuration" readOnly rows={11} wrap="off" value={otherConfig} />
       </details>

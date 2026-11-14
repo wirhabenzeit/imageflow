@@ -32,7 +32,7 @@ import { createDocument, documentIdentity, documentPath, isDocument, RecentDocum
 import { SettingsStore } from './settings';
 import { AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
-import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex } from './mcp-setup';
+import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex, skillArchive } from './mcp-setup';
 import { authoringErrorResult } from './authoring-errors';
 import { acquireProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
@@ -976,6 +976,12 @@ async function installMcp(target: McpClientTarget) {
       if (failure) throw new Error(failure);
     }
     return 'Claude Desktop opened its extension installer. Choose Install there.';
+  }
+  if (target === 'skill') {
+    const file = join(app.getPath('downloads'), 'imageflow-templates.zip');
+    await writeFile(file, await skillArchive(join(app.getAppPath(), 'skills', 'imageflow-templates')));
+    shell.showItemInFolder(file);
+    return 'Saved imageflow-templates.zip to Downloads. Upload it in Claude under Settings → Capabilities → Skills, or unzip it into ~/.claude/skills for Claude Code.';
   }
   if (target === 'codex') {
     const codex = await findCodex();

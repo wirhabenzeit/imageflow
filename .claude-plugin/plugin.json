@@ -1,0 +1,16 @@
+{
+  "name": "imageflow",
+  "description": "Check, preview and edit photo books open in ImageFlow, and build their templates with the template API reference.",
+  "author": {
+    "name": "ImageFlow"
+  },
+  "homepage": "https://github.com/wirhabenzeit/imageflow",
+  "mcpServers": {
+    "imageflow": {
+      "command": "/bin/sh",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/imageflow-mcp.sh"
+      ]
+    }
+  }
+}

@@ -88,7 +88,7 @@ The canvas shows the book as one **Vertical** column of spreads, or as a **Grid*
 
 The canvas scrolls through the whole book; the left sidebar contains spread thumbnails and expandable template settings. The bottom **Photos / Texts** strip selects source content for the Inspector. Space, or double-clicking a text box, opens Quick Look. Clicking selects what is drawn on top: a photo is selected for dragging and pinching, an element with its own editor, such as the starter's route map (Edit route), opens it, and template-marked text or a parameterized box/element opens a popover. Every parameter is also in the Inspector, which a click scrolls to. Custom element controls apply changes as you edit; each change is undoable. Closing with × or clicking outside applies any text still being typed; Escape discards only uncommitted typing. Typed popover values commit on Enter or an outside click; Escape discards uncommitted typing. Choices apply immediately. Layout thumbnails illustrate composition; Markdown starts at the beginning in these previews.
 
-Open **Settings → Agents** to configure the [MCP connection](docs/mcp.md) for local agents.
+Open **Settings → Agents** to configure the [MCP connection](docs/mcp.md) for local agents. The [imageflow-templates skill](skills/imageflow-templates/SKILL.md) gives agents the template API reference and examples; Settings → Agents saves it for upload, and `/plugin marketplace add wirhabenzeit/imageflow` installs it in Claude Code together with the MCP server.
 
 When agent connections are enabled, **Agent · N** in the footer shows the number of connected clients. Click it to inspect or disable the connection.
 

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { access, constants } from 'node:fs/promises';
+import { access, constants, readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join, relative, sep } from 'node:path';
 import { crc32 } from 'node:zlib';
 import type { McpLaunch } from '../src/desktop';
 
@@ -53,6 +53,17 @@ export function claudeExtension(options: { launch: McpLaunch; version: string; t
     { name: 'manifest.json', data: Buffer.from(JSON.stringify(manifest, null, 2) + '\n') },
     { name: 'server/imageflow-mcp.sh', data: Buffer.from(launcherScript), mode: 0o755 },
   ]);
+}
+
+// ---- Agent skill ----
+
+/** The imageflow-templates skill as an archive of its folder, as Claude's skill upload and ~/.claude/skills expect. */
+export async function skillArchive(folder: string) {
+  const name = basename(folder);
+  const files = (await readdir(folder, { recursive: true, withFileTypes: true })).filter((entry) => entry.isFile())
+    .map((entry) => relative(folder, join(entry.parentPath, entry.name)).split(sep).join('/')).sort();
+  if (!files.includes('SKILL.md')) throw new Error('The ImageFlow skill is missing from this installation.');
+  return zip(await Promise.all(files.map(async (file) => ({ name: name + '/' + file, data: await readFile(join(folder, file)) }))));
 }
 
 /** Minimal stored (uncompressed) ZIP writer for the small extension bundle. */

@@ -1,0 +1,15 @@
+# Dependencies
+
+A template can use npm packages, such as a map or chart library (included in the contract-1 baseline):
+
+1. Add a `package.json` in `template/` and run `npm install` there.
+2. Import the package as usual: `import maplibregl from 'maplibre-gl'`, and its CSS with `import 'maplibre-gl/dist/maplibre-gl.css'`.
+3. Run `node scripts/rebuild-template-dependencies.mjs /path/to/template` from the ImageFlow source checkout. ImageFlow bundles every package the template imports into `template/vendor/`: `modules/` (ES modules, shared code split into chunks, CSS beside them), `types/` (the declarations those packages reach, in `types/packages/` by package name, so `.gitignore` rules for `node_modules` keep them), `LICENSES/` and `manifest.json` (packages and versions, the lockfile's hash, and which import maps to which module).
+
+Books never read `node_modules`: book revisions, the folder watcher and **Save a Copy** skip it. Opening, previews, the Book check and export resolve package imports only through `vendor/manifest.json`, so a book renders the same code on every Mac, and the template hash, which covers `vendor/` but not `node_modules/`, identifies that code. A package import missing from the manifest is a compile error pointing at the rebuild, and so is a relative import into `node_modules/` (or a dot folder), which the template hash and copies leave out. When `package-lock.json` changes after a rebuild, the Book check warns (`template-dependencies`) and the book keeps the saved bundle until you rebuild. Exported templates and the library include `vendor/` and leave out `node_modules/`.
+
+- **React** is the app's: packages that import `react` get the host's React and its hooks. Bundling `react`, `react-dom` or `imageflow` is refused.
+- **Types:** the type check resolves packages from `vendor/types`, so `check_book` with `typescript: true` works without `node_modules`; problems inside third-party declarations are not reported. A package without declarations (and no `@types` package) is typed as `any`, with a `template-dependencies` warning. The rebuild also points `paths` in `template/tsconfig.json` at `vendor/types` and excludes `vendor/` there, so code editors see the same declarations.
+- **Purity still applies:** a library may run freely in an [element editor](element-editors.md#element-editors). In a layout, asynchronous or GPU work such as drawing a map runs inside a [`<RenderedImage>`](rendered-images.md#rendered-images); `render` itself stays synchronous ([Render function](render-function.md#render-function)).
+- **Stylesheets:** a package's CSS is bundled with the template's own, and inline `data:` images in it stay inline.
+- Licences: `vendor/LICENSES/` holds each bundled package's licence file. Keep it when you share the template.
