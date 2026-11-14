@@ -681,6 +681,7 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .recent-open:hover:not(:disabled) { background: var(--subtle-hover); }
 .recent-cover { flex: 0 0 60px; height: 66px; background: var(--canvas-surface); display: grid; place-items: center; border-radius: 3px; overflow: hidden; color: var(--muted); font-size: 26px; }
 .recent-cover img { width: 100%; height: 100%; object-fit: contain; }
+.recent-cover img.recent-cover-icon { width: 52px; height: 52px; }
 .recent-description { min-width: 0; display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
 .recent-description strong { color: var(--text); font-size: 13px; font-weight: 600; }
 .recent-location { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -689,7 +690,7 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .recent-actions { display: flex; align-items: center; gap: 5px; flex: none; }
 .studio .recent-remove { border: 0; background: none; box-shadow: none; color: var(--muted); padding: 4px; font-size: 20px; }
 .recent-empty { text-align: center; max-width: 260px; margin: 74px auto 0; color: var(--muted); }
-.recent-empty > span { font-size: 50px; opacity: .45; }
+.recent-empty > img { display: block; width: 96px; height: 96px; margin: 0 auto; }
 .recent-empty h3 { font-weight: 500; color: var(--text); font-size: 17px; margin: 16px 0 8px; }
 .recent-empty p { line-height: 1.6; }
 .start-status { grid-column: 1 / -1; min-height: 30px; padding: 6px 16px; color: var(--error-text); border-top: 1px solid var(--edge); font-size: 12px; }
