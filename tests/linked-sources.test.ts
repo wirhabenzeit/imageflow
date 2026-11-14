@@ -9,7 +9,7 @@ import { approveSource, configureSourceAccess } from '../desktop/source-access';
 import { configureRenditionCache } from '../desktop/rendition-cache';
 import { photoFile } from '../desktop/photos';
 import { isUnavailableSource } from '../src/source-diagnostics';
-import { importIntoProject, loadProject, updateProject } from '../desktop/project';
+import { importIntoProject, loadProject, projectSummary, renderData, updateProject } from '../desktop/project';
 import { collectSources, relocateSource, relinkFolder, saveDocumentCopy } from '../desktop/source-actions';
 import { captureProjectInputs } from '../desktop/revisions';
 import { ProjectSession } from '../desktop/project-session';
@@ -59,17 +59,21 @@ test('proof source warnings and page marking use diagnostic codes rather than un
   assert.equal(isUnavailableSource({ code: 'file-unreadable' }), true);
 });
 
-test('copied photos retain the original estimated capture date after import and reopen', async (t) => {
+test('copied photos keep the original file time as their estimated capture date, without writing it to photos.json', async (t) => {
   const f = await fixture(t);
   const date = new Date('2020-04-05T12:34:56Z');
   await utimes(f.photo, date, date);
   const added = await importIntoProject(f.book, { kind: 'photo', mode: 'copy' }, [f.photo]);
   const id = added.imported[0];
-  assert.equal(added.book.photoIndex[id].captured, date.toISOString());
-  assert.equal(added.book.photos.get(id)!.captured, date.toISOString());
+  assert.equal('captured' in added.book.photoIndex[id], false);
+  assert.equal('capturedEstimated' in added.book.photoIndex[id], false);
+  assert.equal(added.book.photos.get(id)!.captured, undefined);
+  assert.equal(added.book.photos.get(id)!.estimatedCapture, date.toISOString());
   const reopened = await loadProject(f.folder, f.cache);
-  assert.equal(reopened.photos.get(id)!.captured, date.toISOString());
-  assert.equal(reopened.photos.get(id)!.capturedEstimated, true);
+  assert.equal(reopened.photos.get(id)!.estimatedCapture, date.toISOString());
+  assert.deepEqual(projectSummary(reopened, 'x').photoDates?.[id], { captured: date.toISOString(), capturedEstimated: true });
+  // Templates never see the estimate.
+  assert.equal('estimatedCapture' in renderData(reopened, 'x', 'export').photos[id], false);
 });
 
 test('atomic external replacements refresh dimensions and revisions without changing IDs, crops or immutable snapshots', async (t) => {

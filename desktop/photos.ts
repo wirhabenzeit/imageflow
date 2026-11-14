@@ -1,13 +1,14 @@
-import { captureTime } from './capture-time';
+import { estimatedCapture } from './capture-time';
 import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, realpath, rename, rm, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import sharp from 'sharp';
 import type { Photo } from '../src/project';
+import { captureMetadata } from '../src/photo-metadata';
 
 export const photoExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 type Rendition = 'thumb' | 'preview' | 'export';
-export type ProjectPhoto = Photo & { original: string; cache: string; key: string; alpha: boolean; passthrough: boolean; problem?: string; observation?: string };
+export type ProjectPhoto = Photo & { estimatedCapture?: string; original: string; cache: string; key: string; alpha: boolean; passthrough: boolean; problem?: string; observation?: string };
 const observation = (info: import('node:fs').BigIntStats) => [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
 
 export async function photoDetails(original: string, maximumBytes: number | null = 50 * 1024 * 1024) {
@@ -17,11 +18,16 @@ export async function photoDetails(original: string, maximumBytes: number | null
   const metadata = await sharp(original).metadata();
   if (!['jpeg', 'png', 'webp'].includes(metadata.format ?? '') || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still JPEG, PNG or WebP image.');
   const turned = (metadata.orientation ?? 1) >= 5;
+  const capture = captureMetadata(metadata.exif);
   return {
-    ...captureTime(metadata.exif, Number(info.mtimeMs)),
     width: turned ? metadata.height : metadata.width,
     height: turned ? metadata.width : metadata.height,
     alpha: !!metadata.hasAlpha,
+    // Read from the original on every load, never stored in photos.json: existing books get it without re-importing,
+    // and a replaced or edited source refreshes it.
+    ...capture,
+    // Editor-only: photo views sort undated photos by file time. For a snapshot, the caller supplies the original's.
+    estimatedCapture: estimatedCapture(capture.captured, Number(info.mtimeMs)),
     passthrough: metadata.format === 'jpeg' && !metadata.icc && metadata.space === 'srgb' && (metadata.orientation ?? 1) === 1,
     observation: observation(info),
     key: createHash('sha256').update([original, info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs, 'rendition-2'].join(':')).digest('hex'),

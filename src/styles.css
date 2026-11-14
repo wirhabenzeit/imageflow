@@ -661,6 +661,8 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .recent-description { min-width: 0; display: grid; gap: 4px; color: var(--muted); font-size: 11px; }
 .recent-description strong { color: var(--text); font-size: 13px; font-weight: 600; }
 .recent-location { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-books li.missing .recent-open { opacity: .45; }
+.recent-books li.missing .recent-cover { filter: grayscale(1); }
 .recent-actions { display: flex; align-items: center; gap: 5px; flex: none; }
 .studio .recent-remove { border: 0; background: none; box-shadow: none; color: var(--muted); padding: 4px; font-size: 20px; }
 .recent-empty { text-align: center; max-width: 260px; margin: 74px auto 0; color: var(--muted); }

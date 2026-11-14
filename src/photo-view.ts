@@ -21,7 +21,7 @@ export function photoViewChange(id: PhotoViewCommand, current: PhotoView): Parti
   return { group: 'gap', gapMinutes: Number(id.slice(11)) };
 }
 export function photoDate(summary: ProjectSummary, id: string) {
-  return summary.photoDates?.[id] ?? summary.photoIndex[id];
+  return summary.photoDates?.[id];
 }
 export function captureWallTime(captured?: string, estimated = false) {
   if (!captured) return undefined;

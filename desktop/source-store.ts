@@ -1,4 +1,3 @@
-import { captureTime } from './capture-time';
 import { constants } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -43,12 +42,15 @@ async function hashFile(path: string) {
   for await (const chunk of handle.createReadStream()) hash.update(chunk);
   return hash.digest('hex');
 }
+// The original's modification time. A snapshot's own is its copy time, so photo views estimate an undated photo's
+// capture time from this instead (see desktop/capture-time.ts).
+const modifiedAt = (info: BigIntStats) => new Date(Number(info.mtimeMs)).toISOString();
 export type StoredSource = { digest?: string; snapshot: string; path: string; observation: string; snapshotObservation?: string;
-  width?: number; height?: number; captured?: string; capturedEstimated?: boolean; direct?: boolean; key?: string; preview?: string; thumb?: string };
+  width?: number; height?: number; modified?: string; direct?: boolean; key?: string; preview?: string; thumb?: string };
 const storedIndexSchema = z.record(z.string(), z.object({
   digest: z.string().regex(/^[a-f0-9]{64}$/).optional(), snapshot: z.string(), path: z.string(), observation: z.string(),
   snapshotObservation: z.string().optional(), width: z.number().optional(), height: z.number().optional(),
-  captured: z.string().optional(), capturedEstimated: z.boolean().optional(),
+  modified: z.string().optional(),
   direct: z.boolean().optional(), key: z.string().optional(), preview: z.string().optional(), thumb: z.string().optional(),
 }));
 export type ResolvedSource = { status: SourceStatus; stored?: StoredSource };
@@ -103,17 +105,14 @@ export class SourceStore {
         const cache = renditionCacheFor(options.cache ?? '');
         const extension = details.alpha ? '.png' : '.jpg';
         const stored = { path: source.path, snapshot: actual, observation: stamp(before), direct: true, key: details.key,
-          width: details.width, height: details.height, captured: details.captured, capturedEstimated: details.capturedEstimated, preview: join(cache, details.key + '-preview' + extension), thumb: join(cache, details.key + '-thumb' + extension) };
+          width: details.width, height: details.height, modified: modifiedAt(before), preview: join(cache, details.key + '-preview' + extension), thumb: join(cache, details.key + '-thumb' + extension) };
         this.remember(source, stored);
         return { status: { ...source, state: 'available' }, stored };
       }
       const previous = this.saved[source.key];
       if (!privatePin && previous?.digest && !previous.direct && previous.path === source.path && previous.observation === stamp(before) &&
           await stat(previous.snapshot, { bigint: true }).then((info) => within(join(this.root, 'content'), previous.snapshot) && stamp(info) === previous.snapshotObservation, () => false)) {
-        if (source.kind === 'photo' && !previous.captured) {
-          const metadata = await sharp(previous.snapshot).metadata();
-          Object.assign(previous, captureTime(metadata.exif, Number(before.mtimeMs))); this.remember(source, previous);
-        }
+        if (source.kind === 'photo' && !previous.modified) { previous.modified = modifiedAt(before); this.remember(source, previous); }
         this.pins.add(previous.snapshot);
         return { status: { ...source, state: 'available', digest: previous.digest }, stored: previous };
       }
@@ -125,13 +124,13 @@ export class SourceStore {
         // Clone/copy once, then validate the private bytes while the original's identity is guarded.
         await copyFile(actual, temporary, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
         const digest = await hashFile(temporary);
-        let dimensions: { width?: number; height?: number; captured?: string; capturedEstimated?: boolean } = {};
+        let dimensions: { width?: number; height?: number; modified?: string } = {};
         if (source.kind === 'photo') {
           const metadata = await sharp(temporary, { failOn: 'warning' }).metadata();
           if (!['.jpg', '.jpeg', '.png', '.webp'].includes(extname(source.path).toLowerCase()) || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still JPEG, PNG or WebP image.');
           const turned = (metadata.orientation ?? 1) >= 5;
           await sharp(temporary, { failOn: 'warning' }).resize({ width: 1, height: 1 }).toBuffer();
-          dimensions = { ...captureTime(metadata.exif, Number(before.mtimeMs)), width: turned ? metadata.height : metadata.width, height: turned ? metadata.width : metadata.height };
+          dimensions = { modified: modifiedAt(before), width: turned ? metadata.height : metadata.width, height: turned ? metadata.width : metadata.height };
         }
         if (await originalPath(folder, source) !== actual || stamp(await stat(actual, { bigint: true })) !== stamp(before)) throw new Error('Source changed while being read.');
         const snapshot = join(directory, digest + extname(source.path).toLowerCase());

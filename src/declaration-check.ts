@@ -169,19 +169,18 @@ function spanWarnings(declared: Record<string, unknown>, found: DeclarationWarni
   }
 }
 
-// Conditional controls that can hide each other for good (controlCycles), at spread, box and element scope. This runs
+// Conditional controls that can hide each other for good (controlCycles), at document, spread, box and element scope. This runs
 // on the declaration as exported, before schema validation, so a controls list the schema rejects is skipped here
 // and reported by the schema instead. `details.edit` is the scope's edit-path prefix (empty for the layout's own
 // parameters), so the Book check can drop the warning for a layout that marks one of them on the page (render.tsx).
 function controlCycleWarnings(declared: Record<string, unknown>, found: DeclarationWarning[]) {
-  if (!plain(declared.spreads)) return;
   const check = (scope: unknown, path: string[], layout: string, edit: string) => {
     if (!plain(scope) || scope.controls === undefined) return;
     const controls = controlsSchema.safeParse(scope.controls);
     if (!controls.success) return;
     for (const cycle of controlCycles(controls.data)) {
       const names = cycle.join(', ');
-      const where = path.join(' → ') + ': ';
+      const where = path.length ? path.join(' → ') + ': ' : 'Book settings: ';
       found.push({
         code: 'declaration-control-cycle', path: [...path, 'controls'].join('.'),
         message: where + (cycle.length === 1
@@ -189,10 +188,13 @@ function controlCycleWarnings(declared: Record<string, unknown>, found: Declarat
           : 'controls ' + names + ' are each shown only depending on another of them. Once all are hidden, the generated controls cannot show them again.'),
         details: { controls: names, layout, edit },
         suggestion: (cycle.length === 1 ? 'Move ' + names + ' out of the group' : 'Make one of ' + names + ' unconditional') +
-          (edit ? '.' : ', or mark ' + (cycle.length === 1 ? 'it' : 'one') + ' as editable on the page with ctx.edit or ctx.Text.'),
+          (edit && edit !== 'document.' ? '.' : ', or mark ' + (cycle.length === 1 ? 'it' : 'one') + ' as editable on the page with ctx.edit or ctx.Text.'),
       });
     }
   };
+  // Document parameters: Book settings. `layout` is empty, since no one layout owns them.
+  check(declared, [], '', 'document.');
+  if (!plain(declared.spreads)) return;
   for (const [id, definition] of Object.entries(declared.spreads)) {
     if (!plain(definition)) continue;
     check(definition, ['spreads', id], id, '');
@@ -209,11 +211,16 @@ function controlCycleWarnings(declared: Record<string, unknown>, found: Declarat
 // parameters is therefore reported once for each spread using the layout that marks none of them, located on that
 // spread, and not at all when every such spread marks one. Box and element parameters follow the same `controls` and
 // conditions in a marked node's popover, so marking them opens no way back: those warnings, and warnings about
-// layouts no spread uses, stay as they are.
+// layouts no spread uses, stay as they are. A cycle among document parameters is dropped when any spread marks one of
+// them as `document.<id>`, since that node's popover shows it from any page.
 export type RenderedSpread = { spread: string; layout: string; marked: ReadonlySet<string> };
 export function placeControlWarnings(warnings: DeclarationWarning[], rendered: RenderedSpread[]): (DeclarationWarning & { spread?: string })[] {
   return warnings.flatMap((warning) => {
     const { code, details } = warning;
+    if (code === 'declaration-control-cycle' && details.edit === 'document.') {
+      const keys = details.controls.split(', ').map((key) => 'document.' + key);
+      return rendered.some(({ marked }) => keys.some((key) => marked.has(key))) ? [] : [warning];
+    }
     if (code !== 'declaration-control-cycle' || details.edit !== '') return [warning];
     const instances = rendered.filter(({ layout }) => layout === details.layout);
     if (!instances.length) return [warning];

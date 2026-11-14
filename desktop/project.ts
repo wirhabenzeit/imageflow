@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { access, copyFile, mkdir, readFile, readdir, realpath, rm, rmdir, stat } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, readdir, realpath, rm, rmdir, stat, utimes } from 'node:fs/promises';
 import * as ReactExports from 'react';
 import { dependencyWarning, isBareImport, missingDependency, readDependencyManifest, vendoredModule } from './dependencies';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -12,6 +12,7 @@ import { renderOrigin } from '../src/desktop';
 import type { ImportRequest, ProjectSummary } from '../src/desktop';
 import { importPhotoDetails, photoDetails, photoExtensions } from './photos';
 import { renditionCacheFor } from './rendition-cache';
+import { photoDate } from './capture-time';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
 import { sourceEntries, sourcePath, sourceLinked, sourceFolder } from '../src/source-locations';
@@ -237,9 +238,9 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
         if (stored) {
           const { path: _path, linked: _linked, ...metadata } = book.photoIndex[source.id];
           const details = await photoDetails(stored.snapshot, null);
-          // A copied file's mtime is its copy time; retain the original estimate saved at import.
-          const dates = !source.linked && metadata.captured && stored.capturedEstimated ? metadata : stored;
-          photos.set(source.id, { ...metadata, ...details, ...(dates.captured ? { captured: dates.captured, capturedEstimated: dates.capturedEstimated } : {}), observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
+          // Without an EXIF capture time, photo views use the original's modification time, not the snapshot's.
+          const estimate = details.captured ? undefined : stored.modified ?? details.estimatedCapture;
+          photos.set(source.id, { ...metadata, ...details, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
             width: stored.width!, height: stored.height!, original: stored.snapshot,
             key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
             cache: renditionCacheFor(book.cache), ...(status.problem ? { problem: status.problem } : {}) });
@@ -327,9 +328,8 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       if (!info.isFile() || !kind || !extensions.has(extension)) { counts.skipped++; continue; }
       const folder = kind === 'photo' ? 'photos' : kind === 'file' ? 'files' : 'texts';
       const registry = kind === 'file' ? project.files : project.texts;
-      let photo: Awaited<ReturnType<typeof importPhotoDetails>> | undefined;
       try {
-        photo = kind === 'photo' ? await importPhotoDetails(file) : undefined;
+        if (kind === 'photo') await importPhotoDetails(file);
         if (kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
         if (kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
         await access(file, constants.R_OK);
@@ -349,8 +349,10 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       const original = await realpath(file);
       const linked = mode === 'link' && !isInside(book.folder, original);
       if (linked) await approveSource(book.folder, { key: kind + ':' + id, kind, path: original, linked }, request.accept);
-      if (!linked) { await prepare(folder); await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path); }
-      if (kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)), ...(photo ? { captured: photo.captured, ...(photo.capturedEstimated ? { capturedEstimated: true } : {}) } : {}) };
+      if (!linked) { await prepare(folder); await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path);
+        // Keep the original's modification time: photo views estimate an undated photo's capture time from it.
+        await utimes(path, info.atime, info.mtime).catch(() => {}); }
+      if (kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)) };
       else registry[id] = linked ? { path: original, linked: true } : relativePath;
       if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++; else counts.files++;
       imported.push(id);
@@ -383,7 +385,7 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
     id, folder: basename(book.folder), viewKey: book.viewKey ?? createHash('sha256').update(book.folder).digest('hex'), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
     photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
-    photoDates: Object.fromEntries([...book.photos].flatMap(([id, photo]) => photo.captured ? [[id, { captured: photo.captured, ...(photo.capturedEstimated ? { capturedEstimated: true } : {}) }]] : [])),
+    photoDates: Object.fromEntries([...book.photos].flatMap(([id, photo]) => { const date = photoDate(photo); return date ? [[id, date]] : []; })),
     photoSizes: Object.fromEntries([...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
     texts: book.texts, sources: book.sources, ...(book.templateHash ? { templateHash: book.templateHash } : {}),
   };
@@ -395,8 +397,9 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
     project: book.project,
     mode,
     photos: Object.fromEntries([...book.photos].map(([id, photo]) => {
-      const { width, height, caption, title, credit, altText, captured, capturedEstimated } = photo;
-      return [id, { width, height, caption, title, credit, altText, captured, capturedEstimated, src: base + '/photo/' + id }];
+      const { width, height, caption, title, credit, altText, captured, location, camera } = photo;
+      return [id, { width, height, caption, title, credit, altText, ...(captured ? { captured } : {}), ...(location ? { location } : {}),
+        ...(camera ? { camera } : {}), src: base + '/photo/' + id }];
     })),
     texts: book.texts,
     files: book.files,
