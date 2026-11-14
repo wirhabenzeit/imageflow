@@ -91,10 +91,10 @@ export type ContextMenuResult = { command: import('./commands').RegisteredComman
 export type SourceCommand = { action: 'place'; keys: string[] } | { action: 'jump'; spread: string };
 export type PopupItem = { id?: string; label?: string; type?: 'separator'; enabled?: boolean; checked?: boolean; toolTip?: string };
 export type MarkdownState = {
-  id: string; name: string; path: string; external: boolean; text: string; version: number;
+  id: string; name: string; path: string; external: boolean; text: string; version: number; basis: number;
   dirty: boolean; saving: boolean; closing?: boolean; error?: string; conflict?: string;
 };
-export type MarkdownAction = { action: 'state' | 'save' } | { action: 'change' | 'closing'; text: string; version: number }
+export type MarkdownAction = { action: 'state' | 'save' } | { action: 'change' | 'closing'; text: string; version: number; basis: number }
   | { action: 'reload' | 'keep'; conflict: string };
 export type DesktopApi = {
   showMarkdown(request: { id: string } | { name: string }): Promise<Result<void>>;

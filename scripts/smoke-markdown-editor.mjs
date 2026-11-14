@@ -3,6 +3,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
+import { once } from 'node:events';
 import { _electron } from 'playwright-core';
 import { testBook } from './ui-actions.mjs';
 
@@ -17,6 +18,7 @@ const until = async (check, label = 'operation settled') => {
 const errors = [];
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' }, timeout: 20000 });
+const appProcess = app.process();
 const nativeClose = async (page) => {
   const window = await app.browserWindow(page);
   await window.evaluate((window) => window.close());
@@ -48,6 +50,9 @@ try {
     globalThis.markdownPrompts = [];
     dialog.showMessageBox = async (_owner, options) => {
       globalThis.markdownPrompts.push(options);
+      if (options.message.includes('external Markdown') && globalThis.holdMarkdownQuestion) {
+        return new Promise((resolve) => { globalThis.finishMarkdownQuestion = () => resolve({ response: 2 }); });
+      }
       return { response: options.message.includes('external Markdown') ? globalThis.markdownChoice : globalThis.closeChoice };
     };
   });
@@ -101,8 +106,10 @@ try {
   // A failed save must survive a canceled close and retry successfully after the file becomes writable.
   await chmod(arrival, 0o444); await textBox(editor).fill('Retain this failed save'); await saveNow(editor);
   await editor.getByRole('alert').waitFor();
-  await nativeClose(editor); await until(async () => (await app.evaluate(() => globalThis.markdownPrompts)).some((p) => p.message.includes('finish saving')));
-  assert.equal(editor.isClosed(), false); assert.equal(await textBox(editor).inputValue(), 'Retain this failed save');
+  await app.evaluate(({ app }) => { app.quit(); });
+  await until(async () => (await app.evaluate(() => globalThis.markdownPrompts)).some((p) => p.message.includes('finish saving')));
+  assert.equal(editor.isClosed(), false); assert.equal(page.isClosed(), false, 'Return to Editor cancels Quit');
+  assert.equal(await textBox(editor).inputValue(), 'Retain this failed save');
   await chmod(arrival, 0o644); await editor.getByRole('button', { name: 'Retry', exact: true }).click();
   await until(async () => await readFile(arrival, 'utf8') === 'Retain this failed save');
   await rename(arrival, arrival + '.moved');
@@ -126,7 +133,21 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.ok('value' in added, added.error); const id = added.value.imported[0];
-  await open(page, id); assert.equal(app.windows().filter((page) => page.url() === 'imageflow://editor/markdown').length, 0, 'Abort does not open');
+  await open(page, 'arrival'); editor = await editorWindow();
+  const editorNative = await app.browserWindow(editor);
+  assert.equal(await editorNative.evaluate((window) => window.getParentWindow()), null, 'the editor is an independent window');
+  await app.evaluate(() => { globalThis.holdMarkdownQuestion = true; });
+  const pendingQuestion = page.evaluate((id) => window.imageflow.showMarkdown({ id }), id);
+  await until(() => app.evaluate(() => !!globalThis.finishMarkdownQuestion));
+  const sameQuestion = page.evaluate((id) => window.imageflow.showMarkdown({ id }), id);
+  await textBox(editor).fill('Autosaved while the external-source question stays open');
+  await until(async () => await readFile(arrival, 'utf8') === 'Autosaved while the external-source question stays open');
+  assert.equal((await app.evaluate(() => globalThis.markdownPrompts.filter((p) => p.message.includes('external Markdown')))).length, 1, 'concurrent opens share one question');
+  await app.evaluate(() => { globalThis.holdMarkdownQuestion = false; globalThis.finishMarkdownQuestion(); globalThis.finishMarkdownQuestion = null; });
+  assert.ok('value' in await pendingQuestion); assert.ok('value' in await sameQuestion);
+  await nativeClose(editor); await until(() => editor.isClosed());
+  assert.equal(app.windows().filter((page) => page.url() === 'imageflow://editor/markdown').length, 0, 'Abort does not open');
+  console.log('an open question does not block autosave, concurrent opens share a question, and the editor has no parent');
   assert.equal(typeof (await current(page)).project.texts[id], 'object');
   await app.evaluate(() => { globalThis.markdownChoice = 0; });
   await open(page, id); editor = await editorWindow();
@@ -169,12 +190,19 @@ try {
   await emptyPage.getByRole('button', { name: 'Create', exact: true }).click(); editor = await editorWindow();
   await textBox(editor).fill('Pending at app quit');
   const emptySource = Object.values((await current(emptyPage)).project.texts)[0];
+  // Assert process exit before finally's cleanup, so app.close() cannot conceal a swallowed Quit.
+  const processExited = once(appProcess, 'exit', { signal: AbortSignal.timeout(20000) });
   await app.evaluate(({ app }) => { app.quit(); });
+  const [exitCode] = await processExited;
+  assert.equal(exitCode, 0, 'Quit exits the process normally');
   await until(() => emptyPage.isClosed());
   assert.equal(await readFile(join(empty, emptySource), 'utf8'), 'Pending at app quit');
   assert.deepEqual(errors, []);
   console.log('empty-list creation and app-quit flush passed; no renderer errors');
 } finally {
-  await app.close().catch(() => {});
+  if (appProcess.exitCode === null) {
+    await app.evaluate(() => globalThis.finishMarkdownQuestion?.()).catch(() => {});
+    await app.close().catch(() => {});
+  }
   await rm(work, { recursive: true, force: true });
 }

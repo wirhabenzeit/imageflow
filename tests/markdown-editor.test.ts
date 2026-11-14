@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, link, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { MarkdownBuffer } from '../desktop/markdown-buffer';
@@ -39,6 +40,30 @@ test('outside text reloads a clean buffer, but preserves a dirty buffer until ex
   assert.equal(f.value.state.text, 'My edit'); assert.equal(f.value.state.conflict, 'Another outside edit');
   await f.value.resolve('keep', 'Another outside edit');
   assert.equal(f.disk(), 'My edit'); assert.equal(f.value.state.dirty, false);
+});
+
+test('a keystroke based on text from before a clean outside reload must show a conflict', async (t) => {
+  const f = buffer(); t.after(() => f.value.dispose());
+  const oldBasis = f.value.state.basis;
+  f.outside('Outside revision'); await f.value.refresh();
+  assert.notEqual(f.value.state.basis, oldBasis);
+  // The renderer has typed locally but has not received this poll's replacement yet.
+  f.value.change('Typed from the original revision', 1, oldBasis);
+  await f.value.refresh(); await f.value.flush();
+  assert.equal(f.disk(), 'Outside revision');
+  assert.equal(f.value.state.text, 'Typed from the original revision');
+  assert.equal(f.value.state.conflict, 'Outside revision');
+  await f.value.resolve('keep', 'Outside revision');
+  assert.equal(f.disk(), 'Typed from the original revision');
+});
+
+test('typing based on an acknowledged outside reload saves normally', async (t) => {
+  const f = buffer(); t.after(() => f.value.dispose());
+  f.outside('Outside revision'); await f.value.refresh();
+  f.value.change('Edit based on outside revision', 1, f.value.state.basis);
+  await f.value.flush();
+  assert.equal(f.disk(), 'Edit based on outside revision');
+  assert.equal(f.value.state.conflict, undefined);
 });
 
 test('resolving a conflict does not overwrite an even newer outside edit', async (t) => {
@@ -108,7 +133,35 @@ test('two app editors of the same original cannot silently overwrite each other'
     writeMarkdownFile(path, 'Original', 'Second editor', async () => path),
   ]);
   assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
-  assert.equal(await readFile(path, 'utf8'), 'First editor');
+  assert.equal(await readFile(path, 'utf8'), results[0].status === 'fulfilled' ? 'First editor' : 'Second editor');
+});
+
+test('external saves preserve the inode, creation time, ownership, permissions, hard links and extended attributes', async (t) => {
+  const root = await directory(t); const path = join(root, 'original.md'); const alias = join(root, 'alias.md');
+  await writeFile(path, 'Original'); await chmod(path, 0o640); await link(path, alias);
+  if (process.platform === 'darwin') execFileSync('/usr/bin/xattr', ['-w', 'com.imageflow.editor-test', 'preserved', path]);
+  const before = await stat(path, { bigint: true });
+  await writeMarkdownFile(path, 'Original', 'Edited original', async () => path, true);
+  const after = await stat(path, { bigint: true });
+  for (const field of ['ino', 'dev', 'birthtimeNs', 'uid', 'gid', 'mode', 'nlink'] as const) assert.equal(after[field], before[field], field);
+  assert.equal(await readFile(alias, 'utf8'), 'Edited original');
+  if (process.platform === 'darwin') assert.equal(execFileSync('/usr/bin/xattr', ['-p', 'com.imageflow.editor-test', path], { encoding: 'utf8' }).trim(), 'preserved');
+  // A shorter replacement must truncate the old tail while keeping the same original file.
+  await writeMarkdownFile(path, 'Edited original', 'Short', async () => path, true);
+  assert.equal(await readFile(alias, 'utf8'), 'Short');
+  await assert.rejects(writeMarkdownFile(path, 'Original', 'Stale edit', async () => path, true), /changed outside/);
+  assert.equal(await readFile(alias, 'utf8'), 'Short');
+});
+
+test('editors using two hard links to one external original serialize their writes', async (t) => {
+  const root = await directory(t); const path = join(root, 'original.md'); const alias = join(root, 'alias.md');
+  await writeFile(path, 'Original'); await link(path, alias);
+  const results = await Promise.allSettled([
+    writeMarkdownFile(path, 'Original', 'First editor', async () => path, true),
+    writeMarkdownFile(alias, 'Original', 'Second editor', async () => alias, true),
+  ]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  assert.equal(await readFile(path, 'utf8'), await readFile(alias, 'utf8'));
 });
 
 test('invalid UTF-8, oversized files, symlinks, and a changed source target cannot be edited', async (t) => {

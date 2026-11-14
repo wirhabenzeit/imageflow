@@ -8,19 +8,20 @@ export function MarkdownWindow({ api }: { api?: DesktopApi }) {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
   const version = useRef(0);
+  const basis = useRef(0);
   const latestText = useRef('');
   const deferred = useDeferredValue(text);
   const html = useMemo(() => markdownToHtml(deferred), [deferred]);
   const adopt = (next: MarkdownState) => {
     setState(next);
-    if (next.version >= version.current) { version.current = next.version; latestText.current = next.text; setText(next.text); }
+    if (next.version >= version.current) { version.current = next.version; basis.current = next.basis; latestText.current = next.text; setText(next.text); }
   };
   useEffect(() => {
     if (!api) return;
     let active = true;
     let changed = false;
     const stopClosing = api.onMarkdownPrepareClose(() => {
-      void api.markdownAction({ action: 'closing', text: latestText.current, version: version.current }).catch(() => {});
+      void api.markdownAction({ action: 'closing', text: latestText.current, version: version.current, basis: basis.current }).catch(() => {});
     });
     const stop = api.onMarkdownChanged((next) => { changed = true; if (active) adopt(next); });
     void api.markdownAction({ action: 'state' }).then((result) => {
@@ -51,7 +52,7 @@ export function MarkdownWindow({ api }: { api?: DesktopApi }) {
       <span role="status" aria-live="polite">{status}</span>
       <button disabled={!state || state.saving || state.closing} onClick={() => void act({ action: 'save' })}>Save Now</button>
     </header>
-    {(error || state?.error) && <div className="markdown-message error-text" role="alert">{error || state?.error}<button onClick={() => void act(error ? { action: 'change', text, version: ++version.current } : { action: 'save' })}>Retry</button></div>}
+    {(error || state?.error) && <div className="markdown-message error-text" role="alert">{error || state?.error}<button onClick={() => void act(error ? { action: 'change', text, version: ++version.current, basis: basis.current } : { action: 'save' })}>Retry</button></div>}
     {state?.conflict !== undefined && <section className="markdown-conflict" aria-label="Outside changes">
       <p>This file changed outside ImageFlow. Your text is preserved below. Choose which version to keep.</p>
       <details><summary>Review outside text</summary><pre>{state.conflict}</pre></details>
@@ -60,7 +61,7 @@ export function MarkdownWindow({ api }: { api?: DesktopApi }) {
     </section>}
     <div className="markdown-split">
       <section className="markdown-source"><h2>Markdown</h2><textarea aria-label="Markdown source" autoFocus spellCheck value={text} disabled={!state || state.closing}
-        onChange={(event) => { const next = event.target.value; latestText.current = next; setText(next); void act({ action: 'change', text: next, version: ++version.current }); }}
+        onChange={(event) => { const next = event.target.value; latestText.current = next; setText(next); void act({ action: 'change', text: next, version: ++version.current, basis: basis.current }); }}
         onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void act({ action: 'save' }); } }} /></section>
       <section className="markdown-preview" aria-label="Formatted preview"><h2>Preview</h2><div className="markdown-preview-scroll"><article className="ql-markdown" dangerouslySetInnerHTML={{ __html: html }} /></div></section>
     </div>

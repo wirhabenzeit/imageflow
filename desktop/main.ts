@@ -1105,6 +1105,8 @@ void app.whenReady().then(async () => {
       flushingTextEditors = true;
       void (async () => {
         for (const document of documents.values()) if (!await markdownWindows.closeFor(document)) return;
+        // before-quit runs synchronously again; clear the guard before re-entering it.
+        flushingTextEditors = false;
         app.quit();
       })().catch((error) => report(lastDocument?.window, error)).finally(() => { flushingTextEditors = false; });
       return;
@@ -1275,12 +1277,18 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.documentAction, (event, action: 'reveal' | 'template' | 'text', id?: string) => fromEditor(event, async (document) => {
     await openDocumentLocation(document, action, id);
   }));
-  ipcMain.handle(channels.showMarkdown, (event, request: unknown) => fromBook(event, async (document) => {
-    if (!request || typeof request !== 'object') throw new Error('Choose a Markdown source.');
-    if ('id' in request && typeof request.id === 'string') await markdownWindows.open(document, { id: request.id });
-    else if ('name' in request && typeof request.name === 'string') await markdownWindows.open(document, { name: request.name });
-    else throw new Error('Choose a Markdown source or a name for new text.');
-  }));
+  ipcMain.handle(channels.showMarkdown, async (event, request: unknown) => {
+    const document = editorOwner(event) ?? assetsOwner(event);
+    if (!document || document.closing || quitting) return { error: 'Request is only available to an open book.' };
+    try {
+      // Only mutations take the book lock; dialogs and window loading must not block other editors' autosaves.
+      if (!request || typeof request !== 'object') throw new Error('Choose a Markdown source.');
+      if ('id' in request && typeof request.id === 'string') await markdownWindows.open(document, { id: request.id });
+      else if ('name' in request && typeof request.name === 'string') await markdownWindows.open(document, { name: request.name });
+      else throw new Error('Choose a Markdown source or a name for new text.');
+      return { value: undefined };
+    } catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.handle(channels.markdownAction, async (event, request: MarkdownAction) => {
     const entry = markdownWindows.owner(event);
     if (!entry) return { error: 'Request is only available to this Markdown editor.' };

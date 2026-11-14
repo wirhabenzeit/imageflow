@@ -15,7 +15,7 @@ type Entry = { document: DocumentSession; id: string; window: BrowserWindow; buf
 /** All editor capabilities are bound to one registered source and one authorized book. */
 export class MarkdownWindows {
   private entries = new Set<Entry>();
-  private refreshes = new Map<DocumentSession, ReturnType<typeof setTimeout>>();
+  private opening = new Map<DocumentSession, Map<string, Promise<void>>>();
   constructor(private options: { window(): Electron.BrowserWindowConstructorOptions; secure(window: BrowserWindow): void;
     focus(window: BrowserWindow): void; focused(document: DocumentSession): void }) {}
   windows() { return [...this.entries].map(({ window }) => window); }
@@ -29,18 +29,27 @@ export class MarkdownWindows {
     entry.window.setDocumentEdited(state.dirty);
     entry.window.webContents.send(channels.markdownChanged, { ...state, closing: entry.closing });
   }
-  private refreshBook(document: DocumentSession) {
-    clearTimeout(this.refreshes.get(document));
-    const refresh = async () => {
-      this.refreshes.delete(document);
-      if (document.closing) return;
-      const result = await document.run(async () => document.notify({ value: await document.reload() }));
-      if ('error' in result && result.code === 'BOOK_BUSY') this.refreshes.set(document, setTimeout(() => void refresh(), 200));
-      else if ('error' in result) document.notify(result);
-    };
-    this.refreshes.set(document, setTimeout(() => void refresh(), 100));
+  private async editBook<T>(document: DocumentSession, task: () => Promise<T>) {
+    for (let attempt = 0; ; attempt++) {
+      const result = await document.run(task);
+      if ('value' in result) return result.value;
+      if (result.code !== 'BOOK_BUSY' || attempt >= 50) throw new Error(result.error);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   }
   async open(document: DocumentSession, request: { id: string } | { name: string }) {
+    if (!('id' in request)) return this.openSource(document, request);
+    const existing = [...this.entries].find((entry) => entry.document === document && entry.id === request.id);
+    if (existing) { this.options.focus(existing.window); return; }
+    let pending = this.opening.get(document);
+    if (!pending) { pending = new Map(); this.opening.set(document, pending); }
+    if (pending.has(request.id)) return pending.get(request.id);
+    const task = this.openSource(document, request);
+    pending.set(request.id, task);
+    try { await task; }
+    finally { pending.delete(request.id); if (!pending.size) this.opening.delete(document); }
+  }
+  private async openSource(document: DocumentSession, request: { id: string } | { name: string }) {
     if (document.book.readOnly) throw new Error('Create an editable book before editing text.');
     let id: string;
     if ('id' in request) {
@@ -51,20 +60,27 @@ export class MarkdownWindows {
       if (!source) throw new Error('This text source is no longer registered.');
       if (typeof source !== 'string' && source.linked) {
         const choice = await dialog.showMessageBox(document.window, { type: 'question', message: 'Edit this external Markdown source?',
-          detail: source.path + '\n\nEdit external saves changes to the original file. Copy first edits a copy inside this book and keeps all existing placements.',
+          detail: source.path + '\n\nEdit external writes directly to the original to preserve its tags, permissions and file links. An interrupted write may leave incomplete text. Copy first edits a copy inside this book and keeps all existing placements.',
           buttons: ['Edit external', 'Copy first', 'Abort'], defaultId: 1, cancelId: 2 });
         if (choice.response === 2) return;
-        if (choice.response === 1) {
+        const checkSource = () => {
+          if (JSON.stringify(document.book.project.texts[id]) !== JSON.stringify(source)) throw new Error('This source changed while the dialog was open. Choose Edit again.');
+        };
+        checkSource();
+        if (choice.response === 1) await this.editBook(document, async () => {
+          checkSource();
           const next = await relocateSource(document.book, 'markdown:' + id, undefined, true);
           document.projectSession.record(next, 'Copy text into book', false);
           document.notify({ value: document.activate(next) });
-        }
+        });
       }
     } else {
-      const created = await createMarkdownSource(document.book, request.name);
-      id = created.id;
-      document.projectSession.record(created.book, 'Create text source');
-      document.notify({ value: document.activate(created.book) });
+      id = await this.editBook(document, async () => {
+        const created = await createMarkdownSource(document.book, request.name);
+        document.projectSession.record(created.book, 'Create text source');
+        document.notify({ value: document.activate(created.book) });
+        return created.id;
+      });
     }
     const reference = JSON.stringify(document.book.project.texts[id]);
     const folder = document.book.folder;
@@ -76,26 +92,23 @@ export class MarkdownWindows {
     };
     const path = await validate();
     const initial = await readMarkdownFile(path);
+    if (document.closing || document.window.isDestroyed()) throw new Error('This book closed before its editor opened.');
+    const external = typeof document.book.project.texts[id] !== 'string';
     const window = new BrowserWindow({ ...this.options.window(), title: basename(path) + ' — Markdown',
-      width: 1060, height: 720, minWidth: 680, minHeight: 420, show: false, parent: document.window });
+      width: 1060, height: 720, minWidth: 680, minHeight: 420, show: false });
     this.options.secure(window);
     window.webContents.on('will-frame-navigate', (event) => event.preventDefault());
     const entry: Entry = { document, id, window, closing: false, poll: undefined!, buffer: undefined! };
     entry.buffer = new MarkdownBuffer({ id, name: basename(path).replace(/^tx-[a-f0-9-]{12}-/, ''), path,
-      external: typeof document.book.project.texts[id] !== 'string' }, initial, {
+      external }, initial, {
       read: async () => {
         if (await validate() !== path) throw new Error('The source location changed. Reopen its editor.');
         return readMarkdownFile(path);
       },
       write: async (expected, text) => {
-        for (let attempt = 0; ; attempt++) {
-          const result = await document.run(async () => writeMarkdownFile(path, expected, text, validate));
-          if ('value' in result) break;
-          if (result.code !== 'BOOK_BUSY' || attempt >= 50) throw new Error(result.error);
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
+        await this.editBook(document, async () => writeMarkdownFile(path, expected, text, validate, external));
+        // Both in-book and linked-source watchers already coalesce changes and refresh the book.
         document.projectSession.inputs.invalidate();
-        this.refreshBook(document);
       },
     }, (state) => this.publish(entry, state));
     entry.poll = setInterval(() => { if (!entry.closing) void entry.buffer.refresh(); }, 1000);
@@ -116,8 +129,8 @@ export class MarkdownWindows {
   async action(entry: Entry, request: MarkdownAction) {
     if (!request || typeof request !== 'object') throw new Error('Invalid Markdown request.');
     if (request.action === 'change' || request.action === 'closing') {
-      if (typeof request.text !== 'string' || !Number.isSafeInteger(request.version) || request.version < (request.action === 'closing' ? 0 : 1)) throw new Error('Invalid Markdown edit.');
-      if (!entry.closing || request.action === 'closing') entry.buffer.change(request.text, request.version);
+      if (typeof request.text !== 'string' || !Number.isSafeInteger(request.basis) || request.basis < 0 || !Number.isSafeInteger(request.version) || request.version < (request.action === 'closing' ? 0 : 1)) throw new Error('Invalid Markdown edit.');
+      if (!entry.closing || request.action === 'closing') entry.buffer.change(request.text, request.version, request.basis);
       if (request.action === 'closing') entry.acknowledge?.();
     } else if (request.action === 'save') await entry.buffer.flush();
     else if ((request.action === 'reload' || request.action === 'keep') && typeof request.conflict === 'string') await entry.buffer.resolve(request.action, request.conflict);
@@ -141,14 +154,16 @@ export class MarkdownWindows {
           buttons: ['Return to Editor', 'Discard Changes'], defaultId: 0, cancelId: 0 });
         if (answer.response !== 1) { entry.closing = false; this.publish(entry); this.options.focus(entry.window); return false; }
       }
-      entry.window.destroy();
+      await new Promise<void>((resolve) => {
+        entry.window.once('closed', resolve);
+        entry.window.destroy();
+      });
       return true;
     })().finally(() => { entry.closeTask = undefined; });
     return entry.closeTask;
   }
   async closeFor(document: DocumentSession) {
     for (const entry of [...this.entries].filter((entry) => entry.document === document)) if (!await this.closeEntry(entry)) return false;
-    clearTimeout(this.refreshes.get(document)); this.refreshes.delete(document);
     return true;
   }
 }
