@@ -19,7 +19,7 @@ await writeFile(join(folder, 'project.json'), JSON.stringify({ schemaVersion: 1,
   spreads: [{ id: 'one', definition: 'story', boxes: { hero: { photo: 'late', crops: { story: { zoom: 2, centerX: .5, centerY: .5 } } }, body: { text: 'text' } } }, { id: 'two', definition: 'story' }] }));
 const photoIndex = {};
 for (const [id, title, date] of [['late', 'C', '2026:11:03 08:00:00'], ['early', 'A', '2026:11:02 23:50:00'], ['night', 'B', '2026:11:03 00:20:00'], ['estimated', 'D', undefined]]) {
-  const image = sharp({ create: { width: 800, height: 600, channels: 3, background: id === 'early' ? '#cbb68b' : '#709fb0' } });
+  const image = sharp({ create: { width: id === 'late' ? 600 : 800, height: id === 'late' ? 900 : 600, channels: 3, background: id === 'early' ? '#cbb68b' : '#709fb0' } });
   if (date) image.withExif({ IFD2: { DateTimeOriginal: date, OffsetTimeOriginal: '+02:00' } });
   await image.jpeg().toFile(join(folder, 'photos', id + '.jpg'));
   photoIndex[id] = { path: 'photos/' + id + '.jpg', title };
@@ -143,6 +143,25 @@ try {
   assert.equal(await readFile(join(folder, 'photos.json'), 'utf8'), photosBefore);
   assert.deepEqual((await current(page)).history, historyBefore);
   await assets.screenshot({ path: join(work, 'assets.png') });
+  // Portrait previews fit between the header and footer, including in a small Assets window.
+  const fitsPreview = async (owner) => {
+    const image = owner.locator('.ql-photo img');
+    await image.waitFor();
+    await image.evaluate((image) => image.decode());
+    const bounds = await image.boundingBox(), body = await owner.locator('.ql-photo').boundingBox();
+    assert.ok(bounds.x >= body.x && bounds.y >= body.y && bounds.x + bounds.width <= body.x + body.width + 1 && bounds.y + bounds.height <= body.y + body.height + 1, JSON.stringify({ bounds, body }));
+  };
+  await popup('asset-preview');
+  await assets.locator('.asset-row[data-source="photo:late"]').click({ button: 'right' });
+  await fitsPreview(assets);
+  const assetsWindow = await app.browserWindow(assets);
+  const originalSize = await assetsWindow.evaluate((window) => window.getContentSize());
+  await assetsWindow.evaluate((window) => window.setContentSize(600, 420));
+  await assets.waitForFunction(() => innerWidth === 600);
+  await fitsPreview(assets);
+  await assets.screenshot({ path: join(work, 'portrait-quick-look.png') });
+  await assets.keyboard.press('Escape');
+  await assetsWindow.evaluate((window, [width, height]) => window.setContentSize(width, height), originalSize);
   await assets.close();
   // Asset actions are the same registry commands in the strip and utility window.
   await page.locator('.source-photo[data-id="early"]').click();
@@ -157,6 +176,9 @@ try {
   await page.locator('.source-photo[data-id="early"]').click({ button: 'right' });
   await page.getByRole('dialog', { name: /Quick Look/ }).waitFor();
   assert.match(await page.getByRole('dialog', { name: /Quick Look/ }).innerText(), /Captured/);
+  await page.keyboard.press('ArrowLeft');
+  await until(async () => await page.locator('.ql-header h2').innerText() === 'C');
+  await fitsPreview(page);
   await page.keyboard.press('Escape');
   // Compact text controls save through the existing Undo path, with longer controls in the gear panel.
   await page.locator('.spread-thumb[data-spread="one"]').click();

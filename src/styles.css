@@ -200,8 +200,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .ql-header .muted { color: var(--muted); font-size: 12px; }
 .ql-nav { display: flex; gap: 2px; }
 .ql-body { min-height: 0; }
-.ql-photo { display: grid; place-items: center; padding: 14px; background: #292929; overflow: hidden; }
-.ql-photo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.ql-photo { display: grid; grid-template: minmax(0, 1fr) / minmax(0, 1fr); place-items: center; padding: 14px; background: #292929; overflow: hidden; }
+.ql-photo img { min-width: 0; min-height: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
 .ql-text { overflow: auto; padding: 28px 44px; }
 .ql-markdown { max-width: 60ch; margin: 0 auto; font: 16px/1.6 Georgia, serif; }
 .ql-markdown :is(h1, h2, h3) { line-height: 1.2; }
