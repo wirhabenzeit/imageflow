@@ -16,7 +16,11 @@ await mkdir(join(folder, 'template'), { recursive: true });
 await mkdir(join(folder, 'photos'));
 await writeFile(join(folder, 'template/index.tsx'), `import {defineTemplate,mm,p,printFormat,box,Spread,RenderedImage} from 'imageflow';
 export default defineTemplate({id:'startup',version:'1',contract:1,format:printFormat({label:'Book',trim:{width:mm(100),height:mm(120)},bleed:{all:mm(3),binding:mm(0)},safe:mm(8),ends:'inside-covers',pageCount:{min:2,max:500,step:2}}),
-spreads:{story:{label:'Story',parameters:{index:p.number({label:'Index',default:0})},boxes:{hero:box.photo('Hero')},render:ctx=><Spread>
+spreads:{shaped:{label:'Shaped photo',boxes:{hero:box.photo('Hero')},render:ctx=><Spread>
+<ctx.PhotoBox id="hero" rect={ctx.geometry.spread('bleed')}>{(photo,box)=><svg width={photo.box.width} height={photo.box.height}>
+<clipPath id={box.uid}><circle cx={photo.box.width/2} cy={photo.box.height/2} r={photo.box.height/3}/></clipPath>
+<image href={photo.src} x={photo.image.x} y={photo.image.y} width={photo.image.width} height={photo.image.height} clipPath={'url(#'+box.uid+')'}/>
+</svg>}</ctx.PhotoBox></Spread>},story:{label:'Story',parameters:{index:p.number({label:'Index',default:0})},boxes:{hero:box.photo('Hero')},render:ctx=><Spread>
 <ctx.PhotoBox id="hero" rect={ctx.geometry.spread('bleed')}/>
 <RenderedImage label="Slow artwork" inputs={{index:ctx.params.index}} style={{position:'absolute',left:'10mm',top:'10mm',width:'20mm',height:'20mm'}} draw={async target=>{
   if(new URLSearchParams(location.search).get('view')==='present'){
@@ -27,16 +31,24 @@ spreads:{story:{label:'Story',parameters:{index:p.number({label:'Index',default:
   const context=canvas.getContext('2d');context.fillStyle='#cc8844';context.fillRect(0,0,canvas.width,canvas.height);return canvas;
 }}/></Spread>}}});`);
 const photos = {};
-for (const i of [0, 1, 29, 30, 31, 32, 39]) {
+for (const i of [0, 1, 15, 29, 30, 31, 32, 39]) {
   const id = 'p' + i;
   await sharp({ create: { width: 1800, height: 1200, channels: 3, background: '#709fb0' } }).jpeg().toFile(join(folder, 'photos', id + '.jpg'));
   photos[id] = { path: 'photos/' + id + '.jpg', title: id };
 }
 await writeFile(join(folder, 'photos.json'), JSON.stringify(photos));
 await writeFile(join(folder, 'project.json'), JSON.stringify({schemaVersion:1,title:'Startup',template:{id:'startup',version:'1'},spreads:
-  Array.from({length:40},(_,i)=>({id:'s'+i,definition:'story',params:{index:i},boxes:{hero:{photo:photos['p'+i]?'p'+i:'p0'}}}))}));
+  Array.from({length:40},(_,i)=>({id:'s'+i,definition:i===15?'shaped':'story',params:{index:i},boxes:{hero:{photo:photos['p'+i]?'p'+i:'p0'}}}))}));
 const visible = process.argv.includes('--visible');
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: {...process.env, ...(visible ? {} : {IMAGEFLOW_HIDE_WINDOW:'1'})} });
+// Thumbnail rendering also creates windows; only accept the presentation viewer.
+const nextPresentation = () => app.waitForEvent('window', {
+  timeout: 10000,
+  predicate: async (page) => {
+    try { await page.waitForURL('imageflow://editor/presentation', { timeout: 10000 }); return true; }
+    catch { return false; }
+  },
+});
 try {
   if (!process.argv.includes('--measure')) await app.context().addInitScript(() => {
     if (location.hostname !== 'render' || new URLSearchParams(location.search).get('view') !== 'present') return;
@@ -49,6 +61,11 @@ try {
     });
     resize.observe(document, { childList: true, subtree: true });
     HTMLImageElement.prototype.decode = function () {
+      // A detached SVG proxy can load its bytes while Chromium leaves decode() pending in the hidden candidate.
+      if (!this.isConnected) {
+        window.__heldProxyDecodes = (window.__heldProxyDecodes ?? 0) + 1;
+        return new Promise(() => {});
+      }
       if (!held && this.matches('img[data-src]') && window.imageflowRenderStatus?.state !== 'ready') {
         held = true;
         // Model a fullscreen resize replacing an image whose first decode never completes. A later draw must
@@ -95,7 +112,7 @@ try {
   const requests = [];
   app.context().on('request', request => { if(request.url().includes('/proof-photo/')) requests.push(request.url().split('/proof-photo/')[1]); });
   const start = performance.now();
-  const opened = app.waitForEvent('window');
+  const opened = nextPresentation();
   await editor.keyboard.press('Shift+w');
   const page = await opened;
   await page.waitForURL('imageflow://editor/presentation');
@@ -107,7 +124,8 @@ try {
   console.log(JSON.stringify(metrics));
   await checkHeader();
   if (!process.argv.includes('--measure')) {
-    assert.equal(requests[0], 'p30', 'The selected spread is the first original photo requested');
+    assert.equal(await proof.locator('body').evaluate(() => window.__heldProxyDecodes ?? 0), 0, 'Offscreen shaped photos never block startup on decode');
+    assert.equal(requests.find((source) => !source.startsWith('p15')), 'p30', 'The selected spread is the first ordinary photo requested');
     assert.ok(started.length <= 3 && started.every(index => Math.abs(index - 30) <= 1), 'Only the current spread and neighbours draw artwork at startup');
     assert.ok(await page.evaluate(() => !!document.activeElement?.closest('.presentation')), 'Keyboard focus enters presentation without clicking the slide');
     let window = await app.browserWindow(page);
@@ -140,7 +158,8 @@ try {
     await page.keyboard.press('g');
     await proof.locator('.if-presentation.overview').waitFor();
     const overviewSources = await proof.locator('.if-present-crop img[data-src]').evaluateAll(images => images.map(image => image.getAttribute('src')));
-    assert.equal(overviewSources.length, 40);
+    assert.equal(await proof.locator('.if-present-crop').count(), 40);
+    assert.equal(overviewSources.length, 39, 'Overview includes 39 ordinary photos and one SVG photo');
     assert.ok(overviewSources.every(source => /\/proof-photo\/[\w-]+\/\d+$/.test(source)), 'Overview never requests camera originals');
     await proof.locator('.if-present-crop img[data-src]').first().evaluate(image => image.decode());
     assert.ok(await proof.locator('.if-present-crop img[data-src]').evaluateAll(images => images.filter(image => image.complete).every(image => image.naturalWidth <= 1024)));
@@ -153,7 +172,7 @@ try {
     await page.keyboard.press('Escape').catch((error) => { if (!page.isClosed()) throw error; });
     await closed;
     await checkHeader();
-    const reopened = app.waitForEvent('window');
+    const reopened = nextPresentation();
     await menuAction(app, 'Presentation');
     input = await reopened;
     await input.waitForURL('imageflow://editor/presentation');
@@ -161,10 +180,34 @@ try {
     await input.locator('.presentation .book-frame-present[data-current][data-ready]').waitFor();
     await nativeKey('Home');
     await input.frameLocator('.presentation .book-frame-present[data-current][data-ready]').locator('.if-present-crop:visible img[data-src][src$="/p0"]').waitFor();
+    await input.keyboard.press('3');
+    await input.keyboard.press('1');
+    await input.keyboard.press('Enter');
+    const shaped = input.frameLocator('.book-frame-present[data-current][data-ready]')
+      .locator('.if-present-crop:visible [data-photo-render="custom"] svg image');
+    await shaped.waitFor();
+    assert.match(await shaped.getAttribute('href'), /\/proof-photo\/p15(?:\/\d+)?$/, 'The shaped photo remains available when its spread is shown');
     const closedAgain = input.waitForEvent('close');
     await nativeKey('Escape').catch((error) => { if (!input.isClosed()) throw error; });
     await closedAgain;
     await checkHeader();
+    if (process.argv.includes('--repeat')) {
+      const timings = [];
+      for (let cycle = 0; cycle < 20; ++cycle) {
+        const opened = nextPresentation();
+        const started = performance.now();
+        await editor.evaluate((spread) => window.imageflow.startPresentation(spread), cycle % 2 ? 's15' : 's30');
+        const repeated = await opened;
+        await repeated.waitForURL('imageflow://editor/presentation');
+        await repeated.locator('.book-frame-present[data-current][data-ready]').waitFor({ timeout: 5000 });
+        timings.push(Math.round(performance.now() - started));
+        const closed = repeated.waitForEvent('close', { timeout: 5000 });
+        await repeated.keyboard.press('Escape').catch((error) => { if (!repeated.isClosed()) throw error; });
+        await closed;
+      }
+      console.log('20 repeated presentation openings (ms):', JSON.stringify(timings));
+      await checkHeader();
+    }
   }
   console.log('Presentation startup checked:', work);
 } catch (error) {
