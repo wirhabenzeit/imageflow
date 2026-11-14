@@ -1,6 +1,6 @@
 import type { BookMenuState } from './desktop';
 
-type Spec = { label: string | ((state: BookMenuState) => string); accelerator?: string;
+type Spec = { label: string | ((state: BookMenuState) => string); accelerator?: string; registerAccelerator?: boolean; contextLabel?: string;
   enabled: (state: BookMenuState) => boolean; checked?: (state: BookMenuState) => boolean };
 const book = (s: BookMenuState) => s.document && !s.busy;
 const writable = (s: BookMenuState) => book(s) && s.writable;
@@ -15,13 +15,14 @@ export const commandRegistry = {
   'move-book': { label: 'Move To…', enabled: writable },
   'revert-opened': { label: 'Last Opened', enabled: writable },
   'reveal-book': { label: 'Show in Finder', enabled: s => s.document },
-  'import-photos': { label: 'Photos…', accelerator: 'CmdOrCtrl+Shift+I', enabled: writable },
-  'import-folder': { label: 'Photo Folder…', enabled: writable },
-  'import-texts': { label: 'Markdown…', enabled: writable },
+  import: { label: 'Import…', accelerator: 'CmdOrCtrl+Shift+I', enabled: writable },
+  'copy-assets': { label: 'Copy Assets into Book', enabled: writable, checked: s => s.importMode !== 'link' },
   'manage-sources': { label: 'Assets…', enabled: book },
-  'add-spread': { label: 'New Spread', accelerator: 'CmdOrCtrl+Shift+N', enabled: spread('add-spread') },
-  'duplicate-spread': { label: 'Duplicate Spread', accelerator: 'CmdOrCtrl+D', enabled: spread('duplicate-spread') },
-  'delete-spread': { label: 'Delete Spread ⌫', enabled: spread('delete-spread') },
+  'add-spread': { label: 'New Spread', contextLabel: 'New Spread After', accelerator: 'CmdOrCtrl+Shift+N', enabled: spread('add-spread') },
+  'duplicate-spread': { label: s => (s.selectionCount ?? 1) > 1 ? 'Duplicate ' + s.selectionCount + ' Spreads' : 'Duplicate Spread', accelerator: 'CmdOrCtrl+D', enabled: spread('duplicate-spread') },
+  'delete-spread': { label: s => (s.selectionCount ?? 1) > 1 ? 'Delete ' + s.selectionCount + ' Spreads' : 'Delete Spread', accelerator: 'Backspace', registerAccelerator: false, enabled: spread('delete-spread') },
+  'move-spread-start': { label: 'Move to Start', enabled: spread('move-spread-up') },
+  'move-spread-end': { label: 'Move to End', enabled: spread('move-spread-down') },
   'move-spread-up': { label: 'Move Up', accelerator: 'Alt+CmdOrCtrl+Up', enabled: spread('move-spread-up') },
   'move-spread-down': { label: 'Move Down', accelerator: 'Alt+CmdOrCtrl+Down', enabled: spread('move-spread-down') },
   'book-check': { label: 'Check Book', accelerator: 'CmdOrCtrl+Shift+K', enabled: s => s.document },
@@ -36,13 +37,55 @@ export const commandRegistry = {
   'zoom-in': { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', enabled: s => s.document && (s.zoom ?? 1) < 3 },
   'zoom-out': { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', enabled: s => s.document && (s.zoom ?? 1) > .3 },
   'zoom-actual': { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', enabled: s => s.document },
+  presentation: { label: 'Presentation', contextLabel: 'Present from Here', accelerator: 'Shift+W', registerAccelerator: false, enabled: s => s.document },
+  'presentation-start': { label: 'Present from Beginning', accelerator: 'Alt+Shift+W', registerAccelerator: false, enabled: s => s.document },
+  'photos-sort-capture': { label: 'Capture Time', enabled: book, checked: s => !s.photoView || s.photoView.sort === 'capture' },
+  'photos-sort-name': { label: 'Name', enabled: book, checked: s => s.photoView?.sort === 'name' },
+  'photos-sort-import': { label: 'Import Order', enabled: book, checked: s => s.photoView?.sort === 'import' },
+  'photos-group-none': { label: 'None', enabled: book, checked: s => !s.photoView || s.photoView.group === 'none' },
+  'photos-group-day': { label: 'By Day', enabled: book, checked: s => s.photoView?.group === 'day' },
+  'photos-gap-30': { label: '30 Minutes', enabled: book, checked: s => s.photoView?.group === 'gap' && s.photoView.gapMinutes === 30 },
+  'photos-gap-120': { label: '2 Hours', enabled: book, checked: s => s.photoView?.group === 'gap' && s.photoView.gapMinutes === 120 },
+  'photos-gap-360': { label: '6 Hours', enabled: book, checked: s => s.photoView?.group === 'gap' && s.photoView.gapMinutes === 360 },
+  'photos-gap-custom': { label: 'Custom…', enabled: book },
+  'photos-show-time': { label: 'Show Capture Time', enabled: book, checked: s => !!s.photoView?.showTime },
+  'change-layout': { label: 'Change Layout', enabled: writable },
+  'asset-preview': { label: 'Quick Look', enabled: book, accelerator: 'Space', registerAccelerator: false },
+  'asset-place': { label: 'Place on Current Spread', enabled: writable },
+  'asset-placements': { label: 'Show Placements', enabled: book },
+  'asset-jump': { label: 'Go to Spread', enabled: book },
+  'asset-reveal': { label: 'Show in Finder', enabled: book },
+  'asset-open': { label: 'Edit in Default App', enabled: book },
+  'asset-copy': { label: 'Copy into Book', enabled: writable },
+  'asset-remove': { label: 'Remove from Book', enabled: writable },
+  'asset-locate': { label: 'Locate…', enabled: writable },
+  'asset-locate-folder': { label: 'Locate Folder…', enabled: writable },
+  'box-replace-photo': { label: 'Replace Photo…', enabled: writable },
+  'box-adjust-crop': { label: 'Adjust Crop…', enabled: writable },
+  'box-reset-crop': { label: 'Reset Crop', enabled: writable },
+  'box-remove-photo': { label: 'Remove Photo', enabled: writable },
+  'box-edit-text': { label: 'Edit Text', enabled: book },
+  'box-replace-text': { label: 'Choose Markdown File…', enabled: writable },
+  'box-remove-text': { label: 'Remove Text', enabled: writable },
+  'box-show-assets': { label: 'Show in Assets', enabled: book },
+  'recent-open': { label: 'Open', enabled: s => !s.busy },
+  'recent-reveal': { label: 'Show in Finder', enabled: s => !s.busy },
+  'recent-remove': { label: 'Remove from Recents', enabled: s => !s.busy },
+  'recent-locate': { label: 'Locate…', enabled: s => !s.busy },
+  'template-export': { label: 'Export…', enabled: s => !s.busy },
+  'template-remove': { label: 'Move to Trash', enabled: s => !s.busy },
+  'template-reveal': { label: 'Show in Finder', enabled: s => !s.busy },
+  'template-new': { label: 'New Book from Template', enabled: s => !s.busy },
+  'reset-defaults': { label: 'Reset to Template Defaults', enabled: writable },
+  'issue-jump': { label: 'Go to Spread', enabled: book },
+  'issue-copy': { label: 'Copy Message', enabled: s => !s.busy },
   'zoom-fit': { label: 'Zoom to Fit', enabled: s => s.document },
 } satisfies Record<string, Spec>;
 export type RegisteredCommand = keyof typeof commandRegistry;
-export function commandState(id: RegisteredCommand, state: BookMenuState) {
+export function commandState(id: RegisteredCommand, state: BookMenuState, context = false) {
   const spec: Spec = commandRegistry[id];
-  return { id, label: typeof spec.label === 'function' ? spec.label(state) : spec.label,
-    accelerator: spec.accelerator, enabled: spec.enabled(state), checked: spec.checked?.(state) };
+  return { id, label: context && spec.contextLabel ? spec.contextLabel : typeof spec.label === 'function' ? spec.label(state) : spec.label,
+    accelerator: spec.accelerator, registerAccelerator: spec.registerAccelerator, enabled: spec.enabled(state), checked: spec.checked?.(state) };
 }
 export const emptyMenuState: BookMenuState = { document: false, writable: false, busy: false, editing: false, textEditing: false,
   canExport: false, canPrint: false, enabled: { 'add-spread': false, 'duplicate-spread': false, 'delete-spread': false, 'move-spread-up': false, 'move-spread-down': false } };

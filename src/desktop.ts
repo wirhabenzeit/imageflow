@@ -1,3 +1,4 @@
+import type { PhotoView, PhotoViewCommand } from './photo-view';
 import type { PrintFormat, PrintSide, Span } from './format';
 import type { Parameters } from './parameters';
 import type { ControlItem } from './controls';
@@ -17,11 +18,11 @@ export const settingsURL = desktopScheme + '://editor/settings';
 export const renderOrigin = desktopScheme + '://render';
 
 export const channels = {
-  popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', dragSources: 'document:drag-sources',
+  contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', presentation: 'document:presentation', dragSources: 'document:drag-sources',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
-  sourceMenu: 'document:source-menu', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
+  sourceCommand: 'document:source-command', templateAction: 'library:action', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
   open: 'project:open', save: 'project:save', import: 'project:import', network: 'project:editor-network',
   command: 'project:command', changed: 'project:changed',
@@ -46,11 +47,13 @@ export const spreadCommands = ['add-spread', 'duplicate-spread', 'move-spread-up
 export type SpreadCommand = typeof spreadCommands[number];
 export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
   writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canPrint: boolean;
-  sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; saving?: boolean };
-export type Command = SpreadCommand | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'print' | 'import-photos' | 'import-folder' | 'import-texts' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
+  sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView; selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string> };
+export type Command = PhotoViewCommand | SpreadCommand | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'print' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string; readOnly: boolean;
-  handle?: string; history?: HistoryState;
+  handle?: string; history?: HistoryState; viewKey?: string;
+  pageLabels?: Record<string, string>;
+  photoDates?: Record<string, { captured: string; capturedEstimated?: boolean }>;
   // The template's hash as loaded; network approvals hold for one hash (ADR 0006).
   templateHash?: string;
   // The network origins this book's frames may reach now (ADR 0006).
@@ -62,6 +65,7 @@ export type ProjectSummary = ProjectFiles & {
   texts: Record<string, string>;
   sources?: Record<string, SourceStatus>;
 };
+export type ImportCounts = { photos: number; texts: number; files: number; skipped: number; failed: number };
 export type Result<T> = { value: T } | { error: string; code?: 'BOOK_BUSY' };
 export type HistoryState = { undo?: string; redo?: string };
 // How an MCP client starts ImageFlow's stdio bridge. It does not change when the connection is enabled again.
@@ -73,29 +77,35 @@ export type McpClientTarget = 'claude' | 'codex';
 export type ProjectChange = Result<ProjectSummary> | { building: true };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions.
 export type ImportRequest = {
-  kind: 'photo' | 'markdown' | 'file'; mode?: ImportMode; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string };
+  kind?: 'photo' | 'markdown' | 'file'; mode?: ImportMode; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string };
 };
 
 export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string };
 
-export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview'; key?: string; keys?: string[]; accept?: string[] };
+export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump'; spread?: string; key?: string; keys?: string[]; accept?: string[] };
 
+export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
+export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };
+export type SourceCommand = { action: 'place'; keys: string[] } | { action: 'jump'; spread: string };
 export type PopupItem = { id?: string; label?: string; type?: 'separator'; enabled?: boolean; checked?: boolean; toolTip?: string };
 export type DesktopApi = {
+  showContextMenu(items: ContextMenuItem[], state?: BookMenuState): Promise<ContextMenuResult | null>;
+  onSourceCommand(listener: (command: SourceCommand) => void): () => void;
+  templateAction(id: string, action: 'reveal' | 'new'): Promise<Result<void>>;
   popupMenu(items: PopupItem[], point?: { x: number; y: number }): Promise<string | null>;
+  setPresentation(active: boolean): Promise<void>;
   documentProxy(action: 'path' | 'drag'): Promise<void>;
   dragSources(keys: string[]): Promise<void>;
   showAssets(accept: string[]): Promise<Result<void>>;
   showTemplates(): Promise<void>;
   templatePreview(id: string, hash: string): Promise<Result<string | null>>;
-  sourceMenu(keys: string | string[]): Promise<Result<'reveal' | 'locate' | 'locate-folder' | 'copy' | 'remove' | null>>;
   sourceAction(request: SourceAction): Promise<Result<{ summary: ProjectSummary; message?: string }>>;
   saveCopy(includeAssets?: boolean): Promise<Result<null>>;
   currentProject(): Promise<Result<ProjectSummary>>;
   onAppError(listener: (message: string) => void): () => void;
   recentDocuments(): Promise<Result<RecentDocument[]>>;
   onRecentsChanged(listener: () => void): () => void;
-  recentDocument(id: string, action: 'open' | 'locate' | 'remove'): Promise<Result<null>>;
+  recentDocument(id: string, action: 'open' | 'locate' | 'remove' | 'reveal'): Promise<Result<null>>;
   // The New Book picker's choice; nothing cancels.
   chooseStarter(choice?: NewBookChoice): Promise<Result<boolean>>;
   // The template library, and changes to it from any window.
@@ -130,7 +140,7 @@ export type DesktopApi = {
   installMcp(target: McpClientTarget): Promise<Result<string>>;
   onAgentLease(listener: (id: string) => boolean): () => void;
   onAgentRelease(listener: () => void): () => void;
-  importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[] } | null>>;
+  importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[]; counts?: ImportCounts } | null>>;
   // Asks once per book to let its frames reach the template's declared origins; resolves to those allowed, with a new
   // summary to render when that changed what the frames may reach.
   editorNetwork(id: string, origins: string[]): Promise<Result<{ origins: string[]; summary?: ProjectSummary }>>;
@@ -164,6 +174,8 @@ export type TemplateInfo = {
   // The template's own preview image, relative to the template folder (`preview` in defineTemplate).
   preview?: string;
   version: string; parameters: Parameters; spreads: Record<string, SpreadDefinition>;
+  // Arranges the document parameters' controls in Book settings; all of them in declaration order when absent.
+  controls?: ControlItem[];
   // Families of layouts, by ID. `picker` is set when the family supplies its own picker (the component stays in the
   // render frame).
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string } }>;
@@ -183,8 +195,9 @@ export type TemplateInfo = {
 export type BoxLocation = { id: string; type: 'photo' | 'markdown'; x: number; y: number; width: number; height: number };
 // The editor shows the whole book in two frames: the scrolling spread view and the sidebar thumbnails.
 // The layout picker renders one spread in every layout of the template.
-export type BookView = 'book' | 'thumbs' | 'layouts';
+export type BookView = 'book' | 'thumbs' | 'layouts' | 'present';
 export const bookLayout: Record<BookView, { pad: number; gap: number; columns?: number; columnGap?: number }> = {
+  present: { pad: 0, gap: 0 },
   book: { pad: 32, gap: 40 },
   thumbs: { pad: 12, gap: 34 },
   layouts: { pad: 6, gap: 26, columns: 2, columnGap: 12 },

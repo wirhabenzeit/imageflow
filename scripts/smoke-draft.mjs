@@ -143,9 +143,10 @@ try {
   await saveState(() => window.getByRole('radio', { name: 'Photo and story', exact: true }).click(), (data) =>
     data.spreads[1].boxes.body.text === textId);
 
-  await saveState(() => button('Duplicate').click(), (data) => data.spreads.length === 16);
-  await saveState(() => window.getByRole('button', { name: 'Move spread down' }).click(), (data) => data.spreads[2].id === 'headlands');
-  await saveState(() => button('Delete').click(), (data) => data.spreads.length === 15);
+  await window.locator('.spread-thumb[aria-current="page"]').focus();
+  await saveState(() => menuAction(app, 'Duplicate Spread'), (data) => data.spreads.length === 16);
+  await saveState(() => menuAction(app, 'Move Spread Down'), (data) => data.spreads[2].id === 'headlands');
+  await saveState(() => menuAction(app, 'Delete Spread'), (data) => data.spreads.length === 15);
   await saveState(() => button('Add').click(), (data) => data.spreads.length === 16);
 
   await app.evaluate(({ dialog }, folder) => {
@@ -153,7 +154,7 @@ try {
   }, project);
   await menuAction(app, 'Open project…');
   await ready();
-  assert.equal(await window.locator('.project-identity strong').textContent(), 'Draft Photobook');
+  assert.equal(await window.locator('.project-identity .document-title').textContent(), 'Draft Photobook');
   assert.equal((await read()).spreads.length, 16);
   if (!packaged) await checkFlow(app, root);
   console.log('ImageFlow draft workflow passed' + (packaged ? ' (packaged).' : '.'));

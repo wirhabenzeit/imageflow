@@ -1,3 +1,4 @@
+import { emptyMenuState } from './commands';
 import { useState } from 'react';
 import type { DesktopApi } from './desktop';
 import { TemplatePreview } from './TemplatePreview';
@@ -42,9 +43,14 @@ export function TemplateSettings({ api, library }: { api?: DesktopApi; library: 
   const contextMenu = async (id: string) => {
     const item = entries?.find((item) => item.id === id);
     if (!item || busy) return;
-    const action = await api?.popupMenu([{ id: 'export', label: 'Export…' },
-      ...(item.source === 'imported' ? [{ id: 'remove', label: 'Move to Trash' }] : [])]);
-    if (action === 'export') void exportTemplate(id); if (action === 'remove') void remove(id);
+    const result = await api?.showContextMenu(['template-new', 'template-reveal', 'template-export',
+      ...(item.source === 'imported' ? ['template-remove' as const] : [])], { ...emptyMenuState, busy });
+    if (result?.command === 'template-export') void exportTemplate(id);
+    if (result?.command === 'template-remove') void remove(id);
+    if (result?.command === 'template-new' || result?.command === 'template-reveal') void run(async () => {
+      const action = await api!.templateAction(id, result.command === 'template-new' ? 'new' : 'reveal');
+      if ('error' in action) setMessage(action.error);
+    });
   };
   return <div className="template-settings" onDragOver={(event) => { event.preventDefault(); }} onDrop={(event) => {
     event.preventDefault(); const paths = api?.pathsForFiles([...event.dataTransfer.files]); if (paths?.length && !busy) void importTemplates(paths);
