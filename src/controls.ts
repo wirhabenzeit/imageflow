@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isParameterValue } from './parameters';
+import { isParameterValue, maxParameterDescription } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import { identifier } from './project';
 import type { Values } from './project';
@@ -20,8 +20,8 @@ const condition = z.record(identifier, z.union([scalar, z.array(scalar).min(1)])
 const text = z.string().trim().min(1).max(200);
 const controlItem: z.ZodType<ControlItem> = z.lazy(() => z.union([
   identifier,
-  z.strictObject({ parameter: identifier, label: text.optional(), description: z.string().max(1000).optional(), when: condition.optional() }),
-  z.strictObject({ group: text, description: z.string().max(1000).optional(), controls: z.array(controlItem).min(1), when: condition.optional() }),
+  z.strictObject({ parameter: identifier, label: text.optional(), description: z.string().trim().min(1).max(maxParameterDescription).optional(), when: condition.optional() }),
+  z.strictObject({ group: text, description: z.string().trim().min(1).max(maxParameterDescription).optional(), controls: z.array(controlItem).min(1), when: condition.optional() }),
 ]));
 // An empty list is allowed: it shows no generated controls while keeping every declaration. A group needs controls.
 export const controlsSchema = z.array(controlItem).optional();

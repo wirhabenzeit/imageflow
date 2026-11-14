@@ -130,7 +130,16 @@ export type ResolvedFormat =
 
 // Parameters
 
-type Common = { label: string };
+type Common = {
+  label: string;
+  /**
+   * Plain help text, up to 1000 characters (trimmed, not empty): what the value means, which way it goes and when to
+   * change it, such as `'Higher values zoom in; 1 shows the whole route.'`. Agents read it in the authoring context and
+   * MCP inspection; the editor shows it behind an info button on the field, unless a `controls` entry gives the field
+   * its own description. It changes no default, constraint or saved value. Use `unit` for units.
+   */
+  description?: string;
+};
 type Numeric = { min?: number; max?: number; step?: number; unit?: string };
 export type BooleanParameter = Common & { type: 'boolean'; default: boolean };
 export type StringParameter = Common & { type: 'string'; default: string; multiline?: boolean; maxLength?: number; placeholder?: string };
