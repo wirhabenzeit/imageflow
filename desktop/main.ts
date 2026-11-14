@@ -41,12 +41,14 @@ import { TemplateTrust, trustedOrigins } from './template-trust';
 import { isTemplateArchive, templateArchiveExtension, writeTemplateArchive } from './template-archive';
 import { writeAuthoringSnapshot } from './authoring-sdk';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
-import { describeImport } from '../src/library';
-import type { LibraryImportResult, NewBookChoice } from '../src/library';
+import { describeImport, templatePicturePath, templatePictureURL } from '../src/library';
+import type { LibraryEntry, LibraryImportResult, NewBookChoice } from '../src/library';
 import { capabilities } from '../src/runtime-exports';
 import { newSpread, openingSpreadStates } from '../src/editing';
 import { templateFolder, textSourcePath } from './document-actions';
 import { configureRenditionCache, pruneRenditions } from './rendition-cache';
+import { decodes, readTemplatePreview } from './template-preview-file';
+import { previewTypes } from '../src/template-preview';
 
 let templatesWindow: BrowserWindow | null = null;
 const assetsWindows = new Map<DocumentSession, { window: BrowserWindow; accept: string[] }>();
@@ -79,6 +81,9 @@ const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
 const devServer = app.isPackaged ? undefined : process.env.IMAGEFLOW_DEV_SERVER;
 const devState = devServer ? process.env.IMAGEFLOW_DEV_STATE : undefined;
 const devSample = devServer ? process.env.IMAGEFLOW_DEV_SAMPLE : undefined;
+// Packaging renders the built-in templates' opening spreads into this folder and quits (scripts/render-template-previews.mjs).
+const renderPreviewsTo = app.isPackaged ? undefined : process.env.IMAGEFLOW_RENDER_TEMPLATE_PREVIEWS;
+const sampleRoot = devSample ?? (renderPreviewsTo ? process.env.IMAGEFLOW_SAMPLE : undefined);
 const csp = devServer
   ? "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' " +
     devServer + ' ' + devServer.replace(/^http/, 'ws') + "; img-src 'self' data:"
@@ -131,6 +136,14 @@ async function serve(request: Request) {
   if (request.method !== 'GET') return new Response(null, { status: 405 });
   const dist = join(app.getAppPath(), 'dist');
   if (!devServer && /^\/assets\/[\w.-]+\.[a-z0-9]+$/i.test(pathname)) return net.fetch(pathToFileURL(join(dist, pathname)).href);
+  const templatePicture = host === 'editor' && templatePicturePath.exec(pathname);
+  if (templatePicture) {
+    // A template's preview image or saved render, for New Book and Templates. Both are tied to the template's hash.
+    const file = await library.pictureFile(templatePicture[1], templatePicture[2] as 'image' | 'render');
+    if (!file) return new Response(null, { status: 404 });
+    const bytes = await readFile(file);
+    return response(bytes, previewTypes[extname(file).toLowerCase()] ?? 'application/octet-stream', { 'Cache-Control': 'no-cache' });
+  }
   if (host === 'editor' && ['/', '/settings', '/start', '/new', '/assets', '/templates'].includes(pathname)) {
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigin + "; frame-ancestors 'none'; base-uri 'none'",
@@ -154,6 +167,11 @@ async function serve(request: Request) {
     });
   }
   if (resource === 'data') return Response.json(renderData(session.book, id, session.mode));
+  if (resource === 'template-preview') {
+    // The Book check of the template's own preview image: the frame names the declared path, the app reads the file.
+    const { file: _file, ...report } = await readTemplatePreview(join(session.book.folder, 'template'), new URL(request.url).searchParams.get('path') ?? '');
+    return Response.json(report);
+  }
   if (resource.startsWith('template/')) {
     const asset = resource.slice('template/'.length);
     const bytes = session.book.assets.files.get(asset);
@@ -214,7 +232,7 @@ function report(owner: BrowserWindow | null | undefined, error: unknown) {
   else { showStart(); startWindow?.webContents.once('did-finish-load', () => report(startWindow, error)); }
 }
 function sampleFolder(name: string) {
-  return devSample ? join(devSample, name) : app.isPackaged ? join(process.resourcesPath, 'sample', name) : join(app.getAppPath(), 'sample', name);
+  return sampleRoot ? join(sampleRoot, name) : app.isPackaged ? join(process.resourcesPath, 'sample', name) : join(app.getAppPath(), 'sample', name);
 }
 async function openDocumentLocation(document: DocumentSession, action: 'reveal' | 'template' | 'text', id?: string) {
   if (action === 'reveal') { shell.showItemInFolder(document.book.folder); return; }
@@ -494,12 +512,14 @@ async function createBook(stage: string, template: ResolvedTemplate, sample: boo
   }, null, 2) + '\n');
 }
 
-// Previews are disposable and keyed by content hash. Rendering is serialized so opening a library does not
-// launch one hidden browser per card; an offline or empty template keeps the neutral cover placeholder.
+// Renders of a template's opening spread, keyed by content hash. Rendering is serialized so opening a library does not
+// launch one hidden browser per card; an offline or empty template keeps the neutral cover placeholder. A render with
+// every site the template declares is saved in the library (`persist`), so later launches show it at once; one made
+// offline is only kept until the app quits.
 const templatePreviews = new Map<string, Promise<string | null>>();
 const previewJobs = new Map<string, AbortController>();
 let previewQueue: Promise<unknown> = Promise.resolve();
-function templatePreview(id: string, hash: string, origins: string[]) {
+function templatePreview(id: string, hash: string, origins: string[], persist = false) {
   const key = JSON.stringify([hash, origins]);
   const existing = templatePreviews.get(key);
   if (existing) return existing;
@@ -536,6 +556,9 @@ function templatePreview(id: string, hash: string, origins: string[]) {
         if (illustrated) preview = await captureBookPreview(renderOrigin + '/render/' + session,
           { target: { spread: illustrated.id }, maxEdge: 320, format: 'jpeg' }, controller.signal);
       }
+      // A picture that failed to draw, such as a map while its server is unreachable, is shown but never saved: the
+      // next session renders again.
+      if (persist && !controller.signal.aborted && !preview.status.errors.some(({ code }) => code && incompleteRender.has(code))) await library.saveRender(hash, preview.bytes).catch((error) => console.warn('ImageFlow could not save a template preview', error));
       return 'data:image/jpeg;base64,' + Buffer.from(preview.bytes).toString('base64');
     } catch { return null; }
     finally {
@@ -550,6 +573,17 @@ function templatePreview(id: string, hash: string, origins: string[]) {
   if (templatePreviews.size > 24) templatePreviews.delete(templatePreviews.keys().next().value!);
   previewQueue = task.catch(() => {});
   return task;
+}
+// Book check errors that mean a render is missing something the template draws, so it must not be saved.
+const incompleteRender = new Set(['rendered-image-failed', 'layout-render-failed', 'photo-decode-failed', 'source-unavailable', 'render-impure']);
+/** Whether a render of this entry with these sites would show everything the template draws, so it may be saved. */
+const completeRender = (entry: LibraryEntry, origins: readonly string[]) => (entry.network ?? []).every((origin) => origins.includes(origin));
+/** Renders an entry's opening spread and saves it, unless the library already has a saved render for its hash. */
+async function saveTemplatePreview(id: string) {
+  const entry = (await library.list()).find((item) => item.id === id);
+  if (!entry || entry.unavailable || entry.render) return;
+  const origins = await bookNetworkTrust(entry.hash, entry.network);
+  if (completeRender(entry, origins)) await templatePreview(entry.id, entry.hash, origins, true);
 }
 function invalidateTemplatePreviews(hash: string) {
   for (const key of new Set([...templatePreviews.keys(), ...previewJobs.keys()])) {
@@ -648,6 +682,10 @@ async function importTemplate(owner: BrowserWindow | undefined, path: string) {
     await trust.allow(allowed.hash, allowed.info.network ?? [], { id: allowed.info.id ?? '', version: allowed.info.version }).catch((error) => console.warn('ImageFlow could not save template trust', error));
     // Lists already showing the new entry learn that it is trusted.
     publishLibrary();
+  }
+  // Rendered once now, so New Book shows the template at once from then on.
+  if (result.id && (result.status === 'imported' || result.status === 'replaced')) {
+    void saveTemplatePreview(result.id).catch((error) => console.warn('ImageFlow could not render a template preview', error));
   }
   return result;
 }
@@ -992,7 +1030,12 @@ void app.whenReady().then(async () => {
   // IMAGEFLOW_TEMPLATES points tests and development at another library folder.
   library = new TemplateLibrary(process.env.IMAGEFLOW_TEMPLATES || join(app.getPath('userData'), 'Templates'),
     starters.map((starter) => ({ template: join(sampleFolder(starter.folder), 'template'), sample: sampleFolder(starter.folder), defaultName: starter.defaultName })),
-    probeTemplate, (path) => shell.trashItem(path), capabilities.join(',') + '@' + app.getVersion(), join(__dirname, 'authoring-types'));
+    probeTemplate, (path) => shell.trashItem(path), capabilities.join(',') + '@' + app.getVersion(), join(__dirname, 'authoring-types'),
+    // Built-in templates ship renders of their opening spreads; later ones are kept with the app's other caches.
+    renderPreviewsTo ? { cache: renderPreviewsTo } : {
+      shipped: join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'template-previews'),
+      cache: join(app.getPath('userData'), 'Cache', 'template-previews'),
+    });
   library.onChange(publishLibrary);
   trust = new TemplateTrust(join(app.getPath('userData'), 'template-trust.json'));
   const renditions = await configureRenditionCache(cache, join(app.getPath('userData'), 'Cache', 'renditions'));
@@ -1223,7 +1266,16 @@ void app.whenReady().then(async () => {
       return { error: 'Request is only available to Templates and New Book.' };
     try {
       const entry = (await library.list()).find((entry) => entry.id === id && entry.hash === hash);
-      return { value: entry && !entry.unavailable ? await templatePreview(id, hash, await bookNetworkTrust(hash, entry.network)) : null };
+      if (!entry || entry.unavailable) return { value: null };
+      if (entry.render) {
+        // The window asks only when it has no picture, or a saved one failed to load: a damaged render is removed and
+        // made again.
+        const file = await library.pictureFile(hash, 'render');
+        if (file && await decodes(file)) return { value: templatePictureURL(hash, 'render') };
+        if (file) await rm(file, { force: true }).catch(() => {});
+      }
+      const origins = await bookNetworkTrust(hash, entry.network);
+      return { value: await templatePreview(id, hash, origins, completeRender(entry, origins)) };
     } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.library, async (event) => {
@@ -1367,6 +1419,11 @@ void app.whenReady().then(async () => {
   });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
   installMenu();
+  if (renderPreviewsTo) {
+    for (const entry of await library.list()) if (entry.source === 'built-in') await saveTemplatePreview(entry.id);
+    app.quit();
+    return;
+  }
   ready = true;
   const paths = [...new Set([...pendingOpenFiles.splice(0), ...process.argv.filter(isSystemFile)])];
   if (paths.length) for (const path of paths) await openFromSystem(path);

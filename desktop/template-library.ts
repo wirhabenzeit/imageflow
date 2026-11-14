@@ -1,16 +1,24 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import type { TemplateInfo } from '../src/desktop';
 import type { LibraryEntry, LibraryImportResult, TemplatePackage } from '../src/library';
 import { resolveFormat } from '../src/format';
 import { templatePackages } from './dependencies';
 import { extractTemplateArchive, isTemplateArchive, writeTemplateArchive } from './template-archive';
+import { readTemplatePreview } from './template-preview-file';
+import { trimAspect } from '../src/template-preview';
 
 // The template library: templates a new book can be created from. A book copies its template when it is created,
 // so nothing here is read while a book renders, and removing or replacing an entry never changes an existing book.
 // User templates live in a hidden folder, one entry per template ID: `<root>/<id>/template/` holds the source exactly
 // as imported and `<root>/<id>/library.json` the metadata derived from it.
+//
+// Each entry has up to two pictures for the New Book picker and the Templates window, both tied to the template's hash:
+// the template's own preview image (`preview` in defineTemplate), checked when the template is read, and a saved render
+// of its opening spread. An imported template's render is `<root>/<id>/preview-<hash>.jpg`, so it goes with the entry.
+// Built-in templates ship their renders with the app (`renders.shipped/<hash>.jpg`); renders made later are kept in
+// `renders.cache/<hash>.jpg`.
 
 /** Thrown when a folder is not an importable template; `details` lists further findings. */
 export class TemplateImportError extends Error {
@@ -85,7 +93,13 @@ export function compareVersions(a: string, b: string) {
 type Metadata = {
   schema: 1; capabilities: string; hash: string; importedAt: string; importedFrom?: string;
   info?: TemplateInfo; problem?: string;
+  // The template's own preview image, when the file it declares can be shown; `imageProblem` says why not.
+  image?: string; imageProblem?: string;
 };
+/** Where saved renders of opening spreads live; see the comment at the top. */
+export type RenderFolders = { shipped?: string; cache: string };
+type Found = { entry: LibraryEntry; folder: string; info?: TemplateInfo; image?: string };
+const renderName = /^([0-9a-f]{64})\.jpg$/;
 
 /** Loads a template in the renderer and returns its declarations, or throws TemplateImportError. */
 export type ValidateTemplate = (folder: string) => Promise<TemplateInfo>;
@@ -108,12 +122,13 @@ function entryFrom(info: TemplateInfo | undefined, fallback: { id: string; versi
     ...(geometry ? { shape: geometry.pageWidth === geometry.height ? 'Square' as const : geometry.pageWidth > geometry.height ? 'Landscape' as const : 'Portrait' as const } : {}),
     layouts: info ? Object.values(info.spreads).map(({ label }) => label) : [],
     openingSpreads: info?.openingSpreads?.length ?? 0,
+    ...(geometry ? { aspect: trimAspect(info.format) } : {}),
     ...extra,
   };
 }
 
 export class TemplateLibrary {
-  private builtIns = new Map<string, { entry: LibraryEntry; folder: string; info?: TemplateInfo; sample?: string; defaultName?: string }>();
+  private builtIns = new Map<string, Found & { sample?: string; defaultName?: string }>();
   private builtInsLoaded?: Promise<void>;
   private listeners = new Set<() => void>();
   private writes = Promise.resolve();
@@ -125,6 +140,7 @@ export class TemplateLibrary {
     private readonly trash: (path: string) => Promise<void>,
     private readonly capabilities: string,
     private readonly authoringTypes?: string,
+    private readonly renders?: RenderFolders,
   ) {}
 
   onChange(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
@@ -141,12 +157,42 @@ export class TemplateLibrary {
         catch (error) { problem = error instanceof Error ? error.message : String(error); }
         const id = info?.id ?? 'built-in-' + this.builtIns.size;
         const packages = await templatePackages(source.template);
-        this.builtIns.set(id, { folder: source.template, info, sample: source.sample, defaultName: source.defaultName,
+        const { image } = await this.previewImage(source.template, info);
+        this.builtIns.set(id, { folder: source.template, info, image, sample: source.sample, defaultName: source.defaultName,
           entry: entryFrom(info, { id }, { source: 'built-in', hash, ...(packages.length ? { packages } : {}), ...(source.sample ? { sample: true } : {}),
             ...(problem ? { unavailable: problem } : {}) }) });
       }
+      // Renders of earlier versions of the built-in templates are no longer shown.
+      const current = new Set([...this.builtIns.values()].map(({ entry }) => entry.hash));
+      if (this.renders) for (const name of await readdir(this.renders.cache).catch(() => [])) {
+        const hash = renderName.exec(name)?.[1];
+        if (hash && !current.has(hash)) await rm(join(this.renders.cache, name), { force: true }).catch(() => {});
+      }
     })();
     return this.builtInsLoaded;
+  }
+
+  // The template's own preview image as the library shows it: its path in the template folder, or why it cannot be shown.
+  private async previewImage(folder: string, info: TemplateInfo | undefined): Promise<{ image?: string; imageProblem?: string }> {
+    if (!info?.preview) return {};
+    const report = await readTemplatePreview(folder, info.preview);
+    return 'problem' in report ? { imageProblem: report.problem } : { image: info.preview };
+  }
+
+  // The saved render of an entry's opening spread, if there is one.
+  private async savedRender(found: Found, imported: boolean) {
+    const { hash } = found.entry;
+    if (!hash) return undefined;
+    const candidates = imported ? [join(dirname(found.folder), 'preview-' + hash + '.jpg')]
+      : this.renders ? [...this.renders.shipped ? [join(this.renders.shipped, hash + '.jpg')] : [], join(this.renders.cache, hash + '.jpg')] : [];
+    for (const file of candidates) if (await lstat(file).then((entry) => entry.isFile(), () => false)) return file;
+    return undefined;
+  }
+
+  // The pictures an entry has, for the New Book picker and the Templates window to show at once.
+  private async withPictures(found: Found, imported: boolean): Promise<LibraryEntry> {
+    const render = await this.savedRender(found, imported);
+    return { ...found.entry, ...(found.image ? { image: true } : {}), ...(render ? { render: true } : {}) };
   }
 
   private async readMetadata(id: string): Promise<Metadata | undefined> {
@@ -161,7 +207,7 @@ export class TemplateLibrary {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw error;
     });
-    const entries: { entry: LibraryEntry; folder: string; info?: TemplateInfo }[] = [];
+    const entries: Found[] = [];
     for (const name of names) {
       if (!name.isDirectory() || name.name.startsWith('.')) continue;
       const folder = join(this.root, name.name, 'template');
@@ -173,14 +219,14 @@ export class TemplateLibrary {
         const base: Metadata = { schema: 1, hash: '', importedAt: new Date().toISOString(), ...cached, capabilities: this.capabilities };
         try {
           const { hash, info } = await this.describe(folder);
-          metadata = { ...base, hash, info, problem: undefined };
+          metadata = { ...base, hash, info, problem: undefined, image: undefined, imageProblem: undefined, ...await this.previewImage(folder, info) };
         } catch (error) {
-          metadata = { ...base, info: undefined, problem: error instanceof Error ? error.message : String(error) };
+          metadata = { ...base, info: undefined, problem: error instanceof Error ? error.message : String(error), image: undefined, imageProblem: undefined };
         }
         await writeFile(join(this.root, name.name, 'library.json'), JSON.stringify(metadata, null, 2) + '\n').catch(() => {});
       }
       const packages = await templatePackages(folder);
-      entries.push({ folder, info: metadata.info, entry: entryFrom(metadata.info, { id: name.name }, {
+      entries.push({ folder, info: metadata.info, ...(metadata.image ? { image: metadata.image } : {}), entry: entryFrom(metadata.info, { id: name.name }, {
         source: 'imported', hash: metadata.hash, importedAt: metadata.importedAt, ...(packages.length ? { packages } : {}),
         ...(metadata.importedFrom ? { importedFrom: metadata.importedFrom } : {}),
         ...(metadata.problem ? { unavailable: metadata.problem } : {}),
@@ -213,9 +259,50 @@ export class TemplateLibrary {
     await this.loadBuiltIns();
     const user = await this.userEntries();
     const ids = new Set(user.map(({ entry }) => entry.id));
-    const builtIns = [...this.builtIns.values()].filter(({ entry }) => !ids.has(entry.id)).map(({ entry }) => entry);
-    const imported = user.map(({ entry }) => this.builtIns.has(entry.id) ? { ...entry, replacesBuiltIn: true } : entry);
+    const builtIns = await Promise.all([...this.builtIns.values()].filter(({ entry }) => !ids.has(entry.id)).map((found) => this.withPictures(found, false)));
+    const imported = await Promise.all(user.map(async (found) => {
+      const entry = await this.withPictures(found, true);
+      return this.builtIns.has(entry.id) ? { ...entry, replacesBuiltIn: true } : entry;
+    }));
     return [...builtIns, ...imported.sort((a, b) => a.label.localeCompare(b.label))];
+  }
+
+  /**
+   * The file of a picture of the entry with this hash: the template's own preview `image`, or the saved `render` of its
+   * opening spread. Undefined when the entry has none or no entry has the hash.
+   */
+  async pictureFile(hash: string, kind: 'image' | 'render') {
+    await this.writes;
+    await this.loadBuiltIns();
+    const user = (await this.userEntries()).find(({ entry }) => entry.hash === hash);
+    const found = user ?? [...this.builtIns.values()].find(({ entry }) => entry.hash === hash);
+    if (!found || !hash) return undefined;
+    if (kind === 'render') return this.savedRender(found, !!user);
+    return found.image ? join(found.folder, ...found.image.split('/')) : undefined;
+  }
+
+  /**
+   * Saves a render of the opening spread of the entry with this hash, so later launches show it at once. Nothing is
+   * saved when no entry has the hash any more, for example because the template was replaced while it rendered.
+   */
+  async saveRender(hash: string, bytes: Uint8Array) {
+    const task = this.writes.then(async () => {
+      await this.loadBuiltIns();
+      const user = (await this.userEntries()).find(({ entry }) => entry.hash === hash);
+      const builtIn = [...this.builtIns.values()].some(({ entry }) => entry.hash === hash);
+      const file = user ? join(dirname(user.folder), 'preview-' + hash + '.jpg') : builtIn && this.renders ? join(this.renders.cache, hash + '.jpg') : undefined;
+      if (!file || !hash) return false;
+      await mkdir(dirname(file), { recursive: true });
+      // Written aside and renamed, so a picture is never read half-written.
+      const partial = file + '.' + randomUUID() + '.partial';
+      try {
+        await writeFile(partial, bytes);
+        await rename(partial, file);
+      } finally { await rm(partial, { force: true }); }
+      return true;
+    });
+    this.writes = task.then(() => {}, () => {});
+    return task;
   }
 
   /** Where a usable entry's template source is, with its declarations and, for a built-in, its sample book. */
@@ -319,7 +406,7 @@ export class TemplateLibrary {
         throw new TemplateImportError('The template changed while it was being imported. Import it again.');
       }
       const metadata: Metadata = { schema: 1, capabilities: this.capabilities, hash, importedAt: new Date().toISOString(),
-        importedFrom: source, info };
+        importedFrom: source, info, ...await this.previewImage(join(staging, 'template'), info) };
       await writeFile(join(staging, 'library.json'), JSON.stringify(metadata, null, 2) + '\n');
       const target = join(this.root, id);
       const exists = await lstat(target).then(() => true, () => false);

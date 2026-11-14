@@ -779,6 +779,11 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .starter-choice .template-preview { flex: none; height: 142px; width: 100%; background: transparent; overflow: visible; border-radius: 3px; }
 .template-preview.natural { display: flex; justify-content: center; background: transparent; }
 .template-preview.natural img { width: auto; height: auto; max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 2px 7px #0003; }
+/* A template's own preview image fills the default format's shape, cropped rather than letterboxed. */
+.template-preview:has(> img.template-cover) { container-type: size; }
+.template-preview img.template-cover, .template-preview.natural img.template-cover {
+  width: min(100cqw, 100cqh * var(--aspect)); height: min(100cqh, 100cqw / var(--aspect)); max-width: none; max-height: none; object-fit: cover;
+}
 .starter-options { height: 26px; flex: none; }
 .starter-notice { height: 38px; flex: none; overflow: auto; color: var(--muted); font-size: 12px; margin: 0; }
 /* Stable native-style library lists. Details scroll independently of the rows. */

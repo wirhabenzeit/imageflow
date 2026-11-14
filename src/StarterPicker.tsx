@@ -49,7 +49,7 @@ export function StarterPicker({ api }: { api?: DesktopApi }) {
               const next = usable[event.key === 'Home' ? 0 : event.key === 'End' ? usable.length - 1 : Math.max(0, Math.min(usable.length - 1, at + (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1)))];
               if (next) { setSelected(next.id); document.querySelector<HTMLButtonElement>('[data-template="' + CSS.escape(next.id) + '"]')?.focus(); }
             }} data-template={template.id}>
-            <TemplatePreview api={api} entry={template} natural />
+            <TemplatePreview api={api} entry={template} natural image />
             <strong>{template.label}</strong>
             <small title={template.formats.join('\n')}>{templateFormatSummary(template)}</small>
           </button>)}

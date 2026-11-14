@@ -182,9 +182,11 @@ function MarkedDaysGrid({ values, set, context, readOnly, Control }: DocumentEdi
 
 export default defineTemplate({
   id: 'imageflow-calendar',
-  version: '1.1.0',
+  version: '1.2.0',
   label: 'Wall calendar',
   description: 'A landscape wall calendar: one full-bleed photo a month, with the place and the days on a dark strip.',
+  // New Book shows a month page instead of a render of the cover, the first opening spread.
+  preview: './preview.jpg',
   contract: 1,
   formats: {
     a3: calendarFormat('45 × 30 cm (A3 landscape) · 6835 × 4866 px', 6835, 4866),

@@ -6,6 +6,7 @@ import { packager } from '@electron/packager';
 import electronChecksums from 'electron/checksums.json' with { type: 'json' };
 import metadata from '../package.json' with { type: 'json' };
 import { esbuildBinary, sample, stageDesktop } from './stage-desktop.mjs';
+import { renderTemplatePreviews } from './render-template-previews.mjs';
 import { macBuildOptions } from './mac-build-options.mjs';
 import { verifyMacSigning } from './verify-mac-signing.mjs';
 import { notarizeMacRelease } from './mac-release-artifacts.mjs';
@@ -27,6 +28,9 @@ async function packageApp() {
       stageDesktop({ packaged: true, destination: source }),
       cp(sample, books, { recursive: true, filter: (path) => !['.imageflow', 'whitewall'].includes(basename(path)) }),
     ]);
+    // New Book shows the built-in templates at once on first launch: their opening spreads ship pre-rendered.
+    const previews = join(staging, 'template-previews');
+    await renderTemplatePreviews({ app: source, books, output: previews });
     const [output] = await packager({
       dir: source,
       out: join(root, 'out'),
@@ -61,7 +65,7 @@ async function packageApp() {
       },
       // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar.
       asar: { unpackDir: 'node_modules/@img', unpack: '**/mcp-bridge.cjs' },
-      extraResource: [esbuildBinary, books],
+      extraResource: [esbuildBinary, books, previews],
       icon: join(root, 'resources', 'ImageFlow.icns'),
       prune: false,
       overwrite: true,

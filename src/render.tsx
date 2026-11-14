@@ -33,6 +33,8 @@ import { textEditorOwner } from './inline-text';
 import { inlineTextFrame } from './inline-text-frame';
 import { readEdit } from './editing';
 import { parsePreviewRequest, PreviewError } from './preview';
+import { previewAspectMismatch, trimAspect } from './template-preview';
+import type { PreviewFileReport } from './template-preview';
 import type { PreviewMetadata, PagePreviewMetadata } from './preview';
 import { inspectionSchema } from './inspection';
 import type { ElementInspection, ElementMeasurement } from './inspection';
@@ -551,6 +553,26 @@ class LayoutRenderError extends Error {
   constructor(readonly failures: Map<string, Failure>) {
     super('Layouts failed to render: ' + [...failures].map(([spread, { message }]) => spread + ': ' + message).join('; '));
   }
+}
+
+// Problems with the template's own preview image (`preview` in defineTemplate). The app reads the file, since the frame
+// cannot; the aspect ratio is compared with the default format's trimmed page, the shape of the New Book tile.
+async function templatePreviewWarnings(declared: string, format: Template['format']): Promise<Issue[]> {
+  let report: PreviewFileReport;
+  try {
+    const response = await fetch(location.pathname + '/template-preview?' + new URLSearchParams({ path: declared }));
+    if (!response.ok) return [];
+    report = await response.json();
+  } catch { return []; }
+  if ('problem' in report) return [{ message: report.problem, code: 'template-preview-invalid', details: { path: declared },
+    suggestion: 'Fix the file or the preview path in the template declaration. Until then the template library shows a render of the opening spread.' }];
+  const aspect = trimAspect(format);
+  if (!previewAspectMismatch(report.width, report.height, aspect)) return [];
+  const ratio = (value: number) => Math.round(value * 100) / 100;
+  return [{ message: 'The template preview is ' + report.width + ' × ' + report.height + ' pixels, a ratio of ' + ratio(report.width / report.height) +
+    ', but the default format ' + format.label + ' is ' + ratio(aspect) + '. New Book crops the preview to fill its tile.',
+  code: 'template-preview-aspect', details: { path: declared, width: report.width, height: report.height, expected: ratio(aspect) },
+  suggestion: 'Crop the preview to the default format, such as ' + (aspect >= 1 ? '1200 × ' + Math.round(1200 / aspect) : Math.round(1200 * aspect) + ' × 1200') + ' pixels.' }];
 }
 
 // Template declarations that do not satisfy the template contract, by declaration path.
@@ -1384,6 +1406,8 @@ export async function startRender(root: HTMLElement) {
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
     ];
+    // The template's own preview image is checked where the whole book is: the editor's book view, Book check and export.
+    if (declared.data.preview && (!edit || view === 'book')) warnings.push(...await templatePreviewWarnings(declared.data.preview, chooseFormat(declared.data).format));
     // A book without spreads is valid while it is being started, but there is nothing to print yet.
     const errors: Issue[] = spreads.length ? sequence.issues.map((text) => ({ ...message(text), code: 'page-sequence',
       suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format.' })) : [{
