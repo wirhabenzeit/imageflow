@@ -221,11 +221,18 @@ function pictureList(spreads: readonly BookSpread[]) {
 }
 
 // The picture list runs over every Picture list spread in book order: the closing page holds what fits, and a full
-// Picture list spread before it holds more. Entries have a fixed height (one line for the title, one for pages and
-// credit), so how many fit is known before anything renders, and no entry is dropped without a Book check warning.
+// Picture list spread before it holds more. Nothing is cut off silently: an entry's height is worked out from its
+// text before anything renders (one line for the title, then as many lines as its pages and its credit need), so
+// where each entry goes is known in advance, and the Book check warns about photos that do not fit and about a credit
+// or page list too long to show in full.
 const pictureLayouts = ['pictures', 'credits'];
-const pictureRow = 10.5; // mm: 9 pt title and 8 pt pages line, with the gap below
 const pictureColumnGap = 8; // mm
+// Line heights in millimetres, matching styles.css: a 9 pt title line, 8 pt detail lines, and the space between.
+const pictureLine = { title: 4.2, detail: 3.7, gap: .4, after: 2.2 };
+const maxDetailLines = 3;
+// Generous average width of an 8 pt sans character, in millimetres, so the estimate errs towards an extra line.
+const detailCharWidth = 1.7;
+
 function pictureColumns(layout: string, at: ReturnType<Context['geometry']['design']>): Rect[] {
   const sides = layout === 'pictures' ? (['left', 'right'] as const) : (['left'] as const);
   return sides.flatMap((side) => {
@@ -234,44 +241,87 @@ function pictureColumns(layout: string, at: ReturnType<Context['geometry']['desi
     return [{ ...area, width }, { ...area, x: area.x + width + pictureColumnGap, width }];
   });
 }
-const pictureCapacity = (columns: Rect[]) => columns.reduce((sum, column) => sum + Math.floor(column.height / pictureRow), 0);
 
-type PictureContext = Pick<Context, 'book' | 'spread' | 'geometry' | 'view'>;
-/** This spread's share of the picture list: what fits after the Picture list spreads before it. */
-function picturePage(ctx: PictureContext, columns: Rect[]) {
+/** `1, 2, 3, 5` as `1–3, 5`. */
+function pageRanges(pages: number[]) {
+  const sorted = [...pages].sort((a, b) => a - b);
+  const runs: string[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    runs.push(j > i ? sorted[i] + '–' + sorted[j] : String(sorted[i]));
+    i = j;
+  }
+  return (sorted.length > 1 ? 'Pages ' : 'Page ') + runs.join(', ');
+}
+
+type PictureEntry = { title: string; pages: string; credit: string; lines: { pages: number; credit: number }; clipped: boolean; rect: Rect };
+type PictureContext = Pick<Context, 'book' | 'spread' | 'layout' | 'geometry' | 'view'>;
+
+/** Places the whole list across the book's Picture list spreads and returns this spread's part of it. */
+function picturePage(ctx: PictureContext) {
   const at = ctx.geometry.design(canvas);
   // Built from the book index before anything renders, so the list follows every photo placed, moved or removed.
   const pictures = pictureList(ctx.book.spreads);
-  const own = ctx.book.spreads.findIndex(({ id }) => id === ctx.spread);
-  const before = ctx.book.spreads.filter(({ id, layout }, i) => i < own && id !== ctx.spread && pictureLayouts.includes(layout));
-  const after = ctx.book.spreads.some(({ id, layout }, i) => i > own && id !== ctx.spread && pictureLayouts.includes(layout));
-  const offset = before.reduce((sum, { layout }) => sum + pictureCapacity(pictureColumns(layout, at)), 0);
-  const shown = pictures.slice(offset, offset + pictureCapacity(columns));
-  return { pictures, offset, shown, missing: after ? 0 : pictures.length - offset - shown.length };
+  // The spread being drawn counts with the layout drawn, so a layout preview shows what the spread would hold.
+  const lists = ctx.book.spreads
+    .map(({ id, layout }) => ({ id, layout: id === ctx.spread ? ctx.layout : layout }))
+    .filter(({ layout }) => pictureLayouts.includes(layout));
+  const own: PictureEntry[] = [];
+  let next = 0;
+  for (const list of lists) {
+    for (const column of pictureColumns(list.layout, at)) {
+      const perLine = Math.max(10, Math.floor(column.width / detailCharWidth));
+      const linesFor = (text: string) => text ? Math.ceil(text.length / perLine) : 0;
+      let y = column.y;
+      while (next < pictures.length) {
+        const { photo, pages } = pictures[next];
+        const entry = { title: photo.caption || photo.title || 'Untitled', pages: pageRanges(pages), credit: photo.credit ?? '' };
+        const wanted = { pages: linesFor(entry.pages), credit: linesFor(entry.credit) };
+        const lines = { pages: Math.min(wanted.pages, maxDetailLines), credit: Math.min(wanted.credit, maxDetailLines) };
+        const height = pictureLine.title + (lines.pages + lines.credit) * pictureLine.detail + (lines.credit ? 2 : 1) * pictureLine.gap + pictureLine.after;
+        if (y + height - pictureLine.after > column.y + column.height) break;
+        // Text longer than its lines is shortened here, with the Book check warning below, rather than cut by the box.
+        const fit = (text: string, count: number) => text.length > count * perLine ? text.slice(0, count * perLine - 1).trimEnd() + '…' : text;
+        if (list.id === ctx.spread) own.push({ ...entry, pages: fit(entry.pages, lines.pages), credit: fit(entry.credit, lines.credit), lines,
+          clipped: wanted.pages > lines.pages || wanted.credit > lines.credit, rect: { ...column, y, height: height - pictureLine.after } });
+        y += height;
+        next++;
+      }
+    }
+  }
+  const last = lists.at(-1)?.id === ctx.spread;
+  return { pictures, entries: own, listed: next, missing: last ? pictures.length - next : 0 };
 }
 
-const listsSomething = (ctx: PictureContext, columns: Rect[]) => {
-  const { pictures, shown } = picturePage(ctx, columns);
-  return shown.length > 0 || pictures.length === 0;
+const listsSomething = (ctx: PictureContext) => {
+  const { pictures, entries } = picturePage(ctx);
+  return entries.length > 0 || pictures.length === 0;
 };
 
 function PictureList(props: { context: PictureContext; columns: Rect[] }) {
   const ctx = props.context;
-  const { pictures, offset, shown, missing } = picturePage(ctx, props.columns);
-  const slots = props.columns.flatMap((column) =>
-    Array.from({ length: Math.floor(column.height / pictureRow) }, (_, row) => ({ ...column, y: column.y + row * pictureRow, height: pictureRow })));
+  const { pictures, entries, listed, missing } = picturePage(ctx);
+  const clipped = entries.filter((entry) => entry.clipped);
   return <>
-    {shown.map(({ photo, pages }, i) => <div key={i} className="picture" style={ctx.geometry.css(slots[i])}>
-      <span className="picture-title">{photo.caption || photo.title || 'Untitled'}</span>
-      <span className="picture-pages">{(pages.length > 1 ? 'Pages ' : 'Page ') + pages.join(', ')}{photo.credit && ' · ' + photo.credit}</span>
+    {entries.map((entry, i) => <div key={i} className="picture" style={ctx.geometry.css(entry.rect)}>
+      <span className="picture-title">{entry.title}</span>
+      <span className="picture-detail" style={{ '--lines': String(entry.lines.pages) }}>{entry.pages}</span>
+      {entry.credit && <span className="picture-detail" style={{ '--lines': String(entry.lines.credit) }}>{entry.credit}</span>}
     </div>)}
     {missing > 0 && <span hidden {...issue({
       code: 'picture-list-full',
-      message: `The picture list has room for ${offset + shown.length} of the book's ${pictures.length} photos; ${missing} are not listed.`,
+      message: `The picture list has room for ${listed} of the book's ${pictures.length} photos; ${missing} are not listed.`,
       suggestion: 'Add a Picture list spread before this page; the list continues across it.',
     })} />}
-    {!pictures.length && ctx.view === 'canvas' && <p className="caption" style={ctx.geometry.css({ ...props.columns[0], height: pictureRow })}>
-      Photos placed in the book are listed here with their pages.</p>}
+    {clipped.length > 0 && <span hidden {...issue({
+      code: 'picture-credit-cut',
+      message: `The picture list cannot show all of ${clipped.map(({ title }) => '“' + title + '”').join(', ')}: its credit or page list is longer than ${maxDetailLines} lines.`,
+      suggestion: 'Shorten the photo’s credit, or place the photo on fewer pages.',
+    })} />}
+    {!pictures.length && ctx.view === 'canvas' &&
+      <p className="caption" style={ctx.geometry.css({ ...props.columns[0], height: pictureLine.title + pictureLine.detail })}>
+        Photos placed in the book are listed here with their pages.</p>}
   </>;
 }
 
@@ -378,7 +428,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx}>
           {/* No heading over an empty list when earlier Picture list spreads already hold every photo. */}
-          {listsSomething(ctx, pictureColumns('credits', at)) &&
+          {listsSomething(ctx) &&
             <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.left(margin, 36, page - 2 * margin, 14)} />}
           <PictureList context={ctx} columns={pictureColumns('credits', at)} />
           <ctx.Text presentation="inline" parameter="colophon" className="colophon" rect={at.left(margin, 244, page - 2 * margin, 22)} />
@@ -581,7 +631,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx}>
           {/* No heading over an empty list when earlier Picture list spreads already hold every photo. */}
-          {listsSomething(ctx, pictureColumns('pictures', at)) &&
+          {listsSomething(ctx) &&
             <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.left(margin, 36, page - 2 * margin, 14)} />}
           <PictureList context={ctx} columns={pictureColumns('pictures', at)} />
         </Paper>;
