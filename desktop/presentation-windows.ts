@@ -56,7 +56,8 @@ export class PresentationWindows {
     // Call the simple-fullscreen API directly. The generic fullscreen constructor path marks an asynchronous
     // native transition pending, which simple fullscreen never completes and can leave Close Window waiting.
     if (mac) window.setSimpleFullScreen(true);
-    void window.loadURL(presentationURL).catch((error) => {
+    // As with document windows, loadURL can complete without a ready-to-show notification on macOS.
+    void window.loadURL(presentationURL).then(() => this.options.focus(window)).catch((error) => {
       if (window.isDestroyed() || document.closing || document.window.isDestroyed()) return;
       window.close();
       this.options.error(document, error);

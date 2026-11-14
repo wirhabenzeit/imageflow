@@ -111,6 +111,10 @@ try {
     assert.ok(started.length <= 3 && started.every(index => Math.abs(index - 30) <= 1), 'Only the current spread and neighbours draw artwork at startup');
     assert.ok(await page.evaluate(() => !!document.activeElement?.closest('.presentation')), 'Keyboard focus enters presentation without clicking the slide');
     let window = await app.browserWindow(page);
+    if (visible) {
+      assert.equal(await window.evaluate((window) => window.isVisible()), true, 'The fullscreen viewer is shown');
+      assert.equal(await window.evaluate((window) => window.isFocused()), true, 'The fullscreen viewer receives native keyboard focus');
+    }
     let input = page;
     const nativeKey = async (keyCode) => visible ? window.evaluate((window, keyCode) => {
       window.webContents.sendInputEvent({ type: 'keyDown', keyCode });
