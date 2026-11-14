@@ -1,4 +1,5 @@
-// Photo and story with text continuation, chapter anchors, a contents layout and a caption from the photo's capture data.
+// Photo and story with text continuation, chapter anchors, a contents layout, photo credits from the book index and
+// a caption from the photo's capture data.
 import { box, defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { Photo } from 'imageflow';
 
@@ -73,6 +74,27 @@ export default defineTemplate({
           </li>)}
         </ol>
       </Spread>,
+    }),
+    // ctx.book.spreads lists every spread's pages and placed photos, from the saved book: credits stay right after
+    // moves, layout switches and new assignments. Each layout knows where its boxes are; here every photo box fills
+    // the left page, so a photo's page is the spread's left page. A photo placed twice is credited on both pages.
+    credits: spread({
+      label: 'Photo credits',
+      render: (ctx) => {
+        const credits = new Map<string, number[]>();
+        for (const spread of ctx.book.spreads) {
+          for (const { photo } of spread.photos) {
+            const page = spread.page.left ?? spread.page.number ?? spread.page.right;
+            if (!photo?.credit || page === undefined) continue;
+            credits.set(photo.credit, [...credits.get(photo.credit) ?? [], page]);
+          }
+        }
+        return <Spread>
+          <ul style={{ ...ctx.geometry.css(ctx.geometry.page('right', 'safe')), margin: 0, padding: 0, listStyle: 'none', font: '9pt/1.6 serif' }}>
+            {[...credits].map(([credit, pages]) => <li key={credit}>{credit}: {[...new Set(pages)].join(', ')}</li>)}
+          </ul>
+        </Spread>;
+      },
     }),
   }),
 });

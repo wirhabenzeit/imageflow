@@ -27,7 +27,8 @@ const bookFormat = (label: string, width: number, height: number) => printFormat
 
 const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90 });
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
-const textSize = p.number({ label: 'Body size', default: 11, min: 8, max: 16, step: .5, unit: 'pt' });
+const textSize = p.number({ label: 'Body size', default: 11, min: 8, max: 16, step: .5, unit: 'pt',
+  description: 'Type size of body text and Markdown in the whole book.' });
 // For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
 // control for every declared parameter. The value is shared by every layout with this box, so it returns when the
 // spread switches back to a layout that draws captions.
@@ -100,8 +101,9 @@ const viewBox = (viewport: Viewport) => {
 };
 
 // An optional route inset: the track of the assigned GPX file, drawn without a basemap and framed by its viewport.
-// Without a file it is an empty frame in the editor (so it can be clicked) and nothing in the printed book.
-function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Viewport; mode: Context['mode']; rect: Rect }) {
+// Without a file it is an empty frame on the editing canvas (so it can be clicked) and nothing in thumbnails, layout
+// previews or the printed book.
+function RouteMap({ track, viewport, view, rect }: { track: string; viewport: Viewport; view: Context['view']; rect: Rect }) {
   const source = file(track);
   let line = '';
   let problem = '';
@@ -116,7 +118,7 @@ function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Vi
   const finding = problem ? issue({ code: 'gpx-invalid', message: problem, element: 'route', parameter: 'track', file: track,
     suggestion: 'Assign a GPX file that contains a track or route, or clear the GPX track.' }) : {};
   // The printed book leaves an unavailable route out, but still reports why.
-  if (!line && mode !== 'edit') return problem ? <span hidden {...finding} /> : null;
+  if (!line && view !== 'canvas') return problem ? <span hidden {...finding} /> : null;
   return <Element id="route" className={line ? 'route-map' : 'route-map empty'} rect={rect}>
     {line
       ? <svg viewBox={viewBox(viewport)} aria-label="Route"><polyline points={line} /></svg>
@@ -129,9 +131,12 @@ function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Vi
 // one task, so one editor owns all four parameters and applies changes while it stays open.
 const routeParameters = {
   track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
-  centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01 }),
-  centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01 }),
-  zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1 }),
+  centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01,
+    description: 'Centre of the shown part of the route, across: 0 is the west edge of the route, 1 the east edge. Only takes effect when zoomed in (zoom above 1).' }),
+  centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01,
+    description: 'Centre of the shown part of the route, down: 0 is the north edge of the route, 1 the south edge. Only takes effect when zoomed in (zoom above 1).' }),
+  zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1,
+    description: 'Higher values zoom in. 1 shows the whole route; 2 shows half its width. To zoom out a bit, lower it.' }),
 };
 // Typed from the element's declaration: `set` and `Control` accept only these four parameters, with their value types.
 type RouteEditorProps = ElementEditorProps<typeof routeParameters, 'track' | 'centerX' | 'centerY' | 'zoom'>;
@@ -372,7 +377,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx} bled={{ left: true, right: true }}>
           <ctx.PhotoBox id="hero" rect={ctx.geometry.spread('bleed')} />
-          <RouteMap track={ctx.elements.route.params.track} viewport={ctx.elements.route.params} mode={ctx.mode}
+          <RouteMap track={ctx.elements.route.params.track} viewport={ctx.elements.route.params} view={ctx.view}
             rect={at.right(page - margin - 60, margin, 60, 60)} />
           <Caption context={ctx} box={ctx.boxes.hero} className="caption overlay" rect={at.left(margin, 268, 2 * page - 2 * margin, 10)} />
         </Paper>;
@@ -477,7 +482,7 @@ export default defineTemplate({
               <span>{chapter.title}</span><span className="contents-page">{chapter.page}</span>
             </li>)}
           </ol>
-          {!chapters.length && ctx.mode === 'edit' &&
+          {!chapters.length && ctx.view === 'canvas' &&
             <p className="caption" style={ctx.geometry.css(at.right(margin, 40, page - 2 * margin, 10))}>Story and text spreads appear here.</p>}
         </Paper>;
       },

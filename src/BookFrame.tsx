@@ -13,11 +13,16 @@ type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status
 // The occurrence an inline editor is drawn over, whose artwork the book view hides while it edits.
 export type InlineEditing = { spread: string; element: string } | { spread: string; edits: string; occurrence: number };
 
+// The unsaved placement of a crop gesture on a photo box with a render callback.
+export type CropPreview = { spread: string; box: string; placement: { centerX: number; centerY: number; zoom: number } };
+
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation }: {
+export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview }: {
   project: string; view: BookView; query?: string; title: string;
   presentation?: PresentationView;
   hold?: boolean;
+  // Told to every frame, including a candidate with its first geometry, so the template draws the gesture's crop.
+  cropPreview?: CropPreview;
   // Every frame of the book view is told, including a candidate before it is shown, so the artwork never flashes.
   inlineEditing?: InlineEditing;
   // Called once the shown frame has drawn the artwork as `inlineEditing` last asked (by its key), such as shown again
@@ -94,6 +99,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       storeFrame(id, frame);
       return;
     } else if ('type' in data && data.type === 'geometry') {
+      if (latestCrop.current) (event.source as Window).postMessage({ type: 'crop-preview', ...latestCrop.current }, renderOrigin);
       // A candidate frame is shown only once it hides what the inline editor covers.
       if (latestEditing.current) {
         if (!frame.published) frame.hiding = true;
@@ -132,6 +138,14 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   latestKey.current = editingKey;
   const latestApplied = useRef(onInlineEditing);
   latestApplied.current = onInlineEditing;
+  const latestCrop = useRef(cropPreview);
+  latestCrop.current = cropPreview;
+  const cropKey = JSON.stringify(cropPreview ?? null);
+  useEffect(() => {
+    for (const { element, geometry } of latest.current.values()) {
+      if (geometry) element?.contentWindow?.postMessage({ type: 'crop-preview', ...(cropPreview ?? {}) }, renderOrigin);
+    }
+  }, [cropKey]);
   useEffect(() => {
     // Frames still loading are told with their first geometry, above.
     for (const { element, geometry } of latest.current.values()) {
