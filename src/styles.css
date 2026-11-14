@@ -539,7 +539,6 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .sources { container-type: inline-size; }
 .sources-bar { overflow: visible; }
 .sources-bar .spacer { min-width: 0; flex-shrink: 1; }
-.studio .sources-bar > .source-manage { flex: none; min-height: 26px; padding: 3px 8px; font: 400 11px/1.4 var(--ui-font); }
 .source-import { position: relative; flex: none; }
 .source-import > :is(summary, .action-menu-trigger) { display: flex; align-items: center; gap: 5px; min-height: 26px; padding: 3px 8px; border: 1px solid var(--control-border); border-radius: 6px; background: var(--control-fill); color: var(--text); font: 400 11px/1.4 var(--ui-font); list-style: none; cursor: default; }
 .source-import > summary::-webkit-details-marker { display: none; }
@@ -857,13 +856,17 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .project-identity .document-title { font-size: 13px; font-weight: 500; }
 .studio .document-proxy { border: 0; background: transparent; box-shadow: none; padding: 0; min-width: 16px; }
 .studio .document-proxy:hover { border: 0; background: transparent; }
-.source-items-grouped { padding-top: 32px; }
-.studio .photo-group-divider { position: sticky; left: 0; z-index: 2; flex: 0 0 12px; width: 12px; min-width: 12px; align-self: stretch;
-  padding: 0; border: 0; border-left: 1px solid var(--edge); border-radius: 0; background: transparent; overflow: visible; text-align: left; }
-.photo-group-divider > span { position: absolute; top: -25px; left: 3px; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
-  padding: 3px 5px; background: var(--sources-surface); font-size: 11px; }
-.photo-group-divider small { color: var(--muted); font-weight: 400; }
-.photo-capture-time { position: absolute; bottom: 3px; right: 3px; padding: 2px 5px; border-radius: 3px; background: #000b; color: white; font-size: 10px; }
+.source-items-grouped { gap: 24px; }
+.photo-strip-group { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 24px minmax(0, 1fr); flex: none; min-width: 0; height: 100%; }
+.photo-strip-group + .photo-strip-group::before { content: ''; position: absolute; left: -12px; top: 24px; bottom: 0; width: 1px; background: var(--edge); pointer-events: none; }
+.photo-group-items { display: flex; gap: 8px; min-height: 0; }
+.photo-group-heading-track { width: 0; min-width: 100%; }
+.studio .photo-group-heading { position: sticky; left: 12px; justify-self: start; align-self: start; display: flex; align-items: baseline;
+  width: max-content; max-width: 100%; min-width: 0; min-height: 20px; padding: 0 0 4px; border: 0; border-radius: 0;
+  background: var(--sources-surface); box-shadow: none; font-size: 11px; text-align: left; white-space: nowrap; overflow: hidden; }
+.photo-group-heading > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.photo-group-heading small { flex: none; color: var(--muted); font-weight: 400; white-space: pre; }
+.photo-capture-time { position: absolute; bottom: 3px; right: 3px; max-width: calc(100% - 6px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 5px; border-radius: 3px; background: #000b; color: white; font-size: 10px; }
 .studio .asset-group-heading { display: block; width: 100%; text-align: left; min-height: 22px; padding: 3px 8px; border: 0; border-radius: 0; font-size: 11px;
   position: sticky; top: 0; background: var(--panel-surface); z-index: 1; }
 .time-gap-dialog { border: 1px solid var(--edge); border-radius: 10px; padding: 22px; background: var(--panel-surface); color: var(--text); }

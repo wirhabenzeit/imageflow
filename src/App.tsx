@@ -1721,7 +1721,7 @@ export function App() {
         <div className="sources-host" inert={panels.bottomHidden} aria-hidden={panels.bottomHidden}>
         {summary && <Sources view={photoView} summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={choose}
-          failure={setError} changed={(next) => adopt(next)} usage={usage} writable={writable} busy={!!busy} importSources={act} quickLook={setQuick} manage={() => void showAssets()}
+          failure={setError} changed={(next) => adopt(next)} usage={usage} writable={writable} busy={!!busy} importSources={act} quickLook={setQuick}
           importPaths={(files) => {
             const paths = api?.pathsForFiles(files) ?? [];
             if (paths.length) importFiles({ paths });

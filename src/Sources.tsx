@@ -5,9 +5,8 @@ import { photoGroups, photoDate, captureLabel, captureFact } from './photo-view'
 import type { PhotoView } from './photo-view';
 import { useListSelection } from './list-selection';
 import { useFilmstripAnchor } from './filmstrip-anchor';
-import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary } from './desktop';
@@ -21,17 +20,17 @@ function pagesText(list: { pages: string }[] | undefined) {
   return (list.length === 1 && !list[0].pages.includes('–') ? 'Page ' : 'Pages ') + list.map(({ pages }) => pages).join(', ');
 }
 
-export function Sources({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, manage, changed, failure }: {
+export function Sources({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, changed, failure }: {
   view: PhotoViewControl; summary: ProjectSummary; tab: SourceKind; setTab: (tab: SourceKind) => void;
   selected: Partial<Record<SourceKind, string>>; choose: (source: SourceRef) => void; usage: SourceUsage;
   writable: boolean; busy: boolean; importSources: (command: 'import') => void;
   importPaths: (files: File[]) => void; quickLook: (source: SourceRef) => void;
-  failure: (message: string) => void; manage: () => void; changed: (summary: ProjectSummary) => void;
+  failure: (message: string) => void; changed: (summary: ProjectSummary) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const [unused, setUnused] = useState(false);
   const items = useMemo(() => sourceList(summary, tab, view.value).filter(({ id }) => !unused || !usage[tab][id]?.length), [summary, tab, unused, usage, view.value]);
-  useFilmstripAnchor(list, tab === 'photo', JSON.stringify(items.map(({ id }) => id)));
+  useFilmstripAnchor(list, tab === 'photo', JSON.stringify([view.value.group, view.value.gapMinutes, items.map(({ id }) => id)]));
   const current = selected[tab];
   const visibleCurrent = items.some(({ id }) => id === current) ? current : undefined;
   const selection = useListSelection(items.map(({ id }) => id), (id) => items.find((item) => item.id === id)?.title ?? id);
@@ -40,7 +39,6 @@ export function Sources({ view, summary, tab, setTab, selected, choose, usage, w
     else if (!selection.selected.includes(current)) selection.setSelection([current]);
   }, [current, tab]);
   const groups = tab === 'photo' ? photoGroups(summary, items.map(({ id }) => id), view.value) : [];
-  const headers = new Map(groups.filter((group) => group.label).map((group) => [group.ids[0], group]));
 
   useEffect(() => {
     const node = list.current?.querySelector<HTMLElement>('[data-id="' + CSS.escape(current ?? '') + '"]');
@@ -94,6 +92,50 @@ export function Sources({ view, summary, tab, setTab, selected, choose, usage, w
     } else selection.key(event);
   }
 
+  function renderItem({ id, title }: typeof items[number]) {
+    const placed = usage[tab][id];
+    const sourceState = summary.sources?.[(tab === 'photo' ? 'photo:' : 'markdown:') + id];
+    const sourceLabel = sourceState?.state !== 'available' && sourceState?.problem ? (sourceState.cached ? 'Cached · Missing' : 'Unavailable') : sourceState?.linked ? 'Linked' : undefined;
+    const common = {
+      'data-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
+      tabIndex: visibleCurrent === id || (!visibleCurrent && id === items[0]?.id) ? 0 : -1,
+      title: title + ' · ' + pagesText(placed) + (sourceLabel ? ' · ' + (sourceState?.problem ?? sourceLabel) : ''),
+      onClick: (event: React.MouseEvent) => { selection.choose(id, event); choose({ kind: tab, id }); },
+      onContextMenu: (event: React.MouseEvent<HTMLElement>) => { const ids = selection.context(id, event); choose({ kind: tab, id }); void context(ids); },
+      onDoubleClick: () => quickLook({ kind: tab, id }),
+      draggable: writable && (tab === 'text' || !!summary.photos[id]),
+      onDragStart: (event: DragEvent) => {
+        const selected = selection.selected.includes(id) ? selection.selected : [id];
+        event.dataTransfer.setData(tab === 'photo' ? photoMime : textMime, id);
+        if (tab === 'photo' && selected.length > 1) event.dataTransfer.setData(photosMime, JSON.stringify(selected));
+        event.dataTransfer.effectAllowed = 'copy';
+      },
+    };
+    if (tab === 'photo') {
+      const date = photoDate(summary, id);
+      return <div key={id} className="source-item source-photo" style={{ aspectRatio: summary.photoSizes[id] ? summary.photoSizes[id].width / summary.photoSizes[id].height : 1.4 }} {...common}>
+        {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" draggable={false} /> : <span className="missing">Missing</span>}
+        {view.value.showTime && date?.captured && <small className="photo-capture-time" title={date.capturedEstimated ? 'Estimated from file modification time' : date.captured}>{captureLabel(date.captured)}{date.capturedEstimated ? ' ≈' : ''}</small>}
+        <span className="source-title">{title}</span>
+        {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
+        {!!placed?.length && <small className="badge" aria-label={placed.length === 1 ? 'Used once' : 'Used ' + placed.length + ' times'}>
+          {placed.length === 1 ? <Icon name="check" size={12} /> : placed.length + '×'}
+        </small>}
+      </div>;
+    }
+    const source = summary.texts[id];
+    const { heading, body } = source === undefined ? { heading: undefined, body: '' } : excerpt(source);
+    return <div key={id} className="source-item source-text" {...common}>
+      <span className="source-title">{title}</span>
+      {source === undefined ? <span className="missing">Missing file</span> : <span className="source-excerpt">
+        {heading && <strong>{heading} </strong>}{body}
+      </span>}
+      {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
+      <span className="source-meta">{source !== undefined && words(source) + ' words · '}{pagesText(placed)}</span>
+    </div>;
+  }
+  const tiles = new Map(items.map((item) => [item.id, renderItem(item)]));
+
   const tabs: [SourceKind, string, number][] = [
     ['photo', 'Photos', Object.keys(summary.photoIndex).length],
     ['text', 'Texts', Object.keys(summary.project.texts).length],
@@ -110,67 +152,31 @@ export function Sources({ view, summary, tab, setTab, selected, choose, usage, w
           onClick={() => setTab(kind)}>{label} <span className="count">{count}</span></button>)}
       </div>
       <span className="spacer" />
-      {tab === 'photo' && <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} />}
-      <ActionMenu className="source-view" label={<>Show <Icon name="chevron" /></>}>
+      <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} photos={tab === 'photo'}>
         <button onClick={() => setUnused(false)}>All assets{!unused ? ' ✓' : ''}</button>
         <button onClick={() => setUnused(true)}>Unused only{unused ? ' ✓' : ''}</button>
-      </ActionMenu>
-      <button type="button" className="source-manage" disabled={!writable || busy} onClick={manage}>Assets…</button>
+        {tab === 'photo' && <hr />}
+      </PhotoViewMenu>
       <button className="source-import" disabled={!writable || busy} onClick={() => importSources('import')}>Import…</button>
     </div>
     <div ref={list} className={'source-items source-items-' + tab + (tab === 'photo' && view.value.group !== 'none' ? ' source-items-grouped' : '')} role="listbox"
       aria-label={tab === 'photo' ? 'Photos' : 'Texts'} onKeyDown={keys}>
       {!items.length && <p className="source-empty muted">{tab === 'photo'
         ? 'No photos yet. Import photos or drop them here.' : 'No Markdown sources yet. Import a .md file or drop it here.'}</p>}
-      {items.map(({ id, title }, i) => {
-        const placed = usage[tab][id];
-        const sourceState = summary.sources?.[(tab === 'photo' ? 'photo:' : 'markdown:') + id];
-        const sourceLabel = sourceState?.state !== 'available' && sourceState?.problem ? (sourceState.cached ? 'Cached · Missing' : 'Unavailable') : sourceState?.linked ? 'Linked' : undefined;
-        const common = {
-          'data-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
-          tabIndex: visibleCurrent === id || (!visibleCurrent && i === 0) ? 0 : -1,
-          title: title + ' · ' + pagesText(placed) + (sourceLabel ? ' · ' + (sourceState?.problem ?? sourceLabel) : ''),
-          onClick: (event: React.MouseEvent) => { selection.choose(id, event); choose({ kind: tab, id }); },
-          onContextMenu: (event: React.MouseEvent<HTMLElement>) => { const ids = selection.context(id, event); choose({ kind: tab, id }); void context(ids); },
-          onDoubleClick: () => quickLook({ kind: tab, id }),
-          draggable: writable && (tab === 'text' || !!summary.photos[id]),
-          onDragStart: (event: DragEvent) => {
-            const selected = selection.selected.includes(id) ? selection.selected : [id];
-            event.dataTransfer.setData(tab === 'photo' ? photoMime : textMime, id);
-            if (tab === 'photo' && selected.length > 1) event.dataTransfer.setData(photosMime, JSON.stringify(selected));
-            event.dataTransfer.effectAllowed = 'copy';
-          },
-        };
-        if (tab === 'photo') {
-          const group = headers.get(id);
-          const date = photoDate(summary, id);
-          return <Fragment key={id}>
-            {group && <button className="photo-group-divider" aria-label={'Select ' + group.label} onClick={() => {
-              selection.setSelection(group.ids); choose({ kind: 'photo', id: group.ids[0] });
-            }} draggable={writable} onDragStart={(event) => {
-              selection.setSelection(group.ids); event.dataTransfer.setData(photoMime, group.ids[0]); event.dataTransfer.setData(photosMime, JSON.stringify(group.ids));
-            }}><span>{group.label}<small> · {group.ids.length === group.total ? group.total : group.ids.length + ' of ' + group.total}{unused ? ' unused' : group.ids.length === 1 && group.total === 1 ? ' photo' : ' photos'}</small></span></button>}
-          <div className="source-item source-photo" style={{ aspectRatio: summary.photoSizes[id] ? summary.photoSizes[id].width / summary.photoSizes[id].height : 1.4 }} {...common}>
-            {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" draggable={false} /> : <span className="missing">Missing</span>}
-            {view.value.showTime && date?.captured && <small className="photo-capture-time" title={date.capturedEstimated ? 'Estimated from file modification time' : date.captured}>{captureLabel(date.captured)}{date.capturedEstimated ? ' ≈' : ''}</small>}
-            <span className="source-title">{title}</span>
-            {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
-            {!!placed?.length && <small className="badge" aria-label={placed.length === 1 ? 'Used once' : 'Used ' + placed.length + ' times'}>
-              {placed.length === 1 ? <Icon name="check" size={12} /> : placed.length + '×'}
-            </small>}
-          </div></Fragment>;
-        }
-        const source = summary.texts[id];
-        const { heading, body } = source === undefined ? { heading: undefined, body: '' } : excerpt(source);
-        return <div key={id} className="source-item source-text" {...common}>
-          <span className="source-title">{title}</span>
-          {source === undefined ? <span className="missing">Missing file</span> : <span className="source-excerpt">
-            {heading && <strong>{heading} </strong>}{body}
-          </span>}
-          {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
-          <span className="source-meta">{source !== undefined && words(source) + ' words · '}{pagesText(placed)}</span>
+      {tab === 'photo' && view.value.group !== 'none' ? groups.map((group) => {
+        const count = (group.ids.length === group.total ? group.total : group.ids.length + ' of ' + group.total) +
+          (unused ? ' unused' : group.ids.length === 1 && group.total === 1 ? ' photo' : ' photos');
+        return <div className="photo-strip-group" key={group.id} role="group" aria-label={group.label}>
+          <div className="photo-group-heading-track">
+            <button className="photo-group-heading" aria-label={'Select ' + group.label} title={group.label + ' · ' + count}
+              onClick={() => { selection.setSelection(group.ids); choose({ kind: 'photo', id: group.ids[0] }); }} draggable={writable}
+              onDragStart={(event) => { selection.setSelection(group.ids); event.dataTransfer.setData(photoMime, group.ids[0]); event.dataTransfer.setData(photosMime, JSON.stringify(group.ids)); }}>
+              <span>{group.label}</span><small> · {count}</small>
+            </button>
+          </div>
+          <div className="photo-group-items">{group.ids.map((id) => tiles.get(id))}</div>
         </div>;
-      })}
+      }) : [...tiles.values()]}
     </div>
   </section>;
 }

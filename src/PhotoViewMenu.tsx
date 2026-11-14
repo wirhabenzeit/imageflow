@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { defaultPhotoView, photoViewChange, validPhotoView } from './photo-view';
@@ -44,18 +45,23 @@ function TimeGapDialog({ minutes, save, close }: { minutes: number; save: (minut
   </dialog>;
 }
 export type PhotoViewControl = { value: PhotoView; update: (patch: Partial<PhotoView>) => void; custom: () => void };
-export function PhotoViewMenu({ view, update, custom }: { view: PhotoView; update: (patch: Partial<PhotoView>) => void; custom: () => void }) {
+export function PhotoViewMenu({ view, update, custom, photos = true, children }: {
+  view: PhotoView; update: (patch: Partial<PhotoView>) => void; custom: () => void; photos?: boolean; children?: ReactNode;
+}) {
   return <ActionMenu className="photo-view-menu" label={<>View <Icon name="chevron" /></>}>
-    <button onClick={() => update({ sort: 'capture' })}>Capture Time{view.sort === 'capture' ? ' ✓' : ''}</button>
-    <button onClick={() => update({ sort: 'name' })}>Name{view.sort === 'name' ? ' ✓' : ''}</button>
-    <button onClick={() => update({ sort: 'import' })}>Import Order{view.sort === 'import' ? ' ✓' : ''}</button>
-    <hr />
-    <button onClick={() => update({ group: 'none' })}>No Groups{view.group === 'none' ? ' ✓' : ''}</button>
-    <button onClick={() => update({ group: 'day' })}>Group by Day{view.group === 'day' ? ' ✓' : ''}</button>
-    {[30, 120, 360].map((gapMinutes) => <button key={gapMinutes} onClick={() => update({ group: 'gap', gapMinutes })}>
-      {gapMinutes === 30 ? '30 Minute Gap' : gapMinutes / 60 + ' Hour Gap'}{view.group === 'gap' && view.gapMinutes === gapMinutes ? ' ✓' : ''}</button>)}
-    <button onClick={custom}>Custom Time Gap…</button>
-    <hr />
-    <button onClick={() => update({ showTime: !view.showTime })}>Show Capture Time{view.showTime ? ' ✓' : ''}</button>
+    {children}
+    {photos && <>
+      <button onClick={() => update({ sort: 'capture' })}>Capture Time{view.sort === 'capture' ? ' ✓' : ''}</button>
+      <button onClick={() => update({ sort: 'name' })}>Name{view.sort === 'name' ? ' ✓' : ''}</button>
+      <button onClick={() => update({ sort: 'import' })}>Import Order{view.sort === 'import' ? ' ✓' : ''}</button>
+      <hr />
+      <button onClick={() => update({ group: 'none' })}>No Groups{view.group === 'none' ? ' ✓' : ''}</button>
+      <button onClick={() => update({ group: 'day' })}>Group by Day{view.group === 'day' ? ' ✓' : ''}</button>
+      {[30, 120, 360].map((gapMinutes) => <button key={gapMinutes} onClick={() => update({ group: 'gap', gapMinutes })}>
+        {gapMinutes === 30 ? '30 Minute Gap' : gapMinutes / 60 + ' Hour Gap'}{view.group === 'gap' && view.gapMinutes === gapMinutes ? ' ✓' : ''}</button>)}
+      <button onClick={custom}>Custom Time Gap…</button>
+      <hr />
+      <button onClick={() => update({ showTime: !view.showTime })}>Show Capture Time{view.showTime ? ' ✓' : ''}</button>
+    </>}
   </ActionMenu>;
 }
