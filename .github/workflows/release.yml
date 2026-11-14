@@ -113,8 +113,13 @@ jobs:
           retention-days: 7
           overwrite: true
 
+  upgrade-test:
+    needs: version
+    uses: ./.github/workflows/upgrade-test.yml
+    secrets: inherit
+
   draft:
-    needs: [version, mac]
+    needs: [version, mac, upgrade-test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AgentSettings } from './AgentSettings';
 import { Icon } from './Icon';
+import type { UpdateChannel } from './update-feed';
 import type { UpdateState } from './updates';
 import type { DesktopApi } from './desktop';
 import type { AppSettings, Appearance, SettingsPane } from './settings';
@@ -109,6 +110,12 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
           <div className="settings-control">
             <label><input type="checkbox" checked={settings?.automaticUpdates ?? true} disabled={!settings || !update || update.status === 'unavailable' || update.status === 'initializing'}
               onChange={(event) => void choose({ automaticUpdates: event.target.checked })} /> Automatically check for updates</label>
+            <label className="update-channel">Channel: <select aria-label="Update channel" value={settings?.updateChannel ?? 'stable'}
+              disabled={!settings || !update || ['initializing', 'unavailable', 'checking', 'downloading', 'ready'].includes(update.status)}
+              onChange={(event) => void choose({ updateChannel: event.target.value as UpdateChannel })}>
+              <option value="stable">Stable</option><option value="beta">Beta</option>
+            </select></label>
+            <p className="settings-note">Beta includes early versions. Switching to Stable does not downgrade the app.</p>
             <div className="settings-update-actions">
               <button disabled={!api || update?.status === 'initializing' || update?.status === 'checking' || update?.status === 'downloading'} onClick={() => void api?.checkUpdates()}>Check for Updates…</button>
               {update?.status === 'ready' && <button onClick={() => void api?.restartUpdate()}>Restart to Update</button>}

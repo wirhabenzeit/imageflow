@@ -2,7 +2,7 @@
 
 The **Release** workflow builds Apple silicon downloads when a `v*.*.*` tag is pushed. It checks the tag against `package.json` and verifies that the tagged commit belongs to `origin/main`, then builds and tests the Developer ID signed app, notarizes and staples the app and DMG, then attaches the ZIP and DMG to a **draft** GitHub Release with generated notes. Publishing is a manual step. Ordinary PR checks stay separate.
 
-The six signing secrets in [Mac signing and notarization](signing.md) must be configured in the protected **release** environment first, with no repository-level copies. It accepts only `v*` tags, requires approval by `wirhabenzeit`, and disables administrator bypass. Before the first public release, make this repository public so downloads and the planned `update.electronjs.org` feed are accessible without credentials.
+The six signing secrets in [Mac signing and notarization](signing.md) must be configured in the protected **release** environment first, with no repository-level copies. It accepts only `v*` tags, requires approval by `wirhabenzeit`, and disables administrator bypass. Before the first public release, make this repository public so release downloads and channel feeds are accessible without credentials.
 
 ## Prepare and tag
 
@@ -48,7 +48,7 @@ After the workflow and installation check succeed, click **Publish release**. Ke
 
 ## Test tags and retries
 
-For a full workflow rehearsal, use an unused prerelease version such as `0.1.0-test.1`, merge that version through a PR onto `main`, then tag the merged commit `v0.1.0-test.1`. Such tags produce drafts also marked **prerelease**. Leave the test draft unpublished. Drafts and prereleases are excluded from the public update feed. A tag on an unmerged feature/test branch is deliberately rejected before credential access; no bypass is provided for rehearsals.
+For a full workflow rehearsal, use an unused prerelease version such as `0.1.0-test.1`, merge that version through a PR onto `main`, then tag the merged commit `v0.1.0-test.1`. Such tags produce drafts also marked **prerelease**. Leave the test draft unpublished. Drafts and rehearsal prereleases (`-test.N`) are excluded from both update feeds. Published `-beta.N` releases enter only the beta feed. A tag on an unmerged feature/test branch is deliberately rejected before credential access; no bypass is provided for rehearsals.
 
 If the failure is transient or external, such as an Apple service outage, a network error or misconfigured secrets, fix that cause and rerun the failed jobs for the same tag. A rerun uses the original tagged commit and its workflow/scripts. If a fix needs a code change, merge it onto `main`, bump to a new version (for example, the next prerelease), and push a new matching tag. Leave any failed draft unpublished or delete it; do not move an existing release tag.
 
@@ -58,37 +58,83 @@ Signing and notarization child output streams directly to Actions, including bef
 
 Signing credentials are imported only for the separate signing and notarization operations and removed immediately afterward; the API key file exists only during notarization. Only the ZIP and DMG pass to the job with permission to write the draft release. Action artifacts are retained for seven days; the assets attached to the draft release remain there.
 
-## Automatic updates and acceptance (#74)
+## Stable and beta updates
 
-Once background signature/location checks complete, packaged macOS apps with a verified Developer ID signature check the public `wirhabenzeit/imageflow` feed at launch and every four hours. Development and ad-hoc builds do not initialize the updater. The app uses Electron’s `autoUpdater` through `update-electron-app`, with its default modal notification disabled. Downloads happen in the background; a non-modal **Restart to Update** notice appears when the download is ready. **Later** dismisses the notice throughout the app; only the focused or most recent app window shows it, and the restart command remains available in the app menu and General settings.
+The app reads small JSON feeds hosted on GitHub Pages:
 
-**ImageFlow → Check for Updates…** opens General settings, where progress, up-to-date and offline/error feedback appears. **Automatically check for updates** defaults on and is stored on this Mac. Turning it off stops future automatic checks; manual checks still work, and an update already being downloaded can finish. Translocated and Downloads launches explain how to move the app into Applications. Unwritable locations have a separate message about permissions, Applications or ~/Applications; writable external drives are allowed. A signed app must be installed in a writable location to update.
+- Stable: `https://wirhabenzeit.github.io/imageflow/updates/stable/darwin-arm64/RELEASES.json`
+- Beta: `https://wirhabenzeit.github.io/imageflow/updates/beta/darwin-arm64/RELEASES.json`
 
-Restart first requests an ordinary Quit. Markdown source windows flush their latest input using their existing error/conflict/cancel handling. Book windows commit plain fields on blur and drain pending saves. They reject quitting while an active page editor, invalid field or failed save needs attention. Crashed or still-loading renderers do not block Quit; a renderer that does not answer offers Keep Open or an explicit Quit Anyway choice before its window is destroyed. A rejected quit keeps the app usable and the update ready for a later retry. Only after the windows close, writers settle, book locks release and MCP shuts down does the app call `quitAndInstall()`. Books are cleanly closed; reopen them from Recents after relaunch.
+The signed ZIPs remain GitHub Release assets. **Settings → General → Updates → Channel** selects Stable or Beta. Stable is the default for a fresh stable installation; a fresh beta installation defaults to Beta. An explicit preference survives upgrades. Beta receives both beta and final releases, choosing the greatest semantic version. Stable receives final releases only. Switching to Stable never downgrades a newer beta: stable updates resume once a newer final release exists. Channel changes are disabled while a check/download or staged update is in progress.
 
-A downloaded update is staged by Squirrel.Mac. **Later** dismisses the notice; it does not cancel staging. Ordinary Quit also applies the staged update, without requesting relaunch. Cancelling a restart keeps the app open and clears only the relaunch request; the staged update remains. [Electron documents that a downloaded update is applied on the next start](https://www.electronjs.org/docs/latest/api/auto-updater#autoupdaterquitandinstall).
+The app compares semantic versions before starting Electron's native updater. It validates the channel head against a versioned per-release payload, then asks Squirrel.Mac to download, verify and install the ZIP using server mode. This handles `1.0.0-beta.10 → 1.0.0` correctly; Squirrel's static-JSON numeric comparison would consider that a downgrade. No separate updater framework or dynamic update server is needed.
 
-Local implementation checks:
+**Update feeds** regenerates both channel heads after a release is published, edited, unpublished or deleted. It can also run manually. It reads all release pages, ignores drafts, rehearsal/alpha/RC versions and incomplete platform assets, validates the expected GitHub ZIP URL and GitHub's SHA-256 asset digest, and selects by SemVer rather than publication date. An API or metadata error stops deployment, preserving the existing site. With no published release, the feed explicitly reports no available version. Apple silicon is shipped; the x64 feed remains empty until matching x64 assets exist.
+
+GitHub Pages is configured to use Actions, with its protected `github-pages` environment allowing `main` and `v*` tags. After this PR merges:
+
+1. Keep the default site URL above stable and retain the environment's `main` and `v*` policies (published-release events run in their tag context).
+2. Run **Actions → Update feeds** from `main`. Check that both URLs return JSON without credentials. Published beta assets must also be downloadable without credentials.
+3. Keep one Pages deployment workflow. If the documentation site (#75) is added here, generate the `updates/` directory into its final site artifact before that same deployment; independent Pages deployments would replace each other's files.
+
+Publishing a beta uses the existing reviewed release path: update package files to e.g. `1.0.0-beta.1`, merge onto `main`, push its matching tag, approve signing, review the resulting draft and publish it as a prerelease. Publishing a final version follows the same path without the beta suffix. The feed workflow publishes the matching channel metadata automatically. Draft creation never publishes an app release or advances a channel.
+
+## Automatic checks and safe quit
+
+Background signature/location checks run after the first usable window opens. Packaged Developer ID signed macOS apps then check at launch and every four hours; development and ad-hoc builds never contact the feed. Automatically checking is enabled by default and stored on this Mac. Disabling it stops future checks, while manual **ImageFlow → Check for Updates…** still works. General settings shows progress, up-to-date and offline/error states. Translocated/Downloads and unwritable copies have actionable location/permissions hints; writable external drives are allowed.
+
+A downloaded update produces one non-modal **Restart to Update** notice in the focused or most recent app window. **Later** dismisses it throughout the app; the menu and settings restart actions remain. Restart enters ordinary Quit: Markdown windows flush with their existing conflict/cancel handling; ordinary fields commit on blur and pending writes drain. Active page editors and invalid/failed drafts keep the app open. Crashed/loading windows do not prevent quitting. A non-answering window offers Keep Open or explicit Quit Anyway, warning that unsaved input may be lost. Only after ordinary cleanup settles writers, releases locks and shuts down MCP does the app request install/relaunch.
+
+Squirrel also applies a staged update on ordinary Quit, without requesting relaunch. Later dismisses the notice rather than cancelling staging. A cancelled restart clears only the relaunch request. [Electron documents that a downloaded update applies on the next start](https://www.electronjs.org/docs/latest/api/auto-updater#autoupdaterquitandinstall).
+
+## Automated signed upgrade test
+
+**Signed upgrade test** performs actual native installation on a fresh Apple silicon runner, without publishing a GitHub Release. It runs with release preparation or on an existing trusted version tag. Its isolated app has bundle ID `ch.wirhabenzeit.imageflow.upgrade-test`, a separate book/profile, a compiled loopback-only feed and a test-only debugging port. Production builds cannot redirect their feed using environment variables. Fixtures do not register the production document types.
+
+The workflow builds four versions without Apple credentials, signs them using the existing temporary-keychain helper, removes signing credentials, temporarily trusts its local HTTPS server in the ephemeral runner account, and runs three real transitions:
+
+1. `9.9.9-beta.1 → 9.9.9-beta.2` on Beta.
+2. `9.9.9-beta.2 → 9.9.9` on Beta (same-version final release).
+3. `9.9.9 → 9.9.10` on Stable.
+
+It checks stable/beta isolation, offline recovery, actual ZIP download, native installation/relaunch, saved book content, lock reacquisition, up-to-date/no-downgrade behavior and MCP SDK reconnection using the same configured bridge command. Native updater events and `quitAndInstall` are never mocked. It uploads `signed-upgrade-report.json`, then removes local TLS trust. That report must say `passed: true`; green mocked UI tests are separate evidence.
+
+All three transitions passed locally on 2026-11-14 using the installed Developer ID identity, without exporting its private key. The [recorded report](validation/signed-upgrade-2026-11-14.json) includes artifact hashes and identifies the working-tree source used. The temporary local TLS trust was removed and independently checked afterwards. These fixtures were signed, not notarized.
+
+The release workflow runs this test automatically and requires it to succeed before preparing the draft release. It reuses the existing tag-only protected `release` environment and its three signing secrets; no extra environment, key export or credential copy is required. Tagging a release candidate creates a draft only, so the test does not require public publication.
+
+After the workflow exists on a trusted version tag, it can also be rerun on that tag without creating or publishing another release:
+
+```sh
+gh workflow run upgrade-test.yml --ref v1.0.0-beta.1
+```
+
+Choose an actual existing tag containing the workflow and approve the existing release environment. The tag's commit must be on main. Main/feature-branch dispatches are skipped: moving a checkout to main does not change GitHub's tag-only environment authorization. For current untagged code, use the local one-command test below.
+
+Both entry paths verify main ancestry before credential access and retain the existing environment's version-tag policy. Fixtures are signed but not notarized/quarantined; this test establishes native update behavior, not first-download Gatekeeper acceptance.
+
+For a Mac with an installed Developer ID identity, one local command builds, signs and tests all fixtures and removes local test-server trust afterwards:
+
+```sh
+npm run test:upgrade:signed
+```
+
+It selects the sole installed Developer ID, or accepts `APPLE_SIGNING_IDENTITY` when multiple identities are available. Private keys stay in Keychain; nothing is exported. Use a disposable Mac account for routine runs. The staged developer commands used by CI are:
 
 ```sh
 npm run build
 npm run test:unit
-node scripts/stage-desktop.mjs
-node scripts/smoke-updates.mjs
-node scripts/smoke-quit.mjs
-node scripts/smoke-project-lifecycle.mjs
-node scripts/smoke-markdown-editor.mjs
+npm run test:updates
+node scripts/upgrade-fixtures.mjs prepare
+node scripts/upgrade-fixtures.mjs build
+node scripts/mac-credentials.mjs sign-fixtures
+node scripts/upgrade-fixtures.mjs trust
+node scripts/test-signed-upgrade.mjs
+node scripts/upgrade-fixtures.mjs untrust
 ```
 
-`smoke-updates.mjs` simulates native updater events and intercepts installation. It checks the preference, manual feedback, notice, cancelled quit with pending page text, successful save, and lock/MCP cleanup before installation. These checks do **not** establish signed download, installation, relaunch or real-client reconnection.
+Prefer the workflow, which performs trust cleanup even after failure. Lightweight tests cover feed generation, semantic ordering, channel preferences, failures, notices, field save/cancel/recovery and crashed/unresponsive windows.
 
-Before closing #74 or shipping V1, record an actual two-version upgrade in the issue:
+## Remaining release acceptance (#74)
 
-1. Choose two stable SemVer versions built by the release workflow with the same Developer ID. Record versions, commits, workflow runs, signing identity/team, macOS version, ZIP/DMG links and the public feed URL (`https://update.electronjs.org/wirhabenzeit/imageflow/darwin-arm64/<installed-version>`). Both versions must already include the updater.
-2. Install the older notarized DMG on a clean Apple silicon Mac by dragging it into Applications; eject the disk image. Configure a real MCP client once and record its launch configuration.
-3. Publish the newer stable release with its original ZIP and DMG names. Coordinate this publication explicitly: the public service ignores draft and prerelease releases, so two draft artifacts cannot prove delivery. Do not publish throwaway stable releases as part of an automated test.
-4. Check discovery and background download using the real public feed. Verify **Restart to Update**, **Later**, and the retained menu/settings restart command. Record any service cache delay.
-5. Try restarting with pending inline text, a failed save and a conflicted Markdown source. Confirm the app stays open with the draft intact when the edit cannot safely close. Resolve/save, restart, and confirm the expected version relaunches, saved text survives and books reopen without stale locks.
-6. Check ordinary Quit after **Later**, including after cancelling a restart: the staged update should apply and the app should remain closed until launched manually. Verify macOS logout/restart/shutdown with saved books does not get blocked by the quit handshake.
-7. Verify manual checks while automatic checks are off, the persisted preference after relaunch, up-to-date feedback, and offline/error recovery. Run from a DMG/translocated location and verify the move-to-Applications hint.
-8. Reconnect the configured real MCP client without repeating setup. Confirm the installed executable path remains unchanged and a book can be inspected and edited. Attach results and failures to #74; leave it open until this evidence is complete.
+Record the first successful signed-upgrade workflow run and its report under #74. Before V1 ships, also record a real downloaded notarized app's clean-Mac Gatekeeper acceptance (#73), the live Pages feeds and public ZIP checks, a configured desktop MCP client's reconnection, and macOS logout/restart/shutdown with saved books. These environmental checks are separate from the automated SDK/installer result. No public throwaway release is needed to validate the installer; normal beta distribution validates the hosted feed path. Keep #74 open until its evidence is recorded.

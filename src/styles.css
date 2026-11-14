@@ -595,7 +595,8 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 
 .update-notice { position: fixed; right: 20px; top: 48px; z-index: 10000; max-width: 330px; padding: 14px 16px; border: 1px solid var(--edge); border-radius: 10px; background: var(--popup-surface); color: var(--text); box-shadow: 0 6px 28px #0003; font: 13px/1.45 var(--ui-font); }
 .update-notice p { margin: 0 0 10px; }
-.update-notice > div, .settings-update-actions { display: flex; gap: 8px; }
+.update-notice > div, .update-channel { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.settings-update-actions { display: flex; gap: 8px; }
 .update-notice button { cursor: default; font: inherit; padding: 5px 9px; border: 0; border-radius: 6px; background: var(--button-fill, var(--control-fill)); box-shadow: var(--button-shadow, 0 0 0 .5px var(--control-border)); color: var(--text); }
 .settings-update-actions { margin-top: 12px; }
 .update-status { min-height: 2.8em; max-width: 330px; }

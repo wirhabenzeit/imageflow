@@ -1,0 +1,57 @@
+{
+  "signed": true,
+  "mockInstallation": false,
+  "platform": "darwin-arm64",
+  "transitions": [
+    {
+      "from": "9.9.9-beta.1",
+      "to": "9.9.9-beta.2",
+      "channel": "beta",
+      "savedBook": true,
+      "lockReacquired": true,
+      "mcpReconnected": true
+    },
+    {
+      "from": "9.9.9-beta.2",
+      "to": "9.9.9",
+      "channel": "beta",
+      "savedBook": true,
+      "lockReacquired": true,
+      "mcpReconnected": true
+    },
+    {
+      "from": "9.9.9",
+      "to": "9.9.10",
+      "channel": "stable",
+      "savedBook": true,
+      "lockReacquired": true,
+      "mcpReconnected": true
+    }
+  ],
+  "checks": [
+    "stable excludes beta",
+    "offline feed error",
+    "up to date",
+    "no downgrade"
+  ],
+  "startedAt": "2026-11-14T22:46:00.770Z",
+  "completedAt": "2026-11-14T22:47:04.079Z",
+  "passed": true,
+  "environment": {
+    "macOS": "27.0.1",
+    "architecture": "arm64",
+    "bundleId": "ch.wirhabenzeit.imageflow.upgrade-test",
+    "signingTeam": "DX96FWY9AX",
+    "notarized": false
+  },
+  "source": {
+    "parentCommit": "1f609547b42b420ea6be0fc0a8aff7f609e1875b",
+    "workingTree": true
+  },
+  "artifactSHA256": {
+    "9.9.9-beta.1": "7b78db1b6446054c38ee0f1fce04cd16f969fe6cd8f894ac866c6716326bbc2c",
+    "9.9.9-beta.2": "93cbf9d1514204fccda578036f444288b56ebc6ab1362b9f95ec5f40f12f712b",
+    "9.9.9": "f04232f06e03e688f15be4ad1df87086e1dda5dbfbec66c395380ba4b734e702",
+    "9.9.10": "4c1585bbedd5167e69cd1bbd99cf08e614b50159e15b65bed80191782fff797c"
+  }
+}

@@ -2,8 +2,8 @@ import type { UpdateState } from '../src/updates';
 
 export interface UpdateDriver {
   // Initialization configures the public feed and starts its first check.
-  initialize(): void;
-  check(): void;
+  initialize(): void | Promise<void>;
+  check(): void | Promise<void>;
   install(): void;
 }
 
@@ -54,8 +54,9 @@ export class AppUpdater {
     if (this.options.unavailable || ['checking', 'downloading', 'ready'].includes(this.state.status)) return;
     this.publish({ status: 'checking' });
     try {
-      if (!this.initialized) { this.options.driver.initialize(); this.initialized = true; }
-      else this.options.driver.check();
+      const task = !this.initialized ? this.options.driver.initialize() : this.options.driver.check();
+      this.initialized = true;
+      void Promise.resolve(task).catch((error) => this.failed(error));
     } catch (error) { this.failed(error); }
   }
   available() { if (this.state.status !== 'ready') this.publish({ status: 'downloading' }); }

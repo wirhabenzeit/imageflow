@@ -1,6 +1,8 @@
 import { AppUpdater } from './updates';
 import { updateUnavailable } from './update-environment';
-import { updateElectronApp, UpdateSourceType } from 'update-electron-app';
+import { checkUpdateFeed, updateTestConfiguration } from './update-feed';
+import { updateBaseURL, releaseChannel } from '../src/update-feed';
+import { defaultSettings } from '../src/settings';
 import { MarkdownWindows } from './markdown-windows';
 import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
@@ -108,6 +110,10 @@ const csp = devServer
 if (app.isPackaged) process.env.ESBUILD_BINARY_PATH = join(process.resourcesPath, 'esbuild');
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 
+if (updateTestConfiguration) {
+  app.setPath('userData', updateTestConfiguration.profile);
+  app.commandLine.appendSwitch('remote-debugging-port', String(updateTestConfiguration.debugPort));
+}
 if (!app.requestSingleInstanceLock()) app.exit(0);
 // The app remains available after its last book closes; cleanup opens the start window.
 app.on('window-all-closed', () => {});
@@ -1004,7 +1010,7 @@ function updateStateFor(owner: BrowserWindow) {
   const windows = updateWindows();
   const focused = BrowserWindow.getFocusedWindow();
   const target = focused && windows.includes(focused) ? focused : lastDocument?.window ?? windows.find((window) => window.isVisible()) ?? startWindow;
-  return { ...updates.state, notice: owner === target };
+  return { ...updates.state, installedVersion: app.getVersion(), notice: owner === target };
 }
 function publishUpdates() {
   if (!updates) return;
@@ -1091,7 +1097,7 @@ function showSettings(pane?: SettingsPane) {
 
 
 void app.whenReady().then(async () => {
-  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'));
+  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), { ...defaultSettings, updateChannel: releaseChannel(app.getVersion()) ?? 'stable' });
   recents = new RecentDocuments(join(app.getPath('userData'), 'recent-documents.json'));
   await Promise.all([settings.load(), recents.load()]);
   configureSourceStore(join(app.getPath('userData'), 'source-cache'));
@@ -1100,14 +1106,12 @@ void app.whenReady().then(async () => {
   updates = new AppUpdater({
     pending: true,
     driver: {
-      initialize: () => {
-        // The library configures Squirrel's feed and performs the initial check. Own the timer so
-        // Settings can stop and resume automatic checking without installing duplicate listeners.
-        const updater = updateElectronApp({ updateSource: { type: UpdateSourceType.ElectronPublicUpdateService,
-          repo: 'wirhabenzeit/imageflow' }, notifyUser: false, updateInterval: '4 hours' });
-        updater.stopUpdates();
-      },
-      check: () => autoUpdater.checkForUpdates(),
+      initialize: () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
+        channel: settings.value.updateChannel, platform: process.platform + '-' + process.arch, installed: app.getVersion(),
+        request: net.fetch as typeof fetch, current: () => updates.current(), native: autoUpdater }),
+      check: () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
+        channel: settings.value.updateChannel, platform: process.platform + '-' + process.arch, installed: app.getVersion(),
+        request: net.fetch as typeof fetch, current: () => updates.current(), native: autoUpdater }),
       install: () => autoUpdater.quitAndInstall(),
     },
     changed: (state) => {
@@ -1489,9 +1493,13 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {
     if (!appOwner(event)) return { error: 'Request is only available to an app window.' };
     try {
+      if (patch && typeof patch === 'object' && 'updateChannel' in patch && patch.updateChannel !== settings.value.updateChannel &&
+          ['checking', 'downloading', 'ready'].includes(updates.state.status)) throw new Error('Finish the current update before changing channels.');
+      const previousChannel = settings.value.updateChannel;
       const value = await settings.update(patch);
       nativeTheme.themeSource = value.appearance;
       updates.setAutomatic(value.automaticUpdates);
+      if (value.updateChannel !== previousChannel && value.automaticUpdates) updates.check();
       for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value);
       return { value };
     } catch (error) { return { error: errorMessage(error) }; }
@@ -1675,7 +1683,7 @@ void app.whenReady().then(async () => {
     return;
   }
   ready = true;
-  const paths = [...new Set([...pendingOpenFiles.splice(0), ...process.argv.filter(isSystemFile)])];
+  const paths = [...new Set([...(updateTestConfiguration ? [updateTestConfiguration.book] : []), ...pendingOpenFiles.splice(0), ...process.argv.filter(isSystemFile)])];
   if (paths.length) for (const path of paths) await openFromSystem(path);
   else if (devState) {
     try {

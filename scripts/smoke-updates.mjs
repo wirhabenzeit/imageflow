@@ -41,6 +41,12 @@ try {
   await automatic.uncheck();
   await settings.waitForFunction(async () => !(await window.imageflow.getSettings()).value.automaticUpdates);
   assert.equal(JSON.parse(await readFile(join(profile, 'settings.json'), 'utf8')).automaticUpdates, false);
+  const channel = settings.getByRole('combobox', { name: 'Update channel' });
+  assert.equal(await channel.inputValue(), 'stable');
+  await channel.selectOption('beta');
+  await settings.waitForFunction(async () => (await window.imageflow.getSettings()).value.updateChannel === 'beta');
+  assert.equal(JSON.parse(await readFile(join(profile, 'settings.json'), 'utf8')).updateChannel, 'beta');
+  await channel.selectOption('stable');
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('update-not-available'); });
   await settings.getByText('You’re up to date.', { exact: true }).waitFor();
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('error', new Error('offline')); });
@@ -48,6 +54,7 @@ try {
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('update-available'); });
   await settings.getByText('Downloading update…', { exact: true }).waitFor();
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('update-downloaded', {}, '', '1.0.1'); });
+  assert.equal(await channel.isDisabled(), true);
   await page.getByRole('complementary', { name: 'ImageFlow update' }).waitFor();
   await page.screenshot({ path: join(root, '.build/update-notice.png') });
   await settings.screenshot({ path: join(root, '.build/update-settings.png') });

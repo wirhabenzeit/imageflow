@@ -139,3 +139,18 @@ test('Later dismisses notices for the whole app while preserving the restart act
   updater.downloaded('1.0.2');
   assert.equal(updater.state.dismissed, undefined);
 });
+
+
+test('asynchronous feed failures leave checking state and allow a manual retry', async (t) => {
+  let calls = 0;
+  const updater = new AppUpdater({ driver: { initialize: async () => { throw new Error('offline feed'); },
+    check: async () => { calls++; updater.current(); }, install: () => {} }, quit: () => {}, changed: () => {} });
+  t.after(() => updater.dispose());
+  updater.check();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(updater.state.status, 'error');
+  updater.check();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  assert.equal(updater.state.status, 'current');
+});
