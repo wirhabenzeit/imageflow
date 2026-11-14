@@ -52,9 +52,15 @@ try {
   assert.equal(summary.photoDates.early.captured, '2026-11-02T23:50:00+02:00');
   assert.equal(summary.photoDates.estimated.capturedEstimated, true);
   assert.equal(summary.photoDates.estimated.captured, '2026-11-05T12:00:00.000Z');
-  assert.equal(await page.locator('.document-proxy img').count(), 0);
-  assert.equal(await page.locator('.document-proxy svg').count(), 1);
-  assert.ok(await page.locator('.document-title').evaluate((node) => parseFloat(getComputedStyle(node).fontSize) >= 13));
+  if (process.platform === 'darwin') {
+    assert.equal(await page.locator('.project-identity').count(), 0);
+    const nativeWindow = await app.browserWindow(page);
+    assert.equal(await nativeWindow.evaluate((window) => window.getTitle()), 'Details');
+    assert.equal(await nativeWindow.evaluate((window) => window.getRepresentedFilename()), folder);
+  } else {
+    assert.equal(await page.locator('.document-proxy svg').count(), 1);
+    assert.ok(await page.locator('.document-title').evaluate((node) => parseFloat(getComputedStyle(node).fontSize) >= 13));
+  }
   assert.equal(await page.locator('.source-photo[data-id="early"] .badge').count(), 0);
   assert.equal(await page.locator('.source-photo[data-id="late"] .badge[aria-label="Used once"] svg').count(), 1);
   // A height change scales every preceding thumbnail; retain the same point in the center photo.

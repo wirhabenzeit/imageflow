@@ -2,6 +2,8 @@
 
 Use a Mac matching the target architecture (arm64 for v1). Xcode Command Line Tools provide `codesign`, `notarytool`, `stapler`, `ditto` and `hdiutil`. Poppler is required by the packaged PDF smoke checks.
 
+Staging compiles the small AppKit document-header module with Xcode Command Line Tools and the Node-API headers included in official Node.js distributions. For installations with separate headers, set `NODE_INCLUDE_DIR` to the directory containing `node_api.h`. The module is unpacked and signed with the app; no compiler or Node installation is needed to run the packaged app.
+
 ## Build commands
 
 - `npm run package:mac` produces a local app. Without `APPLE_SIGNING_IDENTITY`, it uses the existing ad-hoc signature. With a Developer ID Application identity, it signs with hardened runtime and verifies the app, Electron helpers, esbuild, sharp and libvips.

@@ -16,7 +16,11 @@ assert.ok(type.UTTypeConformsTo.includes('com.apple.package'));
 assert.ok(type.UTTypeTagSpecification['public.filename-extension'].includes('imageflow'));
 const declaration = info.CFBundleDocumentTypes.find((entry) => entry.LSItemContentTypes.includes(type.UTTypeIdentifier));
 assert.equal(declaration.LSTypeIsPackage, true);
-await stat(join(bundle, 'Contents/Resources', declaration.CFBundleTypeIconFile));
+assert.equal(declaration.CFBundleTypeIconFile, 'ImageFlowBook.icns');
+const templateDeclaration = info.CFBundleDocumentTypes.find((entry) => entry.LSItemContentTypes.includes('ch.wirhabenzeit.imageflow.template'));
+assert.equal(templateDeclaration.CFBundleTypeIconFile, 'ImageFlowTemplate.icns');
+for (const icon of [info.CFBundleIconFile, declaration.CFBundleTypeIconFile, templateDeclaration.CFBundleTypeIconFile]) await stat(join(bundle, 'Contents/Resources', icon));
+await stat(join(bundle, 'Contents/Resources/app.asar.unpacked/native/mac-header.node'));
 const work = await realpath(await mkdtemp(join(root, '.build/document-registration-')));
 const first = join(work, 'Cold Launch.imageflow');
 const second = join(work, 'Finder Open.imageflow');
@@ -25,7 +29,13 @@ let app;
 try {
   app = await _electron.launch({ executablePath: packagedMacExecutable(root), args: ['--user-data-dir=' + join(work, 'profile'), first],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
-  const one = await app.firstWindow();
+  // Cold startup can create temporary template-probe windows before the editor.
+  let one;
+  for (let attempt = 0; !one && attempt < 1200; attempt++) {
+    one = app.windows().find((page) => page.url() === 'imageflow://editor/');
+    if (!one) await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(one, 'Cold opening creates a document editor');
   assert.equal(await app.evaluate(({ app }) => app.getVersion()), metadata.version, 'About ImageFlow must use the release version.');
   one.setDefaultTimeout(30000);
   await one.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
