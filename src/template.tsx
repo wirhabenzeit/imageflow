@@ -506,7 +506,9 @@ export type PhotoRender = {
   ppi: number;
   metadata: Photo;
 };
-// `uid` is unique in the book (spread and box), for SVG ids such as a clipPath's.
+// `uid` is unique in the book (spread and box), for SVG ids such as a clipPath's. Ids may contain hyphens, so the
+// spread id's length keeps pairs such as one-x/hero and one/x-hero apart.
+export const photoBoxUid = (spread: string, box: string) => 'if-' + spread.length + '-' + spread + '-' + box;
 export type PhotoBoxState = { id: string; uid: string; params: Values; photo: Photo | null };
 export type PhotoBoxRender = (photo: PhotoRender, box: PhotoBoxState) => ReactNode;
 
@@ -616,7 +618,7 @@ export function PhotoBox({ id, className, style, rect, children, 'data-edit': ma
     const resolved = values.boxes[id];
     renderingSpread(spread.id);
     try {
-      content = render(shown, { id, uid: 'if-' + spread.id + '-' + id, params: resolved?.params ?? {}, photo: resolved?.photo ?? null });
+      content = render(shown, { id, uid: photoBoxUid(spread.id, id), params: resolved?.params ?? {}, photo: resolved?.photo ?? null });
     } finally {
       renderingSpread(undefined);
     }

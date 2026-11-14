@@ -4,7 +4,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
-import { PDFDict, PDFDocument, PDFName } from 'pdf-lib';
+import { decodePDFRawStream, PDFArray, PDFDict, PDFDocument, PDFName } from 'pdf-lib';
 import { _electron } from 'playwright-core';
 
 // #104: a PhotoBox render callback draws the photo through the template's SVG mask in the book view, follows a crop
@@ -114,6 +114,13 @@ try {
   const resources = pdf.getPages()[page].node.Resources();
   const objects = resources?.lookupMaybe(PDFName.of('XObject'), PDFDict);
   assert.ok(objects && objects.keys().length > 0, 'the masked photo is embedded on its page');
+  // The exported copy of the artwork resolves its clip path against its own definition, not the hidden original's:
+  // the circle reaches the PDF as a clipping path built from curves.
+  const contents = pdf.getPages()[page].node.Contents();
+  const streams = contents instanceof PDFArray ? contents.asArray().map((ref) => pdf.context.lookup(ref)) : [contents];
+  const ops = streams.map((stream) => Buffer.from(decodePDFRawStream(stream).decode()).toString('latin1')).join('\n');
+  assert.match(ops, /( c\s+)+[^]*?\bW\s+n\b/, 'the circular mask clips the photo in the PDF');
+  if (process.env.SMOKE_DUMP) await writeFile(process.env.SMOKE_DUMP, ops);
   console.log('PhotoBox render callback smoke test passed.');
 } finally {
   await app?.close();

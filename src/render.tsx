@@ -1,4 +1,5 @@
 import { sourcePath } from './source-locations';
+import { renameIds } from './svg-ids';
 import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
 import { configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
@@ -592,12 +593,18 @@ function sheetCrop(format: ResolvedFormat, side: PrintSide, bounds: PreviewMetad
   return { x: page.trimX, y: bleed.top, widthMm: trim.width, heightMm: trim.height };
 }
 
+// A sheet is copied once per printed side and the original is hidden. SVG references such as clip-path="url(#id)"
+// resolve to the first element with that id in the document, which would be the hidden original, so each copy gets
+// its own ids and its references follow them.
+let printCopies = 0;
+
 function croppedSheet(sheet: HTMLElement, crop: ReturnType<typeof sheetCrop>, pixels?: { width: number; height: number }) {
   const page = document.createElement('div');
   page.className = 'if-print-page';
   page.style.width = cssMM(crop.widthMm);
   page.style.height = cssMM(crop.heightMm);
   const clone = sheet.cloneNode(true) as HTMLElement;
+  renameIds(clone, '-p' + ++printCopies);
   let scaleX = 1;
   let scaleY = 1;
   if (pixels) {

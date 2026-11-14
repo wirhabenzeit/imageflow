@@ -61,7 +61,7 @@ test('a render callback receives the host crop, rendition, resolution, metadata 
   assert.match(photo.src, /\/photo\/wide\/\d+$/);
   const width = Number(photo.src.split('/').at(-1));
   assert.ok(width >= photo.image.width / 96 * 300 && width < photo.image.width / 96 * 300 + 16);
-  assert.deepEqual(state, { id: 'hero', uid: 'if-one-hero', params: { tilt: -4 }, photo: { width: 6000, height: 2000, caption: 'Wide', altText: 'A wide view' } });
+  assert.deepEqual(state, { id: 'hero', uid: 'if-3-one-hero', params: { tilt: -4 }, photo: { width: 6000, height: 2000, caption: 'Wide', altText: 'A wide view' } });
   assert.match(html, /data-photo-render="custom"/);
   assert.match(html, /<svg class="art"><image href="imageflow:\/\/render\/b\/photo\/wide\/\d+"/);
   assert.doesNotMatch(html, /<img/);
