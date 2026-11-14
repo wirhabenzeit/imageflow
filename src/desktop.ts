@@ -18,7 +18,7 @@ export const settingsURL = desktopScheme + '://editor/settings';
 export const renderOrigin = desktopScheme + '://render';
 
 export const channels = {
-  contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', presentation: 'document:presentation', dragSources: 'document:drag-sources',
+  contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', toolbarDragRegions: 'document:toolbar-drag-regions', presentation: 'document:presentation', dragSources: 'document:drag-sources',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
@@ -50,7 +50,7 @@ export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, 
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView; selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string> };
 export type Command = PhotoViewCommand | SpreadCommand | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'print' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
-  id: string; folder: string; readOnly: boolean;
+  id: string; folder: string;
   handle?: string; history?: HistoryState; viewKey?: string;
   pageLabels?: Record<string, string>;
   photoDates?: Record<string, { captured: string; capturedEstimated?: boolean }>;
@@ -95,6 +95,7 @@ export type DesktopApi = {
   popupMenu(items: PopupItem[], point?: { x: number; y: number }): Promise<string | null>;
   setPresentation(active: boolean): Promise<void>;
   documentProxy(action: 'path' | 'drag'): Promise<void>;
+  setToolbarDragRegions(regions: Rect[]): Promise<void>;
   dragSources(keys: string[]): Promise<void>;
   showAssets(accept: string[]): Promise<Result<void>>;
   showTemplates(): Promise<void>;

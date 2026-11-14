@@ -19,7 +19,8 @@
     "package:mac:release": "npm run build && node scripts/package-mac.mjs --release",
     "notarize:mac": "node scripts/notarize-mac.mjs",
     "test:packaged:existing": "node scripts/smoke-document-registration.mjs && node scripts/smoke-linked-sources.mjs --packaged && node scripts/smoke-desktop.mjs --packaged && node scripts/smoke-draft.mjs --packaged && node scripts/smoke-mcp.mjs --packaged",
-    "generate:authoring": "node scripts/generate-authoring.mjs"
+    "generate:authoring": "node scripts/generate-authoring.mjs",
+    "build:icons": "node scripts/build-icons.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",

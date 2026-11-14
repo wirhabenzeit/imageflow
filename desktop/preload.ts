@@ -15,6 +15,7 @@ const api: DesktopApi = {
   popupMenu: (items, point) => ipcRenderer.invoke(channels.popupMenu, items, point),
   setPresentation: (active) => ipcRenderer.invoke(channels.presentation, active),
   documentProxy: (action) => ipcRenderer.invoke(channels.documentProxy, action),
+  setToolbarDragRegions: (regions) => ipcRenderer.invoke(channels.toolbarDragRegions, regions),
   dragSources: (keys) => ipcRenderer.invoke(channels.dragSources, keys),
   showAssets: (accept) => ipcRenderer.invoke(channels.showAssets, accept),
   showTemplates: () => ipcRenderer.invoke(channels.showTemplates),

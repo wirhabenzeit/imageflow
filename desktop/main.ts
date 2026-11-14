@@ -25,6 +25,7 @@ import { photoFile } from './photos';
 import { captureBookPreview, checkBookRender } from './preview';
 import { PreviewError } from '../src/preview';
 import { DocumentSession } from './document-session';
+import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { createDocument, documentIdentity, documentPath, isDocument, RecentDocuments } from './documents';
 import { SettingsStore } from './settings';
@@ -347,7 +348,7 @@ function captureCover(document: DocumentSession, book: OpenProject, closing = fa
   return state.task;
 }
 function scheduleCover(document: DocumentSession, book: OpenProject) {
-  if (book.readOnly || document.closing) return;
+  if (document.closing) return;
   markCoverDirty(document);
   const state = covers.get(document)!;
   state.timer = setTimeout(() => {
@@ -357,28 +358,26 @@ function scheduleCover(document: DocumentSession, book: OpenProject) {
 }
 async function saveDevState() {
   if (devState) await writeFile(devState, JSON.stringify([...documents.values()].filter((document) => !document.closing)
-    .map((document) => ({ folder: document.book.folder, readOnly: document.book.readOnly })))).catch(() => {});
+    .map((document) => ({ folder: document.book.folder })))).catch(() => {});
 }
-async function openDocument(path: string, readOnly = false): Promise<DocumentSession> {
+async function openDocument(path: string): Promise<DocumentSession> {
   if (quitting) throw new Error('ImageFlow is closing.');
-  if (!readOnly && !isDocument(path)) throw new Error('Choose an .imageflow document.');
+  if (!isDocument(path)) throw new Error('Choose an .imageflow document.');
   const { folder, identity } = await documentIdentity(path);
   const existing = identities.get(identity);
   if (existing) {
     if (existing.closing) {
       await existing.close().catch(() => {});
       if (identities.get(identity) === existing) identities.delete(identity);
-      return openDocument(path, readOnly);
+      return openDocument(path);
     }
     if (existing.book.folder !== folder) {
       const relocated = await existing.run(() => existing.relocate(folder));
       if ('error' in relocated) throw new Error(relocated.error);
     }
-    if (!existing.book.readOnly) {
-      await recents.remember(folder, existing.book.project.title);
-      app.addRecentDocument(folder);
-      publishRecents();
-    }
+    await recents.remember(folder, existing.book.project.title);
+    app.addRecentDocument(folder);
+    publishRecents();
     await saveDevState();
     focus(existing.window);
     return existing;
@@ -386,19 +385,21 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
   const pending = opening.get(identity);
   if (pending) return pending;
   const task = (async () => {
-    const release = readOnly ? undefined : await acquireProjectLock(folder);
+    const release = await acquireProjectLock(folder);
     let editor: BrowserWindow | undefined;
     let document: DocumentSession | undefined;
     try {
-      const book = await loadProject(folder, cache, readOnly);
+      const book = await loadProject(folder, cache);
       if (quitting) throw new Error('ImageFlow is closing.');
       editor = new BrowserWindow({ width: 1520, height: 950, minWidth: 940, minHeight: 650, show: false,
-        ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 20 } } : {}),
         webPreferences: windowOptions() });
+      configureMacHeader(editor);
+      // The document session owns the native title; the editor page's HTML title must not replace it.
+      editor.on('page-title-updated', (event) => event.preventDefault());
       secureWindow(editor);
       document = new DocumentSession(editor, book, cache, sessions, release, (next) => {
         if (document) queueMicrotask(() => { if (document) publishAssets(document); });
-        if (document && !next.readOnly) {
+        if (document) {
           void recents.refresh(next.folder, next.project.title).then(publishRecents).catch((error) => console.warn('ImageFlow could not update recent books', error));
           markCoverDirty(document);
         }
@@ -441,12 +442,10 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
       editor.once('ready-to-show', () => { if (!hidden) focus(current.window); });
       // loadURL may finish after ready-to-show, so showing is also safe here.
       focus(editor);
-      if (!readOnly) {
-        await recents.remember(folder, book.project.title);
-        app.addRecentDocument(folder);
-        publishRecents();
-        scheduleCover(current, book);
-      }
+      await recents.remember(folder, book.project.title);
+      app.addRecentDocument(folder);
+      publishRecents();
+      scheduleCover(current, book);
       startWindow?.hide();
       await saveDevState();
       updateMenus();
@@ -1124,7 +1123,7 @@ void app.whenReady().then(async () => {
     const owner = document ? (assetsOwner(event) ? assetsWindows.get(document)?.window : document.window) : templatesOwner(event) ?? startOwner(event);
     if (!owner || document?.closing || !Array.isArray(input) || input.length > 100) return null;
     const state: BookMenuState = { ...emptyMenuState, ...snapshot, document: !!document,
-      writable: !!document && !document.book.readOnly && (snapshot?.writable ?? true) };
+      writable: !!document && (snapshot?.writable ?? true) };
     let chosen: ContextMenuResult | null = null;
     let count = 0;
     const build = (items: ContextMenuItem[], depth = 0): MenuItemConstructorOptions[] => {
@@ -1167,6 +1166,10 @@ void app.whenReady().then(async () => {
       if (entered) owner.removeListener('enter-full-screen', entered);
       if (simple) owner.setSimpleFullScreen(previous); else owner.setFullScreen(previous);
     }
+  });
+  ipcMain.handle(channels.toolbarDragRegions, (event, regions: unknown) => {
+    const owner = editorOwner(event)?.window;
+    if (owner && process.platform === 'darwin') setToolbarDragRegions(owner, regions);
   });
   ipcMain.handle(channels.documentProxy, async (event, action: unknown) => {
     const document = editorOwner(event);
@@ -1257,7 +1260,7 @@ void app.whenReady().then(async () => {
       return { summary: document.summary };
     }
     if (request.action === 'place') {
-      if (document.book.readOnly || !chosen.length) throw new Error('Select assets in an editable book.');
+      if (!chosen.length) throw new Error('Select assets in the book.');
       document.window.webContents.send(channels.sourceCommand, { action: 'place', keys: chosen.map(({ key }) => key) }); focus(document.window);
       return { summary: document.summary };
     }
@@ -1269,7 +1272,6 @@ void app.whenReady().then(async () => {
       else owner.previewFile(path);
       return { summary: document.summary };
     }
-    if (document.book.readOnly) throw new Error('Create an editable book first.');
     let next = document.book;
     let message: string | undefined;
     if (request.action === 'retry') return { summary: activate(await document.reload()) };
@@ -1523,8 +1525,8 @@ void app.whenReady().then(async () => {
   if (paths.length) for (const path of paths) await openFromSystem(path);
   else if (devState) {
     try {
-      const state = JSON.parse(await readFile(devState, 'utf8')) as { folder: string; readOnly: boolean }[];
-      for (const entry of state) await openDocument(entry.folder, entry.readOnly);
+      const state = JSON.parse(await readFile(devState, 'utf8')) as { folder: string }[];
+      for (const entry of state) await openDocument(entry.folder);
     } catch { /* No development documents to restore. */ }
   }
   if (!documents.size) showStart();

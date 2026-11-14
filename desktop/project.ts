@@ -382,7 +382,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
 export function projectSummary(book: OpenProject, id: string): ProjectSummary {
   const base = renderOrigin + '/render/' + id;
   return {
-    id, folder: basename(book.folder), viewKey: book.viewKey ?? createHash('sha256').update(book.folder).digest('hex'), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
+    id, folder: basename(book.folder), viewKey: book.viewKey ?? createHash('sha256').update(book.folder).digest('hex'), project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
     photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
     photoDates: Object.fromEntries([...book.photos].flatMap(([id, photo]) => { const date = photoDate(photo); return date ? [[id, date]] : []; })),
