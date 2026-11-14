@@ -1312,6 +1312,7 @@ export async function startRender(root: HTMLElement) {
       for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
     }
     const lazy = edit && view === 'book';
+    if (edit) book.view = view === 'thumbs' ? 'thumbnail' : view === 'layouts' ? 'layout-preview' : 'canvas';
     // Pictures drawn by <RenderedImage>: at the screen's resolution in the editor (smaller for thumbnails), cheaply
     // in the Book check, and at the format's target resolution for export (ADR 0006).
     const target = template.format.output.resolution?.target ?? 300;

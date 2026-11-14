@@ -399,7 +399,8 @@ type RenderContext = {
   page: { left?: number; right?: number; number?: number };  // page numbers: left/right, or number without facing pages
   format: ResolvedFormat;                   // trim, bleed, safe area in mm, for the chosen format
   formatId: string;                         // the chosen key of `formats`, or 'default'
-  mode: 'edit' | 'export';
+  mode: 'edit' | 'export';                  // 'export' for export, Book check and MCP artwork
+  view: 'canvas' | 'thumbnail' | 'layout-preview' | 'export';  // where this render is shown (see below)
   edit(...paths: EditPath[]): { 'data-edit'?: string };  // marks a node for click-to-edit
   geometry: BoundGeometry;                  // the geometry helpers with this format applied
   PhotoBox; MarkdownBox; Element;          // the platform components, typed to this layout's IDs
@@ -411,6 +412,14 @@ type RenderContext = {
   };
 };
 ```
+
+`mode` and `view` are fixed for the whole render. `mode` is `'edit'` for every render in the editor and `'export'` for print and proof export, the Book check and MCP artwork. `view` says where an edit-mode render is shown: `'canvas'` is the interactive book, the only place anyone clicks; `'thumbnail'` is the sidebar and `'layout-preview'` the Inspector's layout previews, which show what the page will look like. `view === 'export'` exactly when `mode === 'export'`. Show editing scaffolding, such as a placeholder that invites a click, only on the canvas:
+
+```tsx
+{!chapters.length && ctx.view === 'canvas' && <p className="hint">Story spreads appear here.</p>}
+```
+
+ImageFlow's own placeholders follow the same rule: empty `PhotoBox` and `MarkdownBox` placeholders, the `ctx.Text` empty state and the inherited-text underline appear only on the canvas. Thumbnails and layout previews render empty content as export does.
 
 ### Rendered images
 
@@ -454,7 +463,7 @@ For the common case of one string parameter shown as text, `ctx.Text` reads the 
 <ctx.Text parameter="boxes.hero.credit" as="figcaption" placeholder="Photo credit" />
 ```
 
-`parameter` takes the same paths as `ctx.edit`, limited to string parameters. `as` is one of `h1`–`h6`, `p` (default), `span`, `div`, `blockquote` or `figcaption`; `className`, `style`, `rect` and `issue()` markers work as on the platform components. When the value is empty, the editor shows a dimmed placeholder in the template's own type (`placeholder`, else the parameter's `placeholder`, else its label) and marks the node `data-empty`; the exported book shows the empty node. The value is rendered as text, never as HTML, and newlines follow the node's CSS `white-space`. `fallback` displays inherited text when the saved value is empty or whitespace-only, without saving it. Set `fallbackLabel` to name its source: inherited text has a dotted underline in edit mode and the popover explains what clearing the override does. `hidden` suppresses the node explicitly; whitespace never means hidden. A template can bind it to a separate visibility parameter, as the calendar does with `showPlace`. Use `ctx.edit` for nodes that combine several parameters or show more than the value.
+`parameter` takes the same paths as `ctx.edit`, limited to string parameters. `as` is one of `h1`–`h6`, `p` (default), `span`, `div`, `blockquote` or `figcaption`; `className`, `style`, `rect` and `issue()` markers work as on the platform components. When the value is empty, the editing canvas shows a dimmed placeholder in the template's own type (`placeholder`, else the parameter's `placeholder`, else its label) and marks the node `data-empty`; the exported book shows the empty node. The value is rendered as text, never as HTML, and newlines follow the node's CSS `white-space`. `fallback` displays inherited text when the saved value is empty or whitespace-only, without saving it. Set `fallbackLabel` to name its source: inherited text has a dotted underline on the canvas and the popover explains what clearing the override does. `hidden` suppresses the node explicitly; whitespace never means hidden. A template can bind it to a separate visibility parameter, as the calendar does with `showPlace`. Use `ctx.edit` for nodes that combine several parameters or show more than the value.
 
 Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths, image data, or Markdown source, and they cannot change project data.
 
@@ -702,7 +711,7 @@ Rules:
 
 - Each declared box is rendered exactly once through its component; each declared element at most once.
 - Boxes and elements are positioned and sized by template CSS on the component's element (`className`, `style`), or by `rect` (see Geometry helpers).
-- An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted; templates can style `[data-empty]`.
+- An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted, as it is in thumbnails and layout previews; templates can style `[data-empty]`.
 
 ## CSS contract
 
