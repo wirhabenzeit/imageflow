@@ -166,3 +166,35 @@ test('malformed controls reach the schema error instead of crashing the cycle ch
     assert.equal(templateSchema.safeParse(declared).success, false);
   }
 });
+
+test('document controls arrange Book settings, are checked like other scopes and reach templateInfo', () => {
+  const editor = { parameters: ['track'], component: () => null };
+  const declared = (controls: unknown, editors: unknown = { route: editor }) => ({ id: 't', version: '1', contract: 1, format, parameters, controls, editors,
+    spreads: { main: { label: 'Main', render: () => null } } });
+  const arranged = ['show', { group: 'Stamp', when: { show: true }, controls: [{ parameter: 'text', label: 'Words' }, 'tilt'] }];
+  const parsed = templateSchema.safeParse(declared(arranged));
+  assert.ok(parsed.success, JSON.stringify(parsed.error?.issues));
+  const info = templateInfo(chooseFormat(parsed.data));
+  assert.deepEqual(info.controls, arranged);
+  // Book settings: the editor-owned track never shows, `kind` is left out, and the group follows `show`.
+  const shown = (current: typeof values) => controlLayout(info.parameters, info.controls, current, ['track'])
+    .flatMap((node) => node.kind === 'field' ? [node.key] : [node.label + ':' + node.children.map((child) => child.kind === 'field' ? child.label : '').join(',')]);
+  assert.deepEqual(shown(values), ['show', 'Stamp:Words,Tilt']);
+  assert.deepEqual(shown({ ...values, show: false }), ['show']);
+  assert.equal('controls' in templateInfo(chooseFormat(templateSchema.parse(declared(undefined)))), false);
+  // Unknown IDs and a document editor's own parameters are rejected at the template's controls.
+  const unknown = templateSchema.safeParse(declared(['show', 'colour']));
+  assert.equal(unknown.success, false);
+  assert.ok(unknown.error!.issues.some(({ path }) => path.join('.') === 'controls'));
+  assert.equal(templateSchema.safeParse(declared(['show', 'track'])).success, false);
+  assert.equal(templateSchema.safeParse(declared(['show', 'track'], {})).success, true);
+  // A cycle among document parameters warns, unless a spread marks one of them as document.<id>.
+  const cyclic = declared([{ group: 'Options', when: { show: true }, controls: ['show', 'tilt'] }]);
+  const warnings = declarationWarnings(cyclic, templateSchema as unknown as Schema);
+  assert.deepEqual(warnings.map(({ code, path, details }) => [code, path, details]),
+    [['declaration-control-cycle', 'controls', { controls: 'show', layout: '', edit: 'document.' }]]);
+  assert.match(warnings[0].message, /^Book settings: /);
+  assert.match(warnings[0].suggestion, /mark it as editable on the page/);
+  assert.deepEqual(placeControlWarnings(warnings, [{ spread: 'a', layout: 'main', marked: new Set(['show']) }]), warnings);
+  assert.deepEqual(placeControlWarnings(warnings, [{ spread: 'a', layout: 'main', marked: new Set(['document.show']) }]), []);
+});
