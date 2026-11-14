@@ -1,7 +1,7 @@
 import type { PresentationView } from './presentation-model';
 import { sourcePath } from './source-locations';
 import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
-import { configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
+import { activateRenderedImageSpreads, configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
@@ -629,17 +629,40 @@ function croppedSheet(sheet: HTMLElement, crop: ReturnType<typeof sheetCrop>, pi
 
 // Uses the same flowed sheets and crop geometry as proof/export. Only the current crop and its neighbours
 // are mounted at full size; overview crops reuse the final artwork rather than the editor decoration.
-async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat) {
-  root.hidden = true;
+async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat, start: string) {
+  // Keep source layouts measured while their asynchronous pictures finish. display:none would resize those
+  // pictures to zero and cancel them; the presentation copies receive their finished pixels below.
+  const sourceWidth = root.getBoundingClientRect().width;
+  Object.assign(root.style, { position: 'absolute', left: '-100000px', top: '0', width: sourceWidth + 'px', visibility: 'hidden', pointerEvents: 'none' });
+  root.inert = true;
+  root.setAttribute('aria-hidden', 'true');
   const stage = document.createElement('div');
   stage.className = 'if-presentation';
   document.body.append(stage);
-  let state: PresentationView = { spread: spreads[0]?.id ?? '', side: hasSinglePage(format) ? 'page' : sequence.spreads[0]?.span ?? 'spread', bounds: 'trim', overview: false };
+  const initial = Math.max(0, spreads.findIndex(({ id }) => id === start));
+  let state: PresentationView = { spread: spreads[initial]?.id ?? '', side: hasSinglePage(format) ? 'page' : sequence.spreads[initial]?.span ?? 'spread', bounds: 'trim', overview: false };
   const cache = new Map<string, HTMLElement>();
+  const sources = new Map<HTMLElement, HTMLElement>();
+  let warm = false;
+  function syncPictures() {
+    for (const [frame, sheet] of sources) {
+      const originals = sheet.querySelectorAll<HTMLElement>('.if-rendered-image');
+      frame.querySelectorAll<HTMLElement>('.if-rendered-image').forEach((picture, i) => {
+        const original = originals[i];
+        if (!original) return;
+        picture.dataset.rendered = original.dataset.rendered;
+        picture.title = original.title;
+        const image = picture.querySelector('img'), source = original.querySelector('img');
+        if (image && source?.getAttribute('src') && image.getAttribute('src') !== source.getAttribute('src')) image.src = source.src;
+        if (image && source) image.style.display = source.style.display;
+      });
+    }
+  }
   function draw() {
     const width = innerWidth, height = innerHeight;
     const at = Math.max(0, spreads.findIndex(({ id }) => id === state.spread));
-    const visible = state.overview ? spreads.map((_, i) => i) : [at - 1, at, at + 1].filter((i) => i >= 0 && i < sheets.length);
+    const visible = state.overview ? spreads.map((_, i) => i) : (warm ? [at, at - 1, at + 1] : [at]).filter((i) => i >= 0 && i < sheets.length);
+    activateRenderedImageSpreads(visible.map((i) => spreads[i].id));
     const columns = Math.max(1, Math.floor(width / 240));
     const cellWidth = width / columns, cellHeight = 200;
     const keep = new Set<string>();
@@ -663,6 +686,7 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
           frame.addEventListener('click', () => post({ type: 'present-select', spread: spreads[i].id }));
         }
         cache.set(key, frame);
+        sources.set(frame, sheets[i]);
         stage.append(frame);
       }
       const x = state.overview ? (n % columns) * cellWidth + (cellWidth - w) / 2 : (width - w) / 2;
@@ -671,7 +695,8 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
         outline: state.overview && i === at ? '2px solid #87baff' : '' });
       if (state.overview || i === at) rects.push({ spread: spreads[i].id, x, y, width: w, height: h });
     });
-    for (const [key, frame] of cache) if (!keep.has(key)) { frame.remove(); cache.delete(key); }
+    for (const [key, frame] of cache) if (!keep.has(key)) { frame.remove(); sources.delete(frame); cache.delete(key); }
+    syncPictures();
     post({ type: 'geometry', width, height: state.overview ? Math.max(height, Math.ceil(spreads.length / columns) * cellHeight) : height,
       sheets: rects, boxes: [], targets: [] });
   }
@@ -688,8 +713,14 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
     event.preventDefault();
     post({ type: 'present-key', key: event.key, shiftKey: event.shiftKey, metaKey: event.metaKey, ctrlKey: event.ctrlKey, altKey: event.altKey });
   });
+  let queued: ReturnType<typeof setTimeout> | undefined;
+  watchRenderedImages(() => { queued ??= setTimeout(() => { queued = undefined; syncPictures(); }, 0); });
   draw();
-  await Promise.allSettled([...stage.querySelectorAll<HTMLImageElement>('img')].map((image) => image.decode()));
+  // The current spread gets the first photo requests. Neighbours warm only after it can be shown, and slow
+  // generated artwork fills in progressively instead of holding the entire presentation behind it.
+  await Promise.allSettled([...stage.querySelectorAll<HTMLImageElement>('img[data-src]')].map((image) => image.decode()));
+  warm = true;
+  setTimeout(draw, 0);
 }
 const hasSinglePage = (format: ResolvedFormat) => !format.facingPages;
 
@@ -1408,6 +1439,7 @@ export async function startRender(root: HTMLElement) {
     const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
     const { chains, positions } = textAssignments(book, template);
     const present = query.get('view') === 'present';
+    const presentationStart = spreads.find(({ id }) => id === query.get('spread'))?.id ?? spreads[0]?.id ?? '';
     if (present) book.mode = 'export';
     const edit = book.mode === 'edit' && !present;
     const check = !edit && query.get('view') === 'check';
@@ -1423,7 +1455,8 @@ export async function startRender(root: HTMLElement) {
     // Pictures drawn by <RenderedImage>: at the screen's resolution in the editor (smaller for thumbnails), cheaply
     // in the Book check, and at the format's target resolution for export (ADR 0006).
     const target = template.format.output.resolution?.target ?? 300;
-    configureRenderedImages(present ? { mode: 'preview', pixelRatio: window.devicePixelRatio || 1, concurrency: 3, timeoutMs: pictureTimeoutMs.preview } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
+    configureRenderedImages(present ? { mode: 'preview', pixelRatio: window.devicePixelRatio || 1, concurrency: 3, timeoutMs: pictureTimeoutMs.preview,
+      activeSpreads: new Set([presentationStart]) } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
       concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
       previewCache: view !== 'book' ? location.pathname + '/picture/' : undefined }
       : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
@@ -1470,7 +1503,7 @@ export async function startRender(root: HTMLElement) {
     }
     // A check or export is final only once every asynchronous picture is drawn or has failed; the editor shows
     // them as they arrive.
-    const pictureFailures = lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
+    const pictureFailures = present || lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
     if (edit && view === 'thumbs') await settleRestoredImages();
     const images = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
     const decoded = await settle(images);
@@ -1592,7 +1625,7 @@ export async function startRender(root: HTMLElement) {
       }
     }
     const minimum = template.format.output.minimumTextSize;
-    for (const [spread, { sheet }] of validated) {
+    for (const [spread, { sheet }] of present ? [] : validated) {
       const minimumMm = minimum && toMillimeters(minimum);
       const typography = checkTypography(sheet, format, minimumMm);
       if (typography.small && minimumMm) {
@@ -1637,7 +1670,7 @@ export async function startRender(root: HTMLElement) {
       inspection = inspectElements(sheets[index], spreads[index], template, format, inspect);
     }
     if (edit) setGrid = layoutBook(root, [...validated].map(([spread, { sheet }]) => ({ spread, sheet })), view, format, grid);
-    if (present) await renderPresentation(root, sheets, spreads, sequence, format);
+    if (present) await renderPresentation(root, sheets, spreads, sequence, format, presentationStart);
     else if (lazy) {
       const load = photoLoader(root, () => onScreen);
       let timer: ReturnType<typeof setTimeout> | undefined;

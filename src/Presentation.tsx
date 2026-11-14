@@ -18,6 +18,9 @@ export function Presentation({ summary, template, start, close }: {
   const [active, setActive] = useState(true);
   const [activity, setActivity] = useState(0);
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
+  // Navigation uses messages after startup; keep the initial URL stable while choosing other spreads.
+  const [query] = useState(() => new URLSearchParams({ spread: start }).toString());
   const units = useMemo(() => presentationUnits(summary.project.spreads, template, single), [summary.project.spreads, template, single]);
   const at = Math.max(0, units.findIndex((unit) => unit.spread === selected.spread && (!single || !selected.page || unit.pages.includes(selected.page))));
   const unit = units[at];
@@ -75,8 +78,9 @@ export function Presentation({ summary, template, start, close }: {
       if (overview || help || Math.abs(event.deltaX) < 25 || performance.now() - wheelAt.current < 500) return;
       wheelAt.current = performance.now(); choose(at + (event.deltaX > 0 ? 1 : -1));
     }}>
-    {view && <BookFrame project={summary.id} view="present" title="Presentation artwork" presentation={view}
-      onGeometry={() => {}} onStatus={(status) => setError(status.state === 'error' ? status.message : '')} />}
+    {view && <BookFrame project={summary.id} view="present" query={query} title="Presentation artwork" presentation={view}
+      onGeometry={() => {}} onStatus={(status) => { setReady(status.state === 'ready'); setError(status.state === 'error' ? status.message : ''); }} />}
+    {unit && !ready && !error && <p className="presentation-message" role="status">Preparing presentation…</p>}
     {(!unit || error) && <p className="presentation-message">{error || 'This book has no spreads yet.'}</p>}
     <div className={'presentation-indicator' + (active || digits ? ' visible' : '')} aria-live="polite">
       {digits ? 'Go to page ' + digits + ' ↵' : unit ? (unit.pages.length > 1 ? 'pp. ' : 'p. ') + unit.label + ' · ' + (at + 1) + ' / ' + units.length : ''}
