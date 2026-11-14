@@ -19,6 +19,7 @@ import { rememberDocument } from './declaration-check';
 import { capabilities, runtimeExports } from './runtime-exports';
 import { controlProblems, controlsSchema } from './controls';
 import type { ControlItem } from './controls';
+import { previewPath } from './template-preview';
 
 export { inch, mm, p, printFormat, pt };
 export type { PrintFormat, ResolvedFormat, Span } from './format';
@@ -275,6 +276,9 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   // Shown in the template library and the New Book picker; the ID is shown without a label.
   label: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().min(1).max(300).optional(),
+  // An image inside the template folder that the New Book picker shows instead of a render of the opening spread.
+  preview: z.string().refine((path) => previewPath(path) !== undefined,
+    'Use a PNG, JPEG or WebP file inside the template folder, such as ./preview.jpg, without .. or a leading dot.').optional(),
   contract: z.literal(1),
   // Optional extensions beyond the contract-1 baseline. Baseline names in older templates remain valid.
   requires: z.array(z.string()).optional().superRefine((required, context) => {
@@ -292,6 +296,8 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   formats: z.record(identifier, formatSchema).optional(),
   defaultFormat: identifier.optional(),
   parameters: parametersSchema,
+  // Arranges the document parameters' generated controls in Book settings, as `controls` does at the other scopes.
+  controls: controlsSchema,
   // Layouts that are variants of one design, by family ID. Each variant names its family with `family`.
   layoutFamilies: z.record(identifier, layoutFamily).optional(),
   spreads: z.record(identifier, definition).refine((spreads) => Object.keys(spreads).length > 0, 'Declare a spread.')
@@ -302,7 +308,7 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   openingSpreads: z.array(openingSpread).optional(),
   // Editors of document parameters, by ID.
   editors: z.record(identifier, documentEditor).optional(),
-}).superRefine(({ parameters, editors }, context) => {
+}).superRefine(({ parameters, editors, controls }, context) => {
   const owners = new Map<string, string>();
   for (const [id, editor] of Object.entries(editors ?? {})) {
     for (const key of editor.parameters) {
@@ -314,6 +320,8 @@ export const templateSchema = z.preprocess(withSpans, z.object({
       } else owners.set(key, id);
     }
   }
+  // A document parameter a document editor owns has no generated control, as for element editors.
+  checkControls(context, parameters, controls, [...owners.keys()]);
 }).superRefine(({ spreads, layoutFamilies }, context) => {
   for (const { path, message } of familyProblems(spreads, layoutFamilies)) context.addIssue({ code: 'custom', message, path });
 }).superRefine((template, context) => {
@@ -398,8 +406,9 @@ type DeclaredSpread = Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | '
 // definition unchanged.
 const spreadBuilder = <T,>(definition: T) => definition;
 export type TemplateDeclaration = {
-  id: string; version: string; label?: string; description?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
+  id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
+  controls?: ControlItem[];
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
   openingSpreads?: { layout: string; params?: Values }[];
@@ -420,7 +429,8 @@ export function templateInfo(template: Template): TemplateInfo {
     structures: Object.fromEntries(Object.entries(template.formats ?? { default: template.format }).map(([id, format]) => [id, format.structure])),
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
-    parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
+    ...(template.preview ? { preview: previewPath(template.preview)! } : {}),
+    parameters: template.parameters, ...(template.controls ? { controls: template.controls } : {}), openingSpreads: template.openingSpreads ?? [],
     ...(template.editors ? { editors: Object.fromEntries(Object.entries(template.editors).map(([id, { label, parameters, presentation }]) =>
       [id, { ...(label ? { label } : {}), parameters, presentation }])) } : {}),
     ...(template.network?.length ? { network: [...new Set(template.network)] } : {}),

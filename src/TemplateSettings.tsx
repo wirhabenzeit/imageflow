@@ -62,7 +62,7 @@ export function TemplateSettings({ api, library }: { api?: DesktopApi; library: 
             list.context(item.id, event);
             void contextMenu(item.id);
           }}>
-          <TemplatePreview api={api} entry={item} natural /><strong>{item.label}</strong><span className="muted">{item.version}</span>
+          <TemplatePreview api={api} entry={item} natural image /><strong>{item.label}</strong><span className="muted">{item.version}</span>
         </div>)}
       </div>
       <section className="template-detail" aria-label="Template details">

@@ -132,8 +132,57 @@ try {
   }
   assert.equal(invalid.length, 1, JSON.stringify(invalid));
   assert.match(invalid[0].message, /^Marked days: 0, typo, 30\.02 are not dates/);
-  // Moving the December page to the front makes it January, and the December marks stay in December.
+  // A calendar file adds its all-day events to the hand-marked days without changing them: a yearly birthday on
+  // 9 May, and a one-off trip from 30 to 31 December. Its days have a tooltip naming the file.
   saved.params.markedDates = sample;
+  await mkdir(join(project, 'files'), { recursive: true });
+  const calendar = (...events) => ['BEGIN:VCALENDAR', 'VERSION:2.0', ...events.flatMap((lines) => ['BEGIN:VEVENT', ...lines, 'END:VEVENT']), 'END:VCALENDAR'].join('\r\n');
+  await writeFile(join(project, 'files', 'birthdays.ics'), calendar(['DTSTART;VALUE=DATE:19900509', 'RRULE:FREQ=YEARLY'],
+    ['DTSTART;VALUE=DATE:20271230', 'DTEND;VALUE=DATE:20280101'], ['DTSTART:20270520T090000Z']));
+  saved.files = { ...saved.files, birthdays: 'files/birthdays.ics' };
+  saved.params.markedFile = 'birthdays';
+  await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
+  await frame.locator('.month').nth(4).locator('.marked .day', { hasText: /^9$/ }).waitFor();
+  assert.deepEqual(await frame.locator('.month').nth(4).locator('.marked .day').allTextContents(), ['9', '17']);
+  assert.deepEqual(await frame.locator('.month').nth(11).locator('.marked .day').allTextContents(), ['24', '25', '26', '30', '31']);
+  assert.equal(await frame.locator('.month').nth(4).locator('.days li').nth(8).getAttribute('title'), 'From the calendar file birthdays.ics');
+  assert.equal(await frame.locator('.month').nth(4).locator('.days li').nth(16).getAttribute('title'), null);
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).params.markedDates, sample);
+  // The day picker on the page locks the file's days, and follows the file when it changes. Opening it with a click
+  // on a file day marks nothing, since that day's button is disabled.
+  const may = frame.locator('.month').nth(4);
+  await may.locator('.days').scrollIntoViewIfNeeded();
+  const ninth = await may.locator('.days li').nth(8).boundingBox();
+  await w.mouse.click(ninth.x + ninth.width / 2, ninth.y + ninth.height / 2);
+  await w.locator('.inline-editor.showing').waitFor();
+  const picker = w.frameLocator('iframe.inline-editor-frame');
+  const locked = () => picker.locator('.days-on-page li.from-file .day').allTextContents();
+  await picker.locator('.days-on-page li.from-file').first().waitFor();
+  assert.deepEqual(await locked(), ['9']);
+  assert.equal(await picker.locator('.days-on-page li').nth(8).locator('button').isDisabled(), true);
+  assert.equal(await picker.locator('.days-on-page li').nth(8).locator('button').getAttribute('title'), 'From the calendar file birthdays.ics');
+  await writeFile(join(project, 'files', 'birthdays.ics'), calendar(['DTSTART;VALUE=DATE:19900510', 'RRULE:FREQ=YEARLY']));
+  await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
+  await picker.locator('.days-on-page li.from-file .day', { hasText: /^10$/ }).waitFor();
+  assert.deepEqual(await locked(), ['10']);
+  assert.equal(JSON.parse(await readFile(file, 'utf8')).params.markedDates, sample);
+  await w.locator('.inline-editor-bar').getByRole('button', { name: 'Done' }).click();
+  await w.locator('.inline-editor').waitFor({ state: 'detached' });
+  // A file that is not a calendar is reported once, and marks nothing.
+  await writeFile(join(project, 'files', 'birthdays.ics'), 'day,km\n1,4\n');
+  await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
+  await frame.locator('.month').nth(4).locator('.days li').nth(8).and(frame.locator('li:not(.marked)')).waitFor();
+  let broken = [];
+  for (let attempt = 0; attempt < 50 && !broken.length; attempt++) {
+    broken = (await renderStatus()).warnings.filter(({ code }) => code === 'template:marked-file-invalid');
+    if (!broken.length) await w.waitForTimeout(100);
+  }
+  assert.equal(broken.length, 1, JSON.stringify(broken));
+  assert.match(broken[0].message, /^Marked days from calendar: birthdays\.ics is not a calendar file/);
+  delete saved.files.birthdays;
+  delete saved.params.markedFile;
+
+  // Moving the December page to the front makes it January, and the December marks stay in December.
   saved.spreads.splice(1, 0, ...saved.spreads.splice(saved.spreads.findIndex(({ id }) => id === 'dec'), 1));
   await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
   await frame.locator('.month').first().locator('.place', { hasText: 'Outer coast, Senja' }).waitFor();
