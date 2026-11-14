@@ -295,16 +295,15 @@ export type ElementEditor<K extends string = string, P extends Parameters = Para
 export type EditorPresentation = 'dialog' | 'inline';
 /**
  * The read-only view of the book an editor is opened from: the values `render` reads for that spread (its
- * parameters, the document's, boxes with their photos' metadata, elements, page numbers, the book's anchors and the
- * format), plus the spread's ID and layout. It follows the book while the editor stays open: reordering spreads,
+ * parameters, the document's, boxes with their photos' metadata, elements, page numbers, the book's anchors and
+ * spreads (`book`) and the format), plus the spread's ID and layout. It follows the book while the editor stays open: reordering spreads,
  * another photo, a changed document setting or format refresh it. The editor's own draft is applied to it: an
  * element editor's element values and owned layout parameters, or a document editor's own document parameters. Markdown boxes'
  * `text` is null, since flow positions are known only to the book render. Pure helpers that take
  * `Pick<RenderContext, 'page' | 'book' | 'document'>` serve `render` and editors alike.
  */
 export type EditorContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
-  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book'> & {
-    spread: string; layout: string;
+  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book' | 'spread' | 'layout'> & {
     /** Actual rendered bounds in trim coordinates (mm). Null while the current page is pending or the element is hidden. */
     elements: SpreadDeclaration extends S ? Record<string, { params: Values; rect: Rect | null }>
       : { [K in keyof RenderContext<S, D>['elements']]: RenderContext<S, D>['elements'][K] & { rect: Rect | null } };
@@ -424,10 +423,35 @@ type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K
 export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
 /** A declared anchor with the book page it is on. */
 export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
+/** A photo box of a spread's current layout, in `BookContext.spreads`. */
+export type BookPhotoPlacement = {
+  /** The box ID in the spread's current layout. */
+  readonly box: string;
+  /** The assigned photo's ID, or `null` for an empty box. The same photo placed twice appears in both placements. */
+  readonly photoId: string | null;
+  /** The photo's metadata, as `ctx.boxes[id].photo`; `null` when the box is empty or its photo is missing from the book. */
+  readonly photo: Readonly<Photo> | null;
+};
+/** One spread of the book, in `BookContext.spreads`. */
+export type BookSpread = {
+  /** The spread's stable instance ID; it stays the same when spreads move or switch layouts. */
+  readonly id: string;
+  /** The spread's current layout ID. */
+  readonly layout: string;
+  /** Book page numbers: `left` and `right`, only one of them for a single page at a book end, or `number` without facing pages. */
+  readonly page: Readonly<{ left?: number; right?: number; number?: number }>;
+  /** The current layout's photo boxes in declaration order. Content kept from other layouts is not listed. */
+  readonly photos: readonly BookPhotoPlacement[];
+};
 /** The whole book as seen from one spread. */
 export type BookContext = {
   /** Number of pages in the book. */
   pages: number;
+  /**
+   * Every spread in book order, with its pages and photo assignments, for photo credits, indexes and contents.
+   * Derived from the saved book before any spread renders, so it is the same on every spread, and frozen.
+   */
+  spreads: readonly BookSpread[];
   /**
    * The anchor with this ID. Undefined when no spread declares it; the first when several do. The Book check warns
    * about both, on the spread that asked.
@@ -531,6 +555,13 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   format: ResolvedFormat;
   /** The chosen key of `formats`, or `'default'` for a template with a single `format`. */
   formatId: string;
+  /**
+   * This spread's ID, its entry in `book.spreads`, so a layout can find or leave out itself. In a layout preview it is
+   * still the selected spread's ID.
+   */
+  spread: string;
+  /** The layout being drawn: the spread's own, or the previewed one in a layout preview. */
+  layout: string;
   mode: 'edit' | 'export';
   /**
    * Marks the node that shows these parameters, so clicking it in the editor opens them for editing:
@@ -538,7 +569,10 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
    * The marker is invisible and stays in the exported artwork, so the Book check can name the parameter a text shows.
    */
   edit(...paths: EditPath<S, D>[]): EditMarker;
-  /** Page count and the anchors all spreads declare: `ctx.book.anchor('map')?.page`. */
+  /**
+   * The whole book as seen from this spread: page count, the anchors all spreads declare
+   * (`ctx.book.anchor('map')?.page`), and `spreads`, every spread with its pages and placed photos.
+   */
   book: BookContext;
   /** The geometry helpers for this spread's format: `<ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />`. */
   geometry: BoundGeometry;
@@ -564,6 +598,8 @@ export type UntypedRenderContext = {
   page: { left?: number; right?: number; number?: number };
   format: ResolvedFormat;
   formatId: string;
+  spread: string;
+  layout: string;
   mode: 'edit' | 'export';
   edit(...paths: string[]): EditMarker;
   book: BookContext;

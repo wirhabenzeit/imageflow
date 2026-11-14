@@ -413,6 +413,8 @@ type RenderContext = {
   page: { left?: number; right?: number; number?: number };  // page numbers: left/right, or number without facing pages
   format: ResolvedFormat;                   // trim, bleed, safe area in mm, for the chosen format
   formatId: string;                         // the chosen key of `formats`, or 'default'
+  spread: string;                           // this spread's ID, its entry in book.spreads (the selected spread in a layout preview)
+  layout: string;                           // the layout being drawn
   mode: 'edit' | 'export';
   edit(...paths: EditPath[]): { 'data-edit'?: string };  // marks a node for click-to-edit
   geometry: BoundGeometry;                  // the geometry helpers with this format applied
@@ -422,6 +424,7 @@ type RenderContext = {
     pages: number;
     anchor(id: string): Anchor | undefined; // the anchor with this ID (see Anchors)
     anchors(id?: string): Anchor[];         // all anchors with this ID, or all anchors, in page order
+    spreads: BookSpread[];                  // every spread's pages and placed photos (see Book index)
   };
 };
 ```
@@ -436,7 +439,7 @@ type RenderContext = {
 
 ImageFlow reads them from the original file whenever the book opens or a source changes, and never stores them in `photos.json`. Existing books therefore have them without re-importing anything, and replacing a linked photo's original refreshes them under the same photo ID, with crops and assignments unchanged. A photo without EXIF, or with EXIF ImageFlow cannot read, imports and renders as before. The user-written `caption`, `title`, `credit` and `altText` are separate and never overwritten. Writing an extracted field is rejected rather than ignored: in `photos.json` it is a validation error, and `set_photo_metadata` does not accept it.
 
-The same fields appear on `ctx.boxes[id].photo`, in custom editors' `context`, and in `inspect_book`'s `sources` view. [`photo-story.tsx`](examples/photo-story.tsx) builds a caption from them. Raw EXIF is not exposed.
+The same fields appear on `ctx.boxes[id].photo`, on `ctx.book.spreads[].photos[].photo`, in custom editors' `context`, and in `inspect_book`'s `sources` view. [`photo-story.tsx`](examples/photo-story.tsx) builds a caption from them. Raw EXIF is not exposed.
 
 ### Rendered images
 
@@ -516,6 +519,31 @@ type Anchor = { id: string; title?: string; spread: string; page: number; side: 
 - **Previews.** Layout-picker previews read the anchors of the book as saved, so a contents layout previews with real pages.
 
 An anchor marks a whole page, not a point found by measuring the render. Text flow decides which page a heading inside Markdown continuation lands on, so such headings cannot be anchors yet.
+
+### Book index
+
+`ctx.book.spreads` lists every spread of the book in order, with its pages and the photos placed on it, for photo credits, picture indexes and contents pages. No anchors are needed for it:
+
+```ts
+type BookSpread = {
+  id: string;                                  // the spread's stable instance ID
+  layout: string;                              // its current layout
+  page: { left?: number; right?: number; number?: number };  // as ctx.page
+  photos: { box: string; photoId: string | null; photo: Photo | null }[];
+};
+```
+
+```tsx
+for (const spread of ctx.book.spreads)
+  for (const { photo } of spread.photos) if (photo?.credit) credits.push([photo.credit, spread.page.left ?? spread.page.number]);
+```
+
+[`photo-story.tsx`](examples/photo-story.tsx) has a complete credits layout. To find or leave out the current spread, compare with `ctx.spread`: `ctx.book.spreads.filter(({ id }) => id !== ctx.spread)`.
+
+- **From saved data, before render.** Like anchors, the index is built from the saved book and the template's declarations before any spread renders. It never looks at another spread's rendered output, so every spread, the editor's context, MCP artwork and export read the same index, and the same book always gives the same index. It is frozen; changing it throws. The Inspector's layout previews redraw when it changes, such as when a photo is placed or its credit edited on another spread.
+- **Pages.** `page` is the spread's own `ctx.page`: `left` and `right`, one of them for a single page at a book end, or `number` in a format without facing pages. Which page a box is on is the layout's business, since only the layout knows where it draws its boxes.
+- **Photos.** `photos` lists the photo boxes of the spread's current layout, in declaration order, including empty ones. `photoId` is `null` for an empty box. `photo` is the photo's metadata, the same object shape as `ctx.boxes[id].photo`, or `null` when the box is empty or its photo is missing from the book. A photo placed in several boxes appears once per placement. Content a spread keeps from a layout it no longer uses is not listed, and a spread whose layout the template no longer declares lists no photos. Markdown boxes are not listed.
+- **No images.** The index has metadata and assignments only, no photo URLs or rendered thumbnails.
 
 ### Editing UI
 
