@@ -6,9 +6,11 @@ import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { menuAction, testBook } from './ui-actions.mjs';
+import { buildMacHeaderState, macHeaderState } from './mac-header-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/presentation-startup-'));
+const headerHelper = buildMacHeaderState(work);
 const folder = join(work, 'Startup.imageflow');
 await mkdir(join(folder, 'template'), { recursive: true });
 await mkdir(join(folder, 'photos'));
@@ -61,6 +63,22 @@ try {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
   await page.locator('.spread-thumb[data-spread="s30"]').click();
+  const nativeWindow = await app.browserWindow(page);
+  const originalHeader = headerHelper ? await macHeaderState(nativeWindow, headerHelper) : undefined;
+  const checkHeader = async () => {
+    if (!headerHelper) return;
+    let restored;
+    for (let attempt = 0; attempt < 50; ++attempt) {
+      restored = await macHeaderState(nativeWindow, headerHelper);
+      if (Math.abs(restored.iconX - originalHeader.iconX) <= 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    console.log('Document header:', JSON.stringify({ before: originalHeader, after: restored }));
+    assert.ok(originalHeader.iconWidth > 0 && originalHeader.iconX > originalHeader.width / 3, 'The document proxy starts near the window centre');
+    assert.ok(Math.abs(restored.iconX - originalHeader.iconX) <= 1, 'The document title and proxy retain their centred position after presentation');
+    assert.equal(await nativeWindow.evaluate((window) => window.getTitle()), 'Startup');
+    assert.equal(await nativeWindow.evaluate((window) => window.getRepresentedFilename()), folder);
+  };
   if (visible) {
     const window = await app.browserWindow(page);
     await window.evaluate((window) => window.focus());
@@ -69,7 +87,7 @@ try {
   const requests = [];
   page.on('request', request => { if(request.url().includes('/proof-photo/')) requests.push(request.url().split('/proof-photo/')[1]); });
   const start = performance.now();
-  await page.getByRole('button', { name: 'Presentation', exact: true }).click();
+  await page.keyboard.press('Shift+w');
   await page.locator('.presentation .book-frame-present[data-current][data-ready]').waitFor({ timeout: 10000 });
   const startupMs = Math.round(performance.now() - start);
   const proof = page.frameLocator('.presentation .book-frame-present[data-current][data-ready]');
@@ -116,12 +134,14 @@ try {
     assert.equal(await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.naturalWidth), 1800, 'Leaving overview restores original photo quality');
     await page.keyboard.press('Escape');
     await page.locator('.presentation').waitFor({ state: 'detached' });
+    await checkHeader();
     await menuAction(app, 'Presentation');
     await page.locator('.presentation .book-frame-present[data-current][data-ready]').waitFor();
     await nativeKey('Left');
     await page.frameLocator('.presentation .book-frame-present[data-current][data-ready]').locator('.if-present-crop:visible img[data-src][src$="/p0"]').waitFor();
     await nativeKey('Escape');
     await page.locator('.presentation').waitFor({ state: 'detached' });
+    await checkHeader();
   }
   console.log('Presentation startup checked:', work);
 } catch (error) {

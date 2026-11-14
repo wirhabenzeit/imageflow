@@ -1195,7 +1195,12 @@ void app.whenReady().then(async () => {
       const { simple, previous, entered } = presentationWindows.get(owner)!;
       presentationWindows.delete(owner);
       if (entered) owner.removeListener('enter-full-screen', entered);
-      if (simple) owner.setSimpleFullScreen(previous); else owner.setFullScreen(previous);
+      if (simple) {
+        owner.setSimpleFullScreen(previous);
+        // Removing the titled style for simple fullscreen detaches the hidden native toolbar that centres
+        // the document proxy. Restore it only after Electron has restored the window's normal style.
+        if (!previous) configureMacHeader(owner);
+      } else owner.setFullScreen(previous);
     }
   });
   ipcMain.handle(channels.toolbarDragRegions, (event, regions: unknown) => {
