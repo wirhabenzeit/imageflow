@@ -1,3 +1,4 @@
+import { markdownError } from './markdown-errors';
 import type { MarkdownState } from '../src/desktop';
 
 /** The native process owns pending text, including while the renderer or book is closing. */
@@ -49,7 +50,7 @@ export class MarkdownBuffer {
         } else if (this.text === this.saved) this.conflict = undefined;
         // An unavailable source can recover without discarding pending edits or retrying a failed write.
         if (this.text === this.saved) this.error = undefined;
-      } catch (error) { this.error = message(error); }
+      } catch (error) { this.error = markdownError(error).message; }
       this.publish();
     });
   }
@@ -65,7 +66,7 @@ export class MarkdownBuffer {
         if (disk !== text) await this.io.write(disk, text);
         this.saved = text; this.conflict = undefined;
       } catch (error) {
-        this.error = message(error);
+        this.error = markdownError(error).message;
         // A source may have changed between the read and the final publication check.
         try { const disk = await this.io.read(); if (disk !== this.saved) this.conflict = disk; } catch { /* Keep the save error. */ }
       } finally { this.saving = false; this.publish(); }
@@ -79,11 +80,10 @@ export class MarkdownBuffer {
         this.saved = disk;
         if (action === 'reload') { if (this.text !== disk) this.basis++; this.text = disk; }
         this.conflict = undefined; this.error = undefined;
-      } catch (error) { this.error = message(error); }
+      } catch (error) { this.error = markdownError(error).message; }
       this.publish();
     });
     if (action === 'keep' && this.conflict === undefined && !this.error) await this.flush();
   }
   dispose() { this.disposed = true; clearTimeout(this.timer); }
 }
-function message(error: unknown) { return error instanceof Error ? error.message : 'Could not save this Markdown source.'; }

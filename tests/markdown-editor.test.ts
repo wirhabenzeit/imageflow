@@ -136,6 +136,36 @@ test('two app editors of the same original cannot silently overwrite each other'
   assert.equal(await readFile(path, 'utf8'), results[0].status === 'fulfilled' ? 'First editor' : 'Second editor');
 });
 
+test('a source removed just before writing reports a friendly error without recreating it', async (t) => {
+  const root = await directory(t); const path = join(root, 'story.md');
+  await writeFile(path, 'Original'); const expected = await readMarkdownFile(path); await rm(path);
+  await assert.rejects(writeMarkdownFile(path, expected, 'Pending draft', async () => path), (error: Error) => {
+    assert.match(error.message, /source was moved or deleted/);
+    assert.doesNotMatch(error.message, /ENOENT|ENOTDIR/);
+    return true;
+  });
+  assert.deepEqual(await readdir(root), []);
+});
+
+test('a missing source keeps its draft, gives clear feedback, and saves after restoration', async (t) => {
+  const root = await directory(t); const path = join(root, 'story.md');
+  await writeFile(path, 'Original');
+  const value = new MarkdownBuffer({ id: 'x', name: 'Story', path, external: false }, 'Original', {
+    read: () => readMarkdownFile(path),
+    write: (expected, text) => writeMarkdownFile(path, expected, text, async () => path),
+  }, () => {}, 10000);
+  t.after(() => value.dispose());
+  value.change('Pending draft', 1); await rm(path); await value.flush();
+  assert.equal(value.state.text, 'Pending draft'); assert.equal(value.state.dirty, true);
+  assert.match(value.state.error!, /source was moved or deleted/);
+  assert.doesNotMatch(value.state.error!, /ENOENT/);
+  await value.refresh();
+  assert.equal(value.state.text, 'Pending draft'); assert.match(value.state.error!, /source was moved or deleted/);
+  await writeFile(path, 'Original'); await value.flush();
+  assert.equal(await readFile(path, 'utf8'), 'Pending draft'); assert.equal(value.state.dirty, false);
+  assert.equal(value.state.error, undefined);
+});
+
 test('external saves preserve the inode, creation time, ownership, permissions, hard links and extended attributes', async (t) => {
   const root = await directory(t); const path = join(root, 'original.md'); const alias = join(root, 'alias.md');
   await writeFile(path, 'Original'); await chmod(path, 0o640); await link(path, alias);

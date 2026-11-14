@@ -116,6 +116,8 @@ try {
   await textBox(editor).fill('Pending while the original is missing'); await saveNow(editor);
   await editor.getByRole('alert').waitFor();
   assert.equal(await textBox(editor).inputValue(), 'Pending while the original is missing');
+  await until(async () => (await editor.getByRole('alert').innerText()).includes('source was moved or deleted'));
+  assert.ok(!(await editor.getByRole('alert').innerText()).includes('ENOENT'));
   await rename(arrival + '.moved', arrival); await saveNow(editor);
   await until(async () => await readFile(arrival, 'utf8') === 'Pending while the original is missing');
   await nativeClose(editor); await until(() => editor.isClosed());

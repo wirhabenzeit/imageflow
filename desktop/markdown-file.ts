@@ -1,3 +1,4 @@
+import { markdownError } from './markdown-errors';
 import { constants } from 'node:fs';
 import type { BigIntStats } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -23,13 +24,15 @@ export async function readMarkdownFile(path: string) {
 /** Publish complete UTF-8 text, retaining file permissions and checking outside changes before replacement. */
 const pendingWrites = new Map<string, Promise<void>>();
 export async function writeMarkdownFile(path: string, expected: string, text: string, validate: () => Promise<string>, external = false) {
-  // Different books or source IDs can refer to the same original. Serialize them before the disk comparison.
-  const info = await stat(path, { bigint: true });
-  const key = info.dev + ':' + info.ino;
-  const task = (pendingWrites.get(key) ?? Promise.resolve()).catch(() => {}).then(() => publishMarkdownFile(path, expected, text, validate, external));
-  pendingWrites.set(key, task);
-  try { await task; }
-  finally { if (pendingWrites.get(key) === task) pendingWrites.delete(key); }
+  try {
+    // Different books or source IDs can refer to the same original. Serialize them before the disk comparison.
+    const info = await stat(path, { bigint: true });
+    const key = info.dev + ':' + info.ino;
+    const task = (pendingWrites.get(key) ?? Promise.resolve()).catch(() => {}).then(() => publishMarkdownFile(path, expected, text, validate, external));
+    pendingWrites.set(key, task);
+    try { await task; }
+    finally { if (pendingWrites.get(key) === task) pendingWrites.delete(key); }
+  } catch (error) { throw markdownError(error); }
 }
 async function publishMarkdownFile(path: string, expected: string, text: string, validate: () => Promise<string>, external: boolean) {
   if (Buffer.byteLength(text) > maximumMarkdownBytes) throw new Error('Markdown files must be smaller than 5 MB.');
