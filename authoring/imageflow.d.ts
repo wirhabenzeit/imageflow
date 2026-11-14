@@ -135,7 +135,7 @@ type Common = {
   /**
    * Plain help text, up to 1000 characters (trimmed, not empty): what the value means, which way it goes and when to
    * change it, such as `'Higher values zoom in; 1 shows the whole route.'`. Agents read it in the authoring context and
-   * MCP inspection; the editor shows it behind an info button on the field, unless a `controls` entry gives the field
+   * MCP inspection; the editor shows it only as the field's hover tooltip, unless a `controls` entry gives the field
    * its own description. It changes no default, constraint or saved value. Use `unit` for units.
    */
   description?: string;
