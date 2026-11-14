@@ -99,9 +99,14 @@ test('the editor context is what render reads, and follows reordering and photo 
   assert.notEqual(photographed.key, opened.key);
   assert.deepEqual(photographed.context.boxes.hero.photo, { width: 1200, height: 800, caption: 'Cliffs' });
 
-  // A change elsewhere in the book that this page cannot see leaves the context as it was.
+  // A photo assigned elsewhere is visible through the book index (ctx.book.spreads), so it refreshes the context.
   const elsewhere = project(months().map((spread) => spread.id === 'jan' ? { ...spread, boxes: { hero: { photo: 'cliffs' } } } : spread));
-  assert.equal(editorContext(rendered(elsewhere), template, 'feb')!.key, opened.key);
+  const indexed = editorContext(rendered(elsewhere), template, 'feb')!;
+  assert.notEqual(indexed.key, opened.key);
+  assert.equal(indexed.context.book.spreads[0].photos[0].photoId, 'cliffs');
+  // A change elsewhere in the book that this page cannot see leaves the context as it was.
+  const unseen = project(months().map((spread) => spread.id === 'jan' ? { ...spread, elements: { grid: { params: { size: 5 } } } } : spread));
+  assert.equal(editorContext(rendered(unseen), template, 'feb')!.key, opened.key);
   // A deleted spread has no context; the app closes its editor.
   assert.equal(editorContext(rendered(project([months()[0]])), template, 'feb'), undefined);
 });

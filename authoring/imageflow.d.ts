@@ -130,7 +130,16 @@ export type ResolvedFormat =
 
 // Parameters
 
-type Common = { label: string };
+type Common = {
+  label: string;
+  /**
+   * Plain help text, up to 1000 characters (trimmed, not empty): what the value means, which way it goes and when to
+   * change it, such as `'Higher values zoom in; 1 shows the whole route.'`. Agents read it in the authoring context and
+   * MCP inspection; the editor shows it behind an info button on the field, unless a `controls` entry gives the field
+   * its own description. It changes no default, constraint or saved value. Use `unit` for units.
+   */
+  description?: string;
+};
 type Numeric = { min?: number; max?: number; step?: number; unit?: string };
 export type BooleanParameter = Common & { type: 'boolean'; default: boolean };
 export type StringParameter = Common & { type: 'string'; default: string; multiline?: boolean; maxLength?: number; placeholder?: string };
@@ -146,18 +155,43 @@ export type DateParameter = Common & { type: 'date'; default: string; min?: stri
  * read the content with `file(id)`. `accept` lists lowercase extensions such as `'.gpx'`.
  */
 export type FileParameter = Common & { type: 'file'; default: ''; accept: readonly string[] };
-export type Parameter = BooleanParameter | StringParameter | IntegerParameter | NumberParameter | EnumParameter | ColorParameter | DateParameter |
+/** A parameter that can be a field of a list item. */
+export type ScalarParameter = BooleanParameter | StringParameter | IntegerParameter | NumberParameter | EnumParameter | ColorParameter | DateParameter |
   FileParameter;
+/** The value of a list item in a list's `default`. Missing fields take their defaults; a missing `id` is given one. */
+export type ListItemInput = { id?: string } & Record<string, string | number | boolean>;
+/**
+ * A list of flat items, such as a map's GPX tracks, each with the fields declared in `item`. `render` reads an array
+ * of items, each with its stable `id` and every field resolved. The user adds, removes, duplicates and reorders items;
+ * `min` and `max` bound how many there are. See *List parameters* in docs/template-api.md.
+ *
+ *     tracks: p.list({ label: 'Tracks', item: { track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
+ *       colour: p.color({ label: 'Colour', default: '#c0392b' }) }, max: 12 })
+ */
+export type ListParameter = Common & { type: 'list'; item: Record<string, ScalarParameter>; min?: number; max?: number;
+  default: readonly ({ id: string } & Record<string, string | number | boolean>)[] };
+export type Parameter = ScalarParameter | ListParameter;
 export type Parameters = Record<string, Parameter>;
 
-export type ParameterValue<P> =
+type ScalarValue<P> =
   P extends { type: 'boolean' } ? boolean :
   P extends { type: 'integer' | 'number' } ? number :
   P extends { type: 'enum'; options: readonly (infer O)[] } ? O :
   string;
+/** One item of a list as `render` and editors read it: its stable `id` and the value of every field. */
+export type ListItemValue<I> = { id: string } & { [K in keyof I]: ScalarValue<I[K]> };
+export type ParameterValue<P> =
+  P extends { type: 'list'; item: infer I } ? ListItemValue<I>[] :
+  ScalarValue<P>;
 export type ParameterValues<P> = { [K in keyof P]: ParameterValue<P[K]> };
 
 type Options<P extends Parameter> = Omit<P, 'type'>;
+/**
+ * Checks a list's default items: each field takes the value type its `item` declares, such as one of an enum's
+ * options, and fields `item` does not declare are rejected.
+ */
+type DefaultItemsChecked<D, I> = {
+  [N in keyof D]: { [F in keyof D[N]]: F extends 'id' ? string : F extends keyof I ? ScalarValue<I[F]> : never } };
 /** Rejects option names the parameter type does not have, such as `mutliline`, which ImageFlow would ignore. */
 type Known<O, Allowed> = O & { [K in Exclude<keyof O, keyof Allowed>]: never };
 type EnumKeys<C> = `${Extract<keyof C, string | number>}`;
@@ -174,6 +208,11 @@ export const p: {
   color<const O extends Options<ColorParameter>>(options: Known<O, Options<ColorParameter>>): O & { type: 'color' };
   date<const O extends Options<DateParameter>>(options: Known<O, Options<DateParameter>>): O & { type: 'date' };
   file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: Known<O, Omit<FileParameter, 'type' | 'default'>>): O & { type: 'file'; default: '' };
+  /** A list of flat items. Starts empty unless `default` lists items; item fields are the other parameter types. */
+  list<const O extends Common & { item: Record<string, ScalarParameter>; min?: number; max?: number; default?: readonly ListItemInput[] }>(
+    options: Known<O, Common & { item: unknown; min?: number; max?: number; default?: unknown }> & { item: ParametersChecked<O['item']>;
+      default?: DefaultItemsChecked<O['default'], O['item']> }):
+    Omit<O, 'default'> & { type: 'list'; default: ({ id: string } & Partial<ListItemValue<O['item']>>)[] };
 };
 
 // Editing UI
@@ -253,8 +292,8 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
    * `<Control parameter="track" />`. `scope="spread"` names one of the layout parameters the editor declares in
    * `spread`: `<Control parameter="heading" scope="spread" />`.
    */
-  Control: EditorFunction<K, { parameter: K; label?: string; scope?: 'element' }, ImageFlowElement>
-    & EditorFunction<SK, { parameter: SK; label?: string; scope: 'spread' }, ImageFlowElement>;
+  Control: EditorFunction<K, ControlProps<P, K, { scope?: 'element' }>, ImageFlowElement>
+    & EditorFunction<SK, ControlProps<S, SK, { scope: 'spread' }>, ImageFlowElement>;
   /**
    * Lets the user import a file into the project, offering these extensions, and resolves to its file ID (or
    * undefined when they cancel). Assign it with `set` to save the assignment immediately; the
@@ -262,6 +301,16 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
    */
   importFile(accept: readonly string[]): Promise<string | undefined>;
 };
+/** The item field names of a list parameter, or never for other parameters. */
+type ListFields<T> = T extends { type: 'list'; item: infer I } ? keyof I & string : never;
+/**
+ * The props of `Control` for each parameter. For a list parameter, `itemId` and `field` together name one field of
+ * one item, by the item's `id`, instead of the whole list: `<Control parameter="tracks" itemId={track.id} field="track" />`
+ * offers that track's file chooser and import. Other parameters take neither.
+ */
+type ControlProps<P, K extends string, Extra> = K extends K ? { parameter: K; label?: string } & Extra & (
+  | { itemId?: undefined; field?: undefined }
+  | ([ListFields<P[K & keyof P]>] extends [never] ? never : { itemId: string; field: ListFields<P[K & keyof P]> })) : never;
 /**
  * Typed props are checked strictly against the declaration, so an editor typed for `'zoon'` cannot be the editor of
  * an element that owns `'zoom'`. Untyped props (`K` is `string`) stay compatible with every declaration.
@@ -295,16 +344,15 @@ export type ElementEditor<K extends string = string, P extends Parameters = Para
 export type EditorPresentation = 'dialog' | 'inline';
 /**
  * The read-only view of the book an editor is opened from: the values `render` reads for that spread (its
- * parameters, the document's, boxes with their photos' metadata, elements, page numbers, the book's anchors and the
- * format), plus the spread's ID and layout. It follows the book while the editor stays open: reordering spreads,
+ * parameters, the document's, boxes with their photos' metadata, elements, page numbers, the book's anchors and
+ * spreads (`book`) and the format), plus the spread's ID and layout. It follows the book while the editor stays open: reordering spreads,
  * another photo, a changed document setting or format refresh it. The editor's own draft is applied to it: an
  * element editor's element values and owned layout parameters, or a document editor's own document parameters. Markdown boxes'
  * `text` is null, since flow positions are known only to the book render. Pure helpers that take
  * `Pick<RenderContext, 'page' | 'book' | 'document'>` serve `render` and editors alike.
  */
 export type EditorContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
-  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book'> & {
-    spread: string; layout: string;
+  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book' | 'spread' | 'layout'> & {
     /** Actual rendered bounds in trim coordinates (mm). Null while the current page is pending or the element is hidden. */
     elements: SpreadDeclaration extends S ? Record<string, { params: Values; rect: Rect | null }>
       : { [K in keyof RenderContext<S, D>['elements']]: RenderContext<S, D>['elements'][K] & { rect: Rect | null } };
@@ -334,7 +382,7 @@ export type DocumentEditorProps<D extends Parameters = Parameters, K extends key
    */
   waitUntil(until: Promise<unknown>): void;
   /** ImageFlow's own control for one of this editor's parameters, bound to the draft. */
-  Control: EditorFunction<K, { parameter: K; label?: string }, ImageFlowElement>;
+  Control: EditorFunction<K, ControlProps<D, K, {}>, ImageFlowElement>;
   importFile(accept: readonly string[]): Promise<string | undefined>;
 };
 /**
@@ -424,10 +472,35 @@ type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K
 export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
 /** A declared anchor with the book page it is on. */
 export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
+/** A photo box of a spread's current layout, in `BookContext.spreads`. */
+export type BookPhotoPlacement = {
+  /** The box ID in the spread's current layout. */
+  readonly box: string;
+  /** The assigned photo's ID, or `null` for an empty box. The same photo placed twice appears in both placements. */
+  readonly photoId: string | null;
+  /** The photo's metadata, as `ctx.boxes[id].photo`; `null` when the box is empty or its photo is missing from the book. */
+  readonly photo: Readonly<Photo> | null;
+};
+/** One spread of the book, in `BookContext.spreads`. */
+export type BookSpread = {
+  /** The spread's stable instance ID; it stays the same when spreads move or switch layouts. */
+  readonly id: string;
+  /** The spread's current layout ID. */
+  readonly layout: string;
+  /** Book page numbers: `left` and `right`, only one of them for a single page at a book end, or `number` without facing pages. */
+  readonly page: Readonly<{ left?: number; right?: number; number?: number }>;
+  /** The current layout's photo boxes in declaration order. Content kept from other layouts is not listed. */
+  readonly photos: readonly BookPhotoPlacement[];
+};
 /** The whole book as seen from one spread. */
 export type BookContext = {
   /** Number of pages in the book. */
   pages: number;
+  /**
+   * Every spread in book order, with its pages and photo assignments, for photo credits, indexes and contents.
+   * Derived from the saved book before any spread renders, so it is the same on every spread, and frozen.
+   */
+  spreads: readonly BookSpread[];
   /**
    * The anchor with this ID. Undefined when no spread declares it; the first when several do. The Book check warns
    * about both, on the spread that asked.
@@ -459,7 +532,9 @@ export type Photo = {
 };
 /** Where a Markdown box sits in the chain of boxes that share its text. */
 export type FlowPosition = { part: number; parts: number; title?: string };
-export type Values = Record<string, string | number | boolean>;
+/** A list item as saved and read without declaration types: its `id` and its field values. */
+export type ListItemValues = { id: string; [field: string]: string | number | boolean };
+export type Values = Record<string, string | number | boolean | ListItemValues[]>;
 
 type ValuesOf<T> = T extends { parameters: infer P } ? ParameterValues<P> : {};
 type BoxContext<B> = B extends { type: 'photo' }
@@ -520,6 +595,9 @@ export type BoundGeometry = {
   css: typeof geometry.css;
 };
 
+/** Where a render is shown: see `RenderContext.view`. More views may be added; test only `view === 'canvas'`. */
+export type RenderView = 'canvas' | 'thumbnail' | 'layout-preview' | 'export';
+
 /** The context passed to `render`, typed from a spread declared with the `spread` builder or `spreadFor`. */
 export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = {
   params: ValuesOf<S>;
@@ -531,19 +609,45 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   format: ResolvedFormat;
   /** The chosen key of `formats`, or `'default'` for a template with a single `format`. */
   formatId: string;
+  /**
+   * This spread's ID, its entry in `book.spreads`, so a layout can find or leave out itself. In a layout preview it is
+   * still the selected spread's ID.
+   */
+  spread: string;
+  /** The layout being drawn: the spread's own, or the previewed one in a layout preview. */
+  layout: string;
+  /**
+   * `'edit'` for every render in the editor, `'export'` for print and proof export, presentation, the Book check and
+   * MCP artwork. (The Book check is `'export'` here, while `RenderedImage`'s own `mode` tells it apart as `'check'`.)
+   */
   mode: 'edit' | 'export';
+  /**
+   * Where this render is shown, fixed for the whole render. `'canvas'` is the interactive book in the editor, the only
+   * place anyone clicks; `'thumbnail'` (the sidebar) and `'layout-preview'` (the Inspector's layouts) are edit-mode
+   * renders that show what the page will look like. `'export'` matches `mode === 'export'`. Show editing scaffolding,
+   * such as a placeholder that invites a click, only when `view === 'canvas'`. Later versions may add views, so never
+   * switch over the list as if it were complete: compare with `'canvas'` only.
+   */
+  view: RenderView;
   /**
    * Marks the node that shows these parameters, so clicking it in the editor opens them for editing:
    * `<h2 {...ctx.edit('heading')}>{ctx.params.heading}</h2>`. For a single string parameter, `ctx.Text` is shorter.
    * The marker is invisible and stays in the exported artwork, so the Book check can name the parameter a text shows.
    */
   edit(...paths: EditPath<S, D>[]): EditMarker;
-  /** Page count and the anchors all spreads declare: `ctx.book.anchor('map')?.page`. */
+  /**
+   * The whole book as seen from this spread: page count, the anchors all spreads declare
+   * (`ctx.book.anchor('map')?.page`), and `spreads`, every spread with its pages and placed photos.
+   */
   book: BookContext;
   /** The geometry helpers for this spread's format: `<ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />`. */
   geometry: BoundGeometry;
   /** `PhotoBox` limited to this layout's photo box IDs: `<ctx.PhotoBox id="hero" />` fails type checking for unknown IDs. */
-  PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & { id: BoxIds<S, 'photo'> }): ImageFlowElement;
+  PhotoBox<I extends BoxIds<S, 'photo'>>(props: Styling & Placement & EditMarker & IssueMarker & {
+    id: I;
+    /** Renders the photo yourself; `box.params` is typed from this box's declared parameters. See `PhotoRender`. */
+    children?: (photo: PhotoRender, box: PhotoBoxState<I, ValuesOf<S['boxes'][I]>>) => ImageFlowNode;
+  }): ImageFlowElement;
   /** `MarkdownBox` limited to this layout's Markdown box IDs. */
   MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
   /** `Element` limited to this layout's element IDs. */
@@ -564,7 +668,10 @@ export type UntypedRenderContext = {
   page: { left?: number; right?: number; number?: number };
   format: ResolvedFormat;
   formatId: string;
+  spread: string;
+  layout: string;
   mode: 'edit' | 'export';
+  view: RenderView;
   edit(...paths: string[]): EditMarker;
   book: BookContext;
   geometry: BoundGeometry;
@@ -597,7 +704,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
-  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'template-preview';
+  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -791,10 +898,43 @@ type Styling = { className?: string; style?: CSSProperties };
 /** The root of every spread. Sets `--trim-width`, `--trim-height`, `--bleed-*`, and `--safe-*` CSS variables. */
 export function Spread(props: Styling & IssueMarker & { children?: ImageFlowNode }): ImageFlowElement;
 /**
+ * What a PhotoBox render callback receives about its photo. Lengths are CSS pixels (96 per inch) of the printed page,
+ * with the origin at the box's top-left corner; they match the box's layout size whatever the editor's zoom.
+ */
+export type PhotoRender = {
+  /** The rendition ImageFlow chose: the editor's preview or thumbnail, or a print-resolution file in export. Load it with `<img src>` or SVG `<image href>`. */
+  src: string;
+  /** The photo's alt text, else its title, else `''`. */
+  alt: string;
+  /** The box's size. */
+  box: { width: number; height: number };
+  /** Where the whole photo goes so the box shows ImageFlow's crop. It usually extends past the box, which clips it. */
+  image: { x: number; y: number; width: number; height: number };
+  /** CSS that puts an absolutely positioned HTML image at `image`, in percentages of the box: `<img src={photo.src} style={photo.style} />`. */
+  style: CSSProperties;
+  /** The visible part of the photo, as fractions of its width and height. */
+  crop: { x: number; y: number; width: number; height: number };
+  /** The crop as saved for this layout (or followed live during a crop gesture): centre in 0–1 and zoom from 1. */
+  placement: { centerX: number; centerY: number; zoom: number };
+  /** Effective resolution of the visible part at print size. The photo's metadata and pixel size are `box.photo`. */
+  ppi: number;
+};
+/**
+ * The box a render callback draws: the same values as `ctx.boxes[id]`, with its resolved parameters. `uid` is unique
+ * in the book (it combines the spread and the box), for ids inside the callback's SVG such as a `clipPath` id. Derive
+ * further ids with a dot, such as `box.uid + '.mask'`: box IDs never contain one, so they cannot collide with another box.
+ */
+export type PhotoBoxState<I extends string = string, P = Values> = { id: I; uid: string; params: P; photo: Photo | null };
+/**
  * A box that shows the photo assigned to box `id`, cropped to fill it. In the editor, clicking it edits the box's
  * parameters and any others it is marked with.
+ *
+ * With a render callback as its child, the template draws the photo itself, for masks, frames and SVG compositions:
+ * `<PhotoBox id="hero">{(photo, box) => <svg>…<image href={photo.src} {...photo.image} preserveAspectRatio="none" /></svg>}</PhotoBox>`.
+ * ImageFlow still owns assignment, cropping, rendition choice, resolution checks and image loading; the callback must
+ * draw the photo at `photo.image` for the printed crop to match. It is not called for an empty box.
  */
-export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & { id: string }): ImageFlowElement;
+export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & { id: string; children?: (photo: PhotoRender, box: PhotoBoxState) => ImageFlowNode }): ImageFlowElement;
 /**
  * A box that shows its part of the Markdown text assigned to box `id`. `columns` (1–6, default 1) splits it into
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.

@@ -265,7 +265,21 @@ This batch inserts a layout and assigns a photo to its new spread through a batc
 
 Use a real 64-character revision from the preceding inspection/check. Layout, box and source IDs must come from that book’s declarations and source registry.
 
-The advertised command union supports title and format selection, declared parameter set/reset, spread insertion/duplication/movement/removal, compatible layout switching, source assignment/clearing, content swaps, crops and photo metadata. Inserted spreads can include initial parameters, boxes and elements. Batch-local references refer to earlier insertions or duplications. Results describe affected spreads, references, retained content and reflow consequences. Invalid batches leave saved project state untouched. Missing content and layout diagnostics can remain after a valid command.
+A list parameter (`p.list`) is set whole with `set_parameter`, whose `value` is the array of items, each with its `id`. To change one item without resending the list, use the item operations, which take the same `scope`/`spread`/`owner`/`key` as `set_parameter` and address items by `id`:
+
+```json
+[
+  { "op": "insert_list_item", "scope": "element", "spread": "route", "owner": "map", "key": "tracks",
+    "item": { "track": "registered-gpx-id", "colour": "#2b6cb0", "label": "Day 2" } },
+  { "op": "update_list_item", "scope": "element", "spread": "route", "owner": "map", "key": "tracks", "id": "i3f9a1c2b7d", "values": { "colour": "#c0392b" } },
+  { "op": "move_list_item", "scope": "element", "spread": "route", "owner": "map", "key": "tracks", "id": "i3f9a1c2b7d", "after": null },
+  { "op": "remove_list_item", "scope": "element", "spread": "route", "owner": "map", "key": "tracks", "id": "item1" }
+]
+```
+
+`insert_list_item` appends unless `after` names an item (or `null` for the start), and generates the item's `id` unless `item.id` gives an unused one; missing fields take their defaults. `move_list_item` requires `after`. Each operation starts from the saved list, or the list's default when none is saved, and the result must satisfy the list's `min`, `max` and field rules, including file fields naming registered files of an accepted type. A saved list the template no longer allows is not edited item by item: replace it with `set_parameter` or `reset_parameter` first. Unknown items return `ITEM_NOT_FOUND`, and item operations on a parameter that is not a list return `NOT_A_LIST`. `inspect_book` with `view: "parameters"` shows the saved items and their IDs; `get_authoring_context` describes each list's `item` fields with their types and constraints.
+
+The advertised command union supports title and format selection, declared parameter set/reset and list item operations, spread insertion/duplication/movement/removal, compatible layout switching, source assignment/clearing, content swaps, crops and photo metadata. Inserted spreads can include initial parameters, boxes and elements. Batch-local references refer to earlier insertions or duplications. Results describe affected spreads, references, retained content and reflow consequences. Invalid batches leave saved project state untouched. Missing content and layout diagnostics can remain after a valid command.
 
 ImageFlow conservatively blocks agent mutations while any human field or editor is active. Finish or cancel the human edit and close modal editors before retrying an edit-in-progress result. External project-state edits establish a new history boundary when adopted by the app. Template and Markdown file edits are separate from project Undo.
 

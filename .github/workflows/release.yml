@@ -32,6 +32,8 @@ jobs:
       - name: Check tag against package version
         id: version
         run: node scripts/release-metadata.mjs
+      - name: Require recorded built-in template hashes
+        run: node scripts/released-templates.mjs --check
 
   mac:
     needs: version

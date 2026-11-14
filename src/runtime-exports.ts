@@ -34,8 +34,12 @@ export const contract1Capabilities = [
   'inline-editors',
   // Plain string ctx.Text parameters edited in the template's typography.
   'inline-text',
+  // `p.list`: lists of flat items with stable IDs, a generated list control and item-level project commands (#115).
+  'list-parameters',
   // `preview`: the template's own image for New Book, instead of a render of its opening spread.
   'template-preview',
+  // `<PhotoBox>` children: a callback that draws the box's photo from its crop, such as through an SVG mask.
+  'photo-render',
 ] as const;
 // All supported features, including the baseline names accepted in older templates' `requires` lists. Until the
 // first public release the baseline stays open and new features join it (ADR 0008); after it, additive extensions

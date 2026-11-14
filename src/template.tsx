@@ -1,13 +1,15 @@
-import { createContext, useContext, useLayoutEffect, useRef } from 'react';
+import { Component, createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { flushSync } from 'react-dom';
 import { RenderedImage } from './rendered-image';
 import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
 import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanFits } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
-import { identifier, values } from './project';
-import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
+import { identifier, renderView, values } from './project';
+import type { Photo, ProjectFile, RenderProject, RenderView, SpreadState, Values } from './project';
 import { getCrop, placementIn } from './spread';
+import type { Crop, Placement as CropPlacement } from './spread';
 import { declarationConflicts, familyProblems } from './layouts';
 import type { VariantTags } from './layouts';
 import { isParameterValue, p, parametersSchema, resolveParams } from './parameters';
@@ -35,7 +37,13 @@ export type RenderContext = {
   format: ResolvedFormat;
   // The chosen named format, or 'default' for a template with a single format.
   formatId: string;
+  // This spread's ID in the book (its entry in `book.spreads`) and its layout. A layout preview renders the selected
+  // spread in another layout, so `spread` is the selected spread and `layout` the previewed one.
+  spread: string;
+  layout: string;
   mode: RenderProject['mode'];
+  // Where the render is shown: the interactive canvas, a thumbnail or layout preview, or export. Fixed per render.
+  view: RenderView;
   // Marks a rendered node as the place where these parameters are edited; spread the result onto the node.
   edit: (...paths: string[]) => EditMarker;
   // The whole book as seen from this spread: page count and the anchors every spread declares.
@@ -60,8 +68,26 @@ export type AnchorContext = { params: Values; document: Values };
 export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
 // `side` is 'page' in a format without facing pages, where a unit has one page and a declared side is ignored.
 export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
+// One spread of the book as the index lists it: derived from the saved book and the template's declarations before
+// any spread renders, so every spread reads the same index whatever the render order.
+export type BookPhotoPlacement = {
+  box: string;
+  // The assigned photo's ID, or null for an empty box.
+  photoId: string | null;
+  // The photo's metadata (as `ctx.boxes[id].photo`), or null when the box is empty or its photo is missing from the book.
+  photo: Photo | null;
+};
+export type BookSpread = {
+  id: string;
+  layout: string;
+  page: UnitPages;
+  // The active layout's photo boxes, in declaration order. Content kept from other layouts is not listed.
+  photos: BookPhotoPlacement[];
+};
 export type BookContext = {
   pages: number;
+  // Every spread in book order, with its pages and photo assignments. Read-only and the same for every spread.
+  spreads: readonly BookSpread[];
   // The anchor declared with this ID, if exactly one spread declares it. With several, the first; the check warns.
   anchor(id: string): Anchor | undefined;
   // All anchors with this ID, or all anchors, in page order.
@@ -80,7 +106,7 @@ export class SpreadError extends Error {
 
 // Lookups that found no anchor, or several, keyed so repeated renders report each once.
 export type AnchorLookup = { spread: string; anchor: string; found: number };
-export type BookIndex = { pages: number; anchors: Anchor[]; lookups?: Map<string, AnchorLookup> };
+export type BookIndex = { pages: number; anchors: Anchor[]; spreads?: readonly BookSpread[]; lookups?: Map<string, AnchorLookup> };
 
 export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: UnitPages }[] }): BookIndex {
   const document = resolveParams(template.parameters, book.project.params);
@@ -105,7 +131,31 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
     });
   });
   // A spread may declare its right-page anchor before its left-page one. The sort is stable within a page.
-  return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page) };
+  return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page), spreads: spreadIndex(book, template, sequence) };
+}
+
+const deepFreeze = <T,>(value: T): T => {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+};
+// The book's spreads with their pages and active photo assignments, from saved data only. Frozen, so one spread's
+// render cannot change what another reads. A spread whose layout the template no longer declares has no photos.
+export function spreadIndex(book: RenderProject, template: Template, sequence: { spreads: { page: UnitPages }[] }): readonly BookSpread[] {
+  return deepFreeze(book.project.spreads.map((spread, i): BookSpread => {
+    const definition = Object.hasOwn(template.spreads, spread.definition) ? template.spreads[spread.definition] : undefined;
+    const photos = Object.entries(definition?.boxes ?? {}).filter(([, box]) => box.type === 'photo').map(([id]): BookPhotoPlacement => {
+      const photoId = spread.boxes[id]?.photo ?? null;
+      const found = photoId && Object.hasOwn(book.photos, photoId) ? book.photos[photoId] : undefined;
+      if (!found) return { box: id, photoId, photo: null };
+      // A deep copy, so freezing the index leaves nested metadata (such as `captured`) in the render input alone.
+      const { src: _src, ...photo } = structuredClone(found);
+      return { box: id, photoId, photo };
+    });
+    return { id: spread.id, layout: spread.definition, page: Object.fromEntries(Object.entries(sequence.spreads[i].page).filter(([, value]) => value !== undefined)), photos };
+  }));
 }
 
 export function bookContext(index: BookIndex, spread: string): BookContext {
@@ -113,6 +163,7 @@ export function bookContext(index: BookIndex, spread: string): BookContext {
   const matching = (id: string) => index.anchors.filter((anchor) => anchor.id === id);
   return {
     pages: index.pages,
+    spreads: index.spreads ?? [],
     anchor(id) {
       const found = matching(id);
       if (found.length !== 1) index.lookups?.set(spread + '\u0000' + id, { spread, anchor: id, found: found.length });
@@ -150,18 +201,17 @@ export type ElementEditorProps = {
   waitUntil: (until: Promise<unknown>) => void;
   // The app's own control for one of the editor's parameters, bound to the draft, and the file import it uses.
   // `scope: 'spread'` names one of the layout parameters the editor declares instead of an element parameter.
-  Control: (props: { parameter: string; label?: string; scope?: 'element' | 'spread' }) => ReactNode;
+  // For a list, `itemId` and `field` name one field of one item.
+  Control: (props: { parameter: string; label?: string; scope?: 'element' | 'spread'; itemId?: string; field?: string }) => ReactNode;
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };
 // The read-only view of the book an editor is opened from: the values `render` reads for that spread, without the
 // components. It follows the book while the editor is open (a reorder, another photo, a document setting), so a
 // helper such as the calendar's month can serve `render` and the editor alike. Markdown flow positions are not known
 // outside the book render, so `boxes[id].text` is null.
-export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book'> & {
+export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book' | 'spread' | 'layout'> & {
   // Measured bounds in trim coordinates (mm), null before the current page is ready or when not rendered.
   elements: Record<string, { params: Values; rect: Rect | null }>;
-  // The spread's ID and its layout.
-  spread: string; layout: string;
 };
 // A document editor edits some of the template's document parameters, opened from any node marked with them, such
 // as a calendar's days. `values` holds every document parameter with the draft applied; `set` changes the editor's own.
@@ -171,7 +221,7 @@ export type DocumentEditorProps = {
   readOnly: boolean; commit: () => void; cancel: () => void;
   presentation: EditorPresentation;
   waitUntil: (until: Promise<unknown>) => void;
-  Control: (props: { parameter: string; label?: string }) => ReactNode;
+  Control: (props: { parameter: string; label?: string; itemId?: string; field?: string }) => ReactNode;
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };
 // A layout family's picker chooses one of the family's variants. It runs in a sandboxed frame like an element
@@ -496,13 +546,131 @@ function exportSource(photo: Photo & { src: string }, cssWidth: number, format: 
   return width < photo.width ? photo.src + '/' + width : photo.src;
 }
 
-export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker & { id: string }) {
-  const { spread, book, format, renderPhotos, definition, lazyPhotos } = useSpread();
+/**
+ * What a PhotoBox render callback receives about its photo. Lengths are CSS pixels (96 per inch) of the printed
+ * page, with the origin at the box's top-left corner, so they match the box's own layout size whatever the editor's
+ * zoom. `image` is where the whole photo goes so that the box shows the host's crop; it usually extends past the box,
+ * which clips it. `style` places an absolutely positioned HTML image there, in percentages of the box.
+ */
+export type PhotoRender = {
+  src: string;
+  alt: string;
+  box: { width: number; height: number };
+  image: { x: number; y: number; width: number; height: number };
+  style: CSSProperties;
+  crop: Crop;
+  placement: CropPlacement;
+  ppi: number;
+};
+// `uid` is unique in the book (spread and box), for SVG ids such as a clipPath's. Ids may contain hyphens, so the
+// spread id's length keeps pairs such as one-x/hero and one/x-hero apart. Identifiers never contain '.', so a
+// callback derives further ids as uid + '.mask', and export suffixes its copies with '.p1' (see svg-ids.ts).
+export const photoBoxUid = (spread: string, box: string) => 'if-' + spread.length + '-' + spread + '-' + box;
+export type PhotoBoxState = { id: string; uid: string; params: Values; photo: Photo | null };
+export type PhotoBoxRender = (photo: PhotoRender, box: PhotoBoxState) => ReactNode;
+
+// The placement a crop gesture shows before it is saved, by spread and box. The app sends it to the book frame while
+// a photo of a box with a render callback is selected, so the template's artwork follows the gesture.
+const livePlacements = new Map<string, CropPlacement>();
+const liveListeners = new Set<() => void>();
+export function setLivePlacement(spread: string, box: string, placement: CropPlacement | undefined) {
+  // One gesture at a time: a new placement replaces any other, and none clears them all.
+  const key = spread + '\u0000' + box;
+  const current = livePlacements.get(key);
+  if (!placement) {
+    if (!livePlacements.size) return;
+    livePlacements.clear();
+  } else {
+    if (livePlacements.size === 1 && current && current.centerX === placement.centerX && current.centerY === placement.centerY && current.zoom === placement.zoom) return;
+    livePlacements.clear();
+    livePlacements.set(key, { centerX: placement.centerX, centerY: placement.centerY, zoom: placement.zoom });
+  }
+  for (const listener of liveListeners) listener();
+}
+const subscribeLive = (listener: () => void) => { liveListeners.add(listener); return () => { liveListeners.delete(listener); }; };
+// Lazy book views tell callback boxes when their spread comes near the screen (see photoLoader in render.tsx).
+export const photoNearEvent = 'imageflow-photo-near';
+
+const pixelsPerMm = 96 / 25.4;
+// The photo and its crop as a callback sees them, from the box's size in CSS pixels.
+export function photoRender(photo: Photo & { src: string }, placement: CropPlacement, size: { width: number; height: number }, src: string): PhotoRender {
+  const crop = getCrop(photo, placement, size.width / size.height);
+  const width = size.width / crop.width;
+  const height = size.height / crop.height;
+  return {
+    src, alt: photo.altText ?? photo.title ?? '',
+    box: { width: size.width, height: size.height },
+    image: { x: -crop.x * width, y: -crop.y * height, width, height },
+    style: { position: 'absolute', maxWidth: 'none', width: 100 / crop.width + '%', height: 100 / crop.height + '%',
+      left: -100 * crop.x / crop.width + '%', top: -100 * crop.y / crop.height + '%' },
+    crop, placement: { ...placement },
+    ppi: Math.min(photo.width * crop.width / size.width, photo.height * crop.height / size.height) * 96,
+  };
+}
+
+// The editor's book view draws callback boxes after its first render (when their spread comes near) and again during
+// crop gestures, outside the render pass that reports errors. A callback that throws there is caught per box: the box
+// shows that it failed and the failure reaches the live Book check, instead of the whole book view unmounting.
+export type PhotoRenderFailure = { spread: string; box: string; message: string };
+const photoRenderFailures = new Map<string, PhotoRenderFailure>();
+const failureListeners = new Set<() => void>();
+export const currentPhotoRenderFailures = () => [...photoRenderFailures.values()];
+export function watchPhotoRenderFailures(listener: () => void) { failureListeners.add(listener); return () => { failureListeners.delete(listener); }; }
+function setPhotoRenderFailure(key: string, failure: PhotoRenderFailure | undefined) {
+  if (failure) photoRenderFailures.set(key, failure);
+  else if (!photoRenderFailures.delete(key)) return;
+  for (const listener of failureListeners) listener();
+}
+type BoundaryProps = { spread: string; box: string; reset: string; children: ReactNode };
+export class PhotoRenderBoundary extends Component<BoundaryProps, { failed: boolean }> {
+  state = { failed: false };
+  private get key() { return this.props.spread + '\u0000' + this.props.box; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: unknown) {
+    setPhotoRenderFailure(this.key, { spread: this.props.spread, box: this.props.box, message: error instanceof Error ? error.message : String(error) });
+  }
+  // A new crop, size or parameter value draws again.
+  componentDidUpdate(previous: BoundaryProps) {
+    if (previous.reset === this.props.reset) return;
+    if (previous.spread !== this.props.spread || previous.box !== this.props.box) setPhotoRenderFailure(previous.spread + '\u0000' + previous.box, undefined);
+    if (this.state.failed) { setPhotoRenderFailure(this.key, undefined); this.setState({ failed: false }); }
+  }
+  componentWillUnmount() { setPhotoRenderFailure(this.key, undefined); }
+  render() { return this.state.failed ? <span className="if-placeholder" data-photo-render-failed="">Photo could not be drawn</span> : this.props.children; }
+}
+
+// Calls a box's render callback as its own component, so a boundary around it catches what it throws.
+function PhotoRenderCall({ render, photo, state, spread }: { render: PhotoBoxRender; photo: PhotoRender; state: PhotoBoxState; spread: string }) {
+  renderingSpread(spread);
+  try {
+    return <>{render(photo, state)}</>;
+  } finally {
+    renderingSpread(undefined);
+  }
+}
+
+export function PhotoBox({ id, className, style, rect, children, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker &
+  { id: string; children?: PhotoBoxRender }) {
+  const { spread, book, format, renderPhotos, definition, lazyPhotos, values } = useSpread();
+  if (children !== undefined && typeof children !== 'function') {
+    throw new Error('PhotoBox ' + id + ': children must be a render function, such as {(photo, box) => <img src={photo.src} style={photo.style} />}.');
+  }
+  const render = children;
   const box = spread.boxes[id];
   const photo = box?.photo ? book.photos[box.photo] : undefined;
-  const placement = placementIn(box, spread.definition);
+  const saved = placementIn(box, spread.definition);
   const frame = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
+  // A callback needs the box's size. A `rect` gives it at once; otherwise the box is measured before it is painted.
+  const [size, setSize] = useState<{ width: number; height: number } | null>(() =>
+    rect && rect.width > 0 && rect.height > 0 ? { width: rect.width * pixelsPerMm, height: rect.height * pixelsPerMm } : null);
+  // Only the editor's scrolling book draws callback boxes as they come near. Presentation (export mode) copies its
+  // spreads from a hidden render, so their callback boxes draw at once there.
+  const deferred = lazyPhotos && book.mode === 'edit';
+  const [near, setNear] = useState(!deferred);
+  const liveOf = () => render && book.mode === 'edit' ? livePlacements.get(spread.id + '\u0000' + id) : undefined;
+  const live = useSyncExternalStore(subscribeLive, liveOf, liveOf);
+  const placement = live ?? saved;
 
   useLayoutEffect(() => {
     const element = frame.current;
@@ -514,8 +682,12 @@ export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...m
       const w = parseFloat(width);
       const h = parseFloat(height);
       if (!(w > 0 && h > 0)) return;
-      const crop = getCrop(photo, placement, w / h);
+      const crop = getCrop(photo, saved, w / h);
       element.dataset.ppi = String(Math.min(photo.width * crop.width / w, photo.height * crop.height / h) * 96);
+      if (render) {
+        setSize((current) => current && Math.abs(current.width - w) < 0.01 && Math.abs(current.height - h) < 0.01 ? current : { width: w, height: h });
+        return;
+      }
       if (!img) return;
       if (book.mode !== 'edit' && !lazyPhotos && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format);
       img.style.width = 100 / crop.width + '%';
@@ -527,16 +699,41 @@ export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...m
     cropPhoto();
     observer.observe(element);
     return () => observer.disconnect();
-  }, [photo, placement.centerX, placement.centerY, placement.zoom, renderPhotos]);
+  }, [photo, saved.centerX, saved.centerY, saved.zoom, renderPhotos, !!render]);
+
+  useLayoutEffect(() => {
+    const element = frame.current;
+    if (!element || !render || !deferred) return;
+    const listener = (event: Event) => flushSync(() => setNear(!!(event as CustomEvent<boolean>).detail));
+    element.addEventListener(photoNearEvent, listener);
+    return () => element.removeEventListener(photoNearEvent, listener);
+  }, [!!render, deferred]);
+
+  let content: ReactNode = null;
+  if (photo && renderPhotos && render && size && near) {
+    const shown = photoRender(photo, placement, size, '');
+    // Export loads a rendition sized for the saved crop at print resolution; the editor its preview or thumbnail.
+    shown.src = book.mode === 'edit' ? photo.src : exportSource(photo, size.width / getCrop(photo, saved, size.width / size.height).width, format);
+    const resolved = values.boxes[id];
+    const state = { id, uid: photoBoxUid(spread.id, id), params: resolved?.params ?? {}, photo: resolved?.photo ?? null };
+    content = <PhotoRenderCall render={render} photo={shown} state={state} spread={spread.id} />;
+    // Outside the editor's book view a throw fails the render as for any other template code.
+    if (deferred) {
+      content = <PhotoRenderBoundary spread={spread.id} box={id}
+        reset={JSON.stringify([shown.src, shown.placement, shown.box, state.params, state.photo])}>{content}</PhotoRenderBoundary>;
+    }
+  }
 
   return (
     <div ref={frame} data-box={id} data-box-type="photo" data-empty={photo ? undefined : ''}
+      data-photo-render={render ? 'custom' : undefined} data-pending={render && photo && renderPhotos && !(size && near) ? '' : undefined}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
       className={['if-photo', className].filter(Boolean).join(' ')} style={place(rect, style)} {...issueOn(marker)}>
-      {photo && renderPhotos &&
+      {photo && renderPhotos && !render &&
         <img ref={image} src={book.mode === 'edit' && !lazyPhotos ? photo.src : undefined}
           data-src={lazyPhotos ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
-      {!photo && book.mode === 'edit' && <span className="if-placeholder">{box?.photo ? 'Missing photo' : 'Drop a photo'}</span>}
+      {content}
+      {!photo && renderView(book) === 'canvas' && <span className="if-placeholder">{box?.photo ? 'Missing photo' : 'Drop a photo'}</span>}
     </div>
   );
 }
@@ -552,7 +749,7 @@ export function MarkdownBox({ id, className, style, rect, columns = 1, 'data-edi
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
       data-empty={text !== undefined && book.texts[text] !== undefined ? undefined : ''}
       className={['if-markdown', className].filter(Boolean).join(' ')} style={place(rect, style)} {...issueOn(marker)}>
-      {book.mode === 'edit' && (!text || book.texts[text] === undefined) &&
+      {renderView(book) === 'canvas' && (!text || book.texts[text] === undefined) &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
     </div>
   );
@@ -589,6 +786,7 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
   const data = useSpread();
   const { param, value } = parameterAt(data, parameter);
   if (!param) throw new Error('Text shows parameter ' + parameter + ', which this layout does not declare.');
+  if (param.type === 'list') throw new Error('Text shows parameter ' + parameter + ', which is a list. Show its items with their own markup.');
   if (!textTags.has(as)) throw new Error('Text cannot render as ' + as + '. Use one of ' + [...textTags].join(', ') + '.');
   if (presentation !== undefined && presentation !== 'inline' && presentation !== 'dialog') throw new Error("Text presentation must be 'inline' or 'dialog'.");
   const inline = presentation === 'inline';
@@ -597,7 +795,7 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
   const saved = value === undefined ? '' : String(value);
   const inherited = !saved.trim() && !!fallback?.trim();
   const text = saved.trim() ? saved : inherited ? fallback! : '';
-  const empty = !text && data.book.mode === 'edit';
+  const empty = !text && renderView(data.book) === 'canvas';
   const hint = placeholder ?? (param.type === 'string' && param.placeholder ? param.placeholder : param.label);
   const Tag = as;
   // The edit marker stays in export, like ctx.edit(), so checks can name the parameter this text shows.
@@ -605,7 +803,7 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
     data-multiline={inline && param.type === 'string' && param.multiline ? '' : undefined}
     data-text-fallback={fallback?.trim() ? fallback : undefined} data-text-fallback-label={fallback?.trim() ? fallbackLabel : undefined}
     className={className} style={place(rect, style)} {...issueOn(marker)}>
-    {empty ? <span className="if-text-placeholder">{hint}</span> : inherited && data.book.mode === 'edit'
+    {empty ? <span className="if-text-placeholder">{hint}</span> : inherited && renderView(data.book) === 'canvas'
       ? <span className="if-text-inherited" title={'Using ' + fallbackLabel}>{text}</span> : text}
   </Tag>;
 }
@@ -719,7 +917,7 @@ export function editorContext(book: RenderProject, template: Template, spreadId:
     elements: Object.fromEntries(Object.entries(values.elements).map(([id, element]) => [id, { ...element, rect: null }])),
     book: bookContext(index_, spread.id), spread: spread.id, layout: spread.definition,
   };
-  return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, values, template.formatId]) };
+  return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, index_.spreads, values, template.formatId]) };
 }
 
 /** The editor context from a newer book, with the format that book chose, as the book render chooses it. */
@@ -749,8 +947,8 @@ export function withEditorDraft(context: EditorContext, draft: { document: Value
 }
 
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
-export function SpreadView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false }: {
-  book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState;
+export function SpreadView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false, bookSpread = spread.id }: {
+  book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState; bookSpread?: string;
   page: RenderContext['page']; index: BookIndex; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
 }) {
   const definition = template.spreads[spread.definition];
@@ -763,7 +961,8 @@ export function SpreadView({ book, template, format, spread, page, index, positi
   let content: ReturnType<typeof definition.render>;
   try {
     content = definition.render({
-      ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode,
+      ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode, view: renderView(book),
+      spread: bookSpread, layout: spread.definition,
       // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
       edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
       book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),

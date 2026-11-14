@@ -22,7 +22,10 @@
 .if-spread .left-page { left: calc(-1 * var(--bleed-outside)); }
 .if-spread .right-page { right: calc(-1 * var(--bleed-outside)); }
 .if-photo, .if-markdown { overflow: hidden; }
-.if-photo img { position: absolute; max-width: none; display: block; }
+.if-photo:not(:where([data-photo-render])) img { position: absolute; max-width: none; display: block; }
+/* A box with a render callback is positioned for the template's own markup; photo.style places an image. */
+:where(.if-photo[data-photo-render]) { position: relative; }
+.if-photo[data-photo-render] > svg { display: block; }
 .if-markdown { overflow-wrap: break-word; hyphens: manual; }
 .if-markdown :is(ol, ul) { padding-inline-start: 1.75em; }
 html:has(.if-book), html:has(.if-book) body { overflow: hidden; }
@@ -108,7 +111,7 @@ html:has(.if-artwork) { overflow: hidden; }
 
 /* Book view photos load near the screen; until then the box shows a neutral fill and no broken image. */
 .if-preview .if-photo img:not([src]) { visibility: hidden; }
-.if-preview .if-photo:has(> img:not([src])) { background: #e9e5dc; }
+.if-preview .if-photo:has(> img:not([src])), .if-preview .if-photo[data-pending] { background: #e9e5dc; }
 
 /* While an inline editor is drawn over an element or marked node, the preview hides that occurrence's artwork. */
 .if-preview [data-if-editing] { opacity: 0 !important; }
@@ -166,6 +169,15 @@ html:has(.if-inline-text-frame), html:has(.if-inline-text-frame) body { overflow
 .if-editor .if-control .pc-segmented button { flex: 1; border: 0; background: transparent; }
 .if-editor .if-control .pc-segmented button[aria-checked="true"] { background: var(--if-editor-control); box-shadow: 0 1px 2px #0002; }
 .if-editor .if-control .pc-file select { flex: 1; min-width: 0; }
+.if-editor .if-control .pc-list-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.if-editor .if-control .pc-list-item { border: 1px solid var(--if-editor-border); border-radius: 6px; }
+.if-editor .if-control .pc-list-row { display: flex; align-items: center; gap: 2px; padding: 2px; }
+.if-editor .if-control .pc-list-summary { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; border: 0; background: transparent; text-align: left; }
+.if-editor .if-control .pc-list-swatch { width: 12px; height: 12px; border-radius: 3px; }
+.if-editor .if-control .pc-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.if-editor .if-control .pc-list-actions button { border: 0; background: transparent; padding: 2px; }
+.if-editor .if-control .pc-list-fields { display: grid; gap: 8px; padding: 6px 8px 8px; }
+.if-editor .if-control .pc-list-add { margin-top: 6px; }
 .if-editor .if-control input.pc-number { width: 64px; }
 .if-layout-settings { padding: 0; background: transparent; }
 html:has(.if-layout-settings) { background: transparent; }

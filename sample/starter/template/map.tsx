@@ -1,6 +1,6 @@
 // A real map page (ADR 0006). The page draws the map live with MapLibre GL and OpenFreeMap styles through
 // <RenderedImage>: at screen resolution in the editor, and again at the format's target resolution when the book is
-// exported. The GPX track lies on top as vector lines, with the map's attribution. Only the map's settings are saved
+// exported. The GPX tracks lie on top as vector lines, with the map's attribution. Only the map's settings are saved
 // in the book; the editor frames the view by dragging and zooming. Export needs the internet, and a later export may
 // look different if the map provider changes its maps or styles.
 import React from 'react';
@@ -16,18 +16,27 @@ const styleUrl = (style: MapStyle) => mapOrigin + '/styles/' + style;
 export const mapAttribution = '© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors';
 
 export const mapParameters = {
-  track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
+  // Each track is drawn in its own colour; the label names it in the list.
+  tracks: p.list({
+    label: 'Tracks',
+    item: {
+      track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
+      colour: p.color({ label: 'Colour', default: '#c8432b' }),
+      label: p.string({ label: 'Label', default: '', maxLength: 60, placeholder: 'Day 1' }),
+    },
+    max: 12,
+  }),
   style: p.enum({ label: 'Map style', default: 'liberty', options: styles }),
   longitude: p.number({ label: 'Longitude', default: 17.75, min: -180, max: 180, step: .00001 }),
   latitude: p.number({ label: 'Latitude', default: 69.35, min: -85, max: 85, step: .00001 }),
   // The MapLibre zoom of the printed map: its width in CSS pixels is the element's width at 96 per inch.
   zoom: p.number({ label: 'Zoom', default: 8.5, min: 0, max: 18, step: .01 }),
-  trackColor: p.color({ label: 'Track colour', default: '#c8432b' }),
   trackWidth: p.number({ label: 'Track width', default: 1, min: .3, max: 3, step: .1, unit: 'mm' }),
 };
-// The editor owns the view; the track, style and colours are the element's generated controls.
+// The editor owns the view; the tracks, style and line width are the element's generated controls.
 export const mapEditorParameters = ['longitude', 'latitude', 'zoom'] as const;
-type MapValues = { track: string; style: MapStyle; longitude: number; latitude: number; zoom: number };
+type Track = { id: string; track: string; colour: string; label: string };
+type MapValues = { tracks: Track[]; style: MapStyle; longitude: number; latitude: number; zoom: number };
 export type MapEditorProps = ElementEditorProps<typeof mapParameters, typeof mapEditorParameters[number]>;
 
 const cssPerMm = 96 / 25.4;
@@ -50,7 +59,7 @@ export function trackPoints(text: string) {
 }
 
 /** The track in the element's CSS pixels, for the same view the map shows. */
-function projectTrack(points: number[][], values: MapValues, width: number, height: number) {
+function projectTrack(points: number[][], values: Pick<MapValues, 'longitude' | 'latitude' | 'zoom'>, width: number, height: number) {
   const world = 512 * 2 ** values.zoom;
   const [cx, cy] = mercator([values.longitude, values.latitude]);
   return points.map((point) => {
@@ -64,6 +73,15 @@ function readTrack(id: string) {
   if (!source) return { points: undefined, problem: '' };
   try { return { points: trackPoints(source.text), problem: '' }; }
   catch (error) { return { points: undefined, problem: source.name + ' ' + (error instanceof Error ? error.message : 'could not be read') + '.' }; }
+}
+/** Every track with its points, or why it cannot be drawn. */
+const readTracks = (tracks: Track[]) => tracks.map((track) => ({ ...track, ...readTrack(track.track) }));
+/** The longitude/latitude bounds of all drawable tracks, or undefined when there are none. */
+function trackBounds(tracks: ReturnType<typeof readTracks>): [[number, number], [number, number]] | undefined {
+  const points = tracks.flatMap(({ points }) => points ?? []);
+  if (!points.length) return undefined;
+  const lngs = points.map(([lng]) => lng), lats = points.map(([, lat]) => lat);
+  return [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]];
 }
 
 type MapLibre = typeof import('maplibre-gl');
@@ -100,28 +118,32 @@ async function drawMap(view: { style: MapStyle; longitude: number; latitude: num
   }
 }
 
-/** The map as the page draws it: the map picture, the track over it, and the attribution. */
-export function MapView({ values, trackColor, trackWidth, rect, Element }: {
-  values: MapValues; trackColor: string; trackWidth: number; rect: Rect;
+/** The map as the page draws it: the map picture, the tracks over it in list order, and the attribution. */
+export function MapView({ values, trackWidth, rect, Element }: {
+  values: MapValues; trackWidth: number; rect: Rect;
   Element: (props: { id: 'map'; rect: Rect; className?: string; children?: ImageFlowNode }) => ImageFlowNode;
 }) {
   const width = rect.width * cssPerMm, height = rect.height * cssPerMm;
-  const { points, problem } = readTrack(values.track);
+  const tracks = readTracks(values.tracks);
   const view = { style: values.style, longitude: values.longitude, latitude: values.latitude, zoom: values.zoom };
   return <Element id="map" className="map" rect={rect}>
     <RenderedImage className="map-image" label="Map" inputs={{ ...view, width: rect.width, height: rect.height }} draw={(target) => drawMap(view, target)} />
-    {points && <svg className="map-track" viewBox={'0 0 ' + width.toFixed(1) + ' ' + height.toFixed(1)} preserveAspectRatio="none" aria-label="Route">
-      <polyline points={projectTrack(points, values, width, height)} style={{ stroke: trackColor, strokeWidth: trackWidth * cssPerMm }} />
+    {tracks.some(({ points }) => points) && <svg className="map-track" viewBox={'0 0 ' + width.toFixed(1) + ' ' + height.toFixed(1)} preserveAspectRatio="none" aria-label="Route">
+      {tracks.map(({ id, points, colour, label }) => points && <polyline key={id} points={projectTrack(points, values, width, height)}
+        style={{ stroke: colour, strokeWidth: trackWidth * cssPerMm }}>{label && <title>{label}</title>}</polyline>)}
     </svg>}
     <span className="map-attribution">{mapAttribution}</span>
-    {problem && <span hidden {...issue({ code: 'gpx-invalid', message: problem + ' The track is left out.', element: 'map', parameter: 'track',
-      file: values.track, suggestion: 'Assign a GPX file that contains a track or route, or clear the GPX track.' })} />}
+    {tracks.map(({ id, problem, track, label }, index) => problem && <span key={id} hidden {...issue({ code: 'gpx-invalid',
+      message: 'Track ' + (index + 1) + (label ? ' (' + label + ')' : '') + ': ' + problem + ' The track is left out.',
+      element: 'map', parameter: 'tracks', file: track,
+      suggestion: 'Assign a GPX file that contains a track or route to item ' + id + ' of tracks, or remove the item with remove_list_item.' })} />)}
   </Element>;
 }
 
 // The map's editor frames the view on the page itself (`presentation: 'inline'`): it is the element, at its printed
 // size, so dragging and zooming show the composition as printed, with the track and attribution where the page draws
-// them. It owns only the view; the track, style and colours are generated controls in the editor's toolbar. In the
+// them. It owns only the view; the tracks, style and line width are generated controls in the editor's toolbar, where
+// the list of tracks is a "Tracks (n)" button opening the list. In the
 // panel (the fallback, or when moved there) the same map is shown at the page's aspect ratio.
 export function MapEditor({ values, set, readOnly, context, presentation, waitUntil, children }: MapEditorProps & { children?: ImageFlowNode }) {
   const holder = React.useRef<HTMLDivElement>(null);
@@ -138,7 +160,9 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
   const printWidth = (rect?.width ?? 0) * cssPerMm;
   const width = React.useRef(printWidth);
   width.current = printWidth;
-  const { points, problem } = readTrack(values.track);
+  const tracks = readTracks(values.tracks);
+  const drawable = tracks.some(({ points }) => points);
+  const problem = tracks.map(({ problem }) => problem).filter(Boolean).join(' ');
   // The editor map's CSS pixels per printed CSS pixel: 1 inline, where the frame has the printed size; less in the panel.
   const ratio = () => (holder.current?.clientWidth || width.current) / (width.current || 1);
   // A smaller editor map shows the same area at a lower zoom.
@@ -149,11 +173,12 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
     return { longitude: round(center.lng, 5), latitude: round(center.lat, 5), zoom: round(Math.min(18, Math.max(0, target.getZoom() - Math.log2(ratio()))), 2) };
   };
 
-  // The track as a line on the editor map, in the page's colour and width; redrawn when they or the style change.
+  // The tracks as lines on the editor map, each in its colour, at the page's width; redrawn when they or the style change.
   const drawTrack = (target: MapLibreMap) => {
-    const { points: current } = readTrack(latest.current.track);
-    const data = { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: current ?? [] } };
-    const paint = { 'line-color': latest.current.trackColor, 'line-width': latest.current.trackWidth * cssPerMm * ratio() };
+    const current = readTracks(latest.current.tracks).filter(({ points }) => points);
+    const data = { type: 'FeatureCollection' as const, features: current.map(({ points, colour }) => ({ type: 'Feature' as const, properties: { colour },
+      geometry: { type: 'LineString' as const, coordinates: points! } })) };
+    const paint = { 'line-color': ['get', 'colour'] as unknown as string, 'line-width': latest.current.trackWidth * cssPerMm * ratio() };
     const source = target.getSource('track') as { setData?: (value: typeof data) => void } | undefined;
     if (source?.setData) {
       source.setData(data);
@@ -163,12 +188,12 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
     target.addSource('track', { type: 'geojson', data });
     target.addLayer({ id: 'track', type: 'line', source: 'track', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint });
   };
+  // Fits every track at once.
   const fitTrack = () => {
-    const { points: current } = readTrack(latest.current.track);
+    const bounds = trackBounds(readTracks(latest.current.tracks));
     const target = map.current;
-    if (!current || !target) return;
-    const lngs = current.map(([lng]) => lng), lats = current.map(([, lat]) => lat);
-    target.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 40 * ratio(), animate: false });
+    if (!bounds || !target) return;
+    target.fitBounds(bounds, { padding: 40 * ratio(), animate: false });
     set(savedView(target));
   };
   const latestFit = React.useRef(fitTrack);
@@ -225,11 +250,11 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
     current.resize();
     current.jumpTo({ center: [latest.current.longitude, latest.current.latitude], zoom: editorZoom(latest.current.zoom) });
   }, [rect?.width, rect?.height]);
-  React.useEffect(() => { if (map.current?.isStyleLoaded()) drawTrack(map.current); }, [values.track, values.trackColor, values.trackWidth]);
+  React.useEffect(() => { if (map.current?.isStyleLoaded()) drawTrack(map.current); }, [JSON.stringify(values.tracks), values.trackWidth]);
   React.useEffect(() => { map.current?.setStyle(styleUrl(values.style)); }, [values.style]);
   React.useEffect(() => {
     const button = holder.current?.querySelector<HTMLButtonElement>('.map-fit-track');
-    if (button) button.disabled = !points;
+    if (button) button.disabled = !drawable;
   });
 
   // A problem is drawn over the map, so it never moves the map or the page around it.
@@ -243,7 +268,7 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
   </div>;
 }
 
-// A map control, in the style of MapLibre's zoom buttons, that frames the whole track.
+// A map control, in the style of MapLibre's zoom buttons, that frames every track.
 function fitControl(fit: () => void) {
   let container: HTMLElement | undefined;
   return {
@@ -253,8 +278,8 @@ function fitControl(fit: () => void) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'map-fit-track';
-      button.title = 'Fit track';
-      button.setAttribute('aria-label', 'Fit track');
+      button.title = 'Fit tracks';
+      button.setAttribute('aria-label', 'Fit tracks');
       button.innerHTML = '<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M4 8V4h4M12 4h4v4M16 12v4h-4M8 16H4v-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>';
       button.addEventListener('click', fit);
       container.append(button);

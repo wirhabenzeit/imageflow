@@ -11,10 +11,15 @@ import type { Dimensions, Placement } from './spread';
 // lets clicks through to neighbouring boxes. While a gesture runs, the rest of the book dims as well. Each gesture
 // is saved when it ends, as its own undoable edit; there is nothing to confirm. Plain scrolling keeps scrolling the
 // book. The toolbar sits at the bottom of the visible canvas, because the frame may extend past the visible area.
-export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel, resolution, settling, save, close, toolbarHost, children }: {
+//
+// A box the template draws with a render callback (`custom`) is not covered by a plain copy of the photo: the book frame
+// draws the gesture's placement through the template (`preview`), and the frame here only takes the gestures, so the
+// template's mask or artwork follows the crop. The faded photo still shows around the frame.
+export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel, resolution, settling, save, close, toolbarHost, custom = false, preview, children }: {
   frame: Rect; photo: Dimensions; src: string; placement?: Placement; toolbarHost?: HTMLElement | null;
   inchesPerPixel?: number; resolution?: { minimum: number; target: number };
-  settling: boolean; save: (placement: Placement) => void; close: () => void; children?: ReactNode;
+  settling: boolean; save: (placement: Placement) => void; close: () => void; custom?: boolean; preview?: (placement: Placement | undefined) => void;
+  children?: ReactNode;
 }) {
   const aspect = frame.width / frame.height;
   const normal = (value?: Placement) => placementOf(getCrop(photo, value ?? centered, aspect), value?.zoom ?? 1);
@@ -177,16 +182,22 @@ export function CropEditor({ frame, photo, src, placement: saved, inchesPerPixel
   }, []);
 
   const image = { width, height };
+  // The placement the book frame draws for a custom box: the current one while selected, none once closed.
+  const placementKey = JSON.stringify(placement);
+  useEffect(() => { if (custom) preview?.(placement); }, [custom, placementKey]);
+  useEffect(() => () => preview?.(undefined), []);
+  // The faded photo around a custom box leaves the frame clear, so the template's artwork shows unchanged inside it.
+  const hole = custom ? { clipPath: `path(evenodd, 'M0 0H${width}V${height}H0Z M${frame.x - left} ${frame.y - top}h${frame.width}v${frame.height}h${-frame.width}Z')` } : {};
   const zoomButton = (factor: number) => () => {
     zoomAround(factor);
     commit();
   };
   return <div className={'crop-editor' + (settling ? ' settling' : '') + (active ? ' active' : '')}
     onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
-    {!settling && <img className="crop-ghost" src={src} alt="" draggable={false} style={{ left, top, ...image }} />}
-    <div ref={window_} className="crop-window" style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height }}
+    {!settling && <img className="crop-ghost" src={src} alt="" draggable={false} style={{ left, top, ...image, ...hole }} />}
+    <div ref={window_} className={'crop-window' + (custom ? ' custom' : '')} style={{ left: frame.x, top: frame.y, width: frame.width, height: frame.height }}
       onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}>
-      <img src={src} alt="" draggable={false} style={{ left: left - frame.x, top: top - frame.y, ...image }} />
+      {!custom && <img src={src} alt="" draggable={false} style={{ left: left - frame.x, top: top - frame.y, ...image }} />}
     </div>
     {!settling && toolbarHost && createPortal(<div ref={toolbar} className="item-controls crop-toolbar" role="toolbar" aria-label="Photo"
       onPointerDown={(event) => event.stopPropagation()}>
