@@ -612,11 +612,23 @@ export function App() {
     setAgentWorking(true);
     return true;
   });
-  const prepareQuit = useEffectEvent(() => {
+  // Quit refuses only real pending work. A focused form field is committed (fields save on blur) instead.
+  const quitBlocked = useEffectEvent(() => {
     const focused = document.activeElement;
-    const typing = focused instanceof HTMLElement && (focused.matches('input, textarea, select, [contenteditable="true"]') || !!focused.closest('dialog'));
+    const modal = focused instanceof HTMLElement && (focused.matches('[contenteditable="true"]') || !!focused.closest('dialog'));
     const reloadRunning = reloading.current && !reloadFailed.current;
-    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || typing || agentLocked.current) return false;
+    return !!(pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || modal || agentLocked.current);
+  });
+  const prepareQuit = useEffectEvent(async () => {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused.matches('input, textarea, select') && !focused.closest('dialog')) {
+      focused.blur();
+      // Let the blur commit render and its save start, then wait briefly for it to finish.
+      const deadline = Date.now() + 2000;
+      do await new Promise((resolve) => setTimeout(resolve, 30));
+      while (quitBlocked() && Date.now() < deadline);
+    }
+    if (quitBlocked()) return false;
     // Block new edits between the acknowledgement and native window close.
     agentLocked.current = true;
     if (workspace.current) workspace.current.inert = true;

@@ -4,7 +4,7 @@ import { AppUpdater } from '../desktop/updates';
 import { updateLocationHint, updateUnavailable, moveToApplications } from '../desktop/update-environment';
 import type { UpdateState } from '../src/updates';
 
-function fixture(t: { after(callback: () => void): void }, extra: { unavailable?: string; interval?: number } = {}) {
+function fixture(t: { after(callback: () => void): void }, extra: { unavailable?: string; eligibility?: Promise<string | undefined>; interval?: number } = {}) {
   const calls: string[] = [], states: UpdateState[] = [];
   const updater = new AppUpdater({ driver: { initialize: () => { calls.push('initialize'); },
     check: () => { calls.push('check'); }, install: () => { calls.push('install'); } },
@@ -99,4 +99,51 @@ test('translocated, disk image and Downloads launches explain how to move the ap
   }
   assert.equal(updateLocationHint('/Applications/ImageFlow.app', '/Users/me/Downloads'), undefined);
   assert.equal(updateLocationHint('/Users/me/Downloads-backup/ImageFlow.app', '/Users/me/Downloads'), undefined);
+  // An Applications folder on an external drive is a real install, not a mounted disk image.
+  assert.equal(updateLocationHint('/Volumes/Work/Applications/ImageFlow.app', '/Users/me/Downloads'), undefined);
+});
+
+test('eligibility is checked in the background: checks wait for it and never run when it fails', async (t) => {
+  let resolve!: (message: string | undefined) => void;
+  const { updater, calls, states } = fixture(t, { eligibility: new Promise((done) => { resolve = done; }) });
+  updater.setAutomatic(true);
+  assert.deepEqual(calls, []);
+  assert.equal(updater.state.status, 'idle');
+  updater.check();
+  assert.equal(updater.state.status, 'checking');
+  assert.deepEqual(calls, []);
+  resolve(undefined);
+  await new Promise((done) => setImmediate(done));
+  assert.deepEqual(calls, ['initialize']);
+  assert.equal(states.at(-1)?.status, 'checking');
+
+  let reject!: (message: string | undefined) => void;
+  const blocked = fixture(t, { eligibility: new Promise((done) => { reject = done; }) });
+  blocked.updater.check();
+  reject('Move it');
+  await new Promise((done) => setImmediate(done));
+  blocked.updater.setAutomatic(true);
+  blocked.updater.check();
+  assert.deepEqual(blocked.calls, []);
+  assert.deepEqual(blocked.updater.state, { status: 'unavailable', message: 'Move it' });
+});
+
+test('a pending manual check runs once eligibility is known, even with automatic checks off', async (t) => {
+  let resolve!: (message: string | undefined) => void;
+  const { updater, calls } = fixture(t, { eligibility: new Promise((done) => { resolve = done; }) });
+  updater.check();
+  resolve(undefined);
+  await new Promise((done) => setImmediate(done));
+  assert.deepEqual(calls, ['initialize']);
+});
+
+test('Later dismisses the ready notice everywhere but keeps the restart available', (t) => {
+  const { updater, calls } = fixture(t);
+  updater.dismiss();
+  assert.equal(updater.state.dismissed, undefined);
+  updater.downloaded('1.0.1');
+  updater.dismiss();
+  assert.deepEqual(updater.state, { status: 'ready', release: '1.0.1', dismissed: true });
+  updater.restart();
+  assert.deepEqual(calls, ['quit']);
 });

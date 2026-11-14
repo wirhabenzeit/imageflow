@@ -244,6 +244,36 @@ function focusedDocument(owner: BaseWindow | null | undefined = BrowserWindow.ge
   const browser = owner ? BrowserWindow.fromId(owner.id) : undefined;
   return browser ? documents.get(browser.webContents.id) ?? markdownWindows.documentFor(browser) ?? [...assetsWindows].find(([, entry]) => entry.window === browser)?.[0] : lastDocument && !lastDocument.closing ? lastDocument : undefined;
 }
+const unresponsive = new WeakSet<BrowserWindow>();
+// Ask a book window to confirm it has no pending edit before quitting. A window that crashed, hung, is still
+// loading or never answers holds nothing the renderer could still save, so it must not make the app
+// impossible to quit; main-side writers and locks still settle in will-quit.
+function askToQuit(document: DocumentSession): Promise<boolean> {
+  const { window } = document;
+  const contents = window.webContents;
+  if (contents.isCrashed() || contents.isLoadingMainFrame()) return Promise.resolve(true);
+  const id = randomUUID();
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (allowed: boolean, reason?: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer); clearInterval(watch); quitReplies.delete(id);
+      if (!contents.isDestroyed()) contents.removeListener('render-process-gone', gone);
+      if (reason) console.warn('ImageFlow quit without an answer from a book window: ' + reason);
+      resolve(allowed);
+    };
+    const gone = () => finish(true, 'renderer gone');
+    contents.once('render-process-gone', gone);
+    const watch = setInterval(() => {
+      if (window.isDestroyed() || contents.isCrashed()) finish(true, 'renderer gone');
+      else if (unresponsive.has(window)) finish(true, 'renderer unresponsive');
+    }, 100);
+    const timer = setTimeout(() => finish(true, 'no answer'), 10_000);
+    quitReplies.set(id, { sender: contents.id, resolve: (allowed) => finish(allowed) });
+    contents.send(channels.prepareQuit, id);
+  });
+}
 function report(owner: BrowserWindow | null | undefined, error: unknown) {
   if (owner && !owner.isDestroyed()) owner.webContents.send(channels.appError, errorMessage(error));
   else { showStart(); startWindow?.webContents.once('did-finish-load', () => report(startWindow, error)); }
@@ -424,6 +454,8 @@ async function openDocument(path: string): Promise<DocumentSession> {
       identities.set(identity, document);
       lastDocument = document;
       editor.on('focus', () => { lastDocument = current; updateMenus(); });
+      editor.on('unresponsive', () => unresponsive.add(editor!));
+      editor.on('responsive', () => unresponsive.delete(editor!));
       editor.on('blur', () => { if (covers.get(current)?.dirty) scheduleCover(current, current.book); });
       let closingTextEditors = false;
       editor.on('close', (event) => {
@@ -1083,7 +1115,8 @@ void app.whenReady().then(async () => {
   configureSourceAccess(join(app.getPath('userData'), 'source-access'));
   nativeTheme.themeSource = settings.value.appearance;
   updates = new AppUpdater({
-    unavailable: await updateUnavailable({ packaged: app.isPackaged, platform: process.platform,
+    // Not awaited: signature verification can take seconds and must not delay the first window.
+    eligibility: updateUnavailable({ packaged: app.isPackaged, platform: process.platform,
       executable: process.execPath, downloads: app.getPath('downloads') }),
     driver: {
       initialize: () => {
@@ -1097,7 +1130,9 @@ void app.whenReady().then(async () => {
       install: () => autoUpdater.quitAndInstall(),
     },
     changed: (state) => {
-      for (const owner of BrowserWindow.getAllWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.updateChanged, state);
+      for (const owner of [...appWindows(), ...[...pickers.values()].map(({ window }) => window)]) {
+        if (!owner.isDestroyed()) owner.webContents.send(channels.updateChanged, state);
+      }
       const restart = Menu.getApplicationMenu()?.getMenuItemById('restart-update');
       if (restart) restart.enabled = state.status === 'ready';
     },
@@ -1147,17 +1182,12 @@ void app.whenReady().then(async () => {
         while (document.busy && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
         if (document.busy) throw new Error('Wait for the book to finish saving or exporting, then try again.');
         if (document.closing || document.window.isDestroyed()) continue;
+        // A crashed renderer holds no edits; main-side writers still settle in will-quit.
+        if (document.window.webContents.isCrashed()) continue;
         // Pause new agent and renderer mutations while asking for the last input acknowledgement.
         document.busy = true;
         locked.push(document);
-        const id = randomUUID();
-        const allowed = await new Promise<boolean>((resolve) => {
-          const timer = setTimeout(() => { quitReplies.delete(id); resolve(false); }, 3000);
-          quitReplies.set(id, { sender: document.window.webContents.id, resolve: (allowed) => {
-            clearTimeout(timer); quitReplies.delete(id); resolve(allowed);
-          } });
-          document.window.webContents.send(channels.prepareQuit, id);
-        });
+        const allowed = await askToQuit(document);
         if (!allowed) {
           focus(document.window);
           throw new Error('Finish or discard the active edit in this book, then try quitting or restarting again.');
@@ -1452,6 +1482,7 @@ void app.whenReady().then(async () => {
     assetsWindows.get(assetsOwner(event)!)?.window ?? markdownWindows.owner(event);
   ipcMain.handle(channels.updateState, (event) => updateOwner(event) ? updates.state : { status: 'unavailable' });
   ipcMain.handle(channels.checkUpdates, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.check(); });
+  ipcMain.handle(channels.dismissUpdate, (event) => { if (updateOwner(event)) updates.dismiss(); });
   ipcMain.handle(channels.restartUpdate, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.restart(); });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {

@@ -29,9 +29,13 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   assert.equal((await page.evaluate(() => window.imageflow.updateState())).status, 'unavailable');
-  const settingsOpened = instance.waitForEvent('window');
   await menuAction(instance, 'Check for Updates…');
-  const settings = await settingsOpened;
+  // Preview render windows open in the background too, so find Settings by its URL.
+  let settings;
+  for (const deadline = Date.now() + 15000; !settings && Date.now() < deadline; await new Promise((resolve) => setTimeout(resolve, 50))) {
+    settings = instance.windows().find((window) => window.url() === 'imageflow://editor/settings');
+  }
+  assert.ok(settings, 'Settings window opened');
   await settings.getByText('Updates are available in the signed macOS release of ImageFlow.', { exact: true }).waitFor();
   const automatic = settings.getByRole('checkbox', { name: 'Automatically check for updates' });
   assert.equal(await automatic.isChecked(), true);
@@ -44,12 +48,15 @@ try {
   await settings.getByText('Could not check for updates. Check your internet connection and try again.', { exact: true }).waitFor();
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('update-available'); });
   await settings.getByText('Downloading update…', { exact: true }).waitFor();
+  // The notice follows window focus; hidden test windows never receive a real focus event.
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('update-downloaded', {}, '', '1.0.1'); });
   await page.getByRole('complementary', { name: 'ImageFlow update' }).waitFor();
   await page.screenshot({ path: join(root, '.build/update-notice.png') });
   await settings.screenshot({ path: join(root, '.build/update-settings.png') });
   await page.getByRole('button', { name: 'Later', exact: true }).click();
-  assert.equal(await page.locator('.update-notice').count(), 0);
+  await page.locator('.update-notice').waitFor({ state: 'detached' });
+  assert.equal((await page.evaluate(() => window.imageflow.updateState())).dismissed, true);
   assert.equal(await instance.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('restart-update').enabled), true);
   await settings.getByRole('button', { name: 'Restart to Update', exact: true }).last().waitFor();
   // No installation should be attempted by a cancelled quit. The eventual install sees no book lock or MCP descriptor.
@@ -81,7 +88,8 @@ try {
   await instance.evaluate(({ app }) => { app.quit(); });
   await page.waitForFunction(() => globalThis.quitMessages.length === 2);
   await page.getByText(/Finish or discard the active edit/).waitFor();
-  // A cancelled restart must not later install just because the user chose an ordinary Quit.
+  // A cancelled restart must not call quitAndInstall just because the user chose an ordinary Quit. (Squirrel.Mac
+  // may still apply the staged update on that quit without relaunching; see docs/releasing.md.)
   await page.getByRole('button', { name: 'Done', exact: true }).click();
   await page.locator('.inline-text-editor').waitFor({ state: 'detached' });
   await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
@@ -89,6 +97,10 @@ try {
   const mcp = await page.evaluate(() => window.imageflow.mcpSettings(true));
   assert.ok(mcp.value.enabled);
   await stat(join(profile, 'mcp-connection.json'));
+  // A crashed book renderer cannot answer the quit handshake and must not keep the app open.
+  await instance.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/').webContents.forcefullyCrashRenderer();
+  });
   const exited = once(appProcess, 'exit', { signal: AbortSignal.timeout(20000) });
   await menuAction(instance, 'Restart to Update');
   const [code] = await exited;

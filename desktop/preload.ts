@@ -8,12 +8,23 @@ function listen<T>(channel: string, listener: (value: T) => void) {
   return () => { ipcRenderer.removeListener(channel, callback); };
 }
 
+// One handler answers every quit request: a window with no book editor mounted yet has nothing to protect.
+let prepareQuit: (() => boolean | Promise<boolean>) | undefined;
+ipcRenderer.on(channels.prepareQuit, (_event, id: string) => {
+  void Promise.resolve().then(() => prepareQuit ? prepareQuit() : true).catch(() => false)
+    .then((allowed) => ipcRenderer.send(channels.prepareQuitReply, id, allowed));
+});
+
 const api: DesktopApi = {
   updateState: () => ipcRenderer.invoke(channels.updateState),
   onUpdateChanged: (listener) => listen(channels.updateChanged, listener),
   checkUpdates: () => ipcRenderer.invoke(channels.checkUpdates),
   restartUpdate: () => ipcRenderer.invoke(channels.restartUpdate),
-  onPrepareQuit: (listener) => listen<string>(channels.prepareQuit, (id) => ipcRenderer.send(channels.prepareQuitReply, id, listener())),
+  dismissUpdate: () => ipcRenderer.invoke(channels.dismissUpdate),
+  onPrepareQuit: (listener) => {
+    prepareQuit = listener;
+    return () => { if (prepareQuit === listener) prepareQuit = undefined; };
+  },
   onCancelQuit: (listener) => listen(channels.cancelQuit, listener),
   showMarkdown: (request) => ipcRenderer.invoke(channels.showMarkdown, request),
   markdownAction: (request) => ipcRenderer.invoke(channels.markdownAction, request),
