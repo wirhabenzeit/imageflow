@@ -157,8 +157,9 @@ export default defineConfig({
     // The pages live in docs/, outside this package, so point their imports at site/node_modules.
     resolve: {
       alias: [
-        { find: /^vue\/server-renderer$/, replacement: join(site, 'node_modules/vue/server-renderer/index.mjs') },
-        { find: /^vue$/, replacement: join(site, 'node_modules/vue/index.mjs') },
+        // Package folders, not files, so Vite still picks the browser or server entry from package.json.
+        { find: /^vue\/server-renderer$/, replacement: join(site, 'node_modules/vue/server-renderer') },
+        { find: /^vue$/, replacement: join(site, 'node_modules/vue') },
       ],
     },
     server: { fs: { allow: [root] } },
