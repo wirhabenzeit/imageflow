@@ -945,3 +945,10 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .markdown-conflict p { margin: 0 0 6px; }
 .markdown-conflict button { margin: 8px 8px 0 0; }
 .markdown-conflict pre { max-height: 160px; overflow: auto; white-space: pre-wrap; }
+
+.update-notice { position: fixed; right: 20px; top: 48px; z-index: 10000; max-width: 330px; padding: 14px 16px; border: 1px solid var(--edge); border-radius: 10px; background: var(--popup-surface); color: var(--text); box-shadow: 0 6px 28px #0003; font: 13px/1.45 var(--ui-font); }
+.update-notice p { margin: 0 0 10px; }
+.update-notice > div, .settings-update-actions { display: flex; gap: 8px; }
+.update-notice button { cursor: default; font: inherit; padding: 5px 9px; border: 1px solid var(--edge); border-radius: 5px; background: var(--toolbar-fill); color: var(--text); }
+.settings-update-actions { margin-top: 12px; }
+.update-status { min-height: 2.8em; max-width: 330px; }

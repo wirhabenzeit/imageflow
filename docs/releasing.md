@@ -44,7 +44,7 @@ The six signing secrets in [Mac signing and notarization](signing.md) must be co
 
 Open the draft under **GitHub → Releases**, review the generated notes, and download the DMG. On an Apple silicon Mac that has not run ImageFlow before, open it, drag ImageFlow to Applications, eject the disk image, then launch the installed app. Check that Gatekeeper accepts it, **About ImageFlow** shows the expected version, and a sample book opens and exports a proof PDF.
 
-After the workflow and installation check succeed, click **Publish release**. Keep both assets attached under their original names. The updater work in #74 will use the public ZIP; publishing a release alone does not add update support to older builds.
+After the workflow and installation check succeed, click **Publish release**. Keep both assets attached under their original names. The built-in updater uses the public ZIP. Publishing a release does not add update support to builds that predate the updater.
 
 ## Test tags and retries
 
@@ -57,3 +57,34 @@ Existing draft assets can be replaced on a rerun. Draft creation requires an exp
 Signing and notarization child output streams directly to Actions, including before failure or cancellation. The notarization library still waits internally for Apple's final response; if a run is interrupted before it reports a submission ID, use `xcrun notarytool history` with the same API credentials to find it, then `xcrun notarytool log <id>` to inspect it.
 
 Signing credentials are imported only for the separate signing and notarization operations and removed immediately afterward; the API key file exists only during notarization. Only the ZIP and DMG pass to the job with permission to write the draft release. Action artifacts are retained for seven days; the assets attached to the draft release remain there.
+
+## Automatic updates and acceptance (#74)
+
+Packaged macOS apps with a verified Developer ID signature check the public `wirhabenzeit/imageflow` feed at launch and every four hours. Development and ad-hoc builds do not initialize the updater. The app uses Electron’s `autoUpdater` through `update-electron-app`, with its default modal notification disabled. Downloads happen in the background; a non-modal **Restart to Update** notice appears when the download is ready. **Later** dismisses that window’s notice; the restart command remains available in the app menu and General settings.
+
+**ImageFlow → Check for Updates…** opens General settings, where progress, up-to-date and offline/error feedback appears. **Automatically check for updates** defaults on and is stored on this Mac. Turning it off stops future automatic checks; manual checks still work, and an update already being downloaded can finish. Read-only, disk-image, translocated and Downloads launches explain how to move the app into Applications. A signed app must be installed in a writable location to update.
+
+Restart first requests an ordinary Quit. Markdown source windows flush their latest input using their existing error/conflict/cancel handling. Book windows acknowledge that pending work has finished and reject quitting while a page editor, field or save needs attention. A rejected quit keeps the app usable and the update ready for a later retry. Only after the windows close, writers settle, book locks release and MCP shuts down does the app call `quitAndInstall()`. Books are cleanly closed; reopen them from Recents after relaunch.
+
+Local implementation checks:
+
+```sh
+npm run build
+npm run test:unit
+node scripts/stage-desktop.mjs
+node scripts/smoke-updates.mjs
+node scripts/smoke-project-lifecycle.mjs
+node scripts/smoke-markdown-editor.mjs
+```
+
+`smoke-updates.mjs` simulates native updater events and intercepts installation. It checks the preference, manual feedback, notice, cancelled quit with pending page text, successful save, and lock/MCP cleanup before installation. These checks do **not** establish signed download, installation, relaunch or real-client reconnection.
+
+Before closing #74 or shipping V1, record an actual two-version upgrade in the issue:
+
+1. Choose two stable SemVer versions built by the release workflow with the same Developer ID. Record versions, commits, workflow runs, signing identity/team, macOS version, ZIP/DMG links and the public feed URL (`https://update.electronjs.org/wirhabenzeit/imageflow/darwin-arm64/<installed-version>`). Both versions must already include the updater.
+2. Install the older notarized DMG on a clean Apple silicon Mac by dragging it into Applications; eject the disk image. Configure a real MCP client once and record its launch configuration.
+3. Publish the newer stable release with its original ZIP and DMG names. Coordinate this publication explicitly: the public service ignores draft and prerelease releases, so two draft artifacts cannot prove delivery. Do not publish throwaway stable releases as part of an automated test.
+4. Check discovery and background download using the real public feed. Verify **Restart to Update**, **Later**, and the retained menu/settings restart command. Record any service cache delay.
+5. Try restarting with pending inline text, a failed save and a conflicted Markdown source. Confirm the app stays open with the draft intact when the edit cannot safely close. Resolve/save, restart, and confirm the expected version relaunches, saved text survives and books reopen without stale locks.
+6. Verify manual checks while automatic checks are off, the persisted preference after relaunch, up-to-date feedback, and offline/error recovery. Run from a DMG/translocated location and verify the move-to-Applications hint.
+7. Reconnect the configured real MCP client without repeating setup. Confirm the installed executable path remains unchanged and a book can be inspected and edited. Attach results and failures to #74; leave it open until this evidence is complete.

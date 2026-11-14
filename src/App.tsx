@@ -612,6 +612,16 @@ export function App() {
     setAgentWorking(true);
     return true;
   });
+  const prepareQuit = useEffectEvent(() => {
+    const focused = document.activeElement;
+    const typing = focused instanceof HTMLElement && (focused.matches('input, textarea, select, [contenteditable="true"]') || !!focused.closest('dialog'));
+    const reloadRunning = reloading.current && !reloadFailed.current;
+    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || typing || agentLocked.current) return false;
+    // Block new edits between the acknowledgement and native window close.
+    agentLocked.current = true;
+    if (workspace.current) workspace.current.inert = true;
+    return true;
+  });
   function placeSources(keys: string[], target = spreadId, firstBox?: string) {
     if (!template || !writable || !summary) return;
     const state = spreads.find(({ id }) => id === target);
@@ -636,6 +646,11 @@ export function App() {
   });
   useEffect(() => {
     if (!api) return;
+    const prepare = api.onPrepareQuit(() => prepareQuit());
+    const cancelQuit = api.onCancelQuit(() => {
+      agentLocked.current = false;
+      if (workspace.current) workspace.current.inert = false;
+    });
     const sourceCommand = api.onSourceCommand(onSourceCommand);
     const lease = api.onAgentLease(() => acquireAgentLease());
     const release = api.onAgentRelease(() => {
@@ -653,7 +668,7 @@ export function App() {
       if ('error' in result) setError(result.error);
       else adopt(result.value, true);
     });
-    return () => { mounted = false; sourceCommand(); command(); changed(); progress(); lease(); release(); appError(); };
+    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); command(); changed(); progress(); lease(); release(); appError(); };
   }, [api]);
 
   // Network origins the template declares (ADR 0006): decided once per book and template version (its hash) when it

@@ -1,3 +1,6 @@
+import { AppUpdater } from './updates';
+import { updateUnavailable } from './update-environment';
+import { updateElectronApp, UpdateSourceType } from 'update-electron-app';
 import { MarkdownWindows } from './markdown-windows';
 import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
@@ -8,7 +11,7 @@ import { originalPath } from './source-store';
 import { sourceEntries } from '../src/source-locations';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
 import { configureSourceAccess } from './source-access';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
+import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -68,6 +71,9 @@ let settingsPane: SettingsPane = 'general';
 let mcpConnection: Awaited<ReturnType<typeof createMcpConnection>> | undefined;
 let mcpClients: { name: string }[] = [];
 let quitting = false;
+let preparingQuit = false;
+let updates: AppUpdater;
+const quitReplies = new Map<string, { sender: number; resolve: (allowed: boolean) => void }>();
 let quitReady = false;
 let quitCleanup: Promise<void> | undefined;
 let connectionSettingsQueue = Promise.resolve();
@@ -366,7 +372,7 @@ async function saveDevState() {
     .map((document) => ({ folder: document.book.folder })))).catch(() => {});
 }
 async function openDocument(path: string): Promise<DocumentSession> {
-  if (quitting) throw new Error('ImageFlow is closing.');
+  if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
   if (!isDocument(path)) throw new Error('Choose an .imageflow document.');
   const { folder, identity } = await documentIdentity(path);
   const existing = identities.get(identity);
@@ -395,7 +401,7 @@ async function openDocument(path: string): Promise<DocumentSession> {
     let document: DocumentSession | undefined;
     try {
       const book = await loadProject(folder, cache);
-      if (quitting) throw new Error('ImageFlow is closing.');
+      if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
       editor = new BrowserWindow({ width: 1520, height: 950, minWidth: 940, minHeight: 650, show: false,
         webPreferences: windowOptions() });
       configureMacHeader(editor);
@@ -851,6 +857,8 @@ function installMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu', submenu: [
       { role: 'about' }, { type: 'separator' },
+      { id: 'check-updates', label: 'Check for Updates…', click: () => { showSettings('general'); updates.check(); } },
+      { id: 'restart-update', label: 'Restart to Update', enabled: updates.state.status === 'ready', click: () => updates.restart() },
       { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => showSettings() },
       { type: 'separator' }, { role: 'services' }, { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' },
@@ -1002,7 +1010,7 @@ async function disableMcp() {
   publishMcpSettings();
 }
 async function enableMcp() {
-  if (quitting) throw new Error('ImageFlow is closing.');
+  if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
   const connection = await createMcpConnection({
     descriptorPath: mcpDescriptorPath(),
     onClientsChanged: (clients) => { mcpClients = clients; publishMcpSettings(); },
@@ -1074,6 +1082,31 @@ void app.whenReady().then(async () => {
   configureSourceStore(join(app.getPath('userData'), 'source-cache'));
   configureSourceAccess(join(app.getPath('userData'), 'source-access'));
   nativeTheme.themeSource = settings.value.appearance;
+  updates = new AppUpdater({
+    unavailable: await updateUnavailable({ packaged: app.isPackaged, platform: process.platform,
+      executable: process.execPath, downloads: app.getPath('downloads') }),
+    driver: {
+      initialize: () => {
+        // The library configures Squirrel's feed and performs the initial check. Own the timer so
+        // Settings can stop and resume automatic checking without installing duplicate listeners.
+        const updater = updateElectronApp({ updateSource: { type: UpdateSourceType.ElectronPublicUpdateService,
+          repo: 'wirhabenzeit/imageflow' }, notifyUser: false, updateInterval: '4 hours' });
+        updater.stopUpdates();
+      },
+      check: () => autoUpdater.checkForUpdates(),
+      install: () => autoUpdater.quitAndInstall(),
+    },
+    changed: (state) => {
+      for (const owner of BrowserWindow.getAllWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.updateChanged, state);
+      const restart = Menu.getApplicationMenu()?.getMenuItemById('restart-update');
+      if (restart) restart.enabled = state.status === 'ready';
+    },
+    quit: () => app.quit(),
+  });
+  autoUpdater.on('error', (error) => updates.failed(error));
+  autoUpdater.on('update-available', () => updates.available());
+  autoUpdater.on('update-not-available', () => updates.current());
+  autoUpdater.on('update-downloaded', (_event, _notes, name) => updates.downloaded(name));
   cache = await mkdtemp(join(app.getPath('temp'), 'imageflow-cache-'));
   // IMAGEFLOW_TEMPLATES points tests and development at another library folder.
   library = new TemplateLibrary(process.env.IMAGEFLOW_TEMPLATES || join(app.getPath('userData'), 'Templates'),
@@ -1097,21 +1130,59 @@ void app.whenReady().then(async () => {
   if (!app.isPackaged && process.env.IMAGEFLOW_BENCHMARK === '1') {
     Object.defineProperty(globalThis, 'imageflowBenchmarkInputs', { value: () => lastDocument?.projectSession.inputs.metrics });
   }
-  let flushingTextEditors = false;
+  let quitApproved = false;
   app.on('before-quit', (event) => {
-    if (markdownWindows.windows().length) {
-      event.preventDefault();
-      if (flushingTextEditors) return;
-      flushingTextEditors = true;
-      void (async () => {
-        for (const document of documents.values()) if (!await markdownWindows.closeFor(document)) return;
-        // before-quit runs synchronously again; clear the guard before re-entering it.
-        flushingTextEditors = false;
-        app.quit();
-      })().catch((error) => report(lastDocument?.window, error)).finally(() => { flushingTextEditors = false; });
-      return;
-    }
-    quitting = true; clearInterval(sourceMaintenance);
+    if (quitApproved) { quitting = true; updates.dispose(); clearInterval(sourceMaintenance); return; }
+    event.preventDefault();
+    if (preparingQuit) return;
+    preparingQuit = true;
+    const locked: DocumentSession[] = [];
+    void (async () => {
+      // Source editors flush pending keystrokes and retain their existing cancel/failure prompts.
+      for (const document of documents.values()) if (!await markdownWindows.closeFor(document)) return;
+      await Promise.allSettled([...opening.values()]);
+      for (const document of documents.values()) {
+        if (document.closing || document.window.isDestroyed()) continue;
+        const deadline = Date.now() + 30_000;
+        while (document.busy && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+        if (document.busy) throw new Error('Wait for the book to finish saving or exporting, then try again.');
+        if (document.closing || document.window.isDestroyed()) continue;
+        // Pause new agent and renderer mutations while asking for the last input acknowledgement.
+        document.busy = true;
+        locked.push(document);
+        const id = randomUUID();
+        const allowed = await new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => { quitReplies.delete(id); resolve(false); }, 3000);
+          quitReplies.set(id, { sender: document.window.webContents.id, resolve: (allowed) => {
+            clearTimeout(timer); quitReplies.delete(id); resolve(allowed);
+          } });
+          document.window.webContents.send(channels.prepareQuit, id);
+        });
+        if (!allowed) {
+          focus(document.window);
+          throw new Error('Finish or discard the active edit in this book, then try quitting or restarting again.');
+        }
+      }
+      quitApproved = true;
+      // Native close callbacks settle writers and release book locks in the ordinary will-quit cleanup.
+      // Their busy guard must be released now that renderer input is frozen.
+      for (const document of locked) document.busy = false;
+      app.quit();
+    })().catch((error) => report(lastDocument?.window, error)).finally(() => {
+      preparingQuit = false;
+      if (!quitApproved) {
+        updates.cancelRestart();
+        for (const document of locked) {
+          document.busy = false;
+          if (!document.window.isDestroyed()) document.window.webContents.send(channels.cancelQuit);
+        }
+      }
+    });
+  });
+  ipcMain.on(channels.prepareQuitReply, (event, id: unknown, allowed: unknown) => {
+    if (typeof id !== 'string') return;
+    const reply = quitReplies.get(id);
+    if (reply?.sender === event.sender.id && editorOwner(event)) reply.resolve(allowed === true);
   });
   app.on('will-quit', (event) => {
     if (quitReady) return;
@@ -1127,7 +1198,16 @@ void app.whenReady().then(async () => {
       await previewQueue;
       await rm(cache, { recursive: true, force: true });
       await pruneRenditions(renditions).catch((error) => console.warn('ImageFlow could not prune image previews', error));
-    })().catch((error) => console.error('ImageFlow could not finish cleanup', error)).finally(() => { quitReady = true; app.quit(); });
+    })().then(() => {
+      quitReady = true;
+      // Never call quitAndInstall until ordinary window close, saves and MCP/lock cleanup finish.
+      if (!updates.finishQuit()) app.quit();
+    }).catch((error) => {
+      console.error('ImageFlow could not finish cleanup', error);
+      updates.cancelRestart();
+      quitReady = true;
+      app.quit();
+    });
   });
   protocol.handle(desktopScheme, async (request) => {
     try { return await serve(request); }
@@ -1368,12 +1448,18 @@ void app.whenReady().then(async () => {
     await openDocument(folder);
     return null;
   }));
+  const updateOwner = (event: IpcMainInvokeEvent) => appOwner(event) ?? pickerOwner(event) ??
+    assetsWindows.get(assetsOwner(event)!)?.window ?? markdownWindows.owner(event);
+  ipcMain.handle(channels.updateState, (event) => updateOwner(event) ? updates.state : { status: 'unavailable' });
+  ipcMain.handle(channels.checkUpdates, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.check(); });
+  ipcMain.handle(channels.restartUpdate, (event) => { if (updateOwner(event) && !preparingQuit && !quitting) updates.restart(); });
   ipcMain.handle(channels.settings, (event) => appOwner(event) ? { value: settings.value } : { error: 'Request is only available to an app window.' });
   ipcMain.handle(channels.updateSettings, async (event, patch: unknown) => {
     if (!appOwner(event)) return { error: 'Request is only available to an app window.' };
     try {
       const value = await settings.update(patch);
       nativeTheme.themeSource = value.appearance;
+      updates.setAutomatic(value.automaticUpdates);
       for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.settingsChanged, value);
       return { value };
     } catch (error) { return { error: errorMessage(error) }; }
@@ -1566,6 +1652,7 @@ void app.whenReady().then(async () => {
     } catch { /* No development documents to restore. */ }
   }
   if (!documents.size) showStart();
+  updates.setAutomatic(settings.value.automaticUpdates);
   app.on('activate', () => { if (!documents.size && !quitting) showStart(); });
   updateMenus();
 });

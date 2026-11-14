@@ -19,6 +19,8 @@ export const settingsURL = desktopScheme + '://editor/settings';
 export const renderOrigin = desktopScheme + '://render';
 
 export const channels = {
+  updateState: 'app:update-state', updateChanged: 'app:update-changed', checkUpdates: 'app:check-updates', restartUpdate: 'app:restart-update',
+  prepareQuit: 'app:prepare-quit', prepareQuitReply: 'app:prepare-quit-reply', cancelQuit: 'app:cancel-quit',
   contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', toolbarDragRegions: 'document:toolbar-drag-regions', presentation: 'document:presentation', dragSources: 'document:drag-sources',
   showMarkdown: 'markdown:open', markdownAction: 'markdown:action', markdownChanged: 'markdown:changed', markdownPrepareClose: 'markdown:prepare-close',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
@@ -97,6 +99,12 @@ export type MarkdownState = {
 export type MarkdownAction = { action: 'state' | 'save' } | { action: 'change' | 'closing'; text: string; version: number; basis: number }
   | { action: 'reload' | 'keep'; conflict: string };
 export type DesktopApi = {
+  updateState(): Promise<import('./updates').UpdateState>;
+  onUpdateChanged(listener: (state: import('./updates').UpdateState) => void): () => void;
+  checkUpdates(): Promise<void>;
+  restartUpdate(): Promise<void>;
+  onPrepareQuit(listener: () => boolean): () => void;
+  onCancelQuit(listener: () => void): () => void;
   showMarkdown(request: { id: string } | { name: string }): Promise<Result<void>>;
   markdownAction(request: MarkdownAction): Promise<Result<MarkdownState>>;
   onMarkdownPrepareClose(listener: () => void): () => void;
