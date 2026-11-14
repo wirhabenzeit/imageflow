@@ -42,7 +42,17 @@ test('layout previews invalidate for content, file bytes, anchors, format, templ
     ({ template }) => { template.format.label = 'Landscape'; },
     ({ summary }) => { summary.sources!['file:route'].digest = 'route-2'; },
     ({ summary }) => { summary.project.files.track = 'files/track.gpx'; },
+    // The book index: other spreads' layouts, photo assignments and placed photos' metadata.
+    ({ summary }) => { summary.project.spreads[1].definition = 'chapter'; },
+    ({ summary }) => { summary.project.spreads[1].boxes.photo = { params: {}, photo: 'other' }; },
+    ({ summary }) => { summary.project.spreads[1].boxes.photo = { params: {}, photo: 'other' }; summary.photoIndex.other.credit = 'Someone'; },
   ];
+  // A placed photo's credit on another spread changes the preview too.
+  const data = fixture();
+  data.summary.project.spreads[1].boxes.photo = { params: {}, photo: 'other' };
+  const placed = data.key();
+  data.summary.photoIndex.other.credit = 'Someone';
+  assert.notEqual(data.key(), placed);
   for (const change of changes) {
     const data = fixture(); const before = data.key(); change(data); assert.notEqual(data.key(), before);
   }

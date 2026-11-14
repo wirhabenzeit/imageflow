@@ -190,7 +190,7 @@ With the `spread` builder, the render context types every parameter, box and ele
 | Helper | Value | Options |
 | --- | --- | --- |
 | `p.boolean` | `boolean` | `default` |
-| `p.integer` | `number` | `default`, `min`, `max`, `step` |
+| `p.integer` | `number` | `default`, `min`, `max`, `step`, `unit` (display only) |
 | `p.number` | `number` | `default`, `min`, `max`, `step`, `unit` (display only) |
 | `p.string` | `string` | `default`, `multiline`, `maxLength`, `placeholder` |
 | `p.enum` | one of `options` | `default`, `options` (an array of values or a value-to-label map), optional `labels` for arrays |
@@ -199,6 +199,15 @@ With the `spread` builder, the render context types every parameter, box and ele
 | `p.file` | file ID, or `''` when none is assigned | `accept` (lowercase extensions such as `'.gpx'`); see File parameters |
 
 Every parameter has a `label` and a `default` (`p.file` supplies `''`); a saved value outside the constraints is reported and replaced by the default for rendering, but kept in `project.json`.
+
+Any parameter, at any scope, may also have a `description`: plain help text of up to 1000 characters (trimmed, not empty), for people and agents alike. Say what the value means, which way it goes and when to change it, so an agent asked to "zoom the map out a bit" knows which parameter to lower:
+
+```ts
+zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: 8, step: .1,
+  description: 'Higher values zoom in. 1 shows the whole route; 2 shows half its width.' }),
+```
+
+Descriptions appear with the parameter's type, range, `step`, `unit` and options in `get_authoring_context` (under `template`) and in `inspect_book`'s parameter view. In the editor, a field shows its parameter's description behind a small info button (on hover, or click to keep it open), so controls stay uncluttered. A `description` on a `controls` entry is shown under the field instead and replaces it there; control descriptions have the same limits. Descriptions never change defaults, allowed values or saved data. Put units in `unit`, not in the description.
 
 Scopes: `parameters` at template level (document), on a spread definition (spread instance), on a box or element (element instance). Values are stored in `project.json` at the matching scope. There is no inheritance between scopes.
 
@@ -414,7 +423,10 @@ type RenderContext = {
   page: { left?: number; right?: number; number?: number };  // page numbers: left/right, or number without facing pages
   format: ResolvedFormat;                   // trim, bleed, safe area in mm, for the chosen format
   formatId: string;                         // the chosen key of `formats`, or 'default'
-  mode: 'edit' | 'export';
+  spread: string;                           // this spread's ID, its entry in book.spreads (the selected spread in a layout preview)
+  layout: string;                           // the layout being drawn
+  mode: 'edit' | 'export';                  // 'export' for export, Book check and MCP artwork
+  view: 'canvas' | 'thumbnail' | 'layout-preview' | 'export';  // where this render is shown (see below)
   edit(...paths: EditPath[]): { 'data-edit'?: string };  // marks a node for click-to-edit
   geometry: BoundGeometry;                  // the geometry helpers with this format applied
   PhotoBox; MarkdownBox; Element;          // the platform components, typed to this layout's IDs
@@ -423,9 +435,18 @@ type RenderContext = {
     pages: number;
     anchor(id: string): Anchor | undefined; // the anchor with this ID (see Anchors)
     anchors(id?: string): Anchor[];         // all anchors with this ID, or all anchors, in page order
+    spreads: BookSpread[];                  // every spread's pages and placed photos (see Book index)
   };
 };
 ```
+
+`mode` and `view` are fixed for the whole render. `mode` is `'edit'` for every render in the editor and `'export'` for print and proof export, presentation, the Book check and MCP artwork (the Book check is `'export'` here, while `RenderedImage`'s own `mode` tells it apart as `'check'`). `view` says where an edit-mode render is shown: `'canvas'` is the interactive book, the only place anyone clicks; `'thumbnail'` is the sidebar and `'layout-preview'` the Inspector's layout previews, which show what the page will look like. `view === 'export'` exactly when `mode === 'export'`. Later versions may add views, so test only `view === 'canvas'` and never treat the list as complete. Show editing scaffolding, such as a placeholder that invites a click, only on the canvas:
+
+```tsx
+{!chapters.length && ctx.view === 'canvas' && <p className="hint">Story spreads appear here.</p>}
+```
+
+ImageFlow's own placeholders follow the same rule: empty `PhotoBox` and `MarkdownBox` placeholders, the `ctx.Text` empty state and the inherited-text underline appear only on the canvas. Thumbnails and layout previews render empty content as export does. One difference to know when styling `[data-empty]`: `ctx.Text` carries `data-empty` only on the canvas, so in thumbnails and layout previews an empty text renders as in export, while empty `PhotoBox` and `MarkdownBox` boxes carry `data-empty` in every view.
 
 ### Photo metadata
 
@@ -437,7 +458,7 @@ type RenderContext = {
 
 ImageFlow reads them from the original file whenever the book opens or a source changes, and never stores them in `photos.json`. Existing books therefore have them without re-importing anything, and replacing a linked photo's original refreshes them under the same photo ID, with crops and assignments unchanged. A photo without EXIF, or with EXIF ImageFlow cannot read, imports and renders as before. The user-written `caption`, `title`, `credit` and `altText` are separate and never overwritten. Writing an extracted field is rejected rather than ignored: in `photos.json` it is a validation error, and `set_photo_metadata` does not accept it.
 
-The same fields appear on `ctx.boxes[id].photo`, in custom editors' `context`, and in `inspect_book`'s `sources` view. [`photo-story.tsx`](examples/photo-story.tsx) builds a caption from them. Raw EXIF is not exposed.
+The same fields appear on `ctx.boxes[id].photo`, on `ctx.book.spreads[].photos[].photo`, in custom editors' `context`, and in `inspect_book`'s `sources` view. [`photo-story.tsx`](examples/photo-story.tsx) builds a caption from them. Raw EXIF is not exposed.
 
 ### Rendered images
 
@@ -481,7 +502,7 @@ For the common case of one string parameter shown as text, `ctx.Text` reads the 
 <ctx.Text parameter="boxes.hero.credit" as="figcaption" placeholder="Photo credit" />
 ```
 
-`parameter` takes the same paths as `ctx.edit`, limited to string parameters. `as` is one of `h1`–`h6`, `p` (default), `span`, `div`, `blockquote` or `figcaption`; `className`, `style`, `rect` and `issue()` markers work as on the platform components. When the value is empty, the editor shows a dimmed placeholder in the template's own type (`placeholder`, else the parameter's `placeholder`, else its label) and marks the node `data-empty`; the exported book shows the empty node. The value is rendered as text, never as HTML, and newlines follow the node's CSS `white-space`. `fallback` displays inherited text when the saved value is empty or whitespace-only, without saving it. Set `fallbackLabel` to name its source: inherited text has a dotted underline in edit mode and the popover explains what clearing the override does. `hidden` suppresses the node explicitly; whitespace never means hidden. A template can bind it to a separate visibility parameter, as the calendar does with `showPlace`. Use `ctx.edit` for nodes that combine several parameters or show more than the value.
+`parameter` takes the same paths as `ctx.edit`, limited to string parameters. `as` is one of `h1`–`h6`, `p` (default), `span`, `div`, `blockquote` or `figcaption`; `className`, `style`, `rect` and `issue()` markers work as on the platform components. When the value is empty, the editing canvas shows a dimmed placeholder in the template's own type (`placeholder`, else the parameter's `placeholder`, else its label) and marks the node `data-empty`; the exported book shows the empty node. The value is rendered as text, never as HTML, and newlines follow the node's CSS `white-space`. `fallback` displays inherited text when the saved value is empty or whitespace-only, without saving it. Set `fallbackLabel` to name its source: inherited text has a dotted underline on the canvas and the popover explains what clearing the override does. `hidden` suppresses the node explicitly; whitespace never means hidden. A template can bind it to a separate visibility parameter, as the calendar does with `showPlace`. Use `ctx.edit` for nodes that combine several parameters or show more than the value.
 
 Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths, image data, or Markdown source, and they cannot change project data.
 
@@ -517,6 +538,31 @@ type Anchor = { id: string; title?: string; spread: string; page: number; side: 
 - **Previews.** Layout-picker previews read the anchors of the book as saved, so a contents layout previews with real pages.
 
 An anchor marks a whole page, not a point found by measuring the render. Text flow decides which page a heading inside Markdown continuation lands on, so such headings cannot be anchors yet.
+
+### Book index
+
+`ctx.book.spreads` lists every spread of the book in order, with its pages and the photos placed on it, for photo credits, picture indexes and contents pages. No anchors are needed for it:
+
+```ts
+type BookSpread = {
+  id: string;                                  // the spread's stable instance ID
+  layout: string;                              // its current layout
+  page: { left?: number; right?: number; number?: number };  // as ctx.page
+  photos: { box: string; photoId: string | null; photo: Photo | null }[];
+};
+```
+
+```tsx
+for (const spread of ctx.book.spreads)
+  for (const { photo } of spread.photos) if (photo?.credit) credits.push([photo.credit, spread.page.left ?? spread.page.number]);
+```
+
+[`photo-story.tsx`](examples/photo-story.tsx) has a complete credits layout. To find or leave out the current spread, compare with `ctx.spread`: `ctx.book.spreads.filter(({ id }) => id !== ctx.spread)`.
+
+- **From saved data, before render.** Like anchors, the index is built from the saved book and the template's declarations before any spread renders. It never looks at another spread's rendered output, so every spread, the editor's context, MCP artwork and export read the same index, and the same book always gives the same index. It is frozen; changing it throws. The Inspector's layout previews redraw when it changes, such as when a photo is placed or its credit edited on another spread.
+- **Pages.** `page` is the spread's own `ctx.page`: `left` and `right`, one of them for a single page at a book end, or `number` in a format without facing pages. Which page a box is on is the layout's business, since only the layout knows where it draws its boxes.
+- **Photos.** `photos` lists the photo boxes of the spread's current layout, in declaration order, including empty ones. `photoId` is `null` for an empty box. `photo` is the photo's metadata, the same object shape as `ctx.boxes[id].photo`, or `null` when the box is empty or its photo is missing from the book. A photo placed in several boxes appears once per placement. Content a spread keeps from a layout it no longer uses is not listed, and a spread whose layout the template no longer declares lists no photos. Markdown boxes are not listed.
+- **No images.** The index has metadata and assignments only, no photo URLs or rendered thumbnails.
 
 ### Editing UI
 
@@ -585,7 +631,7 @@ elements: { grid: {
 - **The context follows the book; the editor's values do not.** While the editor is open, every newer render of the book refreshes `context`: moving the spread, another photo, another format, or a changed document setting the editor does not edit. The draft is kept and nothing is reported. A change to the values the editor edits is a conflict, handled as below. Deleting the spread closes the editor.
 - **Changes from elsewhere:** if what the editor works on changes while it is open (a saved value after Reload or Undo, or a template edit that changes a default or a declaration of the parameters it handles), the panel says so and refuses to save; the user reopens the editor on the current values. During a reload, controls pause visibly and resume when the preview is ready. A rejected or failed save also pauses the editor with a message; reopening starts from confirmed saved values.
 - **Failures:** if the component throws while rendering, in an event handler or in async work, the panel shows the error and keeps Close available. Earlier applied changes remain saved. The editor counts as loaded once the component has mounted.
-- **Network:** a template may list HTTPS origins in `network`, such as `network: ['https://tiles.openfreemap.org']` (or `https://*.example.com` for subdomains; no paths). Importing the template into the library lists these sites, with an option to allow them in every book made from that version; **Templates → Manage Templates…** shows them and can allow them or stop allowing them later. That trust belongs to the template's hash: a book whose template still has exactly that hash, needs no question, and any change to the template's files asks again. Built-in templates are trusted for the sites they declare. Otherwise, the first time the book renders, or one of its element editors opens, ImageFlow asks the user to allow them, once per book and version of the template: the answer, too, ends when the template's files change. Once allowed, that book's element editors, previews, thumbnails, Book check and export may fetch, load images and fonts from, and open blob workers for those origins; undeclared origins stay blocked. Until then the book stays offline: its [rendered images](#rendered-images) that need the sites fail, so the Book check reports them and export stops, and the question comes back when an editor opens. Revoking the trust in Manage Templates, or changing the template, renders open books again under the new policy, loads an open element editor again, and stops a running export, which then saves nothing. Printing such a book needs the network. Included in the contract-1 baseline.
+- **Network:** a template may list HTTPS origins in `network`, such as `network: ['https://tiles.openfreemap.org']` (or `https://*.example.com` for subdomains; no paths). Importing the template into the library lists these sites, with an option to allow them in every book made from that version; **Templates → Manage Templates…** shows them and can allow them or stop allowing them later. That trust belongs to the template's hash: a book whose template still has exactly that hash, needs no question, and any change to the template's files asks again. Built-in templates are trusted for the sites they declare, and so are the built-in templates of every earlier release, so a book made from an earlier version of a built-in template needs no question after an update changes it. Otherwise, the first time the book renders, or one of its element editors opens, ImageFlow asks the user to allow them, once per book and version of the template: the answer, too, ends when the template's files change. Once allowed, that book's element editors, previews, thumbnails, Book check and export may fetch, load images and fonts from, and open blob workers for those origins; undeclared origins stay blocked. Until then the book stays offline: its [rendered images](#rendered-images) that need the sites fail, so the Book check reports them and export stops, and the question comes back when an editor opens. Revoking the trust in Manage Templates, or changing the template, renders open books again under the new policy, loads an open element editor again, and stops a running export, which then saves nothing. Printing such a book needs the network. Included in the contract-1 baseline.
 - **Scope today:** the element's parameters and the layout parameters it lists, shown in a non-modal panel (`presentation: 'dialog'`, the default) or [on the page](#editing-on-the-page) (`presentation: 'inline'`); a sidebar placement is not available yet. Editors can read files of file parameters with `file()`, and reach remote resources only through `network`. The starter has three reference examples: the **Map** layout's editor (below), the calendar editor (month and marked days, the layout's **Calendar title** through `spread`, and **Week starts** as a generated control below it) and the route map's **Edit route** editor. Choosing a track and framing it are one task, so that editor owns the GPX `track` (drawn with `<Control parameter="track" />`, including import) and the viewport, kept as three ordinary number parameters (`centerX`, `centerY`, `zoom`) and edited together by dragging, scrolling, buttons or arrow keys. It draws only the GPX track, without a basemap, so export stays offline.
 
 The **Map** layout (`sample/starter/template/map.tsx`) is the full-capability example ([ADR 0006](decisions/0006-template-capabilities.md)). Its editor runs MapLibre GL from the saved dependency bundle with OpenFreeMap styles (Liberty, Bright, Positron), declared in `network`, and is shown [on the page](#editing-on-the-page): dragging and zooming frame the map in its printed place, with the track, the attribution and the map title where the page draws them. It owns the view (longitude, latitude and a print zoom that is independent of the screen size), saved as ordinary parameters as you move it; the GPX track, style and track colour and width are generated controls in its toolbar. A button beside the zoom buttons fits the view to the track. The layout draws the map with a [`<RenderedImage>`](#rendered-images): live at screen resolution in the preview, and again at the format's target resolution for export, with the track over it as SVG so the line stays vector in the PDF. A map that cannot be drawn, for example because the map server is down, fails the Book check with `rendered-image-failed`.
@@ -733,7 +779,7 @@ Rules:
 
 - Each declared box is rendered exactly once through its component; each declared element at most once.
 - Boxes and elements are positioned and sized by template CSS on the component's element (`className`, `style`), or by `rect` (see Geometry helpers).
-- An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted; templates can style `[data-empty]`.
+- An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted, as it is in thumbnails and layout previews; templates can style `[data-empty]`.
 
 ### PhotoBox render callbacks
 

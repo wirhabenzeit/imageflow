@@ -12,7 +12,13 @@ The six signing secrets in [Mac signing and notarization](signing.md) must be co
    npm version 1.0.0 --no-git-tag-version
    ```
 
-   Commit `package.json` and `package-lock.json`, open a PR, and merge after checks pass. **ImageFlow → About ImageFlow** shows this version; packaged checks verify it against the Mac bundle and running app.
+   Then record the built-in templates this version ships, so books made from them stay trusted for their network sites after a later update changes them:
+
+   ```sh
+   node scripts/released-templates.mjs
+   ```
+
+   Commit `package.json`, `package-lock.json` and `sample/released-templates.json`, open a PR, and merge after checks pass. The release workflow stops before approval when a built-in template's hash is missing from that list. To withdraw trust from a released built-in, for example because a site it uses changed owner, remove its hash in a later release. **ImageFlow → About ImageFlow** shows this version; packaged checks verify it against the Mac bundle and running app.
 
 2. From the merged commit on `main`, create and push the matching tag:
 
