@@ -47,7 +47,7 @@ import { capabilities } from '../src/runtime-exports';
 import { newSpread, openingSpreadStates } from '../src/editing';
 import { templateFolder, textSourcePath } from './document-actions';
 import { configureRenditionCache, pruneRenditions } from './rendition-cache';
-import { readTemplatePreview } from './template-preview-file';
+import { decodes, readTemplatePreview } from './template-preview-file';
 import { previewTypes } from '../src/template-preview';
 
 let templatesWindow: BrowserWindow | null = null;
@@ -556,7 +556,9 @@ function templatePreview(id: string, hash: string, origins: string[], persist = 
         if (illustrated) preview = await captureBookPreview(renderOrigin + '/render/' + session,
           { target: { spread: illustrated.id }, maxEdge: 320, format: 'jpeg' }, controller.signal);
       }
-      if (persist && !controller.signal.aborted) await library.saveRender(hash, preview.bytes).catch((error) => console.warn('ImageFlow could not save a template preview', error));
+      // A picture that failed to draw, such as a map while its server is unreachable, is shown but never saved: the
+      // next session renders again.
+      if (persist && !controller.signal.aborted && !preview.status.errors.some(({ code }) => code && incompleteRender.has(code))) await library.saveRender(hash, preview.bytes).catch((error) => console.warn('ImageFlow could not save a template preview', error));
       return 'data:image/jpeg;base64,' + Buffer.from(preview.bytes).toString('base64');
     } catch { return null; }
     finally {
@@ -572,6 +574,8 @@ function templatePreview(id: string, hash: string, origins: string[], persist = 
   previewQueue = task.catch(() => {});
   return task;
 }
+// Book check errors that mean a render is missing something the template draws, so it must not be saved.
+const incompleteRender = new Set(['rendered-image-failed', 'layout-render-failed', 'photo-decode-failed', 'source-unavailable', 'render-impure']);
 /** Whether a render of this entry with these sites would show everything the template draws, so it may be saved. */
 const completeRender = (entry: LibraryEntry, origins: readonly string[]) => (entry.network ?? []).every((origin) => origins.includes(origin));
 /** Renders an entry's opening spread and saves it, unless the library already has a saved render for its hash. */
@@ -1263,7 +1267,13 @@ void app.whenReady().then(async () => {
     try {
       const entry = (await library.list()).find((entry) => entry.id === id && entry.hash === hash);
       if (!entry || entry.unavailable) return { value: null };
-      if (entry.render) return { value: templatePictureURL(hash, 'render') };
+      if (entry.render) {
+        // The window asks only when it has no picture, or a saved one failed to load: a damaged render is removed and
+        // made again.
+        const file = await library.pictureFile(hash, 'render');
+        if (file && await decodes(file)) return { value: templatePictureURL(hash, 'render') };
+        if (file) await rm(file, { force: true }).catch(() => {});
+      }
       const origins = await bookNetworkTrust(hash, entry.network);
       return { value: await templatePreview(id, hash, origins, completeRender(entry, origins)) };
     } catch (error) { return { error: errorMessage(error) }; }

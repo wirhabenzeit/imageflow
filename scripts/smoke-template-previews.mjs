@@ -79,6 +79,15 @@ try {
   await until(() => rendered.evaluate((image) => image.complete && image.naturalWidth > 0), 'the saved render');
   await app.close();
 
+  // A damaged saved render is made again rather than leaving an empty tile.
+  await writeFile(saved, 'not a picture');
+  app = await launch();
+  ({ picker } = await newBook(app));
+  const remade = picker.getByRole('option', { name: /Photobook/ }).locator('img');
+  await until(() => remade.evaluate((image) => image.src.startsWith('data:') && image.complete && image.naturalWidth > 0).catch(() => false), 'the render made again');
+  await until(async () => (await sharp(saved).metadata().catch(() => ({}))).width === 320, 'the saved render replaced');
+  await app.close();
+
   // A preview image of another shape is a Book check warning; a missing one too.
   app = await launch();
   await app.firstWindow();

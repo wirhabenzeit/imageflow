@@ -42,6 +42,11 @@ test('the app reads a preview file only when it can show it', async () => {
     await writeFile(join(folder, 'outside.jpg'), 'x');
     await symlink(join(folder, 'outside.jpg'), join(template, 'assets', 'linked.jpg'));
     assert.match((await readTemplatePreview(template, 'assets/linked.jpg') as { problem: string }).problem, /symbolic link/);
+    // Intact headers with damaged pixels, which Chromium cannot show.
+    const webp = await sharp({ create: { width: 45, height: 30, channels: 3, background: '#a53' } }).webp().toBuffer();
+    webp.fill(0x41, 40, webp.length - 4);
+    await writeFile(join(template, 'damaged.webp'), webp);
+    assert.match((await readTemplatePreview(template, 'damaged.webp') as { problem: string }).problem, /damaged|could not be read/);
     await writeFile(join(template, 'large.jpg'), Buffer.alloc(previewMaxBytes + 1));
     assert.match((await readTemplatePreview(template, 'large.jpg') as { problem: string }).problem, /at most 2 MB/);
   } finally { await rm(folder, { recursive: true, force: true }); }
