@@ -1,12 +1,14 @@
+import { estimatedCapture } from './capture-time';
 import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, realpath, rename, rm, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import sharp from 'sharp';
 import type { Photo } from '../src/project';
+import { captureMetadata } from '../src/photo-metadata';
 
 export const photoExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 type Rendition = 'thumb' | 'preview' | 'export';
-export type ProjectPhoto = Photo & { original: string; cache: string; key: string; alpha: boolean; passthrough: boolean; problem?: string; observation?: string };
+export type ProjectPhoto = Photo & { estimatedCapture?: string; original: string; cache: string; key: string; alpha: boolean; passthrough: boolean; problem?: string; observation?: string };
 const observation = (info: import('node:fs').BigIntStats) => [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
 
 export async function photoDetails(original: string, maximumBytes: number | null = 50 * 1024 * 1024) {
@@ -14,16 +16,29 @@ export async function photoDetails(original: string, maximumBytes: number | null
   const info = await stat(original, { bigint: true });
   if (!info.isFile() || (maximumBytes !== null && info.size > BigInt(maximumBytes))) throw new Error('Photos must be files up to 50 MB.');
   const metadata = await sharp(original).metadata();
-  if (!metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still image.');
+  if (!['jpeg', 'png', 'webp'].includes(metadata.format ?? '') || !metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still JPEG, PNG or WebP image.');
   const turned = (metadata.orientation ?? 1) >= 5;
+  const capture = captureMetadata(metadata.exif);
   return {
     width: turned ? metadata.height : metadata.width,
     height: turned ? metadata.width : metadata.height,
     alpha: !!metadata.hasAlpha,
+    // Read from the original on every load, never stored in photos.json: existing books get it without re-importing,
+    // and a replaced or edited source refreshes it.
+    ...capture,
+    // Editor-only: photo views sort undated photos by file time. For a snapshot, the caller supplies the original's.
+    estimatedCapture: estimatedCapture(capture.captured, Number(info.mtimeMs)),
     passthrough: metadata.format === 'jpeg' && !metadata.icc && metadata.space === 'srgb' && (metadata.orientation ?? 1) === 1,
     observation: observation(info),
     key: createHash('sha256').update([original, info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs, 'rendition-2'].join(':')).digest('hex'),
   };
+}
+
+export async function importPhotoDetails(original: string) {
+  const details = await photoDetails(original);
+  // Metadata alone can succeed on a truncated image. Validate its pixels before adding it to the book.
+  await sharp(original, { failOn: 'warning' }).resize({ width: 1, height: 1 }).toBuffer();
+  return details;
 }
 
 const pending = new Map<string, Promise<string>>();

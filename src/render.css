@@ -194,3 +194,8 @@ html:has(.if-layout-settings) { background: transparent; }
 
 /* A zero-specificity fallback: authored classes, inherited typography rules on the node and inline styles win. */
 :where([data-inline-text][data-multiline]) { white-space: pre-wrap; }
+html:has(.if-presentation), html:has(.if-presentation) body { overflow: hidden; background: #111; color-scheme: only light; }
+.if-presentation { position: absolute; inset: 0; background: #111; }
+.if-presentation.overview { overflow: auto; }
+.if-presentation .if-present-crop { margin: 0; background: white; cursor: inherit; }
+.if-presentation .if-sheet { color-scheme: only light; }

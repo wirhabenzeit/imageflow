@@ -58,14 +58,20 @@ export async function menuAction(app, name) {
     'Show Book Check': 'Check Book', 'Save a Copy…': 'Duplicate…' };
   const ids = { 'Delete Spread': 'delete-spread', 'Undo Book Edit': 'undo', 'Redo Book Edit': 'redo', 'Undo Project Edit': 'undo', 'Redo Project Edit': 'redo' };
   const page = activePages.get(app) ?? app.windows().find((page) => page.url() === 'imageflow://editor/') ?? await app.firstWindow();
-  await app.evaluate(({ Menu, BrowserWindow }, { label, commandId, id }) => {
-    const walk = (menu) => menu.items.flatMap((item) => [item, ...item.submenu ? walk(item.submenu) : []]);
-    const item = commandId ? Menu.getApplicationMenu().getMenuItemById(commandId) : walk(Menu.getApplicationMenu()).find((item) => item.label === label);
-    if (!item) throw new Error('Missing menu command: ' + label);
-    const owner = BrowserWindow.fromId(id);
-    item.click(item, owner);
-  }, { label: labels[name] ?? name, commandId: ids[name], id: await app.browserWindow(page).then((window) => window.evaluate((window) => window.id)) });
-  return page;
+  const request = { label: labels[name] ?? name, commandId: ids[name], id: await app.browserWindow(page).then((window) => window.evaluate((window) => window.id)) };
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const clicked = await app.evaluate(({ Menu, BrowserWindow }, { label, commandId, id }) => {
+      const walk = (menu) => menu.items.flatMap((item) => [item, ...item.submenu ? walk(item.submenu) : []]);
+      const item = commandId ? Menu.getApplicationMenu().getMenuItemById(commandId) : walk(Menu.getApplicationMenu()).find((item) => item.label === label);
+      if (!item) throw new Error('Missing menu command: ' + label);
+      if (!item.enabled) return false;
+      item.click(item, BrowserWindow.fromId(id));
+      return true;
+    }, request);
+    if (clicked) return page;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  throw new Error('Menu command stayed disabled: ' + name);
 }
 // Exercise the renderer's real IPC and native Menu implementation, selecting the requested native item.
 export async function popupAction(app, page, trigger, label) {

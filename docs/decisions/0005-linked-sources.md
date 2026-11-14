@@ -2,13 +2,13 @@
 
 Status: implemented, 2026-11-12. Second phase of #40, stacked on document packages (#41).
 
-UI follow-up (#97): **Settings → General → New imports** is the single app default for interactive imports. Individual controls no longer offer copy/link overrides. **Book → Assets…** opens an independent, book-bound window with All / Photos / Markdown / Files filters, conditional attention badges, and contextual actions. It retries unavailable originals on open/focus. File → Duplicate uses a native **Include all files** sheet, with a short full-path note for linked copies. The underlying optional book import policy and explicit API import modes remain readable for existing files and programmatic clients; interactive imports pass the app preference explicitly.
+UI follow-up (#108): **Book → Copy Assets into Book** controls future imports for this book. Checked means copy; unchecked means link. The default is copy when `project.importMode` is absent. The earlier development-only app preference is intentionally retired rather than inherited by unrelated books; existing linked sources keep their ownership. Individual imports can still override the book policy through the API. **Book → Assets…** opens an independent, book-bound window with combinable filters, conditional attention badges, and contextual actions. It retries unavailable originals on open/focus. File → Duplicate uses a native **Include all files** sheet, with a short full-path note for linked copies.
 
 ## Decision
 
-Copy versus link is a **document-level default**, not a strict document mode. Sources → Manage Sources… → New imports chooses Copy into Book (the default) or Link to Original Files. The default applies to photos, Markdown, parameter-file pickers, folder imports, and drag/drop. Existing sources retain their actual ownership when the default changes, and individual imports may override it. A document can mix copied and linked sources. Imports of resources already inside the package remain document-owned rather than linking a document to itself.
+Copy versus link is a **document-level default**, not a strict document mode. Book → Copy Assets into Book chooses copy (checked, the default) or link (unchecked). The default applies to photos, Markdown, parameter-file pickers, folder imports, and drag/drop. Existing sources retain their actual ownership when the default changes, and individual imports may override it. A document can mix copied and linked sources. Imports of resources already inside the package remain document-owned rather than linking a document to itself.
 
-The Sources import menu offers explicit Copy and Link actions. File parameter controls expose the same choice beside Choose. Template code, its fonts, and bundled template assets stay document-owned; linking applies to registered source files, including everything selected through parameter file pickers. File parameters retain their existing UTF-8 text contract and 20 MB limit.
+Import… and file parameter pickers inherit the book default; programmatic imports may pass an explicit mode. Template code, its fonts, and bundled template assets stay document-owned; linking applies to registered source files, including everything selected through parameter file pickers. File parameters retain their existing UTF-8 text contract and 20 MB limit.
 
 ## Persisted locations and identity
 

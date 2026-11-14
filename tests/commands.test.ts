@@ -8,7 +8,10 @@ const book: BookMenuState = { ...emptyMenuState, document: true, writable: true,
   enabled: { 'add-spread': true, 'duplicate-spread': true, 'delete-spread': true, 'move-spread-up': false, 'move-spread-down': true } };
 
 test('document commands are unavailable without a document', () => {
-  for (const id of Object.keys(commandRegistry) as (keyof typeof commandRegistry)[]) assert.equal(commandState(id, emptyMenuState).enabled, false, id);
+  for (const id of Object.keys(commandRegistry) as (keyof typeof commandRegistry)[]) {
+    if (/^(recent-|template-|issue-copy$)/.test(id)) continue;
+    assert.equal(commandState(id, emptyMenuState).enabled, false, id);
+  }
 });
 test('menus and toolbar share history labels and export restrictions', () => {
   assert.equal(commandState('undo', book).label, 'Undo Move photo');

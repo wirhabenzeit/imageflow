@@ -9,7 +9,7 @@ import { approveSource, configureSourceAccess } from '../desktop/source-access';
 import { configureRenditionCache } from '../desktop/rendition-cache';
 import { photoFile } from '../desktop/photos';
 import { isUnavailableSource } from '../src/source-diagnostics';
-import { importIntoProject, loadProject, updateProject } from '../desktop/project';
+import { importIntoProject, loadProject, projectSummary, renderData, updateProject } from '../desktop/project';
 import { collectSources, relocateSource, relinkFolder, saveDocumentCopy } from '../desktop/source-actions';
 import { captureProjectInputs } from '../desktop/revisions';
 import { ProjectSession } from '../desktop/project-session';
@@ -57,6 +57,23 @@ test('proof source warnings and page marking use diagnostic codes rather than un
   assert.equal(isUnavailableSource({}), false);
   assert.equal(isUnavailableSource({ code: 'source-unavailable' }), true);
   assert.equal(isUnavailableSource({ code: 'file-unreadable' }), true);
+});
+
+test('copied photos keep the original file time as their estimated capture date, without writing it to photos.json', async (t) => {
+  const f = await fixture(t);
+  const date = new Date('2020-04-05T12:34:56Z');
+  await utimes(f.photo, date, date);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'copy' }, [f.photo]);
+  const id = added.imported[0];
+  assert.equal('captured' in added.book.photoIndex[id], false);
+  assert.equal('capturedEstimated' in added.book.photoIndex[id], false);
+  assert.equal(added.book.photos.get(id)!.captured, undefined);
+  assert.equal(added.book.photos.get(id)!.estimatedCapture, date.toISOString());
+  const reopened = await loadProject(f.folder, f.cache);
+  assert.equal(reopened.photos.get(id)!.estimatedCapture, date.toISOString());
+  assert.deepEqual(projectSummary(reopened, 'x').photoDates?.[id], { captured: date.toISOString(), capturedEstimated: true });
+  // Templates never see the estimate.
+  assert.equal('estimatedCapture' in renderData(reopened, 'x', 'export').photos[id], false);
 });
 
 test('atomic external replacements refresh dimensions and revisions without changing IDs, crops or immutable snapshots', async (t) => {
@@ -307,4 +324,45 @@ test('permission loss is an actionable source state, including inaccessible pare
     assert.ok(denied.photos.has('shore'));
   } finally { await chmod(f.external, 0o700); }
   assert.equal((await loadProject(f.folder, f.cache)).sources!['photo:' + id].state, 'available');
+});
+
+test('mixed imports infer every file type and use the book policy, with an explicit mode taking precedence', async (t) => {
+  const f = await fixture(t);
+  const files = { project: structuredClone(f.book.project), photoIndex: structuredClone(f.book.photoIndex) };
+  files.project.importMode = 'link';
+  const book = await updateProject(f.book, files);
+  const mixed = await importIntoProject(book, {}, [f.photo, f.text, f.file]);
+  assert.deepEqual(mixed.counts, { photos: 1, texts: 1, files: 0, skipped: 1, failed: 0 });
+  const [photo, text] = mixed.imported;
+  assert.equal(mixed.book.photoIndex[photo].linked, true);
+  assert.deepEqual(mixed.book.project.texts[text], { path: f.text, linked: true });
+  assert.equal(Object.keys(mixed.book.project.files).length, Object.keys(book.project.files).length);
+  const copied = await importIntoProject(mixed.book, { mode: 'copy' }, [f.photo]);
+  assert.equal(copied.book.photoIndex[copied.imported[0]].linked, undefined);
+  assert.match(copied.book.photoIndex[copied.imported[0]].path, /^photos\//);
+  const skipped = await importIntoProject(copied.book, {}, [f.file]);
+  assert.equal(skipped.book, copied.book);
+  assert.deepEqual(skipped.counts, { photos: 0, texts: 0, files: 0, skipped: 1, failed: 0 });
+});
+
+test('mixed imports skip invalid photos while keeping valid assets and reporting parameter files', async (t) => {
+  const f = await fixture(t);
+  const bad = join(f.external, 'bad.jpg');
+  const disguised = join(f.external, 'disguised.png');
+  const truncated = join(f.external, 'truncated.jpg');
+  await writeFile(bad, 'not a photo');
+  await writeFile(disguised, '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>');
+  const bytes = await sharp(f.photo).jpeg().toBuffer();
+  await writeFile(truncated, bytes.subarray(0, bytes.length - 20));
+  const result = await importIntoProject(f.book, {}, [bad, f.photo, disguised, truncated, f.text, f.file]);
+  assert.deepEqual(result.counts, { photos: 1, texts: 1, files: 0, failed: 3, skipped: 1 });
+  assert.equal(result.imported.length, 2);
+  const file = await importIntoProject(result.book, { kind: 'file', accept: ['.gpx'] }, [f.file]);
+  assert.equal(file.counts.files, 1);
+});
+test('failed imports do not leave newly created source directories behind', async (t) => {
+  const f = await fixture(t);
+  await rm(join(f.folder, 'texts'), { recursive: true, force: true });
+  await assert.rejects(importIntoProject(f.book, { kind: 'markdown', target: { spread: 'gone', box: 'story' } }, [f.text]), /no longer exists/);
+  await assert.rejects(stat(join(f.folder, 'texts')), { code: 'ENOENT' });
 });

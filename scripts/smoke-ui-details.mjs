@@ -1,0 +1,291 @@
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, writeFile, readFile, utimes } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import sharp from 'sharp';
+import electron from 'electron';
+import { _electron } from 'playwright-core';
+import { menuAction, testBook } from './ui-actions.mjs';
+const root = fileURLToPath(new URL('../', import.meta.url));
+const work = await mkdtemp(join(root, '.build/ui-details-'));
+const folder = join(work, 'Details.imageflow');
+for (const dir of ['template', 'photos', 'texts']) await mkdir(join(folder, dir), { recursive: true });
+await writeFile(join(folder, 'template/index.tsx'), `import {defineTemplate,mm,p,printFormat,box,Spread} from 'imageflow';
+export default defineTemplate({id:'details',version:'1',contract:1,format:printFormat({label:'Book',trim:{width:mm(100),height:mm(120)},bleed:{all:mm(3),binding:mm(0)},safe:mm(8),ends:'inside-covers',pageCount:{min:2,max:100,step:2}}),
+spreads:{story:{label:'Story',boxes:{hero:box.photo('Hero'),body:box.markdown('Story',{parameters:{columns:p.enum({label:'Columns',default:'1',options:['1','2','3'],labels:{'1':'Full width','2':'2 columns','3':'3 columns'}}),size:p.number({label:'Body size',default:11,min:8,max:16,step:.5,unit:'pt'}),notes:p.string({label:'Footnote',default:''})}})},render:ctx=><Spread><ctx.PhotoBox id="hero" rect={ctx.geometry.page('left','bleed')}/><ctx.MarkdownBox id="body" rect={ctx.geometry.page('right','safe')} columns={Number(ctx.boxes.body.params.columns)} style={{fontSize:ctx.boxes.body.params.size+'pt'}}/></Spread>},
+other:{label:'Other',boxes:{hero:box.photo('Hero')},render:ctx=><Spread><ctx.PhotoBox id="hero" rect={ctx.geometry.spread('bleed')}/></Spread>}}});`);
+await writeFile(join(folder, 'texts/Story.md'), '# A short story\n\nA paragraph for the compact text toolbar.');
+await writeFile(join(folder, 'project.json'), JSON.stringify({ schemaVersion: 1, title: 'Details', template: { id: 'details', version: '1' }, texts: { text: 'texts/Story.md' },
+  spreads: [{ id: 'one', definition: 'story', boxes: { hero: { photo: 'late', crops: { story: { zoom: 2, centerX: .5, centerY: .5 } } }, body: { text: 'text' } } }, { id: 'two', definition: 'story' }] }));
+const photoIndex = {};
+for (const [id, title, date] of [['late', 'C', '2026:11:03 08:00:00'], ['early', 'A', '2026:11:02 23:50:00'], ['night', 'B', '2026:11:03 00:20:00'], ['estimated', 'D', undefined]]) {
+  const image = sharp({ create: { width: id === 'late' ? 600 : 800, height: id === 'late' ? 900 : 600, channels: 3, background: id === 'early' ? '#cbb68b' : '#709fb0' } });
+  if (date) image.withExif({ IFD2: { DateTimeOriginal: date, OffsetTimeOriginal: '+02:00' } });
+  await image.jpeg().toFile(join(folder, 'photos', id + '.jpg'));
+  // Keep file-date ordering independent of the date and timezone running this check.
+  if (!date) await utimes(join(folder, 'photos', id + '.jpg'), new Date('2026-11-05T12:00:00Z'), new Date('2026-11-05T12:00:00Z'));
+  photoIndex[id] = { path: 'photos/' + id + '.jpg', title };
+}
+photoIndex.missing = { path: 'photos/Missing.jpg', title: 'Z' };
+await writeFile(join(folder, 'photos.json'), JSON.stringify(photoIndex));
+const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
+const until = async (check, message = 'Operation completed') => { for (let i = 0; i < 250; i++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 40)); } assert.ok(await check(), message); };
+const current = async (page) => (await page.evaluate(() => window.imageflow.currentProject())).value;
+const ready = async (page) => page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
+async function popup(command, label) {
+  await app.evaluate(({ Menu }, { command, label }) => {
+    Menu.prototype.popup = function ({ callback }) {
+      const walk = (menu) => menu.items.flatMap((item) => [item, ...item.submenu ? walk(item.submenu) : []]);
+      globalThis.lastContext = walk(this).map(({ id, label, enabled }) => ({ id, label, enabled }));
+      const item = walk(this).find((item) => label ? item.label === label : item.id === command);
+      if (command || label) { if (!item?.enabled) throw new Error('Context action unavailable: ' + (command || label)); item.click(item); }
+      callback?.();
+    };
+  }, { command, label });
+}
+try {
+  const page = await testBook(app, folder);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const errors = []; page.on('pageerror', (error) => errors.push(error.message));
+  await ready(page);
+  const summary = await current(page);
+  assert.equal(summary.photoDates.early.captured, '2026-11-02T23:50:00+02:00');
+  assert.equal(summary.photoDates.estimated.capturedEstimated, true);
+  assert.equal(summary.photoDates.estimated.captured, '2026-11-05T12:00:00.000Z');
+  assert.equal(await page.locator('.document-proxy img').count(), 0);
+  assert.equal(await page.locator('.document-proxy svg').count(), 1);
+  assert.ok(await page.locator('.document-title').evaluate((node) => parseFloat(getComputedStyle(node).fontSize) >= 13));
+  assert.equal(await page.locator('.source-photo[data-id="early"] .badge').count(), 0);
+  assert.equal(await page.locator('.source-photo[data-id="late"] .badge[aria-label="Used once"] svg').count(), 1);
+  // A height change scales every preceding thumbnail; retain the same point in the center photo.
+  const divider = page.getByRole('separator', { name: 'Resize Sources', exact: true });
+  // ResizeObserver restores the center after layout. Wait for those frames before scrolling or measuring.
+  const settledStrip = () => page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(null)));
+  }));
+  await divider.focus();
+  for (let i = 0; i < 13; i++) await page.keyboard.press('ArrowUp');
+  await settledStrip();
+  await page.locator('.source-items-photo').evaluate((node) => { node.scrollLeft = (node.scrollWidth - node.clientWidth) / 2; });
+  await settledStrip();
+  const stripCenter = () => page.locator('.source-items-photo').evaluate((node) => {
+    const center = node.getBoundingClientRect().left + node.clientWidth / 2;
+    const photos = [...node.querySelectorAll('.source-photo')];
+    const photo = photos.find((photo) => { const rect = photo.getBoundingClientRect(); return rect.left <= center && rect.right >= center; });
+    if (!photo) return undefined;
+    const rect = photo.getBoundingClientRect();
+    return { id: photo.dataset.id, fraction: (center - rect.left) / rect.width };
+  });
+  const stripBefore = await stripCenter();
+  assert.ok(stripBefore);
+  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowUp');
+  await settledStrip();
+  const stripAfter = await stripCenter();
+  assert.equal(stripAfter?.id, stripBefore.id, JSON.stringify({ stripBefore, stripAfter }));
+  assert.ok(Math.abs(stripAfter.fraction - stripBefore.fraction) < .015, JSON.stringify({ stripBefore, stripAfter }));
+  // When shrinking makes the entire strip fit, scrolling is clamped. Growing it again retains the original point.
+  for (let i = 0; i < 18; i++) await page.keyboard.press('ArrowDown');
+  await settledStrip();
+  for (let i = 0; i < 18; i++) await page.keyboard.press('ArrowUp');
+  await settledStrip();
+  const stripRestored = await stripCenter();
+  assert.equal(stripRestored?.id, stripBefore.id, JSON.stringify({ stripBefore, stripRestored }));
+  assert.ok(Math.abs(stripRestored.fraction - stripBefore.fraction) < .015, JSON.stringify({ stripBefore, stripRestored }));
+  for (let i = 0; i < 18; i++) await page.keyboard.press('ArrowDown');
+  await settledStrip();
+  await page.locator('.source-items-photo').evaluate((node) => { node.scrollLeft = 0; });
+  const projectBefore = await readFile(join(folder, 'project.json'), 'utf8');
+  const photosBefore = await readFile(join(folder, 'photos.json'), 'utf8');
+  const historyBefore = summary.history;
+  const ids = async () => page.locator('.source-items-photo .source-photo').evaluateAll((nodes) => nodes.map((node) => node.dataset.id));
+  assert.deepEqual((await ids()).slice(0, 3), ['early', 'night', 'late']);
+  await menuAction(app, 'By Day');
+  await page.locator('.photo-group-heading').first().waitFor();
+  assert.equal(await page.locator('.photo-group-heading').count(), 4);
+  await menuAction(app, 'Show Capture Time');
+  await until(async () => await page.locator('.photo-capture-time').count() === 4, 'Capture labels shown');
+  await page.locator('.photo-group-heading').nth(1).click();
+  assert.equal(await page.locator('.source-photo[aria-selected="true"]').count(), 2);
+  assert.equal(await page.locator('.sources-bar').getByRole('button', { name: 'Assets…', exact: true }).count(), 0);
+  assert.equal(await page.locator('.sources-bar .source-view').count(), 0);
+  await popup(undefined, 'Unused only');
+  await page.locator('.sources-bar .photo-view-menu button').click();
+  await until(async () => await page.locator('.source-photo[data-id="late"]').count() === 0);
+  await popup(undefined, 'All assets');
+  await page.locator('.sources-bar .photo-view-menu button').click();
+  await until(async () => await page.locator('.source-photo[data-id="late"]').count() === 1);
+  const strip = page.locator('.source-items-photo');
+  await divider.focus();
+  for (let i = 0; i < 13; i++) await page.keyboard.press('ArrowUp');
+  assert.ok(await strip.evaluate((node) => node.scrollWidth > node.clientWidth + 100));
+  await settledStrip();
+  await strip.evaluate((node) => { node.scrollLeft = node.scrollWidth - node.clientWidth; });
+  await settledStrip();
+  const headings = await strip.locator('.photo-strip-group').evaluateAll((groups) => groups.map((group) => {
+    const bounds = group.getBoundingClientRect();
+    const heading = group.querySelector('.photo-group-heading').getBoundingClientRect();
+    return { label: group.getAttribute('aria-label'), contained: heading.left >= bounds.left - 1 && heading.right <= bounds.right + 1,
+      separatorPosition: getComputedStyle(group, '::before').position };
+  }));
+  assert.ok(headings.every(({ contained }) => contained), JSON.stringify(headings));
+  assert.ok(headings.slice(1).every(({ separatorPosition }) => separatorPosition === 'absolute'));
+  await strip.screenshot({ path: join(work, 'group-headings.png') });
+  await strip.evaluate((node) => {
+    const photo = node.querySelector('.source-photo[data-id="night"]').getBoundingClientRect();
+    node.scrollLeft += photo.left + photo.width / 2 - node.getBoundingClientRect().left - node.clientWidth / 2;
+  });
+  await settledStrip();
+  const groupedBefore = await stripCenter();
+  assert.equal(groupedBefore.id, 'night');
+  for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowUp');
+  await settledStrip();
+  const groupedAfter = await stripCenter();
+  assert.equal(groupedAfter.id, groupedBefore.id);
+  assert.ok(Math.abs(groupedAfter.fraction - groupedBefore.fraction) < .015, JSON.stringify({ groupedBefore, groupedAfter }));
+  await strip.screenshot({ path: join(work, 'group-headings-middle.png') });
+  for (let i = 0; i < 17; i++) await page.keyboard.press('ArrowDown');
+  await menuAction(app, 'Custom…');
+  const gap = page.getByRole('dialog', { name: 'Group photos by time gap' });
+  await gap.getByRole('spinbutton').fill('15'); await gap.getByRole('button', { name: 'Group Photos' }).click();
+  await until(async () => await page.locator('.photo-group-heading').count() === 5);
+  await menuAction(app, 'Assets…');
+  await until(() => app.windows().some((window) => window.url() === 'imageflow://editor/assets'));
+  const assets = app.windows().find((window) => window.url() === 'imageflow://editor/assets');
+  assets.on('pageerror', (error) => errors.push(error.message));
+  await assets.locator('.asset-row').first().waitFor();
+  assert.deepEqual(await assets.locator('.asset-row[data-source^="photo:"]').evaluateAll((nodes) => nodes.map((node) => node.dataset.source.slice(6))), await ids());
+  await popup(undefined, 'Import Order');
+  await assets.locator('.photo-view-menu button').click();
+  await until(async () => (await ids())[0] === 'late', 'Assets view preferences propagate to the strip');
+  assert.equal(await readFile(join(folder, 'project.json'), 'utf8'), projectBefore);
+  assert.equal(await readFile(join(folder, 'photos.json'), 'utf8'), photosBefore);
+  assert.deepEqual((await current(page)).history, historyBefore);
+  await assets.screenshot({ path: join(work, 'assets.png') });
+  // Portrait previews fit between the header and footer, including in a small Assets window.
+  const fitsPreview = async (owner) => {
+    const image = owner.locator('.ql-photo img');
+    await image.waitFor();
+    await image.evaluate((image) => image.decode());
+    const bounds = await image.boundingBox(), body = await owner.locator('.ql-photo').boundingBox();
+    assert.ok(bounds.x >= body.x && bounds.y >= body.y && bounds.x + bounds.width <= body.x + body.width + 1 && bounds.y + bounds.height <= body.y + body.height + 1, JSON.stringify({ bounds, body }));
+  };
+  await popup('asset-preview');
+  await assets.locator('.asset-row[data-source="photo:late"]').click({ button: 'right' });
+  await fitsPreview(assets);
+  assert.ok((await app.evaluate(() => globalThis.lastContext)).some(({ id, label }) => id === 'asset-jump' && label === 'Pages 1–2'));
+  const assetsWindow = await app.browserWindow(assets);
+  const originalSize = await assetsWindow.evaluate((window) => window.getContentSize());
+  await assetsWindow.evaluate((window) => window.setContentSize(600, 420));
+  await assets.waitForFunction(() => innerWidth === 600);
+  await fitsPreview(assets);
+  await assets.screenshot({ path: join(work, 'portrait-quick-look.png') });
+  await assets.keyboard.press('Escape');
+  await assetsWindow.evaluate((window, [width, height]) => window.setContentSize(width, height), originalSize);
+  await assets.close();
+  // Asset actions are the same registry commands in the strip and utility window.
+  await page.locator('.source-photo[data-id="early"]').click();
+  await page.locator('.si-facts dt').filter({ hasText: /^Captured$/ }).waitFor();
+  await page.locator('.source-photo[data-id="estimated"]').click();
+  await page.locator('.si-facts dt').filter({ hasText: /^Modified$/ }).waitFor();
+  await page.locator('.spread-thumb[data-spread="two"]').click();
+  await popup('asset-place');
+  await page.locator('.source-photo[data-id="early"]').click({ button: 'right' });
+  await until(async () => (await current(page)).project.spreads[1].boxes.hero?.photo === 'early');
+  await ready(page);
+  await popup('asset-preview');
+  await page.locator('.source-photo[data-id="early"]').click({ button: 'right' });
+  await page.getByRole('dialog', { name: /Quick Look/ }).waitFor();
+  assert.match(await page.getByRole('dialog', { name: /Quick Look/ }).innerText(), /Captured/);
+  await page.keyboard.press('ArrowLeft');
+  await until(async () => await page.locator('.ql-header h2').innerText() === 'C');
+  await fitsPreview(page);
+  await page.keyboard.press('Escape');
+  // Compact text controls save through the existing Undo path, with longer controls in the gear panel.
+  await page.locator('.spread-thumb[data-spread="one"]').click();
+  await page.getByRole('button', { name: 'Edit Story', exact: true }).click();
+  const toolbar = page.locator('.edit-popover-compact');
+  await toolbar.waitFor();
+  assert.ok((await toolbar.boundingBox()).height < 90, 'Markdown toolbar stays one row');
+  await page.screenshot({ path: join(work, 'toolbar.png') });
+  await toolbar.getByRole('radio', { name: '2 columns' }).click();
+  await toolbar.getByRole('spinbutton', { name: 'Body size', exact: true }).fill('12.5');
+  await toolbar.getByRole('button', { name: 'Done', exact: true }).click();
+  await until(async () => (await current(page)).project.spreads[0].boxes.body.params.size === 12.5);
+  assert.equal((await current(page)).project.spreads[0].boxes.body.params.columns, '2');
+  await ready(page);
+  await page.getByRole('button', { name: 'Edit Story', exact: true }).click();
+  await toolbar.getByLabel('More settings', { exact: true }).click();
+  await toolbar.getByRole('textbox', { name: 'Footnote' }).fill('Remember this');
+  await toolbar.getByRole('button', { name: 'Done', exact: true }).click();
+  await until(async () => (await current(page)).project.spreads[0].boxes.body.params.notes === 'Remember this');
+  await ready(page);
+  // A group drop replaces its explicit target, reports a partial placement, and clears the drag outline.
+  const dropPhoto = await page.frameLocator('.canvas .book-frame-book:not(.book-frame-pending)').locator('[data-spread="one"] [data-box="hero"]').boundingBox();
+  const dataTransfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer(); data.setData('application/x-imageflow-photo', 'night');
+    data.setData('application/x-imageflow-photos', JSON.stringify(['night', 'late'])); return data;
+  });
+  const dropEvent = { dataTransfer, clientX: dropPhoto.x + dropPhoto.width / 2, clientY: dropPhoto.y + dropPhoto.height / 2 };
+  await page.locator('.canvas').dispatchEvent('dragover', dropEvent);
+  await page.locator('.box-highlight').waitFor();
+  await page.locator('.canvas').dispatchEvent('drop', dropEvent);
+  await until(async () => (await current(page)).project.spreads[0].boxes.hero.photo === 'night');
+  await page.locator('.box-highlight').waitFor({ state: 'detached' });
+  assert.match(await page.locator('.status').innerText(), /Placed 1 of 2/);
+  await ready(page); await menuAction(app, 'Undo Book Edit');
+  await until(async () => (await current(page)).project.spreads[0].boxes.hero.photo === 'late');
+  await ready(page);
+  // Canvas photo context actions target the clicked box and preserve Undo history.
+  await page.locator('.spread-thumb[data-spread="one"]').click();
+  await popup('box-remove-photo');
+  const photo = await page.frameLocator('.canvas .book-frame-book:not(.book-frame-pending)').locator('[data-spread="one"] [data-box="hero"]').boundingBox();
+  await page.mouse.click(photo.x + photo.width / 2, photo.y + photo.height / 2, { button: 'right' });
+  await until(async () => !(await current(page)).project.spreads[0].boxes.hero.photo);
+  await ready(page); await page.locator('.canvas').focus();
+  await menuAction(app, 'Undo Book Edit');
+  await until(async () => (await current(page)).project.spreads[0].boxes.hero.photo === 'late');
+  await ready(page);
+  await popup('change-layout', 'Other');
+  await page.locator('.spread-thumb[data-spread="one"]').click({ button: 'right' });
+  await until(async () => (await current(page)).project.spreads[0].definition === 'other');
+  await ready(page);
+  await page.locator('.spread-thumb[data-spread="one"]').click();
+  await page.locator('.spread-thumb[data-spread="two"]').click({ modifiers: ['Shift'] });
+  assert.equal(await page.locator('.spread-thumb[aria-pressed="true"]').count(), 2);
+  await popup('duplicate-spread');
+  await page.locator('.spread-thumb[data-spread="two"]').click({ button: 'right' });
+  await until(async () => (await current(page)).project.spreads.length === 4);
+  await until(async () => await page.locator('.source-photo[data-id="early"] .badge').innerText() === '2×');
+  assert.ok((await app.evaluate(() => globalThis.lastContext)).some(({ label }) => label === 'Duplicate 2 Spreads'));
+  await ready(page);
+  await page.locator('.canvas').focus(); await menuAction(app, 'Undo Book Edit');
+  await until(async () => (await current(page)).project.spreads.length === 2);
+  // The utility library and welcome screen use the same native command definitions.
+  await page.evaluate(() => window.imageflow.showTemplates());
+  await until(() => app.windows().some((window) => window.url() === 'imageflow://editor/templates'));
+  const templates = app.windows().find((window) => window.url() === 'imageflow://editor/templates');
+  const templateRow = templates.locator('.template-library-row').first(); await templateRow.waitFor();
+  await popup(); await templateRow.click({ button: 'right' });
+  const templateCommands = await app.evaluate(() => globalThis.lastContext.map(({ id }) => id));
+  assert.ok(templateCommands.includes('template-export') && templateCommands.includes('template-new') && templateCommands.includes('template-reveal'));
+  await app.evaluate(({ dialog }) => { globalThis.templateNewAsked = false; dialog.showSaveDialog = async () => { globalThis.templateNewAsked = true; return { canceled: true }; }; });
+  await popup('template-new'); await templateRow.click({ button: 'right' });
+  await until(() => app.evaluate(() => globalThis.templateNewAsked));
+  assert.equal(templates.isClosed(), false, 'Cancelling New Book leaves the library open');
+  await templates.close();
+  await page.locator('.book-check-toggle').click();
+  const issue = page.locator('.book-check-panel li').first(); await issue.waitFor();
+  const message = await issue.innerText();
+  await popup('issue-copy'); await issue.click({ button: 'right' });
+  assert.equal(await app.evaluate(({ clipboard }) => clipboard.readText()), message);
+  await page.keyboard.press('Escape');
+  assert.deepEqual(errors, []);
+  await page.screenshot({ path: join(work, 'details.png') });
+  await page.close();
+  await until(() => app.windows().some((window) => window.url() === 'imageflow://editor/start'));
+  const welcome = app.windows().find((window) => window.url() === 'imageflow://editor/start');
+  const recent = welcome.locator('.recent-books li').filter({ hasText: 'Details' }); await recent.waitFor();
+  await popup('recent-remove'); await recent.click({ button: 'right' });
+  await recent.waitFor({ state: 'detached' });
+  console.log('Photo dates, shared view preferences, grouping, asset actions, compact Markdown controls and canvas context menus passed:', work);
+} finally { await app.close(); }

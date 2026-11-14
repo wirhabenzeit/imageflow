@@ -1,8 +1,9 @@
+import { compactParameter } from './compact-controls';
 import { Icon } from './Icon';
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
-import type { TemplateInfo } from './desktop';
+import type { TemplateInfo, Rect } from './desktop';
 import { readEdit, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import type { Edit } from './Inspector';
@@ -57,21 +58,21 @@ function arrange(targets: EditTarget[], template: TemplateInfo, spread: SpreadSt
 
 // Fields for parameters marked on a node, saved as each is applied, for places that show them beside another
 // editor (the selected photo's toolbar).
-export function MarkedFields({ project, spread, template, edits, edit }: {
-  project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; edit: (change: Edit, notice?: string) => void;
+export function MarkedFields({ project, spread, template, edits, edit, compact = false }: {
+  compact?: boolean; project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; edit: (change: Edit, notice?: string) => void;
 }) {
   return edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((target): target is EditTarget => !!target)
-    .map((target) => <Field key={target.path} param={target.param} value={readEdit(project, spread, target)}
+    .map((target) => <Field compact={compact && compactParameter(target.param)} key={target.path} param={target.param} value={readEdit(project, spread, target)}
       change={(value) => edit(({ project: files }) => writeEdit(files, spread.id, target, value), target.param.label + ' updated')} />);
 }
 
 // Edits the selected item from a stable panel at the bottom of the visible canvas: a node the template marked with `ctx.edit(...)` or
 // `ctx.Text`, or a box or element. For a box, `children` is the platform's part (its photo or text) and `title`
 // names the box.
-export function EditPopover({ project, spread, template, edits, host, readOnly, blocked, edit, close, step, actions, title, children, textFallback }: {
+export function EditPopover({ project, spread, template, edits, host, readOnly, blocked, edit, close, step, actions, title, children, textFallback, compact = false, anchor }: {
   project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; host?: HTMLElement | null;
   readOnly: boolean; blocked?: string; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
-  actions?: ReactNode; title?: string; children?: ReactNode;
+  compact?: boolean; anchor?: () => Rect | undefined; actions?: ReactNode; title?: string; children?: ReactNode;
   textFallback?: { parameter: string; text: string; label: string };
 }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -118,6 +119,22 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
     return () => document.removeEventListener('pointerdown', outside, true);
   }, [close]);
 
+  const positioning = useRef(anchor);
+  positioning.current = anchor;
+  useLayoutEffect(() => {
+    if (!compact || !host || !panel.current) return;
+    const position = () => {
+      const rect = positioning.current?.(), node = panel.current;
+      if (!rect || !node) return;
+      const left = Math.max(12, Math.min(host.clientWidth - node.offsetWidth - 12, rect.x));
+      const below = rect.y + rect.height + 8;
+      const top = below + node.offsetHeight <= host.clientHeight - 12 ? below : Math.max(12, rect.y - node.offsetHeight - 8);
+      Object.assign(node.style, { left: left + 'px', top: top + 'px' });
+    };
+    const observer = new ResizeObserver(position); observer.observe(panel.current); observer.observe(host);
+    window.addEventListener('scroll', position, true); position();
+    return () => { observer.disconnect(); window.removeEventListener('scroll', position, true); };
+  }, [compact, host]);
   // Focus the selected item's first control without scrolling the book to the floating panel.
   useLayoutEffect(() => {
     if (!host) return;
@@ -155,7 +172,7 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
     ? <>{only.label}{scopeLabel[only.target.scope] && <span className="muted"> · {scopeLabel[only.target.scope]}</span>}</>
     : ownerLabel() ?? 'Edit');
   let index = 0;
-  const render = (items: Shown[]): ReactNode => items.map((item, i) => {
+  const render = (items: Shown[], inline = false): ReactNode => items.map((item, i) => {
     if (item.kind === 'group') {
       return <fieldset key={'group ' + i + ' ' + item.label} className="control-group">
         <legend>{item.label}</legend>
@@ -165,11 +182,11 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
     }
     const { target, label, description } = item;
     const first = index++ === 0;
-    return <div className="ep-field" key={target.path}>
-      {visible.length > 1 && target.param.type !== 'boolean' && <span className="ep-label">{label}
+    return <div className={inline ? 'ep-field compact-field' : 'ep-field'} title={inline ? label : undefined} key={target.path}>
+      {!inline && visible.length > 1 && target.param.type !== 'boolean' && <span className="ep-label">{label}
         {scopeLabel[target.scope] && <span className="muted"> · {scopeLabel[target.scope]}</span>}</span>}
       <ParamControl param={label === target.param.label ? target.param : { ...target.param, label }} value={readEdit(project, spread, target)}
-        draft={drafts[target.path]} autoFocus={first}
+        draft={drafts[target.path]} autoFocus={first} compact={inline} commitOnBlur={compact}
         setDraft={(value) => setDrafts((previous) => ({ ...previous, [target.path]: value }))}
         apply={(value) => apply({ [target.path]: value })} />
       {description && <small className="field-description">{description}</small>}
@@ -179,21 +196,24 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
       </small>}
     </div>;
   });
-  return createPortal(<div ref={panel} className="item-controls edit-popover" role="dialog" aria-label={'Edit ' + (title ?? visible.map(({ label }) => label).join(', '))} title={blocked || (readOnly ? 'Read Only' : undefined)}
+  const inline = compact ? shown.filter((item) => item.kind === 'field' && compactParameter(item.target.param)).slice(0, 4) : [];
+  const overflow = shown.filter((item) => !inline.includes(item));
+  return createPortal(<div ref={panel} className={'item-controls edit-popover' + (compact ? ' edit-popover-compact' : '')} role="dialog" aria-label={'Edit ' + (title ?? visible.map(({ label }) => label).join(', '))} title={blocked || (readOnly ? 'Read Only' : undefined)}
     onKeyDown={keys} onPointerDown={(event) => event.stopPropagation()}
     onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}
     onMouseMove={(event) => event.stopPropagation()} onMouseLeave={(event) => event.stopPropagation()}
     onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
     onDragLeave={(event) => event.stopPropagation()}
     onDrop={(event) => { event.preventDefault(); event.stopPropagation(); }}>
-    <div className="ep-head">
+    {!compact && <div className="ep-head">
       <span>{heading}</span>
       <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)" onClick={() => { commit(); close(); }}><Icon name="close" /></button>
-    </div>
-    <fieldset disabled={readOnly || !!blocked}>
+    </div>}
+    <fieldset className={compact ? 'ep-compact-row' : undefined} disabled={readOnly || !!blocked}>
       {children}
-      {render(shown)}
+      {compact ? <>{render(inline, true)}{overflow.length > 0 && <details className="compact-overflow"><summary title="More settings" aria-label="More settings">⚙</summary><div>{render(overflow)}</div></details>}</> : render(shown)}
     </fieldset>
+    {compact && <button className="ep-done" onClick={() => { commit(); close(); }}>Done</button>}
     {actions && !readOnly && !blocked && <div className="ep-actions">{actions}</div>}
   </div>, host);
 }

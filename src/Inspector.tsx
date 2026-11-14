@@ -1,3 +1,4 @@
+import { assetMenuState } from './asset-menu';
 import { sourcePath } from './source-locations';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
@@ -200,7 +201,14 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   return <aside className="inspector" aria-label="Inspector">
     {header}
     <fieldset disabled={!writable}>
-      {template && <details open><summary>Spread</summary>
+      {template && <details open><summary onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+        event.preventDefault(); event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+      } }} onContextMenu={async (event) => {
+        event.preventDefault();
+        if (!definition || !Object.keys(definition.parameters).length) return;
+        const result = await window.imageflow?.showContextMenu(['reset-defaults'], assetMenuState(summary, false));
+        if (result?.command === 'reset-defaults') changeSpread((item) => { for (const id of Object.keys(definition.parameters)) delete item.params[id]; }, 'Spread settings reset');
+      }}>Spread</summary>
         <p className="field-label">Layout</p>
         {!definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
         <LayoutPicker summary={summary} spread={spread} template={template} choose={(next) => {
