@@ -17,7 +17,7 @@ template/
 
 The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided by the host and must not be bundled. Relative imports, CSS imports, and asset imports inside `template/` are allowed. Other packages come from npm through the template's saved dependency bundle ([Dependencies](#dependencies)). Templates must render deterministically without fetching data, timers, state, or effects. This is an authoring requirement, not a guarantee that arbitrary template JavaScript is safe; open only projects you trust.
 
-`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `printFormat`, `Spread`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue`, `capabilities` and `RenderedImage`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
+`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `printFormat`, `Spread`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue`, `capabilities`, `RenderedImage`, `FormattedText` and `plainText`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
 
 ### Examples
 
@@ -75,6 +75,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `list-parameters` | `p.list` of flat items with stable IDs, the generated list control, `Control` for one item's field, and item-level project commands ([List parameters](#list-parameters)). |
 | `template-preview` | `preview`: the template's own image for New Book instead of a render of its opening spread ([Template previews](#template-previews)). |
 | `photo-render` | `PhotoBox` children: a render callback that draws the box's photo from its crop, such as through an SVG mask ([PhotoBox render callbacks](#photobox-render-callbacks)). |
+| `formatted-text` | `markdown: 'inline'` on string parameters: bold, italic and strikethrough, shown by `ctx.Text` and `<FormattedText>` ([Formatted text](#formatted-text-formatted-text)). |
 
 
 `requires` is reserved for additive extensions introduced after the baseline is fixed. Unsupported extensions are rejected when the template loads, with an update hint. Older templates that list baseline features in `requires` remain valid. `capabilities` continues to list all supported feature names, including the baseline, for compatibility and feature discovery. `get_authoring_context` reports the contract, its `baseline`, all `capabilities` and module `exports` as `capabilities.templateApi`.
@@ -194,7 +195,7 @@ With the `spread` builder, the render context types every parameter, box and ele
 | `p.boolean` | `boolean` | `default` |
 | `p.integer` | `number` | `default`, `min`, `max`, `step`, `unit` (display only) |
 | `p.number` | `number` | `default`, `min`, `max`, `step`, `unit` (display only) |
-| `p.string` | `string` | `default`, `multiline`, `maxLength`, `placeholder` |
+| `p.string` | `string` | `default`, `multiline`, `maxLength`, `placeholder`, `markdown` ([Formatted text](#formatted-text-formatted-text)) |
 | `p.enum` | one of `options` | `default`, `options` (an array of values or a value-to-label map), optional `labels` for arrays |
 | `p.color` | `#rrggbb` | `default` |
 | `p.date` | ISO date `YYYY-MM-DD` | `default`, `min`, `max`, `precision` (`day` or `month`) |
@@ -1025,12 +1026,29 @@ The map editor waits for its first measurement, uses the actual output aspect ra
 
 Use `<ctx.Text parameter="heading" presentation="inline" as="h1" />` to edit a plain string on the page. Inline text is included in the contract-1 baseline under ADR 0008 and needs no `requires` entry. Existing `Text` calls keep the parameter panel; `presentation="inline"` chooses on-page editing for a particular node, with the same word and values as an editor's `presentation` (`'dialog'`, the default, keeps the panel). Older `requires: ['inline-text']` declarations remain valid. The starter headings use it. Installed-runtime capability discovery and the generated SDK include `inline-text`.
 
-The activated occurrence uses the template's actual font, ancestors, dimensions and CSS at page zoom. Other occurrences continue to show the confirmed parameter until Apply succeeds. The parameter's scope and saved identity do not change. A custom editor that owns the parameter remains its sole editing surface: clicking that text (or using the Inspector/Tab) opens the owner, including layout parameters listed in an element editor's `spread`. The inline-text save path also rejects a draft if ownership changes before its save runs. There is no rich text or Markdown editing. An inline string declared `multiline: true` defaults to `white-space: pre-wrap` in both editing and artwork; template CSS classes and inline styles take precedence.
+The activated occurrence uses the template's actual font, ancestors, dimensions and CSS at page zoom. Other occurrences continue to show the confirmed parameter until Apply succeeds. The parameter's scope and saved identity do not change. A custom editor that owns the parameter remains its sole editing surface: clicking that text (or using the Inspector/Tab) opens the owner, including layout parameters listed in an element editor's `spread`. The inline-text save path also rejects a draft if ownership changes before its save runs. Plain strings have no formatting; a string declared with `markdown: 'inline'` gets bold, italic and strikethrough (see below). An inline string declared `multiline: true` defaults to `white-space: pre-wrap` in both editing and artwork; template CSS classes and inline styles take precedence.
 
 Typing is pending until Done, leaving the field, or Enter for a single line. For multiline strings, Enter inserts a line break and ⌘/Ctrl+Enter applies. Tab/Shift+Tab applies and moves to the next/previous occurrence in reading order. Escape and Discard drop only pending typing. Whitespace-only/empty strings retain the existing placeholder and display-only fallback behavior after exit. Paste inserts plain text, normalizes CR/CRLF to LF, and replaces line breaks with spaces for a single-line parameter. Text selection, caret keys and focused typing Undo/Redo belong to the text editor; each confirmed application becomes one book Undo entry. IME Enter/Escape are left to the input method while composing; a pending flush waits for composition to end.
 
 Application validates the complete string (including `maxLength`), checks the original parameter declaration, layout and saved value again when the shared edit queue runs, and uses the normal revision-checked project save service. Failed saves, invalid text and external conflicts keep the editor and its pending text, with a selectable copy of the draft in the error area. Conflicting typing is never silently applied over newer saved values. Recovery instructions explicitly say to fix the text, retry Done, or copy the draft and choose Discard before continuing. Discard and reopen to resolve an external conflict. Outside pointer presses cannot start canvas gestures before applying the text. Normal clicks are performed after a successful apply; browser actions requiring trusted user activation (links, file inputs and controls marked `data-requires-user-activation`) instead show “Text saved. Click again to continue.” and require a new real click. Ordinary zoom/scroll/resize follows the same editor without remounting it. If the layout changes or the occurrence disappears, the pending draft remains recoverable rather than moving to another saved parameter.
 
 The Inspector's marked-text action opens the existing parameter control, including from the keyboard. Targets under 64 × 18 screen pixels, rotated/skewed targets and read-only projects use the existing panel; an inline session keeps its draft if the page later becomes smaller. Thumbnails, MCP artwork captures and proof/print exports use only confirmed render output, without editable nodes, draft text or editor chrome.
+
+### Formatted text (`formatted-text`)
+
+Declare a string with `markdown: 'inline'` to let its value carry inline formatting:
+
+```tsx
+heading: p.string({ label: 'Heading', multiline: true, default: '', markdown: 'inline' }),
+// …
+<ctx.Text parameter="heading" presentation="inline" as="h1" />
+```
+
+- **Saved value:** the string, with a small Markdown subset: `**bold**`, `*italic*`, `***bold italic***` and `~~strikethrough~~`. A backslash keeps a marker literal (`\*`, `\~`, `\\`). Markers that do not pair up, or that touch a space on the wrong side (`5 * 3`), stay as typed. Nothing else is Markdown: `#`, `_`, links, code and HTML are shown as typed. Headings, lists and links belong in Markdown boxes.
+- **Opt-in:** without the flag a string is plain, as before, so existing values never change meaning. The flag may differ between layouts like other constraints, but a value written with markers shows them literally where the flag is off.
+- **Rendering:** `ctx.Text` shows the value as `<strong>`, `<em>` and `<s>` inside its node, never as HTML. Style them in the template's CSS, for example `h1 strong { font-weight: 800; }` for a heading that is already semibold. Display-only `fallback` text is shown plain. Where a template shows the value with its own markup, `<FormattedText value={ctx.params.heading} />` renders the same elements, and `plainText(value)` gives the visible text without markers, for anchor titles and other places where formatting cannot show. `ctx.params` holds the saved string with its markers. The starter template formats its headings (contents entries use `plainText`) and its map title (with `<FormattedText>`).
+- **Length:** `maxLength` counts the visible characters, not the markers, in validation, the generated field and the inline editor.
+- **Inline editing:** the text shows its formatting while you type. Typing a closing marker that matches its opener on the same line converts it: `**word**` turns bold once the second closing `*` is typed, `*word*` italic, `~~word~~` struck through. ⌘B, ⌘I and ⇧⌘X (Ctrl on other systems) toggle the selection, the word at the caret, or the style of the next typed text; the toolbar has the same three buttons. Undo right after a conversion brings the typed markers back as literal text, so a footnote star or `2*3*4` can stay. This editor keeps its own Undo history while typing; each applied edit is still one book Undo entry. Paste inserts plain text, whose markers are kept literally.
+- **Other surfaces:** the generated text field and agents (`apply_project_changes`) read and write the saved string with its markers.
 
 `node scripts/smoke-inline-text.mjs` checks the desktop workflow after building and staging the app. It is included in `npm run test:desktop`, run by the manual Full desktop suite; the automatic core smoke suite stays small.

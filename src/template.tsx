@@ -1,6 +1,7 @@
-import { Component, createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Component, createContext, Fragment, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import { RenderedImage } from './rendered-image';
+import { parseFormatted, plainFormatted } from './formatted-text';
 import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
@@ -804,9 +805,25 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
     data-text-fallback={fallback?.trim() ? fallback : undefined} data-text-fallback-label={fallback?.trim() ? fallbackLabel : undefined}
     className={className} style={place(rect, style)} {...issueOn(marker)}>
     {empty ? <span className="if-text-placeholder">{hint}</span> : inherited && renderView(data.book) === 'canvas'
-      ? <span className="if-text-inherited" title={'Using ' + fallbackLabel}>{text}</span> : text}
+      ? <span className="if-text-inherited" title={'Using ' + fallbackLabel}>{text}</span>
+      : !inherited && param.type === 'string' && param.markdown === 'inline' ? <FormattedText value={text} /> : text}
   </Tag>;
 }
+
+// A value of a `markdown: 'inline'` string parameter as <strong>, <em> and <s>; everything else stays text, never HTML.
+// ctx.Text uses it for such parameters; templates use it where they show the value with their own markup.
+export function FormattedText({ value }: { value: string }) {
+  return <>{parseFormatted(value).map((segment, i) => {
+    let node: ReactNode = segment.text;
+    if (segment.strike) node = <s>{node}</s>;
+    if (segment.italic) node = <em>{node}</em>;
+    if (segment.bold) node = <strong>{node}</strong>;
+    return <Fragment key={i}>{node}</Fragment>;
+  })}</>;
+}
+
+/** The visible text of a formatted value, without markers: for anchor titles, alt text and other plain uses. */
+export const plainText = (value: string) => plainFormatted(value);
 
 let assets: Record<string, string> = {};
 export function setTemplateAssets(next: Record<string, string>) {
@@ -873,7 +890,7 @@ export function issue(found: TemplateIssue): Required<IssueMarker> {
 
 export const runtime = {
   defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
-  RenderedImage,
+  RenderedImage, FormattedText, plainText,
 } satisfies Record<typeof runtimeExports[number], unknown>;
 
 // The values `render` reads for one spread: its parameters, the document's, and its boxes and elements.

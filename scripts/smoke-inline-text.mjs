@@ -126,6 +126,36 @@ try {
   assert.equal(await saved(), 'Composition');
   console.log('constraints and IME flush passed');
 
+  // The starter's heading is `markdown: 'inline'`: markers convert while typing, shortcuts and the toolbar format the
+  // selection, and Undo right after a conversion brings the typed markers back.
+  await open();
+  await input().fill('');
+  await input().pressSequentially('A **bold** and ~~old~~ word');
+  assert.equal(await input().locator('strong').innerText(), 'bold');
+  assert.equal(await input().locator('s').innerText(), 'old');
+  await input().press('ControlOrMeta+a');
+  await input().press('ControlOrMeta+i');
+  assert.equal(await input().locator('em').count() > 0, true);
+  if (process.env.FORMATTED_TEXT_SCREENSHOT) await w.screenshot({ path: process.env.FORMATTED_TEXT_SCREENSHOT });
+  await done();
+  assert.equal(await saved(), '*A **bold** and ~~old~~ word*');
+  assert.equal(await occurrence(1).locator('strong').innerText(), 'bold', 'every occurrence shows the formatting');
+  assert.equal(await occurrence(1).locator('em').count() > 0, true);
+  await open();
+  await input().press('ControlOrMeta+a');
+  await input().press('ControlOrMeta+i');
+  assert.equal(await input().locator('em').count(), 0, 'italic toggles off for the whole selection');
+  await input().pressSequentially('2*3*');
+  assert.equal(await input().locator('em').innerText(), '3', 'a matching closing star converts');
+  await input().press('ControlOrMeta+z');
+  assert.equal(await input().locator('em').count(), 0, 'Undo brings the typed stars back');
+  await input().pressSequentially('4');
+  await w.getByRole('button', { name: 'Bold (⌘B)', exact: true }).waitFor();
+  await done();
+  assert.equal(await saved(), '2\\*3\\*4');
+  assert.equal(await occurrence().innerText(), '2*3*4');
+  console.log('formatted text passed');
+
   await open(0, 'subtitle');
   await input().fill('Single line');
   await w.keyboard.press('Enter');

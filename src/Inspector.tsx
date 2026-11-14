@@ -1,3 +1,4 @@
+import { plainFormatted } from './formatted-text';
 import { assetMenuState } from './asset-menu';
 import { sourcePath } from './source-locations';
 import type { ReactNode } from 'react';
@@ -181,7 +182,10 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
       const fields = target.edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((field) => !!field);
       if (!fields.length) return [];
       const value = readEdit(summary.project, spread, fields[0]);
-      return [{ target, label: fields.map(({ param }) => param.label).join(', '), value: typeof value === 'string' ? value : String(value ?? '') }];
+      const text = typeof value === 'string' ? value : String(value ?? '');
+      const param = fields[0].param;
+      // A formatted string is listed by its visible text, without markers.
+      return [{ target, label: fields.map(({ param }) => param.label).join(', '), value: param.type === 'string' && param.markdown === 'inline' ? plainFormatted(text) : text }];
     }) : [];
   const flow = render?.state === 'ready' ? render.flow : undefined;
   const contents = definition ? [

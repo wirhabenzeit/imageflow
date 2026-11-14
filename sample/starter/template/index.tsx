@@ -1,4 +1,4 @@
-import { box, defineTemplate, geometry, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
+import { box, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Spread } from 'imageflow';
 import type { BookSpread, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
 import { MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
@@ -74,10 +74,11 @@ const Shade = ({ context, rect }: { context: Pick<Context, 'geometry'>; rect: Re
 
 // Shared parameters. An ID means the same thing in every layout that declares it, so switching layouts keeps the
 // heading, the note and each photo's caption setting.
-const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90 });
+// Headings may be formatted: **bold**, *italic* and ~~strikethrough~~ (styles.css picks the faces).
+const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90, markdown: 'inline' });
 const note = p.string({ label: 'Note', default: '', multiline: true, maxLength: 400, placeholder: 'A few lines about these photos',
   description: 'A short text beside the photos. Leave it empty for no text.' });
-const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
+const oneLine = (text: string) => plainText(text).replace(/\s+/g, ' ').trim();
 // For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
 // control for every declared parameter. The value is shared by every layout with this box, so it returns when the
 // spread switches back to a layout that draws captions.
@@ -336,7 +337,7 @@ function MapLayoutEditor(props: MapEditorProps) {
   // Inside the page's own theme (`.field-book`), so the title prints exactly as it shows here.
   return <MapEditor {...props}>
     {typeof title === 'string' && title && map && <div className={bookClass({ theme: document.theme ?? 'light', headingFont: document.headingFont ?? 'serif' }) + ' map-title-layer'}>
-      <h2 className="map-title map-title-overlay" style={geometry.css({ ...at, x: at.x - map.x, y: at.y - map.y })}>{title}</h2>
+      <h2 className="map-title map-title-overlay" style={geometry.css({ ...at, x: at.x - map.x, y: at.y - map.y })}><FormattedText value={title} /></h2>
     </div>}
   </MapEditor>;
 }
@@ -606,7 +607,7 @@ export default defineTemplate({
     }),
     map: spread({
       label: 'Map',
-      parameters: { mapTitle: p.string({ label: 'Map title', default: '', maxLength: 80, placeholder: 'Shown on the map' }) },
+      parameters: { mapTitle: p.string({ label: 'Map title', default: '', maxLength: 80, placeholder: 'Shown on the map', markdown: 'inline' }) },
       elements: { map: {
         label: 'Map',
         parameters: mapParameters,
@@ -617,7 +618,7 @@ export default defineTemplate({
         const { trackWidth, ...values } = ctx.elements.map.params;
         return <Paper context={ctx} bled={{ left: true, right: true }}>
           <MapView values={values} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
-          {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(mapTitleRect(ctx.format))}>{ctx.params.mapTitle}</h2>}
+          {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(mapTitleRect(ctx.format))}><FormattedText value={ctx.params.mapTitle} /></h2>}
         </Paper>;
       },
     }),
