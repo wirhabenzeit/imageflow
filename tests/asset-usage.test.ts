@@ -5,7 +5,7 @@ import { assetMenu } from '../src/asset-menu';
 import type { ProjectSummary } from '../src/desktop';
 import { projectSchema } from '../src/project';
 test('Assets and placement menus use the same page labels as the book canvas', () => {
-  const summary: ProjectSummary = { id: 'book', folder: 'Book', readOnly: false, photos: {}, photoSizes: {}, texts: {},
+  const summary: ProjectSummary = { id: 'book', folder: 'Book', photos: {}, photoSizes: {}, texts: {},
     pageLabels: { one: '4–5' }, photoIndex: { photo: { path: 'photos/photo.jpg' } },
     project: projectSchema.parse({ schemaVersion: 1, title: 'Book', template: { id: 't', version: '1' }, spreads: [
       { id: 'one', definition: 'full', boxes: { hero: { photo: 'photo' } } },

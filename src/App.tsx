@@ -157,7 +157,7 @@ export function App() {
     const target = geometry?.targets.find((item) => targetKey(item) === next.key);
     if (target?.inlineText && openTextOwner(target)) return;
     const state = summary?.project.spreads.find(({ id }) => id === next.spread);
-    const text = !!(!next.owner && !next.panel && !summary?.readOnly && canvasReady && readyId.current === summary?.id && target && textFits(target));
+    const text = !!(!next.owner && !next.panel && canvasReady && readyId.current === summary?.id && target && textFits(target));
     setEditing({ ...next, session: ++editorSessions.current, text,
       ...(text && summary && template && state && target ? { held: { project: summary.project, spread: state, template, target } } : {}) });
   };
@@ -283,7 +283,7 @@ export function App() {
   const layoutFamily = spread && template && pickerFamily(template.spreads, spread.definition, template.layoutFamilies);
   const sequence = template && pageSequence(spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
   const pageLabels = spreads.map((_, i) => pageLabel(sequence?.spreads[i]?.page ?? {}));
-  const writable = !!summary && !summary.readOnly && !reload && !agentWorking;
+  const writable = !!summary && !reload && !agentWorking;
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
   const generation = inputGeneration.current;
@@ -404,7 +404,7 @@ export function App() {
     let applied = false;
     return enqueue(async () => {
       const before = current.current;
-      if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current ||
+      if (!api || !before || agentLocked.current || reloading.current || generation !== inputGeneration.current ||
           (canvasId && (before.id !== canvasId || readyId.current !== canvasId))) return;
       const files = structuredClone({ project: before.project, photoIndex: before.photoIndex });
       if (change(files) === false) return;
@@ -429,7 +429,7 @@ export function App() {
     const generation = inputGeneration.current;
     enqueue(async () => {
       const before = current.current;
-      if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current) return;
+      if (!api || !before || agentLocked.current || reloading.current || generation !== inputGeneration.current) return;
       const result = await persist(() => api.history(before.id, direction));
       if ('error' in result) throw new Error(result.error);
       if (current.current !== before) return;
@@ -442,7 +442,7 @@ export function App() {
     const generation = inputGeneration.current;
     enqueue(async () => {
       const before = current.current;
-      if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current ||
+      if (!api || !before || agentLocked.current || reloading.current || generation !== inputGeneration.current ||
           (canvasId && (before.id !== canvasId || readyId.current !== canvasId))) return;
       setBusy('Importing files…');
       const result = await persist(() => api.importFiles(before.id, request));
@@ -470,7 +470,7 @@ export function App() {
     return new Promise<{ id: string; project: string } | undefined>((resolve) => enqueue(async () => {
       try {
         const before = current.current;
-        if (!api || !before || before.readOnly || agentLocked.current || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
+        if (!api || !before || agentLocked.current || reloading.current || generation !== inputGeneration.current) return resolve(undefined);
         setBusy('Importing file…');
         const result = await persist(() => api.importFiles(before.id, { kind: 'file', accept, mode }));
         if ('error' in result) throw new Error(result.error);
@@ -663,7 +663,7 @@ export function App() {
   // Resolves to the project ID to render from now on.
   function decideNetwork(declared: TemplateInfo | undefined, always = false): Promise<string | void> {
     const before = current.current;
-    if (!api || !before || before.readOnly || !declared?.network?.length) return Promise.resolve(before?.id);
+    if (!api || !before || !declared?.network?.length) return Promise.resolve(before?.id);
     const key = before.folder + '\n' + (before.templateHash ?? '') + '\n' + declared.network.join(' ');
     if (!always && networkAsked.current.has(key)) return Promise.resolve(before.id);
     networkAsked.current.add(key);
@@ -1494,7 +1494,6 @@ export function App() {
             draggable onDragStart={(event) => { event.preventDefault(); void api?.documentProxy('drag'); }}
             onClick={(event) => { event.stopPropagation(); void api?.documentProxy('path'); }}><Icon name="book" size={14} /></button>}
           <span className="document-title">{summary ? bookName(summary.folder) : 'ImageFlow'}</span>
-          <span className="muted">{summary?.readOnly ? 'Read Only' : ''}</span>
         </div>}
         {summary && <div className="history">
           <button aria-label="Undo" title={undoCommand.label} disabled={!undoCommand.enabled} onClick={() => undo('undo')}><Icon name="undo" /></button>
@@ -1693,14 +1692,14 @@ export function App() {
               {editing && inline && summary && textInline && <InlineTextEditor key={editing.session}
                 projectId={summary.id} project={summary.project} spread={editSpread ?? { ...inline.spread, definition: '' }} template={template ?? inline.template} target={inline.target}
                 zoom={editSheet?.zoom ?? 1} host={canvasWrap.current} canvasReady={canvasReady} blocked={blockedInline || undefined}
-                readOnly={summary.readOnly} edit={edit} close={closeEditor} step={stepEditor} shown={setTextShown} notice={setNotice} />}
+                edit={edit} close={closeEditor} step={stepEditor} shown={setTextShown} notice={setNotice} />}
               {editing && inline && summary && !textInline && <EditPopover key={editing.session}
                 compact={editing.owner?.type === 'markdown'} anchor={() => {
                   const stageRect = stage.current?.getBoundingClientRect(), host = canvasWrap.current?.getBoundingClientRect();
                   return stageRect && host ? { x: stageRect.left - host.left + inline.target.x, y: stageRect.top - host.top + inline.target.y, width: inline.target.width, height: inline.target.height } : undefined;
                 }} project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} host={canvasWrap.current}
                 textFallback={inline.target.textFallback}
-                readOnly={summary.readOnly} blocked={blockedInline || undefined}
+                blocked={blockedInline || undefined}
                 edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}
                 actions={!editing.owner && editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)
                   ? <button type="button" onClick={() => startCrop(editing.spread, editPhotoBox)}>Adjust crop…</button>
@@ -1734,7 +1733,7 @@ export function App() {
       </div>
       {summary && (!panels.rightHidden ? <PanelDivider side="right" size={panels.right} resize={resizePanel} onResizing={setResizing} /> : <div />)}
       <div className={'inspector-host' + (panels.rightHidden ? ' is-collapsed' : '')} inert={panels.rightHidden} aria-hidden={panels.rightHidden || !summary}>
-    {summary && spread && <Inspector summary={writable || summary.readOnly ? summary : { ...summary, readOnly: true }}
+    {summary && spread && <Inspector summary={summary} writable={writable}
         spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
         targets={geometry?.targets.filter((target) => target.spread === spread.id)}
@@ -1750,7 +1749,7 @@ export function App() {
     {summary && template && elementEditor && !editorTargetGone(spreads, elementEditor) &&
       <ElementEditorDialog host={canvasWrap.current} key={JSON.stringify(elementEditor)} project={summary.id} template={template}
         presentation={elementEditor.presentation} placement={placement} click={elementEditor.click} stage={stage.current} shown={setInlineShown}
-        spread={spreads.find(({ id }) => id === elementEditor.spread)!} params={summary.project.params} target={elementEditor} readOnly={summary.readOnly}
+        spread={spreads.find(({ id }) => id === elementEditor.spread)!} params={summary.project.params} target={elementEditor}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
         canvasReady={canvasReady} geometry={geometry} edit={edit} close={() => {
           if (elementEditor.presentation === 'inline' && inlineShown) setLeavingEditor(elementEditor);

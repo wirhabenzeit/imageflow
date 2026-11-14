@@ -50,7 +50,7 @@ export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, 
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView; selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string> };
 export type Command = PhotoViewCommand | SpreadCommand | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'print' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
-  id: string; folder: string; readOnly: boolean;
+  id: string; folder: string;
   handle?: string; history?: HistoryState; viewKey?: string;
   pageLabels?: Record<string, string>;
   photoDates?: Record<string, { captured: string; capturedEstimated?: boolean }>;
