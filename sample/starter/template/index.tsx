@@ -1,7 +1,8 @@
-import { asset, box, defineTemplate, Element, file, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
-import type { ElementEditorProps, ImageFlowNode, LayoutPickerProps, Photo, Rect, RenderContext } from 'imageflow';
+import { asset, box, defineTemplate, Element, file, geometry, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
+import type { ElementEditorProps, ImageFlowNode, LayoutPickerProps, Photo, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
 import { MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
+import type { MapEditorProps } from './map';
 
 // Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page.
 // `ctx.geometry.design(canvas)` scales them to the chosen format: horizontal values with the trim width, vertical
@@ -296,9 +297,25 @@ function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerPro
   </div></div>;
 }
 
+// The map title sits over the map. The inline map editor draws it too, at the same place, so framing the view shows
+// the page as printed; it stays an ordinary layout parameter, edited where the page shows it.
+const mapTitleRect = (format: ResolvedFormat) => geometry.design(format, canvas).left(margin, margin, 150, 22);
+function MapLayoutEditor(props: MapEditorProps) {
+  const title = props.spread.mapTitle;
+  const map = props.context.elements.map.rect;
+  const at = mapTitleRect(props.format);
+  const { paper, accent } = props.document as { paper?: string; accent?: string };
+  // Inside the page's own type context (`.field-book`, its ink), so the title prints exactly as it shows here.
+  return <MapEditor {...props}>
+    {typeof title === 'string' && title && map && <div className={'field-book map-title-layer ' + (paper ?? '')} style={{ '--ink': accent }}>
+      <h2 className="map-title map-title-overlay" style={geometry.css({ ...at, x: at.x - map.x, y: at.y - map.y })}>{title}</h2>
+    </div>}
+  </MapEditor>;
+}
+
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.7.0',
+  version: '0.8.0',
   label: 'Photobook',
   description: 'A travel journal with photographs, stories, maps, and room for your own layouts.',
   contract: 1,
@@ -367,14 +384,15 @@ export default defineTemplate({
       elements: { map: {
         label: 'Map',
         parameters: mapParameters,
-        editor: { label: 'Edit map', parameters: [...mapEditorParameters], component: MapEditor },
+        // Framed on the page, in the map's own place; the panel remains the fallback.
+        editor: { label: 'Edit map', parameters: [...mapEditorParameters], component: MapLayoutEditor, presentation: 'inline' },
       } },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         const { trackColor, trackWidth, ...values } = ctx.elements.map.params;
         return <Paper context={ctx} bled={{ left: true, right: true }}>
           <MapView values={values} trackColor={trackColor} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
-          {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(at.left(margin, margin, 150, 22))}>{ctx.params.mapTitle}</h2>}
+          {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(mapTitleRect(ctx.format))}>{ctx.params.mapTitle}</h2>}
         </Paper>;
       },
     }),

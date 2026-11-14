@@ -110,11 +110,21 @@ html:has(.if-artwork) { overflow: hidden; }
 .if-preview .if-photo img:not([src]) { visibility: hidden; }
 .if-preview .if-photo:has(> img:not([src])) { background: #e9e5dc; }
 
+/* While an inline editor is drawn over an element or marked node, the preview hides that occurrence's artwork. */
+.if-preview [data-if-editing] { opacity: 0 !important; }
+
 /* Template-supplied element editors run in their own frame inside an editor dialog. */
 html:has(.if-editor) { color-scheme: light dark; background: Canvas; }
 html:has(.if-editor) body { background: transparent; }
 .if-editor { padding: 16px 18px; font: 13px/1.45 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   background: var(--if-editor-background); color: var(--if-editor-text); color-scheme: light dark; }
+
+/* An inline editor's frame is the element's rectangle on the page, at its printed size: no panel surface or padding,
+   and the page shows through where the editor draws nothing. Its color scheme matches the app's, so the frame stays
+   transparent; the editor's own content uses light artwork defaults. */
+html:has(.if-editor-inline), html:has(.if-editor-inline) body { background: transparent; margin: 0; height: 100%; overflow: hidden; }
+.if-editor-inline { position: fixed; inset: 0; padding: 0; background: transparent; color: initial; font: initial; --if-inline-scale: 1; }
+.if-editor-inline > * { color-scheme: only light; }
 
 /* Artwork uses its authored paper/ink colors and light browser defaults in either OS appearance. */
 html:has(.if-artwork), html:has(.if-print-page), .if-sheet { color-scheme: only light; }

@@ -30,8 +30,11 @@ export const contract1Capabilities = [
   // `<RenderedImage>`: host-managed asynchronous pictures, which may use the `network` origins in previews, checks
   // and export (ADR 0006).
   'rendered-images',
+  // `presentation: 'inline'` on element and document editors: editing on the page, in the frame it was opened from.
+  'inline-editors',
 ] as const;
-// All supported features, including the baseline names accepted in older templates' `requires` lists.
-// Future additive extensions go here, and templates using those extensions declare them in `requires`.
+// All supported features, including the baseline names accepted in older templates' `requires` lists. Until the
+// first public release the baseline stays open and new features join it (ADR 0008); after it, additive extensions
+// go here, and templates using them declare them in `requires`.
 export const capabilities = [...contract1Capabilities] as const;
 export type Capability = typeof capabilities[number];

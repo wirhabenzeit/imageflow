@@ -73,7 +73,7 @@ test('document editors must edit declared document parameters, each owned by one
     ['Document parameter markedDates is edited by both a and b. Give it to one editor.']);
   assert.match(problems({ empty: { parameters: [], component } }).join(), /at least one document parameter/);
   // Only labels and parameters reach the app; components stay in the render frame.
-  assert.deepEqual(info.editors, { markedDays: { label: 'Marked days', parameters: ['markedDates'] } });
+  assert.deepEqual(info.editors, { markedDays: { label: 'Marked days', parameters: ['markedDates'], presentation: 'dialog' } });
 });
 
 test('the editor context is what render reads, and follows reordering and photo changes', () => {

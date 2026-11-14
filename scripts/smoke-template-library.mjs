@@ -175,7 +175,8 @@ try {
   await mapElement.scrollIntoViewIfNeeded();
   const mapBox = await mapElement.boundingBox();
   await editor.mouse.click(mapBox.x + mapBox.width / 2, mapBox.y + mapBox.height / 2);
-  await editor.getByRole('dialog', { name: 'Edit map' }).waitFor();
+  // The map is framed on the page; its toolbar is the editor's chrome.
+  await editor.getByRole('toolbar', { name: 'Edit map' }).waitFor();
   // Whether the open map editor's frame may reach the map server: a request its policy blocks reports a violation.
   const editorReach = async () => {
     await editor.locator('iframe.element-editor-frame').waitFor();
@@ -202,7 +203,7 @@ try {
   }, frameBefore);
   await editor.waitForFunction((src) => document.querySelector('iframe.element-editor-frame')?.getAttribute('src') !== src, editorBefore);
   assert.equal(await editorReach(), 'blocked', 'the open editor lost its network access');
-  await editor.getByRole('dialog', { name: 'Edit map' }).getByRole('button', { name: 'Close', exact: true }).click();
+  await editor.getByRole('toolbar', { name: 'Edit map' }).getByRole('button', { name: 'Done', exact: true }).click();
   assert.deepEqual(await editorNetwork(editor), []);
   assert.equal((await messages())[0].message, 'Allow this book’s template to connect to the internet?');
 

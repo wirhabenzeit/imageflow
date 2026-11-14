@@ -1,5 +1,5 @@
-import { box, defineTemplate, inch, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
-import type { DocumentEditorProps, ImageFlowNode, Rect, RenderContext } from 'imageflow';
+import { box, defineTemplate, geometry as geometryHelpers, inch, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
+import type { DocumentEditorProps, ImageFlowNode, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import { changeMark, daysIn, markedDays, markedEntries, markOf, monthFor } from './marks';
 import './styles.css';
 
@@ -57,15 +57,21 @@ const weekdayName = (date: Date, language: Language) => {
   return name.charAt(0).toLocaleUpperCase(language) + name.slice(1);
 };
 
+/** The page's colours and type sizes, scaled from the A3 design to the format; the day picker on the page uses them too. */
+function pageStyle(document: Context['document'], format: ResolvedFormat) {
+  const at = geometryHelpers.design(format, canvas);
+  return { '--strip': document.strip, '--highlight': document.highlight,
+    '--place-size': at.length(19, 'pt', 'x'), '--caption-size': at.length(17, 'pt', 'x'), '--day-size': at.length(10.5, 'pt', 'x'), '--weekday-size': at.length(6.5, 'pt', 'x'), '--year-size': at.length(38, 'pt', 'x'),
+    '--day-row': at.length(6.25, 'mm', 'x'), '--day-gap': at.length(1.4, 'mm', 'x') };
+}
+
 /** The page: the photo fills everything left of the strip, both reaching into the bleed. */
 function Page({ context, className, children }: { context: Pick<Context, 'document' | 'geometry' | 'format'>; className: string; children?: ImageFlowNode }) {
   const { document, geometry } = context;
   const at = geometry.design(canvas);
   const bleed = geometry.page('bleed');
   const left = at.page(strip.x, 0, 0, 0).x;
-  return <Spread className={'wall-calendar ' + className} style={{ '--strip': document.strip, '--highlight': document.highlight,
-    '--place-size': at.length(19, 'pt', 'x'), '--caption-size': at.length(17, 'pt', 'x'), '--day-size': at.length(10.5, 'pt', 'x'), '--weekday-size': at.length(6.5, 'pt', 'x'), '--year-size': at.length(38, 'pt', 'x'),
-    '--day-row': at.length(6.25, 'mm', 'x'), '--day-gap': at.length(1.4, 'mm', 'x') }}>
+  return <Spread className={'wall-calendar ' + className} style={pageStyle(document, context.format)}>
     <div className="strip" style={geometry.css({ ...bleed, x: left, width: bleed.x + bleed.width - left })} />
     {children}
   </Spread>;
@@ -100,9 +106,47 @@ function Days({ month, language, marked, edit, rect, geometry, finding }: {
 
 // The day picker, opened by clicking the days of a month page. It edits the document's marked dates for the month
 // that page shows, which it reads from its context: moving the page to another month updates the open picker.
-// A click marks that date once; a day marked every year shows as marked, and the picker offers to remove the
-// yearly entry, since one click should not change every year's calendar.
-function MarkedDaysEditor({ values, set, context, readOnly, Control }: DocumentEditorProps<typeof documentParameters, 'markedDates'>) {
+// On the page (`presentation: 'inline'`) it is the page's own column of days: a click marks or unmarks a date once,
+// ⌥-click every year. In the panel it is a month grid. A day marked every year is not changed by a plain click, so
+// one click never changes every year's calendar.
+function MarkedDaysEditor(props: DocumentEditorProps<typeof documentParameters, 'markedDates'>) {
+  return props.presentation === 'inline' ? <DaysOnPage {...props} /> : <MarkedDaysGrid {...props} />;
+}
+
+function DaysOnPage({ values, set, context, readOnly }: DocumentEditorProps<typeof documentParameters, 'markedDates'>) {
+  const month = monthFor(context);
+  const language = context.document.language;
+  const marked = values.markedDates;
+  const year = month.getUTCFullYear();
+  const toggle = (day: number, yearly: boolean) => {
+    const mark = markOf(marked, month, day);
+    if (yearly) set({ markedDates: changeMark(marked, month, day, { yearly: !mark.yearly }) });
+    else if (!mark.yearly) set({ markedDates: changeMark(marked, month, day, { once: !mark.once }) });
+  };
+  const monthLabel = new Intl.DateTimeFormat(language, { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(month);
+  return <div className="wall-calendar days-on-page" style={pageStyle(context.document, context.format)}>
+    <ol className="days" aria-label={'Marked days in ' + monthLabel}>
+      {Array.from({ length: daysIn(month) }, (_, i) => {
+        const date = new Date(Date.UTC(year, month.getUTCMonth(), i + 1));
+        const { once, yearly } = markOf(marked, month, i + 1);
+        const weekend = date.getUTCDay() === 0 || date.getUTCDay() === 6;
+        const className = [weekend ? 'weekend' : '', once || yearly ? 'marked' : '', yearly ? 'yearly' : ''].filter(Boolean).join(' ');
+        return <li key={i} className={className || undefined}>
+          <button type="button" aria-pressed={once || yearly} disabled={readOnly}
+            title={yearly ? 'Every year · ⌥-click to unmark' : once ? year + ' · ⌥-click for every year' : '⌥-click for every year'}
+            onClick={(event: { altKey: boolean }) => toggle(i + 1, event.altKey)}
+            onKeyDown={(event: { altKey: boolean; key: string; preventDefault(): void }) => {
+              if (event.altKey && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggle(i + 1, true); }
+            }}>
+            <span className="day">{i + 1}</span><span className="weekday">{weekdayName(date, language)}</span>
+          </button>
+        </li>;
+      })}
+    </ol>
+  </div>;
+}
+
+function MarkedDaysGrid({ values, set, context, readOnly, Control }: DocumentEditorProps<typeof documentParameters, 'markedDates'>) {
   const month = monthFor(context);
   // `values` holds only the marked dates; every other setting is read from the context, which follows the book.
   const language = context.document.language;
@@ -138,7 +182,7 @@ function MarkedDaysEditor({ values, set, context, readOnly, Control }: DocumentE
 
 export default defineTemplate({
   id: 'imageflow-calendar',
-  version: '1.0.0',
+  version: '1.1.0',
   label: 'Wall calendar',
   description: 'A landscape wall calendar: one full-bleed photo a month, with the place and the days on a dark strip.',
   contract: 1,
@@ -149,7 +193,7 @@ export default defineTemplate({
   defaultFormat: 'a3',
   parameters: documentParameters,
   editors: {
-    markedDays: { label: 'Marked days', parameters: ['markedDates'], component: MarkedDaysEditor },
+    markedDays: { label: 'Marked days', parameters: ['markedDates'], component: MarkedDaysEditor, presentation: 'inline' },
   },
   spreads: ({ spread }) => ({
     cover: spread({

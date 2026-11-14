@@ -148,7 +148,7 @@ export type DesktopApi = {
 // parameters it lists in `spread` (the component itself stays in the render frame).
 // `controls` arranges the generated controls of a scope's parameters (src/controls.ts).
 export type ElementDefinition = {
-  label: string; parameters: Parameters; controls?: ControlItem[]; editor?: { label?: string; parameters: string[]; spread?: string[]; presentation: 'dialog' };
+  label: string; parameters: Parameters; controls?: ControlItem[]; editor?: { label?: string; parameters: string[]; spread?: string[]; presentation: 'dialog' | 'inline' };
 };
 export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; parameters: Parameters; flowOrder?: number; controls?: ControlItem[] };
 // `family` names the layout family this layout is a variant of; `variant` holds the template's tags for it.
@@ -168,7 +168,7 @@ export type TemplateInfo = {
   // The spreads a new book from this template starts with; empty when it starts without spreads.
   openingSpreads?: { layout: string; params: Values }[];
   // Editors of document parameters, by ID, with the parameters each owns (the components stay in the render frame).
-  editors?: Record<string, { label?: string; parameters: string[] }>;
+  editors?: Record<string, { label?: string; parameters: string[]; presentation?: 'dialog' | 'inline' }>;
   // HTTPS origins the template's element editors may reach once the user allows them (ADR 0006).
   network?: string[];
   // The format in use, its ID, and the labels of all formats the template offers.
@@ -192,14 +192,15 @@ export type Rect = { x: number; y: number; width: number; height: number };
 // book view is laid out as a grid; the frame fits the canvas width and reports the height of all rows.
 export type BookGeometry = {
   type: 'geometry'; width: number; height: number; columns?: number;
-  sheets: (Rect & { spread: string })[];
+  // `zoom` is the preview's scale of the sheet: its rectangle here divided by its printed size in CSS pixels.
+  sheets: (Rect & { spread: string; zoom?: number })[];
   // `upright` is false when template CSS rotates or skews the box, so its rectangle is only a bounding box.
   boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean; rect?: Rect })[];
   // Nodes a template marked with `ctx.edit(...)`, and boxes and elements with parameters. `owner` is the box or
   // element the node is, so targets that share a rectangle stay apart; standalone marked nodes have none.
   // `occurrence` counts the earlier nodes on the sheet that edit the same fields, so repeated uses of a field, such
   // as a heading shown twice, are separate targets that edit the same saved value.
-  targets: (Rect & { spread: string; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string };
+  targets: (Rect & { spread: string; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string }; upright?: boolean;
     textFallback?: { parameter: string; text: string; label: string } })[];
 };
 // A preflight finding. `spread` is the spread id and `where` its readable location, such as "Pages 6–7 · Photo grid".

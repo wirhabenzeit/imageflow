@@ -39,6 +39,19 @@
 .wall-calendar .days .weekend { color: rgb(255 255 255 / .5); font-weight: 400; }
 .wall-calendar .days .marked { color: var(--highlight); }
 
+/* The day picker on the page: the page's own column of days, each a button. It fills the frame ImageFlow gives it,
+   which is where the page draws the days, and keeps the page's type; hovering and focus show what a click changes.
+   Days marked every year are underlined, here only. */
+.days-on-page { position: absolute; inset: 0; }
+.days-on-page .days { height: 100%; }
+.days-on-page .days li { display: block; }
+.days-on-page button { display: grid; grid-template-columns: 1fr 1fr; column-gap: var(--day-gap); align-items: baseline; width: 100%; height: 100%;
+  margin: 0; padding: 0; border: 0; border-radius: 1mm; background: none; color: inherit; font: inherit; cursor: pointer; }
+.days-on-page button:hover:not(:disabled) { background: rgb(255 255 255 / .14); }
+.days-on-page button:focus-visible { outline: .5mm solid var(--highlight); outline-offset: 0; }
+.days-on-page button:disabled { cursor: default; }
+.days-on-page .yearly .day { text-decoration: underline dotted; text-underline-offset: .2em; }
+
 /* The day picker, shown in ImageFlow's editor panel. It follows the app's appearance through its variables. */
 .marked-days-editor { color: var(--if-editor-text); font: 13px/1.4 "Calendar Sans", system-ui, sans-serif; }
 .marked-days-editor h3 { margin: 0 0 10px; font-size: 16px; font-weight: 700; }

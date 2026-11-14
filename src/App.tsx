@@ -18,7 +18,8 @@ import { EditPopover, MarkedFields } from './EditPopover';
 import { CropEditor } from './CropEditor';
 import { ElementEditorDialog } from './ElementEditor';
 import { documentEditorFor, editorOwnedDocument, editorTargetGone } from './editor-session';
-import type { EditorTarget } from './editor-session';
+import { anchoredTarget, clickWithin, elementRect, hiddenOccurrence, inlinePlacement, presentationFor } from './inline-editors';
+import type { OpenEditor } from './inline-editors';
 import { LayoutFamilyPicker } from './LayoutFamilyPicker';
 import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
@@ -144,7 +145,11 @@ export function App() {
   // deselected, `settling` keeps its overlay until the book has re-rendered, so the frame does not flash back.
   const [cropping, setCropping] = useState<{ spread: string; box: string; layout: string; saved?: string; settling?: string }>();
   // A template-supplied editor that is open: an element's, or a document editor opened from a spread.
-  const [elementEditor, setElementEditor] = useState<EditorTarget>();
+  const [elementEditor, setElementEditor] = useState<OpenEditor>();
+  // Whether an inline editor is showing in place of the artwork it edits, which the book view then hides.
+  const [inlineShown, setInlineShown] = useState(false);
+  // An inline editor that has closed stays over the page until the book shows its artwork again, so nothing flickers.
+  const [leavingEditor, setLeavingEditor] = useState<OpenEditor>();
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const [dropTarget, setDropTarget] = useState<string>();
@@ -800,6 +805,12 @@ export function App() {
   }
 
   // Finds the spread and box under a pointer. The label strip above each spread belongs to the spread.
+  // A click as a fraction of the node it hit, which the inline editor opened from that node receives (see OpenEditor).
+  function clickAt(event: { clientX: number; clientY: number; altKey: boolean }, rect: Rect) {
+    const bounds = stage.current?.getBoundingClientRect();
+    return bounds && rect.width > 0 && rect.height > 0
+      ? { ...clickWithin(rect, event.clientX - bounds.left, event.clientY - bounds.top), alt: event.altKey } : undefined;
+  }
   function locate(event: { clientX: number; clientY: number }, types?: readonly string[]) {
     const bounds = stage.current?.getBoundingClientRect();
     if (!bounds || !geometry) return {};
@@ -973,20 +984,44 @@ export function App() {
     setEditing(undefined);
     deselectPhoto();
     select(spread, false);
-    setElementEditor({ kind: 'element', spread, element });
+    // Inline when the editor asks for it and the element is on the page, upright and large enough; else the panel.
+    setElementEditor({ kind: 'element', spread, element,
+      presentation: presentationFor(editorOf(spread, element)!.presentation, elementRect(geometry, spread, element)) });
     return true;
   }
   // A node marked only with document parameters a document editor owns opens that editor, with this spread's context.
-  function openDocumentEditor(target: Target) {
+  function openDocumentEditor(target: Target, click?: OpenEditor['click']) {
     const editor = template && documentEditorFor(template, target.edits);
     const layout = spreads.find(({ id }) => id === target.spread)?.definition;
     if (!editor || !layout || readyId.current !== summary?.id) return false;
     setEditing(undefined);
     deselectPhoto();
     select(target.spread, false);
-    setElementEditor({ kind: 'document', spread: target.spread, layout, editor });
+    const presentation = target.hidden ? 'dialog' : presentationFor(template.editors?.[editor]?.presentation, target);
+    setElementEditor({ kind: 'document', spread: target.spread, layout, editor, presentation,
+      ...(presentation === 'inline' ? { at: targetKey(target), ...(click ? { click } : {}) } : {}) });
     return true;
   }
+  // An inline document editor follows the marked node it was opened from (see anchoredTarget), and both kinds follow
+  // the page as it scrolls, zooms and re-renders.
+  const inlineAnchor = useRef<{ open: OpenEditor; at: TargetAnchor }>(undefined);
+  const inlineTarget = elementEditor && anchoredTarget(geometry, elementEditor,
+    inlineAnchor.current?.open === elementEditor ? inlineAnchor.current.at : undefined);
+  const inlineSheet = elementEditor && geometry?.sheets.find(({ spread }) => spread === elementEditor.spread);
+  useEffect(() => {
+    if (elementEditor && inlineTarget && inlineSheet) inlineAnchor.current = { open: elementEditor, at: targetAnchor(inlineTarget, inlineSheet) };
+  }, [elementEditor, inlineTarget, inlineSheet]);
+  const placement = elementEditor && inlinePlacement(geometry, elementEditor, inlineTarget);
+  const inlineEditing = elementEditor && inlineShown && elementEditor !== leavingEditor ? hiddenOccurrence(elementEditor, inlineTarget) : undefined;
+  const leaveEditor = () => {
+    setElementEditor((current) => current === leavingEditor ? undefined : current);
+    setLeavingEditor(undefined);
+  };
+  useEffect(() => {
+    if (!leavingEditor) return;
+    const timeout = setTimeout(leaveEditor, 800);
+    return () => clearTimeout(timeout);
+  }, [leavingEditor]);
   function startCrop(spread: string, box: string) {
     const blocked = cropBlocked(spread, box);
     if (blocked) {
@@ -1370,7 +1405,7 @@ export function App() {
                   path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')) ||
                   (target.owner?.id === top.id && (target.owner.type === 'element') === (top.type === 'element'))));
                 if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
-                else if (target && !openDocumentEditor(target)) openEditing({ spread: target.spread, key: targetKey(target) });
+                else if (target && !openDocumentEditor(target, clickAt(event, target))) openEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
                 // Double-clicking a Markdown box shows its text in Quick Look.
@@ -1391,7 +1426,8 @@ export function App() {
                 setHoveredTarget(target && targetKey(target));
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
               <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus} onPictures={bookPictures}
-                viewport={viewport} hold={holdPreview} accept={acceptCandidate} />
+                viewport={viewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
+                onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const i = spreads.findIndex((item) => item.id === id);
                 if (i < 0) return null;
@@ -1495,9 +1531,13 @@ export function App() {
     </div>
     {summary && template && elementEditor && !editorTargetGone(spreads, elementEditor) &&
       <ElementEditorDialog host={canvasWrap.current} key={JSON.stringify(elementEditor)} project={summary.id} template={template}
+        presentation={elementEditor.presentation} placement={placement} click={elementEditor.click} stage={stage.current} shown={setInlineShown}
         spread={spreads.find(({ id }) => id === elementEditor.spread)!} params={summary.project.params} target={elementEditor} readOnly={summary.readOnly}
         blocked={agentWorking ? 'Agent is updating the book…' : reloading.current ? 'Editing is paused while the book reloads…' : previewError || undefined}
-        canvasReady={canvasReady} geometry={geometry} edit={edit} close={() => setElementEditor((current) => current === elementEditor ? undefined : current)} importFile={importProjectFile}
+        canvasReady={canvasReady} geometry={geometry} edit={edit} close={() => {
+          if (elementEditor.presentation === 'inline' && inlineShown) setLeavingEditor(elementEditor);
+          else setElementEditor((current) => current === elementEditor ? undefined : current);
+        }} importFile={importProjectFile}
           prepare={template?.network?.length ? () => decideNetwork(template, true) : undefined} network={summary.network?.join(' ')} />}
     {summary && quick && <QuickLook summary={summary} source={quick} usage={usage} navigate={navigateQuick}
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
