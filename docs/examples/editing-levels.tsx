@@ -33,6 +33,13 @@ function PatternEditor({ values, set, readOnly, Control }: ElementEditorProps<ty
 export default defineTemplate({
   id: 'example-editing-levels', version: '1.0.0', contract: 1,
   format,
+  // Level 2 at book scope: document parameters arranged in Book settings. The frame's settings show only while it is on.
+  parameters: {
+    frame: p.boolean({ label: 'Page frame', default: false }),
+    frameColor: p.color({ label: 'Colour', default: '#2f3e46' }),
+    frameWidth: p.number({ label: 'Width', default: .5, min: .25, max: 3, step: .25, unit: 'mm' }),
+  },
+  controls: ['frame', { group: 'Frame', when: { frame: true }, controls: ['frameColor', { parameter: 'frameWidth', label: 'Line width' }] }],
   spreads: ({ spread }) => ({
     marks: spread({
       label: 'Marks',
@@ -62,6 +69,8 @@ export default defineTemplate({
         const page = ctx.geometry.page('right', 'safe');
         const { emoji, stamp } = ctx.elements;
         return <Spread>
+          {ctx.document.frame && <div style={{ ...ctx.geometry.css(page), boxSizing: 'border-box',
+            border: ctx.document.frameWidth + 'mm solid ' + ctx.document.frameColor }} />}
           <ctx.Element id="emoji" rect={{ ...page, width: 40, height: 30 }} style={{ fontSize: emoji.params.size + 'pt', lineHeight: 1 }}>
             {emoji.params.emoji}
           </ctx.Element>

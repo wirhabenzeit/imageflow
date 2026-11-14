@@ -1,4 +1,5 @@
 import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
+import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
 import { bookName } from '../src/book-name';
 import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, fileIsAssigned, removeSources } from './source-actions';
@@ -6,7 +7,7 @@ import { originalPath } from './source-store';
 import { sourceEntries } from '../src/source-locations';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
 import { configureSourceAccess } from './source-access';
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -41,13 +42,16 @@ import { TemplateTrust, trustedOrigins } from './template-trust';
 import { isTemplateArchive, templateArchiveExtension, writeTemplateArchive } from './template-archive';
 import { writeAuthoringSnapshot } from './authoring-sdk';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
-import { describeImport } from '../src/library';
-import type { LibraryImportResult, NewBookChoice } from '../src/library';
+import { describeImport, templatePicturePath, templatePictureURL } from '../src/library';
+import type { LibraryEntry, LibraryImportResult, NewBookChoice } from '../src/library';
 import { capabilities } from '../src/runtime-exports';
 import { newSpread, openingSpreadStates } from '../src/editing';
 import { templateFolder, textSourcePath } from './document-actions';
 import { configureRenditionCache, pruneRenditions } from './rendition-cache';
+import { decodes, readTemplatePreview } from './template-preview-file';
+import { previewTypes } from '../src/template-preview';
 
+const presentationWindows = new WeakMap<BrowserWindow, { simple: boolean; previous: boolean; entered?: () => void }>();
 let templatesWindow: BrowserWindow | null = null;
 const assetsWindows = new Map<DocumentSession, { window: BrowserWindow; accept: string[] }>();
 let settingsWindow: BrowserWindow | null = null;
@@ -79,6 +83,9 @@ const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
 const devServer = app.isPackaged ? undefined : process.env.IMAGEFLOW_DEV_SERVER;
 const devState = devServer ? process.env.IMAGEFLOW_DEV_STATE : undefined;
 const devSample = devServer ? process.env.IMAGEFLOW_DEV_SAMPLE : undefined;
+// Packaging renders the built-in templates' opening spreads into this folder and quits (scripts/render-template-previews.mjs).
+const renderPreviewsTo = app.isPackaged ? undefined : process.env.IMAGEFLOW_RENDER_TEMPLATE_PREVIEWS;
+const sampleRoot = devSample ?? (renderPreviewsTo ? process.env.IMAGEFLOW_SAMPLE : undefined);
 const csp = devServer
   ? "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' " +
     devServer + ' ' + devServer.replace(/^http/, 'ws') + "; img-src 'self' data:"
@@ -131,6 +138,14 @@ async function serve(request: Request) {
   if (request.method !== 'GET') return new Response(null, { status: 405 });
   const dist = join(app.getAppPath(), 'dist');
   if (!devServer && /^\/assets\/[\w.-]+\.[a-z0-9]+$/i.test(pathname)) return net.fetch(pathToFileURL(join(dist, pathname)).href);
+  const templatePicture = host === 'editor' && templatePicturePath.exec(pathname);
+  if (templatePicture) {
+    // A template's preview image or saved render, for New Book and Templates. Both are tied to the template's hash.
+    const file = await library.pictureFile(templatePicture[1], templatePicture[2] as 'image' | 'render');
+    if (!file) return new Response(null, { status: 404 });
+    const bytes = await readFile(file);
+    return response(bytes, previewTypes[extname(file).toLowerCase()] ?? 'application/octet-stream', { 'Cache-Control': 'no-cache' });
+  }
   if (host === 'editor' && ['/', '/settings', '/start', '/new', '/assets', '/templates'].includes(pathname)) {
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigin + "; frame-ancestors 'none'; base-uri 'none'",
@@ -154,16 +169,21 @@ async function serve(request: Request) {
     });
   }
   if (resource === 'data') return Response.json(renderData(session.book, id, session.mode));
+  if (resource === 'template-preview') {
+    // The Book check of the template's own preview image: the frame names the declared path, the app reads the file.
+    const { file: _file, ...report } = await readTemplatePreview(join(session.book.folder, 'template'), new URL(request.url).searchParams.get('path') ?? '');
+    return Response.json(report);
+  }
   if (resource.startsWith('template/')) {
     const asset = resource.slice('template/'.length);
     const bytes = session.book.assets.files.get(asset);
     if (bytes) return response(bytes, assetTypes[extname(asset).toLowerCase()] ?? 'application/octet-stream');
   }
-  const photoMatch = /^(photo|thumb)\/([\w-]+)(?:\/([1-9]\d{0,5}))?$/.exec(resource);
+  const photoMatch = /^(photo|proof-photo|thumb)\/([\w-]+)(?:\/([1-9]\d{0,5}))?$/.exec(resource);
   if (photoMatch) {
     const [, kind, photoId, size] = photoMatch;
     const photo = session.book.photos.get(photoId);
-    const rendition = kind === 'thumb' ? 'thumb' : session.mode === 'edit' ? 'preview' : 'export';
+    const rendition = kind === 'thumb' ? 'thumb' : kind === 'proof-photo' ? 'export' : session.mode === 'edit' ? 'preview' : 'export';
     const width = size && rendition === 'export' ? Number(size) : undefined;
     if (photo) return net.fetch(pathToFileURL(await photoFile(photo, rendition, width)).href);
   }
@@ -214,7 +234,7 @@ function report(owner: BrowserWindow | null | undefined, error: unknown) {
   else { showStart(); startWindow?.webContents.once('did-finish-load', () => report(startWindow, error)); }
 }
 function sampleFolder(name: string) {
-  return devSample ? join(devSample, name) : app.isPackaged ? join(process.resourcesPath, 'sample', name) : join(app.getAppPath(), 'sample', name);
+  return sampleRoot ? join(sampleRoot, name) : app.isPackaged ? join(process.resourcesPath, 'sample', name) : join(app.getAppPath(), 'sample', name);
 }
 async function openDocumentLocation(document: DocumentSession, action: 'reveal' | 'template' | 'text', id?: string) {
   if (action === 'reveal') { shell.showItemInFolder(document.book.folder); return; }
@@ -229,6 +249,17 @@ function windowOptions() {
   return { sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'), backgroundThrottling: !hidden };
 }
 function secureWindow(owner: BrowserWindow) {
+  owner.webContents.on('context-menu', (_event, params) => {
+    if (!params.isEditable) return;
+    const suggestions: MenuItemConstructorOptions[] = params.misspelledWord ? [
+      ...params.dictionarySuggestions.map((suggestion) => ({ label: suggestion, click: () => owner.webContents.replaceMisspelling(suggestion) })),
+      { label: 'Add to Dictionary', click: () => owner.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) },
+      { type: 'separator' },
+    ] : [];
+    Menu.buildFromTemplate([...suggestions, { role: 'cut', enabled: params.editFlags.canCut },
+      { role: 'copy', enabled: params.editFlags.canCopy }, { role: 'paste', enabled: params.editFlags.canPaste },
+      { type: 'separator' }, { role: 'selectAll', enabled: params.editFlags.canSelectAll }]).popup({ window: owner });
+  });
   followAppearance(owner);
   owner.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
@@ -459,7 +490,7 @@ function chooseStarter() {
   picker.once('ready-to-show', () => focus(picker));
   void picker.loadURL(starterURL).catch((error) => report(picker, error));
 }
-async function createNewBook(owner: BrowserWindow, selected: NewBookChoice) {
+async function createNewBook(owner: BrowserWindow, selected: NewBookChoice, closeOwner = true) {
   const template = await library.resolve(selected.id);
   const choice = await dialog.showSaveDialog(owner, { title: 'New Book', buttonLabel: 'Create',
     defaultPath: join(app.getPath('documents'), (template.defaultName ?? 'Untitled ' + template.entry.label) + '.imageflow'),
@@ -468,7 +499,7 @@ async function createNewBook(owner: BrowserWindow, selected: NewBookChoice) {
   const folder = await createDocument(documentPath(choice.filePath),
     (stage) => library.withTemplate(selected.id, (current) => createBook(stage, current, selected.sample)));
   await openDocument(folder);
-  owner.close();
+  if (closeOwner) owner.close();
   return true;
 }
 // Fills a new book's staging folder from a library template: its sample book, or the template's own copy with its
@@ -494,12 +525,14 @@ async function createBook(stage: string, template: ResolvedTemplate, sample: boo
   }, null, 2) + '\n');
 }
 
-// Previews are disposable and keyed by content hash. Rendering is serialized so opening a library does not
-// launch one hidden browser per card; an offline or empty template keeps the neutral cover placeholder.
+// Renders of a template's opening spread, keyed by content hash. Rendering is serialized so opening a library does not
+// launch one hidden browser per card; an offline or empty template keeps the neutral cover placeholder. A render with
+// every site the template declares is saved in the library (`persist`), so later launches show it at once; one made
+// offline is only kept until the app quits.
 const templatePreviews = new Map<string, Promise<string | null>>();
 const previewJobs = new Map<string, AbortController>();
 let previewQueue: Promise<unknown> = Promise.resolve();
-function templatePreview(id: string, hash: string, origins: string[]) {
+function templatePreview(id: string, hash: string, origins: string[], persist = false) {
   const key = JSON.stringify([hash, origins]);
   const existing = templatePreviews.get(key);
   if (existing) return existing;
@@ -536,6 +569,9 @@ function templatePreview(id: string, hash: string, origins: string[]) {
         if (illustrated) preview = await captureBookPreview(renderOrigin + '/render/' + session,
           { target: { spread: illustrated.id }, maxEdge: 320, format: 'jpeg' }, controller.signal);
       }
+      // A picture that failed to draw, such as a map while its server is unreachable, is shown but never saved: the
+      // next session renders again.
+      if (persist && !controller.signal.aborted && !preview.status.errors.some(({ code }) => code && incompleteRender.has(code))) await library.saveRender(hash, preview.bytes).catch((error) => console.warn('ImageFlow could not save a template preview', error));
       return 'data:image/jpeg;base64,' + Buffer.from(preview.bytes).toString('base64');
     } catch { return null; }
     finally {
@@ -550,6 +586,17 @@ function templatePreview(id: string, hash: string, origins: string[]) {
   if (templatePreviews.size > 24) templatePreviews.delete(templatePreviews.keys().next().value!);
   previewQueue = task.catch(() => {});
   return task;
+}
+// Book check errors that mean a render is missing something the template draws, so it must not be saved.
+const incompleteRender = new Set(['rendered-image-failed', 'layout-render-failed', 'photo-decode-failed', 'source-unavailable', 'render-impure']);
+/** Whether a render of this entry with these sites would show everything the template draws, so it may be saved. */
+const completeRender = (entry: LibraryEntry, origins: readonly string[]) => (entry.network ?? []).every((origin) => origins.includes(origin));
+/** Renders an entry's opening spread and saves it, unless the library already has a saved render for its hash. */
+async function saveTemplatePreview(id: string) {
+  const entry = (await library.list()).find((item) => item.id === id);
+  if (!entry || entry.unavailable || entry.render) return;
+  const origins = await bookNetworkTrust(entry.hash, entry.network);
+  if (completeRender(entry, origins)) await templatePreview(entry.id, entry.hash, origins, true);
 }
 function invalidateTemplatePreviews(hash: string) {
   for (const key of new Set([...templatePreviews.keys(), ...previewJobs.keys()])) {
@@ -648,6 +695,10 @@ async function importTemplate(owner: BrowserWindow | undefined, path: string) {
     await trust.allow(allowed.hash, allowed.info.network ?? [], { id: allowed.info.id ?? '', version: allowed.info.version }).catch((error) => console.warn('ImageFlow could not save template trust', error));
     // Lists already showing the new entry learn that it is trusted.
     publishLibrary();
+  }
+  // Rendered once now, so New Book shows the template at once from then on.
+  if (result.id && (result.status === 'imported' || result.status === 'replaced')) {
+    void saveTemplatePreview(result.id).catch((error) => console.warn('ImageFlow could not render a template preview', error));
   }
   return result;
 }
@@ -768,7 +819,10 @@ function installMenu() {
       else if (id === 'reveal-book') shell.showItemInFolder(document.book.folder);
       else if (id === 'rename-book' || id === 'move-book') void moveBook(document, id === 'rename-book').catch((error) => report(document.window, error));
       else if (id === 'revert-opened') void revertOpened(document).catch((error) => report(document.window, error));
-      else if (command) document.window.webContents.send(channels.command, command);
+      else if (command) {
+        const target = command.startsWith('photos-') && owner === assetsWindows.get(document)?.window ? assetsWindows.get(document)!.window : document.window;
+        target.webContents.send(channels.command, command);
+      }
     } };
   };
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -788,7 +842,7 @@ function installMenu() {
       { type: 'separator' }, { role: 'close' }, registered('save-copy'), registered('rename-book'), registered('move-book'),
       { label: 'Revert To', submenu: [registered('revert-opened'), registered('reload')] },
       { type: 'separator' },
-      { label: 'Import', submenu: [registered('import-photos'), registered('import-folder'), registered('import-texts')] },
+      registered('import'),
       registered('export'), registered('print'), { type: 'separator' }, registered('reveal-book'),
     ] },
     { label: 'Edit', submenu: [
@@ -797,9 +851,12 @@ function installMenu() {
       { role: 'redo', id: 'native-redo', visible: false, acceleratorWorksWhenHidden: false },
       { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'delete' }, { role: 'selectAll' },
     ] },
-    { label: 'Spread', submenu: [registered('add-spread'), registered('duplicate-spread'), registered('delete-spread'),
-      { type: 'separator' }, registered('move-spread-up'), registered('move-spread-down')] },
-    { label: 'Book', submenu: [registered('manage-sources'), registered('book-check')] },
+    { label: 'Book', submenu: [
+      registered('add-spread'), registered('duplicate-spread'), registered('delete-spread'),
+      { type: 'separator' }, registered('move-spread-up'), registered('move-spread-down'),
+      { type: 'separator' }, registered('manage-sources'), registered('copy-assets', 'copy-assets', 'checkbox'),
+      { type: 'separator' }, registered('book-check'),
+    ] },
     { label: 'Templates', submenu: [{ label: 'Manage Templates…', click: () => showTemplates() }] },
     { label: 'View', submenu: [
       registered('sidebar', 'toggle-project'), registered('inspector', 'toggle-inspector'), registered('sources', 'toggle-sources'),
@@ -812,6 +869,12 @@ function installMenu() {
       registered('guides', 'toggle-guides', 'checkbox'), { type: 'separator' },
       registered('zoom-in'), { ...registered('zoom-in'), id: 'zoom-in-equals', accelerator: 'CmdOrCtrl+=', visible: false, acceleratorWorksWhenHidden: true },
       registered('zoom-out'), registered('zoom-actual'), registered('zoom-fit'),
+      { type: 'separator' },
+      { label: 'Sort Photos By', submenu: [registered('photos-sort-capture', undefined, 'radio'), registered('photos-sort-name', undefined, 'radio'), registered('photos-sort-import', undefined, 'radio')] },
+      { label: 'Group Photos', submenu: [registered('photos-group-none', undefined, 'radio'), registered('photos-group-day', undefined, 'radio'),
+        { label: 'By Time Gap', submenu: [registered('photos-gap-30', undefined, 'radio'), registered('photos-gap-120', undefined, 'radio'), registered('photos-gap-360', undefined, 'radio'), registered('photos-gap-custom')] }] },
+      registered('photos-show-time', undefined, 'checkbox'),
+      { type: 'separator' }, registered('presentation'), registered('presentation-start'),
       // macOS supplies its own full-screen item, including the system keyboard shortcut.
       ...process.platform === 'darwin' ? [] : [{ type: 'separator' as const }, { role: 'togglefullscreen' as const }],
     ] },
@@ -992,7 +1055,12 @@ void app.whenReady().then(async () => {
   // IMAGEFLOW_TEMPLATES points tests and development at another library folder.
   library = new TemplateLibrary(process.env.IMAGEFLOW_TEMPLATES || join(app.getPath('userData'), 'Templates'),
     starters.map((starter) => ({ template: join(sampleFolder(starter.folder), 'template'), sample: sampleFolder(starter.folder), defaultName: starter.defaultName })),
-    probeTemplate, (path) => shell.trashItem(path), capabilities.join(',') + '@' + app.getVersion(), join(__dirname, 'authoring-types'));
+    probeTemplate, (path) => shell.trashItem(path), capabilities.join(',') + '@' + app.getVersion(), join(__dirname, 'authoring-types'),
+    // Built-in templates ship renders of their opening spreads; later ones are kept with the app's other caches.
+    renderPreviewsTo ? { cache: renderPreviewsTo } : {
+      shipped: join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'template-previews'),
+      cache: join(app.getPath('userData'), 'Cache', 'template-previews'),
+    });
   library.onChange(publishLibrary);
   trust = new TemplateTrust(join(app.getPath('userData'), 'template-trust.json'));
   const renditions = await configureRenditionCache(cache, join(app.getPath('userData'), 'Cache', 'renditions'));
@@ -1042,6 +1110,55 @@ void app.whenReady().then(async () => {
     await new Promise<void>((resolve) => Menu.buildFromTemplate(entries).popup({ window: owner, ...position, callback: resolve }));
     return selected;
   });
+  ipcMain.handle(channels.contextMenu, async (event, input: unknown, snapshot?: BookMenuState) => {
+    const document = editorOwner(event) ?? assetsOwner(event);
+    const owner = document ? (assetsOwner(event) ? assetsWindows.get(document)?.window : document.window) : templatesOwner(event) ?? startOwner(event);
+    if (!owner || document?.closing || !Array.isArray(input) || input.length > 100) return null;
+    const state: BookMenuState = { ...emptyMenuState, ...snapshot, document: !!document,
+      writable: !!document && !document.book.readOnly && (snapshot?.writable ?? true) };
+    let chosen: ContextMenuResult | null = null;
+    let count = 0;
+    const build = (items: ContextMenuItem[], depth = 0): MenuItemConstructorOptions[] => {
+      if (depth > 4 || !Array.isArray(items)) return [];
+      return items.flatMap((entry): MenuItemConstructorOptions[] => {
+        if (++count > 200 || !entry) return [];
+        if (typeof entry === 'object' && 'type' in entry) return [{ type: 'separator' }];
+        const request = typeof entry === 'string' ? { command: entry } : entry;
+        if (!Object.hasOwn(commandRegistry, request.command)) return [];
+        const item = commandState(request.command, state, true);
+        const children = request.items && build(request.items, depth + 1);
+        return [{ ...item, label: typeof request.label === 'string' ? request.label.slice(0, 200) : item.label,
+          enabled: item.enabled && request.enabled !== false, registerAccelerator: false,
+          ...(children ? { submenu: children } : {}),
+          ...(request.checked !== undefined || item.checked !== undefined ? { type: 'checkbox' as const, checked: request.checked ?? item.checked } : {}),
+          click: () => { if (request.command === 'issue-copy' && typeof request.value === 'string') clipboard.writeText(request.value); chosen = { command: request.command, ...(typeof request.value === 'string' ? { value: request.value } : {}) }; } }];
+      });
+    };
+    await new Promise<void>((resolve) => Menu.buildFromTemplate(build(input)).popup({ window: owner, callback: resolve }));
+    return chosen;
+  });
+  ipcMain.handle(channels.presentation, (event, active: unknown) => {
+    const owner = editorOwner(event)?.window;
+    if (!owner || typeof active !== 'boolean') return;
+    if (active && !presentationWindows.has(owner)) {
+      const simple = process.platform === 'darwin' && !owner.isFullScreen();
+      const focus = () => {
+        if (owner.isDestroyed() || !presentationWindows.has(owner)) return;
+        if (owner.isVisible()) owner.focus();
+        owner.webContents.focus();
+      };
+      const entered = !simple && !owner.isFullScreen() ? focus : undefined;
+      presentationWindows.set(owner, { simple, previous: simple ? owner.isSimpleFullScreen() : owner.isFullScreen(), entered });
+      if (entered) owner.once('enter-full-screen', entered);
+      if (simple) owner.setSimpleFullScreen(true); else owner.setFullScreen(true);
+      focus();
+    } else if (!active && presentationWindows.has(owner)) {
+      const { simple, previous, entered } = presentationWindows.get(owner)!;
+      presentationWindows.delete(owner);
+      if (entered) owner.removeListener('enter-full-screen', entered);
+      if (simple) owner.setSimpleFullScreen(previous); else owner.setFullScreen(previous);
+    }
+  });
   ipcMain.handle(channels.documentProxy, async (event, action: unknown) => {
     const document = editorOwner(event);
     if (!document || document.closing) return;
@@ -1090,12 +1207,13 @@ void app.whenReady().then(async () => {
     catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.recents, async (event) => startOwner(event) ? { value: await recents.list() } : { error: 'Request is only available to the start window.' });
-  ipcMain.handle(channels.recentAction, async (event, id: string, action: 'open' | 'locate' | 'remove') => {
+  ipcMain.handle(channels.recentAction, async (event, id: string, action: 'open' | 'locate' | 'remove' | 'reveal') => {
     const owner = startOwner(event);
     if (!owner || typeof id !== 'string') return { error: 'Request is only available to the start window.' };
     try {
       const entry = await recents.get(id);
-      if (action === 'remove') { await recents.remove(id); publishRecents(); }
+      if (action === 'reveal') shell.showItemInFolder(entry.path);
+      else if (action === 'remove') { await recents.remove(id); publishRecents(); }
       else if (action === 'open') {
         const document = await openDocument(entry.path);
         await recents.remember(document.book.folder, document.book.project.title, entry.id);
@@ -1116,25 +1234,6 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.documentAction, (event, action: 'reveal' | 'template' | 'text', id?: string) => fromEditor(event, async (document) => {
     await openDocumentLocation(document, action, id);
   }));
-  ipcMain.handle(channels.sourceMenu, async (event, input: unknown) => {
-    const document = assetsOwner(event);
-    const keys = typeof input === 'string' ? [input] : input;
-    if (!document || document.closing || !Array.isArray(keys) || !keys.every((key) => typeof key === 'string')) return { error: 'Choose assets in an open book.' };
-    const chosen = sourceEntries(document.book).filter(({ key }) => keys.includes(key));
-    const owner = assetsWindows.get(document)?.window;
-    if (!chosen.length || !owner || document.book.readOnly) return { value: null };
-    const missing = chosen.some(({ key }) => document.book.sources?.[key]?.state !== 'available');
-    const linked = chosen.filter(({ linked }) => linked).length;
-    let action: 'reveal' | 'locate' | 'locate-folder' | 'copy' | 'remove' | null = null;
-    const menu = Menu.buildFromTemplate([
-      { label: 'Show in Finder', enabled: !missing, click: () => { action = 'reveal'; } },
-      ...(missing ? [{ label: chosen.length === 1 ? 'Locate…' : 'Locate Folder…', click: () => { action = chosen.length === 1 ? 'locate' : 'locate-folder'; } }] : []),
-      ...(linked && !missing ? [{ label: linked === 1 ? 'Copy into Book' : 'Copy ' + linked + ' into Book', click: () => { action = 'copy'; } }] : []),
-      { type: 'separator' }, { label: 'Remove from Book', enabled: !chosen.some((source) => source.kind === 'file' && fileIsAssigned(document.book, source.id)), click: () => { action = 'remove'; } },
-    ]);
-    await new Promise<void>((resolve) => menu.popup({ window: owner, callback: resolve }));
-    return { value: action };
-  });
   ipcMain.handle(channels.sourceAction, (event, request: SourceAction) => fromBook(event, async (document) => {
     const owner = assetsOwner(event) ? assetsWindows.get(document)?.window ?? document.window : document.window;
     if (assetsOwner(event)) request = { ...request, accept: assetsWindows.get(document)?.accept };
@@ -1143,6 +1242,24 @@ void app.whenReady().then(async () => {
     if (keys && (!Array.isArray(keys) || keys.length > 1000 || !keys.every((key) => typeof key === 'string'))) throw new Error('Invalid asset selection.');
     const chosen = sourceEntries(document.book).filter(({ key }) => keys?.includes(key));
     const source = chosen[0];
+    if (request.action === 'jump') {
+      if (!document.book.project.spreads.some(({ id }) => id === request.spread)) throw new Error('This spread no longer exists.');
+      document.window.webContents.send(channels.sourceCommand, { action: 'jump', spread: request.spread }); focus(document.window);
+      return { summary: document.summary };
+    }
+    if (request.action === 'place') {
+      if (document.book.readOnly || !chosen.length) throw new Error('Select assets in an editable book.');
+      document.window.webContents.send(channels.sourceCommand, { action: 'place', keys: chosen.map(({ key }) => key) }); focus(document.window);
+      return { summary: document.summary };
+    }
+    if (request.action === 'reveal' || request.action === 'open' || request.action === 'preview') {
+      if (!source) throw new Error('Choose a registered source.');
+      const path = await originalPath(document.book.folder, source);
+      if (request.action === 'reveal') for (const entry of chosen) shell.showItemInFolder(await originalPath(document.book.folder, entry));
+      else if (request.action === 'open') { const error = await shell.openPath(path); if (error) throw new Error(error); }
+      else owner.previewFile(path);
+      return { summary: document.summary };
+    }
     if (document.book.readOnly) throw new Error('Create an editable book first.');
     let next = document.book;
     let message: string | undefined;
@@ -1164,12 +1281,7 @@ void app.whenReady().then(async () => {
       }
     } else {
       if (!source) throw new Error('Choose a registered source.');
-      if (request.action === 'reveal') {
-        for (const entry of chosen) shell.showItemInFolder(await originalPath(document.book.folder, entry));
-        return { summary: document.summary };
-      }
       if (request.action === 'copy') next = await collectSources(document.book, chosen.filter(({ linked }) => linked).map(({ key }) => key));
-      else if (request.action === 'preview') { owner.previewFile(await originalPath(document.book.folder, source)); return { summary: document.summary }; }
       else if (request.action === 'locate' || request.action === 'replace') {
         if (source.kind === 'file' && !request.accept?.length) throw new Error('This template does not declare a compatible file parameter.');
         const choice = await dialog.showOpenDialog(owner, { title: request.action === 'replace' ? 'Replace Original' : 'Locate Original', properties: ['openFile'],
@@ -1223,7 +1335,16 @@ void app.whenReady().then(async () => {
       return { error: 'Request is only available to Templates and New Book.' };
     try {
       const entry = (await library.list()).find((entry) => entry.id === id && entry.hash === hash);
-      return { value: entry && !entry.unavailable ? await templatePreview(id, hash, await bookNetworkTrust(hash, entry.network)) : null };
+      if (!entry || entry.unavailable) return { value: null };
+      if (entry.render) {
+        // The window asks only when it has no picture, or a saved one failed to load: a damaged render is removed and
+        // made again.
+        const file = await library.pictureFile(hash, 'render');
+        if (file && await decodes(file)) return { value: templatePictureURL(hash, 'render') };
+        if (file) await rm(file, { force: true }).catch(() => {});
+      }
+      const origins = await bookNetworkTrust(hash, entry.network);
+      return { value: await templatePreview(id, hash, origins, completeRender(entry, origins)) };
     } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.library, async (event) => {
@@ -1237,6 +1358,15 @@ void app.whenReady().then(async () => {
     if (paths !== undefined && (!Array.isArray(paths) || paths.length > 50 || !paths.every((path) => typeof path === 'string' && isAbsolute(path)))) return { error: 'Choose template folders or archives.' };
     try { return { value: await importTemplates(owner, paths as string[] | undefined) }; }
     catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.templateAction, async (event, id: unknown, action: unknown) => {
+    const owner = templatesOwner(event);
+    if (!owner || typeof id !== 'string' || (action !== 'reveal' && action !== 'new')) return { error: 'Choose a template in the library.' };
+    try {
+      if (action === 'new') await createNewBook(owner, { id, sample: false }, false);
+      else shell.showItemInFolder((await library.resolve(id)).folder);
+      return { value: undefined };
+    } catch (error) { return { error: errorMessage(error) }; }
   });
   ipcMain.handle(channels.libraryExport, async (event, id: unknown) => {
     const owner = templatesOwner(event);
@@ -1326,7 +1456,7 @@ void app.whenReady().then(async () => {
         return { summary: document.activate(await document.projectSession.save(files, 'Place asset')), imported: [source.id] };
       }
     }
-    return document.importFiles(document.window, id, { ...request, mode: request.mode ?? settings.value.importMode });
+    return document.importFiles(document.window, id, request);
   }));
   ipcMain.handle(channels.network, async (event, id: string, origins: unknown) => {
     const document = editorOwner(event);
@@ -1342,8 +1472,14 @@ void app.whenReady().then(async () => {
     const document = editorOwner(event);
     if (!document || !state || typeof state.enabled !== 'object' || !state.enabled ||
         typeof state.editing !== 'boolean' || typeof state.writable !== 'boolean' || typeof state.busy !== 'boolean') return;
+    const previousLabels = JSON.stringify(document.menuState?.pageLabels ?? {});
+    const pageLabels = Object.fromEntries(document.book.project.spreads.flatMap(({ id }) => {
+      const label = state.pageLabels?.[id];
+      return typeof label === 'string' ? [[id, label.slice(0, 100)]] : [];
+    }));
     document.menuState = { ...emptyMenuState, ...state,
-      enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
+      pageLabels, enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
+    if (previousLabels !== JSON.stringify(pageLabels)) publishAssets(document);
     document.window.setDocumentEdited(state.saving === true);
     if (typeof state.sidebar === 'boolean') document.sidebar = state.sidebar;
     if (typeof state.inspector === 'boolean') document.inspector = state.inspector;
@@ -1367,6 +1503,11 @@ void app.whenReady().then(async () => {
   });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
   installMenu();
+  if (renderPreviewsTo) {
+    for (const entry of await library.list()) if (entry.source === 'built-in') await saveTemplatePreview(entry.id);
+    app.quit();
+    return;
+  }
   ready = true;
   const paths = [...new Set([...pendingOpenFiles.splice(0), ...process.argv.filter(isSystemFile)])];
   if (paths.length) for (const path of paths) await openFromSystem(path);

@@ -295,16 +295,15 @@ export type ElementEditor<K extends string = string, P extends Parameters = Para
 export type EditorPresentation = 'dialog' | 'inline';
 /**
  * The read-only view of the book an editor is opened from: the values `render` reads for that spread (its
- * parameters, the document's, boxes with their photos' metadata, elements, page numbers, the book's anchors and the
- * format), plus the spread's ID and layout. It follows the book while the editor stays open: reordering spreads,
+ * parameters, the document's, boxes with their photos' metadata, elements, page numbers, the book's anchors and
+ * spreads (`book`) and the format), plus the spread's ID and layout. It follows the book while the editor stays open: reordering spreads,
  * another photo, a changed document setting or format refresh it. The editor's own draft is applied to it: an
  * element editor's element values and owned layout parameters, or a document editor's own document parameters. Markdown boxes'
  * `text` is null, since flow positions are known only to the book render. Pure helpers that take
  * `Pick<RenderContext, 'page' | 'book' | 'document'>` serve `render` and editors alike.
  */
 export type EditorContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
-  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book'> & {
-    spread: string; layout: string;
+  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book' | 'spread' | 'layout'> & {
     /** Actual rendered bounds in trim coordinates (mm). Null while the current page is pending or the element is hidden. */
     elements: SpreadDeclaration extends S ? Record<string, { params: Values; rect: Rect | null }>
       : { [K in keyof RenderContext<S, D>['elements']]: RenderContext<S, D>['elements'][K] & { rect: Rect | null } };
@@ -464,7 +463,24 @@ export type BookContext = {
 
 // Render context
 
-export type Photo = { width: number; height: number; caption?: string; title?: string; credit?: string; altText?: string };
+/**
+ * A photo's metadata. `width` and `height` are its pixel size, upright. `caption`, `title`, `credit` and `altText`
+ * are written by the user. `captured`, `location` and `camera` are read from the photo file's EXIF data when it has
+ * them, and are absent otherwise; they are read-only.
+ */
+export type Photo = {
+  width: number; height: number; caption?: string; title?: string; credit?: string; altText?: string;
+  /**
+   * When the photo was taken. `dateTime` is the camera's local wall-clock time, `YYYY-MM-DDTHH:mm:ss`. `offset` is
+   * its UTC offset, such as `'+02:00'`, or `null` when the photo does not record one: the time zone is then unknown,
+   * not UTC. Show the local time as it is; `new Date(dateTime + offset)` is the instant only when `offset` is set.
+   */
+  captured?: { dateTime: string; offset: string | null };
+  /** Where the photo was taken, in WGS 84 degrees: latitude −90 to 90 (north positive), longitude −180 to 180 (east positive). */
+  location?: { latitude: number; longitude: number };
+  /** The camera's make and model as it records them, such as `{ make: 'FUJIFILM', model: 'X-T5' }`. */
+  camera?: { make?: string; model?: string };
+};
 /** Where a Markdown box sits in the chain of boxes that share its text. */
 export type FlowPosition = { part: number; parts: number; title?: string };
 export type Values = Record<string, string | number | boolean>;
@@ -539,6 +555,13 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   format: ResolvedFormat;
   /** The chosen key of `formats`, or `'default'` for a template with a single `format`. */
   formatId: string;
+  /**
+   * This spread's ID, its entry in `book.spreads`, so a layout can find or leave out itself. In a layout preview it is
+   * still the selected spread's ID.
+   */
+  spread: string;
+  /** The layout being drawn: the spread's own, or the previewed one in a layout preview. */
+  layout: string;
   mode: 'edit' | 'export';
   /**
    * Marks the node that shows these parameters, so clicking it in the editor opens them for editing:
@@ -546,7 +569,10 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
    * The marker is invisible and stays in the exported artwork, so the Book check can name the parameter a text shows.
    */
   edit(...paths: EditPath<S, D>[]): EditMarker;
-  /** Page count and the anchors all spreads declare: `ctx.book.anchor('map')?.page`. */
+  /**
+   * The whole book as seen from this spread: page count, the anchors all spreads declare
+   * (`ctx.book.anchor('map')?.page`), and `spreads`, every spread with its pages and placed photos.
+   */
   book: BookContext;
   /** The geometry helpers for this spread's format: `<ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />`. */
   geometry: BoundGeometry;
@@ -572,6 +598,8 @@ export type UntypedRenderContext = {
   page: { left?: number; right?: number; number?: number };
   format: ResolvedFormat;
   formatId: string;
+  spread: string;
+  layout: string;
   mode: 'edit' | 'export';
   edit(...paths: string[]): EditMarker;
   book: BookContext;
@@ -605,7 +633,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
-  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text';
+  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'template-preview';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -615,6 +643,7 @@ export type TemplateDeclaration = {
   version: string;
   label?: string;
   description?: string;
+  preview?: string;
   contract: 1;
   /** Optional extensions beyond the contract-1 baseline. Older lists of baseline features remain accepted. */
   requires?: readonly Capability[];
@@ -623,6 +652,7 @@ export type TemplateDeclaration = {
   formats?: Record<string, PrintFormat>;
   defaultFormat?: string;
   parameters?: Parameters;
+  controls?: Controls;
   layoutFamilies?: Record<string, LayoutFamily>;
   spreads: Record<string, SpreadDefinition>;
   openingSpreads?: readonly OpeningSpread[];
@@ -670,6 +700,13 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   label?: string;
   /** One or two sentences for the template library, up to 300 characters. */
   description?: string;
+  /**
+   * A PNG, JPEG or WebP image inside the template folder, such as `'./preview.jpg'`, that New Book shows instead of a
+   * render of the opening spread. It is cropped to fill a tile with the default format's aspect ratio, so match that
+   * ratio (the Book check warns when it differs). Without it, or when the file is missing, larger than 2 MB or cannot
+   * be read, the library shows its render of the opening spread. Included in the contract-1 baseline.
+   */
+  preview?: string;
   contract: 1;
   /**
    * Optional extensions beyond the contract-1 baseline. Omit for all currently shipped features.
@@ -684,6 +721,12 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   network?: readonly string[];
   /** Book-wide template parameters, shown in the template controls and read through `ctx.document`. */
   parameters?: D & ParametersChecked<D>;
+  /**
+   * Arranges the document parameters' controls in Book settings, as `controls` does on layouts, boxes and elements:
+   * order, groups, label and description overrides, and `when` conditions. Parameters a document editor owns cannot
+   * be listed; they have no generated control.
+   */
+  controls?: Controls<keyof D & string>;
   /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */
   layoutFamilies?: { [K in L]: LayoutFamily };
   /** Editors of document parameters, by ID, opened from nodes marked with their parameters. Included in the contract-1 baseline. */

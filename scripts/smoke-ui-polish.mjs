@@ -52,7 +52,7 @@ try {
   await title.focus(); await title.press('End'); await page.keyboard.insertText('X'); await title.press('Backspace');
   assert.equal(await title.inputValue(), originalTitle);
   assert.equal((await current(page)).project.spreads.length, spreadCount, 'Typing Backspace cannot delete a spread');
-  assert.equal(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('delete-spread').accelerator ?? null), null, 'No native bare-Delete accelerator intercepts text fields');
+  assert.equal(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('delete-spread').registerAccelerator), false, 'The Delete shortcut is displayed without intercepting text fields');
   await page.locator('.spread-thumb').first().click();
   // The unshifted zoom alias targets the book, and Delete remains local to a spread selection.
   await page.locator('.canvas').focus();
@@ -93,10 +93,9 @@ try {
   const firstKey = await rows.first().getAttribute('data-source');
   await assets.keyboard.press('Space');
   await assets.getByRole('dialog', { name: /Quick Look/ }).waitFor();
-  await assets.getByRole('tab', { name: /^Photos/ }).click();
+  await assets.getByRole('searchbox', { name: 'Search assets' }).click();
   await assets.getByRole('dialog', { name: /Quick Look/ }).waitFor({ state: 'detached' });
-  assert.equal(await assets.getByRole('tab', { name: /^Photos/ }).getAttribute('aria-selected'), 'true', 'Outside click also activates the control underneath');
-  await assets.getByRole('tab', { name: /^All/ }).click();
+  assert.equal(await assets.getByRole('searchbox', { name: 'Search assets' }).evaluate((node) => document.activeElement === node), true, 'Outside click also activates the control underneath');
   await rows.first().click();
   const originalCount = Object.keys((await current(assets)).photoIndex).length;
   await assets.keyboard.press('Backspace');
@@ -119,7 +118,7 @@ try {
   await until(async () => (await current(page)).folder === 'Renamed.imageflow', 'Rename updates the live document');
   book = renamed;
   assert.equal((await current(page)).handle, beforeMove.handle);
-  await page.locator('.project-identity strong', { hasText: 'Renamed' }).waitFor();
+  await page.locator('.project-identity .document-title', { hasText: 'Renamed' }).waitFor();
   const destination = join(work, 'Moved'); await mkdir(destination);
   await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }); }, destination);
   await command(page, 'move-book');

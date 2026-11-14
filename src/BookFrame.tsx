@@ -1,6 +1,7 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { BookGeometry, BookView, RenderStatus } from './desktop';
+import type { PresentationView } from './presentation-model';
 import { reorderOffsets } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { Issue } from './desktop';
@@ -13,8 +14,9 @@ type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status
 export type InlineEditing = { spread: string; element: string } | { spread: string; edits: string; occurrence: number };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing }: {
+export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation }: {
   project: string; view: BookView; query?: string; title: string;
+  presentation?: PresentationView;
   hold?: boolean;
   // Every frame of the book view is told, including a candidate before it is shown, so the artwork never flashes.
   inlineEditing?: InlineEditing;
@@ -155,6 +157,10 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       refs.current.get(shown)?.contentWindow?.postMessage({ type: 'play-reorder', start: performance.timeOrigin + performance.now() }, renderOrigin);
     }
   }, [shown]);
+
+  useLayoutEffect(() => {
+    if (presentation && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, renderOrigin);
+  }, [presentation, shown]);
 
   return ids.map((id) => {
     const frame = frames[id];

@@ -19,6 +19,7 @@ import { rememberDocument } from './declaration-check';
 import { capabilities, runtimeExports } from './runtime-exports';
 import { controlProblems, controlsSchema } from './controls';
 import type { ControlItem } from './controls';
+import { previewPath } from './template-preview';
 
 export { inch, mm, p, printFormat, pt };
 export type { PrintFormat, ResolvedFormat, Span } from './format';
@@ -34,6 +35,10 @@ export type RenderContext = {
   format: ResolvedFormat;
   // The chosen named format, or 'default' for a template with a single format.
   formatId: string;
+  // This spread's ID in the book (its entry in `book.spreads`) and its layout. A layout preview renders the selected
+  // spread in another layout, so `spread` is the selected spread and `layout` the previewed one.
+  spread: string;
+  layout: string;
   mode: RenderProject['mode'];
   // Marks a rendered node as the place where these parameters are edited; spread the result onto the node.
   edit: (...paths: string[]) => EditMarker;
@@ -141,7 +146,8 @@ export function spreadIndex(book: RenderProject, template: Template, sequence: {
       const photoId = spread.boxes[id]?.photo ?? null;
       const found = photoId && Object.hasOwn(book.photos, photoId) ? book.photos[photoId] : undefined;
       if (!found) return { box: id, photoId, photo: null };
-      const { src: _src, ...photo } = found;
+      // A deep copy, so freezing the index leaves nested metadata (such as `captured`) in the render input alone.
+      const { src: _src, ...photo } = structuredClone(found);
       return { box: id, photoId, photo };
     });
     return { id: spread.id, layout: spread.definition, page: Object.fromEntries(Object.entries(sequence.spreads[i].page).filter(([, value]) => value !== undefined)), photos };
@@ -198,11 +204,9 @@ export type ElementEditorProps = {
 // components. It follows the book while the editor is open (a reorder, another photo, a document setting), so a
 // helper such as the calendar's month can serve `render` and the editor alike. Markdown flow positions are not known
 // outside the book render, so `boxes[id].text` is null.
-export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book'> & {
+export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book' | 'spread' | 'layout'> & {
   // Measured bounds in trim coordinates (mm), null before the current page is ready or when not rendered.
   elements: Record<string, { params: Values; rect: Rect | null }>;
-  // The spread's ID and its layout.
-  spread: string; layout: string;
 };
 // A document editor edits some of the template's document parameters, opened from any node marked with them, such
 // as a calendar's days. `values` holds every document parameter with the draft applied; `set` changes the editor's own.
@@ -317,6 +321,9 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   // Shown in the template library and the New Book picker; the ID is shown without a label.
   label: z.string().trim().min(1).max(80).optional(),
   description: z.string().trim().min(1).max(300).optional(),
+  // An image inside the template folder that the New Book picker shows instead of a render of the opening spread.
+  preview: z.string().refine((path) => previewPath(path) !== undefined,
+    'Use a PNG, JPEG or WebP file inside the template folder, such as ./preview.jpg, without .. or a leading dot.').optional(),
   contract: z.literal(1),
   // Optional extensions beyond the contract-1 baseline. Baseline names in older templates remain valid.
   requires: z.array(z.string()).optional().superRefine((required, context) => {
@@ -334,6 +341,8 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   formats: z.record(identifier, formatSchema).optional(),
   defaultFormat: identifier.optional(),
   parameters: parametersSchema,
+  // Arranges the document parameters' generated controls in Book settings, as `controls` does at the other scopes.
+  controls: controlsSchema,
   // Layouts that are variants of one design, by family ID. Each variant names its family with `family`.
   layoutFamilies: z.record(identifier, layoutFamily).optional(),
   spreads: z.record(identifier, definition).refine((spreads) => Object.keys(spreads).length > 0, 'Declare a spread.')
@@ -344,7 +353,7 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   openingSpreads: z.array(openingSpread).optional(),
   // Editors of document parameters, by ID.
   editors: z.record(identifier, documentEditor).optional(),
-}).superRefine(({ parameters, editors }, context) => {
+}).superRefine(({ parameters, editors, controls }, context) => {
   const owners = new Map<string, string>();
   for (const [id, editor] of Object.entries(editors ?? {})) {
     for (const key of editor.parameters) {
@@ -356,6 +365,8 @@ export const templateSchema = z.preprocess(withSpans, z.object({
       } else owners.set(key, id);
     }
   }
+  // A document parameter a document editor owns has no generated control, as for element editors.
+  checkControls(context, parameters, controls, [...owners.keys()]);
 }).superRefine(({ spreads, layoutFamilies }, context) => {
   for (const { path, message } of familyProblems(spreads, layoutFamilies)) context.addIssue({ code: 'custom', message, path });
 }).superRefine((template, context) => {
@@ -440,8 +451,9 @@ type DeclaredSpread = Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | '
 // definition unchanged.
 const spreadBuilder = <T,>(definition: T) => definition;
 export type TemplateDeclaration = {
-  id: string; version: string; label?: string; description?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
+  id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
+  controls?: ControlItem[];
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
   openingSpreads?: { layout: string; params?: Values }[];
@@ -462,7 +474,8 @@ export function templateInfo(template: Template): TemplateInfo {
     structures: Object.fromEntries(Object.entries(template.formats ?? { default: template.format }).map(([id, format]) => [id, format.structure])),
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
-    parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
+    ...(template.preview ? { preview: previewPath(template.preview)! } : {}),
+    parameters: template.parameters, ...(template.controls ? { controls: template.controls } : {}), openingSpreads: template.openingSpreads ?? [],
     ...(template.editors ? { editors: Object.fromEntries(Object.entries(template.editors).map(([id, { label, parameters, presentation }]) =>
       [id, { ...(label ? { label } : {}), parameters, presentation }])) } : {}),
     ...(template.network?.length ? { network: [...new Set(template.network)] } : {}),
@@ -549,7 +562,7 @@ export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...m
       const crop = getCrop(photo, placement, w / h);
       element.dataset.ppi = String(Math.min(photo.width * crop.width / w, photo.height * crop.height / h) * 96);
       if (!img) return;
-      if (book.mode !== 'edit' && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format);
+      if (book.mode !== 'edit' && !lazyPhotos && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format);
       img.style.width = 100 / crop.width + '%';
       img.style.height = 100 / crop.height + '%';
       img.style.left = -100 * crop.x / crop.width + '%';
@@ -781,8 +794,8 @@ export function withEditorDraft(context: EditorContext, draft: { document: Value
 }
 
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
-export function SpreadView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false }: {
-  book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState;
+export function SpreadView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false, bookSpread = spread.id }: {
+  book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState; bookSpread?: string;
   page: RenderContext['page']; index: BookIndex; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
 }) {
   const definition = template.spreads[spread.definition];
@@ -796,6 +809,7 @@ export function SpreadView({ book, template, format, spread, page, index, positi
   try {
     content = definition.render({
       ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode,
+      spread: bookSpread, layout: spread.definition,
       // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
       edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
       book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),

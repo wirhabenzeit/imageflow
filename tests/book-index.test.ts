@@ -99,3 +99,35 @@ test('every spread, and the editor context, read the same frozen index, which ca
   assert.deepEqual(bookIndex(book, template, sequence).spreads, index.spreads);
   assert.deepEqual(bookContext({ pages: 0, anchors: [] }, 'one').spreads, []);
 });
+
+test('freezing the index leaves nested photo metadata in the render input writable', () => {
+  const { book, template, sequence } = setup([{ id: 'one', definition: 'single', boxes: { hero: { photo: 'a' } } }]);
+  (book.photos.a as { captured?: object }).captured = { dateTime: '2026-07-01T10:00:00', offset: null };
+  const index = bookIndex(book, template, sequence);
+  assert.ok(Object.isFrozen(index.spreads![0].photos[0].photo!.captured));
+  assert.ok(!Object.isFrozen((book.photos.a as { captured?: object }).captured));
+});
+
+test('render reads its own spread ID and layout, to find itself in the book index', () => {
+  const ids: string[] = [];
+  const template = chooseFormat(templateSchema.parse({
+    id: 'index', version: '1', contract: 1, format: format(), parameters: {},
+    spreads: { pair: { label: 'Pair', render: (ctx: RenderContext) => {
+      ids.push(ctx.spread + ':' + ctx.layout + ':' + ctx.book.spreads.filter(({ id }) => id !== ctx.spread).length);
+      return createElement(runtime.Spread, {});
+    } } },
+  }));
+  const project = projectSchema.parse({ schemaVersion: 1, title: 'Index', template: { id: 'index', version: '1' }, spreads: [
+    { id: 'one', definition: 'pair' }, { id: 'two', definition: 'pair' }] });
+  const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as unknown as RenderProject;
+  const sequence = pageSequence(project.spreads.map(() => 'spread' as const), template.format);
+  const index = bookIndex(book, template, sequence);
+  const formatted = resolveFormat(template.format);
+  for (const [i, spread] of project.spreads.entries()) {
+    renderToStaticMarkup(createElement(SpreadView, { book, template, format: formatted, spread, page: sequence.spreads[i].page, index, positions: {}, renderPhotos: false }));
+  }
+  // A layout preview renders the selected spread under the previewed layout's ID and keeps the book's spread ID.
+  renderToStaticMarkup(createElement(SpreadView, { book, template, format: formatted, spread: { ...project.spreads[0], id: 'pair' },
+    page: sequence.spreads[0].page, index, positions: {}, renderPhotos: false, bookSpread: 'one' }));
+  assert.deepEqual(ids, ['one:pair:1', 'two:pair:1', 'one:pair:1']);
+});

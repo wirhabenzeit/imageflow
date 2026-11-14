@@ -30,7 +30,7 @@ export type RenderedImageProps = {
   style?: CSSProperties;
 };
 
-type Settings = { mode: RenderMode; pixelRatio: number; concurrency: number; timeoutMs: number; previewCache?: string };
+type Settings = { mode: RenderMode; pixelRatio: number; concurrency: number; timeoutMs: number; previewCache?: string; activeSpreads?: ReadonlySet<string> };
 export type RenderedImageFailure = { label: string; message: string; spread?: string; element?: string; timedOut: boolean };
 
 let settings: Settings = { mode: 'preview', pixelRatio: 1, concurrency: 2, timeoutMs: 60_000 };
@@ -43,6 +43,27 @@ const failures = new Map<HTMLElement, RenderedImageFailure>();
 /** Set by the render frame before it renders layouts. */
 export function configureRenderedImages(next: Partial<Settings>) {
   settings = { ...settings, ...next };
+}
+
+const activationListeners = new Set<() => void>();
+// Presentation draws pictures only for the current spread and its neighbours. Checks and exports draw all.
+export function activateRenderedImageSpreads(spreads: string[]) {
+  if (!settings.activeSpreads) return;
+  settings.activeSpreads = new Set(spreads);
+  for (const listener of activationListeners) listener();
+}
+function whenActive(node: HTMLElement, signal: AbortSignal) {
+  const spread = node.closest<HTMLElement>('[data-spread]')?.dataset.spread;
+  const active = () => signal.aborted || !settings.activeSpreads || !spread || settings.activeSpreads.has(spread);
+  if (active()) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const check = () => {
+      if (!active()) return;
+      activationListeners.delete(check); signal.removeEventListener('abort', check); resolve();
+    };
+    activationListeners.add(check); signal.addEventListener('abort', check, { once: true });
+    check();
+  });
 }
 
 const watchers = new Set<() => void>();
@@ -143,6 +164,7 @@ export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', class
     };
     const restored = previewCache && mode === 'preview' ? restorePicture() : () => {};
     const task = (async () => {
+      await whenActive(node, controller.signal);
       if (controller.signal.aborted) return;
       if (!width || !height) throw new Error('the element has no size on the page.');
       const spread = node.closest<HTMLElement>('[data-spread]');

@@ -36,3 +36,25 @@ export function spreadOrder(spreads: SpreadState[], id: string, target: number, 
   if (ordered.some((spread, index) => !allowed(spread, index) && !misplaced.has(spread.id))) return;
   return ordered;
 }
+
+// Move a selection as a set, preserving book order within it. Existing invalid ends do not freeze unrelated moves.
+export function spreadSelectionOrder(spreads: SpreadState[], ids: readonly string[], direction: 'up' | 'down' | 'start' | 'end', template: Book) {
+  const selected = new Set(ids);
+  const allowed = (spread: SpreadState, index: number) => spanAllowedAt(template.spreads[spread.definition]?.span ?? 'spread', index, spreads.length, template.format);
+  const misplaced = new Set(spreads.filter((spread, i) => !allowed(spread, i)).map(({ id }) => id));
+  const valid = (ordered: SpreadState[]) => !ordered.some((spread, i) => !allowed(spread, i) && !misplaced.has(spread.id));
+  let ordered = [...spreads];
+  if (direction === 'up') {
+    for (let i = 1; i < ordered.length; i++) if (selected.has(ordered[i].id) && !selected.has(ordered[i - 1].id)) [ordered[i - 1], ordered[i]] = [ordered[i], ordered[i - 1]];
+  } else if (direction === 'down') {
+    for (let i = ordered.length - 2; i >= 0; i--) if (selected.has(ordered[i].id) && !selected.has(ordered[i + 1].id)) [ordered[i + 1], ordered[i]] = [ordered[i], ordered[i + 1]];
+  } else {
+    const moving = spreads.filter(({ id }) => selected.has(id)), remaining = spreads.filter(({ id }) => !selected.has(id));
+    const positions = Array.from({ length: remaining.length + 1 }, (_, i) => direction === 'start' ? i : remaining.length - i);
+    const candidate = positions.map((i) => [...remaining.slice(0, i), ...moving, ...remaining.slice(i)]).find(valid);
+    if (!candidate) return;
+    ordered = candidate;
+  }
+  if (!valid(ordered) || ordered.every((spread, i) => spread.id === spreads[i].id)) return;
+  return ordered;
+}
