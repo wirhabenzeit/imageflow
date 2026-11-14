@@ -4,46 +4,24 @@
 //   node scripts/released-templates.mjs           adds the current hashes (run when preparing a release)
 //   node scripts/released-templates.mjs --check   fails when a current hash is missing (run by the release workflow)
 //
-// The hash must match templateHash in desktop/template-library.ts; tests/released-templates.test.ts checks that.
-import { createHash } from 'node:crypto';
-import { lstat, readdir, readFile, writeFile } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
+// It hashes templates with desktop/template-hash.mjs, the same code the app uses.
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { hashTemplateFiles, listTemplateFiles } from '../desktop/template-hash.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 export const releasedFile = join(root, 'sample', 'released-templates.json');
 
-async function templateFiles(folder) {
-  const files = [];
-  const walk = async (directory) => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
-      const path = join(directory, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(relative(folder, path) + ' is a symbolic link.');
-      if (entry.isDirectory()) await walk(path);
-      else if (entry.isFile()) files.push(relative(folder, path).split(sep).join('/'));
-    }
-  };
-  if (!(await lstat(folder)).isDirectory()) throw new Error(folder + ' is not a folder.');
-  await walk(folder);
-  return files.sort();
-}
-
+/** A template folder's hash, exactly as the app computes it. */
 export async function templateHash(folder) {
-  const hash = createHash('sha256');
-  for (const file of await templateFiles(folder)) {
-    const bytes = await readFile(join(folder, ...file.split('/')));
-    hash.update(file + '\0' + bytes.length + '\0');
-    hash.update(bytes);
-  }
-  return hash.digest('hex');
+  return hashTemplateFiles(folder, await listTemplateFiles(folder));
 }
 
-/** The built-in templates, as src/starters.ts lists them, with their current hashes. */
+/** The built-in templates, as sample/starters.json lists them, with their current hashes. */
 export async function builtInHashes(base = root) {
-  const starters = await readFile(join(base, 'src', 'starters.ts'), 'utf8');
-  const folders = [...starters.matchAll(/folder:\s*'([^']+)'/g)].map((match) => match[1]);
-  if (!folders.length) throw new Error('src/starters.ts lists no built-in templates.');
+  const folders = JSON.parse(await readFile(join(base, 'sample', 'starters.json'), 'utf8')).map(({ folder }) => folder);
+  if (!folders.length) throw new Error('sample/starters.json lists no built-in templates.');
   return Promise.all(folders.map(async (folder) => ({ folder, hash: await templateHash(join(base, 'sample', folder, 'template')) })));
 }
 
