@@ -9,6 +9,10 @@ function listen<T>(channel: string, listener: (value: T) => void) {
 }
 
 const api: DesktopApi = {
+  showMarkdown: (request) => ipcRenderer.invoke(channels.showMarkdown, request),
+  markdownAction: (request) => ipcRenderer.invoke(channels.markdownAction, request),
+  onMarkdownPrepareClose: (listener) => listen(channels.markdownPrepareClose, listener),
+  onMarkdownChanged: (listener) => listen(channels.markdownChanged, listener),
   onSourceCommand: (listener) => listen(channels.sourceCommand, listener),
   templateAction: (id, action) => ipcRenderer.invoke(channels.templateAction, id, action),
   showContextMenu: (ids, state) => ipcRenderer.invoke(channels.contextMenu, ids, state),
