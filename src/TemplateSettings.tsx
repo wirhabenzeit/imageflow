@@ -84,7 +84,7 @@ export function TemplateSettings({ api, library }: { api?: DesktopApi; library: 
             <li key={name}>{name} {version}{license && ' · ' + license}</li>)}</ul></section> : null}
           {entry.network?.length ? <section className="template-network"><h3>Network</h3>
             <p>{entry.network.join(', ')}</p>
-            <label className="pc-switch"><input type="checkbox" checked={pendingTrust?.id === entry.id ? pendingTrust.allow : !!entry.networkTrust} disabled={busy || entry.source !== 'imported'}
+            <label className="pc-switch"><input type="checkbox" checked={pendingTrust?.id === entry.id ? pendingTrust.allow : !!entry.networkTrust} disabled={busy || entry.source !== 'imported' || entry.networkTrust === 'built-in'}
               onChange={(event) => void trustTemplate(entry.id, event.target.checked)} />Allow network access</label>
           </section> : null}
           {entry.unavailable && <p className="error-text">{entry.unavailable}</p>}
