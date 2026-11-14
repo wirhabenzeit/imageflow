@@ -75,7 +75,7 @@ let mcpClients: { name: string }[] = [];
 let quitting = false;
 let preparingQuit = false;
 let updates: AppUpdater;
-const quitReplies = new Map<string, { sender: number; resolve: (allowed: boolean | undefined) => void }>();
+const quitReplies = new Map<string, { sender: number; resolve: (allowed: boolean | undefined) => void; ack: () => void }>();
 let quitReady = false;
 let quitCleanup: Promise<void> | undefined;
 let connectionSettingsQueue = Promise.resolve();
@@ -1103,15 +1103,15 @@ void app.whenReady().then(async () => {
   configureSourceStore(join(app.getPath('userData'), 'source-cache'));
   configureSourceAccess(join(app.getPath('userData'), 'source-access'));
   nativeTheme.themeSource = settings.value.appearance;
+  const checkFeed = () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
+    channel: settings.value.updateChannel, platform: process.platform + '-' + process.arch, installed: app.getVersion(),
+    request: net.fetch as typeof fetch, current: () => updates.current(), native: autoUpdater });
   updates = new AppUpdater({
     pending: true,
     driver: {
-      initialize: () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
-        channel: settings.value.updateChannel, platform: process.platform + '-' + process.arch, installed: app.getVersion(),
-        request: net.fetch as typeof fetch, current: () => updates.current(), native: autoUpdater }),
-      check: () => checkUpdateFeed({ baseURL: updateTestConfiguration?.baseURL ?? updateBaseURL,
-        channel: settings.value.updateChannel, platform: process.platform + '-' + process.arch, installed: app.getVersion(),
-        request: net.fetch as typeof fetch, current: () => updates.current(), native: autoUpdater }),
+      // Every check reads the selected channel and sets the feed, so the first check needs no separate setup.
+      initialize: () => checkFeed(),
+      check: () => checkFeed(),
       install: () => autoUpdater.quitAndInstall(),
     },
     changed: (state) => {
@@ -1174,9 +1174,19 @@ void app.whenReady().then(async () => {
         prepared.push(document);
         const id = randomUUID();
         const allowed = await new Promise<boolean | undefined>((resolve) => {
-          const timer = setTimeout(() => { quitReplies.delete(id); resolve(undefined); }, 3000);
-          quitReplies.set(id, { sender: contents.id, resolve: (allowed) => {
-            clearTimeout(timer); quitReplies.delete(id); resolve(allowed);
+          // A live renderer acknowledges at once, then may take as long as its pending save needs. Only a missing
+          // acknowledgement, Electron's own hang detection or a very long silence counts as "not responding".
+          let timer = setTimeout(() => finish(undefined), 3000);
+          const hung = () => finish(undefined);
+          const finish = (allowed: boolean | undefined) => {
+            clearTimeout(timer); quitReplies.delete(id);
+            if (!document.window.isDestroyed()) document.window.off('unresponsive', hung);
+            resolve(allowed);
+          };
+          document.window.once('unresponsive', hung);
+          quitReplies.set(id, { sender: contents.id, resolve: finish, ack: () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => finish(undefined), 120_000);
           } });
           contents.send(channels.prepareQuit, id);
         });
@@ -1213,6 +1223,11 @@ void app.whenReady().then(async () => {
         for (const document of prepared) if (!document.window.isDestroyed()) document.window.webContents.send(channels.cancelQuit);
       }
     });
+  });
+  ipcMain.on(channels.prepareQuitAck, (event, id: unknown) => {
+    if (typeof id !== 'string') return;
+    const reply = quitReplies.get(id);
+    if (reply?.sender === event.sender.id && editorOwner(event)) reply.ack();
   });
   ipcMain.on(channels.prepareQuitReply, (event, id: unknown, allowed: unknown) => {
     if (typeof id !== 'string') return;

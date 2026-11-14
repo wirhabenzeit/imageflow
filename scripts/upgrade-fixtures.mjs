@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run } from './verify-mac-signing.mjs';
@@ -19,7 +19,23 @@ export function child(args, env = process.env) {
     job.once('error', reject); job.once('exit', (code) => code === 0 ? resolve() : reject(new Error(args[0] + ' exited ' + code)));
   });
 }
+// Remove this run's (or an interrupted earlier run's) loopback certificate from the keychain, then delete it and its key.
+async function untrust() {
+  const certificate = join(work, 'tls.crt');
+  try { await access(certificate); } catch { return; }
+  try { await run('security', ['remove-trusted-cert', certificate]); } catch { /* trust settings may already be gone */ }
+  try {
+    const keychain = JSON.parse(await readFile(join(work, 'tls-keychain.json'), 'utf8'));
+    const { stdout } = await run('openssl', ['x509', '-in', certificate, '-noout', '-fingerprint', '-sha1']);
+    const digest = stdout.trim().split('=').at(-1).replaceAll(':', '');
+    await run('security', ['delete-certificate', '-Z', digest, keychain]).catch(() => {});
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  await rm(join(work, 'tls.key'), { force: true });
+  await rm(certificate, { force: true });
+}
 async function prepare() {
+  // A killed earlier run cannot run its own cleanup; remove its trust before the folder holding its certificate.
+  await untrust();
   await rm(work, { recursive: true, force: true }); await mkdir(work, { recursive: true });
   const profile = join(work, 'profile'), book = join(work, 'Upgrade.imageflow');
   await mkdir(profile); await mkdir(join(book, 'template'), { recursive: true });
@@ -36,9 +52,6 @@ parameters:{},spreads:{base:{label:'Base',parameters:{heading:p.string({label:'H
     await writeFile(join(work, `fixture-${index}.json`), JSON.stringify({ ...plan, version, output: join(work, String(index)) }));
   }
   await writeFile(planFile, JSON.stringify(plan, null, 2));
-  await writeFile(join(work, 'tls.conf'), `[req]\ndistinguished_name=dn\nx509_extensions=extensions\nprompt=no\n[dn]\nCN=ImageFlow upgrade test\n[extensions]\nsubjectAltName=IP:127.0.0.1,DNS:localhost\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,digitalSignature,keyEncipherment,keyCertSign\nextendedKeyUsage=serverAuth\n`);
-  await run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-sha256', '-keyout', join(work, 'tls.key'),
-    '-out', join(work, 'tls.crt'), '-config', join(work, 'tls.conf')]);
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 const command = process.argv[2];
@@ -48,19 +61,20 @@ else if (command === 'build') {
   for (let index = 0; index < plan.versions.length; index++) await child(['scripts/package-mac.mjs', '--upgrade-fixture', join(work, `fixture-${index}.json`)]);
 
 } else if (command === 'trust') {
-  // User-domain trust in the ephemeral runner account only. The test removes this exact certificate afterwards.
+  // A self-signed leaf (CA:FALSE) trusted for SSL only: it can't issue certificates for other hosts, even if the
+  // key in .build were read before cleanup. The test removes this exact certificate and its key afterwards.
+  // A fresh one-day key per run: nothing outlives cleanup, and reruns with --existing get a new certificate.
+  await untrust();
+  await writeFile(join(work, 'tls.conf'), `[req]\ndistinguished_name=dn\nx509_extensions=extensions\nprompt=no\n[dn]\nCN=ImageFlow upgrade test\n[extensions]\nsubjectAltName=IP:127.0.0.1,DNS:localhost\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n`);
+  await run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-sha256', '-keyout', join(work, 'tls.key'),
+    '-out', join(work, 'tls.crt'), '-config', join(work, 'tls.conf')]);
+  await chmod(join(work, 'tls.key'), 0o600);
   const { stdout } = await run('security', ['default-keychain', '-d', 'user']);
   const keychain = JSON.parse(stdout.trim());
   await writeFile(join(work, 'tls-keychain.json'), JSON.stringify(keychain));
-  await run('security', ['add-trusted-cert', '-r', 'trustRoot', '-k', keychain, join(work, 'tls.crt')]);
+  await run('security', ['add-trusted-cert', '-r', 'trustRoot', '-p', 'ssl', '-k', keychain, join(work, 'tls.crt')]);
 } else if (command === 'untrust') {
-  try {
-    await run('security', ['remove-trusted-cert', join(work, 'tls.crt')]);
-    const keychain = JSON.parse(await readFile(join(work, 'tls-keychain.json'), 'utf8'));
-    const { stdout } = await run('openssl', ['x509', '-in', join(work, 'tls.crt'), '-noout', '-fingerprint', '-sha1']);
-    const digest = stdout.trim().split('=').at(-1).replaceAll(':', '');
-    await run('security', ['delete-certificate', '-Z', digest, keychain]);
-  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  await untrust();
 } else throw new Error('Choose prepare, build, trust or untrust.');
 
 }

@@ -20,7 +20,7 @@ export const renderOrigin = desktopScheme + '://render';
 
 export const channels = {
   updateState: 'app:update-state', updateChanged: 'app:update-changed', checkUpdates: 'app:check-updates', restartUpdate: 'app:restart-update', dismissUpdate: 'app:dismiss-update',
-  prepareQuit: 'app:prepare-quit', prepareQuitReply: 'app:prepare-quit-reply', cancelQuit: 'app:cancel-quit',
+  prepareQuit: 'app:prepare-quit', prepareQuitAck: 'app:prepare-quit-ack', prepareQuitReply: 'app:prepare-quit-reply', cancelQuit: 'app:cancel-quit',
   contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', toolbarDragRegions: 'document:toolbar-drag-regions', presentation: 'document:presentation', dragSources: 'document:drag-sources',
   showMarkdown: 'markdown:open', markdownAction: 'markdown:action', markdownChanged: 'markdown:changed', markdownPrepareClose: 'markdown:prepare-close',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',

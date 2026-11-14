@@ -43,7 +43,7 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-electron-${{ hashFiles('package-lock.json') }}
       - run: npm ci
       - run: npm run build
-      - name: Prepare isolated versions and local TLS certificate
+      - name: Prepare isolated versions
         run: node scripts/upgrade-fixtures.mjs prepare
       - name: Package four versions without signing credentials
         run: node scripts/upgrade-fixtures.mjs build
@@ -53,7 +53,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: node scripts/mac-credentials.mjs sign-fixtures
-      - name: Trust local test server in the runner account
+      - name: Create and trust a one-day loopback TLS certificate
         run: node scripts/upgrade-fixtures.mjs trust
       - name: Exercise real downloads, installation, relaunch and MCP reconnection
         run: node scripts/test-signed-upgrade.mjs

@@ -67,13 +67,13 @@ The app reads small JSON feeds hosted on GitHub Pages:
 
 The signed ZIPs remain GitHub Release assets. **Settings → General → Updates → Channel** selects Stable or Beta. Stable is the default for a fresh stable installation; a fresh beta installation defaults to Beta. An explicit preference survives upgrades. Beta receives both beta and final releases, choosing the greatest semantic version. Stable receives final releases only. Switching to Stable never downgrades a newer beta: stable updates resume once a newer final release exists. Channel changes are disabled while a check/download or staged update is in progress.
 
-The app compares semantic versions before starting Electron's native updater. It validates the channel head against a versioned per-release payload, then asks Squirrel.Mac to download, verify and install the ZIP using server mode. This handles `1.0.0-beta.10 → 1.0.0` correctly; Squirrel's static-JSON numeric comparison would consider that a downgrade. No separate updater framework or dynamic update server is needed.
+The app compares semantic versions before starting Electron's native updater. It validates the channel head against a versioned per-release payload, then asks Squirrel.Mac to download, verify and install the ZIP using server mode. This handles `1.0.0-beta.10 → 1.0.0` correctly; Squirrel's static-JSON numeric comparison would consider that a downgrade. No separate updater framework or dynamic update server is needed. The SHA-256 digest and size in the payload are informational: Squirrel downloads the ZIP from its URL and accepts it only if the contained app satisfies the running app's code-signing requirement (same Developer ID team and bundle ID). That signature check, not the digest, protects installation.
 
 **Update feeds** regenerates both channel heads after a release is published, edited, unpublished or deleted. It can also run manually. It reads all release pages, ignores drafts, rehearsal/alpha/RC versions and incomplete platform assets, validates the expected GitHub ZIP URL and GitHub's SHA-256 asset digest, and selects by SemVer rather than publication date. An API or metadata error stops deployment, preserving the existing site. With no published release, the feed explicitly reports no available version. Apple silicon is shipped; the x64 feed remains empty until matching x64 assets exist.
 
 GitHub Pages is configured to use Actions, with its protected `github-pages` environment allowing `main` and `v*` tags. After this PR merges:
 
-1. Keep the default site URL above stable and retain the environment's `main` and `v*` policies (published-release events run in their tag context).
+1. Keep the default site URL above stable (feed requests refuse redirects, so adding a Pages custom domain would make every check fail until the app's feed URL changes) and retain the environment's `main` and `v*` policies (published-release events run in their tag context).
 2. Run **Actions → Update feeds** from `main`. Check that both URLs return JSON without credentials. Published beta assets must also be downloadable without credentials.
 3. Keep one Pages deployment workflow. If the documentation site (#75) is added here, generate the `updates/` directory into its final site artifact before that same deployment; independent Pages deployments would replace each other's files.
 
@@ -91,7 +91,7 @@ Squirrel also applies a staged update on ordinary Quit, without requesting relau
 
 **Signed upgrade test** performs actual native installation on a fresh Apple silicon runner, without publishing a GitHub Release. It runs with release preparation or on an existing trusted version tag. Its isolated app has bundle ID `ch.wirhabenzeit.imageflow.upgrade-test`, a separate book/profile, a compiled loopback-only feed and a test-only debugging port. Production builds cannot redirect their feed using environment variables. Fixtures do not register the production document types.
 
-The workflow builds four versions without Apple credentials, signs them using the existing temporary-keychain helper, removes signing credentials, temporarily trusts its local HTTPS server in the ephemeral runner account, and runs three real transitions:
+The workflow builds four versions without Apple credentials, signs them using the existing temporary-keychain helper, removes signing credentials, creates a fresh one-day self-signed loopback certificate (a leaf, `CA:FALSE`, trusted for SSL only, so it cannot vouch for any other host), trusts it in the ephemeral runner account, and runs three real transitions:
 
 1. `9.9.9-beta.1 → 9.9.9-beta.2` on Beta.
 2. `9.9.9-beta.2 → 9.9.9` on Beta (same-version final release).
@@ -133,7 +133,7 @@ node scripts/test-signed-upgrade.mjs
 node scripts/upgrade-fixtures.mjs untrust
 ```
 
-Prefer the workflow, which performs trust cleanup even after failure. Lightweight tests cover feed generation, semantic ordering, channel preferences, failures, notices, field save/cancel/recovery and crashed/unresponsive windows.
+`untrust` removes the certificate from the keychain and deletes it with its key. `prepare` and `trust` first remove anything a killed earlier run left behind, so an interrupted local run is cleaned up by the next one; run `node scripts/upgrade-fixtures.mjs untrust` yourself if you won't run the test again. Prefer the workflow, which performs trust cleanup even after failure. Lightweight tests cover feed generation, semantic ordering, channel preferences, failures, notices, field save/cancel/recovery and crashed/unresponsive windows.
 
 ## Remaining release acceptance (#74)
 

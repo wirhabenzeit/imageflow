@@ -29,9 +29,13 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   assert.equal((await page.evaluate(() => window.imageflow.updateState())).status, 'unavailable');
-  const settingsOpened = instance.waitForEvent('window');
   await menuAction(instance, 'Check for Updates…');
-  const settings = await settingsOpened;
+  // Preview render windows open in the background too, so find Settings by its URL rather than the next window.
+  let settings;
+  for (const deadline = Date.now() + 15000; !settings && Date.now() < deadline; await new Promise((resolve) => setTimeout(resolve, 50))) {
+    settings = instance.windows().find((window) => window.url() === 'imageflow://editor/settings');
+  }
+  assert.ok(settings, 'Settings window opened');
   await settings.getByText('Updates are available in the signed macOS release of ImageFlow.', { exact: true }).waitFor();
   const automatic = settings.getByRole('checkbox', { name: 'Automatically check for updates' });
   assert.equal(await automatic.isChecked(), true);
