@@ -1,7 +1,7 @@
 // Compile-time checks of the authoring types, run by `npm run build` (`tsc -p tests/types`). Each
 // `@ts-expect-error` is a declaration a template author must be told about; the build fails if it compiles.
 import { box, defineTemplate, mm, p, printFormat, Spread, spreadFor } from 'imageflow';
-import type { DocumentEditorProps, ElementEditorProps, LayoutPickerProps } from 'imageflow';
+import type { DocumentEditorProps, ElementEditorProps, LayoutPickerProps, PhotoBoxState, PhotoRender } from 'imageflow';
 
 const format = printFormat({ label: 'F', trim: { width: mm(100), height: mm(100) }, bleed: mm(0), safe: mm(5),
   pageCount: { min: 2, max: 20, step: 2 }, ends: 'inside-covers' });
@@ -368,6 +368,23 @@ defineTemplate({ id: 'inline-text', version: '1', contract: 1, format,
       <ctx.Text parameter="heading" presentation="popover" />
     </Spread> }) }) });
 
+// PhotoBox render callbacks: `box.params` is typed per box, and a shared callback fails on a box without its parameters.
+const tilted = (photo: PhotoRender, state: PhotoBoxState<string, { tilt: number }>) =>
+  <img src={photo.src} alt={photo.alt} style={{ ...photo.style, rotate: state.params.tilt + 'deg' }} />;
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
+  a: spread({
+    label: 'A',
+    boxes: { hero: box.photo('Hero', { tilt: p.number({ label: 'Tilt', default: 0, min: -10, max: 10 }) }), plain: box.photo('Plain') },
+    render: (ctx) => <Spread>
+      <ctx.PhotoBox id="hero">{tilted}</ctx.PhotoBox>
+      <ctx.PhotoBox id="hero">{(photo, state) => <svg><image href={photo.src} {...photo.image} opacity={state.params.tilt} /></svg>}</ctx.PhotoBox>
+      {/* @ts-expect-error */}
+      <ctx.PhotoBox id="plain">{tilted}</ctx.PhotoBox>
+      {/* @ts-expect-error */}
+      <ctx.PhotoBox id="plain">{(_photo, state) => state.params.tilt}</ctx.PhotoBox>
+    </Spread>,
+  }),
+}) });
 // A template's own preview image is a path to a file in the template folder.
 defineTemplate({ id: 'preview', version: '1', contract: 1, format, preview: './preview.jpg',
   spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });

@@ -20,6 +20,7 @@ import { PanelDivider, useCanvasLayout, usePanels } from './panels';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
+import type { CropPreview } from './BookFrame';
 import { AgentStatus } from './AgentStatus';
 import { revealIn } from './reveal';
 import { EditPopover, MarkedFields } from './EditPopover';
@@ -164,6 +165,8 @@ export function App() {
   // each layout has its own crop. `saved` holds the project id the last crop edit started from; after the photo is
   // deselected, `settling` keeps its overlay until the book has re-rendered, so the frame does not flash back.
   const [cropping, setCropping] = useState<{ spread: string; box: string; layout: string; saved?: string; settling?: string }>();
+  // The unsaved placement of a crop gesture on a box the template draws with a render callback, which the book view draws.
+  const [cropPreview, setCropPreview] = useState<CropPreview>();
   // A template-supplied editor that is open: an element's, or a document editor opened from a spread.
   const [elementEditor, setElementEditor] = useState<OpenEditor>();
   // Whether an inline editor is showing in place of the artwork it edits, which the book view then hides.
@@ -1628,7 +1631,7 @@ export function App() {
                 setHovered(sheet);
                 setHoveredTarget(target && targetKey(target));
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
-              <BookFrame project={summary.id} view="book" title="Book preview" onGeometry={setGeometry} onStatus={bookStatus} onPictures={bookPictures}
+              <BookFrame project={summary.id} view="book" title="Book preview" cropPreview={cropPreview} onGeometry={setGeometry} onStatus={bookStatus} onPictures={bookPictures}
                 viewport={viewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
                 onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
@@ -1660,6 +1663,7 @@ export function App() {
                 placement={cropPlacement} settling={!!cropping.settling}
                 inchesPerPixel={format && cropSheet ? format.spreadWidth / cropSheet.width / 25.4 : undefined}
                 resolution={template?.format.output.resolution} save={saveCrop} close={deselectPhoto}
+                custom={!!cropFrame.custom} preview={(placement) => setCropPreview(placement && { spread: cropping.spread, box: cropping.box, placement })}
                 toolbarHost={canvasWrap.current}>
                 {/* The box's photo and its own parameters (such as Show caption) sit with the selected photo. Replacing or
                     removing the photo ends the selection. */}
