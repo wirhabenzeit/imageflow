@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cp, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
@@ -7,9 +7,9 @@ import { _electron } from 'playwright-core';
 import sharp from 'sharp';
 import { testBook } from './ui-actions.mjs';
 
-// Template pictures in New Book (#117): the calendar's own preview image, cropped to its format; renders of opening
-// spreads saved on disk, so a second launch shows them on first paint; a render made when a template is imported; and
-// the Book check warning for a preview image of the wrong shape.
+// Template pictures in New Book (#117): the built-in templates' own preview images, cropped to their format; a render
+// of the opening spread made when a template without an image is imported, saved on disk so a second launch shows it
+// on first paint; and the Book check warning for a preview image of the wrong shape.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'template-previews-smoke-'));
 const library = join(work, 'Templates');
@@ -23,7 +23,6 @@ const until = async (check, what) => {
   }
   throw new Error('Timed out waiting for ' + what);
 };
-const exists = (path) => stat(path).then(() => true, () => false);
 async function newBook(app) {
   const start = await app.firstWindow();
   start.setDefaultTimeout(30000);
@@ -51,29 +50,36 @@ try {
   const box = await cover.boundingBox();
   assert.ok(Math.abs(box.width / box.height - calendar.aspect) < 0.03, 'the tile has the format\'s shape: ' + box.width + ' × ' + box.height);
 
-  // The photobook has no image of its own: its opening spread is rendered once and saved with the app's caches.
+  // So does the photobook, with its title photo instead of a render of its typographic title page.
   const photobook = (await entries(picker)).find(({ id }) => id === 'imageflow-starter');
-  assert.equal(photobook.image, undefined);
-  const saved = join(profile, 'Cache', 'template-previews', photobook.hash + '.jpg');
-  await until(() => exists(saved), 'the saved photobook render');
-  assert.equal((await sharp(saved).metadata()).width, 320);
+  assert.equal(photobook.image, true);
+  const photobookCover = picker.getByRole('option', { name: /Photobook/ }).locator('img');
+  await photobookCover.waitFor();
+  assert.match(await photobookCover.getAttribute('src'), /^imageflow:\/\/editor\/template-picture\/[0-9a-f]{64}\/image$/);
 
-  // Importing a template renders it at once and keeps the render beside it in the library.
+  // Importing a template without an image renders its opening spread at once and keeps the render beside it in the
+  // library: here the photobook without its preview (or map sites, so nothing waits for permission).
   const travel = join(work, 'travel');
-  await cp(join(root, 'sample/calendar/template'), travel, { recursive: true });
+  await cp(join(root, 'sample/starter/template'), travel, { recursive: true });
   const source = await readFile(join(travel, 'index.tsx'), 'utf8');
-  await writeFile(join(travel, 'index.tsx'), source.replace("id: 'imageflow-calendar',", "id: 'travel-calendar',").replace("label: 'Wall calendar',", "label: 'Travel calendar',"));
+  const plain = source.replace("id: 'imageflow-starter',", "id: 'travel-book',").replace("label: 'Photobook',", "label: 'Travel book',")
+    .replace("  preview: './preview.jpg',\n", '').replace('  network: [mapOrigin],\n', '');
+  assert.ok(!plain.includes('preview:') && !plain.includes('network:'));
+  await writeFile(join(travel, 'index.tsx'), plain);
   await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false }); });
   const imported = await picker.evaluate((path) => window.imageflow.importTemplates([path]), travel);
   assert.equal(imported.value?.[0]?.status, 'imported', JSON.stringify(imported));
-  await until(async () => (await readdir(join(library, 'travel-calendar')).catch(() => [])).some((name) => /^preview-[0-9a-f]{64}\.jpg$/.test(name)),
-    'the render of the imported template');
+  const renderFile = async () => (await readdir(join(library, 'travel-book')).catch(() => [])).find((name) => /^preview-[0-9a-f]{64}\.jpg$/.test(name));
+  await until(renderFile, 'the render of the imported template');
+  const saved = join(library, 'travel-book', await renderFile());
+  const renderWidth = (await sharp(saved).metadata()).width;
+  assert.ok(renderWidth > 0);
   await app.close();
 
   // After a restart, New Book shows the saved render on first paint, without rendering again.
   app = await launch();
   ({ picker } = await newBook(app));
-  const rendered = picker.getByRole('option', { name: /Photobook/ }).locator('img');
+  const rendered = picker.getByRole('option', { name: /Travel book/ }).locator('img');
   await rendered.waitFor();
   assert.match(await rendered.getAttribute('src'), /\/template-picture\/[0-9a-f]{64}\/render$/);
   await until(() => rendered.evaluate((image) => image.complete && image.naturalWidth > 0), 'the saved render');
@@ -83,9 +89,9 @@ try {
   await writeFile(saved, 'not a picture');
   app = await launch();
   ({ picker } = await newBook(app));
-  const remade = picker.getByRole('option', { name: /Photobook/ }).locator('img');
+  const remade = picker.getByRole('option', { name: /Travel book/ }).locator('img');
   await until(() => remade.evaluate((image) => image.src.startsWith('data:') && image.complete && image.naturalWidth > 0).catch(() => false), 'the render made again');
-  await until(async () => (await sharp(saved).metadata().catch(() => ({}))).width === 320, 'the saved render replaced');
+  await until(async () => (await sharp(saved).metadata().catch(() => ({}))).width === renderWidth, 'the saved render replaced');
   await app.close();
 
   // A preview image of another shape is a Book check warning; a missing one too.

@@ -10,6 +10,7 @@ import { Icon } from './Icon';
 import { sourcePath } from './source-locations';
 import type { SourceReference, ImportMode } from './source-locations';
 import { fileName } from './source-items';
+import { plainFormatted } from './formatted-text';
 
 type Value = Values[string];
 
@@ -32,7 +33,7 @@ function ItemSummary({ param, item, index }: { param: ListParameter; item: ListI
     if (field.type === 'color') swatch ??= String(value);
     else if (field.type === 'file') parts.push(value ? Object.hasOwn(files, String(value)) ? fileName(files[String(value)]) : 'Missing file' : 'No file');
     else if (field.type === 'enum') parts.push(field.labels?.[String(value)] ?? String(value));
-    else if (field.type === 'string' && value) parts.push(String(value));
+    else if (field.type === 'string' && value) parts.push(field.markdown === 'inline' ? plainFormatted(String(value)) : String(value));
     else if ((field.type === 'number' || field.type === 'integer') && parts.length < 2) parts.push(String(value) + (field.unit ? ' ' + field.unit : ''));
   }
   const text = parts.slice(0, 2).join(' · ') || param.label + ' ' + (index + 1);
@@ -222,15 +223,18 @@ export function ParamControl({ param, value, draft, setDraft, apply, autoFocus =
     </div>;
   }
   const text = String(shown);
+  // Formatted strings count visible characters; the browser's own limit would count the markers too.
+  const formatted = param.type === 'string' && param.markdown === 'inline';
+  const limit = formatted ? undefined : param.maxLength;
   return <>
     {param.multiline
-      ? <textarea rows={3} aria-label={param.label} value={text} maxLength={param.maxLength} placeholder={param.placeholder}
+      ? <textarea rows={3} aria-label={param.label} value={text} maxLength={limit} placeholder={param.placeholder}
           data-autofocus={focusMark} onChange={(event) => setDraft(event.target.value)} onBlur={blur} onKeyDown={enter}
           onFocus={autoFocus ? (event) => event.target.select() : undefined} />
-      : <input type="text" aria-label={param.label} value={text} maxLength={param.maxLength} placeholder={param.placeholder}
+      : <input type="text" aria-label={param.label} value={text} maxLength={limit} placeholder={param.placeholder}
           data-autofocus={focusMark} onChange={(event) => setDraft(event.target.value)} onBlur={blur} onKeyDown={enter}
           onFocus={autoFocus ? (event) => event.target.select() : undefined} />}
-    {param.maxLength !== undefined && draft !== undefined && <small className="pc-count">{text.length} / {param.maxLength}</small>}
+    {param.maxLength !== undefined && draft !== undefined && <small className="pc-count">{(formatted ? plainFormatted(text) : text).length} / {param.maxLength}</small>}
   </>;
 }
 

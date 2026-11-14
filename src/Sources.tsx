@@ -1,3 +1,4 @@
+import { EditMarkdown, NewMarkdown } from './MarkdownActions';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { PhotoViewMenu } from './PhotoViewMenu';
 import type { PhotoViewControl } from './PhotoViewMenu';
@@ -127,6 +128,7 @@ export function Sources({ view, summary, tab, setTab, selected, choose, usage, w
     const { heading, body } = source === undefined ? { heading: undefined, body: '' } : excerpt(source);
     return <div key={id} className="source-item source-text" {...common}>
       <span className="source-title">{title}</span>
+      <EditMarkdown id={id} name={title} disabled={!writable || busy || source === undefined} failure={failure} />
       {source === undefined ? <span className="missing">Missing file</span> : <span className="source-excerpt">
         {heading && <strong>{heading} </strong>}{body}
       </span>}
@@ -157,6 +159,7 @@ export function Sources({ view, summary, tab, setTab, selected, choose, usage, w
         <button onClick={() => setUnused(true)}>Unused only{unused ? ' ✓' : ''}</button>
         {tab === 'photo' && <hr />}
       </PhotoViewMenu>
+      {tab === 'text' && <NewMarkdown disabled={!writable || busy} />}
       <button className="source-import" disabled={!writable || busy} onClick={() => importSources('import')}>Import…</button>
     </div>
     <div ref={list} className={'source-items source-items-' + tab + (tab === 'photo' && view.value.group !== 'none' ? ' source-items-grouped' : '')} role="listbox"

@@ -73,8 +73,8 @@ try {
 
   const starter = await ready();
   assert.deepEqual(starter.errors, []);
-  assert.equal(starter.pages, 28);
-  assert.deepEqual(starter.flow['turning:body'], { part: 2, parts: 3, title: 'arrival.md' });
+  assert.equal(starter.pages, 32);
+  assert.deepEqual(starter.flow['turning:body'], { part: 2, parts: 2, title: 'arrival.md' });
   assert.equal((await read()).title, 'Draft Photobook');
   await window.waitForFunction(() => /Book check · (No issues|\d)/.test(document.querySelector('.book-check-toggle')?.getAttribute('title') ?? '') &&
     !document.querySelector('.book-check-stale'));
@@ -88,27 +88,27 @@ try {
   await window.waitForFunction(() => document.querySelector('.status-error') || document.querySelector('.status')?.textContent === 'Print PDF saved.', null, { timeout: 45000 });
   assert.equal(await status(), 'Print PDF saved.');
   const pages = (await PDFDocument.load(await readFile(pdf))).getPages();
-  assert.equal(pages.length, 28);
+  assert.equal(pages.length, 32);
   assert.equal(pages[0].getTrimBox().x, 0);
   assert.ok(pages.at(-1).getTrimBox().x > 0);
 
   await window.locator('.template-controls > summary').click();
-  const oldPaper = (await read()).params.paper;
-  await saveState(() => window.getByRole('radio', { name: 'Cool', exact: true }).click(), (data) => data.params.paper === 'cool');
-  await saveState(() => button('Undo').click(), (data) => data.params.paper === oldPaper);
-  await saveState(() => button('Redo').click(), (data) => data.params.paper === 'cool');
-  await saveState(() => window.getByLabel('Page numbers').uncheck(), (data) => data.params.showPageNumbers === false);
+  const oldTheme = (await read()).params.theme;
+  await saveState(() => window.getByRole('radio', { name: 'Dark', exact: true }).click(), (data) => data.params.theme === 'dark');
+  await saveState(() => button('Undo').click(), (data) => data.params.theme === oldTheme);
+  await saveState(() => button('Redo').click(), (data) => data.params.theme === 'dark');
+  await saveState(() => window.getByRole('checkbox', { name: 'Page numbers', exact: true }).uncheck(), (data) => data.params.showPageNumbers === false);
 
-  await window.getByRole('button', { name: 'Photo and story 2–3' }).click();
+  await window.getByRole('button', { name: 'Photo and story 6–7' }).click();
   await window.locator('[data-spread="arriving"][aria-current="page"]').waitFor();
   const photo = join(root, 'sample/starter/photos/shore.jpg');
   const markdown = join(work, 'drop.md');
   await writeFile(markdown, 'A small story imported through the canvas.\n');
   await changed(() => dropFile(photo, '[data-box="hero"]'));
   // Importing adds a library source before the separate placement save completes.
-  await window.waitForFunction(async () => /^ph-/.test((await window.imageflow.currentProject()).value.project.spreads[1].boxes.hero.photo ?? ''));
+  await window.waitForFunction(async () => /^ph-/.test((await window.imageflow.currentProject()).value.project.spreads[3].boxes.hero.photo ?? ''));
   await ready();
-  const photoId = (await read()).spreads[1].boxes.hero.photo;
+  const photoId = (await read()).spreads[3].boxes.hero.photo;
   assert.match(photoId, /^ph-/);
   assert.ok((await read('photos.json'))[photoId]);
   // Selecting a source shows its Inspector instead of the spread's.
@@ -121,9 +121,9 @@ try {
   await changed(() => button('Undo').click());
   assert.equal((await read('photos.json'))[photoId].caption, undefined);
   await changed(() => dropFile(markdown, '[data-box="body"]'));
-  await window.waitForFunction(async () => /^tx-/.test((await window.imageflow.currentProject()).value.project.spreads[1].boxes.body.text ?? ''));
+  await window.waitForFunction(async () => /^tx-/.test((await window.imageflow.currentProject()).value.project.spreads[3].boxes.body.text ?? ''));
   await ready();
-  const textId = (await read()).spreads[1].boxes.body.text;
+  const textId = (await read()).spreads[3].boxes.body.text;
   assert.match(textId, /^tx-/);
   assert.match(await preview().locator('[data-spread="arriving"] [data-box="body"]').textContent(), /imported through the canvas/);
   await changed(async () => {
@@ -139,15 +139,15 @@ try {
   assert.equal(await preview().locator('[data-spread="arriving"] [data-box="body"]').evaluate((el) => getComputedStyle(el).color), 'rgb(12, 40, 80)');
 
   await saveState(() => window.getByRole('radio', { name: 'Panorama', exact: true }).click(), (data) =>
-    data.spreads[1].definition === 'panorama' && data.spreads[1].boxes.hero.photo === photoId && data.spreads[1].boxes.body.text === textId);
+    data.spreads[3].definition === 'panorama' && data.spreads[3].boxes.hero.photo === photoId && data.spreads[3].boxes.body.text === textId);
   await saveState(() => window.getByRole('radio', { name: 'Photo and story', exact: true }).click(), (data) =>
-    data.spreads[1].boxes.body.text === textId);
+    data.spreads[3].boxes.body.text === textId);
 
   await window.locator('.spread-thumb[aria-current="page"]').focus();
-  await saveState(() => menuAction(app, 'Duplicate Spread'), (data) => data.spreads.length === 16);
-  await saveState(() => menuAction(app, 'Move Spread Down'), (data) => data.spreads[2].id === 'headlands');
-  await saveState(() => menuAction(app, 'Delete Spread'), (data) => data.spreads.length === 15);
-  await saveState(() => button('Add').click(), (data) => data.spreads.length === 16);
+  await saveState(() => menuAction(app, 'Duplicate Spread'), (data) => data.spreads.length === 18);
+  await saveState(() => menuAction(app, 'Move Spread Down'), (data) => data.spreads[4].id === 'headlands');
+  await saveState(() => menuAction(app, 'Delete Spread'), (data) => data.spreads.length === 17);
+  await saveState(() => button('Add').click(), (data) => data.spreads.length === 18);
 
   await app.evaluate(({ dialog }, folder) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] });
@@ -155,7 +155,7 @@ try {
   await menuAction(app, 'Open project…');
   await ready();
   assert.equal(await (await app.browserWindow(window)).evaluate((window) => window.getTitle()), 'Draft Photobook');
-  assert.equal((await read()).spreads.length, 16);
+  assert.equal((await read()).spreads.length, 18);
   if (!packaged) await checkFlow(app, root);
   console.log('ImageFlow draft workflow passed' + (packaged ? ' (packaged).' : '.'));
 } finally {

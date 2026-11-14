@@ -1,3 +1,4 @@
+import { EditMarkdown, NewMarkdown } from './MarkdownActions';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import type { DesktopApi, ProjectSummary, SourceAction } from './desktop';
 import { PhotoViewMenu } from './PhotoViewMenu';
@@ -79,6 +80,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   return <section className="source-manager" aria-label="Assets" aria-busy={busy || disabled}>
     <header className="asset-toolbar">
       <input type="search" aria-label="Search assets" placeholder="Search assets" value={search} onChange={(event) => setSearch(event.target.value)} />
+      <NewMarkdown api={api} disabled={locked} />
       <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} />
       <ActionMenu className="asset-filter" label={<>Filter <Icon name="chevron" /></>}>
         {(['photo', 'markdown', 'file'] as const).map((value) => <button key={value} onClick={() => setKind(kind === value ? 'all' : value)}>{({ photo: 'Photos', markdown: 'Markdown', file: 'Files' })[value]}</button>)}
@@ -128,7 +130,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
             : <span aria-hidden="true">{entry.kind === 'photo' ? '▧' : entry.kind === 'markdown' ? 'Aa' : '▤'}</span>}</span>
           <span className="asset-name" title={entry.path}><span className="asset-description"><strong>{fileName(entry.path)}</strong>
             {(entry.linked || problem) && <span className="muted">{entry.path.split('/').slice(-2, -1)[0]}</span>}</span></span>
-          <span className="asset-status">{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
+          <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={fileName(entry.path)} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
             {entry.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>
         </div></Fragment>;

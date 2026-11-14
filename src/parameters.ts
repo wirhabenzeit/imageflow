@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { plainFormatted } from './formatted-text';
 import { identifier } from './project';
 import type { Values } from './project';
 
@@ -16,7 +17,10 @@ const numeric = { min: z.number().optional(), max: z.number().optional(), step: 
 
 const scalarParameterOptions = [
   z.object({ ...common, type: z.literal('boolean'), default: z.boolean() }),
-  z.object({ ...common, type: z.literal('string'), default: z.string(), multiline: z.boolean().optional(), maxLength: z.int().nonnegative().optional(), placeholder: z.string().optional() }),
+  // `markdown: 'inline'` lets the value carry **bold** and *italic* (src/formatted-text.ts). Opt-in, so plain strings
+  // never change meaning; `maxLength` then counts the visible characters, not the markers.
+  z.object({ ...common, type: z.literal('string'), default: z.string(), multiline: z.boolean().optional(), maxLength: z.int().nonnegative().optional(), placeholder: z.string().optional(),
+    markdown: z.literal('inline').optional() }),
   z.object({ ...common, ...numeric, type: z.literal('integer'), default: z.int() }),
   z.object({ ...common, ...numeric, type: z.literal('number'), default: z.number() }),
   z.object({ ...common, type: z.literal('enum'), default: z.string(), options: z.array(z.string()).min(1), labels: z.record(z.string(), z.string()).optional() }),
@@ -91,7 +95,7 @@ export function isParameterValue(param: Parameter, value: unknown): boolean {
   }
   if (typeof value !== 'string') return false;
   switch (param.type) {
-    case 'string': return param.maxLength === undefined || value.length <= param.maxLength;
+    case 'string': return param.maxLength === undefined || (param.markdown ? plainFormatted(value) : value).length <= param.maxLength;
     case 'enum': return param.options.includes(value);
     case 'color': return color.safeParse(value).success;
     case 'date': return date.safeParse(value).success && (!param.min || value >= param.min) && (!param.max || value <= param.max);

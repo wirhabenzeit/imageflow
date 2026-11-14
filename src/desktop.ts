@@ -12,6 +12,7 @@ export const desktopScheme = 'imageflow';
 export const editorURL = desktopScheme + '://editor/';
 export const startURL = desktopScheme + '://editor/start';
 export const starterURL = desktopScheme + '://editor/new';
+export const markdownURL = desktopScheme + '://editor/markdown';
 export const assetsURL = desktopScheme + '://editor/assets';
 export const templatesURL = desktopScheme + '://editor/templates';
 export const settingsURL = desktopScheme + '://editor/settings';
@@ -19,6 +20,7 @@ export const renderOrigin = desktopScheme + '://render';
 
 export const channels = {
   contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', toolbarDragRegions: 'document:toolbar-drag-regions', presentation: 'document:presentation', dragSources: 'document:drag-sources',
+  showMarkdown: 'markdown:open', markdownAction: 'markdown:action', markdownChanged: 'markdown:changed', markdownPrepareClose: 'markdown:prepare-close',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
@@ -88,7 +90,17 @@ export type ContextMenuItem = import('./commands').RegisteredCommand | { command
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };
 export type SourceCommand = { action: 'place'; keys: string[] } | { action: 'jump'; spread: string };
 export type PopupItem = { id?: string; label?: string; type?: 'separator'; enabled?: boolean; checked?: boolean; toolTip?: string };
+export type MarkdownState = {
+  id: string; name: string; path: string; external: boolean; text: string; version: number; basis: number;
+  dirty: boolean; saving: boolean; closing?: boolean; error?: string; conflict?: string;
+};
+export type MarkdownAction = { action: 'state' | 'save' } | { action: 'change' | 'closing'; text: string; version: number; basis: number }
+  | { action: 'reload' | 'keep'; conflict: string };
 export type DesktopApi = {
+  showMarkdown(request: { id: string } | { name: string }): Promise<Result<void>>;
+  markdownAction(request: MarkdownAction): Promise<Result<MarkdownState>>;
+  onMarkdownPrepareClose(listener: () => void): () => void;
+  onMarkdownChanged(listener: (state: MarkdownState) => void): () => void;
   showContextMenu(items: ContextMenuItem[], state?: BookMenuState): Promise<ContextMenuResult | null>;
   onSourceCommand(listener: (command: SourceCommand) => void): () => void;
   templateAction(id: string, action: 'reveal' | 'new'): Promise<Result<void>>;

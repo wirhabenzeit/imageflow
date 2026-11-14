@@ -213,3 +213,30 @@ test('only the book frame is the canvas; other and unknown frames are previews, 
   assert.equal(renderView({ mode: 'export', view: 'canvas' }), 'export');
   assert.equal(renderView({ mode: 'edit' }), 'canvas');
 });
+
+test('Text shows formatting only for markdown strings, and never as HTML', () => {
+  const render = (markdown: boolean, value: string, fallback?: string) => {
+    const template = chooseFormat(templateSchema.parse({ id: 'text', version: '1', contract: 1,
+      format: { label: 'F', trim: { width: mm(100), height: mm(100) },
+        bleed: { top: mm(0), bottom: mm(0), outside: mm(0), binding: mm(0) }, safe: { top: mm(5), bottom: mm(5), outside: mm(5), binding: mm(5) },
+        structure: { delivery: 'pages', ends: 'inside-covers', pageCount: { min: 2, max: 20, step: 2 } },
+        output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' } },
+      spreads: { main: { label: 'Main', parameters: { heading: { type: 'string', label: 'Heading', default: '', ...(markdown ? { markdown: 'inline' } : {}) } },
+        render: (ctx: RenderContext) => createElement(runtime.Spread, {}, createElement(ctx.Text, { parameter: 'heading', as: 'h1', fallback }),
+          createElement('p', { className: 'own' }, createElement(runtime.FormattedText, { value: String(ctx.params.heading) })),
+          createElement('p', { className: 'plain' }, runtime.plainText(String(ctx.params.heading)))) } } }));
+    const project = projectSchema.parse({ schemaVersion: 1, title: 'Text', template: { id: 'text', version: '1' },
+      spreads: [{ id: 'one', definition: 'main', params: { heading: value } }] });
+    const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+    return renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
+      page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
+  };
+  const formatted = render(true, 'A **bold**, *italic* and ~~gone~~ <b>tag</b>');
+  assert.match(formatted, /<h1[^>]*>A <strong>bold<\/strong>, <em>italic<\/em> and <s>gone<\/s> &lt;b&gt;tag&lt;\/b&gt;<\/h1>/);
+  assert.match(formatted, /<p class="own">A <strong>bold<\/strong>/);
+  assert.match(formatted, /<p class="plain">A bold, italic and gone &lt;b&gt;tag&lt;\/b&gt;<\/p>/);
+  assert.match(render(false, 'A **bold** word'), /<h1[^>]*>A \*\*bold\*\* word<\/h1>/, 'plain strings keep their asterisks');
+  assert.match(render(true, '', '**inherited**'), /<h1[^>]*>\*\*inherited\*\*<\/h1>/, 'display-only fallback text stays plain');
+  assert.ok(capabilities.includes('formatted-text'));
+  assert.ok(runtimeExports.includes('FormattedText') && runtimeExports.includes('plainText'));
+});

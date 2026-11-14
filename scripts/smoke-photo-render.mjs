@@ -13,12 +13,12 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'photo-render-'));
 const project = join(work, 'Book.imageflow');
 await cp(join(root, 'sample', 'starter'), project, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
-// The starter's story layout draws its main photo through a circular SVG mask.
+// The starter's story layout (photo on the left) draws its main photo through a circular SVG mask.
 const source = join(project, 'template', 'index.tsx');
 const template = await readFile(source, 'utf8');
-const plain = `<ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />`;
+const plain = `<ctx.PhotoBox id="hero" rect={ctx.geometry.page(photo, 'bleed')} />`;
 assert.ok(template.includes(plain));
-await writeFile(source, template.replace(plain, `<ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')}>{(photo, box) =>
+await writeFile(source, template.replace(plain, `<ctx.PhotoBox id="hero" rect={ctx.geometry.page(photo, 'bleed')}>{(photo, box) =>
             <svg className="smoke-mask" width={photo.box.width} height={photo.box.height}>
               <clipPath id={box.uid}><circle cx={photo.box.width / 2} cy={photo.box.height / 2} r={photo.box.width / 3} /></clipPath>
               <image className="smoke-image" href={photo.src} x={photo.image.x} y={photo.image.y} width={photo.image.width}
@@ -45,6 +45,8 @@ try {
       return current && current.getAttribute('src') !== url;
     }, old, { timeout: 30000 });
   };
+  // Callback boxes are drawn when their spread comes near the screen, so bring the story into view first.
+  await w.locator('.spread-thumb[data-spread="arriving"]').click();
   const image = frame.locator('[data-spread="arriving"] [data-box="hero"][data-photo-render="custom"] svg.smoke-mask image.smoke-image');
   await image.waitFor();
   const x = () => w.frameLocator(ready).locator('[data-spread="arriving"] [data-box="hero"] image.smoke-image').evaluate((node) => Number(node.getAttribute('x')));
