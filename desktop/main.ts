@@ -39,6 +39,7 @@ import { mcpTools } from '../src/mcp-contract';
 import { starters } from '../src/starters';
 import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-library';
 import { TemplateTrust, trustedOrigins } from './template-trust';
+import { readReleasedTemplates } from './released-templates';
 import { isTemplateArchive, templateArchiveExtension, writeTemplateArchive } from './template-archive';
 import { writeAuthoringSnapshot } from './authoring-sdk';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
@@ -69,6 +70,8 @@ let settings: SettingsStore;
 let recents: RecentDocuments;
 let library: TemplateLibrary;
 let trust: TemplateTrust;
+// Hashes of the built-in templates every release shipped (`sample/released-templates.json`).
+let releasedTemplates: Promise<Set<string>> = Promise.resolve(new Set());
 const sessions: RenderSessions = new Map();
 const documents = new Map<number, DocumentSession>();
 const identities = new Map<string, DocumentSession>();
@@ -708,11 +711,12 @@ async function importTemplate(owner: BrowserWindow | undefined, path: string) {
  * `declared`, or before the template has rendered, all the trust covers.
  */
 async function bookNetworkTrust(hash: string, declared?: readonly string[]) {
-  const entry = await library.builtInEntry(hash);
-  // Remembered like a template the user allowed, so the book stays trusted after an update changes the built-in.
-  if (entry?.network?.length) await trust.rememberBuiltIn(hash, entry.network, entry).catch((error) => console.warn('ImageFlow could not save template trust', error));
-  const allowed = entry ? entry.network ?? [] : await trust.allowed(hash);
-  return declared ? trustedOrigins(declared, { builtIn: entry !== undefined, allowed }) : allowed;
+  const builtIn = await library.builtInNetwork(hash);
+  // A built-in template from an earlier release is trusted like the current one, so its books need not ask after an
+  // update changes it. Its sites are known only once it declares them.
+  const released = builtIn === undefined && (await releasedTemplates).has(hash);
+  const allowed = builtIn ?? await trust.allowed(hash);
+  return declared ? trustedOrigins(declared, { builtIn: builtIn !== undefined || released, allowed }) : allowed;
 }
 
 /** Library entries with why their network access needs no question, for Manage Templates and New Book. */
@@ -1065,6 +1069,7 @@ void app.whenReady().then(async () => {
     });
   library.onChange(publishLibrary);
   trust = new TemplateTrust(join(app.getPath('userData'), 'template-trust.json'));
+  releasedTemplates = readReleasedTemplates(sampleFolder('released-templates.json'));
   const renditions = await configureRenditionCache(cache, join(app.getPath('userData'), 'Cache', 'renditions'));
   await maintainSources();
   const sourceMaintenance = setInterval(() => { if (![...documents.values()].some((document) => document.busy)) void maintainSources(); }, 5 * 60 * 1000);
