@@ -146,6 +146,13 @@ export function InlineTextEditor({ projectId, project, spread, template, target,
       if (event.key === 'Escape' && !saving.current) { event.preventDefault(); close(); }
     }}>
     <strong>{opened.field.param.label}</strong>
+    {opened.field.param.type === 'string' && opened.field.param.markdown === 'inline' && <span className="inline-text-format" role="group" aria-label="Formatting">
+      {([['bold', 'B', 'Bold (⌘B)'], ['italic', 'I', 'Italic (⌘I)'], ['strike', 'S', 'Strikethrough (⇧⌘X)']] as const).map(([mark, letter, title]) =>
+        <button key={mark} type="button" className={'format-' + mark} title={title} aria-label={title} disabled={disabled || !ready}
+          // Keep focus and the selection in the text while clicking.
+          onPointerDown={(event) => event.preventDefault()} onMouseDown={(event) => event.preventDefault()}
+          onClick={() => frame.current?.contentWindow?.postMessage({ type: 'text-format', mark }, renderOrigin)}>{letter}</button>)}
+    </span>}
     {message && <div className="inline-text-recovery" role="alert"><p>{message}</p>
       <textarea aria-label="Unsaved text — copy before discarding" readOnly value={typing} /></div>}
     <button type="button" disabled={finishing} onClick={close}>Discard</button>

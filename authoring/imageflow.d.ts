@@ -142,7 +142,14 @@ type Common = {
 };
 type Numeric = { min?: number; max?: number; step?: number; unit?: string };
 export type BooleanParameter = Common & { type: 'boolean'; default: boolean };
-export type StringParameter = Common & { type: 'string'; default: string; multiline?: boolean; maxLength?: number; placeholder?: string };
+/**
+ * A string. `markdown: 'inline'` lets its value carry inline formatting: `**bold**`, `*italic*` and `~~strikethrough~~`
+ * (escape a literal marker with a backslash, `\*`). `ctx.Text` then shows it as `<strong>`, `<em>` and `<s>`, which
+ * the template styles with CSS, and the inline editor converts markers as they are typed and offers Cmd+B, Cmd+I and
+ * Cmd+Shift+X. `maxLength` counts the visible characters, not the markers. Nothing else is Markdown: `#`, `_`, links
+ * and HTML are shown as typed. `ctx.params` holds the saved string with its markers; show it with `<FormattedText>`.
+ */
+export type StringParameter = Common & { type: 'string'; default: string; multiline?: boolean; maxLength?: number; placeholder?: string; markdown?: 'inline' };
 export type IntegerParameter = Common & Numeric & { type: 'integer'; default: number };
 export type NumberParameter = Common & Numeric & { type: 'number'; default: number };
 export type EnumParameter = Common & { type: 'enum'; default: string; options: readonly string[]; labels?: Record<string, string> };
@@ -704,7 +711,8 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
-  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render';
+  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
+  'formatted-text';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -1072,6 +1080,18 @@ export type RenderedImageProps = {
  * or timeout is a `rendered-image-failed` error, so export never prints a page without it.
  */
 export function RenderedImage(props: RenderedImageProps): ImageFlowElement;
+
+/**
+ * Shows the value of a `markdown: 'inline'` string parameter with its formatting, as `<strong>`, `<em>` and `<s>`
+ * inside the element you place it in: `<h2 className="map-title"><FormattedText value={ctx.params.mapTitle} /></h2>`.
+ * Unmatched markers show as typed; the value is never read as HTML. `ctx.Text` does this for you.
+ */
+export function FormattedText(props: { value: string }): ImageFlowElement;
+/**
+ * The visible text of a `markdown: 'inline'` value, without its markers: `plainText('**Day** one')` is `'Day one'`.
+ * Use it where formatting cannot show, such as anchor titles for a contents page.
+ */
+export function plainText(value: string): string;
 
 // Only the declarations marked `export` above are part of the module.
 export {};

@@ -388,6 +388,12 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .inline-text-recovery { position: absolute; bottom: calc(100% + 8px); left: 0; width: 420px; max-width: 80vw;
   padding: 12px; border: 1px solid var(--edge); background: var(--panel-surface); border-radius: 8px; }
 .inline-text-recovery textarea { width: 100%; height: 80px; }
+/* Formatting buttons for `markdown: 'inline'` text: each letter shows its own style. */
+.inline-text-format { display: flex; flex: none; gap: 2px; }
+.inline-text-format button { min-width: 26px; padding-inline: 6px; font-family: Georgia, serif; }
+.inline-text-format .format-bold { font-weight: 700; }
+.inline-text-format .format-italic { font-style: italic; }
+.inline-text-format .format-strike { text-decoration: line-through; }
 /* On a narrow canvas the fields wrap onto a second row, so nothing overlaps; the width only follows the canvas. */
 .inline-editor-fields { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0; padding: 0 0 0 10px;
   border-width: 0 0 0 1px; min-width: 0; }
