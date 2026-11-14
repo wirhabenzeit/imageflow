@@ -97,7 +97,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     <details open><summary>Placed on</summary>
       <Placements summary={summary} template={template} usage={usage} render={render} source={source} select={select} />
     </details>
-    {!summary.readOnly && <button type="button" onClick={() => {
+    {writable && <button type="button" onClick={() => {
       setOpenError('');
       void window.imageflow?.documentAction('text', source.id).then((result) => { if ('error' in result) setOpenError(result.error); });
     }}>Open in Editor</button>}

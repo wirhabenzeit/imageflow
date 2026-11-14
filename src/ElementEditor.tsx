@@ -24,9 +24,9 @@ import type { EditorState, EditorTarget } from './editor-session';
 // redraws, scrolls or zooms around it; only its position and scale follow. The element's other parameters, and
 // moving the editor to the panel, sit in a toolbar under the canvas, so no panel covers the artwork.
 export type InlinePlacement = Rect & { zoom: number };
-export function ElementEditorDialog({ project, template, spread, params, target, readOnly, blocked, canvasReady, edit, close, importFile, prepare, network = '', host, geometry,
+export function ElementEditorDialog({ project, template, spread, params, target, blocked, canvasReady, edit, close, importFile, prepare, network = '', host, geometry,
   presentation = 'dialog', placement, stage, shown, click }: {
-  project: string; template: TemplateInfo; spread: SpreadState; params: Values; target: EditorTarget; readOnly: boolean;
+  project: string; template: TemplateInfo; spread: SpreadState; params: Values; target: EditorTarget;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
   geometry?: BookGeometry;
   presentation?: 'dialog' | 'inline';
@@ -79,7 +79,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   // The frame keeps the project state it opened with; saving starts a new render elsewhere, not here. Preparing may
   // render the book again (newly allowed network origins), so the frame opens on the project as it is then.
   const address = (id: string) => renderOrigin + '/render/' + id + '?view=editor&spread=' + encodeURIComponent(spread.id) +
-    (target.kind === 'document' ? '&editor=' + encodeURIComponent(target.editor) : '&element=' + encodeURIComponent(element)) + (readOnly ? '&readonly' : '') +
+    (target.kind === 'document' ? '&editor=' + encodeURIComponent(target.editor) : '&element=' + encodeURIComponent(element)) +
     (inline ? '&presentation=inline' : '');
   const latestProject = useRef(project);
   latestProject.current = project;
@@ -125,7 +125,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
       // The import starts a new render session; the frame reads the new file from it.
       const reply = (imported?: { id: string; project: string }) => frame.current?.contentWindow?.postMessage(
         { type: 'editor-imported', request: data.request, ...imported }, renderOrigin);
-      if (readOnly || failed || stale || blocked || rejected.current || !importFile || !accept.length) reply();
+      if (failed || stale || blocked || rejected.current || !importFile || !accept.length) reply();
       else void importFile(accept, data.mode === 'copy' || data.mode === 'link' ? data.mode : undefined).then(reply, () => reply());
     },
   }, 'The editor has not finished the current field. Click × again to close without the unfinished typing.');
@@ -177,7 +177,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   const generated = definition ? controlLayout(definition.parameters, definition.controls, current, owned) : [];
 
   async function apply(reported: Values, reportedSpread: Values, generatedValues: Values) {
-    if (rejected.current || failed || stale || blocked || readOnly || !editor || !declared || !layout) return false;
+    if (rejected.current || failed || stale || blocked || !editor || !declared || !layout) return false;
     const changes = [...Object.entries(reported), ...Object.entries(generatedValues)];
     const spreadChanges = Object.entries(reportedSpread);
     const invalid = changes.filter(([key, value]) => !Object.hasOwn(declared, key) ||
@@ -218,12 +218,12 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   async function done(latest: Values, latestSpread: Values) {
     draft.current = { ...draft.current, ...latest };
     spreadDraft.current = { ...spreadDraft.current, ...latestSpread };
-    if (await apply(draft.current, spreadDraft.current, local) || readOnly) setClosing(true);
+    if (await apply(draft.current, spreadDraft.current, local)) setClosing(true);
   }
 
   function requestClose(action?: () => void) {
     outsideAction.current = action;
-    if (failed || stale || blocked || readOnly || flushTimedOut || rejected.current) { setClosing(true); return; }
+    if (failed || stale || blocked || flushTimedOut || rejected.current) { setClosing(true); return; }
     if (flushing !== undefined) return;
     if (!flush()) void done({}, {});
   }
@@ -276,7 +276,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
       else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); requestClose(); }
     },
   };
-  const disabled = readOnly || failed || stale || !!blocked || saveRejected;
+  const disabled = failed || stale || !!blocked || saveRejected;
   // A file the generated controls import (such as a new GPX track) reaches the editor's frame too, which reads its
   // files from the render session the import started.
   const projectFiles = useContext(ProjectFilesContext);
@@ -311,8 +311,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
     // One line at most, above the toolbar, so a problem never moves the toolbar or the page.
     const problem = saveRejected ? 'The last change could not be saved. Reopen the editor to retry.'
       : stale ? subject + ' changed. Reopen the editor to continue.'
-        : error || (blocked ?? '') || (warnings.length ? warnings.length + ' editor warnings: ' + warnings.join(' ') : '') ||
-          (readOnly ? 'Read Only' : '');
+        : error || (blocked ?? '') || (warnings.length ? warnings.length + ' editor warnings: ' + warnings.join(' ') : '');
     return <>
       {stage && at && createPortal(<div ref={inlineBox} className={'inline-editor' + (showing ? ' showing' : '')} aria-hidden={!showing || undefined} {...contain}
         style={{ left: at.x, top: at.y, width: at.width / at.zoom, height: at.height / at.zoom, transform: 'scale(' + at.zoom + ')',
@@ -332,7 +331,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   if (!host) return null;
   return createPortal(<div ref={panel} className="item-controls element-editor" role="dialog" aria-label={title} {...contain}>
     <header className="ee-header">
-      <h2>{title}</h2>{readOnly && <span className="muted">Read Only</span>}
+      <h2>{title}</h2>
       <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)"
         disabled={flushing !== undefined} onClick={() => requestClose()}><Icon name="close" /></button>
     </header>

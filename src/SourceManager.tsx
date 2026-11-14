@@ -60,7 +60,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     } else if (result.command === 'asset-jump') await act({ action: 'jump', spread: result.value });
     else if (result.command in assetActions) await act({ action: assetActions[result.command as keyof typeof assetActions], keys });
   }
-  const locked = busy || disabled || summary.readOnly;
+  const locked = busy || disabled;
   const shown = entries.filter((entry) => (kind === 'all' || kind === entry.kind) &&
     (used === 'all' || (used === 'used') === !!placements(entry).length) &&
     (storage === 'all' || (storage === 'linked') === entry.linked) && (!attention || unavailable(entry.key)) &&

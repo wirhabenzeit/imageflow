@@ -99,7 +99,7 @@ export class DocumentSession {
   async prepareNetwork() {
     const book = this.book;
     const hash = book.templateHash;
-    const origins = book.readOnly || !hash ? [] : [...new Set([...await approvedNetwork(book.folder, hash),
+    const origins = !hash ? [] : [...new Set([...await approvedNetwork(book.folder, hash),
       ...await this.networkTrust?.(hash).catch(() => []) ?? []])];
     this.network = { hash, origins };
     this.networkPrepared = true;
@@ -180,7 +180,7 @@ export class DocumentSession {
     this.stopWatch();
     this.projectSession.relocate(folder);
     this.projectSession.book = { ...this.book, folder };
-    const next = await loadProject(folder, this.cache, this.book.readOnly);
+    const next = await loadProject(folder, this.cache);
     this.notify({ value: this.activate(next, true) });
     this.watchProject(next);
   }
@@ -214,14 +214,13 @@ export class DocumentSession {
     await this.relocate(destination);
   }
   async reload() {
-    const next = await loadProject(this.book.folder, this.cache, this.book.readOnly);
+    const next = await loadProject(this.book.folder, this.cache);
     const summary = this.activate(next, true);
     if (!this.watcher) this.watchProject(next);
     return summary;
   }
   /** Bundles the template's installed packages into template/vendor/ and reloads the book with them (ADR 0006). */
   async rebuildDependencies() {
-    if (this.book.readOnly) throw new Error('Create a project to change its template.');
     await rebuildDependencies(await templateFolder(this.book.folder));
     const summary = await this.reload();
     this.notify({ value: summary });
@@ -303,9 +302,9 @@ export class DocumentSession {
     this.renderIds.add(id);
     this.renders.set(id, { book, mode: 'edit', network: () => this.originsFor(book), pictures: this.previewPictures });
     // A changed template gets the approvals for its own hash, if any, and the frames are rendered again with them.
-    if (this.networkPrepared && !book.readOnly && book.templateHash !== this.network.hash) queueMicrotask(() => void this.updateNetwork().catch(() => {}));
-    this.window.setTitle(bookName(book.folder) + (book.readOnly ? ' — Read Only' : ''));
-    if (!book.readOnly) this.window.setRepresentedFilename(book.folder);
+    if (this.networkPrepared && book.templateHash !== this.network.hash) queueMicrotask(() => void this.updateNetwork().catch(() => {}));
+    this.window.setTitle(bookName(book.folder));
+    this.window.setRepresentedFilename(book.folder);
     this.changed?.(book);
     this.watchLinkedSources(book);
     return this.summary;
@@ -379,7 +378,6 @@ export class DocumentSession {
 
   watchProject(book: OpenProject) {
     this.stopWatch();
-    if (book.readOnly) return;
     const folder = book.folder;
     const inputs = this.projectSession?.inputs;
     let checkingChanges = false;
@@ -489,7 +487,6 @@ export class DocumentSession {
   async importFiles(owner: BrowserWindow, id: string, request: ImportRequest, base?: OpenProject) {
     const current = this.currentBook(id);
     const book = base ?? current;
-    if (book.readOnly) throw new Error('Create a project to import files.');
     if (request.kind !== undefined && request.kind !== 'photo' && request.kind !== 'markdown' && request.kind !== 'file') throw new Error('Unknown import type.');
     if (request.kind === 'file' && (!Array.isArray(request.accept) || !request.accept.length ||
         !request.accept.every((ext) => typeof ext === 'string' && /^\.[a-z0-9]{1,10}$/.test(ext)) || request.folder)) {
@@ -547,7 +544,7 @@ export class DocumentSession {
       typeof origin === 'string' && /^https:\/\/(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(:\d{1,5})?$/.test(origin)))].slice(0, 20) : [];
     const hash = book.templateHash;
     const before = new Set(this.originsFor(book));
-    if (!origins.length || book.readOnly || !hash) { this.network = { hash, origins: [] }; return { origins: [] as string[] }; }
+    if (!origins.length || !hash) { this.network = { hash, origins: [] }; return { origins: [] as string[] }; }
     while (this.askingNetwork) await this.askingNetwork.catch(() => {});
     const ask = (async () => {
       const trusted = await this.networkTrust?.(hash, origins).catch(() => []) ?? [];

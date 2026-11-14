@@ -20,7 +20,7 @@ export function AssetsWindow({ api }: { api?: DesktopApi }) {
   const [refreshing, setRefreshing] = useState(false);
   const refreshingRef = useRef(false);
   const retry = async (book: ProjectSummary) => {
-    if (!api || book.readOnly || refreshingRef.current || !Object.values(book.sources ?? {}).some(({ state }) => state !== 'available' && state !== 'unapproved')) return;
+    if (!api || refreshingRef.current || !Object.values(book.sources ?? {}).some(({ state }) => state !== 'available' && state !== 'unapproved')) return;
     refreshingRef.current = true;
     setRefreshing(true);
     try {

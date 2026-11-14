@@ -69,9 +69,9 @@ export function MarkedFields({ project, spread, template, edits, edit, compact =
 // Edits the selected item from a stable panel at the bottom of the visible canvas: a node the template marked with `ctx.edit(...)` or
 // `ctx.Text`, or a box or element. For a box, `children` is the platform's part (its photo or text) and `title`
 // names the box.
-export function EditPopover({ project, spread, template, edits, host, readOnly, blocked, edit, close, step, actions, title, children, textFallback, compact = false, anchor }: {
+export function EditPopover({ project, spread, template, edits, host, blocked, edit, close, step, actions, title, children, textFallback, compact = false, anchor }: {
   project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; host?: HTMLElement | null;
-  readOnly: boolean; blocked?: string; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
+  blocked?: string; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
   compact?: boolean; anchor?: () => Rect | undefined; actions?: ReactNode; title?: string; children?: ReactNode;
   textFallback?: { parameter: string; text: string; label: string };
 }) {
@@ -87,7 +87,7 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
   function apply(changes: Record<string, Value>) {
     const valid = targets.filter(({ path, param }) => path in changes && isParameterValue(param, changes[path]) &&
       changes[path] !== readEdit(project, spread, targets.find((target) => target.path === path)!));
-    if (!valid.length || readOnly || blocked) return;
+    if (!valid.length || blocked) return;
     edit(({ project: files }) => { for (const target of valid) writeEdit(files, spread.id, target, changes[target.path]); },
       valid.map(({ param }) => param.label).join(', ') + ' updated');
     setDrafts((previous) => ({ ...previous, ...Object.fromEntries(valid.map(({ path }) => [path, changes[path]])) }));
@@ -198,7 +198,7 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
   });
   const inline = compact ? shown.filter((item) => item.kind === 'field' && compactParameter(item.target.param)).slice(0, 4) : [];
   const overflow = shown.filter((item) => !inline.includes(item));
-  return createPortal(<div ref={panel} className={'item-controls edit-popover' + (compact ? ' edit-popover-compact' : '')} role="dialog" aria-label={'Edit ' + (title ?? visible.map(({ label }) => label).join(', '))} title={blocked || (readOnly ? 'Read Only' : undefined)}
+  return createPortal(<div ref={panel} className={'item-controls edit-popover' + (compact ? ' edit-popover-compact' : '')} role="dialog" aria-label={'Edit ' + (title ?? visible.map(({ label }) => label).join(', '))} title={blocked || undefined}
     onKeyDown={keys} onPointerDown={(event) => event.stopPropagation()}
     onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}
     onMouseMove={(event) => event.stopPropagation()} onMouseLeave={(event) => event.stopPropagation()}
@@ -209,11 +209,11 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
       <span>{heading}</span>
       <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)" onClick={() => { commit(); close(); }}><Icon name="close" /></button>
     </div>}
-    <fieldset className={compact ? 'ep-compact-row' : undefined} disabled={readOnly || !!blocked}>
+    <fieldset className={compact ? 'ep-compact-row' : undefined} disabled={!!blocked}>
       {children}
       {compact ? <>{render(inline, true)}{overflow.length > 0 && <details className="compact-overflow"><summary title="More settings" aria-label="More settings">⚙</summary><div>{render(overflow)}</div></details>}</> : render(shown)}
     </fieldset>
     {compact && <button className="ep-done" onClick={() => { commit(); close(); }}>Done</button>}
-    {actions && !readOnly && !blocked && <div className="ep-actions">{actions}</div>}
+    {actions && !blocked && <div className="ep-actions">{actions}</div>}
   </div>, host);
 }
