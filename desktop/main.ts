@@ -25,6 +25,7 @@ import { photoFile } from './photos';
 import { captureBookPreview, checkBookRender } from './preview';
 import { PreviewError } from '../src/preview';
 import { DocumentSession } from './document-session';
+import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { createDocument, documentIdentity, documentPath, isDocument, RecentDocuments } from './documents';
 import { SettingsStore } from './settings';
@@ -393,8 +394,10 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
       const book = await loadProject(folder, cache, readOnly);
       if (quitting) throw new Error('ImageFlow is closing.');
       editor = new BrowserWindow({ width: 1520, height: 950, minWidth: 940, minHeight: 650, show: false,
-        ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 20 } } : {}),
         webPreferences: windowOptions() });
+      configureMacHeader(editor);
+      // The document session owns the native title; the editor page's HTML title must not replace it.
+      editor.on('page-title-updated', (event) => event.preventDefault());
       secureWindow(editor);
       document = new DocumentSession(editor, book, cache, sessions, release, (next) => {
         if (document) queueMicrotask(() => { if (document) publishAssets(document); });
@@ -1167,6 +1170,10 @@ void app.whenReady().then(async () => {
       if (entered) owner.removeListener('enter-full-screen', entered);
       if (simple) owner.setSimpleFullScreen(previous); else owner.setFullScreen(previous);
     }
+  });
+  ipcMain.handle(channels.toolbarDragRegions, (event, regions: unknown) => {
+    const owner = editorOwner(event)?.window;
+    if (owner && process.platform === 'darwin') setToolbarDragRegions(owner, regions);
   });
   ipcMain.handle(channels.documentProxy, async (event, action: unknown) => {
     const document = editorOwner(event);

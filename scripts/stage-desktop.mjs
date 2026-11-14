@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import metadata from '../package.json' with { type: 'json' };
 import { buildMcp } from './build-mcp.mjs';
+import { buildMacHeader } from './build-mac-header.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 export const desktop = join(root, '.build', 'desktop');
@@ -45,6 +46,7 @@ export async function stageDesktop({ packaged = false, dev = false, destination 
     })),
     cp(join(root, 'docs'), join(destination, 'docs'), { recursive: true }),
     buildMcp(join(destination, 'mcp-bridge.cjs')),
+    buildMacHeader(destination),
     build(mainBuild(destination)),
   ]);
 }

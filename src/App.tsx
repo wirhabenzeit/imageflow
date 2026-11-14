@@ -54,6 +54,7 @@ import { useListSelection } from './list-selection';
 import { insertionProblem, spreadOrder, spreadSelectionOrder } from './spread-order';
 import { spreadMime, useSpreadReorder } from './useSpreadReorder';
 import { animateReorder, reorderOffsets } from './reorder-motion';
+import { useToolbarDrag } from './useToolbarDrag';
 
 type Owner = { type: 'photo' | 'markdown' | 'element'; id: string };
 // `hidden`: the box or element is declared but not on the page, so the editor opens at the spread's corner.
@@ -126,6 +127,7 @@ export function App() {
   const current = useRef<ProjectSummary>(undefined);
   const [spreadId, setSpreadId] = useState('');
   const [presenting, setPresenting] = useState<string>();
+  useToolbarDrag(presenting !== undefined);
   const [template, setTemplate] = useState<TemplateInfo>();
   const [render, setRender] = useState<RenderStatus>();
   const [reload, setReload] = useState<'loading' | 'rendering' | { error: string }>();
@@ -1479,12 +1481,13 @@ export function App() {
   const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
   const pagesLabel = (i: number) => (pageLabels[i].includes('–') ? 'Pages ' : 'Page ') + pageLabels[i];
 
-  return <ProjectFilesContext.Provider value={projectFiles}><div className={navigator.platform.includes('Mac') ? 'studio mac-studio' : 'studio'}>
+  const nativeDocumentTitle = navigator.platform.includes('Mac');
+  return <ProjectFilesContext.Provider value={projectFiles}><div className={nativeDocumentTitle ? 'studio mac-studio' : 'studio'}>
     <div className="editor-shell" inert={presenting !== undefined} aria-hidden={presenting !== undefined}>
     <header className="toolbar">
       <div className="toolbar-actions project-context">
         <button className="toolbar-icon" aria-label="Toggle project panel" aria-pressed={!panels.leftHidden} title="Toggle project panel (⌃⌘S)" onClick={() => togglePanel('left')}><Icon name="sidebarLeft" /></button>
-        <div className="project-identity" title={summary?.folder}
+        {!nativeDocumentTitle && <div className="project-identity" title={summary?.folder}
           onContextMenu={(event) => { event.preventDefault(); void api?.documentProxy('path'); }}
           onClick={(event) => { if (event.metaKey) void api?.documentProxy('path'); }}>
           {summary && <button type="button" className="document-proxy" aria-label="Document location" title="⌘-click for location · Drag to Finder"
@@ -1492,7 +1495,7 @@ export function App() {
             onClick={(event) => { event.stopPropagation(); void api?.documentProxy('path'); }}><Icon name="book" size={14} /></button>}
           <span className="document-title">{summary ? bookName(summary.folder) : 'ImageFlow'}</span>
           <span className="muted">{summary?.readOnly ? 'Read Only' : ''}</span>
-        </div>
+        </div>}
         {summary && <div className="history">
           <button aria-label="Undo" title={undoCommand.label} disabled={!undoCommand.enabled} onClick={() => undo('undo')}><Icon name="undo" /></button>
           <button aria-label="Redo" title={redoCommand.label} disabled={!redoCommand.enabled} onClick={() => undo('redo')}><Icon name="redo" /></button>
