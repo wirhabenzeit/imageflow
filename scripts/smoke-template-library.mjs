@@ -79,10 +79,14 @@ try {
   const cover = await settings.evaluate(async () => {
     const { value } = await window.imageflow.library();
     const book = value.find(({ id }) => id === 'imageflow-starter');
-    return (await window.imageflow.templatePreview(book.id, book.hash)).value;
+    const { value: src } = await window.imageflow.templatePreview(book.id, book.hash);
+    // A render the library saved already comes as its picture URL rather than as data.
+    if (!src || src.startsWith('data:')) return src?.split(',')[1];
+    const bytes = new Uint8Array(await (await fetch(src)).arrayBuffer());
+    return btoa(String.fromCharCode(...bytes));
   });
   assert.ok(cover, 'The photobook has a generated preview');
-  const pixels = await sharp(Buffer.from(cover.split(',')[1], 'base64')).stats();
+  const pixels = await sharp(Buffer.from(cover, 'base64')).stats();
   assert.ok(pixels.channels.some(({ stdev }) => stdev > 1), 'The photobook preview contains visible content');
 
   // Import shows the packages and network sites the template brings; the sites are not allowed unless asked to.

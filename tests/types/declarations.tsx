@@ -363,3 +363,10 @@ defineTemplate({ id: 'inline-text', version: '1', contract: 1, format,
       {/* @ts-expect-error 'inline' or 'dialog', as for editors */}
       <ctx.Text parameter="heading" presentation="popover" />
     </Spread> }) }) });
+
+// A template's own preview image is a path to a file in the template folder.
+defineTemplate({ id: 'preview', version: '1', contract: 1, format, preview: './preview.jpg',
+  spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });
+// @ts-expect-error a path, not an imported image or a list
+defineTemplate({ id: 'preview', version: '1', contract: 1, format, preview: ['./preview.jpg'],
+  spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });

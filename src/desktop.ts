@@ -161,6 +161,8 @@ export type SpreadDefinition = {
 export type TemplateInfo = {
   // The template's identity and its library metadata; `id` is absent in summaries from apps that predate it.
   id?: string; label?: string; description?: string;
+  // The template's own preview image, relative to the template folder (`preview` in defineTemplate).
+  preview?: string;
   version: string; parameters: Parameters; spreads: Record<string, SpreadDefinition>;
   // Families of layouts, by ID. `picker` is set when the family supplies its own picker (the component stays in the
   // render frame).
