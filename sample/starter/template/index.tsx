@@ -27,7 +27,8 @@ const bookFormat = (label: string, width: number, height: number) => printFormat
 
 const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90 });
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
-const textSize = p.number({ label: 'Body size', default: 11, min: 8, max: 16, step: .5, unit: 'pt' });
+const textSize = p.number({ label: 'Body size', default: 11, min: 8, max: 16, step: .5, unit: 'pt',
+  description: 'Type size of body text and Markdown in the whole book.' });
 // For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
 // control for every declared parameter. The value is shared by every layout with this box, so it returns when the
 // spread switches back to a layout that draws captions.
@@ -129,9 +130,12 @@ function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Vi
 // one task, so one editor owns all four parameters and applies changes while it stays open.
 const routeParameters = {
   track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
-  centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01 }),
-  centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01 }),
-  zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1 }),
+  centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01,
+    description: 'Centre of the shown part of the route, across: 0 is the west edge of the route, 1 the east edge.' }),
+  centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01,
+    description: 'Centre of the shown part of the route, down: 0 is the north edge of the route, 1 the south edge.' }),
+  zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1,
+    description: 'Higher values zoom in. 1 shows the whole route; 2 shows half its width. To zoom out a bit, lower it.' }),
 };
 // Typed from the element's declaration: `set` and `Control` accept only these four parameters, with their value types.
 type RouteEditorProps = ElementEditorProps<typeof routeParameters, 'track' | 'centerX' | 'centerY' | 'zoom'>;

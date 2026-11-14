@@ -186,7 +186,7 @@ With the `spread` builder, the render context types every parameter, box and ele
 | Helper | Value | Options |
 | --- | --- | --- |
 | `p.boolean` | `boolean` | `default` |
-| `p.integer` | `number` | `default`, `min`, `max`, `step` |
+| `p.integer` | `number` | `default`, `min`, `max`, `step`, `unit` (display only) |
 | `p.number` | `number` | `default`, `min`, `max`, `step`, `unit` (display only) |
 | `p.string` | `string` | `default`, `multiline`, `maxLength`, `placeholder` |
 | `p.enum` | one of `options` | `default`, `options` (an array of values or a value-to-label map), optional `labels` for arrays |
@@ -195,6 +195,15 @@ With the `spread` builder, the render context types every parameter, box and ele
 | `p.file` | file ID, or `''` when none is assigned | `accept` (lowercase extensions such as `'.gpx'`); see File parameters |
 
 Every parameter has a `label` and a `default` (`p.file` supplies `''`); a saved value outside the constraints is reported and replaced by the default for rendering, but kept in `project.json`.
+
+Any parameter, at any scope, may also have a `description`: plain text of up to 500 characters (trimmed, not empty) for authoring tools and agents. Say what the value means, which way it goes and when to change it, so an agent asked to "zoom the map out a bit" knows which parameter to lower:
+
+```ts
+zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: 8, step: .1,
+  description: 'Higher values zoom in. 1 shows the whole route; 2 shows half its width.' }),
+```
+
+Descriptions appear with the parameter's type, range, `step`, `unit` and options in `get_authoring_context` (under `template`) and in `inspect_book`'s parameter view. They never change defaults, allowed values, saved data or editing, and the editor's controls do not show them; use `description` on a `controls` entry for text the user should see. Put units in `unit`, not in the description.
 
 Scopes: `parameters` at template level (document), on a spread definition (spread instance), on a box or element (element instance). Values are stored in `project.json` at the matching scope. There is no inheritance between scopes.
 
