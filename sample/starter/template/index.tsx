@@ -100,8 +100,9 @@ const viewBox = (viewport: Viewport) => {
 };
 
 // An optional route inset: the track of the assigned GPX file, drawn without a basemap and framed by its viewport.
-// Without a file it is an empty frame in the editor (so it can be clicked) and nothing in the printed book.
-function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Viewport; mode: Context['mode']; rect: Rect }) {
+// Without a file it is an empty frame on the editing canvas (so it can be clicked) and nothing in thumbnails, layout
+// previews or the printed book.
+function RouteMap({ track, viewport, view, rect }: { track: string; viewport: Viewport; view: Context['view']; rect: Rect }) {
   const source = file(track);
   let line = '';
   let problem = '';
@@ -116,7 +117,7 @@ function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Vi
   const finding = problem ? issue({ code: 'gpx-invalid', message: problem, element: 'route', parameter: 'track', file: track,
     suggestion: 'Assign a GPX file that contains a track or route, or clear the GPX track.' }) : {};
   // The printed book leaves an unavailable route out, but still reports why.
-  if (!line && mode !== 'edit') return problem ? <span hidden {...finding} /> : null;
+  if (!line && view !== 'canvas') return problem ? <span hidden {...finding} /> : null;
   return <Element id="route" className={line ? 'route-map' : 'route-map empty'} rect={rect}>
     {line
       ? <svg viewBox={viewBox(viewport)} aria-label="Route"><polyline points={line} /></svg>
@@ -372,7 +373,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx} bled={{ left: true, right: true }}>
           <ctx.PhotoBox id="hero" rect={ctx.geometry.spread('bleed')} />
-          <RouteMap track={ctx.elements.route.params.track} viewport={ctx.elements.route.params} mode={ctx.mode}
+          <RouteMap track={ctx.elements.route.params.track} viewport={ctx.elements.route.params} view={ctx.view}
             rect={at.right(page - margin - 60, margin, 60, 60)} />
           <Caption context={ctx} box={ctx.boxes.hero} className="caption overlay" rect={at.left(margin, 268, 2 * page - 2 * margin, 10)} />
         </Paper>;
@@ -477,7 +478,7 @@ export default defineTemplate({
               <span>{chapter.title}</span><span className="contents-page">{chapter.page}</span>
             </li>)}
           </ol>
-          {!chapters.length && ctx.mode === 'edit' &&
+          {!chapters.length && ctx.view === 'canvas' &&
             <p className="caption" style={ctx.geometry.css(at.right(margin, 40, page - 2 * margin, 10))}>Story and text spreads appear here.</p>}
         </Paper>;
       },

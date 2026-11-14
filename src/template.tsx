@@ -5,8 +5,8 @@ import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
 import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanFits } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
-import { identifier, values } from './project';
-import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
+import { identifier, renderView, values } from './project';
+import type { Photo, ProjectFile, RenderProject, RenderView, SpreadState, Values } from './project';
 import { getCrop, placementIn } from './spread';
 import { declarationConflicts, familyProblems } from './layouts';
 import type { VariantTags } from './layouts';
@@ -36,6 +36,8 @@ export type RenderContext = {
   // The chosen named format, or 'default' for a template with a single format.
   formatId: string;
   mode: RenderProject['mode'];
+  // Where the render is shown: the interactive canvas, a thumbnail or layout preview, or export. Fixed per render.
+  view: RenderView;
   // Marks a rendered node as the place where these parameters are edited; spread the result onto the node.
   edit: (...paths: string[]) => EditMarker;
   // The whole book as seen from this spread: page count and the anchors every spread declares.
@@ -536,7 +538,7 @@ export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...m
       {photo && renderPhotos &&
         <img ref={image} src={book.mode === 'edit' && !lazyPhotos ? photo.src : undefined}
           data-src={lazyPhotos ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
-      {!photo && book.mode === 'edit' && <span className="if-placeholder">{box?.photo ? 'Missing photo' : 'Drop a photo'}</span>}
+      {!photo && renderView(book) === 'canvas' && <span className="if-placeholder">{box?.photo ? 'Missing photo' : 'Drop a photo'}</span>}
     </div>
   );
 }
@@ -552,7 +554,7 @@ export function MarkdownBox({ id, className, style, rect, columns = 1, 'data-edi
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
       data-empty={text !== undefined && book.texts[text] !== undefined ? undefined : ''}
       className={['if-markdown', className].filter(Boolean).join(' ')} style={place(rect, style)} {...issueOn(marker)}>
-      {book.mode === 'edit' && (!text || book.texts[text] === undefined) &&
+      {renderView(book) === 'canvas' && (!text || book.texts[text] === undefined) &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
     </div>
   );
@@ -597,7 +599,7 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
   const saved = value === undefined ? '' : String(value);
   const inherited = !saved.trim() && !!fallback?.trim();
   const text = saved.trim() ? saved : inherited ? fallback! : '';
-  const empty = !text && data.book.mode === 'edit';
+  const empty = !text && renderView(data.book) === 'canvas';
   const hint = placeholder ?? (param.type === 'string' && param.placeholder ? param.placeholder : param.label);
   const Tag = as;
   // The edit marker stays in export, like ctx.edit(), so checks can name the parameter this text shows.
@@ -605,7 +607,7 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
     data-multiline={inline && param.type === 'string' && param.multiline ? '' : undefined}
     data-text-fallback={fallback?.trim() ? fallback : undefined} data-text-fallback-label={fallback?.trim() ? fallbackLabel : undefined}
     className={className} style={place(rect, style)} {...issueOn(marker)}>
-    {empty ? <span className="if-text-placeholder">{hint}</span> : inherited && data.book.mode === 'edit'
+    {empty ? <span className="if-text-placeholder">{hint}</span> : inherited && renderView(data.book) === 'canvas'
       ? <span className="if-text-inherited" title={'Using ' + fallbackLabel}>{text}</span> : text}
   </Tag>;
 }
@@ -763,7 +765,7 @@ export function SpreadView({ book, template, format, spread, page, index, positi
   let content: ReturnType<typeof definition.render>;
   try {
     content = definition.render({
-      ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode,
+      ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode, view: renderView(book),
       // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
       edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
       book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),
