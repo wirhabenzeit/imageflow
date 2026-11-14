@@ -54,6 +54,8 @@ The ad-hoc-signed app appears in `out/ImageFlow-darwin-arm64/ImageFlow.app` on A
 
 Set `APPLE_SIGNING_IDENTITY` to a Developer ID Application identity to sign with hardened runtime. `npm run package:mac:release` also notarizes and staples the app and DMG, verifies their tickets, and creates the update ZIP. [Mac signing and notarization](docs/signing.md) covers the credentials, GitHub Actions secret setup, artifact names and verification. `npm run test:packaged:existing` checks a release build without rebuilding it, including its MCP bridge.
 
+The app icon and the book and template document icons are drawn as SVG in `resources/brand/`. After editing one, run `npm run build:icons` to regenerate the `.icns` files in `resources/` and commit both.
+
 To prepare a downloadable release, follow [Releasing ImageFlow](docs/releasing.md). Pushing a matching version tag creates signed Apple silicon ZIP and DMG assets in a draft GitHub Release for manual review and publishing.
 
 For everyday pull requests, GitHub Actions runs `check` (build, app/template/API type checks, and unit tests on Linux) and `desktop` (two focused Apple silicon Mac smoke checks). `npm run test:desktop:smoke` checks app launch, book opening and rendering, proof PDF output, durable saves and orderly shutdown. It builds and stages the app but leaves unit tests to `check`.
