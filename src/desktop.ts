@@ -210,7 +210,8 @@ export type BookGeometry = {
   // `zoom` is the preview's scale of the sheet: its rectangle here divided by its printed size in CSS pixels.
   sheets: (Rect & { spread: string; zoom?: number })[];
   // `upright` is false when template CSS rotates or skews the box, so its rectangle is only a bounding box.
-  boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean; rect?: Rect })[];
+  // `custom` marks a photo box the template draws with a render callback; the crop editor then lets its artwork show.
+  boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean; rect?: Rect; custom?: boolean })[];
   // Nodes a template marked with `ctx.edit(...)`, and boxes and elements with parameters. `owner` is the box or
   // element the node is, so targets that share a rectangle stay apart; standalone marked nodes have none.
   // `occurrence` counts the earlier nodes on the sheet that edit the same fields, so repeated uses of a field, such
