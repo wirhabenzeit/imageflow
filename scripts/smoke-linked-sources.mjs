@@ -8,6 +8,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
 import { testBook, menuAction, retryBookRefresh, waitForPage } from './ui-actions.mjs';
+import { createRouteFixture } from './route-fixture.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await realpath(await mkdtemp(join(root, '.build/linked-smoke-')));
@@ -41,7 +42,11 @@ async function assetWindow() {
 }
 
 try {
-  const page = await testBook(app, folder, true);
+  await createRouteFixture(folder);
+  // Replacing the first story with linked Markdown leaves arrival.md starting in a later, smaller box.
+  // Keep that unrelated story short so the print checks measure source availability rather than text overflow.
+  await writeFile(join(folder, 'texts/arrival.md'), '# Sample story\n\nA short story for the remaining sample spreads.\n');
+  const page = await testBook(app, folder);
   await ready(page);
   let summary = await current(page);
   assert.ok((await page.evaluate(async () => { const { value } = await window.imageflow.currentProject(); value.project.importMode = 'link'; return window.imageflow.saveProject(value.id, value); })).value);

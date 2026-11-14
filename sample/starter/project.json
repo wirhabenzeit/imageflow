@@ -246,13 +246,6 @@
             "caption": true
           }
         }
-      },
-      "elements": {
-        "route": {
-          "params": {
-            "track": "senja-road"
-          }
-        }
       }
     },
     {
