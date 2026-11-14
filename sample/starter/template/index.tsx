@@ -131,9 +131,9 @@ function RouteMap({ track, viewport, mode, rect }: { track: string; viewport: Vi
 const routeParameters = {
   track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
   centerX: p.number({ label: 'Horizontal', default: .5, min: 0, max: 1, step: .01,
-    description: 'Centre of the shown part of the route, across: 0 is the west edge of the route, 1 the east edge.' }),
+    description: 'Centre of the shown part of the route, across: 0 is the west edge of the route, 1 the east edge. Only takes effect when zoomed in (zoom above 1).' }),
   centerY: p.number({ label: 'Vertical', default: .5, min: 0, max: 1, step: .01,
-    description: 'Centre of the shown part of the route, down: 0 is the north edge of the route, 1 the south edge.' }),
+    description: 'Centre of the shown part of the route, down: 0 is the north edge of the route, 1 the south edge. Only takes effect when zoomed in (zoom above 1).' }),
   zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: maxRouteZoom, step: .1,
     description: 'Higher values zoom in. 1 shows the whole route; 2 shows half its width. To zoom out a bit, lower it.' }),
 };

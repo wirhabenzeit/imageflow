@@ -44,7 +44,7 @@ try {
   const page = await testBook(app, folder, true);
   await ready(page);
   let summary = await current(page);
-  assert.ok((await page.evaluate(() => window.imageflow.updateSettings({ importMode: 'link' }))).value);
+  assert.ok((await page.evaluate(async () => { const { value } = await window.imageflow.currentProject(); value.project.importMode = 'link'; return window.imageflow.saveProject(value.id, value); })).value);
   const imported = {};
   for (const [kind, path] of [['photo', photo], ['markdown', text], ['file', file]]) {
     const result = await page.evaluate(async ({ kind, path }) => {
@@ -126,7 +126,7 @@ try {
   // A linked-file refresh may still own the book just after the renderer becomes ready.
   // Retry only that explicit busy response; any other error must fail with its actual message.
   const collection = await retryBookRefresh(async () => {
-    await manager.getByRole('button', { name: 'Copy All into Book', exact: true }).click();
+    await manager.getByRole('button', { name: /^Copy All \d+ into Book$/ }).click();
     const alert = manager.getByRole('alert');
     await alert.waitFor();
     return { error: await alert.innerText(), code: await alert.getAttribute('data-error-code') };
@@ -192,7 +192,7 @@ try {
   });
   await linkedRow.click({ button: 'right' });
   await waitForPage(linkedWindow, async (id) => !(await window.imageflow.currentProject()).value.photoIndex[id].linked, unusedId);
-  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Show in Finder', 'Copy into Book', '', 'Remove from Book']);
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Place on Current Spread', '', 'Show in Finder', 'Copy into Book', '', 'Remove from Book']);
   await linkedRow.getByRole('img', { name: 'Linked to original file' }).waitFor({ state: 'detached' });
   await stat(unused);
   await linkedWindow.close();
@@ -225,7 +225,7 @@ try {
   });
   await unapprovedRow.click({ button: 'right' });
   await accessWindow.waitForFunction(() => !document.querySelector('[data-source="file:notchosen"]')?.textContent.includes('Locate to approve'));
-  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Show in Finder', 'Locate…', '', 'Remove from Book']);
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Place on Current Spread', '', 'Show in Finder', 'Locate…', 'Copy into Book', '', 'Remove from Book']);
   assert.deepEqual((await current(page)).history, historyBeforeLocate, 'Locate does not add an empty Undo step');
   await accessWindow.close();
   await reload(page);

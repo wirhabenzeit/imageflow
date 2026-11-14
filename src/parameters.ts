@@ -6,9 +6,10 @@ const label = z.string().trim().min(1);
 const color = z.string().regex(/^#[0-9a-f]{6}$/i);
 const date = z.iso.date();
 const extension = z.string().regex(/^\.[a-z0-9]{1,10}$/, 'Use lowercase file extensions such as .gpx.');
-// `description` is plain text for authoring tools and agents: what the value means, its direction and when to change
-// it. It never changes defaults, validation, saved data or the generated controls.
-export const maxParameterDescription = 500;
+// `description` is plain help text: what the value means, its direction and when to change it. Agents read it, and the
+// editor shows it behind an info button on a field without a control description of its own. It never changes
+// defaults, validation or saved data. Control descriptions share its limits.
+export const maxParameterDescription = 1000;
 const description = z.string().trim().min(1).max(maxParameterDescription).optional();
 const common = { label, description };
 const numeric = { min: z.number().optional(), max: z.number().optional(), step: z.number().positive().optional(), unit: z.string().optional() };

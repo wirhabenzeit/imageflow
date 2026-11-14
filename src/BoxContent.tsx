@@ -145,9 +145,9 @@ function CropPhotoActions({ summary, assigned, label, choose, remove, fields }: 
 }
 
 // Assign a Markdown source to a box, import one, or show it; and where the box sits in its text's flow.
-export function TextContent({ summary, spread, box, label, change, importText, inspect, flow }: {
+export function TextContent({ summary, spread, box, label, change, importText, inspect, flow, compact = false, quickLook }: {
   summary: ProjectSummary; spread: SpreadState; box: string; label: string; change: Change;
-  importText: () => void; inspect?: (source: SourceRef) => void; flow?: { part: number; parts: number };
+  compact?: boolean; quickLook?: (source: SourceRef) => void; importText: () => void; inspect?: (source: SourceRef) => void; flow?: { part: number; parts: number };
 }) {
   const assigned = spread.boxes[box]?.text;
   const choices = Object.entries(summary.project.texts).map(([id, path]) => [id, sourcePath(path).split('/').pop()] as const);
@@ -157,6 +157,15 @@ export function TextContent({ summary, spread, box, label, change, importText, i
       item.boxes[box] = { params: item.boxes[box]?.params ?? {}, ...(value ? { text: value } : {}) };
     }, value ? (choices.find(([id]) => id === value)?.[1] ?? value) + ' placed in ' + label : 'Text removed from ' + label);
   }
+  if (compact) return <ActionMenu className="text-source-menu" label={<>Aa <span>{name}</span>{flow && flow.parts > 1 && <small>{flow.part}/{flow.parts}</small>}<Icon name="chevron" /></>}>
+    {choices.filter(([id]) => id !== assigned).map(([id, name]) => <button key={id} onClick={() => assign(id)}>{name ?? id}</button>)}
+    <hr />
+    <button onClick={importText}>Choose Markdown File…</button>
+    <button disabled={!assigned || !quickLook} onClick={() => assigned && quickLook?.({ kind: 'text', id: assigned })}>Show in Quick Look</button>
+    <button disabled={!assigned} onClick={() => assigned && void window.imageflow?.sourceAction({ action: 'open', key: 'markdown:' + assigned })}>Edit in Default App</button>
+    <button disabled={!assigned} onClick={() => assigned && void window.imageflow?.sourceAction({ action: 'reveal', key: 'markdown:' + assigned })}>Show in Finder</button>
+    <hr /><button disabled={!assigned} onClick={() => assign()}>Remove Text</button>
+  </ActionMenu>;
   return <div className="box-content">
     <div className="box-photo box-text">
       <button type="button" className="box-photo-thumb content-file-icon" title="Show text" aria-label={'Show text in ' + label}

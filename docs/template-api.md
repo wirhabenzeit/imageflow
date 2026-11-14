@@ -71,6 +71,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `rendered-images` | `<RenderedImage>` for host-managed asynchronous pictures in preview, check and export. |
 | `inline-editors` | `presentation: 'inline'` on element and document editors: editing on the page, in the frame of what the editor was opened from ([Editing on the page](#editing-on-the-page)). |
 | `inline-text` | `ctx.Text presentation="inline"` for plain-string typing in template typography, with existing parameter scopes and Undo. |
+| `template-preview` | `preview`: the template's own image for New Book instead of a render of its opening spread ([Template previews](#template-previews)). |
 
 
 `requires` is reserved for additive extensions introduced after the baseline is fixed. Unsupported extensions are rejected when the template loads, with an update hint. Older templates that list baseline features in `requires` remain valid. `capabilities` continues to list all supported feature names, including the baseline, for compatibility and feature discovery. `get_authoring_context` reports the contract, its `baseline`, all `capabilities` and module `exports` as `capabilities.templateApi`.
@@ -93,6 +94,8 @@ export default defineTemplate({
   // Shown in the template library and the New Book picker.
   label: 'Senja journal',
   description: 'Full-bleed photos with a field-notes text column.',
+  // Optional: what New Book shows for the template. Without it, a render of the first opening spread.
+  preview: './preview.jpg',
   contract: 1,
 
   // One print format, or several named `formats` the user chooses between; see below.
@@ -196,14 +199,14 @@ With the `spread` builder, the render context types every parameter, box and ele
 
 Every parameter has a `label` and a `default` (`p.file` supplies `''`); a saved value outside the constraints is reported and replaced by the default for rendering, but kept in `project.json`.
 
-Any parameter, at any scope, may also have a `description`: plain text of up to 500 characters (trimmed, not empty) for authoring tools and agents. Say what the value means, which way it goes and when to change it, so an agent asked to "zoom the map out a bit" knows which parameter to lower:
+Any parameter, at any scope, may also have a `description`: plain help text of up to 1000 characters (trimmed, not empty), for people and agents alike. Say what the value means, which way it goes and when to change it, so an agent asked to "zoom the map out a bit" knows which parameter to lower:
 
 ```ts
 zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: 8, step: .1,
   description: 'Higher values zoom in. 1 shows the whole route; 2 shows half its width.' }),
 ```
 
-Descriptions appear with the parameter's type, range, `step`, `unit` and options in `get_authoring_context` (under `template`) and in `inspect_book`'s parameter view. They never change defaults, allowed values, saved data or editing, and the editor's controls do not show them; use `description` on a `controls` entry for text the user should see. Put units in `unit`, not in the description.
+Descriptions appear with the parameter's type, range, `step`, `unit` and options in `get_authoring_context` (under `template`) and in `inspect_book`'s parameter view. In the editor, a field shows its parameter's description behind a small info button (on hover, or click to keep it open), so controls stay uncluttered. A `description` on a `controls` entry is shown under the field instead and replaces it there; control descriptions have the same limits. Descriptions never change defaults, allowed values or saved data. Put units in `unit`, not in the description.
 
 Scopes: `parameters` at template level (document), on a spread definition (spread instance), on a box or element (element instance). Values are stored in `project.json` at the matching scope. There is no inheritance between scopes.
 
@@ -298,6 +301,12 @@ A template may offer formats of both kinds side by side. The layout picker, new 
 ### Template library
 
 New books are made from the templates in the library: the built-in starter and the templates imported with **Templates → Manage Templates… → Import…**. Import loads the template like a book would and refuses one that fails to load. Before a template that bundles npm packages or declares `network` sites enters the library, the import lists the packages with their versions and licences and the sites its editors connect to, and **Templates → Manage Templates…** keeps showing them ([Dependencies](#dependencies), [Element editors](#element-editors)). The library keeps one entry per `id`, compared by `version` as dot-separated numbers: a newer version replaces the entry, while an older version, or the same version with other files, asks first. So bump `version` when you change a template you have shared. `label` (up to 80 characters) and `description` (up to 300) are what the library shows; without a label it shows the ID. A book copies its template when it is created, and `project.json` records the source's hash as `template.hash`; the library is never read while a book renders.
+
+#### Template previews
+
+New Book and **Manage Templates…** show a picture of each template. By default it is a render of the first opening spread (or, when that is blank, an illustrated sample spread), made once per version and saved: built-in templates ship theirs with the app, and an imported template is rendered when it is imported and kept with it in the library. Both are tied to the [template hash](#template-library), so any change to the template's files makes a new one, and removing the template removes its render. A template that declares `network` sites is saved only once those sites are allowed, so the picture never lacks a map; until then it is rendered again in each session.
+
+When the opening spread doesn't sell the template well, set `preview` to an image inside the template folder, such as `preview: './preview.jpg'`. New Book shows it instead of the render, cropped to fill a tile with the shape of the default format's trimmed page, never letterboxed. **Manage Templates…** keeps showing the render in its details, so you can compare. The image must be PNG, JPEG or WebP with a matching extension, at most 2 MB (about 1200 pixels on the long edge is plenty), and inside the template folder: no `..`, no dot folders, no symbolic links. It is part of the template's files and hash, so a book copies it and an export includes it. When the file is missing, too large or cannot be read, New Book falls back to the render. The Book check, and `check_book` and `get_authoring_context` for agents, report a `template-preview-invalid` warning for such a file and a `template-preview-aspect` warning when its width-to-height ratio differs from the default format's page by more than 5%. Update the image when you change the layouts it shows. The wall calendar sample uses `preview` to show a month page instead of its cover. Included in the contract-1 baseline.
 
 To share a template, export it as an `.imageflow-template` file: **Export…** in **Templates → Manage Templates…** saves a library entry, built-in ones included. To share an edited book template, import its template folder into the library first. The file is a zip of the template's files, leaving out dotfiles and `node_modules/`, and exporting the same files always gives the same bytes. Importing it, from **Import Templates…** or by opening it in Finder, gives the same hash as the folder it came from. A zip made with Finder's **Compress** works too, when it holds the template folder or its contents. Files with paths outside the template, links, encrypted entries or damaged data are refused before anything is written.
 
@@ -401,7 +410,12 @@ type RenderContext = {
   document: DocumentParams;
   boxes: Record<BoxId, {
     params: BoxParams;
-    photo?: { caption?: string; title?: string; credit?: string; altText?: string; width: number; height: number } | null;
+    photo?: {                               // null for an empty box
+      caption?: string; title?: string; credit?: string; altText?: string; width: number; height: number;
+      captured?: { dateTime: string; offset: string | null };   // read from the file (see Photo metadata)
+      location?: { latitude: number; longitude: number };
+      camera?: { make?: string; model?: string };
+    } | null;
     text?: { title?: string; part: number; parts: number } | null;  // flow position for Markdown boxes
   }>;
   elements: Record<ElementId, { params: ElementParams }>;
@@ -420,6 +434,18 @@ type RenderContext = {
   };
 };
 ```
+
+### Photo metadata
+
+`photo.captured`, `photo.location` and `photo.camera` come from the photo file's EXIF data. Each is present only when the file records it in a usable form, and all three are read-only:
+
+- **`captured`**: `{ dateTime, offset }`. `dateTime` is the camera's local wall-clock time, `YYYY-MM-DDTHH:mm:ss`, from the time the photo was taken (or, failing that, digitized), never the file's modification time. `offset` is the recorded UTC offset, such as `'+02:00'`, or `null` when the file has none. `null` means the time zone is unknown, not UTC: show `dateTime` as it is, and use `new Date(dateTime + offset)` for the instant only when `offset` is set. Placeholder dates such as `0000:00:00`, impossible dates and offsets outside −12:00 to +14:00 are left out.
+- **`location`**: `{ latitude, longitude }` in WGS 84 degrees, north and east positive, rounded to 7 decimals. A coordinate without its hemisphere, out of range or with a zero denominator, or a fix the receiver marked void, gives no location.
+- **`camera`**: `{ make?, model? }` as the camera records them, trimmed to at most 100 characters.
+
+ImageFlow reads them from the original file whenever the book opens or a source changes, and never stores them in `photos.json`. Existing books therefore have them without re-importing anything, and replacing a linked photo's original refreshes them under the same photo ID, with crops and assignments unchanged. A photo without EXIF, or with EXIF ImageFlow cannot read, imports and renders as before. The user-written `caption`, `title`, `credit` and `altText` are separate and never overwritten. Writing an extracted field is rejected rather than ignored: in `photos.json` it is a validation error, and `set_photo_metadata` does not accept it.
+
+The same fields appear on `ctx.boxes[id].photo`, in custom editors' `context`, and in `inspect_book`'s `sources` view. [`photo-story.tsx`](examples/photo-story.tsx) builds a caption from them. Raw EXIF is not exposed.
 
 ### Rendered images
 
@@ -505,7 +531,7 @@ An anchor marks a whole page, not a point found by measuring the render. Text fl
 Saved data and its editing UI are separate. Parameters declare what is saved: IDs, types, defaults, constraints and scopes, which persistence, validation, Undo and project commands (including MCP) rely on. How they are edited is chosen at three levels, from no code to custom UI. Choose the smallest level, and the smallest editor, that does what was asked: a request for a changeable emoji is one string parameter (and a size if wanted), not a choice between emoji, text and uploaded artwork. [`editing-levels.tsx`](examples/editing-levels.tsx) shows all three.
 
 1. **Generated controls (default).** Every parameter gets a control: text field, switch, slider and number, segmented choice or menu, colour, date or month, file chooser with import. Nothing to write.
-2. **Arranged controls.** `controls` on a spread, box or element arranges the generated controls of that scope's parameters: order, titled groups, labels, descriptions, and conditions.
+2. **Arranged controls.** `controls` on the template, a spread, a box or an element arranges the generated controls of that scope's parameters: order, titled groups, labels, descriptions, and conditions. At the template level it arranges the document parameters in Book settings, below the fixed format choice.
 
    ```tsx
    controls: ['show', { group: 'Stamp', when: { show: true }, controls: [
@@ -518,9 +544,13 @@ Saved data and its editing UI are separate. Parameters declare what is saved: ID
    - `controls: []` shows no generated controls for the scope while keeping every declaration. A group needs at least one entry.
    - A condition only hides a control. The value stays saved and validated, and comes back when the condition holds again. Conditions are presentation: they never remove a declaration or change a saved ID.
    - Click-to-edit follows the box's or element's `controls` for its own parameters. A parameter a node explicitly shows with `ctx.edit` or `ctx.Text` is always editable on that node.
-   - The authoring types check entry IDs against the scope's parameters. Loading the template reports unknown or repeated IDs, a parameter a custom editor owns, conditions on unknown parameters, on the control's own value, or on values the parameter can never have.
-   - Controls that can hide themselves for good load with a `declaration-control-cycle` warning in the Book check: a control inside a group shown only depending on that control (a group shown while `show` is on that contains `show`), or controls whose conditions depend on each other (A shown only when B is on, B only when A is on). For layout (spread) parameters, the warning is given per spread: a spread that marks one of them on the page with `ctx.edit` or `ctx.Text` gets none, since that node's popover always shows it, while another spread of the same layout that marks none of them (for example because its values hide the marked node) gets the warning on itself. Marking a box's or element's own parameter does not count: its popover follows the same `controls` and conditions.
+   - The authoring types check entry IDs against the scope's parameters. Loading the template reports unknown or repeated IDs, a parameter a custom editor owns (an element editor's, or a document editor's at the template level), conditions on unknown parameters, on the control's own value, or on values the parameter can never have.
+   - Controls that can hide themselves for good load with a `declaration-control-cycle` warning in the Book check: a control inside a group shown only depending on that control (a group shown while `show` is on that contains `show`), or controls whose conditions depend on each other (A shown only when B is on, B only when A is on). For layout (spread) parameters, the warning is given per spread: a spread that marks one of them on the page with `ctx.edit` or `ctx.Text` gets none, since that node's popover always shows it, while another spread of the same layout that marks none of them (for example because its values hide the marked node) gets the warning on itself. Marking a box's or element's own parameter does not count: its popover follows the same `controls` and conditions. For document parameters, the warning is dropped when any spread marks one of the cycle's parameters as `document.<id>`, since that node's popover shows it from any page.
 3. **A custom editor** for an element, below.
+
+Presentation uses the export artwork path (`ctx.mode === 'export'`), including final text flow and crop geometry. Templates should omit editing scaffolding there, just as for PDF output.
+
+Photo capture time, location and camera are described under [Photo metadata](#photo-metadata). The editor's photo views also sort and group photos that have no EXIF capture time by their file's modification time, shown as an estimate; that estimate is editor-only and never reaches templates. Photo views compare camera wall times as shot, and show estimated modification times in the computer's local timezone, so mixed cameras and file dates group consistently. Sorting and grouping are per-book view preferences and do not change the rendered book.
 
 #### Where editing happens
 

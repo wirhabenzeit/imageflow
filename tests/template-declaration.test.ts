@@ -298,6 +298,6 @@ test('parameter descriptions survive normalization at every scope and change not
   assert.deepEqual(declarationWarnings(declared(zoom)), []);
   // Empty and overlong descriptions are declaration errors, not silently dropped text.
   assert.equal(templateSchema.safeParse(declared('   ')).success, false);
-  assert.equal(templateSchema.safeParse(declared('x'.repeat(501))).success, false);
-  assert.equal(templateSchema.safeParse(declared('x'.repeat(500))).success, true);
+  assert.equal(templateSchema.safeParse(declared('x'.repeat(1001))).success, false);
+  assert.equal(templateSchema.safeParse(declared('x'.repeat(1000))).success, true);
 });

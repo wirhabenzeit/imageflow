@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mm, printFormat } from '../src/format';
 import type { FacingFormat } from '../src/format';
-import { spreadOrder } from '../src/spread-order';
+import { spreadOrder, spreadSelectionOrder } from '../src/spread-order';
 import { chooseFormat, templateInfo, templateSchema } from '../src/template';
 import { projectSchema } from '../src/project';
 
@@ -71,4 +71,16 @@ test('existing placement errors do not block unrelated moves or trade away valid
 test('single pages incompatible with the delivery format do not freeze full-spread moves', () => {
   const format = { ...facing, structure: { ...facing.structure, delivery: 'spreads' as const } };
   assert.deepEqual(spreadOrder(spreads, 's1', 3, { ...template, format })?.map(({ id }) => id), ['s0', 's2', 's3', 's1', 's4']);
+});
+
+
+test('selection moves preserve relative order and cannot displace valid single ends', () => {
+  const order = (ids: string[], direction: 'up' | 'down' | 'start' | 'end') => spreadSelectionOrder(spreads, ids, direction, template)?.map(({ id }) => id);
+  assert.deepEqual(order(['s1', 's2'], 'down'), ['s0', 's3', 's1', 's2', 's4']);
+  assert.deepEqual(order(['s2', 's3'], 'up'), ['s0', 's2', 's3', 's1', 's4']);
+  assert.deepEqual(order(['s2', 's3'], 'start'), ['s0', 's2', 's3', 's1', 's4']);
+  assert.deepEqual(order(['s1', 's2'], 'end'), ['s0', 's3', 's1', 's2', 's4']);
+  assert.equal(order(['s0', 's1'], 'down'), undefined);
+  assert.equal(order(['s3', 's4'], 'up'), undefined);
+  assert.equal(order([], 'end'), undefined);
 });
