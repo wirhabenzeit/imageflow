@@ -14,14 +14,13 @@ body { margin: 0; }
 .toolbar { justify-content: space-between; padding: 0 24px; border-bottom: 1px solid var(--edge); }
 .brand { font-weight: 730; font-size: 19px; letter-spacing: -.04em; }
 .studio button {
-  min-height: 28px; padding: 4px 11px;
-  border: 1px solid var(--control-border); border-radius: 6px;
-  background: var(--control-fill); color: var(--text);
-  font: 400 12px/1.4 var(--ui-font); cursor: default;
-  box-shadow: 0 1px 1px #00000008;
+  min-height: 24px; padding: 3px 10px;
+  border: 0; border-radius: 6px;
+  background: var(--button-fill); color: var(--text);
+  font: 400 12px/16px var(--ui-font); cursor: default;
+  box-shadow: var(--button-shadow);
 }
-.studio button:hover:not(:disabled) { border-color: var(--hover-border); }
-.studio button:active:not(:disabled) { filter: brightness(.96); }
+.studio button:active:not(:disabled) { background: var(--button-pressed); }
 .studio button:disabled { opacity: .4; cursor: default; }
 .studio button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
 .studio .primary { background: var(--primary-fill); color: #fff; border-color: var(--primary-border); }
@@ -40,7 +39,6 @@ body { margin: 0; }
 :is(.inspector, .document-settings) .checkbox { display: flex; align-items: center; }
 
 .inspector p { font-size: 12px; margin: 6px 0; overflow-wrap: anywhere; }
-.inspector button, .sources button { min-height: 26px; font-size: 11px; padding: 3px 9px; }
 .error-text { color: var(--error-text); }
 .crop-controls { display: grid; gap: 0; }
 .crop-controls > button { grid-column: 1 / -1; justify-self: start; }
@@ -281,9 +279,6 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 :is(.inspector, .document-settings, .edit-popover, .pc-list-popover) :is(input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 :is(.inspector, .document-settings, .edit-popover) textarea { resize: vertical; }
 .field-name { font-size: 12px; color: var(--muted); }
-.field-help { margin-left: 4px; width: 14px; height: 14px; padding: 0; border: 1px solid var(--muted); border-radius: 50%; background: none;
-  color: var(--muted); font: italic 600 9px/12px Georgia, serif; vertical-align: 1px; cursor: help; opacity: .7; }
-.field-help:hover, .field-help[aria-expanded="true"] { opacity: 1; }
 .pc-count { justify-self: end; font-size: 11px; color: var(--muted); }
 .pc-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .pc-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
@@ -469,10 +464,6 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .toolbar button:disabled { opacity: .3; }
 .export-area { width: 112px; display: flex; justify-content: flex-end; align-items: center; }
 .export-menu { position: relative; width: 112px; flex: none; }
-.export-menu > :is(summary, .action-menu-trigger) { display: flex; align-items: center; justify-content: center; gap: 7px; cursor: default; border: 1px solid var(--control-border); border-radius: 6px; padding: 5px 9px; background: var(--control-fill); box-shadow: 0 1px 1px #00000008; color: var(--text); font-size: 12px; font-weight: 500; list-style: none; }
-.export-menu > :is(summary, .action-menu-trigger):hover { border-color: var(--hover-border); }
-.export-menu > :is(summary, .action-menu-trigger)::-webkit-details-marker { display: none; }
-.export-menu > :is(summary, .action-menu-trigger):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .export-choices { position: absolute; right: 0; top: calc(100% + 8px); width: 228px; padding: 5px; z-index: 30; display: grid; gap: 2px; background: var(--popup-surface); border: 1px solid var(--control-border); border-radius: 8px; box-shadow: 0 8px 28px #0002; }
 .studio .export-choices button { text-align: left; min-height: 29px; padding: 5px 10px; border: 0; border-radius: 4px; font-size: 13px; font-weight: 400; background: transparent; color: inherit; }
 .studio .export-choices button:hover:not(:disabled) { background: var(--menu-highlight); color: white; }
@@ -584,9 +575,6 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .sources-bar { overflow: visible; }
 .sources-bar .spacer { min-width: 0; flex-shrink: 1; }
 .source-import { position: relative; flex: none; }
-.source-import > :is(summary, .action-menu-trigger) { display: flex; align-items: center; gap: 5px; min-height: 26px; padding: 3px 8px; border: 1px solid var(--control-border); border-radius: 6px; background: var(--control-fill); color: var(--text); font: 400 11px/1.4 var(--ui-font); list-style: none; cursor: default; }
-.source-import > summary::-webkit-details-marker { display: none; }
-.source-import > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .studio .agent-status { flex: none; margin-right: 14px; min-height: 22px; padding: 1px 6px; border: 0; background: transparent; box-shadow: none; color: var(--info-text); font-size: 11px; }
 .studio .agent-status:hover { background: var(--selection-surface); }
 .studio .book-check-clean .book-check-toggle { opacity: 1; color: var(--muted); }
@@ -854,7 +842,6 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .asset-icon img, .asset-icon > span { width: 24px; height: 24px; }
 .asset-row .asset-description > span { direction: rtl; text-align: left; }
 .asset-row .asset-status { white-space: nowrap; }
-.studio .source-import .action-menu-trigger, .studio .crop-more .action-menu-trigger { min-height: 26px; padding: 3px 8px; font: 11px var(--ui-font); }
 .project-identity { pointer-events: auto; grid-template-columns: 18px minmax(0, auto); justify-content: center; align-items: center; column-gap: 5px; }
 .project-identity strong { grid-column: 2; }
 .project-identity .muted { grid-column: 2; }
@@ -958,3 +945,22 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .markdown-conflict p { margin: 0 0 6px; }
 .markdown-conflict button { margin: 8px 8px 0 0; }
 .markdown-conflict pre { max-height: 160px; overflow: auto; white-space: pre-wrap; }
+
+/* Buttons: one macOS-like family, last so it wins over the older per-area rules.
+   Push buttons and pull-down triggers share one look and size: 24px in panels, 28px in the window toolbar. A pull-down
+   ends in a small muted chevron, centred with its label. Borderless icon buttons, segmented controls, thumbnails and
+   links keep their own rules above. */
+.studio :is(button.primary, button.source-import, .action-menu-trigger, .settings-buttons button, .start-actions > button) {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  min-height: 24px; height: auto; padding: 3px 10px;
+  border: 0; border-radius: 6px; background: var(--button-fill); box-shadow: var(--button-shadow);
+  color: var(--text); font: 400 12px/16px var(--ui-font); white-space: nowrap;
+}
+.studio :is(button.source-import, .action-menu-trigger, .settings-buttons button, .start-actions > button):active:not(:disabled) { background: var(--button-pressed); filter: none; }
+.studio button.primary { background: var(--button-primary); color: #fff; box-shadow: 0 0 0 .5px #00000026, 0 .5px 1.5px #0000002e; font-weight: 500; }
+.studio button.primary:active:not(:disabled) { filter: brightness(.92); }
+.studio .action-menu-trigger svg:last-child:not(:first-child) { width: 10px; height: 10px; margin-right: -3px; color: var(--button-chevron); }
+.studio .action-menu-trigger svg:last-child:not(:first-child) path { stroke-width: 1.8; }
+.studio .export-menu > .action-menu-trigger { width: 100%; min-height: 28px; font-size: 13px; }
+.studio .export-menu > .action-menu-trigger svg:first-child { color: var(--muted); }
+.studio .start-actions > button { min-height: 28px; font-size: 13px; }

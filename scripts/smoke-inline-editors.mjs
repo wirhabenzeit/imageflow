@@ -1,4 +1,4 @@
-import { testBook } from './ui-actions.mjs';
+import { testBook, clickPage } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -84,7 +84,7 @@ try {
   // Clicking the map opens its editor on the page, in the map's own rectangle: no panel. With a slow map server, the
   // printed map stays until the editor's map has its style: the editor appears drawn.
   await app.evaluate(() => { globalThis.styleDelay = 1500; globalThis.styleServed = 0; });
-  await w.mouse.click(mapBox.x + mapBox.width * .7, mapBox.y + mapBox.height * .6);
+  await clickPage(w, mapBox.x + mapBox.width * .7, mapBox.y + mapBox.height * .6);
   const editor = w.locator('.inline-editor.showing');
   await editor.waitFor();
   const shownAt = Date.now();
@@ -197,7 +197,7 @@ try {
   };
   assert.equal(await tracksDrawn(1), 1, 'the saved track is drawn');
   const mapNow = await page.locator('[data-element="map"]').boundingBox();
-  await w.mouse.click(mapNow.x + mapNow.width * .7, mapNow.y + mapNow.height * .6);
+  await clickPage(w, mapNow.x + mapNow.width * .7, mapNow.y + mapNow.height * .6);
   await editor.waitFor();
   // The list is one button in the toolbar, which opens it in a popover, so the toolbar keeps one row.
   await toolbar.getByRole('button', { name: 'Tracks (1)' }).click();
@@ -257,7 +257,7 @@ try {
   const original = await marked();
   // One click on a day opens the days on the page and marks that day, even when the page scrolls before they show.
   const tenth = await january.locator('.days li').nth(9).boundingBox();
-  await w.mouse.click(tenth.x + tenth.width / 2, tenth.y + tenth.height / 2);
+  await clickPage(w, tenth.x + tenth.width / 2, tenth.y + tenth.height / 2);
   await w.mouse.wheel(0, tenth.height * 5);
   const dayEditor = w.locator('.inline-editor.showing');
   await dayEditor.waitFor();
@@ -276,7 +276,7 @@ try {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (modifier) await w.keyboard.down(modifier);
-    await w.mouse.click(row.x + row.width / 2, row.y + row.height / 2);
+    await clickPage(w, row.x + row.width / 2, row.y + row.height / 2);
     if (modifier) await w.keyboard.up(modifier);
   };
   await day(10).waitFor();
