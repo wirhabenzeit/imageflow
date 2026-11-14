@@ -408,6 +408,7 @@ type RenderContext = {
     pages: number;
     anchor(id: string): Anchor | undefined; // the anchor with this ID (see Anchors)
     anchors(id?: string): Anchor[];         // all anchors with this ID, or all anchors, in page order
+    spreads: BookSpread[];                  // every spread's pages and placed photos (see Book index)
   };
 };
 ```
@@ -490,6 +491,31 @@ type Anchor = { id: string; title?: string; spread: string; page: number; side: 
 - **Previews.** Layout-picker previews read the anchors of the book as saved, so a contents layout previews with real pages.
 
 An anchor marks a whole page, not a point found by measuring the render. Text flow decides which page a heading inside Markdown continuation lands on, so such headings cannot be anchors yet.
+
+### Book index
+
+`ctx.book.spreads` lists every spread of the book in order, with its pages and the photos placed on it, for photo credits, picture indexes and contents pages. No anchors are needed for it:
+
+```ts
+type BookSpread = {
+  id: string;                                  // the spread's stable instance ID
+  layout: string;                              // its current layout
+  page: { left?: number; right?: number; number?: number };  // as ctx.page
+  photos: { box: string; photoId: string | null; photo: Photo | null }[];
+};
+```
+
+```tsx
+for (const spread of ctx.book.spreads)
+  for (const { photo } of spread.photos) if (photo?.credit) credits.push([photo.credit, spread.page.left ?? spread.page.number]);
+```
+
+[`photo-story.tsx`](examples/photo-story.tsx) has a complete credits layout.
+
+- **From saved data, before render.** Like anchors, the index is built from the saved book and the template's declarations before any spread renders. It never looks at another spread's rendered output, so every spread, the editor's context, MCP artwork and export read the same index, and the same book always gives the same index. It is frozen; changing it throws.
+- **Pages.** `page` is the spread's own `ctx.page`: `left` and `right`, one of them for a single page at a book end, or `number` in a format without facing pages. Which page a box is on is the layout's business, since only the layout knows where it draws its boxes.
+- **Photos.** `photos` lists the photo boxes of the spread's current layout, in declaration order, including empty ones. `photoId` is `null` for an empty box. `photo` is the photo's metadata, the same object shape as `ctx.boxes[id].photo`, or `null` when the box is empty or its photo is missing from the book. A photo placed in several boxes appears once per placement. Content a spread keeps from a layout it no longer uses is not listed, and a spread whose layout the template no longer declares lists no photos. Markdown boxes are not listed.
+- **No images.** The index has metadata and assignments only, no photo URLs or rendered thumbnails.
 
 ### Editing UI
 

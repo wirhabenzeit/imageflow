@@ -59,8 +59,26 @@ export type AnchorContext = { params: Values; document: Values };
 export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
 // `side` is 'page' in a format without facing pages, where a unit has one page and a declared side is ignored.
 export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
+// One spread of the book as the index lists it: derived from the saved book and the template's declarations before
+// any spread renders, so every spread reads the same index whatever the render order.
+export type BookPhotoPlacement = {
+  box: string;
+  // The assigned photo's ID, or null for an empty box.
+  photoId: string | null;
+  // The photo's metadata (as `ctx.boxes[id].photo`), or null when the box is empty or its photo is missing from the book.
+  photo: Photo | null;
+};
+export type BookSpread = {
+  id: string;
+  layout: string;
+  page: UnitPages;
+  // The active layout's photo boxes, in declaration order. Content kept from other layouts is not listed.
+  photos: BookPhotoPlacement[];
+};
 export type BookContext = {
   pages: number;
+  // Every spread in book order, with its pages and photo assignments. Read-only and the same for every spread.
+  spreads: readonly BookSpread[];
   // The anchor declared with this ID, if exactly one spread declares it. With several, the first; the check warns.
   anchor(id: string): Anchor | undefined;
   // All anchors with this ID, or all anchors, in page order.
@@ -79,7 +97,7 @@ export class SpreadError extends Error {
 
 // Lookups that found no anchor, or several, keyed so repeated renders report each once.
 export type AnchorLookup = { spread: string; anchor: string; found: number };
-export type BookIndex = { pages: number; anchors: Anchor[]; lookups?: Map<string, AnchorLookup> };
+export type BookIndex = { pages: number; anchors: Anchor[]; spreads?: readonly BookSpread[]; lookups?: Map<string, AnchorLookup> };
 
 export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: UnitPages }[] }): BookIndex {
   const document = resolveParams(template.parameters, book.project.params);
@@ -104,7 +122,30 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
     });
   });
   // A spread may declare its right-page anchor before its left-page one. The sort is stable within a page.
-  return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page) };
+  return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page), spreads: spreadIndex(book, template, sequence) };
+}
+
+const deepFreeze = <T,>(value: T): T => {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
+};
+// The book's spreads with their pages and active photo assignments, from saved data only. Frozen, so one spread's
+// render cannot change what another reads. A spread whose layout the template no longer declares has no photos.
+export function spreadIndex(book: RenderProject, template: Template, sequence: { spreads: { page: UnitPages }[] }): readonly BookSpread[] {
+  return deepFreeze(book.project.spreads.map((spread, i): BookSpread => {
+    const definition = Object.hasOwn(template.spreads, spread.definition) ? template.spreads[spread.definition] : undefined;
+    const photos = Object.entries(definition?.boxes ?? {}).filter(([, box]) => box.type === 'photo').map(([id]): BookPhotoPlacement => {
+      const photoId = spread.boxes[id]?.photo ?? null;
+      const found = photoId && Object.hasOwn(book.photos, photoId) ? book.photos[photoId] : undefined;
+      if (!found) return { box: id, photoId, photo: null };
+      const { src: _src, ...photo } = found;
+      return { box: id, photoId, photo };
+    });
+    return { id: spread.id, layout: spread.definition, page: Object.fromEntries(Object.entries(sequence.spreads[i].page).filter(([, value]) => value !== undefined)), photos };
+  }));
 }
 
 export function bookContext(index: BookIndex, spread: string): BookContext {
@@ -112,6 +153,7 @@ export function bookContext(index: BookIndex, spread: string): BookContext {
   const matching = (id: string) => index.anchors.filter((anchor) => anchor.id === id);
   return {
     pages: index.pages,
+    spreads: index.spreads ?? [],
     anchor(id) {
       const found = matching(id);
       if (found.length !== 1) index.lookups?.set(spread + '\u0000' + id, { spread, anchor: id, found: found.length });
@@ -709,7 +751,7 @@ export function editorContext(book: RenderProject, template: Template, spreadId:
     elements: Object.fromEntries(Object.entries(values.elements).map(([id, element]) => [id, { ...element, rect: null }])),
     book: bookContext(index_, spread.id), spread: spread.id, layout: spread.definition,
   };
-  return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, values, template.formatId]) };
+  return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, index_.spreads, values, template.formatId]) };
 }
 
 /** The editor context from a newer book, with the format that book chose, as the book render chooses it. */
