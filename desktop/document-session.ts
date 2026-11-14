@@ -128,6 +128,7 @@ export class DocumentSession {
   menuState?: BookMenuState;
   layout: CanvasLayout = { mode: 'vertical', columns: 2 };
 
+  private viewers = new Set<BrowserWindow>();
   constructor(readonly window: BrowserWindow, book: OpenProject, private cache: string,
     private renders: RenderSessions, private unlockProject: ProjectLock | undefined,
     private changed?: (book: OpenProject) => void) {
@@ -146,12 +147,21 @@ export class DocumentSession {
     });
     this.activate(book);
     this.watchProject(book);
+    this.guardNavigation(window);
+  }
+  private guardNavigation(window: BrowserWindow) {
     window.webContents.on('will-frame-navigate', (event) => {
       const url = new URL(event.url);
       const match = viewPath.exec(url.pathname);
       if (event.isMainFrame || url.protocol !== desktopScheme + ':' || url.host !== 'render' || !match ||
           match[1] !== this.active.id || match[2]) event.preventDefault();
     });
+  }
+
+  attachViewer(window: BrowserWindow) {
+    this.viewers.add(window);
+    this.guardNavigation(window);
+    window.once('closed', () => this.viewers.delete(window));
   }
 
   get book() { return this.projectSession.book; }
@@ -161,6 +171,13 @@ export class DocumentSession {
   }
   notify(change: ProjectChange) {
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.changed, change);
+    // activate publishes every new revision, including saves returned directly to the editor through IPC.
+    if (!('value' in change)) this.publishViewers(change);
+  }
+  private publishViewers(change: ProjectChange) {
+    if (!this.closing) for (const viewer of this.viewers) {
+      if (!viewer.isDestroyed()) viewer.webContents.send(channels.changed, change);
+    }
   }
   async run<T>(task: () => Promise<T>): Promise<Result<T>> {
     if (this.closing) return { error: 'This book is closing.' };
@@ -247,6 +264,7 @@ export class DocumentSession {
   close() {
     if (this.closeTask) return this.closeTask;
     this.closing = true;
+    for (const viewer of this.viewers) if (!viewer.isDestroyed()) viewer.close();
     this.stopWatch();
     clearInterval(this.linkedTimer);
     for (const watcher of this.linkedWatchers.values()) watcher.close();
@@ -278,10 +296,13 @@ export class DocumentSession {
     this.active = { id, book };
     // The editor keeps its last ready frames while newer candidates render. Those frames still request lazy photos.
     const retained = new Set([id, previous?.id]);
-    for (const frame of this.window?.webContents.mainFrame.framesInSubtree ?? []) {
-      const url = frame.url;
-      const id = url.startsWith(renderOrigin + '/') ? viewPath.exec(new URL(url).pathname)?.[1] : undefined;
-      if (id) retained.add(id);
+    for (const window of [this.window, ...this.viewers]) {
+      if (window.isDestroyed()) continue;
+      for (const frame of window.webContents.mainFrame.framesInSubtree) {
+        const url = frame.url;
+        const id = url.startsWith(renderOrigin + '/') ? viewPath.exec(new URL(url).pathname)?.[1] : undefined;
+        if (id) retained.add(id);
+      }
     }
     for (const [sessionId, { mode }] of this.renders) {
       if (mode === 'edit' && this.renderIds.has(sessionId) && !retained.has(sessionId)) {
@@ -297,7 +318,9 @@ export class DocumentSession {
     this.window.setRepresentedFilename(book.folder);
     this.changed?.(book);
     this.watchLinkedSources(book);
-    return this.summary;
+    const summary = this.summary;
+    this.publishViewers({ value: summary });
+    return summary;
   }
 
   /** Parent-directory watches survive atomic replacement; reconciliation also covers reconnects and missed events. */

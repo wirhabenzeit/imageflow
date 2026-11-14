@@ -837,7 +837,8 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .studio .document-proxy { grid-column: 1; grid-row: 1; width: 18px; padding: 0; min-height: 18px; background: transparent; border: 0; box-shadow: none; }
 .quicklook[open] { position: fixed; inset: 8vh 10vw; margin: 0; width: 80vw; height: 80vh; z-index: 100; box-shadow: 0 20px 80px #0005; }
 .editor-shell { display: contents; }
-.presentation { position: fixed; inset: 0; z-index: 1000; background: #111; color: #eee; outline: none; }
+.presentation { position: fixed; inset: 0; z-index: 1000; background: #111; color: #eee; outline: none;
+  font: 13px/1.45 var(--ui-font, -apple-system, BlinkMacSystemFont, system-ui, sans-serif); }
 .presentation .book-frame { position: absolute; inset: 0; width: 100%; height: 100% !important; border: 0; pointer-events: none; }
 .presentation-overview .book-frame { pointer-events: auto; }
 .presentation .book-frame-pending { visibility: hidden; }
@@ -848,7 +849,8 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .presentation-help { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); background: #242424f5;
   border: 1px solid #666; padding: 20px 28px; border-radius: 12px; color: #eee; font-size: 14px; }
 .presentation-help button { color: #eee; background: #444; border: 1px solid #888; }
-.presentation-message { position: absolute; top: 30%; width: 100%; text-align: center; }
+.presentation-message { position: absolute; top: 50%; width: 100%; margin: 0; padding: 0 32px; transform: translateY(-50%);
+  font-size: 24px; font-weight: 400; line-height: 1.4; letter-spacing: -.015em; text-align: center; color: #ccc; }
 .source-items-photo { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; align-items: stretch; overflow-anchor: none; }
 .source-items-photo .source-photo { width: auto; height: 100%; grid-template-rows: minmax(0, 1fr); }
 .source-items-photo .source-photo .source-title { display: none; }

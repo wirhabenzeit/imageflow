@@ -5,16 +5,22 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { menuAction, testBook } from './ui-actions.mjs';
+import { menuAction, nextPresentation, testBook } from './ui-actions.mjs';
+import { buildMacHeaderState, macHeaderState } from './mac-header-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/presentation-startup-'));
+const headerHelper = buildMacHeaderState(work);
 const folder = join(work, 'Startup.imageflow');
 await mkdir(join(folder, 'template'), { recursive: true });
 await mkdir(join(folder, 'photos'));
 await writeFile(join(folder, 'template/index.tsx'), `import {defineTemplate,mm,p,printFormat,box,Spread,RenderedImage} from 'imageflow';
 export default defineTemplate({id:'startup',version:'1',contract:1,format:printFormat({label:'Book',trim:{width:mm(100),height:mm(120)},bleed:{all:mm(3),binding:mm(0)},safe:mm(8),ends:'inside-covers',pageCount:{min:2,max:500,step:2}}),
-spreads:{story:{label:'Story',parameters:{index:p.number({label:'Index',default:0})},boxes:{hero:box.photo('Hero')},render:ctx=><Spread>
+spreads:{shaped:{label:'Shaped photo',boxes:{hero:box.photo('Hero')},render:ctx=><Spread>
+<ctx.PhotoBox id="hero" rect={ctx.geometry.spread('bleed')}>{(photo,box)=><svg width={photo.box.width} height={photo.box.height}>
+<clipPath id={box.uid}><circle cx={photo.box.width/2} cy={photo.box.height/2} r={photo.box.height/3}/></clipPath>
+<image href={photo.src} x={photo.image.x} y={photo.image.y} width={photo.image.width} height={photo.image.height} clipPath={'url(#'+box.uid+')'}/>
+</svg>}</ctx.PhotoBox></Spread>},story:{label:'Story',parameters:{index:p.number({label:'Index',default:0})},boxes:{hero:box.photo('Hero')},render:ctx=><Spread>
 <ctx.PhotoBox id="hero" rect={ctx.geometry.spread('bleed')}/>
 <RenderedImage label="Slow artwork" inputs={{index:ctx.params.index}} style={{position:'absolute',left:'10mm',top:'10mm',width:'20mm',height:'20mm'}} draw={async target=>{
   if(new URLSearchParams(location.search).get('view')==='present'){
@@ -25,14 +31,14 @@ spreads:{story:{label:'Story',parameters:{index:p.number({label:'Index',default:
   const context=canvas.getContext('2d');context.fillStyle='#cc8844';context.fillRect(0,0,canvas.width,canvas.height);return canvas;
 }}/></Spread>}}});`);
 const photos = {};
-for (const i of [0, 1, 29, 30, 31, 32, 39]) {
+for (const i of [0, 1, 15, 29, 30, 31, 32, 39]) {
   const id = 'p' + i;
   await sharp({ create: { width: 1800, height: 1200, channels: 3, background: '#709fb0' } }).jpeg().toFile(join(folder, 'photos', id + '.jpg'));
   photos[id] = { path: 'photos/' + id + '.jpg', title: id };
 }
 await writeFile(join(folder, 'photos.json'), JSON.stringify(photos));
 await writeFile(join(folder, 'project.json'), JSON.stringify({schemaVersion:1,title:'Startup',template:{id:'startup',version:'1'},spreads:
-  Array.from({length:40},(_,i)=>({id:'s'+i,definition:'story',params:{index:i},boxes:{hero:{photo:photos['p'+i]?'p'+i:'p0'}}}))}));
+  Array.from({length:40},(_,i)=>({id:'s'+i,definition:i===15?'shaped':'story',params:{index:i},boxes:{hero:{photo:photos['p'+i]?'p'+i:'p0'}}}))}));
 const visible = process.argv.includes('--visible');
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: {...process.env, ...(visible ? {} : {IMAGEFLOW_HIDE_WINDOW:'1'})} });
 try {
@@ -47,6 +53,11 @@ try {
     });
     resize.observe(document, { childList: true, subtree: true });
     HTMLImageElement.prototype.decode = function () {
+      // A detached SVG proxy can load its bytes while Chromium leaves decode() pending in the hidden candidate.
+      if (!this.isConnected) {
+        window.__heldProxyDecodes = (window.__heldProxyDecodes ?? 0) + 1;
+        return new Promise(() => {});
+      }
       if (!held && this.matches('img[data-src]') && window.imageflowRenderStatus?.state !== 'ready') {
         held = true;
         // Model a fullscreen resize replacing an image whose first decode never completes. A later draw must
@@ -56,35 +67,69 @@ try {
       return decode.call(this);
     };
   });
-  const page = await testBook(app, folder);
-  page.on('pageerror', error => console.error('Renderer error:', error.message));
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
-  await page.locator('.spread-thumb[data-spread="s30"]').click();
+  const editor = await testBook(app, folder);
+  editor.on('pageerror', error => console.error('Renderer error:', error.message));
+  await editor.emulateMedia({ reducedMotion: 'reduce' });
+  await editor.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
+  await editor.locator('.spread-thumb[data-spread="s30"]').click();
+  const nativeWindow = await app.browserWindow(editor);
+  const originalBounds = await nativeWindow.evaluate((window) => {
+    window.__presentationResizes = 0;
+    window.on('resize', () => { window.__presentationResizes++; });
+    return window.getBounds();
+  });
+  const originalHeader = headerHelper ? await macHeaderState(nativeWindow, headerHelper) : undefined;
+  const checkHeader = async () => {
+    assert.deepEqual(await nativeWindow.evaluate((window) => window.getBounds()), originalBounds);
+    assert.equal(await nativeWindow.evaluate((window) => window.__presentationResizes), 0, 'Presentation never resizes the editor, including during startup');
+    assert.equal(await nativeWindow.evaluate((window) => window.isFullScreen() || window.isSimpleFullScreen()), false);
+    if (!headerHelper) return;
+    let restored;
+    for (let attempt = 0; attempt < 50; ++attempt) {
+      restored = await macHeaderState(nativeWindow, headerHelper);
+      if (Math.abs(restored.iconX - originalHeader.iconX) <= 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    console.log('Document header:', JSON.stringify({ before: originalHeader, after: restored }));
+    assert.ok(originalHeader.iconWidth > 0 && originalHeader.iconX > originalHeader.width / 3, 'The document proxy starts near the window centre');
+    assert.ok(Math.abs(restored.iconX - originalHeader.iconX) <= 1, 'The document title and proxy retain their centred position after presentation');
+    assert.equal(await nativeWindow.evaluate((window) => window.getTitle()), 'Startup');
+    assert.equal(await nativeWindow.evaluate((window) => window.getRepresentedFilename()), folder);
+  };
   if (visible) {
-    const window = await app.browserWindow(page);
+    const window = await app.browserWindow(editor);
     await window.evaluate((window) => window.focus());
     await app.evaluate(({ app }) => app.focus({ steal: true }));
   }
   const requests = [];
-  page.on('request', request => { if(request.url().includes('/proof-photo/')) requests.push(request.url().split('/proof-photo/')[1]); });
+  app.context().on('request', request => { if(request.url().includes('/proof-photo/')) requests.push(request.url().split('/proof-photo/')[1]); });
   const start = performance.now();
-  await page.getByRole('button', { name: 'Presentation', exact: true }).click();
+  const opened = nextPresentation(app);
+  await editor.keyboard.press('Shift+w');
+  const page = await opened;
+  await page.waitForURL('imageflow://editor/presentation');
   await page.locator('.presentation .book-frame-present[data-current][data-ready]').waitFor({ timeout: 10000 });
   const startupMs = Math.round(performance.now() - start);
   const proof = page.frameLocator('.presentation .book-frame-present[data-current][data-ready]');
   const started = await proof.locator('body').evaluate(() => window.__startedPictures ?? []);
   const metrics = { startupMs, startedPictures: started, requestedPhotos: [...requests] };
   console.log(JSON.stringify(metrics));
+  await checkHeader();
   if (!process.argv.includes('--measure')) {
-    assert.equal(requests[0], 'p30', 'The selected spread is the first original photo requested');
+    assert.equal(await proof.locator('body').evaluate(() => window.__heldProxyDecodes ?? 0), 0, 'Offscreen shaped photos never block startup on decode');
+    assert.equal(requests.find((source) => !source.startsWith('p15')), 'p30', 'The selected spread is the first ordinary photo requested');
     assert.ok(started.length <= 3 && started.every(index => Math.abs(index - 30) <= 1), 'Only the current spread and neighbours draw artwork at startup');
     assert.ok(await page.evaluate(() => !!document.activeElement?.closest('.presentation')), 'Keyboard focus enters presentation without clicking the slide');
-    const window = await app.browserWindow(page);
+    let window = await app.browserWindow(page);
+    if (visible) {
+      assert.equal(await window.evaluate((window) => window.isVisible()), true, 'The fullscreen viewer is shown');
+      assert.equal(await window.evaluate((window) => window.isFocused()), true, 'The fullscreen viewer receives native keyboard focus');
+    }
+    let input = page;
     const nativeKey = async (keyCode) => visible ? window.evaluate((window, keyCode) => {
       window.webContents.sendInputEvent({ type: 'keyDown', keyCode });
       window.webContents.sendInputEvent({ type: 'keyUp', keyCode });
-    }, keyCode) : page.keyboard.press({ Right: 'ArrowRight', Left: 'ArrowLeft' }[keyCode] ?? keyCode);
+    }, keyCode) : input.keyboard.press({ Right: 'ArrowRight', Left: 'ArrowLeft' }[keyCode] ?? keyCode);
     // --visible exercises the native input path, which requires a focused native window. Neither path clicks
     // the slide or manually focuses it after entry, since that would mask the reported focus failure.
     await nativeKey('Right');
@@ -105,7 +150,8 @@ try {
     await page.keyboard.press('g');
     await proof.locator('.if-presentation.overview').waitFor();
     const overviewSources = await proof.locator('.if-present-crop img[data-src]').evaluateAll(images => images.map(image => image.getAttribute('src')));
-    assert.equal(overviewSources.length, 40);
+    assert.equal(await proof.locator('.if-present-crop').count(), 40);
+    assert.equal(overviewSources.length, 39, 'Overview includes 39 ordinary photos and one SVG photo');
     assert.ok(overviewSources.every(source => /\/proof-photo\/[\w-]+\/\d+$/.test(source)), 'Overview never requests camera originals');
     await proof.locator('.if-present-crop img[data-src]').first().evaluate(image => image.decode());
     assert.ok(await proof.locator('.if-present-crop img[data-src]').evaluateAll(images => images.filter(image => image.complete).every(image => image.naturalWidth <= 1024)));
@@ -114,18 +160,50 @@ try {
     await proof.locator('.if-presentation:not(.overview) .if-present-crop:visible img[data-src][src$="/p39"]').waitFor();
     await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.decode());
     assert.equal(await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.naturalWidth), 1800, 'Leaving overview restores original photo quality');
-    await page.keyboard.press('Escape');
-    await page.locator('.presentation').waitFor({ state: 'detached' });
+    const closed = page.waitForEvent('close');
+    await page.keyboard.press('Escape').catch((error) => { if (!page.isClosed()) throw error; });
+    await closed;
+    await checkHeader();
+    const reopened = nextPresentation(app);
     await menuAction(app, 'Presentation');
-    await page.locator('.presentation .book-frame-present[data-current][data-ready]').waitFor();
-    await nativeKey('Left');
-    await page.frameLocator('.presentation .book-frame-present[data-current][data-ready]').locator('.if-present-crop:visible img[data-src][src$="/p0"]').waitFor();
-    await nativeKey('Escape');
-    await page.locator('.presentation').waitFor({ state: 'detached' });
+    input = await reopened;
+    await input.waitForURL('imageflow://editor/presentation');
+    window = await app.browserWindow(input);
+    await input.locator('.presentation .book-frame-present[data-current][data-ready]').waitFor();
+    await nativeKey('Home');
+    await input.frameLocator('.presentation .book-frame-present[data-current][data-ready]').locator('.if-present-crop:visible img[data-src][src$="/p0"]').waitFor();
+    await input.keyboard.press('3');
+    await input.keyboard.press('1');
+    await input.keyboard.press('Enter');
+    const shaped = input.frameLocator('.book-frame-present[data-current][data-ready]')
+      .locator('.if-present-crop:visible [data-photo-render="custom"] svg image');
+    await shaped.waitFor();
+    assert.match(await shaped.getAttribute('href'), /\/proof-photo\/p15(?:\/\d+)?$/, 'The shaped photo remains available when its spread is shown');
+    const closedAgain = input.waitForEvent('close');
+    await nativeKey('Escape').catch((error) => { if (!input.isClosed()) throw error; });
+    await closedAgain;
+    await checkHeader();
+    if (process.argv.includes('--repeat')) {
+      const timings = [];
+      for (let cycle = 0; cycle < 20; ++cycle) {
+        const opened = nextPresentation(app);
+        const started = performance.now();
+        await editor.evaluate((spread) => window.imageflow.startPresentation(spread), cycle % 2 ? 's15' : 's30');
+        const repeated = await opened;
+        await repeated.waitForURL('imageflow://editor/presentation');
+        await repeated.locator('.book-frame-present[data-current][data-ready]').waitFor({ timeout: 5000 });
+        timings.push(Math.round(performance.now() - started));
+        const closed = repeated.waitForEvent('close', { timeout: 5000 });
+        await repeated.keyboard.press('Escape').catch((error) => { if (!repeated.isClosed()) throw error; });
+        await closed;
+      }
+      console.log('20 repeated presentation openings (ms):', JSON.stringify(timings));
+      await checkHeader();
+    }
   }
   console.log('Presentation startup checked:', work);
 } catch (error) {
-  for (const page of app.windows().filter(page => page.url() === 'imageflow://editor/')) {
+  for (const page of app.windows().filter(page => ['imageflow://editor/', 'imageflow://editor/presentation'].includes(page.url()))) {
     console.error('Presentation state:', await page.evaluate(() => ({ active: document.activeElement?.outerHTML.slice(0, 300), presentation: !!document.querySelector('.presentation'), message: document.querySelector('.presentation-message')?.textContent,
       frames: [...document.querySelectorAll('.book-frame-present')].map(frame => ({ src: frame.src, ready: frame.dataset.ready, className: frame.className, height: frame.clientHeight })) })));
     for (const frame of page.frames().filter(frame => frame.url().includes('view=present'))) console.error('Artwork state:', await frame.evaluate(() => ({ state: window.imageflowRenderStatus?.state, ready: document.readyState,
