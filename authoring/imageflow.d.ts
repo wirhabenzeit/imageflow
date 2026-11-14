@@ -520,6 +520,9 @@ export type BoundGeometry = {
   css: typeof geometry.css;
 };
 
+/** Where a render is shown: see `RenderContext.view`. More views may be added; test only `view === 'canvas'`. */
+export type RenderView = 'canvas' | 'thumbnail' | 'layout-preview' | 'export';
+
 /** The context passed to `render`, typed from a spread declared with the `spread` builder or `spreadFor`. */
 export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = {
   params: ValuesOf<S>;
@@ -531,7 +534,19 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   format: ResolvedFormat;
   /** The chosen key of `formats`, or `'default'` for a template with a single `format`. */
   formatId: string;
+  /**
+   * `'edit'` for every render in the editor, `'export'` for print and proof export, presentation, the Book check and
+   * MCP artwork. (The Book check is `'export'` here, while `RenderedImage`'s own `mode` tells it apart as `'check'`.)
+   */
   mode: 'edit' | 'export';
+  /**
+   * Where this render is shown, fixed for the whole render. `'canvas'` is the interactive book in the editor, the only
+   * place anyone clicks; `'thumbnail'` (the sidebar) and `'layout-preview'` (the Inspector's layouts) are edit-mode
+   * renders that show what the page will look like. `'export'` matches `mode === 'export'`. Show editing scaffolding,
+   * such as a placeholder that invites a click, only when `view === 'canvas'`. Later versions may add views, so never
+   * switch over the list as if it were complete: compare with `'canvas'` only.
+   */
+  view: RenderView;
   /**
    * Marks the node that shows these parameters, so clicking it in the editor opens them for editing:
    * `<h2 {...ctx.edit('heading')}>{ctx.params.heading}</h2>`. For a single string parameter, `ctx.Text` is shorter.
@@ -565,6 +580,7 @@ export type UntypedRenderContext = {
   format: ResolvedFormat;
   formatId: string;
   mode: 'edit' | 'export';
+  view: RenderView;
   edit(...paths: string[]): EditMarker;
   book: BookContext;
   geometry: BoundGeometry;

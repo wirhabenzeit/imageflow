@@ -16,7 +16,7 @@ import { cssMM, pageLabel, pageNumbers, pageSequence, pagesText, resolveFormat, 
 import { animateReorder } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat, UnitPages } from './format';
-import { parseDocument } from './project';
+import { frameView, parseDocument } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
 import { isParameterValue, parameterWarnings, resolveParams } from './parameters';
@@ -1476,6 +1476,7 @@ export async function startRender(root: HTMLElement) {
     }
     if (present) for (const photo of Object.values(book.photos)) photo.src = photo.src.replace('/photo/', '/proof-photo/');
     const lazy = edit && view === 'book';
+    if (edit) book.view = frameView(view);
     // Pictures drawn by <RenderedImage>: at the screen's resolution in the editor (smaller for thumbnails), cheaply
     // in the Book check, and at the format's target resolution for export (ADR 0006).
     const target = template.format.output.resolution?.target ?? 300;
