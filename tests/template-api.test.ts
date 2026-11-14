@@ -6,7 +6,7 @@ import { geometry } from '../src/geometry';
 import { capabilities, runtimeExports } from '../src/runtime-exports';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { projectSchema } from '../src/project';
+import { frameView, projectSchema, renderView } from '../src/project';
 import type { RenderProject, RenderView } from '../src/project';
 import { box, chooseFormat, issue, runtime, SpreadView, templateIssueSchema, templateSchema } from '../src/template';
 import type { RenderContext } from '../src/template';
@@ -202,4 +202,14 @@ test('inline Text validates its opt-in and string binding and renders pure multi
   assert.match(artwork, />First\nSecond<\/p>/);
   assert.doesNotMatch(artwork, /contenteditable|data-text-editor|iframe|textbox/);
   assert.doesNotMatch(render({ value: '', mode: 'export' }), /if-text-placeholder/);
+});
+
+test('only the book frame is the canvas; other and unknown frames are previews, and export is always export', () => {
+  assert.equal(frameView('book'), 'canvas');
+  assert.equal(frameView('thumbs'), 'thumbnail');
+  assert.equal(frameView('layouts'), 'layout-preview');
+  assert.equal(frameView('something-new'), 'thumbnail');
+  assert.equal(frameView(null), 'thumbnail');
+  assert.equal(renderView({ mode: 'export', view: 'canvas' }), 'export');
+  assert.equal(renderView({ mode: 'edit' }), 'canvas');
 });

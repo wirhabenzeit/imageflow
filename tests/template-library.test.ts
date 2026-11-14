@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import type { TemplateInfo } from '../src/desktop';
 import { mm, printFormat } from '../src/format';
 import { compareVersions, TemplateImportError, TemplateLibrary, templateFiles, templateHash } from '../desktop/template-library';
+import sharp from 'sharp';
 
 const format = printFormat({ label: 'Square', trim: { width: mm(200), height: mm(200) }, bleed: mm(3), safe: mm(10),
   pageCount: { min: 2, max: 20, step: 2 } });
@@ -14,7 +15,8 @@ async function validate(folder: string): Promise<TemplateInfo> {
   const source = await readFile(join(folder, 'index.tsx'), 'utf8');
   if (source.includes('BROKEN')) throw new TemplateImportError('Template → spreads: Declare a spread.', ['spreads: Declare a spread.']);
   const field = (name: string) => new RegExp(name + ": '([^']*)'").exec(source)?.[1];
-  return { id: field('id'), version: field('version')!, label: field('label'), parameters: {}, format, formatId: 'default', formats: {},
+  return { id: field('id'), version: field('version')!, label: field('label'), ...(field('preview') ? { preview: field('preview') } : {}),
+    parameters: {}, format, formatId: 'default', formats: {},
     spreads: { story: { label: 'Story', span: 'spread', parameters: {}, boxes: {}, elements: {} } },
     openingSpreads: [{ layout: 'story', params: {} }] };
 }
@@ -211,4 +213,55 @@ test('imports are reviewed with their packages and network sites, and a declined
     assert.equal(await library.isBuiltIn(entry.hash), false);
     assert.equal(await library.isBuiltIn((await library.list())[0].hash), true);
   } finally { await done(); }
+});
+
+const jpeg = (width: number, height: number) => sharp({ create: { width, height, channels: 3, background: '#557' } }).jpeg().toBuffer();
+
+test('entries carry the preview image, a saved render of the opening spread, and the shape to crop the image to', async () => {
+  const work = await mkdtemp(join(tmpdir(), 'imageflow-library-'));
+  try {
+    const builtIn = await template(work, 'builtin', { id: 'starter', version: '1.0.0', extra: "preview: './preview.jpg'" });
+    await writeFile(join(builtIn, 'preview.jpg'), await jpeg(40, 40));
+    const shipped = join(work, 'shipped');
+    const cache = join(work, 'cache');
+    const renders = { shipped, cache };
+    const library = new TemplateLibrary(join(work, 'Templates'), [{ template: builtIn }], validate, async (path) => { await rm(path, { recursive: true }); }, 'caps-1', undefined, renders);
+    let [starter] = await library.list();
+    assert.equal(starter.aspect, 1, 'a square format');
+    assert.equal(starter.image, true);
+    assert.equal(starter.render, undefined);
+    assert.equal(await library.pictureFile(starter.hash, 'image'), join(builtIn, 'preview.jpg'));
+    assert.equal(await library.pictureFile(starter.hash, 'render'), undefined);
+
+    // A render made later is kept in the cache; one shipped with the app is preferred.
+    assert.equal(await library.saveRender(starter.hash, await jpeg(20, 20)), true);
+    [starter] = await library.list();
+    assert.equal(starter.render, true);
+    assert.equal(await library.pictureFile(starter.hash, 'render'), join(cache, starter.hash + '.jpg'));
+    await mkdir(shipped);
+    await writeFile(join(shipped, starter.hash + '.jpg'), await jpeg(20, 20));
+    assert.equal(await library.pictureFile(starter.hash, 'render'), join(shipped, starter.hash + '.jpg'));
+    assert.equal(await library.saveRender('f'.repeat(64), await jpeg(20, 20)), false, 'no entry has this hash');
+
+    // An imported template keeps its render beside its source, so removing the entry removes it too.
+    const travel = await template(work, 'travel', { id: 'travel', version: '1.0.0', extra: "preview: './missing.jpg'" });
+    assert.equal((await library.import(travel, no)).status, 'imported');
+    let imported = (await library.list())[1];
+    assert.equal(imported.image, undefined, 'a missing preview file falls back to the render');
+    const metadata = JSON.parse(await readFile(join(work, 'Templates', 'travel', 'library.json'), 'utf8'));
+    assert.match(metadata.imageProblem, /does not exist/);
+    await library.saveRender(imported.hash, await jpeg(20, 20));
+    imported = (await library.list())[1];
+    assert.equal(imported.render, true);
+    assert.equal(await library.pictureFile(imported.hash, 'render'), join(work, 'Templates', 'travel', 'preview-' + imported.hash + '.jpg'));
+    await library.remove('travel');
+    assert.equal(await library.pictureFile(imported.hash, 'render'), undefined);
+
+    // Renders of earlier built-in versions are pruned when the app starts.
+    const stale = join(cache, 'a'.repeat(64) + '.jpg');
+    await writeFile(stale, 'old');
+    const restarted = new TemplateLibrary(join(work, 'Templates'), [{ template: builtIn }], validate, async () => {}, 'caps-1', undefined, renders);
+    await restarted.list();
+    assert.deepEqual((await readdir(cache)).sort(), [starter.hash + '.jpg']);
+  } finally { await rm(work, { recursive: true, force: true }); }
 });

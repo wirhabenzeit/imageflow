@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { importModeSchema, sourceReferenceSchema } from './source-locations';
 import type { SourceStatus } from './source-locations';
 import type { Dimensions } from './spread';
+import { captureFields } from './photo-metadata';
+import type { CaptureMetadata } from './photo-metadata';
 
 export const identifier = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/, 'Use letters, digits, underscores, or hyphens.')
   .refine((id) => !Object.hasOwn(Object.prototype, id), 'This identifier is reserved.');
@@ -52,6 +54,9 @@ export const photoIndexSchema = z.record(identifier, z.object({
   title: z.string().optional(),
   credit: z.string().optional(),
   altText: z.string().optional(),
+  // Capture time, location and camera are read from the photo file and cannot be written here.
+  ...Object.fromEntries(captureFields.map((field) => [field, z.custom<never>(() => false,
+    { message: field + ' is read from the photo file and is read-only. Remove it from photos.json.' }).optional()])),
 }));
 
 export type Project = z.infer<typeof projectSchema>;
@@ -59,7 +64,7 @@ export type SpreadState = Project['spreads'][number];
 export type BoxState = z.infer<typeof box>;
 export type Values = z.infer<typeof values>;
 export type PhotoIndex = z.infer<typeof photoIndexSchema>;
-export type Photo = Omit<PhotoIndex[string], 'path' | 'linked'> & Dimensions;
+export type Photo = Omit<PhotoIndex[string], 'path' | 'linked' | typeof captureFields[number]> & Dimensions & CaptureMetadata;
 // A file the template reads through `file(id)`. Files are read as UTF-8 text.
 export type ProjectFile = { name: string; extension: string; text?: string; problem?: string };
 export type ProjectFiles = { project: Project; photoIndex: PhotoIndex };
@@ -80,6 +85,10 @@ export type RenderProject = {
 };
 // `'canvas'` is the interactive book in the editor; thumbnails and layout previews are edit-mode renders nobody clicks.
 export type RenderView = 'canvas' | 'thumbnail' | 'layout-preview' | 'export';
+// The book frame's `?view=` decides which edit-mode render is the canvas. Only the book view itself is; an unknown
+// frame counts as a preview, so a new frame never shows editing scaffolding by accident.
+export const frameView = (view: string | null): Exclude<RenderView, 'export'> =>
+  view === 'book' ? 'canvas' : view === 'layouts' ? 'layout-preview' : 'thumbnail';
 export const renderView = (book: Pick<RenderProject, 'mode' | 'view'>): RenderView =>
   book.mode === 'export' ? 'export' : book.view ?? 'canvas';
 export type FixtureMarking = { banner: string; labels: Record<string, string> };

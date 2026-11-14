@@ -1,13 +1,19 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { DesktopApi, ProjectSummary } from './desktop';
+import { usePhotoView } from './PhotoViewMenu';
+import { isPhotoViewCommand } from './photo-view';
+import { sourceList } from './source-items';
 import { bookName } from './book-name';
 import { QuickLook } from './Sources';
-import { sourceUsage } from './editing';
+import { assetPageLabels, assetUsage } from './asset-usage';
 import type { SourceRef } from './source-items';
 import { SourceManager } from './SourceManager';
 
 export function AssetsWindow({ api }: { api?: DesktopApi }) {
   const [summary, setSummary] = useState<ProjectSummary>();
+  const photoView = usePhotoView(summary?.viewKey ?? summary?.folder);
+  const onCommand = useEffectEvent((id: string) => { if (isPhotoViewCommand(id)) photoView.command(id); });
+  useEffect(() => api?.onCommand(onCommand), [api]);
   const [quick, setQuick] = useState<SourceRef>();
   const [error, setError] = useState('');
   useEffect(() => { if (summary) document.title = 'Assets — ' + bookName(summary.folder); }, [summary?.folder]);
@@ -44,12 +50,13 @@ export function AssetsWindow({ api }: { api?: DesktopApi }) {
     return () => { active = false; stop(); window.removeEventListener('focus', onFocus); };
   }, [api]);
   return <main className="studio assets-window">
-    {summary && api ? <SourceManager api={api} summary={summary} adopt={setSummary} disabled={refreshing} quickLook={setQuick} /> : !error && <p className="muted">Loading assets…</p>}
-    {summary && quick && <QuickLook summary={summary} source={quick} usage={sourceUsage(summary.project, summary.project.spreads.map((_, i) => 'Spread ' + (i + 1)))}
+    {summary && api ? <SourceManager view={photoView} api={api} summary={summary} adopt={setSummary} disabled={refreshing} quickLook={setQuick} /> : !error && <p className="muted">Loading assets…</p>}
+    {summary && quick && <QuickLook view={photoView.value} summary={summary} source={quick} usage={assetUsage(summary, assetPageLabels(summary))}
       close={() => setQuick(undefined)} navigate={(step) => {
-        const ids = quick.kind === 'photo' ? Object.keys(summary.photoIndex) : Object.keys(summary.project.texts);
+        const ids = sourceList(summary, quick.kind, photoView.value).map(({ id }) => id);
         const next = ids[ids.indexOf(quick.id) + step]; if (next) setQuick({ ...quick, id: next });
       }} />}
+    {photoView.dialog}
     {error && <p className="error-text" role="alert">{error}</p>}
   </main>;
 }

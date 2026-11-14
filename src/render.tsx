@@ -1,6 +1,8 @@
+import type { PresentationView } from './presentation-model';
+import { presentationPhotoSource } from './presentation-model';
 import { sourcePath } from './source-locations';
 import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
-import { configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
+import { activateRenderedImageSpreads, configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
@@ -14,7 +16,7 @@ import { cssMM, pageLabel, pageNumbers, pageSequence, pagesText, resolveFormat, 
 import { animateReorder } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat, UnitPages } from './format';
-import { parseDocument } from './project';
+import { frameView, parseDocument } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
 import { isParameterValue, parameterWarnings, resolveParams } from './parameters';
@@ -33,6 +35,8 @@ import { textEditorOwner } from './inline-text';
 import { inlineTextFrame } from './inline-text-frame';
 import { readEdit } from './editing';
 import { parsePreviewRequest, PreviewError } from './preview';
+import { previewAspectMismatch, trimAspect } from './template-preview';
+import type { PreviewFileReport } from './template-preview';
 import type { PreviewMetadata, PagePreviewMetadata } from './preview';
 import { inspectionSchema } from './inspection';
 import type { ElementInspection, ElementMeasurement } from './inspection';
@@ -553,6 +557,26 @@ class LayoutRenderError extends Error {
   }
 }
 
+// Problems with the template's own preview image (`preview` in defineTemplate). The app reads the file, since the frame
+// cannot; the aspect ratio is compared with the default format's trimmed page, the shape of the New Book tile.
+async function templatePreviewWarnings(declared: string, format: Template['format']): Promise<Issue[]> {
+  let report: PreviewFileReport;
+  try {
+    const response = await fetch(location.pathname + '/template-preview?' + new URLSearchParams({ path: declared }));
+    if (!response.ok) return [];
+    report = await response.json();
+  } catch { return []; }
+  if ('problem' in report) return [{ message: report.problem, code: 'template-preview-invalid', details: { path: declared },
+    suggestion: 'Fix the file or the preview path in the template declaration. Until then the template library shows a render of the opening spread.' }];
+  const aspect = trimAspect(format);
+  if (!previewAspectMismatch(report.width, report.height, aspect)) return [];
+  const ratio = (value: number) => Math.round(value * 100) / 100;
+  return [{ message: 'The template preview is ' + report.width + ' × ' + report.height + ' pixels, a ratio of ' + ratio(report.width / report.height) +
+    ', but the default format ' + format.label + ' is ' + ratio(aspect) + '. New Book crops the preview to fill its tile.',
+  code: 'template-preview-aspect', details: { path: declared, width: report.width, height: report.height, expected: ratio(aspect) },
+  suggestion: 'Crop the preview to the default format, such as ' + (aspect >= 1 ? '1200 × ' + Math.round(1200 / aspect) : Math.round(1200 * aspect) + ' × 1200') + ' pixels.' }];
+}
+
 // Template declarations that do not satisfy the template contract, by declaration path.
 class DeclarationError extends Error {
   constructor(message: string, readonly issues: { path: string; message: string }[]) { super(message); }
@@ -603,6 +627,126 @@ function croppedSheet(sheet: HTMLElement, crop: ReturnType<typeof sheetCrop>, pi
   page.append(clone);
   return page;
 }
+
+// Uses the same flowed sheets and crop geometry as proof/export. Only the current crop and its neighbours
+// are mounted at full size; overview crops reuse the final artwork rather than the editor decoration.
+async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat, start: string) {
+  // Keep source layouts measured while their asynchronous pictures finish. display:none would resize those
+  // pictures to zero and cancel them; the presentation copies receive their finished pixels below.
+  const sourceWidth = root.getBoundingClientRect().width;
+  Object.assign(root.style, { position: 'absolute', left: '-100000px', top: '0', width: sourceWidth + 'px', visibility: 'hidden', pointerEvents: 'none' });
+  root.inert = true;
+  root.setAttribute('aria-hidden', 'true');
+  const stage = document.createElement('div');
+  stage.className = 'if-presentation';
+  document.body.append(stage);
+  const initial = Math.max(0, spreads.findIndex(({ id }) => id === start));
+  let state: PresentationView = { spread: spreads[initial]?.id ?? '', side: hasSinglePage(format) ? 'page' : sequence.spreads[initial]?.span ?? 'spread', bounds: 'trim', overview: false };
+  const cache = new Map<string, HTMLElement>();
+  const sources = new Map<HTMLElement, HTMLElement>();
+  let warm = false;
+  let drawRevision = 0;
+  let firstPaint!: () => void;
+  const painted = new Promise<void>((resolve) => { firstPaint = resolve; });
+  function syncPictures() {
+    for (const [frame, sheet] of sources) {
+      const originals = sheet.querySelectorAll<HTMLElement>('.if-rendered-image');
+      frame.querySelectorAll<HTMLElement>('.if-rendered-image').forEach((picture, i) => {
+        const original = originals[i];
+        if (!original) return;
+        picture.dataset.rendered = original.dataset.rendered;
+        picture.title = original.title;
+        const image = picture.querySelector('img'), source = original.querySelector('img');
+        if (image && source?.getAttribute('src') && image.getAttribute('src') !== source.getAttribute('src')) image.src = source.src;
+        if (image && source) image.style.display = source.style.display;
+      });
+    }
+  }
+  function draw() {
+    const revision = ++drawRevision;
+    const width = innerWidth, height = innerHeight;
+    const at = Math.max(0, spreads.findIndex(({ id }) => id === state.spread));
+    const visible = state.overview ? spreads.map((_, i) => i) : (warm ? [at, at - 1, at + 1] : [at]).filter((i) => i >= 0 && i < sheets.length);
+    activateRenderedImageSpreads(visible.map((i) => spreads[i].id));
+    const columns = Math.max(1, Math.floor(width / 240));
+    const cellWidth = width / columns, cellHeight = 200;
+    const keep = new Set<string>();
+    const fresh: HTMLElement[] = [];
+    stage.classList.toggle('overview', state.overview);
+    const rects: BookGeometry['sheets'] = [];
+    visible.forEach((i, n) => {
+      const side = state.overview || i !== at ? (hasSinglePage(format) ? 'page' : sequence.spreads[i].span) : state.side;
+      const crop = sheetCrop(format, side, state.bounds);
+      const scale = Math.min(((state.overview ? cellWidth : width) - 32) / crop.widthMm, ((state.overview ? cellHeight : height) - 32) / crop.heightMm);
+      const w = Math.max(1, crop.widthMm * scale), h = Math.max(1, crop.heightMm * scale);
+      const key = [i, side, state.bounds, w, h, state.overview].join(':');
+      keep.add(key);
+      let frame = cache.get(key);
+      if (!frame) {
+        frame = croppedSheet(sheets[i], crop, { width: w, height: h });
+        frame.classList.add('if-present-crop');
+        if (state.overview) {
+          frame.setAttribute('role', 'button');
+          frame.setAttribute('aria-label', pagesText(sequence.spreads[i].page));
+          frame.addEventListener('click', () => post({ type: 'present-select', spread: spreads[i].id }));
+        }
+        cache.set(key, frame);
+        sources.set(frame, sheets[i]);
+        stage.append(frame);
+        fresh.push(frame);
+      }
+      const x = state.overview ? (n % columns) * cellWidth + (cellWidth - w) / 2 : (width - w) / 2;
+      const y = state.overview ? Math.floor(n / columns) * cellHeight + (cellHeight - h) / 2 : (height - h) / 2;
+      Object.assign(frame.style, { position: 'absolute', left: x + 'px', top: y + 'px', visibility: !state.overview && i !== at ? 'hidden' : 'visible',
+        outline: state.overview && i === at ? '2px solid #87baff' : '' });
+      if (state.overview || i === at) rects.push({ spread: spreads[i].id, x, y, width: w, height: h });
+    });
+    for (const [key, frame] of cache) if (!keep.has(key)) {
+      for (const image of frame.querySelectorAll('img')) image.removeAttribute('src');
+      frame.remove(); sources.delete(frame); cache.delete(key);
+    }
+    for (const frame of fresh) for (const image of frame.querySelectorAll<HTMLImageElement>('img[data-src]')) {
+      image.loading = state.overview ? 'lazy' : 'eager';
+      image.src = presentationPhotoSource(image.dataset.src!, image.getBoundingClientRect().width * (devicePixelRatio || 1), state.overview);
+    }
+    syncPictures();
+    post({ type: 'geometry', width, height: state.overview ? Math.max(height, Math.ceil(spreads.length / columns) * cellHeight) : height,
+      sheets: rects, boxes: [], targets: [] });
+    if (!warm) {
+      const images = [...stage.querySelectorAll<HTMLImageElement>('img[data-src]')];
+      void Promise.all(images.map((image) => image.complete ? Promise.resolve() : new Promise<void>((resolve) => {
+        const loaded = () => { image.removeEventListener('load', loaded); image.removeEventListener('error', loaded); resolve(); };
+        image.addEventListener('load', loaded, { once: true }); image.addEventListener('error', loaded, { once: true });
+      }))).then(() => {
+        // Chromium can defer decode() indefinitely in a hidden candidate iframe. Loading the full original
+        // is enough to reveal it; readiness also follows the latest crop if fullscreen resized it meanwhile.
+        if (revision === drawRevision) firstPaint();
+      });
+    }
+  }
+  window.addEventListener('message', (event) => {
+    if (event.source !== parent || event.origin !== 'imageflow://editor' || event.data?.type !== 'present') return;
+    const next = event.data as PresentationView;
+    if (!spreads.some(({ id }) => id === next.spread) || !['page', 'left', 'right', 'spread'].includes(next.side) || !['trim', 'bleed'].includes(next.bounds)) return;
+    state = next;
+    draw();
+  });
+  window.addEventListener('resize', draw);
+  window.addEventListener('keydown', (event) => {
+    if (event.metaKey || event.ctrlKey) return;
+    event.preventDefault();
+    post({ type: 'present-key', key: event.key, shiftKey: event.shiftKey, metaKey: event.metaKey, ctrlKey: event.ctrlKey, altKey: event.altKey });
+  });
+  let queued: ReturnType<typeof setTimeout> | undefined;
+  watchRenderedImages(() => { queued ??= setTimeout(() => { queued = undefined; syncPictures(); }, 0); });
+  draw();
+  // The current spread gets the first photo requests. Neighbours warm only after it can be shown, and slow
+  // generated artwork fills in progressively instead of holding the entire presentation behind it.
+  await painted;
+  warm = true;
+  setTimeout(draw, 0);
+}
+const hasSinglePage = (format: ResolvedFormat) => !format.facingPages;
 
 function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: ReturnType<typeof pageSequence>, format: ResolvedFormat) {
   const style = document.createElement('style');
@@ -885,6 +1029,17 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
 // draft of the editor's parameters; the frame reports the draft, its height, and commit or cancel to the app, which
 // validates and saves. The frame never changes project data itself. Its read-only context follows the book: the app
 // names each newer render session, and the frame recomputes the context from it.
+// Identifies the project's files and their contents, so a changed file refreshes an open editor. A short hash keeps
+// large files out of the key.
+function filesKey(book: RenderProject) {
+  return JSON.stringify(Object.entries(book.files).map(([id, found]) => {
+    const text = found.text ?? '';
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+    return [id, book.project.files[id], found.problem ?? '', text.length, hash >>> 0];
+  }));
+}
+
 function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, target: { element: string } | { editor: string }, readOnly: boolean,
   presentation: EditorPresentation) {
   const spread = book.project.spreads.find(({ id }) => id === spreadId);
@@ -981,8 +1136,13 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       const next = refreshedEditorContext(latest, template, spreadId);
       if (!next) return;
       const measured = withEditorGeometry(next.context, measurements);
-      const key = next.key + JSON.stringify(Object.fromEntries(Object.entries(measured.elements).map(([id, element]) => [id, element.rect])));
+      // The project's files count too: an editor reading `file(id)` shows the file's current content.
+      const key = next.key + JSON.stringify(Object.fromEntries(Object.entries(measured.elements).map(([id, element]) => [id, element.rect])))
+        + filesKey(latest);
       if (key === contextKey) return;
+      setTemplateFiles(latest.files);
+      projectFiles = latest.project.files;
+      updateFiles?.(projectFiles);
       seen = measured;
       contextKey = key;
       updateContext?.(seen);
@@ -1302,21 +1462,26 @@ export async function startRender(root: HTMLElement) {
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
     const { chains, positions } = textAssignments(book, template);
-    const edit = book.mode === 'edit';
+    const present = query.get('view') === 'present';
+    const presentationStart = spreads.find(({ id }) => id === query.get('spread'))?.id ?? spreads[0]?.id ?? '';
+    if (present) book.mode = 'export';
+    const edit = book.mode === 'edit' && !present;
     const check = !edit && query.get('view') === 'check';
     const artwork = !edit && query.get('view') === 'artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
     const inspect = !edit && query.has('inspect') ? inspectionSchema.parse(JSON.parse(query.get('inspect')!)) : undefined;
     // The editor renders the whole book twice: as scrolling spreads and as sidebar thumbnails.
-    const view: BookView = query.get('view') === 'thumbs' ? 'thumbs' : query.get('view') === 'layouts' ? 'layouts' : 'book';
+    const view: BookView = present ? 'present' : query.get('view') === 'thumbs' ? 'thumbs' : query.get('view') === 'layouts' ? 'layouts' : 'book';
     if (edit && view !== 'book') {
       for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
     }
+    if (present) for (const photo of Object.values(book.photos)) photo.src = photo.src.replace('/photo/', '/proof-photo/');
     const lazy = edit && view === 'book';
-    if (edit) book.view = view === 'thumbs' ? 'thumbnail' : view === 'layouts' ? 'layout-preview' : 'canvas';
+    if (edit) book.view = frameView(view);
     // Pictures drawn by <RenderedImage>: at the screen's resolution in the editor (smaller for thumbnails), cheaply
     // in the Book check, and at the format's target resolution for export (ADR 0006).
     const target = template.format.output.resolution?.target ?? 300;
-    configureRenderedImages(edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
+    configureRenderedImages(present ? { mode: 'preview', pixelRatio: window.devicePixelRatio || 1, concurrency: 3, timeoutMs: pictureTimeoutMs.preview,
+      activeSpreads: new Set([presentationStart]) } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
       concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
       previewCache: view !== 'book' ? location.pathname + '/picture/' : undefined }
       : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
@@ -1341,7 +1506,7 @@ export async function startRender(root: HTMLElement) {
     const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
     flushSync(() => react.render(visible.map(({ spread, i }) => {
       const view = <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
-        page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy} />;
+        page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy || present} />;
       return <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} data-layout={spread.definition} key={spread.id}>
         {edit ? view : <LayoutBoundary spread={spread.id} failures={layoutFailures}>{view}</LayoutBoundary>}
       </div>;
@@ -1363,7 +1528,7 @@ export async function startRender(root: HTMLElement) {
     }
     // A check or export is final only once every asynchronous picture is drawn or has failed; the editor shows
     // them as they arrive.
-    const pictureFailures = lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
+    const pictureFailures = present || lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
     if (edit && view === 'thumbs') await settleRestoredImages();
     const images = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
     const decoded = await settle(images);
@@ -1385,6 +1550,8 @@ export async function startRender(root: HTMLElement) {
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
         suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
     ];
+    // The template's own preview image is checked where the whole book is: the editor's book view, Book check and export.
+    if (declared.data.preview && (!edit || view === 'book')) warnings.push(...await templatePreviewWarnings(declared.data.preview, chooseFormat(declared.data).format));
     // A book without spreads is valid while it is being started, but there is nothing to print yet.
     const errors: Issue[] = spreads.length ? sequence.issues.map((text) => ({ ...message(text), code: 'page-sequence',
       suggestion: 'Insert, remove or move spreads, or switch layouts, so the page sequence fits the format.' })) : [{
@@ -1483,7 +1650,7 @@ export async function startRender(root: HTMLElement) {
       }
     }
     const minimum = template.format.output.minimumTextSize;
-    for (const [spread, { sheet }] of validated) {
+    for (const [spread, { sheet }] of present ? [] : validated) {
       const minimumMm = minimum && toMillimeters(minimum);
       const typography = checkTypography(sheet, format, minimumMm);
       if (typography.small && minimumMm) {
@@ -1528,7 +1695,8 @@ export async function startRender(root: HTMLElement) {
       inspection = inspectElements(sheets[index], spreads[index], template, format, inspect);
     }
     if (edit) setGrid = layoutBook(root, [...validated].map(([spread, { sheet }]) => ({ spread, sheet })), view, format, grid);
-    if (lazy) {
+    if (present) await renderPresentation(root, sheets, spreads, sequence, format, presentationStart);
+    else if (lazy) {
       const load = photoLoader(root, () => onScreen);
       let timer: ReturnType<typeof setTimeout> | undefined;
       onScreenChange = () => { timer ??= setTimeout(() => { timer = undefined; load(); }, 16); };

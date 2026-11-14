@@ -96,11 +96,6 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
             </div>
             <p className="settings-note" id="appearance-description">System follows your macOS appearance.</p>
           </div>
-          <label className="settings-label" htmlFor="default-import-mode">New imports:</label>
-          <select className="settings-control" id="default-import-mode" disabled={!settings} value={settings?.importMode ?? 'copy'}
-            onChange={(event) => void choose({ importMode: event.target.value as AppSettings['importMode'] })}>
-            <option value="copy">Copy into Book</option><option value="link">Link to Original Files</option>
-          </select>
           {error && <p role="alert" className="error-text settings-control">{error}</p>}
         </div>}
         {pane === 'agents' && <AgentSettings api={api} />}

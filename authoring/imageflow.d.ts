@@ -439,7 +439,24 @@ export type BookContext = {
 
 // Render context
 
-export type Photo = { width: number; height: number; caption?: string; title?: string; credit?: string; altText?: string };
+/**
+ * A photo's metadata. `width` and `height` are its pixel size, upright. `caption`, `title`, `credit` and `altText`
+ * are written by the user. `captured`, `location` and `camera` are read from the photo file's EXIF data when it has
+ * them, and are absent otherwise; they are read-only.
+ */
+export type Photo = {
+  width: number; height: number; caption?: string; title?: string; credit?: string; altText?: string;
+  /**
+   * When the photo was taken. `dateTime` is the camera's local wall-clock time, `YYYY-MM-DDTHH:mm:ss`. `offset` is
+   * its UTC offset, such as `'+02:00'`, or `null` when the photo does not record one: the time zone is then unknown,
+   * not UTC. Show the local time as it is; `new Date(dateTime + offset)` is the instant only when `offset` is set.
+   */
+  captured?: { dateTime: string; offset: string | null };
+  /** Where the photo was taken, in WGS 84 degrees: latitude −90 to 90 (north positive), longitude −180 to 180 (east positive). */
+  location?: { latitude: number; longitude: number };
+  /** The camera's make and model as it records them, such as `{ make: 'FUJIFILM', model: 'X-T5' }`. */
+  camera?: { make?: string; model?: string };
+};
 /** Where a Markdown box sits in the chain of boxes that share its text. */
 export type FlowPosition = { part: number; parts: number; title?: string };
 export type Values = Record<string, string | number | boolean>;
@@ -503,7 +520,7 @@ export type BoundGeometry = {
   css: typeof geometry.css;
 };
 
-/** Where a render is shown: see `RenderContext.view`. */
+/** Where a render is shown: see `RenderContext.view`. More views may be added; test only `view === 'canvas'`. */
 export type RenderView = 'canvas' | 'thumbnail' | 'layout-preview' | 'export';
 
 /** The context passed to `render`, typed from a spread declared with the `spread` builder or `spreadFor`. */
@@ -517,13 +534,17 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   format: ResolvedFormat;
   /** The chosen key of `formats`, or `'default'` for a template with a single `format`. */
   formatId: string;
-  /** `'edit'` for every render in the editor, `'export'` for print and proof export, the Book check and MCP artwork. */
+  /**
+   * `'edit'` for every render in the editor, `'export'` for print and proof export, presentation, the Book check and
+   * MCP artwork. (The Book check is `'export'` here, while `RenderedImage`'s own `mode` tells it apart as `'check'`.)
+   */
   mode: 'edit' | 'export';
   /**
    * Where this render is shown, fixed for the whole render. `'canvas'` is the interactive book in the editor, the only
    * place anyone clicks; `'thumbnail'` (the sidebar) and `'layout-preview'` (the Inspector's layouts) are edit-mode
    * renders that show what the page will look like. `'export'` matches `mode === 'export'`. Show editing scaffolding,
-   * such as a placeholder that invites a click, only when `view === 'canvas'`.
+   * such as a placeholder that invites a click, only when `view === 'canvas'`. Later versions may add views, so never
+   * switch over the list as if it were complete: compare with `'canvas'` only.
    */
   view: RenderView;
   /**
@@ -592,7 +613,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
-  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text';
+  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'template-preview';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -602,6 +623,7 @@ export type TemplateDeclaration = {
   version: string;
   label?: string;
   description?: string;
+  preview?: string;
   contract: 1;
   /** Optional extensions beyond the contract-1 baseline. Older lists of baseline features remain accepted. */
   requires?: readonly Capability[];
@@ -610,6 +632,7 @@ export type TemplateDeclaration = {
   formats?: Record<string, PrintFormat>;
   defaultFormat?: string;
   parameters?: Parameters;
+  controls?: Controls;
   layoutFamilies?: Record<string, LayoutFamily>;
   spreads: Record<string, SpreadDefinition>;
   openingSpreads?: readonly OpeningSpread[];
@@ -657,6 +680,13 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   label?: string;
   /** One or two sentences for the template library, up to 300 characters. */
   description?: string;
+  /**
+   * A PNG, JPEG or WebP image inside the template folder, such as `'./preview.jpg'`, that New Book shows instead of a
+   * render of the opening spread. It is cropped to fill a tile with the default format's aspect ratio, so match that
+   * ratio (the Book check warns when it differs). Without it, or when the file is missing, larger than 2 MB or cannot
+   * be read, the library shows its render of the opening spread. Included in the contract-1 baseline.
+   */
+  preview?: string;
   contract: 1;
   /**
    * Optional extensions beyond the contract-1 baseline. Omit for all currently shipped features.
@@ -671,6 +701,12 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   network?: readonly string[];
   /** Book-wide template parameters, shown in the template controls and read through `ctx.document`. */
   parameters?: D & ParametersChecked<D>;
+  /**
+   * Arranges the document parameters' controls in Book settings, as `controls` does on layouts, boxes and elements:
+   * order, groups, label and description overrides, and `when` conditions. Parameters a document editor owns cannot
+   * be listed; they have no generated control.
+   */
+  controls?: Controls<keyof D & string>;
   /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */
   layoutFamilies?: { [K in L]: LayoutFamily };
   /** Editors of document parameters, by ID, opened from nodes marked with their parameters. Included in the contract-1 baseline. */
