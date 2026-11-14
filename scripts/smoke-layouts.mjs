@@ -115,7 +115,7 @@ try {
   });
   await layoutReady('last-notes');
   assert.equal(await pickerHasNoOverlap(), true);
-  assert.equal(await picker.getByRole('radio').count(), 8);
+  assert.equal(await picker.getByRole('radio').count(), 11);
   await w.locator('.inspector').screenshot({ path: join(root, '.build', 'layout-picker-ready.png') });
   // Revisit cached URLs across single-page and full-spread choice sets.
   for (const spread of ['closing', 'last-notes', 'title', 'last-notes', 'closing', 'last-notes']) {
@@ -123,13 +123,14 @@ try {
     await layoutReady(spread);
     assert.equal(await pickerHasNoOverlap(), true);
   }
-  await button('Photo grid 2×2 6–7').click();
+  await button('Photo grid 2×2 10–11').click();
   await w.locator('[data-spread="settlements"][aria-current="page"]').waitFor();
 
   // Only layouts with the same footprint are offered: no single title or closing page for a full spread. The grid
   // family has its own picker, so its 2×2 and 3×3 variants are one preview, named after the family.
   assert.deepEqual(await picker.getByRole('radio').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label'))),
-    ['Photo and story', 'Panorama', 'Map', 'Photo grid', 'Two photos', 'Text spread', 'Calendar spread', 'Contents']);
+    ['Contents', 'Chapter opener', 'Photo and story', 'Text spread', 'Quote and photo', 'Photo and note', 'Panorama', 'Two photos', 'Photo grid',
+      'Feature and details', 'Map']);
 
   // A new book revision with unchanged preview inputs reuses the same iframe, including its map drawing.
   await w.locator('iframe.book-frame-layouts[data-current][data-ready]').waitFor();
@@ -246,18 +247,16 @@ try {
     'A grid-size change keeps the remaining previews quiet without a rebuilding badge or opacity changes');
   const position = await pickerRegion.evaluate((node) => {
     const browser = document.querySelector('.layout-picker').getBoundingClientRect();
-    const gap = document.querySelector('input[aria-label="Gap"]').closest('.field').getBoundingClientRect();
     const picker = node.getBoundingClientRect();
-    return { browserBottom: browser.bottom, pickerTop: picker.top, pickerBottom: picker.bottom, gapTop: gap.top, height: picker.height };
+    return { browserBottom: browser.bottom, pickerTop: picker.top, height: picker.height };
   });
   assert.ok(position.pickerTop >= position.browserBottom, 'Grid size follows the complete layout browser');
-  assert.ok(position.gapTop >= position.pickerBottom && position.gapTop - position.pickerBottom < 16, 'Grid size and Gap are consecutive fields');
   assert.ok(position.height < 60, 'The grid-size field is compact');
   assert.equal(await statusLine(), '');
   assert.equal((await settlements()).definition, 'grid9');
   assert.equal(await frame.locator('[data-spread="settlements"] [data-box]').count(), 9);
   assert.equal(await layout('Photo grid').getAttribute('aria-checked'), 'true');
-  assert.equal(await picker.getByRole('radio').count(), 8);
+  assert.equal(await picker.getByRole('radio').count(), 11);
   assert.deepEqual((await status()).warnings, []);
   await rerendered(() => button('Undo').click());
   assert.deepEqual(await settlements(), state);
@@ -311,12 +310,15 @@ try {
   await rerendered(() => button('Undo').click());
   assert.deepEqual(await keptNames(), ['Cottage']);
 
-  // Story and text spreads declare chapter anchors on the page with their heading; a Contents layout lists them.
-  const chapters = [['Arriving', 3], ['A turn in the path', 9], ['From the notebook', 12], ['When it got quiet', 17], ['The last notes', 26]];
-  assert.deepEqual((await status()).anchors.map(({ id, title, page }) => [id, title, page]), chapters.map((entry) => ['chapter', ...entry]));
+  // Chapter openers declare chapter anchors, stories and text spreads section anchors, on the page with their
+  // heading; a Contents layout lists them, numbering the chapters.
+  const entries = [['chapter', 'The coast', 4], ['section', 'Arriving', 7], ['section', 'A turn in the path', 14],
+    ['section', 'From the notebook', 18], ['chapter', 'Changing weather', 20], ['section', 'The last notes', 30]];
+  assert.deepEqual((await status()).anchors.map(({ id, title, page }) => [id, title, page]), entries);
   await rerendered(() => layout('Contents').click());
   assert.deepEqual(await frame.locator('[data-spread="settlements"] .contents li').evaluateAll((items) =>
-    items.map((item) => [item.firstElementChild.textContent, Number(item.lastElementChild.textContent)])), chapters);
+    items.map((item) => [item.firstElementChild.textContent, Number(item.lastElementChild.textContent)])),
+  [['01The coast', 4], ['Arriving', 7], ['A turn in the path', 14], ['From the notebook', 18], ['02Changing weather', 20], ['The last notes', 30]]);
   await rerendered(() => button('Undo').click());
   assert.equal((await settlements()).definition, 'pair');
 
@@ -325,19 +327,19 @@ try {
   const templateSource = await readFile(templateFile, 'utf8');
 
   // A lookup of an anchor no spread declares is a Book check warning on the spread that asked.
-  const contentsLookup = "const chapters = ctx.book.anchors('chapter');";
+  const contentsLookup = "const entries = ctx.book.anchors().filter(({ id }) => id === 'chapter' || id === 'section');";
   assert.ok(templateSource.includes(contentsLookup));
   await rerendered(() => writeFile(templateFile, templateSource.replace(contentsLookup,
-    "const chapters = [ctx.book.anchor('map'), ...ctx.book.anchors('chapter')].filter(Boolean);")));
+    "const entries = [ctx.book.anchor('map'), ...ctx.book.anchors('chapter')].filter(Boolean);")));
   await rerendered(() => layout('Contents').click());
   const missing = (await status()).warnings.filter(({ code }) => code === 'anchor-missing');
-  assert.deepEqual(missing.map(({ spread, details }) => [spread, details.anchor]), [['settlements', 'map']]);
+  assert.deepEqual(missing.map(({ spread, details }) => [spread, details.anchor]), [['contents', 'map'], ['settlements', 'map']]);
   await rerendered(() => button('Undo').click());
   await rerendered(() => writeFile(templateFile, templateSource));
-  const pairParameters = "parameters: { framed: p.boolean({ label: 'White frame', default: false }) },";
+  const pairParameters = "parameters: { framed: p.boolean({ label: 'White frame', default: false,";
   assert.ok(templateSource.includes(pairParameters));
   await writeFile(templateFile, templateSource.replace(pairParameters,
-    "parameters: { framed: p.boolean({ label: 'White frame', default: false }), heading: p.integer({ label: 'Heading', default: 1 }) },"));
+    "parameters: { heading: p.integer({ label: 'Heading', default: 1 }), framed: p.boolean({ label: 'White frame', default: false,"));
   await w.waitForFunction(() => /Parameter heading is a string in Title page but an integer in Two photos/
     .test(document.querySelector('.status-error')?.textContent ?? ''), null, { timeout: 30000 });
   await rerendered(() => writeFile(templateFile, templateSource));

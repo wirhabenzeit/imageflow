@@ -3,7 +3,7 @@
   "title": "Along the coast",
   "template": {
     "id": "imageflow-starter",
-    "version": "0.4.0"
+    "version": "0.9.0"
   },
   "params": {},
   "texts": {
@@ -17,12 +17,45 @@
   "spreads": [
     {
       "id": "title",
-      "definition": "title",
+      "definition": "cover",
       "params": {
-        "subtitle": "Field notes from Senja",
-        "heading": "Along the coast"
+        "heading": "Along the coast",
+        "subtitle": "Field notes from Senja"
       },
-      "boxes": {}
+      "boxes": {
+        "hero": {
+          "photo": "segla"
+        }
+      }
+    },
+    {
+      "id": "contents",
+      "definition": "contents",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "segla",
+          "crops": {
+            "contents": {
+              "centerX": 0.45,
+              "centerY": 0.4,
+              "zoom": 1.6
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "coast",
+      "definition": "opener",
+      "params": {
+        "heading": "The coast"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "light"
+        }
+      }
     },
     {
       "id": "arriving",
@@ -32,7 +65,10 @@
       },
       "boxes": {
         "hero": {
-          "photo": "segla"
+          "photo": "segla",
+          "params": {
+            "caption": true
+          }
         },
         "body": {
           "text": "arrival"
@@ -56,7 +92,8 @@
       "id": "settlements",
       "definition": "grid",
       "params": {
-        "heading": "Settlements"
+        "heading": "Settlements",
+        "note": "Four places along the outer road, from the ridge to the last cottage before the ferry."
       },
       "boxes": {
         "hero": {
@@ -74,17 +111,90 @@
       }
     },
     {
+      "id": "still",
+      "definition": "statement",
+      "params": {
+        "quote": "Each turn opened a different view of the same water.",
+        "attribution": "From the notebook"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "cottage"
+        }
+      }
+    },
+    {
       "id": "turning",
-      "definition": "story",
+      "definition": "storyRight",
       "params": {
         "heading": "A turn in the path"
       },
       "boxes": {
         "hero": {
-          "photo": "cottage"
+          "photo": "light"
         },
         "body": {
           "text": "arrival"
+        }
+      }
+    },
+    {
+      "id": "details",
+      "definition": "feature3",
+      "params": {},
+      "boxes": {
+        "hero": {
+          "photo": "shore",
+          "params": {
+            "caption": true
+          }
+        },
+        "second": {
+          "photo": "segla",
+          "crops": {
+            "feature3": {
+              "centerX": 0.42,
+              "centerY": 0.38,
+              "zoom": 2.2
+            }
+          }
+        },
+        "third": {
+          "photo": "cottage",
+          "crops": {
+            "feature3": {
+              "centerX": 0.5,
+              "centerY": 0.5,
+              "zoom": 2.4
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "notebook",
+      "definition": "text",
+      "params": {
+        "heading": "From the notebook"
+      },
+      "boxes": {
+        "body": {
+          "text": "notebook"
+        },
+        "continuation": {
+          "text": "notebook"
+        }
+      }
+    },
+    {
+      "id": "weather",
+      "definition": "opener",
+      "params": {
+        "heading": "Changing weather"
+      },
+      "boxes": {
+        "hero": {
+          "photo": "cottage"
         }
       }
     },
@@ -110,49 +220,18 @@
       }
     },
     {
-      "id": "notebook",
-      "definition": "text",
+      "id": "cottage",
+      "definition": "single",
       "params": {
-        "heading": "From the notebook"
+        "note": "The white cottage looked small in the photograph. From the road it felt like the only thing for miles."
       },
-      "boxes": {
-        "body": {
-          "text": "notebook"
-        },
-        "continuation": {
-          "text": "notebook"
-        }
-      }
-    },
-    {
-      "id": "march",
-      "definition": "calendar",
-      "params": {},
       "boxes": {
         "hero": {
-          "photo": "segla"
-        }
-      },
-      "elements": {
-        "grid": {
+          "photo": "cottage",
           "params": {
-            "month": "2027-03-01"
+            "shape": "arch",
+            "caption": true
           }
-        }
-      }
-    },
-    {
-      "id": "quiet",
-      "definition": "story",
-      "params": {
-        "heading": "When it got quiet"
-      },
-      "boxes": {
-        "hero": {
-          "photo": "light"
-        },
-        "body": {
-          "text": "arrival"
         }
       }
     },
@@ -162,7 +241,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "cottage",
+          "photo": "light",
           "params": {
             "caption": true
           }
@@ -178,59 +257,100 @@
     },
     {
       "id": "frames",
-      "definition": "grid",
+      "definition": "grid9",
       "params": {
-        "heading": "Four frames"
-      },
-      "boxes": {
-        "hero": {
-          "photo": "light"
-        },
-        "second": {
-          "photo": "cottage"
-        },
-        "third": {
-          "photo": "shore"
-        },
-        "fourth": {
-          "photo": "segla"
-        }
-      }
-    },
-    {
-      "id": "may",
-      "definition": "calendar",
-      "params": {},
-      "boxes": {
-        "hero": {
-          "photo": "shore"
-        }
-      },
-      "elements": {
-        "grid": {
-          "params": {
-            "month": "2027-05-01"
-          }
-        }
-      }
-    },
-    {
-      "id": "twilight",
-      "definition": "pair",
-      "params": {
-        "framed": true
+        "heading": "Details",
+        "note": ""
       },
       "boxes": {
         "hero": {
           "photo": "segla",
-          "params": {
-            "caption": true
+          "crops": {
+            "grid9": {
+              "centerX": 0.3,
+              "centerY": 0.3,
+              "zoom": 2
+            }
           }
         },
         "second": {
+          "photo": "shore",
+          "crops": {
+            "grid9": {
+              "centerX": 0.7,
+              "centerY": 0.6,
+              "zoom": 2.5
+            }
+          }
+        },
+        "fifth": {
+          "photo": "cottage",
+          "crops": {
+            "grid9": {
+              "centerX": 0.55,
+              "centerY": 0.48,
+              "zoom": 3
+            }
+          }
+        },
+        "third": {
           "photo": "light",
-          "params": {
-            "caption": true
+          "crops": {
+            "grid9": {
+              "centerX": 0.2,
+              "centerY": 0.6,
+              "zoom": 2
+            }
+          }
+        },
+        "fourth": {
+          "photo": "segla",
+          "crops": {
+            "grid9": {
+              "centerX": 0.6,
+              "centerY": 0.7,
+              "zoom": 2.5
+            }
+          }
+        },
+        "sixth": {
+          "photo": "shore",
+          "crops": {
+            "grid9": {
+              "centerX": 0.25,
+              "centerY": 0.3,
+              "zoom": 2.2
+            }
+          }
+        },
+        "seventh": {
+          "photo": "cottage",
+          "crops": {
+            "grid9": {
+              "centerX": 0.3,
+              "centerY": 0.7,
+              "zoom": 2
+            }
+          }
+        },
+        "eighth": {
+          "photo": "light",
+          "crops": {
+            "grid9": {
+              "centerX": 0.75,
+              "centerY": 0.35,
+              "zoom": 2.6
+            }
+          }
+        },
+        "ninth": {
+          "photo": "segla",
+          "crops": {
+            "grid9": {
+              "centerX": 0.5,
+              "centerY": 0.15,
+              "zoom": 2.4
+            }
           }
         }
       }
@@ -252,9 +372,9 @@
     },
     {
       "id": "closing",
-      "definition": "closing",
+      "definition": "credits",
       "params": {
-        "closingLine": "Until next time"
+        "colophon": "Field notes from Senja, made with ImageFlow.\nThe sample photographs are placeholders: replace them with your own."
       },
       "boxes": {}
     }
