@@ -1,6 +1,6 @@
 {
   "private": true,
-  "description": "Packages the starter template uses. Run npm install here, then Template → Rebuild Dependencies; books use the saved bundle in vendor/.",
+  "description": "Packages the starter template uses. Run npm install here, then node scripts/rebuild-template-dependencies.mjs sample/starter/template from the ImageFlow checkout; books use the saved bundle in vendor/.",
   "dependencies": {
     "maplibre-gl": "5.24.1"
   }
