@@ -974,7 +974,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   flushSync(() => react.render(previews.map(({ definition, span, spread }) => (
     <div className="if-spread-container" data-span={span} data-spread={definition} data-layout={definition} key={definition}>
       <SpreadView book={book} spread={spread} template={template} format={format} positions={{}}
-        page={sequence.spreads[index].page} index={anchors} renderPhotos />
+        page={sequence.spreads[index].page} index={anchors} renderPhotos bookSpread={spreads[index].id} />
     </div>
   ))));
   if (renderError) throw renderError;
