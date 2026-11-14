@@ -31,13 +31,14 @@ export const fixtureRequestSchema = z.strictObject({
     .describe('Synthetic content cases. Defaults to every case that applies to each layout.'),
   preview: z.strictObject({
     printFormat: id.optional().describe('Format whose fixtures appear in the image. Defaults to the first tested format.'),
-    cells: z.array(z.strictObject({ layout: id, case: fixtureCase })).min(1).max(fixtureLimits.previewCells).optional()
+    cells: z.array(z.strictObject({ layout: id.describe('Layout ID.'), case: fixtureCase.describe('Fixture case.') })).min(1).max(fixtureLimits.previewCells).optional()
       .describe('Fixtures to show, in order. Defaults to the first 12 tested fixtures of that format.'),
-    columns: z.int().min(1).max(4).default(3),
-    bounds: z.enum(['trim', 'bleed']).default('trim'),
-    maxEdge: z.int().min(128).max(1600).default(1200),
-    format: z.enum(['png', 'jpeg']).default('png'),
-    guides: z.boolean().default(false), labels: z.boolean().default(false),
+    columns: z.int().min(1).max(4).default(3).describe('Fixtures per row.'),
+    bounds: z.enum(['trim', 'bleed']).default('trim').describe('Crop to the trimmed page, or include the bleed.'),
+    maxEdge: z.int().min(128).max(1600).default(1200).describe('Longest image edge in pixels.'),
+    format: z.enum(['png', 'jpeg']).default('png').describe('Image encoding.'),
+    guides: z.boolean().default(false).describe('Draw trim and safe-area guides.'),
+    labels: z.boolean().default(false).describe('Outline and label every box and element.'),
   }).optional().describe('Return a labelled contact sheet of synthetic fixtures. It never shows the saved book.'),
 });
 export type FixtureRequest = z.output<typeof fixtureRequestSchema>;
