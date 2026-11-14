@@ -4,6 +4,7 @@ import type { PhotoViewControl } from './PhotoViewMenu';
 import { photoGroups, photoDate, captureLabel, captureFact } from './photo-view';
 import type { PhotoView } from './photo-view';
 import { useListSelection } from './list-selection';
+import { useFilmstripAnchor } from './filmstrip-anchor';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
@@ -30,6 +31,7 @@ export function Sources({ view, summary, tab, setTab, selected, choose, usage, w
   const list = useRef<HTMLDivElement>(null);
   const [unused, setUnused] = useState(false);
   const items = useMemo(() => sourceList(summary, tab, view.value).filter(({ id }) => !unused || !usage[tab][id]?.length), [summary, tab, unused, usage, view.value]);
+  useFilmstripAnchor(list, tab === 'photo', JSON.stringify(items.map(({ id }) => id)));
   const current = selected[tab];
   const visibleCurrent = items.some(({ id }) => id === current) ? current : undefined;
   const selection = useListSelection(items.map(({ id }) => id), (id) => items.find((item) => item.id === id)?.title ?? id);
@@ -153,7 +155,9 @@ export function Sources({ view, summary, tab, setTab, selected, choose, usage, w
             {view.value.showTime && date?.captured && <small className="photo-capture-time" title={date.capturedEstimated ? 'Estimated from file modification time' : date.captured}>{captureLabel(date.captured)}{date.capturedEstimated ? ' ≈' : ''}</small>}
             <span className="source-title">{title}</span>
             {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
-            <small className="badge">{placed?.length ? placed.length + '×' : 'Unused'}</small>
+            {!!placed?.length && <small className="badge" aria-label={placed.length === 1 ? 'Used once' : 'Used ' + placed.length + ' times'}>
+              {placed.length === 1 ? <Icon name="check" size={12} /> : placed.length + '×'}
+            </small>}
           </div></Fragment>;
         }
         const source = summary.texts[id];

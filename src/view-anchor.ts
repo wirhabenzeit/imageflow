@@ -4,10 +4,9 @@ type Sheet = BookGeometry['sheets'][number];
 export type ViewAnchor = { spread: string; page?: number; x: number; y: number; viewportX: number; viewportY: number };
 // The anchor is a position within a sheet, rather than a pixel scroll offset. It survives resizing and reflow.
 export function captureViewAnchor(sheets: Sheet[], viewport: Rect, selected?: string, pages: Record<string, number> = {}): ViewAnchor | undefined {
-  const visible = (sheet: Sheet) => sheet.y < viewport.y + viewport.height && sheet.y + sheet.height > viewport.y &&
-    sheet.x < viewport.x + viewport.width && sheet.x + sheet.width > viewport.x;
   const center = { x: viewport.x + viewport.width / 2, y: viewport.y + viewport.height / 2 };
-  const sheet = sheets.find((sheet) => sheet.spread === selected && visible(sheet)) ?? [...sheets].sort((a, b) => {
+  const containsCenter = (sheet: Sheet) => center.x >= sheet.x && center.x <= sheet.x + sheet.width && center.y >= sheet.y && center.y <= sheet.y + sheet.height;
+  const sheet = sheets.find((sheet) => sheet.spread === selected && containsCenter(sheet)) ?? sheets.find(containsCenter) ?? [...sheets].sort((a, b) => {
     const distance = (sheet: Sheet) => Math.hypot(sheet.x + sheet.width / 2 - center.x, sheet.y + sheet.height / 2 - center.y);
     return distance(a) - distance(b);
   })[0];

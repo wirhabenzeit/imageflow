@@ -49,6 +49,34 @@ try {
   const summary = await current(page);
   assert.equal(summary.photoDates.early.captured, '2026-11-02T23:50:00+02:00');
   assert.equal(summary.photoDates.estimated.capturedEstimated, true);
+  assert.equal(await page.locator('.document-proxy img').count(), 0);
+  assert.equal(await page.locator('.document-proxy svg').count(), 1);
+  assert.ok(await page.locator('.document-title').evaluate((node) => parseFloat(getComputedStyle(node).fontSize) >= 13));
+  assert.equal(await page.locator('.source-photo[data-id="early"] .badge').count(), 0);
+  assert.equal(await page.locator('.source-photo[data-id="late"] .badge[aria-label="Used once"] svg').count(), 1);
+  // A height change scales every preceding thumbnail; retain the same point in the center photo.
+  const divider = page.getByRole('separator', { name: 'Resize Sources', exact: true });
+  await divider.focus();
+  for (let i = 0; i < 13; i++) await page.keyboard.press('ArrowUp');
+  await page.locator('.source-items-photo').evaluate((node) => { node.scrollLeft = (node.scrollWidth - node.clientWidth) / 2; });
+  await page.waitForTimeout(80);
+  const stripCenter = () => page.locator('.source-items-photo').evaluate((node) => {
+    const center = node.getBoundingClientRect().left + node.clientWidth / 2;
+    const photos = [...node.querySelectorAll('.source-photo')];
+    const photo = photos.find((photo) => { const rect = photo.getBoundingClientRect(); return rect.left <= center && rect.right >= center; });
+    if (!photo) return undefined;
+    const rect = photo.getBoundingClientRect();
+    return { id: photo.dataset.id, fraction: (center - rect.left) / rect.width };
+  });
+  const stripBefore = await stripCenter();
+  assert.ok(stripBefore);
+  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowUp');
+  await page.waitForTimeout(80);
+  const stripAfter = await stripCenter();
+  assert.equal(stripAfter?.id, stripBefore.id);
+  assert.ok(Math.abs(stripAfter.fraction - stripBefore.fraction) < .015, JSON.stringify({ stripBefore, stripAfter }));
+  for (let i = 0; i < 18; i++) await page.keyboard.press('ArrowDown');
+  await page.locator('.source-items-photo').evaluate((node) => { node.scrollLeft = 0; });
   const projectBefore = await readFile(join(folder, 'project.json'), 'utf8');
   const photosBefore = await readFile(join(folder, 'photos.json'), 'utf8');
   const historyBefore = summary.history;
@@ -132,6 +160,7 @@ try {
   await popup('duplicate-spread');
   await page.locator('.spread-thumb[data-spread="two"]').click({ button: 'right' });
   await until(async () => (await current(page)).project.spreads.length === 4);
+  await until(async () => await page.locator('.source-photo[data-id="early"] .badge').innerText() === '2×');
   assert.ok((await app.evaluate(() => globalThis.lastContext)).some(({ label }) => label === 'Duplicate 2 Spreads'));
   await ready(page);
   await page.locator('.canvas').focus(); await menuAction(app, 'Undo Book Edit');

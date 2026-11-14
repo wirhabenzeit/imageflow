@@ -18,7 +18,7 @@ export const settingsURL = desktopScheme + '://editor/settings';
 export const renderOrigin = desktopScheme + '://render';
 
 export const channels = {
-  contextMenu: 'app:context-menu', documentIcon: 'document:icon', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', presentation: 'document:presentation', dragSources: 'document:drag-sources',
+  contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', presentation: 'document:presentation', dragSources: 'document:drag-sources',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
@@ -90,7 +90,6 @@ export type DesktopApi = {
   showContextMenu(items: ContextMenuItem[], state?: BookMenuState): Promise<ContextMenuResult | null>;
   onSourceCommand(listener: (command: SourceCommand) => void): () => void;
   templateAction(id: string, action: 'reveal' | 'new'): Promise<Result<void>>;
-  documentIcon(): Promise<string | null>;
   popupMenu(items: PopupItem[], point?: { x: number; y: number }): Promise<string | null>;
   setPresentation(active: boolean): Promise<void>;
   documentProxy(action: 'path' | 'drag'): Promise<void>;

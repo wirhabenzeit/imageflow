@@ -23,3 +23,10 @@ test('panel height changes retain the anchor at the same relative place in the v
   const anchor = captureViewAnchor(sheets, { x: 0, y: 260, width: 440, height: 160 })!;
   assert.deepEqual(restoreViewAnchor(anchor, sheets, { width: 440, height: 80 }), { left: 0, top: 300 });
 });
+test('a selected spread at the edge does not displace the canvas center during resizing', () => {
+  const anchor = captureViewAnchor(sheets, { x: 0, y: 190, width: 440, height: 400 }, 's0')!;
+  assert.equal(anchor.spread, 's1');
+  assert.equal(anchor.viewportY, .5);
+  assert.equal(anchor.y, .65);
+  assert.deepEqual(restoreViewAnchor(anchor, sheets, { width: 440, height: 200 }), { left: 0, top: 290 });
+});

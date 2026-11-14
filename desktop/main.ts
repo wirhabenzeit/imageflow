@@ -1107,10 +1107,6 @@ void app.whenReady().then(async () => {
     await new Promise<void>((resolve) => Menu.buildFromTemplate(entries).popup({ window: owner, ...position, callback: resolve }));
     return selected;
   });
-  ipcMain.handle(channels.documentIcon, async (event) => {
-    const document = editorOwner(event);
-    return document && !document.closing ? (await app.getFileIcon(document.book.folder, { size: 'small' })).toDataURL() : null;
-  });
   ipcMain.handle(channels.contextMenu, async (event, input: unknown, snapshot?: BookMenuState) => {
     const document = editorOwner(event) ?? assetsOwner(event);
     const owner = document ? (assetsOwner(event) ? assetsWindows.get(document)?.window : document.window) : templatesOwner(event) ?? startOwner(event);

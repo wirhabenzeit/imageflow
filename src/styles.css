@@ -176,7 +176,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .source-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .source-photo .source-title { padding: 2px 6px; font-size: 11px; }
 .source-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.badge { position: absolute; right: 4px; top: 4px; background: var(--control-surface); color: var(--accent); padding: 0 4px; border-radius: 3px; font-size: 11px; font-weight: 500; }
+.badge { position: absolute; right: 4px; top: 4px; display: inline-flex; align-items: center; justify-content: center; min-height: 16px; background: var(--control-surface); color: var(--accent); padding: 0 4px; border-radius: 3px; font-size: 11px; font-weight: 500; }
 .source-text { width: 220px; grid-template-rows: auto minmax(0, 1fr) auto; gap: 3px; padding: 7px 9px; font-size: 11px; }
 .source-text .source-title { font-size: 12px; }
 .source-excerpt { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; color: var(--muted); font-family: Georgia, serif; font-size: 11.5px; line-height: 1.35; }
@@ -838,7 +838,7 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
   border: 1px solid #666; padding: 20px 28px; border-radius: 12px; color: #eee; font-size: 14px; }
 .presentation-help button { color: #eee; background: #444; border: 1px solid #888; }
 .presentation-message { position: absolute; top: 30%; width: 100%; text-align: center; }
-.source-items-photo { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; align-items: stretch; }
+.source-items-photo { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; align-items: stretch; overflow-anchor: none; }
 .source-items-photo .source-photo { width: auto; height: 100%; grid-template-rows: minmax(0, 1fr); }
 .source-items-photo .source-photo .source-title { display: none; }
 .source-items-photo .source-photo .source-storage { position: absolute; bottom: 4px; left: 4px; padding: 2px 5px; border-radius: 3px; background: #000a; color: white; }
@@ -854,7 +854,7 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .source-manager .asset-name strong { max-width: 80%; }
 .source-manager .asset-description > span { direction: ltr; unicode-bidi: plaintext; font-size: 11px; }
 .source-manager .asset-status { display: flex; align-items: center; justify-content: end; gap: 6px; width: auto; font-size: 11px; }
-.project-identity .document-title { font-weight: 400; }
+.project-identity .document-title { font-size: 13px; font-weight: 500; }
 .studio .document-proxy { border: 0; background: transparent; box-shadow: none; padding: 0; min-width: 16px; }
 .studio .document-proxy:hover { border: 0; background: transparent; }
 .source-items-grouped { padding-top: 32px; }

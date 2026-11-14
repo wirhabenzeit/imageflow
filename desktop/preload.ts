@@ -12,7 +12,6 @@ const api: DesktopApi = {
   onSourceCommand: (listener) => listen(channels.sourceCommand, listener),
   templateAction: (id, action) => ipcRenderer.invoke(channels.templateAction, id, action),
   showContextMenu: (ids, state) => ipcRenderer.invoke(channels.contextMenu, ids, state),
-  documentIcon: () => ipcRenderer.invoke(channels.documentIcon),
   popupMenu: (items, point) => ipcRenderer.invoke(channels.popupMenu, items, point),
   setPresentation: (active) => ipcRenderer.invoke(channels.presentation, active),
   documentProxy: (action) => ipcRenderer.invoke(channels.documentProxy, action),

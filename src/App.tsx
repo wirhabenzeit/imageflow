@@ -122,12 +122,6 @@ export function App() {
   const [projectInstance, setProjectInstance] = useState(0);
   const current = useRef<ProjectSummary>(undefined);
   const [spreadId, setSpreadId] = useState('');
-  const [documentIcon, setDocumentIcon] = useState<string | null>(null);
-  useEffect(() => {
-    let active = true;
-    void api?.documentIcon().then((icon) => { if (active) setDocumentIcon(icon); }).catch(() => { if (active) setDocumentIcon(null); });
-    return () => { active = false; };
-  }, [api, summary?.folder]);
   const [presenting, setPresenting] = useState<string>();
   const [template, setTemplate] = useState<TemplateInfo>();
   const [render, setRender] = useState<RenderStatus>();
@@ -1495,7 +1489,7 @@ export function App() {
           onClick={(event) => { if (event.metaKey) void api?.documentProxy('path'); }}>
           {summary && <button type="button" className="document-proxy" aria-label="Document location" title="⌘-click for location · Drag to Finder"
             draggable onDragStart={(event) => { event.preventDefault(); void api?.documentProxy('drag'); }}
-            onClick={(event) => { event.stopPropagation(); void api?.documentProxy('path'); }}>{documentIcon ? <img src={documentIcon} width={16} height={16} alt="" /> : <Icon name="document" size={16} />}</button>}
+            onClick={(event) => { event.stopPropagation(); void api?.documentProxy('path'); }}><Icon name="book" size={14} /></button>}
           <span className="document-title">{summary ? bookName(summary.folder) : 'ImageFlow'}</span>
           <span className="muted">{summary?.readOnly ? 'Read Only' : ''}</span>
         </div>
