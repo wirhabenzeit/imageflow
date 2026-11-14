@@ -393,8 +393,9 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
       const book = await loadProject(folder, cache, readOnly);
       if (quitting) throw new Error('ImageFlow is closing.');
       editor = new BrowserWindow({ width: 1520, height: 950, minWidth: 940, minHeight: 650, show: false,
-        ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 20 } } : {}),
         webPreferences: windowOptions() });
+      // The document session owns the native title; the editor page's HTML title must not replace it.
+      editor.on('page-title-updated', (event) => event.preventDefault());
       secureWindow(editor);
       document = new DocumentSession(editor, book, cache, sessions, release, (next) => {
         if (document) queueMicrotask(() => { if (document) publishAssets(document); });

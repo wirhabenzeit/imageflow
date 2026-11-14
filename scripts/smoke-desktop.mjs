@@ -126,7 +126,7 @@ try {
   await menuAction(instance, 'Open project…');
   await window.locator('.status-error').waitFor();
   assert.match(await status.textContent(), /project\.json.*schemaVersion/);
-  assert.equal(await window.locator('.project-identity .document-title').textContent(), 'WhiteWall');
+  assert.equal(await (await instance.browserWindow(window)).evaluate((window) => window.getTitle()), 'WhiteWall');
 
   await menuAction(instance, 'Reload');
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));

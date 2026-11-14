@@ -56,16 +56,17 @@ async function packageApp() {
         CFBundleDocumentTypes: [{
           CFBundleTypeName: 'ImageFlow Book', CFBundleTypeRole: 'Editor', LSHandlerRank: 'Owner',
           LSItemContentTypes: ['ch.wirhabenzeit.imageflow.book'], LSTypeIsPackage: true,
-          CFBundleTypeIconFile: 'ImageFlow.icns',
+          CFBundleTypeIconFile: 'ImageFlowBook.icns',
         }, {
           // Opening a template file imports it into the template library.
           CFBundleTypeName: 'ImageFlow Template', CFBundleTypeRole: 'Viewer', LSHandlerRank: 'Owner',
-          LSItemContentTypes: ['ch.wirhabenzeit.imageflow.template'], CFBundleTypeIconFile: 'ImageFlow.icns',
+          LSItemContentTypes: ['ch.wirhabenzeit.imageflow.template'], CFBundleTypeIconFile: 'ImageFlowTemplate.icns',
         }],
       },
       // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar.
       asar: { unpackDir: 'node_modules/@img', unpack: '**/mcp-bridge.cjs' },
-      extraResource: [esbuildBinary, books, previews],
+      // Document icons; the app icon comes from `icon` below. Sources and generator: resources/brand/, npm run build:icons.
+      extraResource: [esbuildBinary, books, previews, ...['ImageFlowBook.icns', 'ImageFlowTemplate.icns'].map((icon) => join(root, 'resources', icon))],
       icon: join(root, 'resources', 'ImageFlow.icns'),
       prune: false,
       overwrite: true,

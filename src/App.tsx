@@ -1475,12 +1475,13 @@ export function App() {
   const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
   const pagesLabel = (i: number) => (pageLabels[i].includes('–') ? 'Pages ' : 'Page ') + pageLabels[i];
 
-  return <ProjectFilesContext.Provider value={projectFiles}><div className={navigator.platform.includes('Mac') ? 'studio mac-studio' : 'studio'}>
+  const nativeDocumentTitle = navigator.platform.includes('Mac');
+  return <ProjectFilesContext.Provider value={projectFiles}><div className={nativeDocumentTitle ? 'studio mac-studio' : 'studio'}>
     <div className="editor-shell" inert={presenting !== undefined} aria-hidden={presenting !== undefined}>
     <header className="toolbar">
       <div className="toolbar-actions project-context">
         <button className="toolbar-icon" aria-label="Toggle project panel" aria-pressed={!panels.leftHidden} title="Toggle project panel (⌃⌘S)" onClick={() => togglePanel('left')}><Icon name="sidebarLeft" /></button>
-        <div className="project-identity" title={summary?.folder}
+        {!nativeDocumentTitle && <div className="project-identity" title={summary?.folder}
           onContextMenu={(event) => { event.preventDefault(); void api?.documentProxy('path'); }}
           onClick={(event) => { if (event.metaKey) void api?.documentProxy('path'); }}>
           {summary && <button type="button" className="document-proxy" aria-label="Document location" title="⌘-click for location · Drag to Finder"
@@ -1488,7 +1489,7 @@ export function App() {
             onClick={(event) => { event.stopPropagation(); void api?.documentProxy('path'); }}><Icon name="book" size={14} /></button>}
           <span className="document-title">{summary ? bookName(summary.folder) : 'ImageFlow'}</span>
           <span className="muted">{summary?.readOnly ? 'Read Only' : ''}</span>
-        </div>
+        </div>}
         {summary && <div className="history">
           <button aria-label="Undo" title={undoCommand.label} disabled={!undoCommand.enabled} onClick={() => undo('undo')}><Icon name="undo" /></button>
           <button aria-label="Redo" title={redoCommand.label} disabled={!redoCommand.enabled} onClick={() => undo('redo')}><Icon name="redo" /></button>
