@@ -1,0 +1,37 @@
+# Documentation site
+
+[VitePress](https://vitepress.dev) builds the site from `docs/`. Configuration, theme and separate dependencies live in `site/`.
+
+```sh
+cd site
+npm ci
+npm run dev       # preview at http://localhost:5173/imageflow/
+npm run build     # build and check links
+```
+
+Output is written to `site/.vitepress/dist/`.
+
+## Content and navigation
+
+| Section | Sources |
+| --- | --- |
+| Guide | `docs/guide/` |
+| Templates | `docs/templates/`, `docs/mcp.md`, `docs/template-api/` |
+| Development | `docs/development/`, `docs/releasing.md`, `docs/signing.md`, `docs/decisions/` |
+| History | Design notes marked with a historical banner |
+
+The template API sidebar and topic table use `docs/template-api/topics.json`. Topic files are shared with the MCP server and template skill. The generated single-page `docs/template-api.md` is excluded.
+
+Keep Markdown links relative for GitHub. The site redirects single-page API links to matching topics and links outside `docs/` to GitHub.
+
+Add pages to the sidebar in `site/.vitepress/config.mts`. Its `history` list controls the historical banner.
+
+## Checks and publishing
+
+The shared **Pages** workflow (`.github/workflows/pages.yml`) builds every pull request and push to `main`. VitePress rejects missing page links; `site/scripts/check-links.mjs` checks internal links and anchors in the built page content. Pull requests never deploy.
+
+On pushes to `main`, published-release changes and manual runs from `main`, the workflow publishes one combined artifact to [GitHub Pages](https://wirhabenzeit.github.io/imageflow/). It copies `site/.vitepress/dist/` into `.build/pages/`, then generates the stable/beta update feeds under `.build/pages/updates/` when the updater is present. Release-triggered builds check out current `main`, so refreshing feeds also retains the current documentation. A failed docs build, link check or feed/API request stops deployment and leaves the existing site intact.
+
+PR #140 (auto-updates) and PR #145 (documentation) carry the same workflow and can merge in either order. Each builds whichever component is present; once both merge, every deployment includes both. Keep this as the only Pages deployment workflow: a separate docs-only or feeds-only deployment would replace the other component. Production runs share one concurrency group across all triggers.
+
+Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. Keep the `github-pages` environment open to `main` and `v*` tags, because release events run in the release tag's context. The production URL and `/imageflow/` base path must stay stable: the updater uses `https://wirhabenzeit.github.io/imageflow/updates` and refuses redirects. `DOCS_BASE` is available for local previews; adding a production custom domain requires a coordinated app update to its feed URL.

@@ -74,8 +74,8 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `formatted-text` | `markdown: 'inline'` on string parameters: bold, italic and strikethrough, shown by `ctx.Text` and `<FormattedText>` ([Formatted text](formatted-text.md#formatted-text-formatted-text)). |
 
 
-`requires` is reserved for additive extensions introduced after the baseline is fixed. Unsupported extensions are rejected when the template loads, with an update hint. Older templates that list baseline features in `requires` remain valid. `capabilities` continues to list all supported feature names, including the baseline, for compatibility and feature discovery. `get_authoring_context` reports the contract, its `baseline`, all `capabilities` and module `exports` as `capabilities.templateApi`.
+Use `requires` for extensions beyond the contract-1 baseline. Unsupported extensions are rejected when the template loads, with an update hint. Listing baseline features in `requires` is also valid.
 
-The baseline is defined in `src/runtime-exports.ts`. Until ImageFlow's first public release it stays open: new additive features join it, and templates use them without `requires`. At that release it is fixed, and later additive extensions are declared in `requires`. It never shrinks. Development builds before that release are not supported implementations of contract 1; use a current build rather than adding a list of baseline flags to target an older one. See [ADR 0007](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0007-template-v1-baseline.md) and [ADR 0008](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0008-baseline-freeze-at-release.md).
+`capabilities` lists all supported features. `get_authoring_context` reports the contract, `baseline`, `capabilities` and module `exports` in `capabilities.templateApi`. The baseline is defined in `src/runtime-exports.ts`.
 
 An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
