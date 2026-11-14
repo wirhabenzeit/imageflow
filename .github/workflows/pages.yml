@@ -1,0 +1,82 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published, edited, unpublished, deleted]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize the whole production build/deployment, including release-triggered
+# feed refreshes. PR builds never deploy and have their own concurrency group.
+concurrency:
+  group: github-pages-${{ github.event_name == 'pull_request' && github.ref || 'production' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Releases run in a tag context. Always publish current main, including
+          # its documentation, rather than replacing it with an older tag's site.
+          ref: ${{ github.event_name == 'pull_request' && github.sha || 'main' }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            site/package-lock.json
+      - run: npm ci --ignore-scripts
+      # The docs and updater MRs may merge in either order. Once both are on
+      # main, every deployment builds both components into this single artifact.
+      - name: Install documentation dependencies
+        if: hashFiles('site/package.json') != ''
+        run: npm ci
+        working-directory: site
+      - name: Build documentation and check links
+        if: hashFiles('site/package.json') != ''
+        run: npm run build
+        working-directory: site
+      - name: Assemble Pages site
+        run: |
+          mkdir -p .build/pages
+          if [ -f site/package.json ]; then
+            cp -a site/.vitepress/dist/. .build/pages/
+          fi
+          touch .build/pages/.nojekyll
+      - name: Generate update feeds alongside documentation
+        if: hashFiles('scripts/generate-update-feeds.mjs') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/generate-update-feeds.mjs .build/pages
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'release')
+        with:
+          path: .build/pages
+
+  deploy:
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'release')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish documentation and update feeds together
+        id: deployment
+        uses: actions/deploy-pages@v4
