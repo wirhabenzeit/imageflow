@@ -1,5 +1,5 @@
 import type { TemplateInfo } from './desktop';
-import { resolveParams } from './parameters';
+import { resolveParams, sameValue } from './parameters';
 import type { SpreadState, Values } from './project';
 
 // What an open custom editor works on, and the rules that keep its saves safe while the book changes around it.
@@ -78,7 +78,7 @@ export function editorTargetGone(spreads: readonly SpreadState[], target: Editor
 
 /** The changes of a draft that differ from the saved state, or undefined when there are none. */
 export function changedValues(template: TemplateInfo, state: EditorState, target: EditorTarget, draft: EditorDraft): EditorDraft | undefined {
-  const differ = (saved: Values, values: Values) => Object.fromEntries(Object.entries(values).filter(([key, value]) => saved[key] !== value));
+  const differ = (saved: Values, values: Values) => Object.fromEntries(Object.entries(values).filter(([key, value]) => !sameValue(saved[key], value)));
   if (target.kind === 'document') {
     const values = differ(resolveParams(template.parameters, state.params), draft.values);
     return Object.keys(values).length ? { values, spread: {} } : undefined;

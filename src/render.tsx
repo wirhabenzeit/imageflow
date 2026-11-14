@@ -1,6 +1,7 @@
 import type { PresentationView } from './presentation-model';
 import { presentationPhotoSource } from './presentation-model';
 import { sourcePath } from './source-locations';
+import { renameIds } from './svg-ids';
 import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
 import { activateRenderedImageSpreads, configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
@@ -16,16 +17,18 @@ import { cssMM, pageLabel, pageNumbers, pageSequence, pagesText, resolveFormat, 
 import { animateReorder } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat, UnitPages } from './format';
-import { parseDocument } from './project';
+import { frameView, parseDocument } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
-import { isParameterValue, parameterWarnings, resolveParams } from './parameters';
+import { isParameterValue, parameterWarnings, resolveParams, resolveValue } from './parameters';
+import type { ListItem } from './parameters';
+import { fileErrors } from './file-findings';
 import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, editorContext, normalizeTemplate, refreshedEditorContext, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
-import type { AnchorLookup, EditorContext, EditorPresentation } from './template';
+import { bookIndex, chooseFormat, currentPhotoRenderFailures, watchPhotoRenderFailures, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import type { AnchorLookup, PhotoRenderFailure, EditorContext, EditorPresentation } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
@@ -94,30 +97,6 @@ function textAssignments(book: RenderProject, template: Template) {
     });
   }
   return { chains, positions };
-}
-
-// Assigned files that are gone, unreadable, or of a type the parameter does not accept. An unassigned file
-// parameter is valid; the template renders without it.
-function fileErrors(book: RenderProject, schema: Parameters, values: Values, scope: string): Issue[] {
-  return Object.entries(schema).flatMap(([id, param]): Issue[] => {
-    const value = values[id];
-    if (param.type !== 'file' || typeof value !== 'string' || !value) return [];
-    const where = scope + ' · ' + param.label + ': ';
-    const path = book.project.files[value];
-    const found = book.files[value];
-    const finding = (code: string, message: string, suggestion: string): Issue[] =>
-      [{ message: where + message, code, parameter: id, source: value, suggestion }];
-    if (!path || !found) {
-      return finding('file-missing', 'the assigned file is no longer in the project. Choose it again.',
-        'Import the file again with import_sources, then assign its new ID to parameter ' + id + '.');
-    }
-    if (found.problem) return finding('file-unreadable', found.problem, 'Replace the file or assign another file to parameter ' + id + '.');
-    if (!param.accept.includes(found.extension)) {
-      return finding('file-type', found.name + ' is not a ' + param.accept.join(' or ') + ' file. Choose another file.',
-        'Assign a ' + param.accept.join(' or ') + ' file to parameter ' + id + '.');
-    }
-    return [];
-  });
 }
 
 // Converts a measured CSS pixel distance to millimetres, rounded for reporting.
@@ -478,6 +457,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
             spread, id: (box.dataset.box ?? box.dataset.element)!, upright: sized && upright(box, sheet),
             rect: { ...measured, x: measured.x - origin.x, y: measured.y - origin.y },
             type: (box.dataset.boxType ?? 'element') as BookGeometry['boxes'][number]['type'], ...rect,
+            ...(box.dataset.photoRender === 'custom' ? { custom: true } : {}),
           };
         });
       }),
@@ -515,6 +495,17 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
         if (marked) hidden = [marked];
       }
       for (const node of hidden) node.setAttribute('data-if-editing', '');
+    });
+    // While the app crops the photo of a box with a render callback, the template draws the gesture's placement, so
+    // its mask or artwork follows the crop before it is saved. Without a placement the saved crop shows again.
+    window.addEventListener('message', (event: MessageEvent) => {
+      if (event.source !== parent || event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'crop-preview') return;
+      const { spread, box, placement } = event.data;
+      const valid = placement && [placement.centerX, placement.centerY, placement.zoom].every(Number.isFinite);
+      if (typeof spread === 'string' && typeof box === 'string' && valid) {
+        setLivePlacement(spread, box, { centerX: Math.min(1, Math.max(0, placement.centerX)), centerY: Math.min(1, Math.max(0, placement.centerY)),
+          zoom: Math.min(20, Math.max(1, placement.zoom)) });
+      } else setLivePlacement('', '', undefined);
     });
   }
   fit();
@@ -604,12 +595,18 @@ function sheetCrop(format: ResolvedFormat, side: PrintSide, bounds: PreviewMetad
   return { x: page.trimX, y: bleed.top, widthMm: trim.width, heightMm: trim.height };
 }
 
+// A sheet is copied once per printed side and the original is hidden. SVG references such as clip-path="url(#id)"
+// resolve to the first element with that id in the document, which would be the hidden original, so each copy gets
+// its own ids and its references follow them.
+let printCopies = 0;
+
 function croppedSheet(sheet: HTMLElement, crop: ReturnType<typeof sheetCrop>, pixels?: { width: number; height: number }) {
   const page = document.createElement('div');
   page.className = 'if-print-page';
   page.style.width = cssMM(crop.widthMm);
   page.style.height = cssMM(crop.heightMm);
   const clone = sheet.cloneNode(true) as HTMLElement;
+  renameIds(clone, '.p' + ++printCopies);
   let scaleX = 1;
   let scaleY = 1;
   if (pixels) {
@@ -937,6 +934,24 @@ function fontFailures() {
     .map((font) => font.family.replace(/^["']|["']$/g, '')))].sort();
 }
 
+// The pictures in `root` to wait for: HTML images with a source, and SVG <image> references, such as a PhotoBox render
+// callback draws. An SVG image is loaded through a detached HTML image with the same URL, which the SVG then shares
+// from the cache; `pictureSource` maps it back to the SVG element for error reports.
+const pictureSource = new WeakMap<HTMLImageElement, Element>();
+function decodable(root: ParentNode): HTMLImageElement[] {
+  const html = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
+  const svg = [...root.querySelectorAll<SVGImageElement>('image')].flatMap((node) => {
+    const href = node.getAttribute('href') ?? node.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+    if (!href) return [];
+    const proxy = new Image();
+    proxy.alt = node.getAttribute('aria-label') ?? '';
+    proxy.src = new URL(href, document.baseURI).href;
+    pictureSource.set(proxy, node);
+    return [proxy];
+  });
+  return [...html, ...svg];
+}
+
 // Waits for fonts and photos so measurements and text flow see final metrics.
 async function settle(images: HTMLImageElement[]) {
   // A font that fails to load is reported by `fontFailures` rather than aborting the render.
@@ -974,11 +989,11 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   flushSync(() => react.render(previews.map(({ definition, span, spread }) => (
     <div className="if-spread-container" data-span={span} data-spread={definition} data-layout={definition} key={definition}>
       <SpreadView book={book} spread={spread} template={template} format={format} positions={{}}
-        page={sequence.spreads[index].page} index={anchors} renderPhotos />
+        page={sequence.spreads[index].page} index={anchors} renderPhotos bookSpread={spreads[index].id} />
     </div>
   ))));
   if (renderError) throw renderError;
-  await settle([...root.querySelectorAll('img')]);
+  await settle(decodable(root));
   const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
   const sheets = previews.map(({ definition, spread }, n) => {
     const { sheet, boxes } = validateSpread(containers[n], spread, template, format, definition, [], []);
@@ -1019,6 +1034,18 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
           img.src = img.dataset.src!;
           loading.push(img);
         } else if (far && img.getAttribute('src')) img.removeAttribute('src');
+      }
+      // Boxes with a render callback draw their photo only while near the screen, and drop it when far away.
+      for (const box of container.querySelectorAll<HTMLElement>('[data-photo-render="custom"]')) {
+        const shown = box.dataset.near === '';
+        if (near && !shown) {
+          box.dataset.near = '';
+          box.dispatchEvent(new CustomEvent(photoNearEvent, { detail: true }));
+          loading.push(...decodable(box));
+        } else if (far && shown) {
+          delete box.dataset.near;
+          box.dispatchEvent(new CustomEvent(photoNearEvent, { detail: false }));
+        }
       }
     }
     return loading;
@@ -1217,14 +1244,38 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
 
   const EditorValues = React.createContext({ element: draft, spread: spreadDraft });
   // The app's control for one of this editor's parameters, writing to the draft like `set` (or `setSpread`).
-  function Control({ parameter, label, scope = 'element' }: { parameter: string; label?: string; scope?: 'element' | 'spread' }) {
+  // For a list, `item` and `field` name one field of one item (by its ID), and the control writes the whole list with
+  // that field changed.
+  // Item IDs a list's controls have shown: a control for one of them renders nothing once the item is removed, while
+  // an ID never seen is a mistake in the editor.
+  const seenItems = new Set<string>();
+  function Control({ parameter, label, scope = 'element', itemId: item, field }: { parameter: string; label?: string; scope?: 'element' | 'spread'; itemId?: string; field?: string }) {
     const values = React.useContext(EditorValues)[scope === 'spread' ? 'spread' : 'element'];
     const [owned, parameters] = scope === 'spread' ? [ownedSpread, layout!.parameters] : [editor!.parameters, declared];
     const param = owned.includes(parameter) && Object.hasOwn(parameters, parameter) ? parameters[parameter] : undefined;
     if (!param) throw new Error(unknownControl(parameter, owned, scope));
-    const value = isParameterValue(param, values[parameter]) ? values[parameter] : param.default;
+    const value = resolveValue(param, values[parameter]);
+    const write = (next: Values[string]) => changes(scope === 'spread' ? 'spread' : 'element', { [parameter]: next });
+    if (item !== undefined || field !== undefined) {
+      if (param.type !== 'list') throw new Error('Control ' + parameter + ' is not a list, so it takes no itemId or field.');
+      const items = value as ListItem[];
+      const fieldParam = field !== undefined && Object.hasOwn(param.item, field) ? param.item[field] : undefined;
+      if (!fieldParam) throw new Error('Control ' + parameter + ' needs field, one of: ' + Object.keys(param.item).join(', ') + '.');
+      if (typeof item !== 'string') throw new Error('Control ' + parameter + ' with field ' + field + ' needs itemId, the id of one of its items.');
+      const key = scope + ' ' + parameter + ' ';
+      for (const { id } of items) seenItems.add(key + id);
+      const current = items.find(({ id }) => id === item);
+      // An item that was just removed renders nothing rather than failing the editor; an unknown ID is a mistake.
+      if (!current) {
+        if (seenItems.has(key + item)) return null;
+        throw new Error('Control ' + parameter + ' has no item ' + JSON.stringify(item) + '. Use the id of one of its items.');
+      }
+      return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
+        React.createElement(Field, { param: label ? { ...fieldParam, label } : fieldParam, value: current[field!],
+          change: (next) => write(items.map((other) => other.id === item ? { ...other, [field!]: next as ListItem[string] } : other)) }));
+    }
     return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
-      React.createElement(Field, { param: label ? { ...param, label } : param, value, change: (next) => changes(scope === 'spread' ? 'spread' : 'element', { [parameter]: next }) }));
+      React.createElement(Field, { param: label ? { ...param, label } : param, value, change: write }));
   }
 
   // Inline, the editor replaces the page's artwork only once it has drawn: after its fonts, what it asked to wait for
@@ -1476,6 +1527,7 @@ export async function startRender(root: HTMLElement) {
     }
     if (present) for (const photo of Object.values(book.photos)) photo.src = photo.src.replace('/photo/', '/proof-photo/');
     const lazy = edit && view === 'book';
+    if (edit) book.view = frameView(view);
     // Pictures drawn by <RenderedImage>: at the screen's resolution in the editor (smaller for thumbnails), cheaply
     // in the Book check, and at the format's target resolution for export (ADR 0006).
     const target = template.format.output.resolution?.target ?? 300;
@@ -1529,7 +1581,7 @@ export async function startRender(root: HTMLElement) {
     // them as they arrive.
     const pictureFailures = present || lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
     if (edit && view === 'thumbs') await settleRestoredImages();
-    const images = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
+    const images = decodable(root);
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
@@ -1569,6 +1621,9 @@ export async function startRender(root: HTMLElement) {
       suggestion: failed.timedOut ? 'Check the internet connection, then check or export again.'
         : 'Check that the template’s network sites are allowed for this book and reachable, then check or export again.' }));
     errors.push(...pictureIssues(pictureFailures));
+    const photoRenderIssues = (failures: PhotoRenderFailure[]): Issue[] => failures.map(({ spread, box, message: text }) => ({
+      ...located(spread, 'Photo box ' + box + ': its render callback failed: ' + text), code: 'photo-render-failed', box,
+      suggestion: 'Fix the PhotoBox render callback so it returns markup for every crop and parameter value.' }));
     for (const { api, spread } of guards?.calls ?? []) {
       errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api))), code: 'render-impure',
         details: { api }, suggestion: impureSuggestion });
@@ -1597,8 +1652,9 @@ export async function startRender(root: HTMLElement) {
     }
     for (const [i, result] of decoded.entries()) {
       if (result.status !== 'rejected') continue;
-      const box = images[i].closest<HTMLElement>('[data-box]')?.dataset.box;
-      const spread = images[i].closest<HTMLElement>('[data-spread]')?.dataset.spread;
+      const source = pictureSource.get(images[i]) ?? images[i];
+      const box = source.closest<HTMLElement>('[data-box]')?.dataset.box;
+      const spread = source.closest<HTMLElement>('[data-spread]')?.dataset.spread;
       const photo = spread && box ? spreads.find(({ id }) => id === spread)?.boxes[box]?.photo : undefined;
       errors.push({ ...(spread ? located(spread, '') : {}), message: 'Could not decode photo ' + (images[i].alt || box) + '.',
         code: 'photo-decode-failed', box, source: photo,
@@ -1704,11 +1760,11 @@ export async function startRender(root: HTMLElement) {
     }
     else if (artwork) {
       const { frame, metadata } = renderArtwork(root, sheets, spreads, sequence, format, artwork, book.fixture);
-      await settle([...frame.querySelectorAll<HTMLImageElement>('img')]);
+      await settle(decodable(frame));
       window.imageflowPreview = { state: 'ready', metadata };
     } else if (!check) {
       makePrintPages(root, sheets, sequence, format);
-      await Promise.allSettled([...document.querySelectorAll<HTMLImageElement>('.if-print-page img')].map((img) => img.decode()));
+      await Promise.allSettled([...document.querySelectorAll<HTMLElement>('.if-print-page')].flatMap((page) => decodable(page)).map((img) => img.decode()));
     }
     const units: { side: PrintSide; spread: string; where: string }[] = sequence.spreads.flatMap(({ sides }, i) =>
       sides.map((side) => ({ side, spread: spreads[i].id, where: where[i] })));
@@ -1726,10 +1782,11 @@ export async function startRender(root: HTMLElement) {
         setTimeout(() => {
           queued = false;
           const { pending, failures } = renderedImageState();
-          post({ type: 'pictures', pending, errors: pictureIssues(failures) });
+          post({ type: 'pictures', pending, errors: [...pictureIssues(failures), ...photoRenderIssues(currentPhotoRenderFailures())] });
         }, 50);
       };
       watchRenderedImages(report);
+      watchPhotoRenderFailures(report);
       report();
     }
   } catch (error) {

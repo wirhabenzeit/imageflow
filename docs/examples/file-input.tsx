@@ -33,7 +33,7 @@ export default defineTemplate({
         const area = ctx.geometry.page('right', 'safe');
         const rect = { ...area, height: area.height / 2 };
         // No file assigned is valid: nothing in print, a hint in the editor.
-        if (!parsed) return <Spread>{ctx.mode === 'edit' && <ctx.Element id="chart" rect={rect}>Add a CSV of daily distances</ctx.Element>}</Spread>;
+        if (!parsed) return <Spread>{ctx.view === 'canvas' && <ctx.Element id="chart" rect={rect}>Add a CSV of daily distances</ctx.Element>}</Spread>;
         if ('line' in parsed) {
           // Reported on the element, its file parameter and the file, with the line as a detail. A hidden node works in export.
           return <Spread><ctx.Element id="chart" rect={rect}>

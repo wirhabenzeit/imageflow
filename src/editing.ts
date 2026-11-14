@@ -1,5 +1,5 @@
 import type { Project, SpreadState, Values } from './project';
-import { isParameterValue } from './parameters';
+import { resolveValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import { shownBoxes } from './layouts';
 import { spanAllowedAt } from './format';
@@ -99,7 +99,7 @@ function editValues(project: Project, spread: SpreadState, target: EditTarget, c
 
 export function readEdit(project: Project, spread: SpreadState, target: EditTarget) {
   const value = editValues(project, spread, target)?.[target.key];
-  return isParameterValue(target.param, value) ? value! : target.param.default;
+  return resolveValue(target.param, value);
 }
 
 // Document parameters need no spread, so a book without spreads can still change them.
