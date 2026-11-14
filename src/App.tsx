@@ -18,7 +18,7 @@ import { EditPopover, MarkedFields } from './EditPopover';
 import { CropEditor } from './CropEditor';
 import { ElementEditorDialog } from './ElementEditor';
 import { documentEditorFor, editorOwnedDocument, editorTargetGone } from './editor-session';
-import { anchoredTarget, elementRect, hiddenOccurrence, inlinePlacement, presentationFor } from './inline-editors';
+import { anchoredTarget, clickWithin, elementRect, hiddenOccurrence, inlinePlacement, presentationFor } from './inline-editors';
 import type { OpenEditor } from './inline-editors';
 import { LayoutFamilyPicker } from './LayoutFamilyPicker';
 import { PhotoContent, TextContent } from './BoxContent';
@@ -805,6 +805,12 @@ export function App() {
   }
 
   // Finds the spread and box under a pointer. The label strip above each spread belongs to the spread.
+  // A click as a fraction of the node it hit, which the inline editor opened from that node receives (see OpenEditor).
+  function clickAt(event: { clientX: number; clientY: number; altKey: boolean }, rect: Rect) {
+    const bounds = stage.current?.getBoundingClientRect();
+    return bounds && rect.width > 0 && rect.height > 0
+      ? { ...clickWithin(rect, event.clientX - bounds.left, event.clientY - bounds.top), alt: event.altKey } : undefined;
+  }
   function locate(event: { clientX: number; clientY: number }, types?: readonly string[]) {
     const bounds = stage.current?.getBoundingClientRect();
     if (!bounds || !geometry) return {};
@@ -1399,7 +1405,7 @@ export function App() {
                   path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')) ||
                   (target.owner?.id === top.id && (target.owner.type === 'element') === (top.type === 'element'))));
                 if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
-                else if (target && !openDocumentEditor(target, { x: event.clientX, y: event.clientY, alt: event.altKey })) openEditing({ spread: target.spread, key: targetKey(target) });
+                else if (target && !openDocumentEditor(target, clickAt(event, target))) openEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
                 // Double-clicking a Markdown box shows its text in Quick Look.

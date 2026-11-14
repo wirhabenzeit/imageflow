@@ -5,7 +5,7 @@ import { renderOrigin } from './desktop';
 // The messages a template-supplied editor frame (an element editor or layout-family controls) posts to its host.
 // Drafts and committed values are the frame's own report, so each host validates them before using them.
 export type FrameMessage =
-  | { type: 'editor-ready' } | { type: 'editor-draft'; values: unknown; spread?: unknown } | { type: 'editor-size'; height: number }
+  | { type: 'editor-mounted' } | { type: 'editor-ready' } | { type: 'editor-draft'; values: unknown; spread?: unknown } | { type: 'editor-size'; height: number }
   | { type: 'editor-commit'; values: unknown; spread?: unknown } | { type: 'editor-flushed'; request: number; values: unknown; spread?: unknown }
   | { type: 'editor-cancel' }
   | { type: 'editor-import'; request: number; accept: unknown; mode?: unknown } | { type: 'editor-notice'; message: unknown }
@@ -27,6 +27,8 @@ options: { initialHeight?: number; minimumHeight?: number; focusOnReady?: boolea
   const [height, setHeight] = useState(options.initialHeight ?? 240);
   const measured = useRef(false);
   const [ready, setReady] = useState(false);
+  // Mounted, possibly still drawing before it is ready (an inline editor waiting for its first view).
+  const [mounted, setMounted] = useState(false);
   const [generation, setGeneration] = useState(0);
   const [error, setError] = useState('');
   const [failed, setFailed] = useState(false);
@@ -55,7 +57,10 @@ options: { initialHeight?: number; minimumHeight?: number; focusOnReady?: boolea
         setFailed(true);
         setError(data.message);
       }
+    } else if (data.type === 'editor-mounted') {
+      setMounted(true);
     } else if (data.type === 'editor-ready') {
+      setMounted(true);
       setReady(true);
       setGeneration((value) => value + 1);
       if (options.focusOnReady !== false) frame.current?.focus({ preventScroll: true });
@@ -99,5 +104,5 @@ options: { initialHeight?: number; minimumHeight?: number; focusOnReady?: boolea
     return true;
   }
 
-  return { height, ready, generation, error, setError, failed, flushing, flushTimedOut, flush };
+  return { height, ready, mounted, generation, error, setError, failed, flushing, flushTimedOut, flush };
 }

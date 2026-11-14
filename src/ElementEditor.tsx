@@ -107,7 +107,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
     setSource(address(latestProject.current));
   }, [network]);
   const values = (reported: unknown): Values => reported && typeof reported === 'object' ? reported as Values : {};
-  const { height, ready, generation, error, setError, failed, flushing, flushTimedOut, flush } = useEditorFrame(frame, {
+  const { height, ready, mounted, generation, error, setError, failed, flushing, flushTimedOut, flush } = useEditorFrame(frame, {
     draft(reported, reportedSpread) {
       draft.current = { ...draft.current, ...values(reported) };
       spreadDraft.current = { ...spreadDraft.current, ...values(reportedSpread) };
@@ -167,8 +167,8 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   const rects = JSON.stringify(Object.fromEntries((canvasReady ? geometry?.boxes ?? [] : [])
     .filter((box) => box.spread === spread.id && box.type === 'element' && box.rect).map((box) => [box.id, box.rect])));
   useEffect(() => {
-    if (ready) frame.current?.contentWindow?.postMessage({ type: 'editor-context', project, elementRects: JSON.parse(rects) }, renderOrigin);
-  }, [ready, generation, project, rects]);
+    if (mounted) frame.current?.contentWindow?.postMessage({ type: 'editor-context', project, elementRects: JSON.parse(rects) }, renderOrigin);
+  }, [mounted, generation, project, rects]);
 
   const owned = editor?.parameters ?? [];
   const saved = resolveParams(definition?.parameters ?? {}, spread.elements[element]?.params ?? {});
@@ -253,10 +253,10 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   // The click on the page that opened the editor acts in it too, at the same place, once it shows.
   const clicked = useRef(false);
   useEffect(() => {
-    if (!showing || !click || clicked.current || !inlineBox.current || !at) return;
+    if (!showing || !click || clicked.current || !at) return;
     clicked.current = true;
-    const box = inlineBox.current.getBoundingClientRect();
-    frame.current?.contentWindow?.postMessage({ type: 'editor-click', x: (click.x - box.left) / at.zoom, y: (click.y - box.top) / at.zoom, altKey: click.alt }, renderOrigin);
+    // The same point of the node, in the frame's own (printed) size, wherever the page has moved since.
+    frame.current?.contentWindow?.postMessage({ type: 'editor-click', x: click.x * at.width / at.zoom, y: click.y * at.height / at.zoom, altKey: click.alt }, renderOrigin);
   }, [showing]);
   const zoom = at?.zoom;
   useEffect(() => {

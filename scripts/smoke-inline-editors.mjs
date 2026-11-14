@@ -54,9 +54,13 @@ try {
   // OpenFreeMap, offline: every style is a plain coloured background, which MapLibre draws without tiles.
   await app.evaluate(({ dialog, net, session }) => {
     dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });
-    session.defaultSession.protocol.handle('https', (request) => {
+    // `styleDelay` slows the map server down; `styleServed` is when it last answered.
+    globalThis.styleDelay = 0;
+    session.defaultSession.protocol.handle('https', async (request) => {
       const url = new URL(request.url);
       if (url.host !== 'tiles.openfreemap.org') return net.fetch(request, { bypassCustomProtocolHandlers: true });
+      if (globalThis.styleDelay) await new Promise((resolve) => setTimeout(resolve, globalThis.styleDelay));
+      globalThis.styleServed = Date.now();
       const colours = { liberty: '#bcd6c2', bright: '#d8c9a7', positron: '#e3e3e3' };
       const style = url.pathname.split('/').at(-1);
       return Response.json({ version: 8, name: style, sources: {},
@@ -77,10 +81,15 @@ try {
   // The page's map has been drawn from the local style, so the preview and editor use the same server.
   await page.locator('.map-image img').waitFor({ state: 'attached' });
   const mapBox = await map.boundingBox();
-  // Clicking the map opens its editor on the page, in the map's own rectangle: no panel.
+  // Clicking the map opens its editor on the page, in the map's own rectangle: no panel. With a slow map server, the
+  // printed map stays until the editor's map has its style: the editor appears drawn.
+  await app.evaluate(() => { globalThis.styleDelay = 1500; globalThis.styleServed = 0; });
   await w.mouse.click(mapBox.x + mapBox.width * .7, mapBox.y + mapBox.height * .6);
   const editor = w.locator('.inline-editor.showing');
   await editor.waitFor();
+  const shownAt = Date.now();
+  const served = await app.evaluate(() => { globalThis.styleDelay = 0; return globalThis.styleServed; });
+  assert.ok(served > 0 && served <= shownAt, 'the editor appears only after its map has loaded: ' + JSON.stringify({ served, shownAt }));
   assert.equal(await w.locator('.element-editor').count(), 0, 'no editor panel');
   sameBox(await editor.boundingBox(), await map.boundingBox(), 'editor over the map');
   // The page hides its own map artwork while the editor shows, so nothing is drawn twice.
@@ -188,13 +197,14 @@ try {
   const days = january.locator('.days');
   await days.scrollIntoViewIfNeeded();
   const original = await marked();
-  // One click on a day opens the days on the page and marks that day.
+  // One click on a day opens the days on the page and marks that day, even when the page scrolls before they show.
   const tenth = await january.locator('.days li').nth(9).boundingBox();
   await w.mouse.click(tenth.x + tenth.width / 2, tenth.y + tenth.height / 2);
+  await w.mouse.wheel(0, tenth.height * 5);
   const dayEditor = w.locator('.inline-editor.showing');
   await dayEditor.waitFor();
   assert.equal(await w.locator('.element-editor').count(), 0, 'no editor panel');
-  sameBox(await dayEditor.boundingBox(), await days.boundingBox(), 'day picker over the days');
+  await follows(dayEditor, days, 'day picker over the days');
   await january.locator('.days[data-if-editing]').waitFor({ state: 'attached' });
   const picker = w.frameLocator('iframe.inline-editor-frame');
   // Playwright does not apply the frame's scale to boxes inside it, so days are clicked where the page draws them.

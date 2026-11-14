@@ -174,12 +174,14 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
   const latestFit = React.useRef(fitTrack);
   latestFit.current = fitTrack;
 
+  // On the page, the printed map stays until this one has drawn its first view (or failed), so nothing flickers. The
+  // wait is registered while mounting, before the map's measured rectangle arrives.
+  const firstView = React.useRef<() => void>(() => {});
+  React.useEffect(() => { waitUntil(new Promise<void>((resolve) => { firstView.current = resolve; })); }, []);
   React.useEffect(() => {
     if (!rect) return;
     let removed = false;
-    // On the page, the printed map stays until this one has drawn its first view (or failed), so nothing flickers.
-    let drawn = () => {};
-    waitUntil(new Promise<void>((resolve) => { drawn = resolve; }));
+    const drawn = () => firstView.current();
     void loadMapLibre().then((maplibregl) => {
       if (removed || !holder.current) return drawn();
       const view = latest.current;

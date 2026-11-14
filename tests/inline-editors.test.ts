@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mm } from '../src/format';
 import type { BookGeometry } from '../src/desktop';
-import { anchoredTarget, hiddenOccurrence, inlineFits, inlinePlacement, presentationFor } from '../src/inline-editors';
+import { anchoredTarget, clickWithin, hiddenOccurrence, inlineFits, inlinePlacement, presentationFor } from '../src/inline-editors';
 import type { OpenEditor } from '../src/inline-editors';
 import { p } from '../src/parameters';
 import { capabilities, contract1Capabilities } from '../src/runtime-exports';
@@ -102,4 +102,11 @@ test('an inline document editor sits on the marked node it was opened from, and 
   const anchor = { spread: 's1', edits: 'document.marked', x: (120 - 32) / 800, y: (210 - 40) / 400 };
   const renumbered = { ...geometry, targets: [{ ...geometry.targets[1], occurrence: 0 }, { ...geometry.targets[0], occurrence: 1 }] };
   assert.equal(anchoredTarget(renumbered, days, anchor)?.x, 100);
+});
+
+test('the opening click is kept relative to the node it hit', () => {
+  const rect = { x: 100, y: 200, width: 50, height: 400 };
+  assert.deepEqual(clickWithin(rect, 125, 300), { x: .5, y: .25 });
+  // Outside the node (a rounding step at its edge) it stays on the node.
+  assert.deepEqual(clickWithin(rect, 90, 700), { x: 0, y: 1 });
 });

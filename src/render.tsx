@@ -1080,6 +1080,8 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       updateFiles = setFiles;
       updateContext = setContext;
       // Effects run only once the component has mounted without throwing; the component's own effects ran before.
+      // Mounted: the app sends the measured context now, so the editor can draw before it is announced ready.
+      post({ type: 'editor-mounted' });
       void settled().then(() => { announced = true; if (!failed) post({ type: 'editor-ready' }); });
       return () => { update = undefined; updateFiles = undefined; updateContext = undefined; };
     }, []);
