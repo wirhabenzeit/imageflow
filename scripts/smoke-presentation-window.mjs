@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { nextPresentation, testBook } from './ui-actions.mjs';
 import { buildMacHeaderState, macHeaderState } from './mac-header-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -27,7 +27,7 @@ const app = await _electron.launch({ executablePath: electron, args: [join(root,
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 const current = async (page) => (await page.evaluate(() => window.imageflow.currentProject())).value;
 async function open(editor, spread) {
-  const opened = app.waitForEvent('window');
+  const opened = nextPresentation(app);
   assert.ok('value' in await editor.evaluate((spread) => window.imageflow.startPresentation(spread), spread));
   const presentation = await opened;
   await presentation.waitForURL('imageflow://editor/presentation');

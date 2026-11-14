@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { menuAction, testBook } from './ui-actions.mjs';
+import { menuAction, nextPresentation, testBook } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/ui-polish-'));
@@ -89,7 +89,7 @@ try {
       callback?.();
     };
   });
-  const opened = app.waitForEvent('window');
+  const opened = nextPresentation(app);
   await page.locator('.spread-thumb[data-spread="s3"]').click({ button: 'right' });
   const presentation = await opened;
   await presentation.waitForURL('imageflow://editor/presentation');

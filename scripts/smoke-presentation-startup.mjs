@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { menuAction, testBook } from './ui-actions.mjs';
+import { menuAction, nextPresentation, testBook } from './ui-actions.mjs';
 import { buildMacHeaderState, macHeaderState } from './mac-header-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -41,14 +41,6 @@ await writeFile(join(folder, 'project.json'), JSON.stringify({schemaVersion:1,ti
   Array.from({length:40},(_,i)=>({id:'s'+i,definition:i===15?'shaped':'story',params:{index:i},boxes:{hero:{photo:photos['p'+i]?'p'+i:'p0'}}}))}));
 const visible = process.argv.includes('--visible');
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: {...process.env, ...(visible ? {} : {IMAGEFLOW_HIDE_WINDOW:'1'})} });
-// Thumbnail rendering also creates windows; only accept the presentation viewer.
-const nextPresentation = () => app.waitForEvent('window', {
-  timeout: 10000,
-  predicate: async (page) => {
-    try { await page.waitForURL('imageflow://editor/presentation', { timeout: 10000 }); return true; }
-    catch { return false; }
-  },
-});
 try {
   if (!process.argv.includes('--measure')) await app.context().addInitScript(() => {
     if (location.hostname !== 'render' || new URLSearchParams(location.search).get('view') !== 'present') return;
@@ -112,7 +104,7 @@ try {
   const requests = [];
   app.context().on('request', request => { if(request.url().includes('/proof-photo/')) requests.push(request.url().split('/proof-photo/')[1]); });
   const start = performance.now();
-  const opened = nextPresentation();
+  const opened = nextPresentation(app);
   await editor.keyboard.press('Shift+w');
   const page = await opened;
   await page.waitForURL('imageflow://editor/presentation');
@@ -172,7 +164,7 @@ try {
     await page.keyboard.press('Escape').catch((error) => { if (!page.isClosed()) throw error; });
     await closed;
     await checkHeader();
-    const reopened = nextPresentation();
+    const reopened = nextPresentation(app);
     await menuAction(app, 'Presentation');
     input = await reopened;
     await input.waitForURL('imageflow://editor/presentation');
@@ -194,7 +186,7 @@ try {
     if (process.argv.includes('--repeat')) {
       const timings = [];
       for (let cycle = 0; cycle < 20; ++cycle) {
-        const opened = nextPresentation();
+        const opened = nextPresentation(app);
         const started = performance.now();
         await editor.evaluate((spread) => window.imageflow.startPresentation(spread), cycle % 2 ? 's15' : 's30');
         const repeated = await opened;
