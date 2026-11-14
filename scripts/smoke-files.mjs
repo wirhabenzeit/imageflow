@@ -1,4 +1,4 @@
-import { testBook, menuAction } from './ui-actions.mjs';
+import { testBook, menuAction, clickPage } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -70,7 +70,7 @@ try {
     await frame.locator(route).scrollIntoViewIfNeeded();
     await w.waitForTimeout(200);
     const box = await frame.locator(route).boundingBox();
-    await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await clickPage(w, box.x + box.width / 2, box.y + box.height / 2);
     await editorReady();
     return routeEditor.getByRole('combobox', { name: 'GPX track' });
   };
@@ -88,7 +88,7 @@ try {
   await frame.locator(route).scrollIntoViewIfNeeded();
   await w.waitForTimeout(200);
   const inset = await frame.locator(route).boundingBox();
-  await w.mouse.click(inset.x + inset.width / 2, inset.y + inset.height / 2);
+  await clickPage(w, inset.x + inset.width / 2, inset.y + inset.height / 2);
   await editorReady();
   const note = (text) => routeEditor.locator('.route-editor-nav', { hasText: text }).waitFor();
   await routeEditor.getByRole('button', { name: 'Zoom in' }).click();
@@ -112,7 +112,7 @@ try {
   const emptyBox = await empty.boundingBox();
   // The inset lies over the panorama photo: what is drawn on top decides, so the click opens its editor rather
   // than selecting the photo.
-  await w.mouse.click(emptyBox.x + emptyBox.width / 2, emptyBox.y + emptyBox.height / 2);
+  await clickPage(w, emptyBox.x + emptyBox.width / 2, emptyBox.y + emptyBox.height / 2);
   await routeDialog.waitFor();
   assert.equal(await w.locator('.crop-editor').count(), 0);
   await routeEditor.getByText('Choose a GPX track to draw the route.').waitFor();

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { execFileSync } from 'node:child_process';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { testBook, clickPage } from './ui-actions.mjs';
 
 // A real desktop session: editing typography/occurrences, pending typing, composition, plain paste, fallback,
 // save/reopen, failures and conflicts. Runs separately so the default smoke suite stays small.
@@ -45,7 +45,7 @@ try {
     const target = occurrence(index, path);
     await target.scrollIntoViewIfNeeded();
     const box = await target.boundingBox();
-    await w.mouse.click(box.x + box.width * .5, box.y + box.height * .5);
+    await clickPage(w, box.x + box.width * .5, box.y + box.height * .5);
     await input().waitFor();
     await w.locator('.inline-text-editor.showing').waitFor();
   }
@@ -200,7 +200,7 @@ try {
   await open();
   await input().fill('Outside apply');
   const second = await occurrence(1).boundingBox();
-  await w.mouse.click(second.x + second.width * .5, second.y + second.height * .5);
+  await clickPage(w, second.x + second.width * .5, second.y + second.height * .5);
   for (let n = 0; n < 100 && await saved() !== 'Outside apply'; n++) await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(await saved(), 'Outside apply');
   await input().waitFor();
@@ -218,7 +218,7 @@ try {
     stage.addEventListener('mousedown', () => { window.outerPresses++; });
   });
   const next = await occurrence(1).boundingBox();
-  await w.mouse.click(next.x + next.width * .5, next.y + next.height * .5);
+  await clickPage(w, next.x + next.width * .5, next.y + next.height * .5);
   for (let n = 0; n < 100 && await saved() !== 'Gesture guard'; n++) await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(await saved(), 'Gesture guard');
   assert.equal(await w.evaluate(() => window.outerPresses), 0, 'the canvas receives no premature press');
@@ -306,7 +306,7 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   const tilted = await occurrence().boundingBox();
-  await w.mouse.click(tilted.x + tilted.width * .5, tilted.y + tilted.height * .5);
+  await clickPage(w, tilted.x + tilted.width * .5, tilted.y + tilted.height * .5);
   await w.locator('.edit-popover').waitFor();
   assert.equal(await w.locator('.inline-text-editor').count(), 0);
   await w.locator('.edit-popover').press('Escape');
@@ -357,7 +357,7 @@ export default defineTemplate({id:'imageflow-starter',version:'1',contract:1,
   for (const path of ['elements.note.text','heading','document.title']) {
     console.log('opening editor owner:', path);
     const node=occurrence(0,path); await node.scrollIntoViewIfNeeded();const box=await node.boundingBox();
-    await w.mouse.click(box.x+box.width/2,box.y+box.height/2);
+    await clickPage(w, box.x+box.width/2,box.y+box.height/2);
     await w.locator('.element-editor').waitFor();
     assert.equal(await w.locator('.inline-text-editor').count(),0,'owned text opens its custom editor: '+path);
     const src=await w.locator('.element-editor iframe').getAttribute('src');

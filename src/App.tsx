@@ -1618,8 +1618,11 @@ export function App() {
                 if (moved.current) return;
                 const { sheet, top, target } = locate(event);
                 if (!sheet || !spreads.some(({ id }) => id === sheet)) return;
+                // The first click on a spread selects it; its photos and texts take clicks once it is selected, so a
+                // spread filled by one photo can still be selected.
+                const current = spreadSelected && spreadId === sheet;
                 select(sheet, false);
-                if (blockedInline) return;
+                if (!current || blockedInline) return;
                 if (top) setFocusBox({ box: top.id, at: Date.now() });
                 // What is drawn on top decides: a box or element opens its own editor there (see openOwner). A smaller
                 // click-to-edit node on top, such as a heading over a photo, opens its popover instead.
@@ -1646,7 +1649,7 @@ export function App() {
               onMouseMove={(event) => {
                 const { sheet, target } = locate(event);
                 setHovered(sheet);
-                setHoveredTarget(target && targetKey(target));
+                setHoveredTarget(target && spreadSelected && sheet === spreadId ? targetKey(target) : undefined);
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
               <BookFrame project={summary.id} view="book" title="Book preview" cropPreview={cropPreview} onGeometry={setGeometry} onStatus={bookStatus} onPictures={bookPictures}
                 viewport={viewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
