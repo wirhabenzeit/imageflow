@@ -1,0 +1,12 @@
+{
+  "name": "imageflow",
+  "owner": { "name": "ImageFlow" },
+  "metadata": { "description": "Agent support for ImageFlow photo books." },
+  "plugins": [
+    {
+      "name": "imageflow",
+      "source": "./",
+      "description": "The ImageFlow MCP server for books open in the ImageFlow app, and the imageflow-templates skill with the template API reference and examples."
+    }
+  ]
+}

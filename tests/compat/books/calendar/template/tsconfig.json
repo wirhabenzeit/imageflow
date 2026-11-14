@@ -1,0 +1,3 @@
+{
+  "extends": "./.imageflow-sdk/tsconfig.json"
+}

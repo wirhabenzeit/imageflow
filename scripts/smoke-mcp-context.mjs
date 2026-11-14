@@ -200,6 +200,15 @@ try {
   assert.equal((await read(first)).title, 'Only first changed');
   assert.equal((await inspect(secondHandle)).title, 'Same title');
   assert.deepEqual((await good('list_projects')).projects.map((book) => book.project), [secondHandle]);
+  // #136: a context call on the starter book stays near 8k tokens. The reference topics, examples and sources are
+  // requested separately, so this budget covers the starter's declarations, file list and the table of contents.
+  const starterFolder = join(work, 'Starter.imageflow');
+  await testBook(app, starterFolder, true);
+  const starter = (await good('list_projects')).projects.find((book) => book.folder === starterFolder).project;
+  const starterContext = await good('get_authoring_context', { project: starter });
+  const contextBytes = JSON.stringify(starterContext).length;
+  assert.ok(contextBytes <= 30_000, 'The starter book context grew to ' + contextBytes + ' bytes; the budget is 30,000 (about 8k tokens).');
+  assert.ok(starterContext.template.spreads.story && starterContext.topics.length > 20);
   console.log('ImageFlow MCP context, empty-book, single-page, inline drafts and multi-book workflows passed' + (packaged ? ' (packaged).' : '.'));
 } catch (error) {
   if (one && !one.isClosed()) await one.screenshot({ path: join(root, '.build/mcp-context-failure.png') }).catch(() => {});

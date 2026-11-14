@@ -1,6 +1,74 @@
 # Template API (contract 1)
 
-Status: implemented reference for the v1 runtime, including UI PR #7. The executable schemas in `src/template.tsx`, `src/parameters.ts`, `src/format.ts`, and `src/project.ts` govern validation. The authoring declarations are in `authoring/imageflow.d.ts`; the complete working example is `sample/starter/template/index.tsx`. Historical proposals are not alternative supported APIs.
+Status: implemented reference for the v1 runtime. The executable schemas in `src/template.tsx`, `src/parameters.ts`, `src/format.ts`, and `src/project.ts` govern validation. The authoring declarations are in `authoring/imageflow.d.ts`; the complete working example is `sample/starter/template/index.tsx`. Historical proposals are not alternative supported APIs.
+
+This page is generated from the topic files in [`template-api/`](template-api), which the ImageFlow MCP server (`get_authoring_context` with `docs`) and the [agent skill](../skills/imageflow-templates/SKILL.md) serve one at a time. Edit those files and run `npm run generate:docs`.
+
+## Topics
+
+- [Authoring workflow](#authoring-workflow): Order of work for agents: which MCP tool reads, edits, previews and verifies what, and how revisions and drafts fit together.
+- [Package](#package): The template/ folder, host-provided imports, the shipped example templates and the contract-1 baseline features.
+- [Declaration](#declaration): defineTemplate fields, the three parameter scopes, declaring spreads with spread()/spreadFor and typed reusable declarations.
+- [Parameters](#parameters): p.* parameter helpers, their value types and options (ranges, units, enums, dates, multiline, descriptions).
+- [List parameters](#list-parameters): p.list for a variable number of flat items, item IDs, list controls and the list item commands.
+- [Boxes and elements](#boxes-and-elements): Photo and Markdown boxes, flowOrder for text continuation, and generated elements with parameters.
+- [Print format](#print-format): printFormat: trim, bleed, safe area, several named formats, formats without facing pages, single-page spans and book ends.
+- [Template library](#template-library): Importing templates into the library, template previews and openingSpreads for new books.
+- [Switching layouts](#switching-layouts): How content, crops and parameters carry over, are kept or restored when a spread switches layout.
+- [Layout families](#layout-families): Grouping layout variants into a family with variant tags, and the family picker.
+- [Dependencies](#dependencies): Using npm packages in a template: the saved dependency bundle, licences and network sites.
+- [Render function](#render-function): The pure render(ctx) contract, the render context fields, and photo capture metadata.
+- [Rendered images](#rendered-images): <RenderedImage> for pictures that draw asynchronously, such as WebGL maps, and how check and export wait for them.
+- [Click-to-edit](#click-to-edit): ctx.edit(...paths) to make rendered nodes open parameter popovers when clicked.
+- [Anchors](#anchors): Anchors that other spreads refer to (tables of contents, map captions) and the book index of anchors and pages.
+- [Editing UI](#editing-ui): Choosing between generated controls, arranged controls and custom editors, and where each kind of editing happens.
+- [Element editors](#element-editors): Custom React editors for element parameters: props, Control, spread parameters, network access and sandboxing.
+- [Document editors](#document-editors): Custom editors for book-wide document parameters, opened where the book shows them.
+- [Editing on the page](#editing-on-the-page): presentation: 'inline' editors drawn on the page instead of in the panel, and their appearance.
+- [File parameters](#file-parameters): p.file parameters for project files such as GPX tracks, file() in render and importing files.
+- [Template findings](#template-findings): issue() to report problems with a template's own input as book check findings.
+- [Geometry helpers](#geometry-helpers): geometry helpers: page, spread, safe and bleed rectangles, insets, grids and design coordinates in millimetres.
+- [Platform components](#platform-components): Spread, PhotoBox, MarkdownBox, Element and Text components, and PhotoBox render callbacks.
+- [CSS contract](#css-contract): Inline styles and styles.css, geometry CSS variables, Markdown typography, fonts and output rules.
+- [Validation](#validation): What is validated when a template loads and when a book renders.
+- [Stored project data](#stored-project-data): How spreads, boxes, crops and parameter values are saved in project.json.
+- [Authoring and compatibility details](#authoring-and-compatibility-details): Type-checking with the generated SDK, splitting layouts into files, persistence, preview limits and enum maps.
+- [Inline plain text (`inline-text`)](#inline-plain-text-inline-text): On-page editing of plain string parameters with ctx.Text presentation="inline".
+- [Formatted text (`formatted-text`)](#formatted-text-formatted-text): Strings with inline bold, italic and strikethrough (markdown: 'inline') and FormattedText.
+
+## Authoring workflow
+
+How an agent edits an ImageFlow book through the MCP server. The template API topics describe what a template can declare; this topic describes the order of work and which tool does what.
+
+### Orientation
+
+1. Call `list_projects` to get the handle and input revision of the open, authorized book.
+2. Call `get_authoring_context`. It returns the parsed template declarations (`template`), saved and current template identity, the files under `template/`, a table of contents of the API reference (`topics`) and the shipped examples (`examples`). Ask for the topics you need with `docs: ['list-parameters', …]`, for example sources with `includeExamples: ['minimal']`, and for template or Markdown files with `includeSource`.
+3. Call `inspect_book` for the saved spreads, sources and parameter values. The `elements` view measures boxes and elements of one spread after whole-book text flow.
+
+### Editing
+
+- Edit `template/` TSX, CSS and assets directly with your workspace tools.
+- Edit registered Markdown at its source location; linked Markdown stays outside the package.
+- Use `apply_project_changes` for `project.json` and `photos.json`. Never edit these manifests while the app is open.
+- Copy new content into `inbox/` and call `import_sources`. Then assign the returned IDs with a command batch.
+- Parameter commands use saved scopes: `document`, `spread`, `box` or `element`. An element editor can also own spread parameters; use `scope: 'spread'` for those fields, not `scope: 'element'`.
+- To find the parameter a request means, read each parameter's description with its unit, range and options. Give new parameters a description when their meaning or direction is not obvious from the label.
+- To start or extend a template, read the [package](#package) topic's example table, fetch the closest example with `includeExamples` and copy its layout.
+- For an empty book, inspect `template.openingSpreads` and insert suitable layouts with `insert_spread`. `openingSpreads` describes new-book defaults and is not applied again automatically.
+- Use a layout family when layouts are variants of one design (`template.layoutFamilies`; `family` and `variant` on each layout). Pickers should choose by variant tags, not hard-coded IDs. Switch variants with `switch_layout` and the layout ID of the variant ([Layout families](#layout-families)).
+
+### Verifying
+
+- Call `check_book` with a spread preview after every edit. Images include whole-book text flow. Layout errors carry the spread and template source line; text that runs out of its box or overlaps other text is reported per block.
+- Set `typescript: true` to type-check template sources against the installed runtime. Type errors do not suppress usable images.
+- Preview a new or unused layout before saving it: call `check_book` with `draft.operations` (an `insert_spread` with a `ref`) and target the preview at its `$ref`. Then apply the same operations with `apply_project_changes` to save them.
+- Use `preview.target.spreads` for a contact sheet of up to 12 spreads, and `box` or `element` targets for close-ups. `guides` and `labels` add trim, safe-area and box outlines.
+- Stress-test layouts with `check_book` `fixtures`: synthetic typical, long, empty, portrait-photo and malformed-file content per format, with a coverage matrix and a bannered fixture contact sheet that is never the saved book. Coverage names the checks that did not run.
+
+### Revisions
+
+Every result carries the input `revision`. Pass it as `expectedRevision` to commands, page-number previews and drafts. A `REVISION_CONFLICT` means the book changed: inspect or check again before editing. Commands need a unique `idempotencyKey`, so a retry after a lost reply returns the original result instead of applying the batch twice.
 
 ## Package
 
@@ -80,7 +148,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 
 `requires` is reserved for additive extensions introduced after the baseline is fixed. Unsupported extensions are rejected when the template loads, with an update hint. Older templates that list baseline features in `requires` remain valid. `capabilities` continues to list all supported feature names, including the baseline, for compatibility and feature discovery. `get_authoring_context` reports the contract, its `baseline`, all `capabilities` and module `exports` as `capabilities.templateApi`.
 
-The baseline is defined in `src/runtime-exports.ts`. Until ImageFlow's first public release it stays open: new additive features join it, and templates use them without `requires`. At that release it is fixed, and later additive extensions are declared in `requires`. It never shrinks. Development builds before that release are not supported implementations of contract 1; use a current build rather than adding a list of baseline flags to target an older one. See [ADR 0007](decisions/0007-template-v1-baseline.md) and [ADR 0008](decisions/0008-baseline-freeze-at-release.md).
+The baseline is defined in `src/runtime-exports.ts`. Until ImageFlow's first public release it stays open: new additive features join it, and templates use them without `requires`. At that release it is fixed, and later additive extensions are declared in `requires`. It never shrinks. Development builds before that release are not supported implementations of contract 1; use a current build rather than adding a list of baseline flags to target an older one. See [ADR 0007](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0007-template-v1-baseline.md) and [ADR 0008](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0008-baseline-freeze-at-release.md).
 
 An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
 
@@ -186,7 +254,7 @@ spread({ label: 'Story', boxes: { hero: box.photo('Main photo', { caption }), st
 
 With the `spread` builder, the render context types every parameter, box and element of its layout. `ctx.PhotoBox`, `ctx.MarkdownBox` and `ctx.Element` are the platform components restricted to that layout's IDs, so `<ctx.PhotoBox id="heor" />` fails type checking. The top-level components accept any ID for extracted helpers. `MarkdownBox` takes `columns` as a number or a numeric string, so an enum value such as `'2'` needs no cast. Runtime validation still checks every rendered box and element, for code that is not type-checked.
 
-### Parameters
+## Parameters
 
 `p.*` helpers create plain, serializable schema objects; the editor generates controls from them, and the `spread` builder infers render-context types from them. A spread declared as a plain object gets a broad context.
 
@@ -215,7 +283,7 @@ Descriptions appear with the parameter's type, range, `step`, `unit` and options
 
 Scopes: `parameters` at template level (document), on a spread definition (spread instance), on a box or element (element instance). Values are stored in `project.json` at the matching scope. There is no inheritance between scopes.
 
-#### List parameters
+## List parameters
 
 A list holds a variable number of flat items, such as the GPX tracks of one map, each with its own colour and label:
 
@@ -245,14 +313,14 @@ const mapParameters = {
 
 The starter's Map layout draws every track of its `tracks` list; *Fit tracks* frames all of them. It replaces the map's earlier single `track` and `trackColor`; books saved with those are not migrated (no released books use them).
 
-### Boxes and elements
+## Boxes and elements
 
 - `boxes` declares content boxes. `type: 'photo'` accepts a photo from the photo index; `type: 'markdown'` accepts a Markdown file. Boxes may declare their own `parameters`.
 - Markdown boxes on a spread need a unique `flowOrder` when the spread has more than one. Continuation follows project spread order, then `flowOrder`.
 - `elements` declares generated artwork (calendar, ornaments with options) that has parameters but no assigned content.
 - Identifiers are stable keys: renaming one is a breaking change for projects using the template.
 
-### Print format
+## Print format
 
 `format` is a single `PrintFormat` as sketched in `spikes/pdf-format/print-format-sketch.md` (PR #2): trim, bleed per edge, safe insets, structure (`delivery: 'pages' | 'spreads'`, `ends: 'single-pages' | 'inside-covers'`, page-count rule), and output constraints (container, colour space, transparency policy, resolution range, raster size, font rules, minimum text size). The platform resolves it into concrete geometry once.
 
@@ -274,7 +342,7 @@ Changing the format re-renders the book: assignments, crops and text sources sta
 
 Arbitrary dimensions within declared limits, rather than named presets, are not supported yet.
 
-#### Formats without facing pages
+### Formats without facing pages
 
 Wall calendars, cards, loose print series and posters have no facing pages. Declare them with `facingPages: false`, and every unit of the book is one page: the editor, the thumbnails, the Book check and both exports work page by page instead of spread by spread. The name follows print convention (InDesign's *Facing Pages* setting).
 
@@ -316,7 +384,7 @@ The Wall calendar starter, `sample/calendar/template/index.tsx`, is a complete e
 
 `span` defaults to `'page'` when no format of the template has facing pages, and to `'spread'` otherwise, so a calendar template does not repeat it on every layout. A layout whose `span` fits none of the template's formats loads with a `declaration-span-unused` warning.
 
-#### Book ends
+### Book ends
 
 The template and the format each have one job. The template offers layouts with a `span`: a `right` layout for the opening, a `left` layout for the closing, and full spreads in between. The format states what the printer expects, and export follows the format alone. `ends` is therefore a requirement, not a permission:
 
@@ -333,11 +401,11 @@ The template and the format each have one job. The template offers layouts with 
 
 A template may offer formats of both kinds side by side. The layout picker, new spreads and fixtures use only the layouts that fit the chosen format. A book that switches to a format its layouts do not fit still previews (a page layout is drawn on a spread, a spread layout on one page), but the Book check reports a `page-sequence` error naming each such spread or page, and print export is blocked until its layouts are switched; proof export still works. The picker of a mismatched spread offers the layouts that fit the new format. Switching back to the earlier format restores the book; assignments, crops and text sources are kept, as with any format change. Opening spreads are checked against the formats of the default format's kind, because a new book starts in the default format.
 
-### Template library
+## Template library
 
 New books are made from the templates in the library: the built-in starter and the templates imported with **Templates → Manage Templates… → Import…**. Import loads the template like a book would and refuses one that fails to load. Before a template that bundles npm packages or declares `network` sites enters the library, the import lists the packages with their versions and licences and the sites its editors connect to, and **Templates → Manage Templates…** keeps showing them ([Dependencies](#dependencies), [Element editors](#element-editors)). The library keeps one entry per `id`, compared by `version` as dot-separated numbers: a newer version replaces the entry, while an older version, or the same version with other files, asks first. So bump `version` when you change a template you have shared. `label` (up to 80 characters) and `description` (up to 300) are what the library shows; without a label it shows the ID. A book copies its template when it is created, and `project.json` records the source's hash as `template.hash`; the library is never read while a book renders.
 
-#### Template previews
+### Template previews
 
 New Book and **Manage Templates…** show a picture of each template. By default it is a render of the first opening spread (or, when that is blank, an illustrated sample spread), made once per version and saved: built-in templates ship theirs with the app, and an imported template is rendered when it is imported and kept with it in the library. Both are tied to the [template hash](#template-library), so any change to the template's files makes a new one, and removing the template removes its render. A template that declares `network` sites is saved only once those sites are allowed, so the picture never lacks a map; until then it is rendered again in each session.
 
@@ -364,7 +432,7 @@ defineTemplate({
 
 The starter declares a title page, one *Photo and story* spread and the closing page.
 
-### Switching layouts
+## Switching layouts
 
 A spread can switch to any layout of the template with the same page footprint: a full spread to another full spread, a single left or right page to another of the same side. Changing between a spread and a single page changes the book's pagination and is not offered as a layout switch.
 
@@ -385,7 +453,7 @@ Selecting a layout is one edit: Undo restores the previous layout with everythin
 
 State that no layout of the template declares (after the template drops a box, element or parameter) stays in `project.json` and is reported in the Book check rather than removed.
 
-### Layout families
+## Layout families
 
 Layouts that are variants of one design, such as a photo grid in 2×2 and 3×3, can form a **layout family**. Every variant is still an ordinary layout with its own ID and a fixed set of boxes, so everything in [Switching layouts](#switching-layouts) applies unchanged: choosing a variant is a layout switch, with the same carried, kept and restored content, per-layout crops, rejected-value fallbacks and one Undo step. Families change only how the choice is presented.
 
@@ -437,7 +505,7 @@ Books never read `node_modules`: book revisions, the folder watcher and **Save a
 
 `render(context)` is called per spread instance and must be a pure function of its input: no state, effects, timers, randomness, or data fetching. Rendering never changes the book's saved content. Work that loads declared external resources or finishes later, such as drawing a map, goes through [`<RenderedImage>`](#rendered-images), which the host runs, waits for and checks.
 
-Book check and export enforce the parts of this that would make a printed page depend on something outside the book. While they render, a call from template code (including bundled libraries and module setup) to `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Worker`, `SharedWorker`, `importScripts`, a GPU canvas context (`webgl`, `webgl2`, `webgpu`, `bitmaprenderer`, on `HTMLCanvasElement` or `OffscreenCanvas`), `navigator.gpu`, `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` is a `render-impure` error naming the API and, when it happened while a layout rendered, its spread. Print export refuses a book with such an error. A 2D canvas is allowed. While a `<RenderedImage>` is drawing, these calls are its declared work and are not recorded. The editor's own previews and element editors are not checked, so an element editor may use these APIs (see [ADR 0006](decisions/0006-template-capabilities.md)). The check reports mistakes; it is not a sandbox, and the render frames' content security policy blocks other origins regardless.
+Book check and export enforce the parts of this that would make a printed page depend on something outside the book. While they render, a call from template code (including bundled libraries and module setup) to `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Worker`, `SharedWorker`, `importScripts`, a GPU canvas context (`webgl`, `webgl2`, `webgpu`, `bitmaprenderer`, on `HTMLCanvasElement` or `OffscreenCanvas`), `navigator.gpu`, `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` is a `render-impure` error naming the API and, when it happened while a layout rendered, its spread. Print export refuses a book with such an error. A 2D canvas is allowed. While a `<RenderedImage>` is drawing, these calls are its declared work and are not recorded. The editor's own previews and element editors are not checked, so an element editor may use these APIs (see [ADR 0006](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0006-template-capabilities.md)). The check reports mistakes; it is not a sandbox, and the render frames' content security policy blocks other origins regardless.
 
 ```ts
 type RenderContext = {
@@ -494,7 +562,7 @@ ImageFlow reads them from the original file whenever the book opens or a source 
 
 The same fields appear on `ctx.boxes[id].photo`, on `ctx.book.spreads[].photos[].photo`, in custom editors' `context`, and in `inspect_book`'s `sources` view. [`photo-story.tsx`](examples/photo-story.tsx) builds a caption from them. Raw EXIF is not exposed.
 
-### Rendered images
+## Rendered images
 
 A picture that takes time to make, such as a map drawn by a WebGL library from remote tiles, renders through `<RenderedImage>` (included in the contract-1 baseline):
 
@@ -518,7 +586,7 @@ import { RenderedImage } from 'imageflow';
 - **Network:** `draw` may reach the template's declared [`network`](#element-editors) origins once the user has allowed them; otherwise its requests are blocked and the picture fails. Its requests, WebGL contexts, workers and timers are not `render-impure`.
 - `label` names the picture in messages (default `'Picture'`); `alt`, `className` and `style` apply to the box, whose class is `if-rendered-image` with `data-rendered="pending" | "ready" | "failed"`.
 
-### Click-to-edit
+## Click-to-edit
 
 `ctx.edit(...paths)` marks the node that shows parameters, so clicking it in the editor opens a popover with a control for each parameter (text field, month or date picker, segmented choice, slider, colour). Spread the result onto the node:
 
@@ -540,8 +608,7 @@ For the common case of one string parameter shown as text, `ctx.Text` reads the 
 
 Templates read photo metadata (for captions) and page numbers through the context; they never receive file paths, image data, or Markdown source, and they cannot change project data.
 
-
-### Anchors
+## Anchors
 
 A layout can declare anchors: places that other spreads refer to by ID, such as chapter openings for a table of contents or a map that a caption points to. Declare them with `anchors`, a function of the spread's saved values:
 
@@ -598,7 +665,7 @@ for (const spread of ctx.book.spreads)
 - **Photos.** `photos` lists the photo boxes of the spread's current layout, in declaration order, including empty ones. `photoId` is `null` for an empty box. `photo` is the photo's metadata, the same object shape as `ctx.boxes[id].photo`, or `null` when the box is empty or its photo is missing from the book. A photo placed in several boxes appears once per placement. Content a spread keeps from a layout it no longer uses is not listed, and a spread whose layout the template no longer declares lists no photos. Markdown boxes are not listed.
 - **No images.** The index has metadata and assignments only, no photo URLs or rendered thumbnails.
 
-### Editing UI
+## Editing UI
 
 Saved data and its editing UI are separate. Parameters declare what is saved: IDs, types, defaults, constraints and scopes, which persistence, validation, Undo and project commands (including MCP) rely on. How they are edited is chosen at three levels, from no code to custom UI. Choose the smallest level, and the smallest editor, that does what was asked: a request for a changeable emoji is one string parameter (and a size if wanted), not a choice between emoji, text and uploaded artwork. [`editing-levels.tsx`](examples/editing-levels.tsx) shows all three.
 
@@ -624,7 +691,7 @@ Presentation uses the export artwork path (`ctx.mode === 'export'`), including f
 
 Photo capture time, location and camera are described under [Photo metadata](#photo-metadata). The editor's photo views also sort and group photos that have no EXIF capture time by their file's modification time, shown as an estimate; that estimate is editor-only and never reaches templates. Photo views compare camera wall times as shot, and show estimated modification times in the computer's local timezone, so mixed cameras and file dates group consistently. Sorting and grouping are per-book view preferences and do not change the rendered book.
 
-#### Where editing happens
+### Where editing happens
 
 Click a box, element, or marked node to edit it. Generated item controls and photo controls share a fixed position at the bottom center of the visible canvas; the selected item remains outlined on the page. The sidebar lists items without repeating their controls.
 
@@ -634,7 +701,7 @@ Click a box, element, or marked node to edit it. Generated item controls and pho
 - **Marked nodes:** a node marked with `ctx.Text` or `ctx.edit` opens a popover for those parameters. A node smaller than the box under it wins, so a heading over a photo edits the heading. A parameter may be shown by several nodes, such as `ctx.Text parameter="heading"` on both pages: each is its own place to edit, the selection outline follows the occurrence clicked and Tab reaches each, while all of them edit the same saved value. The sidebar lists the parameter once.
 - **The sidebar** holds the spread's layout, the spread parameters nothing on the page edits, content kept for other layouts, and a list of what the page edits: marked nodes such as `ctx.Text` headings (in reading order), then the declared boxes and elements. The list shows what each holds and opens the same editors, so empty, overlapping and keyboard users reach everything. Boxes and elements are told apart by identity, never by position, so two at the same place each edit their own values. A box or element the layout does not render right now opens the same bottom panel with its declared parameters and a note that it is hidden. Format and document parameters live together in the template controls, named for the template. The app header uses the book’s file name. Menus open the editing surfaces; they do not duplicate custom controls.
 
-### Element editors
+## Element editors
 
 An element can supply its own editor for parameters that generated controls handle poorly, such as marking days in a calendar or panning a map:
 
@@ -666,11 +733,11 @@ elements: { grid: {
 - **Changes from elsewhere:** if what the editor works on changes while it is open (a saved value after Reload or Undo, or a template edit that changes a default or a declaration of the parameters it handles), the panel says so and refuses to save; the user reopens the editor on the current values. During a reload, controls pause visibly and resume when the preview is ready. A rejected or failed save also pauses the editor with a message; reopening starts from confirmed saved values.
 - **Failures:** if the component throws while rendering, in an event handler or in async work, the panel shows the error and keeps Close available. Earlier applied changes remain saved. The editor counts as loaded once the component has mounted.
 - **Network:** a template may list HTTPS origins in `network`, such as `network: ['https://tiles.openfreemap.org']` (or `https://*.example.com` for subdomains; no paths). Importing the template into the library lists these sites, with an option to allow them in every book made from that version; **Templates → Manage Templates…** shows them and can allow them or stop allowing them later. That trust belongs to the template's hash: a book whose template still has exactly that hash, needs no question, and any change to the template's files asks again. Built-in templates are trusted for the sites they declare, and so are the built-in templates of every earlier release, so a book made from an earlier version of a built-in template needs no question after an update changes it. Otherwise, the first time the book renders, or one of its element editors opens, ImageFlow asks the user to allow them, once per book and version of the template: the answer, too, ends when the template's files change. Once allowed, that book's element editors, previews, thumbnails, Book check and export may fetch, load images and fonts from, and open blob workers for those origins; undeclared origins stay blocked. Until then the book stays offline: its [rendered images](#rendered-images) that need the sites fail, so the Book check reports them and export stops, and the question comes back when an editor opens. Revoking the trust in Manage Templates, or changing the template, renders open books again under the new policy, loads an open element editor again, and stops a running export, which then saves nothing. Printing such a book needs the network. Included in the contract-1 baseline.
-- **Scope today:** the element's parameters and the layout parameters it lists, shown in a non-modal panel (`presentation: 'dialog'`, the default) or [on the page](#editing-on-the-page) (`presentation: 'inline'`); a sidebar placement is not available yet. Editors can read files of file parameters with `file()`, and reach remote resources only through `network`. The photobook starter has two reference examples: the **Map** layout's editor (below) and the route map's **Edit route** editor. Choosing a track and framing it are one task, so that editor owns the GPX `track` (drawn with `<Control parameter="track" />`, including import) and the viewport, kept as three ordinary number parameters (`centerX`, `centerY`, `zoom`) and edited together by dragging, scrolling, buttons or arrow keys. It draws only the GPX track, without a basemap, so export stays offline.
+- **Scope today:** the element's parameters and the layout parameters it lists, shown in a non-modal panel (`presentation: 'dialog'`, the default) or [on the page](#editing-on-the-page) (`presentation: 'inline'`); a sidebar placement is not available yet. Editors can read files of file parameters with `file()`, and reach remote resources only through `network`. The photobook starter's **Map** layout has a reference editor (below). The file-control smoke test uses a separate route editor fixture (`scripts/fixtures/route.tsx`) to check choosing a track and framing its viewport together.
 
-The **Map** layout (`sample/starter/template/map.tsx`) is the full-capability example ([ADR 0006](decisions/0006-template-capabilities.md)). Its editor runs MapLibre GL from the saved dependency bundle with OpenFreeMap styles (Liberty, Bright, Positron), declared in `network`, and is shown [on the page](#editing-on-the-page): dragging and zooming frame the map in its printed place, with the tracks, the attribution and the map title where the page draws them. It owns the view (longitude, latitude and a print zoom that is independent of the screen size), saved as ordinary parameters as you move it; its list of GPX tracks (each with a colour and a label), the style and the track width are generated controls in its toolbar, where the list is a *Tracks (n)* button that opens it. A button beside the zoom buttons fits the view to all tracks. The layout draws the map with a [`<RenderedImage>`](#rendered-images): live at screen resolution in the preview, and again at the format's target resolution for export, with the tracks over it as SVG so the lines stay vector in the PDF. A map that cannot be drawn, for example because the map server is down, fails the Book check with `rendered-image-failed`.
+The **Map** layout (`sample/starter/template/map.tsx`) is the full-capability example ([ADR 0006](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0006-template-capabilities.md)). Its editor runs MapLibre GL from the saved dependency bundle with OpenFreeMap styles (Liberty, Bright, Positron), declared in `network`, and is shown [on the page](#editing-on-the-page): dragging and zooming frame the map in its printed place, with the tracks, the attribution and the map title where the page draws them. It owns the view (longitude, latitude and a print zoom that is independent of the screen size), saved as ordinary parameters as you move it; its list of GPX tracks (each with a colour and a label), the style and the track width are generated controls in its toolbar, where the list is a *Tracks (n)* button that opens it. A button beside the zoom buttons fits the view to all tracks. The layout draws the map with a [`<RenderedImage>`](#rendered-images): live at screen resolution in the preview, and again at the format's target resolution for export, with the tracks over it as SVG so the lines stay vector in the PDF. A map that cannot be drawn, for example because the map server is down, fails the Book check with `rendered-image-failed`.
 
-### Document editors
+## Document editors
 
 A template can supply an editor for document parameters, for values that belong to the whole book but are best edited where the book shows them. The wall calendar's marked dates are one document parameter, edited by clicking the days of any month page:
 
@@ -695,7 +762,7 @@ export default defineTemplate({
 - **Conflicts:** the rules of element editors apply, with the document editor's own parameters as its values. The context refreshes on a reorder, another photo, another format or another document setting. An outside change to the parameters it edits (Undo, Reload, an agent) stops it until it is reopened. Deleting its spread, or switching that spread to another layout (which removes the node it was opened from), closes it. A save queued before such a change is not applied, so an old draft never overwrites newer values.
 - **Example:** the calendar starter's day picker, shown [on the page](#editing-on-the-page): clicking a day on a month page marks it and turns that column of days into buttons, in the page's own type (the click that opens a document editor on the page also acts in it, at the same place). A click marks a date once, for the year of the page, or unmarks it; ⌥-click marks or unmarks it every year. A plain click never changes a yearly mark. In the panel (its fallback) it is a month grid with a list that offers *Unmark every year* (or *Mark every year* for a one-off date). Removing a yearly mark keeps a one-off mark of the same day. The full text stays available under *All marked days*. Included in the contract-1 baseline.
 
-### Editing on the page
+## Editing on the page
 
 An element editor or a document editor can ask to be shown on the page instead of in the panel, with `presentation: 'inline'`:
 
@@ -716,7 +783,7 @@ export default defineTemplate({
 - **Where it falls back to the panel:** an element whose template CSS rotates, skews or mirrors it (its on-page rectangle is only a bounding box), one too small to use on screen, or one not on the page opens in the panel, with the same component and `presentation: 'dialog'`. So does every editor of a template that does not ask for `'inline'`. The sidebar's list of a spread's elements opens the same editor as a click on the page.
 - **Output stays pure:** the inline editor exists only in the editing view. Thumbnails, the Book check, clean MCP artwork and proof and print export never contain it or its toolbar, and always draw the saved values with `render`.
 
-#### Appearance in custom editors
+### Appearance in custom editors
 
 Custom editor frames follow the app's appearance automatically, including changes while a dialog is open. The app's Settings offer Light, Dark, or System (the default, following macOS). No appearance attribute or opt-in is needed. Editors must support both light and dark appearances: inherit the host's text and background colors, and use its CSS variables for custom surfaces, controls and states:
 
@@ -727,9 +794,9 @@ Custom editor frames follow the app's appearance automatically, including change
 }}>…</div>
 ```
 
-Available variables: `--if-editor-background`, `--if-editor-text`, `--if-editor-muted`, `--if-editor-control`, `--if-editor-border`, `--if-editor-selection`, `--if-editor-accent`, `--if-editor-focus`, `--if-editor-marked-background` and `--if-editor-marked-text`. They update live without recreating the editor or committing its draft. The calendar starter's day picker and the photobook's route editor demonstrate both surfaces and selected states. Theme variables are scoped to the editor host; use explicit authored colors for book artwork. Never apply editor appearance styles to `.if-sheet`, print output, or template artwork.
+Available variables: `--if-editor-background`, `--if-editor-text`, `--if-editor-muted`, `--if-editor-control`, `--if-editor-border`, `--if-editor-selection`, `--if-editor-accent`, `--if-editor-focus`, `--if-editor-marked-background` and `--if-editor-marked-text`. They update live without recreating the editor or committing its draft. The calendar starter's day picker demonstrates both surfaces and selected states. Theme variables are scoped to the editor host; use explicit authored colors for book artwork. Never apply editor appearance styles to `.if-sheet`, print output, or template artwork.
 
-### File parameters
+## File parameters
 
 A parameter can refer to a file the user adds to the project, for input that is not photos or Markdown, such as a GPX track for a map:
 
@@ -747,9 +814,9 @@ render: (ctx) => {
 - **Value:** the file's ID in the project's `files` registry, or `''`. Paths in the registry are relative to the project, so moving the project folder keeps its files.
 - **Content:** `file(id)` returns the file's name, extension and UTF-8 text, read when the project loads (files are limited to 20 MB). Preview and export render from the same text. It returns `undefined` when nothing is assigned or the assigned file cannot be read.
 - **Diagnostics:** ImageFlow reports an assigned file that is no longer registered, missing or unreadable, or whose extension is not in `accept`, as a Book check error for that element, which blocks print export. An unassigned file parameter is valid. The template parses the content. If it cannot, it should render without it and report a [template finding](#template-findings) that names the element, parameter and file.
-- **Example:** the starter's Map layout draws a list of GPX tracks ([List parameters](#list-parameters)) over a basemap it renders (see [Element editors](#element-editors)). The Panorama layout has a Route map element that draws an assigned GPX track as a line in an inset (`sample/starter/files/senja-road.gpx`), without a basemap.
+- **Example:** the starter's Map layout draws a list of GPX tracks ([List parameters](#list-parameters)) over a basemap it renders (see [Element editors](#element-editors)). A sample GPX file is available at `sample/starter/files/senja-road.gpx`.
 
-### Template findings
+## Template findings
 
 A template reports problems with its input, such as an assigned file it cannot parse, with `issue()`. Spread the result onto a rendered node, or onto `Spread`, `PhotoBox`, `MarkdownBox` or `Element`, which forward it to their own node; a hidden node works in export:
 
@@ -1012,7 +1079,7 @@ The API is the in-process `imageflow` template module. There is no documented pu
 
 The canonical SDK is `authoring/`. `npm run generate:authoring` generates standalone snapshots for both shipped templates; the build runs it automatically. Their tiny `tsconfig.json` extends `./.imageflow-sdk/tsconfig.json`. No template maintains a declaration copy or synchronization test.
 
-Creating a book writes the installed SDK into `template/.imageflow-sdk/`. Exporting a template includes a fresh snapshot in the archive for external authoring, without changing its source folder. App import discards all archive-supplied SDK folders, at any depth; new books and subsequent exports use the installed SDK instead. Existing books are never rewritten when opened. The snapshot includes React declarations, a standalone TypeScript configuration and `api.json` identifying contract 1 and the SDK content digest. Outside ImageFlow, run `tsc -p .imageflow-sdk/tsconfig.json`, or extend that configuration from your own `tsconfig.json`.
+Creating a book writes the installed SDK into `template/.imageflow-sdk/`, and the installed agent skill, with this reference and the examples, into `.claude/skills/imageflow-templates/` at the book's root, where Claude Code and other agents that read project skills find it. Like the SDK, the skill is written only when a book is created; it is not a book input and not part of the template. Exporting a template includes a fresh snapshot in the archive for external authoring, without changing its source folder. App import discards all archive-supplied SDK folders, at any depth; new books and subsequent exports use the installed SDK instead. Existing books are never rewritten when opened. The snapshot includes React declarations, a standalone TypeScript configuration and `api.json` identifying contract 1 and the SDK content digest. Outside ImageFlow, run `tsc -p .imageflow-sdk/tsconfig.json`, or extend that configuration from your own `tsconfig.json`.
 
 `.imageflow-sdk/` is reserved for generated tooling. It is excluded from template hashes, saved-input revisions and runtime imports; the app always checks against its installed SDK. Authored source and other declaration files remain part of template identity. An export may contain different tooling bytes after an app update while retaining the same authored-template hash.
 
@@ -1022,7 +1089,7 @@ Creating a book writes the installed SDK into `template/.imageflow-sdk/`. Export
 
 The map editor waits for its first measurement, uses the actual output aspect ratio and width to frame the map, and keeps its existing map stable while the book redraws. Saved map settings remain ordinary parameters.
 
-### Inline plain text (`inline-text`)
+## Inline plain text (`inline-text`)
 
 Use `<ctx.Text parameter="heading" presentation="inline" as="h1" />` to edit a plain string on the page. Inline text is included in the contract-1 baseline under ADR 0008 and needs no `requires` entry. Existing `Text` calls keep the parameter panel; `presentation="inline"` chooses on-page editing for a particular node, with the same word and values as an editor's `presentation` (`'dialog'`, the default, keeps the panel). Older `requires: ['inline-text']` declarations remain valid. The starter headings use it. Installed-runtime capability discovery and the generated SDK include `inline-text`.
 
@@ -1034,7 +1101,7 @@ Application validates the complete string (including `maxLength`), checks the or
 
 The Inspector's marked-text action opens the existing parameter control, including from the keyboard. Targets under 64 × 18 screen pixels, rotated/skewed targets and read-only projects use the existing panel; an inline session keeps its draft if the page later becomes smaller. Thumbnails, MCP artwork captures and proof/print exports use only confirmed render output, without editable nodes, draft text or editor chrome.
 
-### Formatted text (`formatted-text`)
+## Formatted text (`formatted-text`)
 
 Declare a string with `markdown: 'inline'` to let its value carry inline formatting:
 

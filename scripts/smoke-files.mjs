@@ -1,3 +1,4 @@
+import { createRouteFixture } from './route-fixture.mjs';
 import { testBook, menuAction, clickPage } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -6,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 
-// File parameters (#16): the starter's panorama route map reads an optional GPX track from the project's files/.
+// File parameters (#16): a test-only route map reads an optional GPX track from the project's files/.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'files-'));
 const project = join(work, 'Book.imageflow');
@@ -14,7 +15,8 @@ const read = async () => JSON.parse(await readFile(join(project, 'project.json')
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
-  const w = await testBook(app, project, true);
+  await createRouteFixture(project);
+  const w = await testBook(app, project);
   w.setDefaultTimeout(20000);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1400, 900));
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, project);
@@ -76,7 +78,7 @@ try {
   };
 
   await w.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
-  // The starter assigns a sample track: drawn, no issues. The other panorama has none and shows an empty frame.
+  // The fixture assigns a sample track: drawn, no issues. The other panorama has none and shows an empty frame.
   assert.equal(await trackLine(), 1);
   assert.equal((await status()).errors.length + (await status()).warnings.length, 0);
   assert.equal(await frame.locator('[data-spread="headlands"] [data-element="route"]').getAttribute('class'), 'route-map empty');

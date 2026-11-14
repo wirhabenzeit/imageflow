@@ -1,0 +1,4638 @@
+{
+  "bookFormat": {
+    "schemaVersion": 1,
+    "project.json": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "number",
+          "const": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "importMode": {
+          "type": "string",
+          "enum": [
+            "copy",
+            "link"
+          ]
+        },
+        "template": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "id",
+            "version"
+          ]
+        },
+        "format": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+        },
+        "params": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "texts": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "linked": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "path",
+                  "linked"
+                ]
+              }
+            ]
+          }
+        },
+        "files": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "linked": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "path",
+                  "linked"
+                ]
+              }
+            ]
+          }
+        },
+        "spreads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              },
+              "definition": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              },
+              "params": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "boxes": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "photo": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "text": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "crops": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "centerX": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "centerY": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "zoom": {
+                            "type": "number",
+                            "minimum": 1,
+                            "maximum": 20
+                          }
+                        },
+                        "required": [
+                          "centerX",
+                          "centerY",
+                          "zoom"
+                        ]
+                      }
+                    },
+                    "focus": {
+                      "type": "object",
+                      "properties": {
+                        "centerX": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "centerY": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      },
+                      "required": [
+                        "centerX",
+                        "centerY"
+                      ]
+                    },
+                    "params": {
+                      "default": {},
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "number"
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "elements": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "params": {
+                      "default": {},
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ]
+                          },
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "number"
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "required": [
+              "id",
+              "definition"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "title",
+        "template",
+        "spreads"
+      ]
+    },
+    "photos.json": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "linked": {
+            "type": "boolean"
+          },
+          "caption": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "credit": {
+            "type": "string"
+          },
+          "altText": {
+            "type": "string"
+          },
+          "captured": {},
+          "location": {},
+          "camera": {}
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  },
+  "templateApi": {
+    "runtimeExports": [
+      "defineTemplate",
+      "spreadFor",
+      "p",
+      "mm",
+      "pt",
+      "inch",
+      "printFormat",
+      "Spread",
+      "PhotoBox",
+      "MarkdownBox",
+      "Element",
+      "asset",
+      "file",
+      "geometry",
+      "box",
+      "issue",
+      "capabilities",
+      "RenderedImage",
+      "FormattedText",
+      "plainText"
+    ],
+    "contract1Capabilities": [
+      "anchors",
+      "geometry",
+      "box-helpers",
+      "template-issues",
+      "typed-components",
+      "spread-builder",
+      "bound-geometry",
+      "text-component",
+      "format-helper",
+      "box-records",
+      "editor-controls",
+      "editor-native-controls",
+      "layout-families",
+      "editor-spread-parameters",
+      "opening-spreads",
+      "single-pages",
+      "editor-context",
+      "document-editors",
+      "editor-network",
+      "rendered-images",
+      "inline-editors",
+      "inline-text",
+      "list-parameters",
+      "template-preview",
+      "photo-render",
+      "formatted-text"
+    ],
+    "capabilities": [
+      "anchors",
+      "geometry",
+      "box-helpers",
+      "template-issues",
+      "typed-components",
+      "spread-builder",
+      "bound-geometry",
+      "text-component",
+      "format-helper",
+      "box-records",
+      "editor-controls",
+      "editor-native-controls",
+      "layout-families",
+      "editor-spread-parameters",
+      "opening-spreads",
+      "single-pages",
+      "editor-context",
+      "document-editors",
+      "editor-network",
+      "rendered-images",
+      "inline-editors",
+      "inline-text",
+      "list-parameters",
+      "template-preview",
+      "photo-render",
+      "formatted-text"
+    ],
+    "declarations": {
+      "imageflow.d.ts": {
+        "Length": "export type Length = { value: number; unit: 'mm' | 'pt' | 'in'; };",
+        "mm": "export function mm(value: number): Length;",
+        "pt": "export function pt(value: number): Length;",
+        "inch": "export function inch(value: number): Length;",
+        "Insets": "type Insets = { top: Length; bottom: Length; outside: Length; binding: Length; };",
+        "PageInsets": "type PageInsets = { top: Length; bottom: Length; left: Length; right: Length; };",
+        "Span": "export type Span = 'spread' | 'left' | 'right' | 'page';",
+        "Resolution": "export type Resolution = { minimum: number; target: number; maximum: number; };",
+        "FormatOutput": "type FormatOutput = { container: 'pdf'; colorSpace: 'sRGB'; transparency: 'allow' | 'forbid'; resolution?: Resolution; minimumTextSize?: Length; maximumFileSize?: { pages: number; cover?: number; }; fonts?: { allowType3: false; allowSystemFonts: false; }; };",
+        "FacingFormat": "export type FacingFormat = { label: string; trim: { width: Length; height: Length; }; bleed: Insets; safe: Insets; structure: { facingPages?: true; delivery: 'pages' | 'spreads'; ends: 'single-pages' | 'inside-covers'; pageCount: { min: number; max: number; step: 2 | 4; }; }; output: FormatOutput; };",
+        "SinglePageFormat": "export type SinglePageFormat = { label: string; trim: { width: Length; height: Length; }; bleed: PageInsets; safe: PageInsets; structure: { facingPages: false; pageCount: { min: number; max: number; step: 1 | 2 | 4; }; }; output: FormatOutput; };",
+        "PrintFormat": "export type PrintFormat = FacingFormat | SinglePageFormat;",
+        "InsetsShorthand": "export type InsetsShorthand = Length | (Partial<Insets> & { all: Length; }) | Insets;",
+        "PageInsetsShorthand": "export type PageInsetsShorthand = Length | (Partial<PageInsets> & { all: Length; }) | PageInsets;",
+        "FormatOptions": "type FormatOptions = { label: string; trim: { width: Length; height: Length; }; output?: Partial<FormatOutput>; };",
+        "FacingFormatOptions": "type FacingFormatOptions = FormatOptions & { facingPages?: true; bleed: InsetsShorthand; safe: InsetsShorthand; pageCount: { min: number; max: number; step: 2 | 4; }; delivery?: 'pages' | 'spreads'; ends?: 'single-pages' | 'inside-covers'; };",
+        "SinglePageFormatOptions": "type SinglePageFormatOptions = FormatOptions & { facingPages: false; bleed: PageInsetsShorthand; safe: PageInsetsShorthand; pageCount: { min: number; max: number; step: 1 | 2 | 4; }; delivery?: never; ends?: never; };",
+        "printFormat": "export function printFormat(options: SinglePageFormatOptions): SinglePageFormat;",
+        "printFormat (2)": "export function printFormat(options: FacingFormatOptions): FacingFormat;",
+        "printFormat (3)": "export function printFormat(options: FacingFormatOptions | SinglePageFormatOptions): PrintFormat;",
+        "Millimeters": "type Millimeters = { trim: { width: number; height: number; }; pageWidth: number; spreadWidth: number; outputWidth: number; height: number; resolution?: Resolution; };",
+        "ResolvedFormat": "export type ResolvedFormat = Millimeters & { facingPages: true; bleed: { top: number; bottom: number; outside: number; binding: number; }; safe: { top: number; bottom: number; outside: number; binding: number; }; } | Millimeters & { facingPages: false; bleed: { top: number; bottom: number; left: number; right: number; }; safe: { top: number; bottom: number; left: number; right: number; }; };",
+        "Common": "type Common = { label: string; description?: string; };",
+        "Numeric": "type Numeric = { min?: number; max?: number; step?: number; unit?: string; };",
+        "BooleanParameter": "export type BooleanParameter = Common & { type: 'boolean'; default: boolean; };",
+        "StringParameter": "export type StringParameter = Common & { type: 'string'; default: string; multiline?: boolean; maxLength?: number; placeholder?: string; markdown?: 'inline'; };",
+        "IntegerParameter": "export type IntegerParameter = Common & Numeric & { type: 'integer'; default: number; };",
+        "NumberParameter": "export type NumberParameter = Common & Numeric & { type: 'number'; default: number; };",
+        "EnumParameter": "export type EnumParameter = Common & { type: 'enum'; default: string; options: readonly string[]; labels?: Record<string, string>; };",
+        "ColorParameter": "export type ColorParameter = Common & { type: 'color'; default: string; };",
+        "DateParameter": "export type DateParameter = Common & { type: 'date'; default: string; min?: string; max?: string; precision?: 'day' | 'month'; };",
+        "FileParameter": "export type FileParameter = Common & { type: 'file'; default: ''; accept: readonly string[]; };",
+        "ScalarParameter": "export type ScalarParameter = BooleanParameter | StringParameter | IntegerParameter | NumberParameter | EnumParameter | ColorParameter | DateParameter | FileParameter;",
+        "ListItemInput": "export type ListItemInput = { id?: string; } & Record<string, string | number | boolean>;",
+        "ListParameter": "export type ListParameter = Common & { type: 'list'; item: Record<string, ScalarParameter>; min?: number; max?: number; default: readonly ({ id: string; } & Record<string, string | number | boolean>)[]; };",
+        "Parameter": "export type Parameter = ScalarParameter | ListParameter;",
+        "Parameters": "export type Parameters = Record<string, Parameter>;",
+        "ScalarValue": "type ScalarValue<P> = P extends { type: 'boolean'; } ? boolean : P extends { type: 'integer' | 'number'; } ? number : P extends { type: 'enum'; options: readonly (infer O)[]; } ? O : string;",
+        "ListItemValue": "export type ListItemValue<I> = { id: string; } & { [K in keyof I]: ScalarValue<I[K]>; };",
+        "ParameterValue": "export type ParameterValue<P> = P extends { type: 'list'; item: infer I; } ? ListItemValue<I>[] : ScalarValue<P>;",
+        "ParameterValues": "export type ParameterValues<P> = { [K in keyof P]: ParameterValue<P[K]>; };",
+        "Options": "type Options<P extends Parameter> = Omit<P, 'type'>;",
+        "DefaultItemsChecked": "type DefaultItemsChecked<D, I> = { [N in keyof D]: { [F in keyof D[N]]: F extends 'id' ? string : F extends keyof I ? ScalarValue<I[F]> : never; }; };",
+        "Known": "type Known<O, Allowed> = O & { [K in Exclude<keyof O, keyof Allowed>]: never; };",
+        "EnumKeys": "type EnumKeys<C> = `${Extract<keyof C, string | number>}`;",
+        "FirstStatement #45": "export const p: { boolean<const O extends Options<BooleanParameter>>(options: Known<O, Options<BooleanParameter>>): O & { type: 'boolean'; }; string<const O extends Options<StringParameter>>(options: Known<O, Options<StringParameter>>): O & { type: 'string'; }; integer<const O extends Options<IntegerParameter>>(options: Known<O, Options<IntegerParameter>>): O & { type: 'integer'; }; number<const O extends Options<NumberParameter>>(options: Known<O, Options<NumberParameter>>): O & { type: 'number'; }; enum<const T extends string>(options: Common & { options: readonly T[]; default: NoInfer<T>; labels?: Partial<Record<T, string>>; }): Common & { options: readonly T[]; default: T; labels?: Partial<Record<T, string>>; type: 'enum'; }; enum<const C extends Record<string, string>>(options: Common & { options: C; default: NoInfer<EnumKeys<C>>; }): Common & { options: EnumKeys<C>[]; default: EnumKeys<C>; labels: C; type: 'enum'; }; color<const O extends Options<ColorParameter>>(options: Known<O, Options<ColorParameter>>): O & { type: 'color'; }; date<const O extends Options<DateParameter>>(options: Known<O, Options<DateParameter>>): O & { type: 'date'; }; file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: Known<O, Omit<FileParameter, 'type' | 'default'>>): O & { type: 'file'; default: ''; }; list<const O extends Common & { item: Record<string, ScalarParameter>; min?: number; max?: number; default?: readonly ListItemInput[]; }>(options: Known<O, Common & { item: unknown; min?: number; max?: number; default?: unknown; }> & { item: ParametersChecked<O['item']>; default?: DefaultItemsChecked<O['default'], O['item']>; }): Omit<O, 'default'> & { type: 'list'; default: ({ id: string; } & Partial<ListItemValue<O['item']>>)[]; }; };",
+        "ConditionValue": "export type ConditionValue = string | number | boolean | readonly (string | number | boolean)[];",
+        "Condition": "export type Condition<K extends string = string> = { [P in K]?: ConditionValue; };",
+        "ControlItem": "export type ControlItem<K extends string = string> = K | { parameter: K; label?: string; description?: string; when?: Condition<K>; } | { group: string; description?: string; controls: readonly ControlItem<K>[]; when?: Condition<K>; };",
+        "Controls": "export type Controls<K extends string = string> = readonly ControlItem<K>[];",
+        "BoxDeclaration": "export type BoxDeclaration = { type: 'photo' | 'markdown'; label: string; parameters?: Parameters; flowOrder?: number; controls?: Controls; };",
+        "ElementEditorProps": "export type ElementEditorProps<P extends Parameters = Parameters, K extends keyof P & string = keyof P & string, D extends Parameters = Parameters, S extends Parameters = Parameters, SK extends keyof S & string = keyof S & string> = { values: ParameterValues<P>; set: EditorFunction<K, EditorChanges<P, K>, void>; spread: ParameterValues<S>; setSpread: EditorFunction<SK, EditorChanges<S, SK>, void>; document: ParameterValues<D>; format: ResolvedFormat; context: EditorContext<SpreadDeclaration, D>; readOnly: boolean; commit(): void; cancel(): void; presentation: EditorPresentation; waitUntil(until: Promise<unknown>): void; Control: EditorFunction<K, ControlProps<P, K, { scope?: 'element'; }>, ImageFlowElement> & EditorFunction<SK, ControlProps<S, SK, { scope: 'spread'; }>, ImageFlowElement>; importFile(accept: readonly string[]): Promise<string | undefined>; };",
+        "ListFields": "type ListFields<T> = T extends { type: 'list'; item: infer I; } ? keyof I & string : never;",
+        "ControlProps": "type ControlProps<P, K extends string, Extra> = K extends K ? { parameter: K; label?: string; } & Extra & ({ itemId?: undefined; field?: undefined; } | ([ ListFields<P[K & keyof P]> ] extends [ never ] ? never : { itemId: string; field: ListFields<P[K & keyof P]>; })) : never;",
+        "EditorChanges": "type EditorChanges<P extends Parameters, K extends keyof P & string> = [ K ] extends [ never ] ? Record<string, never> : Partial<Pick<ParameterValues<P>, K>>;",
+        "EditorFunction": "type EditorFunction<K extends string, A, R> = string extends K ? { bivariant(argument: A): R; }['bivariant'] : (argument: A) => R;",
+        "ParametersOf": "type ParametersOf<T> = T extends { parameters?: infer P; } ? P extends Parameters ? P : {} : {};",
+        "EditorSpreadKeys": "type EditorSpreadKeys<T> = T extends { editor: { spread: readonly (infer K extends string)[]; }; } ? K : never;",
+        "EditorKeys": "type EditorKeys<T> = T extends { editor?: { parameters: readonly (infer K)[]; }; } ? K & string : never;",
+        "ElementEditor": "export type ElementEditor<K extends string = string, P extends Parameters = Parameters, Owned extends keyof P & string = K & keyof P & string, D extends Parameters = Parameters, S extends Parameters = Parameters, OwnedSpread extends keyof S & string = keyof S & string> = { label?: string; parameters: readonly K[]; spread?: readonly (keyof S & string)[]; component: EditorFunction<Owned, ElementEditorProps<P, Owned, D, S, OwnedSpread>, ImageFlowNode>; presentation?: EditorPresentation; };",
+        "EditorPresentation": "export type EditorPresentation = 'dialog' | 'inline';",
+        "EditorContext": "export type EditorContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book' | 'spread' | 'layout'> & { elements: SpreadDeclaration extends S ? Record<string, { params: Values; rect: Rect | null; }> : { [K in keyof RenderContext<S, D>['elements']]: RenderContext<S, D>['elements'][K] & { rect: Rect | null; }; }; };",
+        "DocumentEditorProps": "export type DocumentEditorProps<D extends Parameters = Parameters, K extends keyof D & string = keyof D & string> = { values: ParameterValues<Pick<D, K>>; set: EditorFunction<K, EditorChanges<D, K>, void>; context: EditorContext<SpreadDeclaration, D>; format: ResolvedFormat; readOnly: boolean; commit(): void; cancel(): void; presentation: EditorPresentation; waitUntil(until: Promise<unknown>): void; Control: EditorFunction<K, ControlProps<D, K, {}>, ImageFlowElement>; importFile(accept: readonly string[]): Promise<string | undefined>; };",
+        "DocumentEditor": "export type DocumentEditor<D extends Parameters = Parameters, K extends keyof D & string = keyof D & string> = { label?: string; parameters: readonly K[]; component: EditorFunction<K, DocumentEditorProps<D, K>, ImageFlowNode>; presentation?: EditorPresentation; };",
+        "ElementDeclaration": "export type ElementDeclaration = { label: string; parameters?: Parameters; controls?: Controls; editor?: ElementEditor; };",
+        "SpreadDeclaration": "export type SpreadDeclaration = { label: string; span?: Span; parameters?: Parameters; controls?: Controls; boxes?: Record<string, BoxDeclaration>; elements?: Record<string, ElementDeclaration>; family?: string; variant?: VariantTags; };",
+        "VariantTags": "export type VariantTags = Record<string, string | number | boolean>;",
+        "LayoutVariant": "export type LayoutVariant = { id: string; label: string; variant: VariantTags; };",
+        "LayoutPickerProps": "export type LayoutPickerProps = { variants: readonly LayoutVariant[]; current: string; saved: string; choose(id: string): void; find(tags: VariantTags): string | undefined; document: Values; format: ResolvedFormat; readOnly: boolean; commit(): void; cancel(): void; };",
+        "LayoutFamily": "export type LayoutFamily = { label: string; picker?: { label?: string; component(props: LayoutPickerProps): ImageFlowNode; }; };",
+        "Exact": "type Exact<T, Allowed> = { [X in Exclude<keyof T, keyof Allowed>]: never; };",
+        "ParametersChecked": "type ParametersChecked<P> = { [K in keyof P]: Exact<P[K], Extract<Parameter, { type: P[K] extends { type: infer T; } ? T : never; }>>; };",
+        "OwnParametersChecked": "type OwnParametersChecked<T> = T extends { parameters: infer P; } ? { parameters: ParametersChecked<P>; } : unknown;",
+        "ElementsChecked": "type ElementsChecked<E, D extends Parameters = Parameters, S extends Parameters = Parameters> = { [K in keyof E]: { controls?: Controls<ParameterKeys<E[K]>>; editor?: ElementEditor<ParameterKeys<E[K]>, ParametersOf<E[K]>, EditorKeys<E[K]> & keyof ParametersOf<E[K]> & string, D, S, EditorSpreadKeys<E[K]> & keyof S & string>; } & Exact<E[K], ElementDeclaration> & OwnParametersChecked<E[K]>; };",
+        "BoxesChecked": "type BoxesChecked<B> = { [K in keyof B]: { controls?: Controls<ParameterKeys<B[K]>>; } & Exact<B[K], BoxDeclaration> & OwnParametersChecked<B[K]>; };",
+        "AnchorDeclaration": "export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right'; };",
+        "Anchor": "export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page'; };",
+        "BookPhotoPlacement": "export type BookPhotoPlacement = { readonly box: string; readonly photoId: string | null; readonly photo: Readonly<Photo> | null; };",
+        "BookSpread": "export type BookSpread = { readonly id: string; readonly layout: string; readonly page: Readonly<{ left?: number; right?: number; number?: number; }>; readonly photos: readonly BookPhotoPlacement[]; };",
+        "BookContext": "export type BookContext = { pages: number; spreads: readonly BookSpread[]; anchor(id: string): Anchor | undefined; anchors(id?: string): Anchor[]; };",
+        "Photo": "export type Photo = { width: number; height: number; caption?: string; title?: string; credit?: string; altText?: string; captured?: { dateTime: string; offset: string | null; }; location?: { latitude: number; longitude: number; }; camera?: { make?: string; model?: string; }; };",
+        "FlowPosition": "export type FlowPosition = { part: number; parts: number; title?: string; };",
+        "ListItemValues": "export type ListItemValues = { id: string; [field: string]: string | number | boolean; };",
+        "Values": "export type Values = Record<string, string | number | boolean | ListItemValues[]>;",
+        "ValuesOf": "type ValuesOf<T> = T extends { parameters: infer P; } ? ParameterValues<P> : {};",
+        "BoxContext": "type BoxContext<B> = B extends { type: 'photo'; } ? { params: ValuesOf<B>; photo: Photo | null; } : { params: ValuesOf<B>; text: FlowPosition | null; };",
+        "BoxIds": "type BoxIds<S extends SpreadDeclaration, T extends 'photo' | 'markdown'> = { [K in keyof S['boxes'] & string]: NonNullable<S['boxes']>[K] extends { type: T; } ? K : never; }[keyof S['boxes'] & string];",
+        "Columns": "export type Columns = number | `${number}`;",
+        "ParameterKeys": "type ParameterKeys<T> = T extends { parameters?: infer P; } ? keyof NonNullable<P> & string : never;",
+        "NestedPaths": "type NestedPaths<Group extends string, R> = { [K in keyof R & string]: `${Group}.${K}.${ParameterKeys<R[K]>}`; }[keyof R & string];",
+        "EditPath": "export type EditPath<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = ParameterKeys<S> | `document.${keyof D & string}` | NestedPaths<'elements', NonNullable<S['elements']>> | NestedPaths<'boxes', NonNullable<S['boxes']>>;",
+        "StringKeys": "type StringKeys<P> = { [K in keyof P & string]: P[K] extends { type: 'string'; } ? K : never; }[keyof P & string];",
+        "StringParameterKeys": "type StringParameterKeys<T> = T extends { parameters?: infer P; } ? StringKeys<NonNullable<P>> : never;",
+        "NestedStringPaths": "type NestedStringPaths<Group extends string, R> = { [K in keyof R & string]: `${Group}.${K}.${StringParameterKeys<R[K]>}`; }[keyof R & string];",
+        "TextPath": "export type TextPath<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = StringParameterKeys<S> | `document.${StringKeys<D>}` | NestedStringPaths<'elements', NonNullable<S['elements']>> | NestedStringPaths<'boxes', NonNullable<S['boxes']>>;",
+        "EditMarker": "export type EditMarker = { 'data-edit'?: string; };",
+        "IssueMarker": "export type IssueMarker = { 'data-issue'?: string; 'data-issue-info'?: string; };",
+        "Placement": "type Placement = { rect?: Rect; };",
+        "TextTag": "export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | 'div' | 'blockquote' | 'figcaption';",
+        "TextProps": "export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & { parameter: Path; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean; };",
+        "BoundGeometry": "export type BoundGeometry = { page(side: 'left' | 'right', area?: Area): Rect; page(area?: Area): Rect; spread(area?: Area): Rect; design(canvas: { width: number; height: number; }): DesignCanvas; inset: typeof geometry.inset; grid: typeof geometry.grid; css: typeof geometry.css; };",
+        "RenderView": "export type RenderView = 'canvas' | 'thumbnail' | 'layout-preview' | 'export';",
+        "RenderContext": "export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = { params: ValuesOf<S>; document: ParameterValues<D>; boxes: { [K in keyof S['boxes']]: BoxContext<S['boxes'][K]>; }; elements: { [K in keyof S['elements']]: { params: ValuesOf<S['elements'][K]>; }; }; page: { left?: number; right?: number; number?: number; }; format: ResolvedFormat; formatId: string; spread: string; layout: string; mode: 'edit' | 'export'; view: RenderView; edit(...paths: EditPath<S, D>[]): EditMarker; book: BookContext; geometry: BoundGeometry; PhotoBox<I extends BoxIds<S, 'photo'>>(props: Styling & Placement & EditMarker & IssueMarker & { id: I; children?: (photo: PhotoRender, box: PhotoBoxState<I, ValuesOf<S['boxes'][I]>>) => ImageFlowNode; }): ImageFlowElement; MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & { id: BoxIds<S, 'markdown'>; columns?: Columns; }): ImageFlowElement; Element(props: Styling & Placement & EditMarker & IssueMarker & { id: keyof S['elements'] & string; children?: ImageFlowNode; }): ImageFlowElement; Text(props: TextProps<TextPath<S, D>>): ImageFlowElement; };",
+        "UntypedRenderContext": "export type UntypedRenderContext = { params: Values; document: Values; boxes: Record<string, { params: Values; photo?: Photo | null; text?: FlowPosition | null; }>; elements: Record<string, { params: Values; }>; page: { left?: number; right?: number; number?: number; }; format: ResolvedFormat; formatId: string; spread: string; layout: string; mode: 'edit' | 'export'; view: RenderView; edit(...paths: string[]): EditMarker; book: BookContext; geometry: BoundGeometry; PhotoBox: typeof PhotoBox; MarkdownBox: typeof MarkdownBox; Element: typeof Element; Text(props: TextProps): ImageFlowElement; };",
+        "AnchorContext": "export type AnchorContext<P = Values, D = Values> = { params: P; document: D; };",
+        "FirstStatement #105": "declare const typedDocument: unique symbol;",
+        "FirstStatement #106": "declare const typedFamily: unique symbol;",
+        "SpreadDefinition": "export type SpreadDefinition<D extends Parameters = Parameters, F extends string = string> = SpreadDeclaration & { render(context: UntypedRenderContext): ImageFlowNode; anchors?(context: AnchorContext): readonly AnchorDeclaration[]; readonly [typedDocument]?: D; readonly [typedFamily]?: F; };",
+        "Capability": "export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' | 'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' | 'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' | 'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' | 'formatted-text';",
+        "FirstStatement #109": "export const capabilities: readonly Capability[];",
+        "TemplateDeclaration": "export type TemplateDeclaration = { id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string; parameters?: Parameters; controls?: Controls; layoutFamilies?: Record<string, LayoutFamily>; spreads: Record<string, SpreadDefinition>; openingSpreads?: readonly OpeningSpread[]; editors?: Record<string, DocumentEditor>; };",
+        "OpeningSpread": "export type OpeningSpread<L extends string = string> = { layout: L; params?: Values; };",
+        "SpreadBuilder": "export type SpreadBuilder<D extends Parameters> = <const P extends Parameters = {}, const B extends Record<string, BoxDeclaration> = {}, const E extends Record<string, ElementDeclaration> = {}, const F extends string = never>(definition: { label: string; span?: Span; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string>; boxes?: B & BoxesChecked<B>; elements?: E & ElementsChecked<E, D, P>; render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E; }, D>): ImageFlowNode; anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[]; family?: F; variant?: VariantTags; }) => SpreadDefinition<D, F>;",
+        "TemplateTools": "export type TemplateTools<D extends Parameters> = { spread: SpreadBuilder<D>; };",
+        "TemplateBase": "type TemplateBase<D extends Parameters, L extends string = string> = { id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; parameters?: D & ParametersChecked<D>; controls?: Controls<keyof D & string>; layoutFamilies?: { [K in L]: LayoutFamily; }; editors?: Record<string, DocumentEditor<D, any>>; };",
+        "Opening": "type Opening<L extends string> = { openingSpreads?: readonly OpeningSpread<L>[]; };",
+        "OpeningLayouts": "type OpeningLayouts<S, L extends string> = { [K in Exclude<L, keyof S>]: SpreadDefinition<any>; };",
+        "FormatChoice": "type FormatChoice<F extends string> = { format: PrintFormat; formats?: never; defaultFormat?: never; } | { formats: { [K in F]: PrintFormat; }; defaultFormat?: NoInfer<F>; format?: never; };",
+        "Missing": "type Missing<D, Typed> = Exclude<keyof Typed, keyof D> & string;",
+        "Mismatched": "type Mismatched<D, Typed> = { [K in keyof Typed & keyof D]: [ ParameterValue<D[K]> ] extends [ ParameterValue<Typed[K]> ] ? never : K; }[keyof Typed & keyof D] & string;",
+        "TypedWith": "type TypedWith<T> = typeof typedDocument extends keyof T ? NonNullable<T[typeof typedDocument & keyof T]> : {};",
+        "FamilyOf": "type FamilyOf<T> = typeof typedFamily extends keyof T ? NonNullable<T[typeof typedFamily & keyof T]> : T extends { family: infer F extends string; } ? F : never;",
+        "FamilyCheck": "type FamilyCheck<T, L extends string> = 0 extends 1 & T ? unknown : [ FamilyOf<T> ] extends [ never ] ? unknown : string extends FamilyOf<T> ? unknown : [ Exclude<FamilyOf<T>, L> ] extends [ never ] ? unknown : { family: `Declare layout family ${Exclude<FamilyOf<T>, L> & string} in the template's layoutFamilies`; };",
+        "DocumentCheck": "type DocumentCheck<S, D, L extends string = string> = { [K in keyof S]: FamilyCheck<S[K], L> & (0 extends 1 & TypedWith<S[K]> ? unknown : [ Missing<D, TypedWith<S[K]>> ] extends [ never ] ? [ Mismatched<D, TypedWith<S[K]>> ] extends [ never ] ? unknown : { [typedDocument]: `Document parameter ${Mismatched<D, TypedWith<S[K]>>} is declared differently in the template's parameters and in spreadFor()`; } : { [typedDocument]: `Declare document parameter ${Missing<D, TypedWith<S[K]>>} in the template's parameters, or remove it from spreadFor()`; }) & SpreadChecked<S[K], D extends Parameters ? D : Parameters>; };",
+        "SpreadChecked": "type SpreadChecked<T, D extends Parameters = Parameters> = 0 extends 1 & T ? unknown : Exact<T, SpreadDefinition<any>> & OwnParametersChecked<T> & (T extends { boxes: infer B; } ? { boxes: BoxesChecked<B>; } : unknown) & (T extends { elements: infer E; } ? { elements: ElementsChecked<E, D, ParametersOf<T>>; } : unknown);",
+        "defineTemplate": "export function defineTemplate<const D extends Parameters = {}, const F extends string = never, const S extends Record<string, SpreadDefinition<any, any>> = {}, const L extends string = never, const O extends string = never>(template: TemplateBase<D, L> & FormatChoice<F> & Opening<O> & { spreads: (tools: TemplateTools<D>) => S & DocumentCheck<S, D, L> & OpeningLayouts<S, O>; }): TemplateDeclaration;",
+        "defineTemplate (2)": "export function defineTemplate<const D extends Parameters = {}, const F extends string = never, const S extends Record<string, SpreadDefinition<any, any>> = {}, const L extends string = never, const O extends string = never>(template: TemplateBase<D, L> & FormatChoice<F> & Opening<O> & { spreads: S & DocumentCheck<S, D, L> & OpeningLayouts<S, O>; }): TemplateDeclaration;",
+        "spreadFor": "export function spreadFor<const D extends Parameters>(document: D & ParametersChecked<D>): SpreadBuilder<D>;",
+        "CSSProperties": "export type CSSProperties = { [K in keyof CSSStyleDeclaration as CSSStyleDeclaration[K] extends string ? K : never]?: string | number; } & { [property: `--${string}`]: string | number | undefined; };",
+        "ImageFlowElement": "export type ImageFlowElement = { readonly type: unknown; readonly props: unknown; readonly key: string | null; };",
+        "ImageFlowNode": "export type ImageFlowNode = ImageFlowElement | string | number | bigint | boolean | null | undefined | Iterable<ImageFlowNode>;",
+        "Styling": "type Styling = { className?: string; style?: CSSProperties; };",
+        "Spread": "export function Spread(props: Styling & IssueMarker & { children?: ImageFlowNode; }): ImageFlowElement;",
+        "PhotoRender": "export type PhotoRender = { src: string; alt: string; box: { width: number; height: number; }; image: { x: number; y: number; width: number; height: number; }; style: CSSProperties; crop: { x: number; y: number; width: number; height: number; }; placement: { centerX: number; centerY: number; zoom: number; }; ppi: number; };",
+        "PhotoBoxState": "export type PhotoBoxState<I extends string = string, P = Values> = { id: I; uid: string; params: P; photo: Photo | null; };",
+        "PhotoBox": "export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & { id: string; children?: (photo: PhotoRender, box: PhotoBoxState) => ImageFlowNode; }): ImageFlowElement;",
+        "MarkdownBox": "export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & { id: string; columns?: Columns; }): ImageFlowElement;",
+        "Element": "export function Element(props: Styling & Placement & EditMarker & IssueMarker & { id: string; children?: ImageFlowNode; }): ImageFlowElement;",
+        "FirstStatement #138": "export const box: { photo<const P extends Parameters = {}>(label: string, parameters?: P & ParametersChecked<P>, options?: { controls?: Controls<keyof P & string>; }): { type: 'photo'; label: string; parameters: P; controls?: Controls<keyof P & string>; }; markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string>; }): { type: 'markdown'; label: string; parameters: P; flowOrder?: number; controls?: Controls<keyof P & string>; }; photos<const K extends string, const P extends Parameters = {}>(ids: readonly K[], label: (id: K, index: number) => string, parameters?: P & ParametersChecked<P>): { [Id in K]: { type: 'photo'; label: string; parameters: P; }; }; };",
+        "Rect": "export type Rect = { x: number; y: number; width: number; height: number; };",
+        "Area": "export type Area = 'trim' | 'safe' | 'bleed';",
+        "DesignCanvas": "export type DesignCanvas = { left(x: number, y: number, width: number, height: number): Rect; right(x: number, y: number, width: number, height: number): Rect; page(x: number, y: number, width: number, height: number): Rect; width(value: number): number; height(value: number): number; scaleX: number; scaleY: number; length(value: number, unit: 'mm' | 'pt' | 'px', axis: 'x' | 'y' | 'min' | 'max'): string; };",
+        "FirstStatement #142": "export const geometry: { page(format: ResolvedFormat, side: 'left' | 'right', area?: Area): Rect; page(format: ResolvedFormat, area?: Area): Rect; spread(format: ResolvedFormat, area?: Area): Rect; inset(rect: Rect, by: number | { top?: number; right?: number; bottom?: number; left?: number; }): Rect; grid(rect: Rect, options: { columns: number; rows?: number; gap?: number; columnGap?: number; rowGap?: number; }): Rect[]; design(format: ResolvedFormat, canvas: { width: number; height: number; }): DesignCanvas; css(rect: Rect): CSSProperties; };",
+        "TemplateIssue": "export type TemplateIssue = { code: string; message: string; severity?: 'error' | 'warning'; box?: string; element?: string; parameter?: string; file?: string; details?: Record<string, string | number>; suggestion?: string; };",
+        "issue": "export function issue(found: TemplateIssue): Required<IssueMarker>;",
+        "asset": "export function asset(path: string): string;",
+        "file": "export function file(id: string): { name: string; extension: string; text: string; } | undefined;",
+        "RenderTarget": "export type RenderTarget = { width: number; height: number; pixelRatio: number; mode: 'preview' | 'check' | 'export'; signal: AbortSignal; };",
+        "RenderedImageProps": "export type RenderedImageProps = { draw: (target: RenderTarget) => Promise<Blob | HTMLCanvasElement | OffscreenCanvas>; inputs: unknown; label?: string; alt?: string; className?: string; style?: CSSProperties; };",
+        "RenderedImage": "export function RenderedImage(props: RenderedImageProps): ImageFlowElement;",
+        "FormattedText": "export function FormattedText(props: { value: string; }): ImageFlowElement;",
+        "plainText": "export function plainText(value: string): string;",
+        "ExportDeclaration #152": "export {};"
+      },
+      "jsx-runtime.d.ts": {
+        "ImportDeclaration #0": "import type { CSSProperties, ImageFlowElement, ImageFlowNode } from './imageflow';",
+        "Attributes": "type Attributes = { className?: string; style?: CSSProperties; children?: ImageFlowNode; [attribute: string]: unknown; };",
+        "JSX": "export namespace JSX { type Element = ImageFlowElement; type ElementType = string | ((props: any) => ImageFlowNode); interface ElementChildrenAttribute { children: {}; } interface IntrinsicAttributes { key?: string | number | null; } interface IntrinsicElements { [tag: string]: Attributes; } }",
+        "jsx": "export function jsx(type: unknown, props: unknown, key?: unknown): ImageFlowElement;",
+        "jsxs": "export function jsxs(type: unknown, props: unknown, key?: unknown): ImageFlowElement;",
+        "FirstStatement #5": "export const Fragment: (props: { children?: ImageFlowNode; }) => ImageFlowNode;"
+      },
+      "assets.d.ts": {
+        "'*.css'": "declare module '*.css';",
+        "'*.txt'": "declare module '*.txt' { const text: string; export default text; }",
+        "'*.png'": "declare module '*.png' { const url: string; export default url; }",
+        "'*.jpg'": "declare module '*.jpg' { const url: string; export default url; }",
+        "'*.jpeg'": "declare module '*.jpeg' { const url: string; export default url; }",
+        "'*.webp'": "declare module '*.webp' { const url: string; export default url; }",
+        "'*.svg'": "declare module '*.svg' { const url: string; export default url; }",
+        "'*.woff2'": "declare module '*.woff2' { const url: string; export default url; }",
+        "'*.woff'": "declare module '*.woff' { const url: string; export default url; }",
+        "'*.ttf'": "declare module '*.ttf' { const url: string; export default url; }",
+        "'*.otf'": "declare module '*.otf' { const url: string; export default url; }"
+      },
+      "react.d.ts": {
+        "ImportDeclaration #0": "import type { ImageFlowNode, ImageFlowElement } from './imageflow';",
+        "ImportDeclaration #1": "import type * as ReactRuntime from './react-runtime/index';",
+        "ExportDeclaration #2": "export type { ImageFlowNode as ReactNode, ImageFlowElement as ReactElement, CSSProperties } from './imageflow';",
+        "createElement": "export function createElement(type: string | ((props: any) => ImageFlowNode), props?: any, ...children: ImageFlowNode[]): ImageFlowElement;",
+        "FirstStatement #4": "export const Fragment: (props: { children?: ImageFlowNode; }) => ImageFlowNode;",
+        "FirstStatement #5": "export const Children: { count(children: ImageFlowNode): number; toArray(children: ImageFlowNode): ImageFlowNode[]; only(children: ImageFlowNode): ImageFlowElement; map<T>(children: ImageFlowNode, fn: (child: ImageFlowNode, index: number) => T): T[]; forEach(children: ImageFlowNode, fn: (child: ImageFlowNode, index: number) => void): void; };",
+        "FirstStatement #6": "declare const React: Omit<typeof ReactRuntime, 'createElement' | 'Fragment' | 'Children'> & { createElement: typeof createElement; Fragment: typeof Fragment; Children: typeof Children; };",
+        "ExportAssignment #7": "export default React;"
+      }
+    }
+  },
+  "mcp": {
+    "list_projects": {
+      "readOnly": true,
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "project": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "folder": {
+                  "type": "string"
+                },
+                "writable": {
+                  "type": "boolean"
+                },
+                "revision": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "history": {
+                  "type": "object",
+                  "properties": {
+                    "undo": {
+                      "type": "string"
+                    },
+                    "redo": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "project",
+                "title",
+                "folder",
+                "writable",
+                "revision",
+                "history"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "scope": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "projects"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "get_authoring_context": {
+      "readOnly": true,
+      "input": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "docs": {
+            "maxItems": 12,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "authoring-workflow",
+                "package",
+                "declaration",
+                "parameters",
+                "list-parameters",
+                "boxes-and-elements",
+                "print-formats",
+                "template-library",
+                "switching-layouts",
+                "layout-families",
+                "dependencies",
+                "render-function",
+                "rendered-images",
+                "click-to-edit",
+                "anchors-and-index",
+                "editing-ui",
+                "element-editors",
+                "document-editors",
+                "editing-on-the-page",
+                "file-parameters",
+                "template-findings",
+                "geometry",
+                "platform-components",
+                "css-contract",
+                "validation",
+                "stored-data",
+                "compatibility",
+                "inline-text",
+                "formatted-text"
+              ]
+            }
+          },
+          "includeExamples": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "minItems": 1,
+                "maxItems": 12,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]{1,64}$"
+                }
+              }
+            ]
+          },
+          "includeSource": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "root": {
+            "type": "string"
+          },
+          "guide": {
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "project",
+                    "template",
+                    "render",
+                    "preview"
+                  ]
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "line": {
+                      "type": "number"
+                    },
+                    "column": {
+                      "type": "number"
+                    },
+                    "spread": {
+                      "type": "string"
+                    },
+                    "box": {
+                      "type": "string"
+                    },
+                    "element": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "parameter": {
+                      "type": "string"
+                    },
+                    "where": {
+                      "type": "string"
+                    },
+                    "declaration": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "details": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "suggestion": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "stage",
+                "severity",
+                "message"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "bundle": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "declarations": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "layout": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "typescript": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "fixtures": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "print": {
+                "type": "string",
+                "enum": [
+                  "not-run"
+                ]
+              }
+            },
+            "required": [
+              "bundle",
+              "declarations",
+              "layout",
+              "typescript",
+              "fixtures",
+              "print"
+            ],
+            "additionalProperties": {}
+          },
+          "template": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {}
+          },
+          "templateIdentity": {
+            "type": "object",
+            "properties": {
+              "saved": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      },
+                      "hash": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "version"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "current": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "version": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "hash": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "version",
+                  "hash"
+                ],
+                "additionalProperties": {}
+              },
+              "matchesSavedHash": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "saved",
+              "current",
+              "matchesSavedHash"
+            ],
+            "additionalProperties": {}
+          },
+          "sources": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "text",
+                "sha256",
+                "truncated"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "templateFiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "summary",
+                "bytes"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "docs": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "examples": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "description"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "project",
+          "root",
+          "guide",
+          "revision",
+          "diagnostics",
+          "checks",
+          "templateIdentity",
+          "sources",
+          "templateFiles",
+          "topics",
+          "examples",
+          "capabilities"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "inspect_book": {
+      "readOnly": true,
+      "input": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "spreads",
+              "sources",
+              "parameters",
+              "elements"
+            ]
+          },
+          "offset": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "default": 30,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "spread": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "box": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "element": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [
+          "project",
+          "view"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "project",
+                    "template",
+                    "render",
+                    "preview"
+                  ]
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "line": {
+                      "type": "number"
+                    },
+                    "column": {
+                      "type": "number"
+                    },
+                    "spread": {
+                      "type": "string"
+                    },
+                    "box": {
+                      "type": "string"
+                    },
+                    "element": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "parameter": {
+                      "type": "string"
+                    },
+                    "where": {
+                      "type": "string"
+                    },
+                    "declaration": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "details": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "suggestion": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "stage",
+                "severity",
+                "message"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "bundle": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "declarations": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "layout": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "typescript": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "fixtures": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "print": {
+                "type": "string",
+                "enum": [
+                  "not-run"
+                ]
+              }
+            },
+            "required": [
+              "bundle",
+              "declarations",
+              "layout",
+              "typescript",
+              "fixtures",
+              "print"
+            ],
+            "additionalProperties": {}
+          },
+          "templateIdentity": {
+            "type": "object",
+            "properties": {
+              "saved": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      },
+                      "hash": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "version"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "current": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "version": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "hash": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "version",
+                  "hash"
+                ],
+                "additionalProperties": {}
+              },
+              "matchesSavedHash": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "saved",
+              "current",
+              "matchesSavedHash"
+            ],
+            "additionalProperties": {}
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "nextOffset": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "project",
+          "revision",
+          "diagnostics",
+          "checks"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "check_book": {
+      "readOnly": true,
+      "input": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expectedRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "preview": {
+            "type": "object",
+            "properties": {
+              "target": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "spread": {
+                        "$ref": "#/$defs/__schema0"
+                      },
+                      "side": {
+                        "type": "string",
+                        "enum": [
+                          "left",
+                          "right",
+                          "page"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "spread"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "page": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "page"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "spread": {
+                        "$ref": "#/$defs/__schema0"
+                      },
+                      "box": {
+                        "$ref": "#/$defs/__schema3"
+                      },
+                      "paddingMm": {
+                        "$ref": "#/$defs/__schema4"
+                      }
+                    },
+                    "required": [
+                      "spread",
+                      "box"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "spread": {
+                        "$ref": "#/$defs/__schema0"
+                      },
+                      "element": {
+                        "$ref": "#/$defs/__schema3"
+                      },
+                      "paddingMm": {
+                        "$ref": "#/$defs/__schema4"
+                      }
+                    },
+                    "required": [
+                      "spread",
+                      "element"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "spreads": {
+                        "minItems": 1,
+                        "maxItems": 12,
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/$defs/__schema0"
+                        }
+                      },
+                      "columns": {
+                        "default": 3,
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 4
+                      }
+                    },
+                    "required": [
+                      "spreads"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "bounds": {
+                "default": "trim",
+                "type": "string",
+                "enum": [
+                  "trim",
+                  "bleed"
+                ]
+              },
+              "maxEdge": {
+                "default": 1000,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1600
+              },
+              "format": {
+                "default": "png",
+                "type": "string",
+                "enum": [
+                  "png",
+                  "jpeg"
+                ]
+              },
+              "guides": {
+                "default": false,
+                "type": "boolean"
+              },
+              "labels": {
+                "default": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          "inspect": {
+            "type": "object",
+            "properties": {
+              "spread": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "box": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "element": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "offset": {
+                "default": 0,
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "limit": {
+                "default": 30,
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              }
+            },
+            "required": [
+              "spread"
+            ],
+            "additionalProperties": false
+          },
+          "typescript": {
+            "type": "boolean"
+          },
+          "draft": {
+            "type": "object",
+            "properties": {
+              "operations": {
+                "minItems": 1,
+                "maxItems": 100,
+                "type": "array",
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "set_title"
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "title"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "select_format"
+                        },
+                        "format": {
+                          "$ref": "#/$defs/__schema2"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "format"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "set_parameter"
+                        },
+                        "scope": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema7"
+                        },
+                        "owner": {
+                          "$ref": "#/$defs/__schema9"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema10"
+                        },
+                        "value": {
+                          "$ref": "#/$defs/__schema11"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "scope",
+                        "key",
+                        "value"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "reset_parameter"
+                        },
+                        "scope": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema7"
+                        },
+                        "owner": {
+                          "$ref": "#/$defs/__schema9"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema10"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "scope",
+                        "key"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "insert_list_item"
+                        },
+                        "scope": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema7"
+                        },
+                        "owner": {
+                          "$ref": "#/$defs/__schema9"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema10"
+                        },
+                        "item": {
+                          "$ref": "#/$defs/__schema13"
+                        },
+                        "after": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/$defs/__schema2"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "scope",
+                        "key",
+                        "item"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "update_list_item"
+                        },
+                        "scope": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema7"
+                        },
+                        "owner": {
+                          "$ref": "#/$defs/__schema9"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema10"
+                        },
+                        "id": {
+                          "$ref": "#/$defs/__schema14"
+                        },
+                        "values": {
+                          "$ref": "#/$defs/__schema13"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "scope",
+                        "key",
+                        "id",
+                        "values"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "remove_list_item"
+                        },
+                        "scope": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema7"
+                        },
+                        "owner": {
+                          "$ref": "#/$defs/__schema9"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema10"
+                        },
+                        "id": {
+                          "$ref": "#/$defs/__schema14"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "scope",
+                        "key",
+                        "id"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "move_list_item"
+                        },
+                        "scope": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema7"
+                        },
+                        "owner": {
+                          "$ref": "#/$defs/__schema9"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema10"
+                        },
+                        "id": {
+                          "$ref": "#/$defs/__schema14"
+                        },
+                        "after": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/$defs/__schema2"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "scope",
+                        "key",
+                        "id",
+                        "after"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "insert_spread"
+                        },
+                        "definition": {
+                          "$ref": "#/$defs/__schema15"
+                        },
+                        "ref": {
+                          "$ref": "#/$defs/__schema16"
+                        },
+                        "after": {
+                          "$ref": "#/$defs/__schema17"
+                        },
+                        "params": {
+                          "default": {},
+                          "$ref": "#/$defs/__schema18"
+                        },
+                        "boxes": {
+                          "default": {},
+                          "type": "object",
+                          "propertyNames": {
+                            "$ref": "#/$defs/__schema2"
+                          },
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "photo": {
+                                "$ref": "#/$defs/__schema2"
+                              },
+                              "text": {
+                                "$ref": "#/$defs/__schema2"
+                              },
+                              "params": {
+                                "default": {},
+                                "$ref": "#/$defs/__schema18"
+                              },
+                              "crops": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "$ref": "#/$defs/__schema2"
+                                },
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "centerX": {
+                                      "$ref": "#/$defs/__schema19"
+                                    },
+                                    "centerY": {
+                                      "$ref": "#/$defs/__schema21"
+                                    },
+                                    "zoom": {
+                                      "$ref": "#/$defs/__schema22"
+                                    }
+                                  },
+                                  "required": [
+                                    "centerX",
+                                    "centerY",
+                                    "zoom"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "focus": {
+                                "type": "object",
+                                "properties": {
+                                  "centerX": {
+                                    "$ref": "#/$defs/__schema19"
+                                  },
+                                  "centerY": {
+                                    "$ref": "#/$defs/__schema21"
+                                  }
+                                },
+                                "required": [
+                                  "centerX",
+                                  "centerY"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "elements": {
+                          "default": {},
+                          "type": "object",
+                          "propertyNames": {
+                            "$ref": "#/$defs/__schema2"
+                          },
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "params": {
+                                "default": {},
+                                "$ref": "#/$defs/__schema18"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "definition"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "duplicate_spread"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema8"
+                        },
+                        "ref": {
+                          "$ref": "#/$defs/__schema16"
+                        },
+                        "after": {
+                          "$ref": "#/$defs/__schema17"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "spread"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "move_spread"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema8"
+                        },
+                        "after": {
+                          "anyOf": [
+                            {
+                              "$ref": "#/$defs/__schema1"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "spread",
+                        "after"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "remove_spread"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema8"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "spread"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "switch_layout"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema8"
+                        },
+                        "definition": {
+                          "$ref": "#/$defs/__schema15"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "spread",
+                        "definition"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "assign_source"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema8"
+                        },
+                        "box": {
+                          "$ref": "#/$defs/__schema23"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "photo",
+                            "text"
+                          ]
+                        },
+                        "source": {
+                          "$ref": "#/$defs/__schema2"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "spread",
+                        "box",
+                        "kind",
+                        "source"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "clear_box"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema8"
+                        },
+                        "box": {
+                          "$ref": "#/$defs/__schema23"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "spread",
+                        "box"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "swap_content"
+                        },
+                        "from": {
+                          "$ref": "#/$defs/__schema24"
+                        },
+                        "to": {
+                          "$ref": "#/$defs/__schema24"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "from",
+                        "to"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "set_crop"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema8"
+                        },
+                        "box": {
+                          "$ref": "#/$defs/__schema23"
+                        },
+                        "centerX": {
+                          "$ref": "#/$defs/__schema19"
+                        },
+                        "centerY": {
+                          "$ref": "#/$defs/__schema21"
+                        },
+                        "zoom": {
+                          "$ref": "#/$defs/__schema22"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "spread",
+                        "box",
+                        "centerX",
+                        "centerY",
+                        "zoom"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "set_photo_metadata"
+                        },
+                        "photo": {
+                          "$ref": "#/$defs/__schema2"
+                        },
+                        "values": {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "caption": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "credit": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "altText": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "photo",
+                        "values"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              }
+            },
+            "required": [
+              "operations"
+            ],
+            "additionalProperties": false
+          },
+          "fixtures": {
+            "type": "object",
+            "properties": {
+              "layouts": {
+                "minItems": 1,
+                "maxItems": 24,
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema25"
+                }
+              },
+              "formats": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "all"
+                  },
+                  {
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/__schema25"
+                    }
+                  }
+                ]
+              },
+              "cases": {
+                "minItems": 1,
+                "maxItems": 5,
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/__schema26"
+                }
+              },
+              "preview": {
+                "type": "object",
+                "properties": {
+                  "printFormat": {
+                    "$ref": "#/$defs/__schema25"
+                  },
+                  "cells": {
+                    "minItems": 1,
+                    "maxItems": 12,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "layout": {
+                          "$ref": "#/$defs/__schema25"
+                        },
+                        "case": {
+                          "$ref": "#/$defs/__schema26"
+                        }
+                      },
+                      "required": [
+                        "layout",
+                        "case"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "columns": {
+                    "default": 3,
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4
+                  },
+                  "bounds": {
+                    "default": "trim",
+                    "type": "string",
+                    "enum": [
+                      "trim",
+                      "bleed"
+                    ]
+                  },
+                  "maxEdge": {
+                    "default": 1200,
+                    "type": "integer",
+                    "minimum": 128,
+                    "maximum": 1600
+                  },
+                  "format": {
+                    "default": "png",
+                    "type": "string",
+                    "enum": [
+                      "png",
+                      "jpeg"
+                    ]
+                  },
+                  "guides": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "labels": {
+                    "default": false,
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "__schema1": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema2"
+              },
+              {
+                "type": "string",
+                "pattern": "^\\$.*"
+              }
+            ]
+          },
+          "__schema2": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+          },
+          "__schema3": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+          },
+          "__schema4": {
+            "default": 2,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "__schema5": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+          },
+          "__schema6": {
+            "type": "string",
+            "enum": [
+              "document",
+              "spread",
+              "box",
+              "element"
+            ]
+          },
+          "__schema7": {
+            "$ref": "#/$defs/__schema8"
+          },
+          "__schema8": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "__schema9": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "__schema10": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "__schema11": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema12"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/__schema12"
+                  }
+                }
+              }
+            ]
+          },
+          "__schema12": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "__schema13": {
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema12"
+            }
+          },
+          "__schema14": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "__schema15": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "__schema16": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "__schema17": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "__schema18": {
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema11"
+            }
+          },
+          "__schema19": {
+            "$ref": "#/$defs/__schema20"
+          },
+          "__schema20": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "__schema21": {
+            "$ref": "#/$defs/__schema20"
+          },
+          "__schema22": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "__schema23": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "__schema24": {
+            "type": "object",
+            "properties": {
+              "spread": {
+                "$ref": "#/$defs/__schema8"
+              },
+              "box": {
+                "$ref": "#/$defs/__schema23"
+              }
+            },
+            "required": [
+              "spread",
+              "box"
+            ],
+            "additionalProperties": false
+          },
+          "__schema25": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+          },
+          "__schema26": {
+            "type": "string",
+            "enum": [
+              "typical",
+              "long-text",
+              "empty",
+              "portrait-photos",
+              "malformed-files"
+            ]
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "error"
+            ]
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "project",
+                    "template",
+                    "render",
+                    "preview"
+                  ]
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "line": {
+                      "type": "number"
+                    },
+                    "column": {
+                      "type": "number"
+                    },
+                    "spread": {
+                      "type": "string"
+                    },
+                    "box": {
+                      "type": "string"
+                    },
+                    "element": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "parameter": {
+                      "type": "string"
+                    },
+                    "where": {
+                      "type": "string"
+                    },
+                    "declaration": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "details": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "suggestion": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "stage",
+                "severity",
+                "message"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "bundle": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "declarations": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "layout": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "typescript": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "fixtures": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "print": {
+                "type": "string",
+                "enum": [
+                  "not-run"
+                ]
+              }
+            },
+            "required": [
+              "bundle",
+              "declarations",
+              "layout",
+              "typescript",
+              "fixtures",
+              "print"
+            ],
+            "additionalProperties": {}
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "$ref": "#/$defs/__schema0"
+                  },
+                  "height": {
+                    "$ref": "#/$defs/__schema1"
+                  },
+                  "widthMm": {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  "heightMm": {
+                    "$ref": "#/$defs/__schema3"
+                  },
+                  "bounds": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "spread": {
+                    "$ref": "#/$defs/__schema5"
+                  },
+                  "side": {
+                    "$ref": "#/$defs/__schema6"
+                  },
+                  "page": {
+                    "$ref": "#/$defs/__schema7"
+                  },
+                  "detail": {
+                    "$ref": "#/$defs/__schema8"
+                  },
+                  "guides": {
+                    "$ref": "#/$defs/__schema9"
+                  },
+                  "labels": {
+                    "$ref": "#/$defs/__schema10"
+                  },
+                  "mimeType": {
+                    "$ref": "#/$defs/__schema11"
+                  },
+                  "draft": {
+                    "$ref": "#/$defs/__schema12"
+                  },
+                  "fixture": {
+                    "$ref": "#/$defs/__schema13"
+                  }
+                },
+                "required": [
+                  "width",
+                  "height",
+                  "widthMm",
+                  "heightMm",
+                  "bounds",
+                  "spread",
+                  "side",
+                  "page",
+                  "mimeType"
+                ],
+                "additionalProperties": {}
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "contact-sheet"
+                  },
+                  "width": {
+                    "type": "number"
+                  },
+                  "height": {
+                    "type": "number"
+                  },
+                  "bounds": {
+                    "type": "string",
+                    "enum": [
+                      "trim",
+                      "bleed"
+                    ]
+                  },
+                  "columns": {
+                    "type": "number"
+                  },
+                  "banner": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string"
+                      },
+                      "height": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "height"
+                    ],
+                    "additionalProperties": {}
+                  },
+                  "guides": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "labels": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "cells": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "$ref": "#/$defs/__schema0"
+                        },
+                        "height": {
+                          "$ref": "#/$defs/__schema1"
+                        },
+                        "widthMm": {
+                          "$ref": "#/$defs/__schema2"
+                        },
+                        "heightMm": {
+                          "$ref": "#/$defs/__schema3"
+                        },
+                        "bounds": {
+                          "$ref": "#/$defs/__schema4"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema5"
+                        },
+                        "side": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "page": {
+                          "$ref": "#/$defs/__schema7"
+                        },
+                        "detail": {
+                          "$ref": "#/$defs/__schema8"
+                        },
+                        "guides": {
+                          "$ref": "#/$defs/__schema9"
+                        },
+                        "labels": {
+                          "$ref": "#/$defs/__schema10"
+                        },
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        },
+                        "label": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "width",
+                        "height",
+                        "widthMm",
+                        "heightMm",
+                        "bounds",
+                        "spread",
+                        "side",
+                        "page",
+                        "x",
+                        "y",
+                        "label"
+                      ],
+                      "additionalProperties": {}
+                    }
+                  },
+                  "mimeType": {
+                    "$ref": "#/$defs/__schema11"
+                  },
+                  "draft": {
+                    "$ref": "#/$defs/__schema12"
+                  },
+                  "fixture": {
+                    "$ref": "#/$defs/__schema13"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "width",
+                  "height",
+                  "bounds",
+                  "columns",
+                  "cells",
+                  "mimeType"
+                ],
+                "additionalProperties": {}
+              }
+            ]
+          },
+          "typecheck": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "totalDiagnostics": {
+                "type": "number"
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "elapsedMs": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "files",
+              "totalDiagnostics",
+              "truncated",
+              "elapsedMs"
+            ],
+            "additionalProperties": {}
+          },
+          "draft": {
+            "type": "object",
+            "properties": {
+              "applied": {
+                "type": "boolean"
+              },
+              "committed": {
+                "type": "boolean",
+                "const": false
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "affectedSpreads": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "references": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "reflow": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "applied",
+              "committed"
+            ],
+            "additionalProperties": {}
+          },
+          "fixtures": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "state",
+          "revision",
+          "diagnostics",
+          "checks"
+        ],
+        "additionalProperties": {},
+        "$defs": {
+          "__schema0": {
+            "type": "number"
+          },
+          "__schema1": {
+            "type": "number"
+          },
+          "__schema2": {
+            "type": "number"
+          },
+          "__schema3": {
+            "type": "number"
+          },
+          "__schema4": {
+            "type": "string",
+            "enum": [
+              "trim",
+              "bleed"
+            ]
+          },
+          "__schema5": {
+            "type": "string"
+          },
+          "__schema6": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "spread",
+              "page"
+            ]
+          },
+          "__schema7": {
+            "type": "object",
+            "properties": {
+              "left": {
+                "type": "number"
+              },
+              "right": {
+                "type": "number"
+              },
+              "number": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": {}
+          },
+          "__schema8": {
+            "type": "object",
+            "properties": {
+              "box": {
+                "type": "string"
+              },
+              "element": {
+                "type": "string"
+              },
+              "xMm": {
+                "type": "number"
+              },
+              "yMm": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "xMm",
+              "yMm"
+            ],
+            "additionalProperties": {}
+          },
+          "__schema9": {
+            "type": "boolean",
+            "const": true
+          },
+          "__schema10": {
+            "type": "boolean",
+            "const": true
+          },
+          "__schema11": {
+            "type": "string",
+            "enum": [
+              "image/png",
+              "image/jpeg"
+            ]
+          },
+          "__schema12": {
+            "type": "boolean",
+            "const": true
+          },
+          "__schema13": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      }
+    },
+    "apply_project_changes": {
+      "readOnly": false,
+      "input": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "expectedRevision": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "operations": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "set_title"
+                    },
+                    "title": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "title"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "select_format"
+                    },
+                    "format": {
+                      "$ref": "#/$defs/__schema0"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "format"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "set_parameter"
+                    },
+                    "scope": {
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema2"
+                    },
+                    "owner": {
+                      "$ref": "#/$defs/__schema5"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema6"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/__schema7"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "scope",
+                    "key",
+                    "value"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "reset_parameter"
+                    },
+                    "scope": {
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema2"
+                    },
+                    "owner": {
+                      "$ref": "#/$defs/__schema5"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema6"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "scope",
+                    "key"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "insert_list_item"
+                    },
+                    "scope": {
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema2"
+                    },
+                    "owner": {
+                      "$ref": "#/$defs/__schema5"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema6"
+                    },
+                    "item": {
+                      "$ref": "#/$defs/__schema9"
+                    },
+                    "after": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/__schema0"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "scope",
+                    "key",
+                    "item"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "update_list_item"
+                    },
+                    "scope": {
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema2"
+                    },
+                    "owner": {
+                      "$ref": "#/$defs/__schema5"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema6"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/__schema10"
+                    },
+                    "values": {
+                      "$ref": "#/$defs/__schema9"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "scope",
+                    "key",
+                    "id",
+                    "values"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "remove_list_item"
+                    },
+                    "scope": {
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema2"
+                    },
+                    "owner": {
+                      "$ref": "#/$defs/__schema5"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema6"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/__schema10"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "scope",
+                    "key",
+                    "id"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "move_list_item"
+                    },
+                    "scope": {
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema2"
+                    },
+                    "owner": {
+                      "$ref": "#/$defs/__schema5"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema6"
+                    },
+                    "id": {
+                      "$ref": "#/$defs/__schema10"
+                    },
+                    "after": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/__schema0"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "scope",
+                    "key",
+                    "id",
+                    "after"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "insert_spread"
+                    },
+                    "definition": {
+                      "$ref": "#/$defs/__schema11"
+                    },
+                    "ref": {
+                      "$ref": "#/$defs/__schema12"
+                    },
+                    "after": {
+                      "$ref": "#/$defs/__schema13"
+                    },
+                    "params": {
+                      "default": {},
+                      "$ref": "#/$defs/__schema14"
+                    },
+                    "boxes": {
+                      "default": {},
+                      "type": "object",
+                      "propertyNames": {
+                        "$ref": "#/$defs/__schema0"
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "photo": {
+                            "$ref": "#/$defs/__schema0"
+                          },
+                          "text": {
+                            "$ref": "#/$defs/__schema0"
+                          },
+                          "params": {
+                            "default": {},
+                            "$ref": "#/$defs/__schema14"
+                          },
+                          "crops": {
+                            "type": "object",
+                            "propertyNames": {
+                              "$ref": "#/$defs/__schema0"
+                            },
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "centerX": {
+                                  "$ref": "#/$defs/__schema15"
+                                },
+                                "centerY": {
+                                  "$ref": "#/$defs/__schema17"
+                                },
+                                "zoom": {
+                                  "$ref": "#/$defs/__schema18"
+                                }
+                              },
+                              "required": [
+                                "centerX",
+                                "centerY",
+                                "zoom"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "focus": {
+                            "type": "object",
+                            "properties": {
+                              "centerX": {
+                                "$ref": "#/$defs/__schema15"
+                              },
+                              "centerY": {
+                                "$ref": "#/$defs/__schema17"
+                              }
+                            },
+                            "required": [
+                              "centerX",
+                              "centerY"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "elements": {
+                      "default": {},
+                      "type": "object",
+                      "propertyNames": {
+                        "$ref": "#/$defs/__schema0"
+                      },
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "params": {
+                            "default": {},
+                            "$ref": "#/$defs/__schema14"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "definition"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "duplicate_spread"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema3"
+                    },
+                    "ref": {
+                      "$ref": "#/$defs/__schema12"
+                    },
+                    "after": {
+                      "$ref": "#/$defs/__schema13"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "spread"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "move_spread"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema3"
+                    },
+                    "after": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/__schema4"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "spread",
+                    "after"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "remove_spread"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema3"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "spread"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "switch_layout"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema3"
+                    },
+                    "definition": {
+                      "$ref": "#/$defs/__schema11"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "spread",
+                    "definition"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "assign_source"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema3"
+                    },
+                    "box": {
+                      "$ref": "#/$defs/__schema19"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "photo",
+                        "text"
+                      ]
+                    },
+                    "source": {
+                      "$ref": "#/$defs/__schema0"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "spread",
+                    "box",
+                    "kind",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "clear_box"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema3"
+                    },
+                    "box": {
+                      "$ref": "#/$defs/__schema19"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "spread",
+                    "box"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "swap_content"
+                    },
+                    "from": {
+                      "$ref": "#/$defs/__schema20"
+                    },
+                    "to": {
+                      "$ref": "#/$defs/__schema20"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "from",
+                    "to"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "set_crop"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema3"
+                    },
+                    "box": {
+                      "$ref": "#/$defs/__schema19"
+                    },
+                    "centerX": {
+                      "$ref": "#/$defs/__schema15"
+                    },
+                    "centerY": {
+                      "$ref": "#/$defs/__schema17"
+                    },
+                    "zoom": {
+                      "$ref": "#/$defs/__schema18"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "spread",
+                    "box",
+                    "centerX",
+                    "centerY",
+                    "zoom"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "set_photo_metadata"
+                    },
+                    "photo": {
+                      "$ref": "#/$defs/__schema0"
+                    },
+                    "values": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "caption": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "credit": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "altText": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "photo",
+                    "values"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "dryRun": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project",
+          "expectedRevision",
+          "idempotencyKey",
+          "label",
+          "operations"
+        ],
+        "additionalProperties": false,
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+          },
+          "__schema1": {
+            "type": "string",
+            "enum": [
+              "document",
+              "spread",
+              "box",
+              "element"
+            ]
+          },
+          "__schema2": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "__schema3": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "__schema4": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema0"
+              },
+              {
+                "type": "string",
+                "pattern": "^\\$.*"
+              }
+            ]
+          },
+          "__schema5": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "__schema6": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "__schema7": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema8"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/__schema8"
+                  }
+                }
+              }
+            ]
+          },
+          "__schema8": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "__schema9": {
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema8"
+            }
+          },
+          "__schema10": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "__schema11": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "__schema12": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "__schema13": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema4"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "__schema14": {
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema7"
+            }
+          },
+          "__schema15": {
+            "$ref": "#/$defs/__schema16"
+          },
+          "__schema16": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "__schema17": {
+            "$ref": "#/$defs/__schema16"
+          },
+          "__schema18": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 20
+          },
+          "__schema19": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "__schema20": {
+            "type": "object",
+            "properties": {
+              "spread": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "box": {
+                "$ref": "#/$defs/__schema19"
+              }
+            },
+            "required": [
+              "spread",
+              "box"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "error"
+            ]
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "committed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "const": "pending"
+              }
+            ]
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "affectedSpreads": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "references": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "reflow": {
+            "type": "boolean"
+          },
+          "replayed": {
+            "type": "boolean",
+            "const": true
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "project",
+                    "template",
+                    "render",
+                    "preview"
+                  ]
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "line": {
+                      "type": "number"
+                    },
+                    "column": {
+                      "type": "number"
+                    },
+                    "spread": {
+                      "type": "string"
+                    },
+                    "box": {
+                      "type": "string"
+                    },
+                    "element": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "parameter": {
+                      "type": "string"
+                    },
+                    "where": {
+                      "type": "string"
+                    },
+                    "declaration": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "details": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "suggestion": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "stage",
+                "severity",
+                "message"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "bundle": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "declarations": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "layout": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "typescript": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "fixtures": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "print": {
+                "type": "string",
+                "enum": [
+                  "not-run"
+                ]
+              }
+            },
+            "required": [
+              "bundle",
+              "declarations",
+              "layout",
+              "typescript",
+              "fixtures",
+              "print"
+            ],
+            "additionalProperties": {}
+          },
+          "history": {
+            "type": "object",
+            "properties": {
+              "undo": {
+                "type": "string"
+              },
+              "redo": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": {}
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "revision",
+          "committed"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "import_sources": {
+      "readOnly": false,
+      "input": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "project": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "expectedRevision": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "idempotencyKey": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "paths": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "kind": {
+                "type": "string",
+                "const": "photo"
+              }
+            },
+            "required": [
+              "project",
+              "expectedRevision",
+              "idempotencyKey",
+              "paths",
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "project": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "expectedRevision": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "idempotencyKey": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "paths": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "kind": {
+                "type": "string",
+                "const": "markdown"
+              }
+            },
+            "required": [
+              "project",
+              "expectedRevision",
+              "idempotencyKey",
+              "paths",
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "project": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "expectedRevision": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "idempotencyKey": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "paths": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "kind": {
+                "type": "string",
+                "const": "file"
+              },
+              "accept": {
+                "minItems": 1,
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^\\.[a-z0-9]{1,10}$"
+                }
+              }
+            },
+            "required": [
+              "project",
+              "expectedRevision",
+              "idempotencyKey",
+              "paths",
+              "kind",
+              "accept"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "$defs": {
+          "__schema0": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "__schema1": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "__schema2": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+          },
+          "__schema3": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "type": "object"
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "error"
+            ]
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "committed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string",
+                "const": "pending"
+              }
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "photo",
+                    "markdown",
+                    "file"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "path",
+                "kind"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "replayed": {
+            "type": "boolean",
+            "const": true
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "stage": {
+                  "type": "string",
+                  "enum": [
+                    "project",
+                    "template",
+                    "render",
+                    "preview"
+                  ]
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "line": {
+                      "type": "number"
+                    },
+                    "column": {
+                      "type": "number"
+                    },
+                    "spread": {
+                      "type": "string"
+                    },
+                    "box": {
+                      "type": "string"
+                    },
+                    "element": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "parameter": {
+                      "type": "string"
+                    },
+                    "where": {
+                      "type": "string"
+                    },
+                    "declaration": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                },
+                "details": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  }
+                },
+                "suggestion": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "stage",
+                "severity",
+                "message"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "bundle": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "declarations": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "layout": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "typescript": {
+                "type": "string",
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "fixtures": {
+                "type": "string",
+                "enum": [
+                  "completed",
+                  "failed",
+                  "not-run"
+                ]
+              },
+              "print": {
+                "type": "string",
+                "enum": [
+                  "not-run"
+                ]
+              }
+            },
+            "required": [
+              "bundle",
+              "declarations",
+              "layout",
+              "typescript",
+              "fixtures",
+              "print"
+            ],
+            "additionalProperties": {}
+          },
+          "history": {
+            "type": "object",
+            "properties": {
+              "undo": {
+                "type": "string"
+              },
+              "redo": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": {}
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "revision",
+          "committed"
+        ],
+        "additionalProperties": {}
+      }
+    }
+  }
+}

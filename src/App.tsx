@@ -5,7 +5,6 @@ import type { ViewAnchor } from './view-anchor';
 import { assetUsage } from './asset-usage';
 import { sourcePlacements } from './source-placement';
 import { importFeedback } from './import-feedback';
-import { Presentation } from './Presentation';
 import { commandState } from './commands';
 import type { BookMenuState } from './desktop';
 import { bookName } from './book-name';
@@ -126,8 +125,7 @@ export function App() {
   const [projectInstance, setProjectInstance] = useState(0);
   const current = useRef<ProjectSummary>(undefined);
   const [spreadId, setSpreadId] = useState('');
-  const [presenting, setPresenting] = useState<string>();
-  useToolbarDrag(presenting !== undefined);
+  useToolbarDrag();
   const [template, setTemplate] = useState<TemplateInfo>();
   const [render, setRender] = useState<RenderStatus>();
   const [reload, setReload] = useState<'loading' | 'rendering' | { error: string }>();
@@ -500,10 +498,15 @@ export function App() {
     if ('error' in result) setError(result.error);
   }
 
+  function present(id: string) {
+    if (!api || !summary || editing || cropping || elementEditor) return;
+    void api.startPresentation(id).then((result) => { if ('error' in result) setError(result.error); })
+      .catch(() => setError('Could not open presentation.'));
+  }
   function act(command: Command) {
     if (isPhotoViewCommand(command)) { photoView.command(command); return; }
     if (command === 'presentation' || command === 'presentation-start') {
-      if (summary && !editing && !cropping && !elementEditor) setPresenting(command === 'presentation-start' ? summary.project.spreads[0]?.id ?? '' : spreadId);
+      present(command === 'presentation-start' ? summary?.project.spreads[0]?.id ?? '' : spreadId);
       return;
     }
     if (command === 'book-check') { setCheckScope(undefined); setCheckRequest((value) => value + 1); return; }
@@ -654,6 +657,10 @@ export function App() {
     if (request.action === 'jump') select(request.spread);
     else placeSources(request.keys);
   });
+  const onPresentationClosed = useEffectEvent((id: string) => {
+    if (current.current?.project.spreads.some((spread) => spread.id === id)) select(id);
+    canvas.current?.focus({ preventScroll: true });
+  });
   useEffect(() => {
     if (!api) return;
     const prepare = api.onPrepareQuit(() => prepareQuit());
@@ -665,6 +672,7 @@ export function App() {
       if (workspace.current) workspace.current.inert = false;
     });
     const sourceCommand = api.onSourceCommand(onSourceCommand);
+    const presentationClosed = api.onPresentationClosed(onPresentationClosed);
     const lease = api.onAgentLease(() => acquireAgentLease());
     const release = api.onAgentRelease(() => {
       agentLocked.current = quitLock.current;
@@ -681,7 +689,7 @@ export function App() {
       if ('error' in result) setError(result.error);
       else adopt(result.value, true);
     });
-    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); command(); changed(); progress(); lease(); release(); appError(); };
+    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); };
   }, [api]);
 
   // Network origins the template declares (ADR 0006): decided once per book and template version (its hash) when it
@@ -948,7 +956,7 @@ export function App() {
     else if (command === 'move-spread-down') moveSelected(ids, 'down');
     else if (command === 'move-spread-start') moveSelected(ids, 'start');
     else if (command === 'move-spread-end') moveSelected(ids, 'end');
-    else if (command === 'presentation') setPresenting(id);
+    else if (command === 'presentation') present(id);
     else if (command === 'book-check') { setCheckScope(id); setCheckRequest((value) => value + 1); }
   }
   async function canvasMenu(event: Pick<React.MouseEvent, 'clientX' | 'clientY' | 'preventDefault'>) {
@@ -1417,7 +1425,7 @@ export function App() {
     choose(source);
   }
   const presentKey = useEffectEvent((event: globalThis.KeyboardEvent) => {
-    if (event.defaultPrevented || presenting !== undefined || !event.shiftKey || event.code !== 'KeyW' || event.metaKey || event.ctrlKey ||
+    if (event.defaultPrevented || !event.shiftKey || event.code !== 'KeyW' || event.metaKey || event.ctrlKey ||
         controlFocused || editing || cropping || elementEditor || quick || (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable], iframe, dialog'))) return;
     event.preventDefault(); act(event.altKey ? 'presentation-start' : 'presentation');
   });
@@ -1525,7 +1533,7 @@ export function App() {
 
   const nativeDocumentTitle = navigator.platform.includes('Mac');
   return <ProjectFilesContext.Provider value={projectFiles}><div className={nativeDocumentTitle ? 'studio mac-studio' : 'studio'}>
-    <div className="editor-shell" inert={presenting !== undefined} aria-hidden={presenting !== undefined}>
+    <div className="editor-shell">
     <header className="toolbar">
       <div className="toolbar-actions project-context">
         <button className="toolbar-icon" aria-label="Toggle project panel" aria-pressed={!panels.leftHidden} title="Toggle project panel (⌃⌘S)" onClick={() => togglePanel('left')}><Icon name="sidebarLeft" /></button>
@@ -1812,8 +1820,5 @@ export function App() {
       {summary && <BookCheckIndicator requestSpread={checkScope} request={checkRequest} check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}
     </footer>
     </div>
-    {summary && template && presenting !== undefined && <Presentation summary={summary} template={template} start={presenting} close={(id) => {
-      setPresenting(undefined); select(id); canvas.current?.focus({ preventScroll: true });
-    }} />}
   </div></ProjectFilesContext.Provider>;
 }

@@ -14,6 +14,9 @@ if (window.location.hostname === 'render' && window.location.pathname.startsWith
   void import('./StarterPicker').then(({ StarterPicker }) => show(<StarterPicker api={window.imageflow} />));
 } else if (window.location.pathname === '/markdown') {
   void import('./MarkdownWindow').then(({ MarkdownWindow }) => show(<MarkdownWindow api={window.imageflow} />));
+} else if (window.location.pathname === '/presentation') {
+  document.title = 'Presentation';
+  void import('./PresentationWindow').then(({ PresentationWindow }) => createRoot(root).render(<PresentationWindow api={window.imageflow} />));
 } else if (window.location.pathname === '/assets') {
   document.title = 'Assets';
   void import('./AssetsWindow').then(({ AssetsWindow }) => show(<AssetsWindow api={window.imageflow} />));

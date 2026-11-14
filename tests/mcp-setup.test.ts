@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex } from '../desktop/mcp-setup';
+import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex, skillArchive } from '../desktop/mcp-setup';
 import { mcpTools } from '../src/mcp-contract';
 
 const launch = bridgeLaunch('/Applications/Image Flow.app/Contents/MacOS/ImageFlow', '/Applications/Image Flow.app/Contents/Resources/app.asar.unpacked/mcp-bridge.cjs', "/Users/me/Library/Application Support/ImageFlow/mcp-connection.json");
@@ -53,4 +53,18 @@ test('ChatGPT and Codex registration runs codex mcp add with the launch configur
   await addToCodex(codex, launch);
   assert.deepEqual(JSON.parse(await readFile(log, 'utf8')),
     ['mcp', 'add', 'imageflow', '--env', 'ELECTRON_RUN_AS_NODE=1', '--', launch.command, ...launch.args]);
+});
+
+test('the template skill archive holds the skill folder with its references and examples', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'imageflow-skill-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const file = join(folder, 'imageflow-templates.zip');
+  await writeFile(file, await skillArchive(resolve('skills/imageflow-templates')));
+  execFileSync('unzip', ['-tq', file]);
+  const names = execFileSync('unzip', ['-Z1', file], { encoding: 'utf8' }).trim().split('\n');
+  assert.ok(names.includes('imageflow-templates/SKILL.md'));
+  assert.ok(names.includes('imageflow-templates/references/authoring-workflow.md'));
+  assert.ok(names.includes('imageflow-templates/examples/minimal.tsx'));
+  assert.ok(names.every((name) => name.startsWith('imageflow-templates/')));
+  await assert.rejects(skillArchive(folder), /missing/);
 });

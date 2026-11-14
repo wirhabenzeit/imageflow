@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { testBook, menuAction } from './ui-actions.mjs';
+import { createRouteFixture } from './route-fixture.mjs';
 
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -28,7 +29,8 @@ const command = async (page, id) => {
   }, { owner, id });
 };
 try {
-  const page = await testBook(app, book, true);
+  await createRouteFixture(book);
+  const page = await testBook(app, book);
   const ready = () => page.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   await ready();
   // Native text Undo must leave the book's history and stored content intact.

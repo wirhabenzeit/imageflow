@@ -29,6 +29,17 @@ export async function clickClosingWindow(page, button) {
   await closed;
 }
 
+// Background thumbnail renders create windows too. Wait for the actual viewer, even if one races it.
+export function nextPresentation(app) {
+  return app.waitForEvent('window', {
+    timeout: 10000,
+    predicate: async (page) => {
+      try { await page.waitForURL('imageflow://editor/presentation', { timeout: 10000 }); return true; }
+      catch { return false; }
+    },
+  });
+}
+
 // Fixtures use real document opening; package creation and picker behavior have their own workflow test.
 export async function testBook(app, path, create = false) {
   if (create) await cp(fileURLToPath(new URL('../sample/starter', import.meta.url)), path, { recursive: true, filter: (path) => !path.includes('/.imageflow') });

@@ -6,7 +6,7 @@ import { dependencyWarning, isBareImport, missingDependency, readDependencyManif
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BuildFailure, Loader } from 'esbuild';
 import type { AuthoringDiagnostic } from '../src/authoring';
-import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
+import { bookFormatVersion, newerBookMessage, parseDocument, photoIndexSchema, projectSchema } from '../src/project';
 import type { FixtureMarking, PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
 import type { ImportRequest, ProjectSummary } from '../src/desktop';
@@ -68,6 +68,9 @@ export function readProjectDocument(root: string, name: 'photos.json'): Promise<
 export async function readProjectDocument(root: string, name: ManifestName): Promise<{ document: Project | PhotoIndex; source: Buffer }> {
   const source = await readProjectManifest(root, name);
   const value = parseJson(source, name);
+  // Refused before validation so the message is only the request to update, not a schema path.
+  const version = name === 'project.json' && value && typeof value === 'object' ? (value as { schemaVersion?: unknown }).schemaVersion : undefined;
+  if (typeof version === 'number' && Number.isInteger(version) && version > bookFormatVersion) throw new Error(newerBookMessage(version));
   const document = name === 'project.json' ? parseDocument(projectSchema, value, name) : parseDocument(photoIndexSchema, value, name);
   return { document, source };
 }

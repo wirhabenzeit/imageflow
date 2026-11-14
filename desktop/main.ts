@@ -4,6 +4,7 @@ import { checkUpdateFeed, updateTestConfiguration } from './update-feed';
 import { updateBaseURL, releaseChannel } from '../src/update-feed';
 import { defaultSettings } from '../src/settings';
 import { MarkdownWindows } from './markdown-windows';
+import { PresentationWindows } from './presentation-windows';
 import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
@@ -37,7 +38,7 @@ import { createDocument, documentIdentity, documentPath, isDocument, RecentDocum
 import { SettingsStore } from './settings';
 import { AuthoringError } from './authoring-service';
 import { createMcpConnection } from './mcp-connection';
-import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex } from './mcp-setup';
+import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex, skillArchive } from './mcp-setup';
 import { authoringErrorResult } from './authoring-errors';
 import { acquireProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
@@ -48,7 +49,7 @@ import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-l
 import { TemplateTrust, trustedOrigins } from './template-trust';
 import { ReleasedTemplates } from './released-templates';
 import { isTemplateArchive, templateArchiveExtension } from './template-archive';
-import { writeAuthoringSnapshot } from './authoring-sdk';
+import { writeAgentSkill, writeAuthoringSnapshot } from './authoring-sdk';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
 import { describeImport, templatePicturePath, templatePictureURL } from '../src/library';
 import type { LibraryEntry, LibraryImportResult, NewBookChoice } from '../src/library';
@@ -59,7 +60,16 @@ import { configureRenditionCache, pruneRenditions } from './rendition-cache';
 import { decodes, readTemplatePreview } from './template-preview-file';
 import { previewTypes } from '../src/template-preview';
 
-const presentationWindows = new WeakMap<BrowserWindow, { simple: boolean; previous: boolean; entered?: () => void }>();
+const presentationWindows = new PresentationWindows({
+  window: () => ({ webPreferences: windowOptions() }), secure: secureWindow, focus,
+  focused: (document) => { lastDocument = document; updateMenus(); },
+  closed: (document, spread) => {
+    if (quitting) return;
+    document.window.webContents.send(channels.presentationClosed, spread);
+    focus(document.window);
+  },
+  error: (document, error) => report(document.window, error),
+});
 let templatesWindow: BrowserWindow | null = null;
 const assetsWindows = new Map<DocumentSession, { window: BrowserWindow; accept: string[] }>();
 const markdownWindows = new MarkdownWindows({
@@ -167,7 +177,7 @@ async function serve(request: Request) {
     const bytes = await readFile(file);
     return response(bytes, previewTypes[extname(file).toLowerCase()] ?? 'application/octet-stream', { 'Cache-Control': 'no-cache' });
   }
-  if (host === 'editor' && ['/', '/settings', '/start', '/new', '/assets', '/templates', '/markdown'].includes(pathname)) {
+  if (host === 'editor' && ['/', '/settings', '/start', '/new', '/assets', '/templates', '/markdown', '/presentation'].includes(pathname)) {
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigin + "; frame-ancestors 'none'; base-uri 'none'",
     });
@@ -248,7 +258,7 @@ async function fromEditor<T>(event: IpcMainInvokeEvent, run: (document: Document
 }
 function focusedDocument(owner: BaseWindow | null | undefined = BrowserWindow.getFocusedWindow()) {
   const browser = owner ? BrowserWindow.fromId(owner.id) : undefined;
-  return browser ? documents.get(browser.webContents.id) ?? markdownWindows.documentFor(browser) ?? [...assetsWindows].find(([, entry]) => entry.window === browser)?.[0] : lastDocument && !lastDocument.closing ? lastDocument : undefined;
+  return browser ? documents.get(browser.webContents.id) ?? markdownWindows.documentFor(browser) ?? presentationWindows.documentFor(browser) ?? [...assetsWindows].find(([, entry]) => entry.window === browser)?.[0] : lastDocument && !lastDocument.closing ? lastDocument : undefined;
 }
 function report(owner: BrowserWindow | null | undefined, error: unknown) {
   if (owner && !owner.isDestroyed()) owner.webContents.send(channels.appError, errorMessage(error));
@@ -447,6 +457,7 @@ async function openDocument(path: string): Promise<DocumentSession> {
       });
       editor.on('closed', () => {
         documents.delete(webContentsId);
+        presentationWindows.close(current);
         assetsWindows.get(current)?.window.destroy();
         assetsWindows.delete(current);
         const work = covers.get(current);
@@ -546,10 +557,12 @@ async function createBook(stage: string, template: ResolvedTemplate, sample: boo
     project.template = { ...project.template, hash: entry.hash };
     await writeFile(file, JSON.stringify(project, null, 2) + '\n');
     await writeAuthoringSnapshot(join(stage, 'template'), join(__dirname, 'authoring-types'));
+    await writeAgentSkill(stage, join(__dirname, 'skills'));
     return;
   }
   await copyTemplate(folder, join(stage, 'template'));
   await writeAuthoringSnapshot(join(stage, 'template'), join(__dirname, 'authoring-types'));
+  await writeAgentSkill(stage, join(__dirname, 'skills'));
   await Promise.all(['photos', 'texts', 'files'].map((name) => mkdir(join(stage, name))));
   await writeFile(join(stage, 'photos.json'), '{}\n');
   await writeFile(file, JSON.stringify({
@@ -994,6 +1007,12 @@ async function installMcp(target: McpClientTarget) {
     }
     return 'Claude Desktop opened its extension installer. Choose Install there.';
   }
+  if (target === 'skill') {
+    const file = join(app.getPath('downloads'), 'imageflow-templates.zip');
+    await writeFile(file, await skillArchive(join(app.getAppPath(), 'skills', 'imageflow-templates')));
+    shell.showItemInFolder(file);
+    return 'Saved imageflow-templates.zip to Downloads. Upload it in Claude under Settings → Capabilities → Skills, or unzip it into ~/.claude/skills for Claude Code.';
+  }
   if (target === 'codex') {
     const codex = await findCodex();
     if (!codex) throw new Error('Neither the ChatGPT desktop app nor the Codex CLI was found. Install one, or add the configuration under Other agents manually.');
@@ -1306,27 +1325,24 @@ void app.whenReady().then(async () => {
     await new Promise<void>((resolve) => Menu.buildFromTemplate(build(input)).popup({ window: owner, callback: resolve }));
     return chosen;
   });
-  ipcMain.handle(channels.presentation, (event, active: unknown) => {
-    const owner = editorOwner(event)?.window;
-    if (!owner || typeof active !== 'boolean') return;
-    if (active && !presentationWindows.has(owner)) {
-      const simple = process.platform === 'darwin' && !owner.isFullScreen();
-      const focus = () => {
-        if (owner.isDestroyed() || !presentationWindows.has(owner)) return;
-        if (owner.isVisible()) owner.focus();
-        owner.webContents.focus();
-      };
-      const entered = !simple && !owner.isFullScreen() ? focus : undefined;
-      presentationWindows.set(owner, { simple, previous: simple ? owner.isSimpleFullScreen() : owner.isFullScreen(), entered });
-      if (entered) owner.once('enter-full-screen', entered);
-      if (simple) owner.setSimpleFullScreen(true); else owner.setFullScreen(true);
-      focus();
-    } else if (!active && presentationWindows.has(owner)) {
-      const { simple, previous, entered } = presentationWindows.get(owner)!;
-      presentationWindows.delete(owner);
-      if (entered) owner.removeListener('enter-full-screen', entered);
-      if (simple) owner.setSimpleFullScreen(previous); else owner.setFullScreen(previous);
-    }
+  ipcMain.handle(channels.presentation, (event, spread: unknown) => {
+    const document = editorOwner(event);
+    if (!document || quitting || typeof spread !== 'string') return { error: 'Request is only available to an open book.' };
+    try { presentationWindows.show(document, spread); return { value: undefined }; }
+    catch (error) { return { error: errorMessage(error) }; }
+  });
+  ipcMain.handle(channels.presentationState, (event) => {
+    const entry = presentationWindows.owner(event);
+    return entry && !entry.document.closing ? { value: { summary: entry.document.summary, start: entry.spread } }
+      : { error: 'This window has no presentation.' };
+  });
+  ipcMain.handle(channels.presentationSpread, (event, spread: unknown) => {
+    const entry = presentationWindows.owner(event);
+    if (entry) presentationWindows.select(entry, spread);
+  });
+  ipcMain.handle(channels.presentationClose, (event, spread: unknown) => {
+    const entry = presentationWindows.owner(event);
+    if (entry) { presentationWindows.select(entry, spread); presentationWindows.close(entry.document); }
   });
   ipcMain.handle(channels.toolbarDragRegions, (event, regions: unknown) => {
     const owner = editorOwner(event)?.window;
@@ -1690,7 +1706,12 @@ void app.whenReady().then(async () => {
     if (state.layout && (state.layout.mode === 'grid' || state.layout.mode === 'vertical') && gridColumns.includes(state.layout.columns as 1|2|3|4)) document.layout = state.layout;
     updateMenus();
   });
-  app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
+  // The panel shows the bundle's app icon; the credits line carries the same tagline as the start window.
+  app.setAboutPanelOptions({
+    applicationName: 'ImageFlow', applicationVersion: app.getVersion(),
+    credits: 'Your photographs. A book of their own.', copyright: 'Copyright © 2026 the ImageFlow authors',
+    website: 'https://github.com/wirhabenzeit/imageflow',
+  });
   installMenu();
   if (renderPreviewsTo) {
     for (const entry of await library.list()) if (entry.source === 'built-in') await saveTemplatePreview(entry.id);

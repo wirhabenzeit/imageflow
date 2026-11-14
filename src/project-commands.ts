@@ -18,21 +18,39 @@ export const spreadReference = z.union([id, z.string().startsWith('$').refine((v
   'Use a spread ID or $ followed by a batch reference.')]);
 const scalar = z.union([z.string(), z.boolean(), z.number()]);
 // A list parameter's value is its whole array of items, each with its `id`.
-const value = z.union([scalar, z.array(z.record(z.string(), scalar))]);
-const parameterValues = z.record(id, value);
+const value = z.union([scalar, z.array(z.record(z.string(), scalar))])
+  .describe('The new value, of the type the parameter declares. A list parameter takes its whole array of items, each with its id.');
+const parameterValues = z.record(id, value).describe('Parameter values by parameter ID; omitted parameters take their defaults.');
 const itemValues = z.record(id, scalar);
 const unit = z.number().min(0).max(1);
-const placement = z.strictObject({ centerX: unit, centerY: unit, zoom: z.number().min(1).max(maxZoom) });
+const placement = {
+  centerX: unit.describe('Horizontal centre of the visible region, 0 (left edge of the photo) to 1 (right edge).'),
+  centerY: unit.describe('Vertical centre of the visible region, 0 (top) to 1 (bottom).'),
+  zoom: z.number().min(1).max(maxZoom).describe('1 fills the box with the whole photo cropped to its shape; larger values zoom in.'),
+};
+const placementSchema = z.strictObject(placement);
+const focus = z.strictObject({ centerX: placement.centerX, centerY: placement.centerY })
+  .describe('The point to keep visible when the photo is cropped to other layouts.');
 const initialBox = z.strictObject({
-  photo: id.optional(), text: id.optional(), params: parameterValues.default({}),
-  crops: z.record(id, placement).optional(), focus: z.strictObject({ centerX: unit, centerY: unit }).optional(),
+  photo: id.optional().describe('Photo source ID.'), text: id.optional().describe('Markdown text source ID.'),
+  params: parameterValues.default({}),
+  crops: z.record(id, placementSchema).optional().describe('Saved crop per layout ID.'), focus: focus.optional(),
 }).refine(({ photo, text, crops, focus }) => !(photo && text) && (!(crops || focus) || !!photo),
   'A box has one source, and only photos have crops or focus.');
-const boxTarget = z.strictObject({ spread: spreadReference, box: id });
+const spreadTarget = spreadReference.describe('Spread ID, or a $ref defined earlier in this batch.');
+const boxId = id.describe('Box ID, as the spread\'s layout declares it.');
+const boxTarget = z.strictObject({ spread: spreadTarget, box: boxId });
 const parameterTarget = {
-  scope: z.enum(['document', 'spread', 'box', 'element']),
-  spread: spreadReference.optional(), owner: id.optional(), key: id,
+  scope: z.enum(['document', 'spread', 'box', 'element'])
+    .describe('Where the parameter is saved: document (whole book), spread, or a box or element of a spread. Parameters an element editor owns for its spread use spread.'),
+  spread: spreadTarget.optional().describe('Spread of a spread, box or element parameter. Omit for document parameters.'),
+  owner: id.optional().describe('Box or element ID of a box or element parameter.'),
+  key: id.describe('Parameter ID.'),
 };
+const after = spreadReference.nullable().optional()
+  .describe('Insert after this spread ID or $ref; null inserts at the start; omitted appends at the end.');
+const ref = id.optional().describe('Name for the new spread, usable as $name in later operations of this batch and in draft preview targets.');
+const definition = id.describe('Layout ID from template.spreads.');
 function validParameterTarget(target: z.infer<z.ZodObject<typeof parameterTarget>>) {
   return target.scope === 'document' ? target.spread === undefined && target.owner === undefined
     : target.scope === 'spread' ? target.spread !== undefined && target.owner === undefined
@@ -40,40 +58,61 @@ function validParameterTarget(target: z.infer<z.ZodObject<typeof parameterTarget
 }
 
 const targetMessage = 'Document parameters omit spread/owner, spread parameters require spread, and box/element parameters require spread and owner.';
+const itemId = id.describe('ID of an existing list item.');
 export const projectOperationSchema = z.discriminatedUnion('op', [
-  z.strictObject({ op: z.literal('set_title'), title: z.string().trim().min(1) }),
-  z.strictObject({ op: z.literal('select_format'), format: id }),
-  z.strictObject({ op: z.literal('set_parameter'), ...parameterTarget, value }).refine(validParameterTarget,
-    'Document parameters omit spread/owner, spread parameters require spread, and box/element parameters require spread and owner.'),
-  z.strictObject({ op: z.literal('reset_parameter'), ...parameterTarget }).refine(validParameterTarget,
-    'Document parameters omit spread/owner, spread parameters require spread, and box/element parameters require spread and owner.'),
+  z.strictObject({ op: z.literal('set_title'), title: z.string().trim().min(1).describe('The book title.') })
+    .describe('Rename the book.'),
+  z.strictObject({ op: z.literal('select_format'), format: id.describe('Format ID from template.formats.') })
+    .describe('Choose one of the template\'s print formats.'),
+  z.strictObject({ op: z.literal('set_parameter'), ...parameterTarget, value }).refine(validParameterTarget, targetMessage)
+    .describe('Set a document, spread, box or element parameter.'),
+  z.strictObject({ op: z.literal('reset_parameter'), ...parameterTarget }).refine(validParameterTarget, targetMessage)
+    .describe('Remove a saved parameter value so its default applies again.'),
   // Item operations on a list parameter, addressed by the item's stable id, so an agent does not resend the list.
   z.strictObject({ op: z.literal('insert_list_item'), ...parameterTarget, item: itemValues.describe('Field values; missing fields take their defaults. An id is generated unless given.'),
-    after: id.nullable().optional().describe('Item id to insert after, null for the start; omitted appends.') }).refine(validParameterTarget, targetMessage),
-  z.strictObject({ op: z.literal('update_list_item'), ...parameterTarget, id, values: itemValues }).refine(validParameterTarget, targetMessage),
-  z.strictObject({ op: z.literal('remove_list_item'), ...parameterTarget, id }).refine(validParameterTarget, targetMessage),
-  z.strictObject({ op: z.literal('move_list_item'), ...parameterTarget, id,
-    after: id.nullable().describe('Item id to move after, or null to move to the start.') }).refine(validParameterTarget, targetMessage),
+    after: id.nullable().optional().describe('Item id to insert after, null for the start; omitted appends.') }).refine(validParameterTarget, targetMessage)
+    .describe('Add an item to a list parameter.'),
+  z.strictObject({ op: z.literal('update_list_item'), ...parameterTarget, id: itemId,
+    values: itemValues.describe('Field values to change; other fields keep their values.') }).refine(validParameterTarget, targetMessage)
+    .describe('Change fields of one list item.'),
+  z.strictObject({ op: z.literal('remove_list_item'), ...parameterTarget, id: itemId }).refine(validParameterTarget, targetMessage)
+    .describe('Remove one list item.'),
+  z.strictObject({ op: z.literal('move_list_item'), ...parameterTarget, id: itemId,
+    after: id.nullable().describe('Item id to move after, or null to move to the start.') }).refine(validParameterTarget, targetMessage)
+    .describe('Move one list item.'),
   z.strictObject({
-    op: z.literal('insert_spread'), definition: id, ref: id.optional(), after: spreadReference.nullable().optional(),
-    params: parameterValues.default({}), boxes: z.record(id, initialBox).default({}),
-    elements: z.record(id, z.strictObject({ params: parameterValues.default({}) })).default({}),
-  }),
-  z.strictObject({ op: z.literal('duplicate_spread'), spread: spreadReference, ref: id.optional(), after: spreadReference.nullable().optional() }),
-  z.strictObject({ op: z.literal('move_spread'), spread: spreadReference,
-    after: spreadReference.nullable().describe('Required destination. Use null to move to the start, or an existing spread ID or $alias to move immediately after it.') }),
-  z.strictObject({ op: z.literal('remove_spread'), spread: spreadReference }),
-  z.strictObject({ op: z.literal('switch_layout'), spread: spreadReference, definition: id }),
-  z.strictObject({ op: z.literal('assign_source'), ...boxTarget.shape, kind: z.enum(['photo', 'text']), source: id }),
-  z.strictObject({ op: z.literal('clear_box'), ...boxTarget.shape }),
-  z.strictObject({ op: z.literal('swap_content'), from: boxTarget, to: boxTarget }),
-  z.strictObject({ op: z.literal('set_crop'), ...boxTarget.shape, ...placement.shape }),
-  z.strictObject({ op: z.literal('set_photo_metadata'), photo: id, values: z.strictObject({
-    title: z.string().nullable().optional(), caption: z.string().nullable().optional(),
-    credit: z.string().nullable().optional(), altText: z.string().nullable().optional(),
-  }) }),
+    op: z.literal('insert_spread'), definition, ref, after,
+    params: parameterValues.default({}),
+    boxes: z.record(id, initialBox).default({}).describe('Initial contents of boxes, by box ID.'),
+    elements: z.record(id, z.strictObject({ params: parameterValues.default({}) })).default({}).describe('Initial element parameters, by element ID.'),
+  }).describe('Add a spread with the given layout.'),
+  z.strictObject({ op: z.literal('duplicate_spread'), spread: spreadTarget, ref, after })
+    .describe('Copy a spread with its contents. after defaults to directly after the original.'),
+  z.strictObject({ op: z.literal('move_spread'), spread: spreadTarget,
+    after: spreadReference.nullable().describe('Required destination. Use null to move to the start, or an existing spread ID or $alias to move immediately after it.') })
+    .describe('Move a spread.'),
+  z.strictObject({ op: z.literal('remove_spread'), spread: spreadTarget }).describe('Remove a spread.'),
+  z.strictObject({ op: z.literal('switch_layout'), spread: spreadTarget, definition })
+    .describe('Change a spread to another layout with the same page footprint, carrying over content with matching IDs. Also switches layout family variants.'),
+  z.strictObject({ op: z.literal('assign_source'), ...boxTarget.shape,
+    kind: z.enum(['photo', 'text']).describe('photo for photo boxes, text for Markdown boxes.'),
+    source: id.describe('Source ID from inspect_book sources or import_sources.') })
+    .describe('Put a photo or Markdown text into a box.'),
+  z.strictObject({ op: z.literal('clear_box'), ...boxTarget.shape }).describe('Remove the content of a box.'),
+  z.strictObject({ op: z.literal('swap_content'), from: boxTarget.describe('First box.'), to: boxTarget.describe('Second box.') })
+    .describe('Exchange the contents of two boxes, on the same or different spreads.'),
+  z.strictObject({ op: z.literal('set_crop'), ...boxTarget.shape, ...placement })
+    .describe('Set the crop of the photo in a box for the spread\'s current layout.'),
+  z.strictObject({ op: z.literal('set_photo_metadata'), photo: id.describe('Photo source ID.'), values: z.strictObject({
+    title: z.string().nullable().optional().describe('Short title of the photo.'),
+    caption: z.string().nullable().optional().describe('Caption text that templates may print with the photo.'),
+    credit: z.string().nullable().optional().describe('Photographer or source credit.'),
+    altText: z.string().nullable().optional().describe('Description of the photo for accessibility.'),
+  }).describe('Fields to change; null clears a field, omitted fields stay as they are.') })
+    .describe('Change the title, caption, credit or alt text saved with a photo.'),
 ]);
-export const projectOperationsSchema = z.array(projectOperationSchema).min(1).max(100);
+export const projectOperationsSchema = z.array(projectOperationSchema).min(1).max(100)
+  .describe('Up to 100 operations, applied in order as one atomic step: either all succeed or none is saved.');
 export type ProjectOperation = z.input<typeof projectOperationSchema>;
 export type ProjectOperations = z.input<typeof projectOperationsSchema>;
 export type ProjectCommandResult = {

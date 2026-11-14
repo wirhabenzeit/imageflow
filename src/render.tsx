@@ -1558,7 +1558,9 @@ export async function startRender(root: HTMLElement) {
     // them as they arrive.
     const pictureFailures = present || lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
     if (edit && view === 'thumbs') await settleRestoredImages();
-    const images = decodable(root);
+    // Presentation waits for the visible crop's photos below. SVG photos elsewhere in the book use detached
+    // decode proxies that Chromium may never resolve while the candidate frame is hidden.
+    const images = present ? [] : decodable(root);
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });

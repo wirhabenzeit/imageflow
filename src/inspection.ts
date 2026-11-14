@@ -3,8 +3,10 @@ import { identifier } from './project';
 
 const id = identifier.refine((value) => value.length <= 256);
 export const makeInspectionSchema = (spread: z.ZodType<string, string>) => z.strictObject({
-  spread, box: id.optional(), element: id.optional(),
-  offset: z.int().min(0).default(0), limit: z.int().min(1).max(100).default(30),
+  spread: spread.describe('Spread to measure, or a $ref of a spread inserted by the draft.'),
+  box: id.optional().describe('Measure just this box.'), element: id.optional().describe('Measure just this element.'),
+  offset: z.int().min(0).default(0).describe('Index of the first item to return, for paging.'),
+  limit: z.int().min(1).max(100).default(30).describe('Number of items to return. Continue from nextOffset.'),
 }).refine(({ box, element }) => !(box && element), 'Choose either a box or an element.');
 export const inspectionSchema = makeInspectionSchema(id);
 export type InspectionRequest = z.input<typeof inspectionSchema>;

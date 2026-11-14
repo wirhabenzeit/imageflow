@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 // Tooling only. Rendering already refuses relative imports through dot folders, and templateFiles leaves them
@@ -43,4 +43,16 @@ export async function writeAuthoringSnapshot(template: string, typesRoot: string
     await mkdir(dirname(join(template, path)), { recursive: true });
     await writeFile(join(template, path), bytes);
   }
+}
+
+// Where Claude Code and other agents that read .claude/skills look for project skills: an agent started in the book
+// folder, or in a folder above it, finds the template API reference without installing anything.
+export const agentSkillFolder = '.claude/skills/imageflow-templates';
+
+/** Copies the installed imageflow-templates skill into a newly created book. Like the SDK snapshot, it is written only
+ * when a book is created, never when one is opened, and it is outside the book's inputs and template identity. */
+export async function writeAgentSkill(book: string, skills: string) {
+  const target = join(book, agentSkillFolder);
+  await rm(target, { recursive: true, force: true });
+  await cp(join(skills, 'imageflow-templates'), target, { recursive: true });
 }
