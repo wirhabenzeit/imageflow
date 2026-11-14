@@ -84,10 +84,9 @@
 .field-book .contents-page { font: 500 9pt/1.6 "Field Sans"; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* Picture list: every photo once, with its pages. */
-.field-book .pictures { margin: 0; padding: 0; list-style: none; columns: 2; column-gap: 8mm; font: 400 9pt/1.35 "Field Serif"; }
-.field-book .pictures li { display: flex; flex-direction: column; gap: .6mm; margin: 0 0 3mm; break-inside: avoid; }
-.field-book .picture-pages { font: 500 8pt/1.35 "Field Sans"; color: var(--muted); font-variant-numeric: tabular-nums; }
-.field-book .pictures .more { color: var(--muted); }
+.field-book .picture { display: flex; flex-direction: column; gap: .5mm; font: 400 9pt/1.3 "Field Serif"; }
+.field-book .picture > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.field-book .picture-pages { font: 500 8pt/1.3 "Field Sans"; color: var(--muted); font-variant-numeric: tabular-nums; }
 .field-book .colophon { font: 500 8.5pt/1.45 "Field Sans"; color: var(--muted); white-space: pre-line; }
 
 /* Route inset on panoramas: a GPX track without a basemap. */

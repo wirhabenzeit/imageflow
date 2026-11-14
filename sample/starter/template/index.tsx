@@ -1,4 +1,4 @@
-import { box, defineTemplate, geometry, mm, p, printFormat, pt, Spread } from 'imageflow';
+import { box, defineTemplate, geometry, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { BookSpread, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
 import { MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
@@ -186,8 +186,11 @@ const story = (photo: 'left' | 'right') => (ctx: RenderContext<StoryLayout, type
   </Paper>;
 };
 
-// Which page each photo box is on, for the picture list. Boxes not listed are on the left page.
-const boxPages: Record<string, Record<string, 'left' | 'right'>> = {
+// Which pages each photo box covers, for the picture list. Boxes not listed are on the left page; `both` is a photo
+// across the spread.
+const boxPages: Record<string, Record<string, 'left' | 'right' | 'both'>> = {
+  opener: { hero: 'both' },
+  panorama: { hero: 'both' },
   storyRight: { hero: 'right' },
   statement: { hero: 'right' },
   single: { hero: 'right' },
@@ -198,21 +201,79 @@ const boxPages: Record<string, Record<string, 'left' | 'right'>> = {
   feature5: { second: 'right', third: 'right', fourth: 'right', fifth: 'right' },
   cover: { hero: 'right' },
 };
-const pageOf = (spread: BookSpread, box: string) =>
-  spread.page.number ?? (boxPages[spread.layout]?.[box] === 'right' ? spread.page.right ?? spread.page.left : spread.page.left ?? spread.page.right);
+function pagesOf(spread: BookSpread, box: string): number[] {
+  const { left, right, number } = spread.page;
+  if (number !== undefined) return [number];
+  const side = boxPages[spread.layout]?.[box] ?? 'left';
+  const pages = side === 'both' ? [left, right] : side === 'right' ? [right ?? left] : [left ?? right];
+  return pages.filter((at): at is number => at !== undefined);
+}
 
 /** Every photo in the book once, with the pages it is on, in book order. */
 function pictureList(spreads: readonly BookSpread[]) {
   const pictures = new Map<string, { photo: Photo; pages: number[] }>();
   for (const spread of spreads) for (const { box, photoId, photo } of spread.photos) {
-    const at = pageOf(spread, box);
-    if (!photoId || !photo || at === undefined) continue;
+    if (!photoId || !photo) continue;
     const entry = pictures.get(photoId) ?? pictures.set(photoId, { photo, pages: [] }).get(photoId)!;
-    if (!entry.pages.includes(at)) entry.pages.push(at);
+    for (const at of pagesOf(spread, box)) if (!entry.pages.includes(at)) entry.pages.push(at);
   }
   return [...pictures.values()];
 }
-const maxPictures = 36;
+
+// The picture list runs over every Picture list spread in book order: the closing page holds what fits, and a full
+// Picture list spread before it holds more. Entries have a fixed height (one line for the title, one for pages and
+// credit), so how many fit is known before anything renders, and no entry is dropped without a Book check warning.
+const pictureLayouts = ['pictures', 'credits'];
+const pictureRow = 10.5; // mm: 9 pt title and 8 pt pages line, with the gap below
+const pictureColumnGap = 8; // mm
+function pictureColumns(layout: string, at: ReturnType<Context['geometry']['design']>): Rect[] {
+  const sides = layout === 'pictures' ? (['left', 'right'] as const) : (['left'] as const);
+  return sides.flatMap((side) => {
+    const area = at[side](margin, 58, page - 2 * margin, layout === 'pictures' ? 202 : 172);
+    const width = (area.width - pictureColumnGap) / 2;
+    return [{ ...area, width }, { ...area, x: area.x + width + pictureColumnGap, width }];
+  });
+}
+const pictureCapacity = (columns: Rect[]) => columns.reduce((sum, column) => sum + Math.floor(column.height / pictureRow), 0);
+
+type PictureContext = Pick<Context, 'book' | 'spread' | 'geometry' | 'view'>;
+/** This spread's share of the picture list: what fits after the Picture list spreads before it. */
+function picturePage(ctx: PictureContext, columns: Rect[]) {
+  const at = ctx.geometry.design(canvas);
+  // Built from the book index before anything renders, so the list follows every photo placed, moved or removed.
+  const pictures = pictureList(ctx.book.spreads);
+  const own = ctx.book.spreads.findIndex(({ id }) => id === ctx.spread);
+  const before = ctx.book.spreads.filter(({ id, layout }, i) => i < own && id !== ctx.spread && pictureLayouts.includes(layout));
+  const after = ctx.book.spreads.some(({ id, layout }, i) => i > own && id !== ctx.spread && pictureLayouts.includes(layout));
+  const offset = before.reduce((sum, { layout }) => sum + pictureCapacity(pictureColumns(layout, at)), 0);
+  const shown = pictures.slice(offset, offset + pictureCapacity(columns));
+  return { pictures, offset, shown, missing: after ? 0 : pictures.length - offset - shown.length };
+}
+
+const listsSomething = (ctx: PictureContext, columns: Rect[]) => {
+  const { pictures, shown } = picturePage(ctx, columns);
+  return shown.length > 0 || pictures.length === 0;
+};
+
+function PictureList(props: { context: PictureContext; columns: Rect[] }) {
+  const ctx = props.context;
+  const { pictures, offset, shown, missing } = picturePage(ctx, props.columns);
+  const slots = props.columns.flatMap((column) =>
+    Array.from({ length: Math.floor(column.height / pictureRow) }, (_, row) => ({ ...column, y: column.y + row * pictureRow, height: pictureRow })));
+  return <>
+    {shown.map(({ photo, pages }, i) => <div key={i} className="picture" style={ctx.geometry.css(slots[i])}>
+      <span className="picture-title">{photo.caption || photo.title || 'Untitled'}</span>
+      <span className="picture-pages">{(pages.length > 1 ? 'Pages ' : 'Page ') + pages.join(', ')}{photo.credit && ' · ' + photo.credit}</span>
+    </div>)}
+    {missing > 0 && <span hidden {...issue({
+      code: 'picture-list-full',
+      message: `The picture list has room for ${offset + shown.length} of the book's ${pictures.length} photos; ${missing} are not listed.`,
+      suggestion: 'Add a Picture list spread before this page; the list continues across it.',
+    })} />}
+    {!pictures.length && ctx.view === 'canvas' && <p className="caption" style={ctx.geometry.css({ ...props.columns[0], height: pictureRow })}>
+      Photos placed in the book are listed here with their pages.</p>}
+  </>;
+}
 
 // The map title sits over the map. The inline map editor draws it too, at the same place, so framing the view shows
 // the page as printed; it stays an ordinary layout parameter, edited where the page shows it.
@@ -315,21 +376,12 @@ export default defineTemplate({
       },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
-        // Built from the book index before anything renders, so the list follows every photo placed, moved or removed.
-        const pictures = pictureList(ctx.book.spreads);
-        const shown = pictures.slice(0, maxPictures);
         return <Paper context={ctx}>
-          <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.left(margin, 36, page - 2 * margin, 14)} />
-          <ol className="pictures" style={ctx.geometry.css(at.left(margin, 58, page - 2 * margin, 178))}>
-            {shown.map(({ photo, pages }, i) => <li key={i}>
-              <span className="picture-title">{photo.caption || photo.title || 'Untitled'}</span>
-              <span className="picture-pages">{(pages.length > 1 ? 'Pages ' : 'Page ') + pages.join(', ')}{photo.credit && ' · ' + photo.credit}</span>
-            </li>)}
-            {pictures.length > shown.length && <li className="more">and {pictures.length - shown.length} more</li>}
-          </ol>
-          {!pictures.length && ctx.view === 'canvas' &&
-            <p className="caption" style={ctx.geometry.css(at.left(margin, 58, page - 2 * margin, 10))}>Photos placed in the book are listed here with their pages.</p>}
-          <ctx.Text presentation="inline" parameter="colophon" className="colophon" rect={at.left(margin, 240, page - 2 * margin, 24)} />
+          {/* No heading over an empty list when earlier Picture list spreads already hold every photo. */}
+          {listsSomething(ctx, pictureColumns('credits', at)) &&
+            <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.left(margin, 36, page - 2 * margin, 14)} />}
+          <PictureList context={ctx} columns={pictureColumns('credits', at)} />
+          <ctx.Text presentation="inline" parameter="colophon" className="colophon" rect={at.left(margin, 244, page - 2 * margin, 22)} />
         </Paper>;
       },
     }),
@@ -516,6 +568,22 @@ export default defineTemplate({
         return <Paper context={ctx} bled={{ left: true, right: true }}>
           <MapView values={values} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
           {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(mapTitleRect(ctx.format))}>{ctx.params.mapTitle}</h2>}
+        </Paper>;
+      },
+    }),
+
+    // More room for the picture list, before the closing page. The list starts on the first Picture list spread in
+    // the book and continues on the next.
+    pictures: spread({
+      label: 'Picture list spread',
+      parameters: { listHeading: p.string({ label: 'Heading', default: 'Pictures' }) },
+      render: (ctx) => {
+        const at = ctx.geometry.design(canvas);
+        return <Paper context={ctx}>
+          {/* No heading over an empty list when earlier Picture list spreads already hold every photo. */}
+          {listsSomething(ctx, pictureColumns('pictures', at)) &&
+            <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.left(margin, 36, page - 2 * margin, 14)} />}
+          <PictureList context={ctx} columns={pictureColumns('pictures', at)} />
         </Paper>;
       },
     }),
