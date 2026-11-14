@@ -64,7 +64,7 @@ async function packageApp() {
         }],
       },
       // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar.
-      asar: { unpackDir: 'node_modules/@img', unpack: '**/mcp-bridge.cjs' },
+      asar: { unpackDir: 'node_modules/@img', unpack: '**/{mcp-bridge.cjs,mac-header.node}' },
       // Document icons; the app icon comes from `icon` below. Sources and generator: resources/brand/, npm run build:icons.
       extraResource: [esbuildBinary, books, previews, ...['ImageFlowBook.icns', 'ImageFlowTemplate.icns'].map((icon) => join(root, 'resources', icon))],
       icon: join(root, 'resources', 'ImageFlow.icns'),

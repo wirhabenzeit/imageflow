@@ -25,6 +25,7 @@ import { photoFile } from './photos';
 import { captureBookPreview, checkBookRender } from './preview';
 import { PreviewError } from '../src/preview';
 import { DocumentSession } from './document-session';
+import { configureMacHeader } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { createDocument, documentIdentity, documentPath, isDocument, RecentDocuments } from './documents';
 import { SettingsStore } from './settings';
@@ -391,6 +392,7 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
       if (quitting) throw new Error('ImageFlow is closing.');
       editor = new BrowserWindow({ width: 1520, height: 950, minWidth: 940, minHeight: 650, show: false,
         webPreferences: windowOptions() });
+      configureMacHeader(editor);
       // The document session owns the native title; the editor page's HTML title must not replace it.
       editor.on('page-title-updated', (event) => event.preventDefault());
       secureWindow(editor);
