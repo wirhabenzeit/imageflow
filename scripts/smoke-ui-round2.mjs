@@ -15,7 +15,6 @@ await mkdir(join(folder, 'photos'));
 await writeFile(join(folder, 'template/index.tsx'), `import { defineTemplate, mm, p, printFormat, Spread, box } from 'imageflow';
 const make = (height) => printFormat({label:'Size '+height,trim:{width:mm(100),height:mm(height)},bleed:{all:mm(3),binding:mm(0)},safe:mm(5),ends:'single-pages',pageCount:{min:2,max:100,step:2}});
 export default defineTemplate({id:'polish',version:'1',contract:1,formats:{small:make(100),tall:make(170)},parameters:{show:p.boolean({label:'Show footer',default:true}),footer:p.string({label:'Footer',default:'Trip'})},
-controls:['show',{group:'Details',when:{show:true},controls:[{parameter:'footer',label:'Book footer'}]}],
 spreads:Object.fromEntries(['right','spread','left'].map(span=>[span,{label:span,span,boxes:{hero:box.photo('Hero')},render:ctx=><Spread><ctx.PhotoBox id="hero" rect={ctx.geometry.spread('bleed')}/>{ctx.document.show&&<span style={{position:'absolute',top:'5mm',left:'5mm'}}>{ctx.document.footer}</span>}</Spread>}]))});`);
 await writeFile(join(folder, 'project.json'), JSON.stringify({ schemaVersion: 1, title: 'Polish', template: { id: 'polish', version: '1' },
   spreads: Array.from({ length: 10 }, (_, i) => ({ id: 's' + i, definition: i === 0 ? 'right' : i === 9 ? 'left' : 'spread', boxes: { hero: { photo: 'image' } } })) }));
@@ -41,8 +40,8 @@ try {
   await ready(page);
   const settings = page.locator('.document-settings');
   await settings.locator('summary').click();
-  assert.equal(await settings.getByLabel('Book footer', { exact: true }).count(), 1);
-  await settings.getByLabel('Book footer', { exact: true }).fill('WWW');
+  assert.equal(await settings.getByLabel('Footer', { exact: true }).count(), 1);
+  await settings.getByLabel('Footer', { exact: true }).fill('WWW');
   await page.keyboard.press('Tab');
   await ready(page);
   assert.equal(await page.locator('.presentation').count(), 0, 'Typing W in a field must not present');

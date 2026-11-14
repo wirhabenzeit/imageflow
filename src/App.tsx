@@ -1528,7 +1528,7 @@ export function App() {
                 {missingFormat && <option value={summary.project.format} disabled>{summary.project.format} (not in the template)</option>}
                 {Object.entries(template.formats).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
               </select></label>}
-            <Fields controls={template.controls} schema={template.parameters} values={summary.project.params} exclude={editorOwnedDocument(template)}
+            <Fields schema={template.parameters} values={summary.project.params} exclude={editorOwnedDocument(template)}
               update={(id, value) => edit(({ project }) => { project.params[id] = value; })} />
 
           </fieldset>

@@ -33,11 +33,6 @@ function PatternEditor({ values, set, readOnly, Control }: ElementEditorProps<ty
 export default defineTemplate({
   id: 'example-editing-levels', version: '1.0.0', contract: 1,
   format,
-  parameters: {
-    showFooter: p.boolean({ label: 'Show footer', default: true }),
-    footer: p.string({ label: 'Footer', default: 'Our travels' }),
-  },
-  controls: ['showFooter', { group: 'Footer', when: { showFooter: true }, controls: ['footer'] }],
   spreads: ({ spread }) => ({
     marks: spread({
       label: 'Marks',
@@ -67,7 +62,6 @@ export default defineTemplate({
         const page = ctx.geometry.page('right', 'safe');
         const { emoji, stamp } = ctx.elements;
         return <Spread>
-          {ctx.document.showFooter && <span {...ctx.edit('document.footer')}>{ctx.document.footer}</span>}
           <ctx.Element id="emoji" rect={{ ...page, width: 40, height: 30 }} style={{ fontSize: emoji.params.size + 'pt', lineHeight: 1 }}>
             {emoji.params.emoji}
           </ctx.Element>
@@ -95,7 +89,6 @@ export default defineTemplate({
           : pattern === 'stripes' ? 'repeating-linear-gradient(45deg, ' + tint + ' 0 2mm, transparent 2mm 5mm)'
           : 'linear-gradient(' + tint + ' 0.4mm, transparent 0.4mm), linear-gradient(90deg, ' + tint + ' 0.4mm, transparent 0.4mm)';
         return <Spread>
-          {ctx.document.showFooter && <span {...ctx.edit('document.footer')}>{ctx.document.footer}</span>}
           <ctx.Element id="backdrop" rect={ctx.geometry.spread('bleed')} style={{ backgroundImage: image, backgroundSize: '6mm 6mm', opacity }} />
         </Spread>;
       },

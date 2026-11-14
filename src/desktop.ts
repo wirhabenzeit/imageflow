@@ -173,7 +173,7 @@ export type TemplateInfo = {
   id?: string; label?: string; description?: string;
   // The template's own preview image, relative to the template folder (`preview` in defineTemplate).
   preview?: string;
-  version: string; parameters: Parameters; controls?: ControlItem[]; spreads: Record<string, SpreadDefinition>;
+  version: string; parameters: Parameters; spreads: Record<string, SpreadDefinition>;
   // Families of layouts, by ID. `picker` is set when the family supplies its own picker (the component stays in the
   // render frame).
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string } }>;

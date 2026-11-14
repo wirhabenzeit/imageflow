@@ -370,8 +370,3 @@ defineTemplate({ id: 'preview', version: '1', contract: 1, format, preview: './p
 // @ts-expect-error a path, not an imported image or a list
 defineTemplate({ id: 'preview', version: '1', contract: 1, format, preview: ['./preview.jpg'],
   spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });
-// Book settings arrange controls with the same parameter-ID checking as other scopes.
-defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo, controls: ['foo'], spreads: { a: imported } });
-defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: foo,
-  // @ts-expect-error Unknown document parameter.
-  controls: ['fooo'], spreads: { a: imported } });
