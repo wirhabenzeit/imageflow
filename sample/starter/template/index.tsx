@@ -1,4 +1,4 @@
-import { asset, box, defineTemplate, Element, file, geometry, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
+import { asset, box, defineTemplate, Element, file, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Spread } from 'imageflow';
 import type { ElementEditorProps, ImageFlowNode, LayoutPickerProps, Photo, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
 import { MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
@@ -25,8 +25,10 @@ const bookFormat = (label: string, width: number, height: number) => printFormat
   },
 });
 
-const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90 });
-const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
+// Headings may be formatted: **bold**, *italic* and ~~strikethrough~~ (styles.css picks the faces).
+const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90, markdown: 'inline' });
+// Contents entries list a heading as plain text, without its formatting markers.
+const oneLine = (text: string) => plainText(text).replace(/\s+/g, ' ').trim();
 const textSize = p.number({ label: 'Body size', default: 11, min: 8, max: 16, step: .5, unit: 'pt',
   description: 'Type size of body text and Markdown in the whole book.' });
 // For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
@@ -313,7 +315,7 @@ function MapLayoutEditor(props: MapEditorProps) {
   // Inside the page's own type context (`.field-book`, its ink), so the title prints exactly as it shows here.
   return <MapEditor {...props}>
     {typeof title === 'string' && title && map && <div className={'field-book map-title-layer ' + (paper ?? '')} style={{ '--ink': accent }}>
-      <h2 className="map-title map-title-overlay" style={geometry.css({ ...at, x: at.x - map.x, y: at.y - map.y })}>{title}</h2>
+      <h2 className="map-title map-title-overlay" style={geometry.css({ ...at, x: at.x - map.x, y: at.y - map.y })}><FormattedText value={title} /></h2>
     </div>}
   </MapEditor>;
 }
@@ -385,7 +387,7 @@ export default defineTemplate({
     }),
     map: spread({
       label: 'Map',
-      parameters: { mapTitle: p.string({ label: 'Map title', default: '', maxLength: 80, placeholder: 'Shown on the map' }) },
+      parameters: { mapTitle: p.string({ label: 'Map title', default: '', maxLength: 80, placeholder: 'Shown on the map', markdown: 'inline' }) },
       elements: { map: {
         label: 'Map',
         parameters: mapParameters,
@@ -397,7 +399,7 @@ export default defineTemplate({
         const { trackWidth, ...values } = ctx.elements.map.params;
         return <Paper context={ctx} bled={{ left: true, right: true }}>
           <MapView values={values} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
-          {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(mapTitleRect(ctx.format))}>{ctx.params.mapTitle}</h2>}
+          {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(mapTitleRect(ctx.format))}><FormattedText value={ctx.params.mapTitle} /></h2>}
         </Paper>;
       },
     }),
