@@ -76,8 +76,8 @@ export type HistoryState = { undo?: string; redo?: string };
 export type McpLaunch = { command: string; args: string[]; env: Record<string, string> };
 export type McpSettings = { enabled: boolean; clients: { name: string }[]; launch: McpLaunch; claudeCode: string };
 // `claude` opens Claude Desktop's extension installer; `codex` registers the bridge for the ChatGPT desktop app and
-// Codex, which share ~/.codex/config.toml.
-export type McpClientTarget = 'claude' | 'codex';
+// Codex, which share ~/.codex/config.toml. `skill` saves the ImageFlow templates agent skill as an archive.
+export type McpClientTarget = 'claude' | 'codex' | 'skill';
 export type ProjectChange = Result<ProjectSummary> | { building: true };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions.
 export type ImportRequest = {

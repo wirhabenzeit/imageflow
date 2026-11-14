@@ -90,7 +90,7 @@ The canvas scrolls through the whole book; the left sidebar contains spread thum
 
 **Presentation** (⇧W) opens a separate fullscreen window on the editor's display. The editor keeps its size and title bar. Escape or Close Window dismisses presentation and returns to the last viewed spread; closing the book closes its presentation too. Starting presentation from another book switches to that book.
 
-Open **Settings → Agents** to configure the [MCP connection](docs/mcp.md) for local agents.
+Open **Settings → Agents** to configure the [MCP connection](docs/mcp.md) for local agents. The [imageflow-templates skill](skills/imageflow-templates/SKILL.md) gives agents the template API reference and examples; Settings → Agents saves it for upload, and `/plugin marketplace add wirhabenzeit/imageflow` installs it in Claude Code together with the MCP server.
 
 When agent connections are enabled, **Agent · N** in the footer shows the number of connected clients. Click it to inspect or disable the connection.
 

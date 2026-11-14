@@ -1,7 +1,7 @@
 import { sourcePath, sourceLinked } from '../src/source-locations';
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { capabilities as templateCapabilities, contract1Capabilities, runtimeExports } from '../src/runtime-exports';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from '../src/authoring-check';
 import type { AuthoringDiagnostic } from '../src/authoring';
@@ -30,6 +30,7 @@ import type { FixtureCell } from '../src/fixtures';
 import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
 import { cellReport, fixtureAssets, fixtureDraft, fixtureFindings, fixtureNotEvaluated } from './fixtures';
 import { templateFiles, templateHash } from './template-library';
+import { docTopics } from '../src/doc-topics';
 
 // Fixture checks share the bridge's two-minute call deadline with queueing, so they stop starting renders after this.
 const fixtureBudgetMs = 60_000;
@@ -40,6 +41,7 @@ export class AuthoringError extends Error {
 type Hooks = {
   session: () => ProjectSession | undefined;
   cache: string;
+  // The app's docs folder: template API topics in template-api/ (listed in topics.json) and example templates in examples/.
   docs: string;
   check: (book: OpenProject, request: AuthoringCheckRequest, signal: AbortSignal, index?: ProjectInputIndex, draft?: CheckDraft) => Promise<AuthoringCheckResult>;
   changed: (book: OpenProject) => void;
@@ -89,11 +91,16 @@ async function contextSource(folder: string, path: string, signal: AbortSignal) 
     truncated: bytes.length > 32_000, observation: before.stamp };
 }
 
+// Generated folders (the saved dependency bundle and the authoring SDK) are listed once, not file by file.
+const generatedTemplateFolders = ['template/vendor/', 'template/.imageflow-sdk/'];
+
 async function contextTemplateFiles(folder: string) {
   const root = join(folder, 'template');
   if (await realpath(root) !== root) throw new AuthoringError('PATH_NOT_ALLOWED', 'The template folder points outside its expected location.');
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
-  return entries.filter((entry) => entry.isFile()).map((entry) => relative(folder, join(entry.parentPath, entry.name))).sort().slice(0, 200);
+  const files = entries.filter((entry) => entry.isFile()).map((entry) => relative(folder, join(entry.parentPath, entry.name)).split(sep).join('/'));
+  const listed = new Set(files.map((path) => generatedTemplateFolders.find((prefix) => path.startsWith(prefix)) ?? path));
+  return [...listed].sort().slice(0, 200);
 }
 
 async function templateObservation(folder: string, signal: AbortSignal) {
@@ -127,14 +134,37 @@ function sameDocuments(before: PromiseSettledResult<{ source: Buffer }>[], after
 }
 
 // Complete example templates shipped next to the API reference. The first line of each is its description.
-async function templateExamples(reference: string) {
-  const folder = join(dirname(reference), 'examples');
+// Every example is listed; only the requested ones carry their source.
+async function templateExamples(docs: string, include: boolean | string[] | undefined) {
+  const folder = join(docs, 'examples');
   const names = (await readdir(folder)).filter((name) => name.endsWith('.tsx')).sort();
-  return Promise.all(names.map(async (name) => {
+  const examples = await Promise.all(names.map(async (name) => {
     const source = await readFile(join(folder, name), 'utf8');
     return { name: basename(name, '.tsx'), description: source.split('\n', 1)[0].replace(/^\/\/\s*/, ''), source };
   }));
+  const wanted = Array.isArray(include) ? new Set(include) : undefined;
+  const missing = [...wanted ?? []].filter((name) => !examples.some((example) => example.name === name));
+  if (missing.length) {
+    throw new AuthoringError('EXAMPLE_NOT_FOUND', 'No example named ' + missing.join(', ') + '. Examples: ' + examples.map(({ name }) => name).join(', ') + '.');
+  }
+  return examples.map(({ source, ...example }) => include === true || wanted?.has(example.name) ? { ...example, source } : example);
 }
+
+// The template API reference, one Markdown file per topic. The context lists the topics; agents request the ones they need.
+async function referenceTopics(docs: string, requested: string[]) {
+  const folder = join(docs, 'template-api');
+  const topics = await Promise.all(docTopics.map(async (topic) => ({ ...topic, bytes: (await stat(join(folder, topic.id + '.md'))).size })));
+  const missing = requested.filter((id) => !topics.some((topic) => topic.id === id));
+  if (missing.length) {
+    throw new AuthoringError('DOC_NOT_FOUND', 'No reference topic ' + missing.join(', ') + '. Topics: ' + topics.map(({ id }) => id).join(', ') + '.');
+  }
+  const texts = await Promise.all(requested.map((id) => readFile(join(folder, id + '.md'), 'utf8')));
+  return { topics, docs: Object.fromEntries(requested.map((id, index) => [id, texts[index]])) };
+}
+
+const contextGuide = 'Start with docs: ["authoring-workflow"]. Request reference topics from topics with docs, example templates from examples with ' +
+  'includeExamples, and template or Markdown files from templateFiles with includeSource. Edit template/ files with workspace tools, save project ' +
+  'data with apply_project_changes, and verify every edit with check_book.';
 
 export function createAuthoringService(hooks: Hooks) {
   let cachedCheck: { session: ProjectSession; inputs: ProjectInputCapture; result: AuthoringCheckResult } | undefined;
@@ -440,7 +470,7 @@ export function createAuthoringService(hooks: Hooks) {
       let verifySources: (() => Promise<void>) | undefined;
       if (name === 'get_authoring_context') {
         const sources: Record<string, { text: string; sha256: string; truncated: boolean }> = {};
-        const requested: string[] = args.includeSource ?? ['template/index.tsx'];
+        const requested: string[] = args.includeSource ?? [];
         const readSources = () => Promise.allSettled(requested.map((path) => contextSource(folder, path, signal)));
         const sourceResults = await readSources();
         for (const [index, source] of sourceResults.entries()) {
@@ -458,23 +488,14 @@ export function createAuthoringService(hooks: Hooks) {
             throw new AuthoringError('SOURCE_CHANGED', 'Sources changed while preparing context. Check again.');
           }
         };
+        const reference = await referenceTopics(hooks.docs, [...new Set<string>(args.docs ?? [])]);
         result = {
-          project: session.handle, revision: report.revision, root: session.book.folder,
-          workflow: ['Edit template/ TSX, CSS and assets directly with workspace tools.', 'Edit registered Markdown at its source location; linked Markdown stays outside the package.',
-            'Call check_book with a spread preview after edits; images include whole-book text flow.',
-            'Preview a new or unused layout before saving it: call check_book with draft.operations (an insert_spread with a ref) and target the preview at its $ref.',
-            'Stress-test layouts with check_book fixtures: synthetic long, empty, portrait-photo and malformed-file content per format, with a coverage matrix and a bannered fixture contact sheet.',
-            'Use apply_project_changes for project.json/photos.json; never edit these manifests while the app is open.',
-            'Copy new content into inbox/ and call import_sources. Then assign returned IDs with a command batch.',
-            'To start or extend a template, call get_authoring_context with includeExamples and copy the closest example layout.',
-            'For an empty book, inspect template.openingSpreads and insert suitable layouts with insert_spread; openingSpreads describes new-book defaults and is not applied again automatically.',
-            'Parameter commands use saved scopes: document, spread, box or element. An element editor can also own spread parameters; use scope:spread for those fields, not scope:element.',
-            'To find the parameter a request means, read each parameter\'s description with its unit, range and options; give new parameters a description when their meaning or direction is not obvious from the label.',
-            'Use a layout family when layouts are variants of one design (template.layoutFamilies; family and variant on each layout); pickers should choose by variant tags, not hard-coded IDs. Switch variants with switch_layout and the layout ID.'],
+          project: session.handle, revision: report.revision, root: session.book.folder, guide: contextGuide,
           template, templateIdentity, diagnostics, checks: report.checks, sources,
           templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
-          apiReference: await readFile(hooks.docs, 'utf8'),
-          ...(args.includeExamples ? { examples: await templateExamples(hooks.docs) } : {}),
+          topics: reference.topics,
+          ...(args.docs?.length ? { docs: reference.docs } : {}),
+          examples: await templateExamples(hooks.docs, args.includeExamples),
           capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
             maxPreviewEdge: 1600, typescript: true, printPreflight: false, draftPreview: true, contactSheets: true,
             fixtures: { cases: [...fixtureCases], maxLayouts: fixtureLimits.layouts, maxFormats: fixtureLimits.formats,

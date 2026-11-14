@@ -8,7 +8,8 @@
     "strict": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "resolveJsonModule": true
   },
   "include": ["src", "desktop", "tests", "vite.config.ts"],
   // Template-side type checks with the starter's own settings: `tsc -p tests/types`.

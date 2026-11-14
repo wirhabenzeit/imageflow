@@ -154,6 +154,8 @@ try {
   assert.equal(project.template.id, 'travel');
   assert.equal(project.template.version, '1.0.0');
   assert.match(project.template.hash, /^[a-f0-9]{64}$/);
+  // Agents started in or above a new book find the template API reference as a project skill.
+  assert.match(await readFile(join(book, '.claude/skills/imageflow-templates/SKILL.md'), 'utf8'), /^---\nname: imageflow-templates\n/);
   assert.deepEqual(project.spreads.map(({ definition }) => definition), ['title', 'story', 'closing']);
   assert.deepEqual(JSON.parse(await readFile(join(book, 'photos.json'), 'utf8')), {});
   for (const folder of ['photos', 'texts', 'files']) assert.ok((await stat(join(book, folder))).isDirectory());

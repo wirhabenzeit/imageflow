@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { createAuthoringService } from '../desktop/authoring-service';
@@ -145,7 +146,6 @@ async function service(t: TestContext, fails?: Failure) {
   await writeFile(join(folder, 'project.json'), JSON.stringify(saved));
   await writeFile(join(folder, 'photos.json'), '{}');
   await writeFile(join(folder, 'template/index.tsx'), 'export default {};');
-  await writeFile(join(work, 'api.md'), '# API');
   const session = new ProjectSession(await loadProject(folder, cache, true));
   t.after(() => session.close());
   const renders: Render[] = [];
@@ -167,7 +167,7 @@ async function service(t: TestContext, fails?: Failure) {
     return { state: 'ready', template, pages: book.project.spreads.length * 2, units: [], errors, warnings, flow: {}, anchors: [] };
   };
   const hooks: Parameters<typeof createAuthoringService>[0] = {
-    session: () => session, cache, docs: join(work, 'api.md'),
+    session: () => session, cache, docs: resolve('docs'),
     check: (book, request, signal, index, draft) => checkProject(book, cache, request, async (snapshot, preview) => {
       renders.push({ book: snapshot, preview });
       const failure = snapshot.fixture ? fails?.(snapshot) : undefined;
@@ -190,7 +190,7 @@ async function service(t: TestContext, fails?: Failure) {
     import: async () => assert.fail('Fixtures must not import sources.'),
   };
   const run = createAuthoringService(hooks);
-  const call = (name: string, args: Record<string, unknown> = {}) => run(name, { project: session.handle, ...args }, new AbortController().signal);
+  const call = (name: string, args: Record<string, unknown> = {}) => run(name, { project: session.handle, ...args }, new AbortController().signal).then((result) => checkedOutput(name, result));
   return { folder, session, renders, call, cache };
 }
 
