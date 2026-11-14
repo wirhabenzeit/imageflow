@@ -851,9 +851,12 @@ function installMenu() {
       { role: 'redo', id: 'native-redo', visible: false, acceleratorWorksWhenHidden: false },
       { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'delete' }, { role: 'selectAll' },
     ] },
-    { label: 'Spread', submenu: [registered('add-spread'), registered('duplicate-spread'), registered('delete-spread'),
-      { type: 'separator' }, registered('move-spread-up'), registered('move-spread-down')] },
-    { label: 'Book', submenu: [registered('manage-sources'), registered('copy-assets', 'copy-assets', 'checkbox'), registered('book-check')] },
+    { label: 'Book', submenu: [
+      registered('add-spread'), registered('duplicate-spread'), registered('delete-spread'),
+      { type: 'separator' }, registered('move-spread-up'), registered('move-spread-down'),
+      { type: 'separator' }, registered('manage-sources'), registered('copy-assets', 'copy-assets', 'checkbox'),
+      { type: 'separator' }, registered('book-check'),
+    ] },
     { label: 'Templates', submenu: [{ label: 'Manage Templates…', click: () => showTemplates() }] },
     { label: 'View', submenu: [
       registered('sidebar', 'toggle-project'), registered('inspector', 'toggle-inspector'), registered('sources', 'toggle-sources'),
