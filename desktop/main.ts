@@ -51,7 +51,7 @@ import { configureRenditionCache, pruneRenditions } from './rendition-cache';
 import { decodes, readTemplatePreview } from './template-preview-file';
 import { previewTypes } from '../src/template-preview';
 
-const presentationWindows = new WeakMap<BrowserWindow, { simple: boolean; previous: boolean }>();
+const presentationWindows = new WeakMap<BrowserWindow, { simple: boolean; previous: boolean; entered?: () => void }>();
 let templatesWindow: BrowserWindow | null = null;
 const assetsWindows = new Map<DocumentSession, { window: BrowserWindow; accept: string[] }>();
 let settingsWindow: BrowserWindow | null = null;
@@ -1142,11 +1142,20 @@ void app.whenReady().then(async () => {
     if (!owner || typeof active !== 'boolean') return;
     if (active && !presentationWindows.has(owner)) {
       const simple = process.platform === 'darwin' && !owner.isFullScreen();
-      presentationWindows.set(owner, { simple, previous: simple ? owner.isSimpleFullScreen() : owner.isFullScreen() });
+      const focus = () => {
+        if (owner.isDestroyed() || !presentationWindows.has(owner)) return;
+        if (owner.isVisible()) owner.focus();
+        owner.webContents.focus();
+      };
+      const entered = !simple && !owner.isFullScreen() ? focus : undefined;
+      presentationWindows.set(owner, { simple, previous: simple ? owner.isSimpleFullScreen() : owner.isFullScreen(), entered });
+      if (entered) owner.once('enter-full-screen', entered);
       if (simple) owner.setSimpleFullScreen(true); else owner.setFullScreen(true);
+      focus();
     } else if (!active && presentationWindows.has(owner)) {
-      const { simple, previous } = presentationWindows.get(owner)!;
+      const { simple, previous, entered } = presentationWindows.get(owner)!;
       presentationWindows.delete(owner);
+      if (entered) owner.removeListener('enter-full-screen', entered);
       if (simple) owner.setSimpleFullScreen(previous); else owner.setFullScreen(previous);
     }
   });

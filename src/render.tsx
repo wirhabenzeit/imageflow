@@ -644,6 +644,9 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
   const cache = new Map<string, HTMLElement>();
   const sources = new Map<HTMLElement, HTMLElement>();
   let warm = false;
+  let drawRevision = 0;
+  let firstPaint!: () => void;
+  const painted = new Promise<void>((resolve) => { firstPaint = resolve; });
   function syncPictures() {
     for (const [frame, sheet] of sources) {
       const originals = sheet.querySelectorAll<HTMLElement>('.if-rendered-image');
@@ -659,6 +662,7 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
     }
   }
   function draw() {
+    const revision = ++drawRevision;
     const width = innerWidth, height = innerHeight;
     const at = Math.max(0, spreads.findIndex(({ id }) => id === state.spread));
     const visible = state.overview ? spreads.map((_, i) => i) : (warm ? [at, at - 1, at + 1] : [at]).filter((i) => i >= 0 && i < sheets.length);
@@ -699,6 +703,17 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
     syncPictures();
     post({ type: 'geometry', width, height: state.overview ? Math.max(height, Math.ceil(spreads.length / columns) * cellHeight) : height,
       sheets: rects, boxes: [], targets: [] });
+    if (!warm) {
+      const images = [...stage.querySelectorAll<HTMLImageElement>('img[data-src]')];
+      void Promise.all(images.map((image) => image.complete ? Promise.resolve() : new Promise<void>((resolve) => {
+        const loaded = () => { image.removeEventListener('load', loaded); image.removeEventListener('error', loaded); resolve(); };
+        image.addEventListener('load', loaded, { once: true }); image.addEventListener('error', loaded, { once: true });
+      }))).then(() => {
+        // Chromium can defer decode() indefinitely in a hidden candidate iframe. Loading the full original
+        // is enough to reveal it; readiness also follows the latest crop if fullscreen resized it meanwhile.
+        if (revision === drawRevision) firstPaint();
+      });
+    }
   }
   window.addEventListener('message', (event) => {
     if (event.source !== parent || event.origin !== 'imageflow://editor' || event.data?.type !== 'present') return;
@@ -718,7 +733,7 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
   draw();
   // The current spread gets the first photo requests. Neighbours warm only after it can be shown, and slow
   // generated artwork fills in progressively instead of holding the entire presentation behind it.
-  await Promise.allSettled([...stage.querySelectorAll<HTMLImageElement>('img[data-src]')].map((image) => image.decode()));
+  await painted;
   warm = true;
   setTimeout(draw, 0);
 }

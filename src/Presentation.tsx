@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BookFrame } from './BookFrame';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary, TemplateInfo } from './desktop';
@@ -31,7 +31,19 @@ export function Presentation({ summary, template, start, close }: {
     if (next) setSelected({ spread: next.spread, page: next.pages[0] ?? 0 });
     wake();
   }
-  useEffect(() => { host.current?.focus(); void window.imageflow?.setPresentation(true); return () => { void window.imageflow?.setPresentation(false); }; }, []);
+  function focusPresentation() {
+    const node = host.current;
+    if (node && !node.contains(document.activeElement)) node.focus({ preventScroll: true });
+  }
+  useLayoutEffect(() => { focusPresentation(); }, [ready]);
+  useEffect(() => {
+    let active = true;
+    // Fullscreen can replace the native keyboard responder after the initial DOM focus. Reclaim it once the
+    // transition request completes, and when returning to the window, without moving focus off its controls.
+    void window.imageflow?.setPresentation(true).then(() => { if (active) focusPresentation(); });
+    window.addEventListener('focus', focusPresentation);
+    return () => { active = false; window.removeEventListener('focus', focusPresentation); void window.imageflow?.setPresentation(false); };
+  }, []);
   useEffect(() => { const timer = setTimeout(() => setActive(false), 2000); return () => clearTimeout(timer); }, [activity]);
   const key = useEffectEvent((event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey' | 'altKey'>) => {
     if (event.metaKey || event.ctrlKey) return;
