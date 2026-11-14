@@ -68,19 +68,18 @@ export function MarkedFields({ project, spread, template, edits, edit }: {
 // Edits the selected item from a stable panel at the bottom of the visible canvas: a node the template marked with `ctx.edit(...)` or
 // `ctx.Text`, or a box or element. For a box, `children` is the platform's part (its photo or text) and `title`
 // names the box.
-export function EditPopover({ project, spread, template, edits, host, readOnly, blocked, edit, close, step, actions, title, children, textFallback, includeEditorOwned = false }: {
+export function EditPopover({ project, spread, template, edits, host, readOnly, blocked, edit, close, step, actions, title, children, textFallback }: {
   project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; host?: HTMLElement | null;
   readOnly: boolean; blocked?: string; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
   actions?: ReactNode; title?: string; children?: ReactNode;
   textFallback?: { parameter: string; text: string; label: string };
-  includeEditorOwned?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const [drafts, setDrafts] = useState<Record<string, Value>>({});
   // Parameters owned by a template-supplied element editor are edited there; the popover offers it as an action.
   const editors = template.spreads[spread.definition]?.elements ?? {};
   const targets = edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((target): target is EditTarget =>
-    !!target && (includeEditorOwned || !(target.scope === 'element' && editors[target.owner!]?.editor?.parameters.includes(target.key))));
+    !!target && !(target.scope === 'element' && editors[target.owner!]?.editor?.parameters.includes(target.key)));
   const shown = arrange(targets, template, spread, drafts);
   const visible = shownFields(shown);
 

@@ -140,7 +140,7 @@ test('Text inherits display-only fallback for empty values, with explicit hiding
 });
 
 test('inline Text validates its opt-in and string binding and renders pure multiline artwork', () => {
-  const render = ({ requires = ['inline-text'], type = 'string', editing = 'inline', mode = 'edit', value = 'First\nSecond' }:
+  const render = ({ requires = [], type = 'string', editing = 'inline', mode = 'edit', value = 'First\nSecond' }:
     { requires?: string[]; type?: string; editing?: string; mode?: 'edit' | 'export'; value?: string } = {}) => {
     const template = chooseFormat(templateSchema.parse({ id: 'text', version: '1', contract: 1, requires,
       format: { label: 'F', trim: { width: mm(100), height: mm(100) },
@@ -156,10 +156,12 @@ test('inline Text validates its opt-in and string binding and renders pure multi
     return renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
       page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
   };
-  assert.throws(() => render({ requires: [] }), /requires.*inline-text/);
+  assert.match(render({ requires: [] }), /data-inline-text/);
+  assert.match(render({ requires: ['inline-text'] }), /data-inline-text/);
   assert.throws(() => render({ type: 'number' }), /string parameter/);
   assert.throws(() => render({ editing: 'panel' }), /editing must be inline/);
-  assert.match(render(), /white-space:pre-wrap/);
+  assert.match(render(), /data-multiline/);
+  assert.doesNotMatch(render(), /white-space:/);
   assert.match(render({ value: '' }), /if-text-placeholder/);
   const artwork = render({ mode: 'export' });
   assert.match(artwork, />First\nSecond<\/p>/);

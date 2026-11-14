@@ -29,6 +29,7 @@ import { resolveEditPath } from './editing';
 import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
 import type { VariantTags } from './layouts';
 import { numberOccurrences } from './edit-targets';
+import { textEditorOwner } from './inline-text';
 import { inlineTextFrame } from './inline-text-frame';
 import { readEdit } from './editing';
 import { parsePreviewRequest, PreviewError } from './preview';
@@ -1284,7 +1285,8 @@ export async function startRender(root: HTMLElement) {
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
     if (book.mode === 'edit') {
-      const focus = () => post({ type: 'editor-focus', text: !!document.activeElement?.matches('textarea, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"])') });
+      const focus = () => post({ type: 'editor-focus', text: document.activeElement instanceof HTMLElement &&
+        (document.activeElement.isContentEditable || document.activeElement.matches('textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"])')) });
       document.addEventListener('focusin', focus); document.addEventListener('focusout', focus); window.addEventListener('focus', focus);
       setTimeout(focus, 0);
     }
@@ -1352,7 +1354,7 @@ export async function startRender(root: HTMLElement) {
       const field = spread && resolveEditPath(info!, spread.definition, path);
       const nodes = [...root.querySelectorAll<HTMLElement>('[data-edit]')].filter((node) => node.dataset.edit === path);
       const node = nodes[Number(query.get('occurrence')) || 0];
-      if (!spread || !node?.hasAttribute('data-inline-text') || field?.param.type !== 'string' || query.has('readonly')) {
+      if (!spread || !node?.hasAttribute('data-inline-text') || field?.param.type !== 'string' || query.has('readonly') || textEditorOwner(info!, spread.definition, path)) {
         throw new Error('This text is not available for inline editing. Use its parameter control.');
       }
       inlineTextFrame(root, node, field.param, String(readEdit(book.project, spread, field)), post, editorURL.slice(0, -1));

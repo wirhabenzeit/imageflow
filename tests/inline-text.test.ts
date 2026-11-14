@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { plainText, saveInlineText, textFits, textProblem } from '../src/inline-text';
+import { plainText, saveInlineText, textEditorOwner, textFits, textProblem } from '../src/inline-text';
 import { readEdit, resolveEditPath } from '../src/editing';
 import { p } from '../src/parameters';
 import { projectSchema } from '../src/project';
 import { capabilities, contract1Capabilities } from '../src/runtime-exports';
 
-test('inline-text is discoverable without expanding the frozen baseline', () => {
+test('inline-text is discoverable in the pre-release contract-1 baseline', () => {
   assert.ok(capabilities.includes('inline-text'));
-  assert.ok(!(contract1Capabilities as readonly string[]).includes('inline-text'));
+  assert.ok((contract1Capabilities as readonly string[]).includes('inline-text'));
 });
 
 test('inline text normalizes paste without truncating invalid drafts', () => {
@@ -31,6 +31,26 @@ test('small, transformed and non-opted-in targets use the parameter panel', () =
 const field = p.string({ label: 'Heading', default: 'Default', multiline: true, maxLength: 30 });
 const template = { parameters: { title: field }, spreads: { title: { parameters: { heading: field },
   boxes: { hero: { parameters: { caption: field } } }, elements: { note: { parameters: { text: field } } } } } };
+
+test('custom editor ownership wins for document, element and owned layout strings, but not unowned box strings', () => {
+  const owned = { ...template, editors: { titles: { parameters: ['title'] } }, spreads: { title: {
+    ...template.spreads.title, elements: { note: { parameters: { text: field }, editor: { parameters: ['text'], spread: ['heading'] } } },
+  } } };
+  assert.deepEqual(textEditorOwner(owned, 'title', 'document.title'), { kind: 'document', editor: 'titles' });
+  assert.deepEqual(textEditorOwner(owned, 'title', 'elements.note.text'), { kind: 'element', element: 'note' });
+  assert.deepEqual(textEditorOwner(owned, 'title', 'heading'), { kind: 'element', element: 'note' });
+  assert.equal(textEditorOwner(owned, 'title', 'boxes.hero.caption'), undefined);
+  assert.equal(textEditorOwner(owned, 'missing', 'heading'), undefined);
+  const project = projectSchema.parse({ schemaVersion: 1, title: 'Book', template: { id: 'test', version: '1' },
+    spreads: [{ id: 'one', definition: 'title' }] });
+  const before = structuredClone(project);
+  for (const path of ['document.title', 'elements.note.text', 'heading']) {
+    // The draft was opened when there was no owner. Adding an owner before the save queue runs must reject it.
+    const target = resolveEditPath(template, 'title', path)!;
+    assert.equal(saveInlineText(project, owned, 'one', 'title', target, 'Default', 'Changed'), false);
+  }
+  assert.deepEqual(project, before);
+});
 
 for (const path of ['heading', 'document.title', 'boxes.hero.caption', 'elements.note.text']) {
   test('inline text uses the existing saved scope: ' + path, () => {

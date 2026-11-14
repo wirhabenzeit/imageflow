@@ -22,7 +22,7 @@ import { anchoredTarget, clickWithin, elementRect, hiddenOccurrence, inlinePlace
 import type { OpenEditor } from './inline-editors';
 import { LayoutFamilyPicker } from './LayoutFamilyPicker';
 import { InlineTextEditor } from './InlineTextEditor';
-import { textFits } from './inline-text';
+import { textEditorOwner, textFits } from './inline-text';
 import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
@@ -141,8 +141,9 @@ export function App() {
   const editorSessions = useRef(0);
   const openEditing = (next: { spread: string; key: string; owner?: Owner; panel?: boolean }) => {
     const target = geometry?.targets.find((item) => targetKey(item) === next.key);
+    if (target?.inlineText && openTextOwner(target)) return;
     const state = summary?.project.spreads.find(({ id }) => id === next.spread);
-    const text = !!(!next.owner && !next.panel && !summary?.readOnly && target && textFits(target));
+    const text = !!(!next.owner && !next.panel && !summary?.readOnly && canvasReady && readyId.current === summary?.id && target && textFits(target));
     setEditing({ ...next, session: ++editorSessions.current, text,
       ...(text && summary && template && state && target ? { held: { project: summary.project, spread: state, template, target } } : {}) });
   };
@@ -976,14 +977,19 @@ export function App() {
   }
   // Opens the popover of a node the template marked, such as a ctx.Text heading, from the sidebar's list.
   function openTarget(target: Target, panel = false) {
-    if (readyId.current !== summary?.id) {
-      setNotice('The book preview is updating; try again in a moment.');
-      return;
-    }
-    if (!target.inlineText && openDocumentEditor(target)) return;
+    if (target.inlineText && openTextOwner(target)) return;
+    if (openDocumentEditor(target)) return;
     deselectPhoto();
     select(target.spread, false);
     openEditing({ spread: target.spread, key: targetKey(target), panel });
+  }
+  function openTextOwner(target: Target) {
+    const state = spreads.find(({ id }) => id === target.spread);
+    const owner = template && state && target.edits.length === 1 && textEditorOwner(template, state.definition, target.edits[0]);
+    if (!owner) return false;
+    const opened = owner.kind === 'element' ? openElementEditor(target.spread, owner.element) : openDocumentEditor(target);
+    if (!opened) setNotice('The book preview is updating; try again in a moment.');
+    return true;
   }
   function editorOf(spread: string, element: string) {
     const state = spreads.find(({ id }) => id === spread);
@@ -1415,7 +1421,8 @@ export function App() {
                 const own = !target || (!!top && (target.edits.every((path) =>
                   path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')) ||
                   (target.owner?.id === top.id && (target.owner.type === 'element') === (top.type === 'element'))));
-                if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
+                if (target?.inlineText) openTarget(target);
+                else if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
                 else if (target && !openDocumentEditor(target, clickAt(event, target))) openEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
@@ -1493,11 +1500,10 @@ export function App() {
               {editing && inline && summary && textInline && <InlineTextEditor key={editing.session}
                 projectId={summary.id} project={summary.project} spread={editSpread ?? { ...inline.spread, definition: '' }} template={template ?? inline.template} target={inline.target}
                 zoom={editSheet?.zoom ?? 1} host={canvasWrap.current} canvasReady={canvasReady} blocked={blockedInline || undefined}
-                readOnly={summary.readOnly} edit={edit} close={closeEditor} step={stepEditor} shown={setTextShown} />}
+                readOnly={summary.readOnly} edit={edit} close={closeEditor} step={stepEditor} shown={setTextShown} notice={setNotice} />}
               {editing && inline && summary && !textInline && <EditPopover key={editing.session}
                 project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} host={canvasWrap.current}
                 textFallback={inline.target.textFallback}
-                includeEditorOwned={!!inline.target.inlineText}
                 readOnly={summary.readOnly} blocked={blockedInline || undefined}
                 edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}
                 actions={!editing.owner && editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)

@@ -353,7 +353,7 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: calenda
   spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });
 
 // Inline plain text is additive; only string paths and the supported presentation are accepted.
-defineTemplate({ id: 'inline-text', version: '1', contract: 1, format, requires: ['inline-text'],
+defineTemplate({ id: 'inline-text', version: '1', contract: 1, format,
   spreads: ({ spread }) => ({ title: spread({ label: 'Title', parameters: { heading: p.string({ label: 'Heading', default: '' }), count: p.integer({ label: 'Count', default: 1 }) },
     render: (ctx) => <Spread>
       <ctx.Text parameter="heading" editing="inline" />

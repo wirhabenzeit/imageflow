@@ -16,7 +16,9 @@ export function inlineTextFrame(root: HTMLElement, node: HTMLElement, param: Ext
   node.dataset.textEditor = '';
   node.removeAttribute('data-empty');
   node.replaceChildren(document.createTextNode(value));
-  node.contentEditable = 'plaintext-only';
+  // Chromium forces pre-wrap on plaintext-only regardless of author CSS. Use the normal editing surface with
+  // plain-text input/paste guards so the page's own pre-line/normal/pre-wrap typography remains authoritative.
+  node.contentEditable = 'true';
   node.setAttribute('role', 'textbox');
   node.setAttribute('aria-label', param.label);
   node.setAttribute('aria-multiline', String(!!param.multiline));
@@ -24,6 +26,28 @@ export function inlineTextFrame(root: HTMLElement, node: HTMLElement, param: Ext
   let composing = false;
   let dirty = false;
   let pending: number | 'commit' | undefined;
+  let inputWhitespace: { value: string; priority: string } | undefined;
+  let restoreFrame = 0;
+  const restoreWhitespace = () => {
+    cancelAnimationFrame(restoreFrame);
+    if (!inputWhitespace) return;
+    const previous = inputWhitespace;
+    inputWhitespace = undefined;
+    if (previous.value) node.style.setProperty('white-space', previous.value, previous.priority);
+    else node.style.removeProperty('white-space');
+  };
+  const prepareInput = () => {
+    inputWhitespace ??= { value: node.style.getPropertyValue('white-space'), priority: node.style.getPropertyPriority('white-space') };
+    node.style.setProperty('white-space', 'pre-wrap', 'important');
+    // A cancelled composition can have no input event. Restore before the next paint in that case too.
+    cancelAnimationFrame(restoreFrame);
+    restoreFrame = requestAnimationFrame(restoreWhitespace);
+  };
+  const insertText = (text: string) => {
+    prepareInput();
+    try { document.execCommand('insertText', false, text); }
+    finally { restoreWhitespace(); }
+  };
   const values = () => {
     if (!dirty) return { [node.dataset.edit!]: value };
     // Chromium keeps a lone <br> as the caret container after deleting everything. It is not a saved newline.
@@ -43,7 +67,7 @@ export function inlineTextFrame(root: HTMLElement, node: HTMLElement, param: Ext
   const measure = () => post({ type: 'text-size', height: Math.max(node.getBoundingClientRect().height, node.scrollHeight) });
   const draft = () => {
     post({ type: 'editor-draft', values: values() });
-    measure();
+    queueMicrotask(measure);
   };
   const finish = (request?: number) => {
     if (composing) { pending = request ?? 'commit'; return; }
@@ -55,23 +79,28 @@ export function inlineTextFrame(root: HTMLElement, node: HTMLElement, param: Ext
     draft();
     if (pending !== undefined) { const request = pending; pending = undefined; finish(request === 'commit' ? undefined : request); }
   });
-  node.addEventListener('input', () => { dirty = true; draft(); });
+  node.addEventListener('input', () => { restoreWhitespace(); dirty = true; draft(); });
   node.addEventListener('beforeinput', (event) => {
+    if (event.inputType.startsWith('format') || event.inputType === 'insertFromDrop') { event.preventDefault(); return; }
+    // Rich editable surfaces otherwise turn repeated typed spaces into NBSP. Preserve literal spaces in the
+    // input operation, then restore the authored display before painting. Keep the browser's native Undo stack.
+    prepareInput();
     if (event.isComposing || composing) return;
     if (event.inputType === 'insertParagraph' || event.inputType === 'insertLineBreak') {
       event.preventDefault();
-      if (param.multiline) document.execCommand('insertText', false, '\n');
-      else finish();
+      if (param.multiline) insertText('\n');
+      else { restoreWhitespace(); finish(); }
     }
   });
   node.addEventListener('paste', (event) => {
     event.preventDefault();
     // insertText keeps the browser's typing Undo history, unlike replacing textContent on every input.
-    document.execCommand('insertText', false, plainText(event.clipboardData?.getData('text/plain') ?? '', !!param.multiline));
+    insertText(plainText(event.clipboardData?.getData('text/plain') ?? '', !!param.multiline));
   });
   node.addEventListener('drop', (event) => { event.preventDefault(); });
   node.addEventListener('keydown', (event) => {
     event.stopPropagation();
+    if ((event.metaKey || event.ctrlKey) && !event.altKey && ['b', 'i', 'u'].includes(event.key.toLowerCase())) { event.preventDefault(); return; }
     if (composing || event.isComposing || event.keyCode === 229) return;
     if (event.key === 'Escape') { event.preventDefault(); post({ type: 'editor-cancel' }); }
     else if (event.key === 'Enter' && (!param.multiline || event.metaKey || event.ctrlKey)) { event.preventDefault(); finish(); }
@@ -85,10 +114,7 @@ export function inlineTextFrame(root: HTMLElement, node: HTMLElement, param: Ext
   window.addEventListener('message', (event) => {
     if (event.source !== parent || event.origin !== editorOrigin) return;
     if (event.data?.type === 'editor-flush') finish(event.data.request);
-    else if (event.data?.type === 'text-history' && node.isContentEditable && !composing) {
-      if (event.data.direction === 'undo' || event.data.direction === 'redo') document.execCommand(event.data.direction);
-    }
-    else if (event.data?.type === 'text-disabled') node.contentEditable = event.data.disabled ? 'false' : 'plaintext-only';
+    else if (event.data?.type === 'text-disabled') node.contentEditable = event.data.disabled ? 'false' : 'true';
   });
   post({ type: 'editor-ready' });
   measure();

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { execFileSync } from 'node:child_process';
 import { _electron } from 'playwright-core';
-import { testBook, menuAction } from './ui-actions.mjs';
+import { testBook } from './ui-actions.mjs';
 
 // A real desktop session: editing typography/occurrences, pending typing, composition, plain paste, fallback,
 // save/reopen, failures and conflicts. Runs separately so the default smoke suite stays small.
@@ -31,6 +31,7 @@ let app;
 try {
   app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' }, timeout: 15000 });
+  await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false }); });
   let w = await testBook(app, book, false);
   w.setDefaultTimeout(20000);
   await w.setViewportSize({ width: 1500, height: 1000 }).catch(() => {});
@@ -70,6 +71,18 @@ try {
   assert.equal(await saved(), baseline);
   console.log('pending typing, occurrence and Escape passed');
 
+  // Whitespace rules come from the template, including the starter's pre-line class, without changing saved spaces.
+  await open();
+  assert.equal(await input().evaluate((node) => getComputedStyle(node).whiteSpace), 'pre-line');
+  await input().fill('');
+  await input().pressSequentially('  Two  spaces  ');
+  const shownSpacing = await input().innerText();
+  await done();
+  assert.equal(await saved(), '  Two  spaces  ');
+  assert.equal(await occurrence().innerText(), shownSpacing, 'restored artwork uses the same whitespace');
+  console.log('authored whitespace and literal saved spaces passed');
+
+
   await open();
   await input().fill('First line');
   await w.keyboard.press('Enter');
@@ -98,6 +111,9 @@ try {
   await w.getByRole('alert').filter({ hasText: 'at most 90' }).waitFor();
   assert.equal(await saved(), 'Plain pasted\ntext');
   assert.equal(await input().innerText(), 'x'.repeat(91));
+  await w.getByRole('button', { name: 'Edit Heading', exact: true }).click();
+  await w.getByRole('alert').filter({ hasText: 'Fix the text or choose Discard to continue' }).waitFor();
+  assert.equal(await w.locator('.inline-text-editor').count(), 1, 'failed navigation retains the draft with explicit recovery');
   await input().fill('Composition');
   await input().dispatchEvent('compositionstart');
   await w.keyboard.press('Meta+Enter');
@@ -143,12 +159,14 @@ try {
   await open();
   await input().fill('Native');
   await input().pressSequentially(' typing');
-  await menuAction(app, 'Undo Project Edit');
+  await w.waitForFunction(() => true);
+  for (let n = 0; n < 50 && !await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('native-undo').visible); n++) await new Promise((resolve) => setTimeout(resolve, 50));
+  await w.keyboard.press((process.platform === 'darwin' ? 'Meta' : 'Control') + '+z');
   await w.waitForFunction(() => true);
   for (let n = 0; n < 50 && await input().innerText() === 'Native typing'; n++) await new Promise((resolve) => setTimeout(resolve, 50));
   assert.notEqual(await input().innerText(), 'Native typing', 'native menu Undo edits typing');
   assert.equal(await saved(), '', 'typing Undo does not undo the book');
-  await menuAction(app, 'Redo Project Edit');
+  await w.keyboard.press((process.platform === 'darwin' ? 'Meta' : 'Control') + '+Shift+z');
   for (let n = 0; n < 50 && await input().innerText() !== 'Native typing'; n++) await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(await input().innerText(), 'Native typing');
   await done();
@@ -191,6 +209,42 @@ try {
   await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
   console.log('outside apply and switching occurrence passed');
 
+  // The outer gesture cannot start canvas commands before the text has applied.
+  await open();
+  await input().fill('Gesture guard');
+  await w.locator('.stage').evaluate((stage) => {
+    window.outerPresses = 0;
+    stage.addEventListener('pointerdown', () => { window.outerPresses++; });
+    stage.addEventListener('mousedown', () => { window.outerPresses++; });
+  });
+  const next = await occurrence(1).boundingBox();
+  await w.mouse.click(next.x + next.width * .5, next.y + next.height * .5);
+  for (let n = 0; n < 100 && await saved() !== 'Gesture guard'; n++) await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(await saved(), 'Gesture guard');
+  assert.equal(await w.evaluate(() => window.outerPresses), 0, 'the canvas receives no premature press');
+  await input().waitFor();
+  await w.keyboard.press('Escape');
+  await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
+
+  // A trusted-activation action is never replayed synthetically; the next real click performs it.
+  await w.evaluate(() => {
+    window.trustedActions = [];
+    const button = document.createElement('button'); button.id = 'trusted-test';
+    button.textContent = 'Trusted action'; button.dataset.requiresUserActivation = '';
+    button.style.cssText = 'position:fixed;left:400px;top:60px;z-index:1000';
+    button.addEventListener('click', (event) => window.trustedActions.push(event.isTrusted));
+    document.body.append(button);
+  });
+  await open();
+  await input().fill('Trusted action draft');
+  await w.locator('#trusted-test').click();
+  await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
+  assert.deepEqual(await w.evaluate(() => window.trustedActions), []);
+  await w.locator('#trusted-test').click();
+  assert.deepEqual(await w.evaluate(() => window.trustedActions), [true]);
+  await w.locator('#trusted-test').evaluate((node) => node.remove());
+  console.log('pointer isolation and trusted activation passed');
+
   await open();
   await input().fill('Unsaved external draft');
   const changed = JSON.parse(await readFile(projectFile, 'utf8'));
@@ -222,14 +276,18 @@ try {
 
   const id = new URL(await w.locator(ready).getAttribute('src')).pathname.split('/').at(-1);
   const capture = () => w.evaluate(({ id, spread }) => window.imageflow.checkBook(id, { preview: { target: { spread }, maxEdge: 600 } }), { id, spread: firstId });
+  console.log('capturing confirmed artwork');
   const confirmedImage = await capture();
+  console.log('captured confirmed artwork');
   assert.ok(confirmedImage.value?.image?.data, JSON.stringify(confirmedImage.error));
   await open();
   await input().fill('Unconfirmed export typing');
   const pendingImage = await capture();
+  console.log('captured artwork with pending typing');
   assert.equal(pendingImage.value?.image?.data, confirmedImage.value.image.data, 'MCP artwork path excludes typing and UI');
   const pdf = join(work, 'confirmed.pdf');
   await app.evaluate(({ dialog }, path) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: path }); }, pdf);
+  console.log('exporting proof');
   const exported = await w.evaluate((id) => window.imageflow.exportBook(id, 'proof'), id);
   assert.ok(!exported.error, exported.error);
   const pdfText = execFileSync('pdftotext', [pdf, '-'], { encoding: 'utf8' });
@@ -267,6 +325,55 @@ try {
   assert.equal(await saved(), 'Keep lowercase');
   console.log('display-only capitalization passed');
 
+  // Ownership is tested through both the page and the Inspector, and includes an editor's layout fields.
+  const ownedBook = join(work, 'Owned.imageflow');
+  await cp(join(root, 'sample/starter'), ownedBook, { recursive: true, filter: (p) => basename(p) !== '.imageflow' });
+  await writeFile(join(ownedBook, 'template/index.tsx'), `
+import { defineTemplate, p, Spread, printFormat, mm } from 'imageflow';
+const string = (label) => p.string({label, default:'Default text'});
+export default defineTemplate({id:'imageflow-starter',version:'1',contract:1,
+  format:printFormat({label:'Test',trim:{width:mm(200),height:mm(200)},bleed:mm(0),safe:mm(5),ends:'inside-covers',pageCount:{min:2,max:20,step:2}}),
+  parameters:{title:string('Book title')},
+  editors:{titles:{label:'Owned book title',parameters:['title'],component:({Control})=><Control parameter="title"/>}},
+  spreads:({spread})=>({owned:spread({label:'Ownership',parameters:{heading:string('Spread title')},
+    boxes:{hero:{type:'photo',label:'Photo',parameters:{caption:string('Caption')}}},
+    elements:{note:{label:'Note',parameters:{text:string('Element text')},
+      editor:{label:'Owned note',parameters:['text'],spread:['heading'],component:({Control})=><><Control parameter="text"/><Control parameter="heading" scope="spread"/></>}}},
+    render:(ctx)=><Spread>
+      <ctx.PhotoBox id="hero" rect={{x:0,y:0,width:200,height:200}}/>
+      <ctx.Element id="note" rect={{x:200,y:0,width:200,height:200}}/>
+      <ctx.Text parameter="elements.note.text" editing="inline" rect={{x:220,y:20,width:150,height:20}}/>
+      <ctx.Text parameter="heading" editing="inline" rect={{x:220,y:60,width:150,height:20}}/>
+      <ctx.Text parameter="document.title" editing="inline" rect={{x:220,y:100,width:150,height:20}}/>
+      <ctx.Text parameter="boxes.hero.caption" editing="inline" rect={{x:220,y:140,width:150,height:20}}/>
+    </Spread>})})});`);
+  const ownedProject = {...initial, spreads:[{id:firstId,definition:'owned',params:{},boxes:{},elements:{}}]};
+  await writeFile(join(ownedBook, 'project.json'), JSON.stringify(ownedProject));
+  console.log('opening ownership fixture');
+  await w.close(); w = await testBook(app, ownedBook, false);
+  console.log('ownership fixture opened');
+  await w.setViewportSize({width:1500,height:1000}).catch(()=>{});
+  await w.locator(ready).waitFor();
+  for (const path of ['elements.note.text','heading','document.title']) {
+    console.log('opening editor owner:', path);
+    const node=occurrence(0,path); await node.scrollIntoViewIfNeeded();const box=await node.boundingBox();
+    await w.mouse.click(box.x+box.width/2,box.y+box.height/2);
+    await w.locator('.element-editor').waitFor();
+    assert.equal(await w.locator('.inline-text-editor').count(),0,'owned text opens its custom editor: '+path);
+    const src=await w.locator('.element-editor iframe').getAttribute('src');
+    assert.ok(src.includes(path==='document.title'?'editor=titles':'element=note'),src);
+    await w.locator('.element-editor').getByRole('button',{name:'Close',exact:true}).click();
+    await w.locator('.element-editor').waitFor({state:'detached'});
+  }
+  await open(1,'boxes.hero.caption');
+  await w.keyboard.press('Escape');await w.locator('.inline-text-editor').waitFor({state:'detached'});
+  const ownedHeading=w.getByRole('button',{name:'Edit Spread title',exact:true});
+  await ownedHeading.focus();await w.keyboard.press('Enter');
+  await w.locator('.element-editor').waitFor();
+  assert.equal(await w.locator('.edit-popover').count(),0,'Inspector cannot bypass ownership');
+  await w.locator('.element-editor').getByRole('button',{name:'Close',exact:true}).click();
+  await w.locator('.element-editor').waitFor({state:'detached'});
+  console.log('custom editor ownership and unowned box text passed');
   console.log('Inline text smoke passed:', work);
 } catch (error) {
   if (app) {

@@ -182,3 +182,6 @@ html:has(.if-layout-settings) { background: transparent; }
   content: attr(title); position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; text-align: center;
   font: 12px/1.3 system-ui, sans-serif; color: rgb(140 20 20);
 }
+
+/* A zero-specificity fallback: authored classes, inherited typography rules on the node and inline styles win. */
+:where([data-inline-text][data-multiline]) { white-space: pre-wrap; }

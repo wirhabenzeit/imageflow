@@ -483,8 +483,8 @@ export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | '
  * Empty or whitespace-only values inherit `fallback`, without saving it. `fallbackLabel` identifies its source
  * in the editor; `hidden` suppresses the node explicitly. With neither value nor fallback, edit mode shows
  * `placeholder` (default: the parameter's placeholder or label), and export shows an empty node.
- * `editing="inline"` opts a string parameter into on-page typing (requires `inline-text`). Existing call sites use
- * the parameter panel. Multiline inline strings preserve line breaks; template `style` can override whiteSpace.
+ * `editing="inline"` opts a string parameter into on-page typing (included in the contract-1 baseline). Existing call sites use
+ * the parameter panel. Multiline inline strings default to preserving line breaks; template CSS and `style` take precedence.
  */
 export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & { parameter: Path; as?: TextTag; editing?: 'inline'; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
 
