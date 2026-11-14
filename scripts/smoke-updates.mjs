@@ -17,6 +17,15 @@ const projectFile = join(folder, 'project.json');
 const initial = JSON.parse(await readFile(projectFile, 'utf8'));
 initial.spreads = [{ ...initial.spreads[0], definition: 'title', boxes: {} }];
 await writeFile(projectFile, JSON.stringify(initial));
+// Settings are written asynchronously after the control changes; wait for the file rather than racing the write.
+async function savedSetting(key, expected) {
+  let value;
+  for (const deadline = Date.now() + 10000; Date.now() < deadline; await new Promise((resolve) => setTimeout(resolve, 50))) {
+    value = await readFile(join(profile, 'settings.json'), 'utf8').then((text) => JSON.parse(text)[key], () => undefined);
+    if (value === expected) return;
+  }
+  assert.equal(value, expected, 'saved ' + key);
+}
 let instance, appProcess;
 try {
   instance = await _electron.launch({ executablePath: electron,
@@ -43,13 +52,11 @@ try {
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('update-not-available'); });
   await settings.getByText('You’re up to date.', { exact: true }).waitFor();
   await automatic.uncheck();
-  await settings.waitForFunction(async () => !(await window.imageflow.getSettings()).value.automaticUpdates);
-  assert.equal(JSON.parse(await readFile(join(profile, 'settings.json'), 'utf8')).automaticUpdates, false);
+  await savedSetting('automaticUpdates', false);
   const channel = settings.getByRole('combobox', { name: 'Update channel' });
   assert.equal(await channel.inputValue(), 'stable');
   await channel.selectOption('beta');
-  await settings.waitForFunction(async () => (await window.imageflow.getSettings()).value.updateChannel === 'beta');
-  assert.equal(JSON.parse(await readFile(join(profile, 'settings.json'), 'utf8')).updateChannel, 'beta');
+  await savedSetting('updateChannel', 'beta');
   await channel.selectOption('stable');
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('update-not-available'); });
   await settings.getByText('You’re up to date.', { exact: true }).waitFor();
