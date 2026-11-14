@@ -25,7 +25,7 @@ import { photoFile } from './photos';
 import { captureBookPreview, checkBookRender } from './preview';
 import { PreviewError } from '../src/preview';
 import { DocumentSession } from './document-session';
-import { configureMacHeader } from './mac-header';
+import { configureMacHeader, setToolbarDragRegions } from './mac-header';
 import type { RenderSessions } from './document-session';
 import { createDocument, documentIdentity, documentPath, isDocument, RecentDocuments } from './documents';
 import { SettingsStore } from './settings';
@@ -1170,6 +1170,10 @@ void app.whenReady().then(async () => {
       if (entered) owner.removeListener('enter-full-screen', entered);
       if (simple) owner.setSimpleFullScreen(previous); else owner.setFullScreen(previous);
     }
+  });
+  ipcMain.handle(channels.toolbarDragRegions, (event, regions: unknown) => {
+    const owner = editorOwner(event)?.window;
+    if (owner && process.platform === 'darwin') setToolbarDragRegions(owner, regions);
   });
   ipcMain.handle(channels.documentProxy, async (event, action: unknown) => {
     const document = editorOwner(event);

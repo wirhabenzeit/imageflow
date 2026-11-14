@@ -54,6 +54,7 @@ import { useListSelection } from './list-selection';
 import { insertionProblem, spreadOrder, spreadSelectionOrder } from './spread-order';
 import { spreadMime, useSpreadReorder } from './useSpreadReorder';
 import { animateReorder, reorderOffsets } from './reorder-motion';
+import { useToolbarDrag } from './useToolbarDrag';
 
 type Owner = { type: 'photo' | 'markdown' | 'element'; id: string };
 // `hidden`: the box or element is declared but not on the page, so the editor opens at the spread's corner.
@@ -126,6 +127,7 @@ export function App() {
   const current = useRef<ProjectSummary>(undefined);
   const [spreadId, setSpreadId] = useState('');
   const [presenting, setPresenting] = useState<string>();
+  useToolbarDrag(presenting !== undefined);
   const [template, setTemplate] = useState<TemplateInfo>();
   const [render, setRender] = useState<RenderStatus>();
   const [reload, setReload] = useState<'loading' | 'rendering' | { error: string }>();
