@@ -1,7 +1,7 @@
-// The route inset of the Panorama layout: the track of a GPX file, drawn without a basemap, so export stays offline.
-// Its editor chooses the file and frames part of the route.
+// Test fixture for file parameters and custom element editors, kept out of the photobook starter.
 import { Element, file, issue, p } from 'imageflow';
 import type { ElementEditorProps, Rect, RenderView } from 'imageflow';
+import './route.css';
 
 // Track points of a GPX file as [longitude, latitude]. ImageFlow only checks the extension; the content is ours.
 function gpxPoints(text: string) {
