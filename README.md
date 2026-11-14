@@ -2,6 +2,8 @@
 
 ImageFlow is a macOS photobook editor. Its draft starter project is a 32-page WhiteWall Gallery Square book with sample photos, Markdown, and a template you can edit.
 
+**Documentation:** <https://wirhabenzeit.github.io/imageflow/> ([getting started](https://wirhabenzeit.github.io/imageflow/guide/getting-started), [writing templates](https://wirhabenzeit.github.io/imageflow/templates/)). Its sources are in [`docs/`](docs).
+
 ## Run locally
 
 Use Node.js 22.20+ or 24.12+ on macOS.

@@ -5,3 +5,5 @@ out/
 .DS_Store
 .imageflow/
 .imageflow-sdk/
+site/.vitepress/dist/
+site/.vitepress/cache/
