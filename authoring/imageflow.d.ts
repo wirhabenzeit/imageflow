@@ -526,7 +526,11 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   /** The geometry helpers for this spread's format: `<ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />`. */
   geometry: BoundGeometry;
   /** `PhotoBox` limited to this layout's photo box IDs: `<ctx.PhotoBox id="hero" />` fails type checking for unknown IDs. */
-  PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & { id: BoxIds<S, 'photo'> }): ImageFlowElement;
+  PhotoBox<I extends BoxIds<S, 'photo'>>(props: Styling & Placement & EditMarker & IssueMarker & {
+    id: I;
+    /** Renders the photo yourself; `box.params` is typed from this box's declared parameters. See `PhotoRender`. */
+    children?: (photo: PhotoRender, box: PhotoBoxState<I, ValuesOf<S['boxes'][I]>>) => ImageFlowNode;
+  }): ImageFlowElement;
   /** `MarkdownBox` limited to this layout's Markdown box IDs. */
   MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
   /** `Element` limited to this layout's element IDs. */
@@ -759,10 +763,46 @@ type Styling = { className?: string; style?: CSSProperties };
 /** The root of every spread. Sets `--trim-width`, `--trim-height`, `--bleed-*`, and `--safe-*` CSS variables. */
 export function Spread(props: Styling & IssueMarker & { children?: ImageFlowNode }): ImageFlowElement;
 /**
+ * What a PhotoBox render callback receives about its photo. Lengths are CSS pixels (96 per inch) of the printed page,
+ * with the origin at the box's top-left corner; they match the box's layout size whatever the editor's zoom.
+ */
+export type PhotoRender = {
+  /** The rendition ImageFlow chose: the editor's preview or thumbnail, or a print-resolution file in export. Load it with `<img src>` or SVG `<image href>`. */
+  src: string;
+  /** The photo's alt text, else its title, else `''`. */
+  alt: string;
+  /** The box's size. */
+  box: { width: number; height: number };
+  /** Where the whole photo goes so the box shows ImageFlow's crop. It usually extends past the box, which clips it. */
+  image: { x: number; y: number; width: number; height: number };
+  /** CSS that puts an absolutely positioned HTML image at `image`, in percentages of the box: `<img src={photo.src} style={photo.style} />`. */
+  style: CSSProperties;
+  /** The visible part of the photo, as fractions of its width and height. */
+  crop: { x: number; y: number; width: number; height: number };
+  /** The crop as saved for this layout (or followed live during a crop gesture): centre in 0–1 and zoom from 1. */
+  placement: { centerX: number; centerY: number; zoom: number };
+  /** The original's size in pixels, upright. */
+  pixels: { width: number; height: number };
+  /** Effective resolution of the visible part at print size. */
+  ppi: number;
+  /** The photo's metadata, as `ctx.boxes[id].photo`. */
+  metadata: Photo;
+};
+/**
+ * The box a render callback draws: the same values as `ctx.boxes[id]`, with its resolved parameters. `uid` is unique
+ * in the book (it combines the spread and the box), for ids inside the callback's SVG such as a `clipPath` id.
+ */
+export type PhotoBoxState<I extends string = string, P = Values> = { id: I; uid: string; params: P; photo: Photo | null };
+/**
  * A box that shows the photo assigned to box `id`, cropped to fill it. In the editor, clicking it edits the box's
  * parameters and any others it is marked with.
+ *
+ * With a render callback as its child, the template draws the photo itself, for masks, frames and SVG compositions:
+ * `<PhotoBox id="hero">{(photo, box) => <svg>…<image href={photo.src} {...photo.image} preserveAspectRatio="none" /></svg>}</PhotoBox>`.
+ * ImageFlow still owns assignment, cropping, rendition choice, resolution checks and image loading; the callback must
+ * draw the photo at `photo.image` for the printed crop to match. It is not called for an empty box.
  */
-export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & { id: string }): ImageFlowElement;
+export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & { id: string; children?: (photo: PhotoRender, box: PhotoBoxState) => ImageFlowNode }): ImageFlowElement;
 /**
  * A box that shows its part of the Markdown text assigned to box `id`. `columns` (1–6, default 1) splits it into
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.

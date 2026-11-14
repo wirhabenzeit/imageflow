@@ -22,7 +22,7 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, editorContext, normalizeTemplate, refreshedEditorContext, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import { bookIndex, chooseFormat, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup, EditorContext, EditorPresentation } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
@@ -474,6 +474,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
             spread, id: (box.dataset.box ?? box.dataset.element)!, upright: sized && upright(box, sheet),
             rect: { ...measured, x: measured.x - origin.x, y: measured.y - origin.y },
             type: (box.dataset.boxType ?? 'element') as BookGeometry['boxes'][number]['type'], ...rect,
+            ...(box.dataset.photoRender === 'custom' ? { custom: true } : {}),
           };
         });
       }),
@@ -511,6 +512,17 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
         if (marked) hidden = [marked];
       }
       for (const node of hidden) node.setAttribute('data-if-editing', '');
+    });
+    // While the app crops the photo of a box with a render callback, the template draws the gesture's placement, so
+    // its mask or artwork follows the crop before it is saved. Without a placement the saved crop shows again.
+    window.addEventListener('message', (event: MessageEvent) => {
+      if (event.source !== parent || event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'crop-preview') return;
+      const { spread, box, placement } = event.data;
+      const valid = placement && [placement.centerX, placement.centerY, placement.zoom].every(Number.isFinite);
+      if (typeof spread === 'string' && typeof box === 'string' && valid) {
+        setLivePlacement(spread, box, { centerX: Math.min(1, Math.max(0, placement.centerX)), centerY: Math.min(1, Math.max(0, placement.centerY)),
+          zoom: Math.min(20, Math.max(1, placement.zoom)) });
+      } else setLivePlacement('', '', undefined);
     });
   }
   fit();
@@ -793,6 +805,24 @@ function fontFailures() {
     .map((font) => font.family.replace(/^["']|["']$/g, '')))].sort();
 }
 
+// The pictures in `root` to wait for: HTML images with a source, and SVG <image> references, such as a PhotoBox render
+// callback draws. An SVG image is loaded through a detached HTML image with the same URL, which the SVG then shares
+// from the cache; `pictureSource` maps it back to the SVG element for error reports.
+const pictureSource = new WeakMap<HTMLImageElement, Element>();
+function decodable(root: ParentNode): HTMLImageElement[] {
+  const html = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
+  const svg = [...root.querySelectorAll<SVGImageElement>('image')].flatMap((node) => {
+    const href = node.getAttribute('href') ?? node.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+    if (!href) return [];
+    const proxy = new Image();
+    proxy.alt = node.getAttribute('aria-label') ?? '';
+    proxy.src = new URL(href, document.baseURI).href;
+    pictureSource.set(proxy, node);
+    return [proxy];
+  });
+  return [...html, ...svg];
+}
+
 // Waits for fonts and photos so measurements and text flow see final metrics.
 async function settle(images: HTMLImageElement[]) {
   // A font that fails to load is reported by `fontFailures` rather than aborting the render.
@@ -834,7 +864,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
     </div>
   ))));
   if (renderError) throw renderError;
-  await settle([...root.querySelectorAll('img')]);
+  await settle(decodable(root));
   const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
   const sheets = previews.map(({ definition, spread }, n) => {
     const { sheet, boxes } = validateSpread(containers[n], spread, template, format, definition, [], []);
@@ -875,6 +905,18 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
           img.src = img.dataset.src!;
           loading.push(img);
         } else if (far && img.getAttribute('src')) img.removeAttribute('src');
+      }
+      // Boxes with a render callback draw their photo only while near the screen, and drop it when far away.
+      for (const box of container.querySelectorAll<HTMLElement>('[data-photo-render="custom"]')) {
+        const shown = box.dataset.near === '';
+        if (near && !shown) {
+          box.dataset.near = '';
+          box.dispatchEvent(new CustomEvent(photoNearEvent, { detail: true }));
+          loading.push(...decodable(box));
+        } else if (far && shown) {
+          delete box.dataset.near;
+          box.dispatchEvent(new CustomEvent(photoNearEvent, { detail: false }));
+        }
       }
     }
     return loading;
@@ -1364,7 +1406,7 @@ export async function startRender(root: HTMLElement) {
     // them as they arrive.
     const pictureFailures = lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
     if (edit && view === 'thumbs') await settleRestoredImages();
-    const images = [...root.querySelectorAll<HTMLImageElement>('img[src]')];
+    const images = decodable(root);
     const decoded = await settle(images);
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
@@ -1430,8 +1472,9 @@ export async function startRender(root: HTMLElement) {
     }
     for (const [i, result] of decoded.entries()) {
       if (result.status !== 'rejected') continue;
-      const box = images[i].closest<HTMLElement>('[data-box]')?.dataset.box;
-      const spread = images[i].closest<HTMLElement>('[data-spread]')?.dataset.spread;
+      const source = pictureSource.get(images[i]) ?? images[i];
+      const box = source.closest<HTMLElement>('[data-box]')?.dataset.box;
+      const spread = source.closest<HTMLElement>('[data-spread]')?.dataset.spread;
       const photo = spread && box ? spreads.find(({ id }) => id === spread)?.boxes[box]?.photo : undefined;
       errors.push({ ...(spread ? located(spread, '') : {}), message: 'Could not decode photo ' + (images[i].alt || box) + '.',
         code: 'photo-decode-failed', box, source: photo,
@@ -1536,11 +1579,11 @@ export async function startRender(root: HTMLElement) {
     }
     else if (artwork) {
       const { frame, metadata } = renderArtwork(root, sheets, spreads, sequence, format, artwork, book.fixture);
-      await settle([...frame.querySelectorAll<HTMLImageElement>('img')]);
+      await settle(decodable(frame));
       window.imageflowPreview = { state: 'ready', metadata };
     } else if (!check) {
       makePrintPages(root, sheets, sequence, format);
-      await Promise.allSettled([...document.querySelectorAll<HTMLImageElement>('.if-print-page img')].map((img) => img.decode()));
+      await Promise.allSettled([...document.querySelectorAll<HTMLElement>('.if-print-page')].flatMap((page) => decodable(page)).map((img) => img.decode()));
     }
     const units: { side: PrintSide; spread: string; where: string }[] = sequence.spreads.flatMap(({ sides }, i) =>
       sides.map((side) => ({ side, spread: spreads[i].id, where: where[i] })));

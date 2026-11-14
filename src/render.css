@@ -22,7 +22,10 @@
 .if-spread .left-page { left: calc(-1 * var(--bleed-outside)); }
 .if-spread .right-page { right: calc(-1 * var(--bleed-outside)); }
 .if-photo, .if-markdown { overflow: hidden; }
-.if-photo img { position: absolute; max-width: none; display: block; }
+.if-photo:not([data-photo-render]) img { position: absolute; max-width: none; display: block; }
+/* A box with a render callback is positioned for the template's own markup; photo.style places an image. */
+:where(.if-photo[data-photo-render]) { position: relative; }
+.if-photo[data-photo-render] > svg { display: block; }
 .if-markdown { overflow-wrap: break-word; hyphens: manual; }
 .if-markdown :is(ol, ul) { padding-inline-start: 1.75em; }
 html:has(.if-book), html:has(.if-book) body { overflow: hidden; }
@@ -108,7 +111,7 @@ html:has(.if-artwork) { overflow: hidden; }
 
 /* Book view photos load near the screen; until then the box shows a neutral fill and no broken image. */
 .if-preview .if-photo img:not([src]) { visibility: hidden; }
-.if-preview .if-photo:has(> img:not([src])) { background: #e9e5dc; }
+.if-preview .if-photo:has(> img:not([src])), .if-preview .if-photo[data-pending] { background: #e9e5dc; }
 
 /* While an inline editor is drawn over an element or marked node, the preview hides that occurrence's artwork. */
 .if-preview [data-if-editing] { opacity: 0 !important; }

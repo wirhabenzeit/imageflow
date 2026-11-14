@@ -1,4 +1,5 @@
-import { createContext, useContext, useLayoutEffect, useRef } from 'react';
+import { createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { flushSync } from 'react-dom';
 import { RenderedImage } from './rendered-image';
 import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
@@ -8,6 +9,7 @@ import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
 import { identifier, values } from './project';
 import type { Photo, ProjectFile, RenderProject, SpreadState, Values } from './project';
 import { getCrop, placementIn } from './spread';
+import type { Crop, Placement as CropPlacement } from './spread';
 import { declarationConflicts, familyProblems } from './layouts';
 import type { VariantTags } from './layouts';
 import { isParameterValue, p, parametersSchema, resolveParams } from './parameters';
@@ -486,13 +488,88 @@ function exportSource(photo: Photo & { src: string }, cssWidth: number, format: 
   return width < photo.width ? photo.src + '/' + width : photo.src;
 }
 
-export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker & { id: string }) {
-  const { spread, book, format, renderPhotos, definition, lazyPhotos } = useSpread();
+/**
+ * What a PhotoBox render callback receives about its photo. Lengths are CSS pixels (96 per inch) of the printed
+ * page, with the origin at the box's top-left corner, so they match the box's own layout size whatever the editor's
+ * zoom. `image` is where the whole photo goes so that the box shows the host's crop; it usually extends past the box,
+ * which clips it. `style` places an absolutely positioned HTML image there, in percentages of the box.
+ */
+export type PhotoRender = {
+  src: string;
+  alt: string;
+  box: { width: number; height: number };
+  image: { x: number; y: number; width: number; height: number };
+  style: CSSProperties;
+  crop: Crop;
+  placement: CropPlacement;
+  pixels: { width: number; height: number };
+  ppi: number;
+  metadata: Photo;
+};
+// `uid` is unique in the book (spread and box), for SVG ids such as a clipPath's.
+export type PhotoBoxState = { id: string; uid: string; params: Values; photo: Photo | null };
+export type PhotoBoxRender = (photo: PhotoRender, box: PhotoBoxState) => ReactNode;
+
+// The placement a crop gesture shows before it is saved, by spread and box. The app sends it to the book frame while
+// a photo of a box with a render callback is selected, so the template's artwork follows the gesture.
+const livePlacements = new Map<string, CropPlacement>();
+const liveListeners = new Set<() => void>();
+export function setLivePlacement(spread: string, box: string, placement: CropPlacement | undefined) {
+  // One gesture at a time: a new placement replaces any other, and none clears them all.
+  const key = spread + '\u0000' + box;
+  const current = livePlacements.get(key);
+  if (!placement) {
+    if (!livePlacements.size) return;
+    livePlacements.clear();
+  } else {
+    if (livePlacements.size === 1 && current && current.centerX === placement.centerX && current.centerY === placement.centerY && current.zoom === placement.zoom) return;
+    livePlacements.clear();
+    livePlacements.set(key, { centerX: placement.centerX, centerY: placement.centerY, zoom: placement.zoom });
+  }
+  for (const listener of liveListeners) listener();
+}
+const subscribeLive = (listener: () => void) => { liveListeners.add(listener); return () => { liveListeners.delete(listener); }; };
+// Lazy book views tell callback boxes when their spread comes near the screen (see photoLoader in render.tsx).
+export const photoNearEvent = 'imageflow-photo-near';
+
+const pixelsPerMm = 96 / 25.4;
+// The photo and its crop as a callback sees them, from the box's size in CSS pixels.
+export function photoRender(photo: Photo & { src: string }, placement: CropPlacement, size: { width: number; height: number }, src: string): PhotoRender {
+  const crop = getCrop(photo, placement, size.width / size.height);
+  const width = size.width / crop.width;
+  const height = size.height / crop.height;
+  const { src: _src, ...metadata } = photo;
+  return {
+    src, alt: photo.altText ?? photo.title ?? '',
+    box: { width: size.width, height: size.height },
+    image: { x: -crop.x * width, y: -crop.y * height, width, height },
+    style: { position: 'absolute', maxWidth: 'none', width: 100 / crop.width + '%', height: 100 / crop.height + '%',
+      left: -100 * crop.x / crop.width + '%', top: -100 * crop.y / crop.height + '%' },
+    crop, placement: { ...placement }, pixels: { width: photo.width, height: photo.height },
+    ppi: Math.min(photo.width * crop.width / size.width, photo.height * crop.height / size.height) * 96,
+    metadata,
+  };
+}
+
+export function PhotoBox({ id, className, style, rect, children, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker &
+  { id: string; children?: PhotoBoxRender }) {
+  const { spread, book, format, renderPhotos, definition, lazyPhotos, values } = useSpread();
+  if (children !== undefined && typeof children !== 'function') {
+    throw new Error('PhotoBox ' + id + ': children must be a render function, such as {(photo, box) => <img src={photo.src} style={photo.style} />}.');
+  }
+  const render = children;
   const box = spread.boxes[id];
   const photo = box?.photo ? book.photos[box.photo] : undefined;
-  const placement = placementIn(box, spread.definition);
+  const saved = placementIn(box, spread.definition);
   const frame = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
+  // A callback needs the box's size. A `rect` gives it at once; otherwise the box is measured before it is painted.
+  const [size, setSize] = useState<{ width: number; height: number } | null>(() =>
+    rect && rect.width > 0 && rect.height > 0 ? { width: rect.width * pixelsPerMm, height: rect.height * pixelsPerMm } : null);
+  const [near, setNear] = useState(!lazyPhotos);
+  const liveOf = () => render && book.mode === 'edit' ? livePlacements.get(spread.id + '\u0000' + id) : undefined;
+  const live = useSyncExternalStore(subscribeLive, liveOf, liveOf);
+  const placement = live ?? saved;
 
   useLayoutEffect(() => {
     const element = frame.current;
@@ -504,8 +581,12 @@ export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...m
       const w = parseFloat(width);
       const h = parseFloat(height);
       if (!(w > 0 && h > 0)) return;
-      const crop = getCrop(photo, placement, w / h);
+      const crop = getCrop(photo, saved, w / h);
       element.dataset.ppi = String(Math.min(photo.width * crop.width / w, photo.height * crop.height / h) * 96);
+      if (render) {
+        setSize((current) => current && Math.abs(current.width - w) < 0.01 && Math.abs(current.height - h) < 0.01 ? current : { width: w, height: h });
+        return;
+      }
       if (!img) return;
       if (book.mode !== 'edit' && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format);
       img.style.width = 100 / crop.width + '%';
@@ -517,15 +598,39 @@ export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...m
     cropPhoto();
     observer.observe(element);
     return () => observer.disconnect();
-  }, [photo, placement.centerX, placement.centerY, placement.zoom, renderPhotos]);
+  }, [photo, saved.centerX, saved.centerY, saved.zoom, renderPhotos, !!render]);
+
+  useLayoutEffect(() => {
+    const element = frame.current;
+    if (!element || !render || !lazyPhotos) return;
+    const listener = (event: Event) => flushSync(() => setNear(!!(event as CustomEvent<boolean>).detail));
+    element.addEventListener(photoNearEvent, listener);
+    return () => element.removeEventListener(photoNearEvent, listener);
+  }, [!!render, lazyPhotos]);
+
+  let content: ReactNode = null;
+  if (photo && renderPhotos && render && size && near) {
+    const shown = photoRender(photo, placement, size, '');
+    // Export loads a rendition sized for the saved crop at print resolution; the editor its preview or thumbnail.
+    shown.src = book.mode === 'edit' ? photo.src : exportSource(photo, size.width / getCrop(photo, saved, size.width / size.height).width, format);
+    const resolved = values.boxes[id];
+    renderingSpread(spread.id);
+    try {
+      content = render(shown, { id, uid: 'if-' + spread.id + '-' + id, params: resolved?.params ?? {}, photo: resolved?.photo ?? null });
+    } finally {
+      renderingSpread(undefined);
+    }
+  }
 
   return (
     <div ref={frame} data-box={id} data-box-type="photo" data-empty={photo ? undefined : ''}
+      data-photo-render={render ? 'custom' : undefined} data-pending={render && photo && renderPhotos && !(size && near) ? '' : undefined}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
       className={['if-photo', className].filter(Boolean).join(' ')} style={place(rect, style)} {...issueOn(marker)}>
-      {photo && renderPhotos &&
+      {photo && renderPhotos && !render &&
         <img ref={image} src={book.mode === 'edit' && !lazyPhotos ? photo.src : undefined}
           data-src={lazyPhotos ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
+      {content}
       {!photo && book.mode === 'edit' && <span className="if-placeholder">{box?.photo ? 'Missing photo' : 'Drop a photo'}</span>}
     </div>
   );
