@@ -104,6 +104,9 @@ try {
   assert.equal((await sharp(Buffer.from(image.data,'base64')).metadata()).width,300);
   assert.equal(check.data.image.data,undefined);
   assert.equal(check.data.checks.typescript,'not-run');
+  const wrongSide=await call('check_book',{project,preview:{target:{spread:'first',side:'page'},maxEdge:300}});
+  assert.equal(wrongSide.response.isError,true);
+  assert.ok(wrongSide.data.diagnostics.some(d=>d.code==='preview-target-not-found' && d.message.includes('use left, right or omit side')),JSON.stringify(wrongSide.data));
   let revision=check.data.revision;
   await ready();
 

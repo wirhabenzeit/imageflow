@@ -36,12 +36,15 @@ export async function listTemplateFiles(folder) {
 }
 
 /** A hash of these template files and their paths, so the same template has the same hash wherever it is copied. */
-export async function hashTemplateFiles(folder, files) {
+export async function hashTemplateFiles(folder, files, signal) {
+  signal?.throwIfAborted();
   const hash = createHash('sha256');
   for (const file of files) {
-    const bytes = await readFile(join(folder, ...file.split('/')));
+    signal?.throwIfAborted();
+    const bytes = await readFile(join(folder, ...file.split('/')), { signal });
     hash.update(file + '\0' + bytes.length + '\0');
     hash.update(bytes);
   }
+  signal?.throwIfAborted();
   return hash.digest('hex');
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import fs, { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -10,6 +11,7 @@ import { AuthoringError, createAuthoringService } from '../desktop/authoring-ser
 import { checkProject } from '../desktop/check';
 import { importIntoProject, loadProject } from '../desktop/project';
 import { ProjectSession } from '../desktop/project-session';
+import { templateHash } from '../desktop/template-library';
 import type { AuthoringDiagnostic } from '../src/authoring';
 import type { RenderStatus } from '../src/desktop';
 import { mm } from '../src/format';
@@ -65,6 +67,114 @@ function countChecks(hooks: Parameters<typeof createAuthoringService>[0]) {
   hooks.check = (...args) => { count++; return check(...args); };
   return () => count;
 }
+
+test('context and summary distinguish saved library provenance from the current authored template', async (t) => {
+  const { folder, call } = await fixture(t);
+  const hash = await templateHash(join(folder, 'template'));
+  const saved = { ...project.template, hash };
+  await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, template: saved }));
+  for (const tool of ['get_authoring_context', 'inspect_book']) {
+    const result = await call(tool);
+    assert.deepEqual(result.templateIdentity, {
+      saved, current: { id: null, version: '1', hash }, matchesSavedHash: true,
+    });
+  }
+  // Generated tooling is outside authored template identity, as it is in the library.
+  await mkdir(join(folder, 'template/.imageflow-sdk'));
+  await writeFile(join(folder, 'template/.imageflow-sdk/index.d.ts'), '// generated');
+  for (const tool of ['get_authoring_context', 'inspect_book']) {
+    assert.equal(((await call(tool)).templateIdentity as { matchesSavedHash: boolean }).matchesSavedHash, true);
+  }
+  // A source edit does not rewrite provenance, even before the app's loaded book has refreshed.
+  await writeFile(join(folder, 'template/index.tsx'), 'export default { edited: true };');
+  const editedHash = await templateHash(join(folder, 'template'));
+  assert.notEqual(editedHash, hash);
+  for (const tool of ['get_authoring_context', 'inspect_book']) {
+    assert.deepEqual((await call(tool)).templateIdentity, {
+      saved, current: { id: null, version: '1', hash: editedHash }, matchesSavedHash: false,
+    });
+  }
+});
+
+test('books without saved provenance do not claim an unchanged library template', async (t) => {
+  const { folder, call } = await fixture(t);
+  for (const tool of ['get_authoring_context', 'inspect_book']) {
+    assert.deepEqual((await call(tool)).templateIdentity, {
+      saved: project.template, current: { id: null, version: '1', hash: await templateHash(join(folder, 'template')) },
+      matchesSavedHash: null,
+    });
+  }
+});
+
+test('saved identity is distinct from declarations in the currently checked template', async (t) => {
+  const { hooks, call } = await fixture(t);
+  hooks.check = (book, request, signal, index) => checkProject(book, book.cache, request, async () => ({
+    status: { ...status, template: { ...status.template, id: 'test', version: '2', label: 'Edited template' } },
+  }), signal, index);
+  const result = await call('get_authoring_context');
+  const identity = result.templateIdentity as { saved: typeof project.template; current: { id: string; version: string } };
+  assert.deepEqual(identity.saved, project.template);
+  assert.equal(identity.current.id, 'test');
+  assert.equal(identity.current.version, '2');
+});
+
+test('context verifies the whole template hash even without source reads or a complete revision', async (t) => {
+  const { folder, docs, hooks, call } = await fixture(t);
+  await rm(join(folder, 'photos.json'));
+  await writeFile(join(folder, 'template/artwork.svg'), '<svg/>');
+  Object.defineProperty(hooks, 'docs', { get: () => {
+    writeFileSync(join(folder, 'template/artwork.svg'), '<svg><path/></svg>');
+    return docs;
+  } });
+  await assert.rejects(call('get_authoring_context', { includeSource: [] }),
+    (error) => error instanceof AuthoringError && error.code === 'SOURCE_CHANGED');
+});
+
+test('paginated inspections and context reuse the template hash without rereading large assets', async (t) => {
+  const { folder, call } = await fixture(t);
+  const asset = join(folder, 'template/artwork.bin');
+  await writeFile(asset, Buffer.alloc(2 * 1024 * 1024, 1));
+  const original = readFile;
+  let reads = 0;
+  const patched = t.mock.method(fs, 'readFile', async (...args: Parameters<typeof readFile>) => {
+    if (args[0] === asset) reads++;
+    return original(...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const first = await call('inspect_book', { view: 'spreads', limit: 1 });
+    assert.ok(reads > 0, 'The initial hash reads the asset');
+    const initialReads = reads;
+    await call('inspect_book', { view: 'spreads', offset: 1, limit: 1 });
+    const context = await call('get_authoring_context');
+    assert.deepEqual(context.templateIdentity, first.templateIdentity);
+    assert.equal(reads, initialReads, 'Unchanged requests only reconcile metadata');
+    await writeFile(asset, Buffer.alloc(2 * 1024 * 1024, 2));
+    const changed = await call('inspect_book');
+    assert.notDeepEqual(changed.templateIdentity, first.templateIdentity);
+    assert.ok(reads > initialReads, 'Changed assets are rehashed');
+  } finally {
+    patched.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('cached template hashes include library files omitted from project revisions', async (t) => {
+  const { folder, call } = await fixture(t);
+  const directory = join(folder, 'template/artwork.tmp');
+  await mkdir(directory);
+  const first = await call('inspect_book');
+  // Revision capture ignores this directory, but it is part of library identity, even when initially empty.
+  const path = join(directory, 'image.svg');
+  await writeFile(path, '<svg/>');
+  const added = await call('inspect_book');
+  assert.equal(added.revision, first.revision);
+  assert.notDeepEqual(added.templateIdentity, first.templateIdentity);
+  await writeFile(path, '<svg><path/></svg>');
+  const edited = await call('inspect_book');
+  assert.equal(edited.revision, first.revision);
+  assert.notDeepEqual(edited.templateIdentity, added.templateIdentity);
+});
 
 for (const code of ['typescript-error', 'typescript-timeout']) {
   test(code + ' results do not enter the context or inspection cache', async (t) => {
@@ -146,6 +256,10 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     const result = await call(tool);
     assert.ok((result.diagnostics as AuthoringDiagnostic[]).some(({ code }) => code === 'template-compile-error'));
     assert.equal(result.template, undefined);
+    assert.deepEqual(result.templateIdentity, {
+      saved: project.template, current: { id: null, version: null, hash: await templateHash(join(folder, 'template')) },
+      matchesSavedHash: null,
+    });
     if (tool === 'get_authoring_context') {
       assert.equal((result.sources as Record<string, { text: string }>)['template/index.tsx'].text, broken);
       assert.equal(result.apiReference, '# Template API reference');
@@ -203,6 +317,9 @@ test('a template directory outside the project cannot expose its source or filen
   assert.equal(result.revision, null);
   assert.deepEqual(result.sources, {});
   assert.deepEqual(result.templateFiles, []);
+  assert.deepEqual(result.templateIdentity, {
+    saved: project.template, current: { id: null, version: null, hash: null }, matchesSavedHash: null,
+  });
   assert.equal(JSON.stringify(result).includes('PRIVATE_SOURCE_MUST_STAY_OUTSIDE'), false);
   assert.equal(JSON.stringify(result).includes('PRIVATE_FILENAME_MUST_STAY_OUTSIDE'), false);
   assert.equal(result.apiReference, '# Template API reference');
