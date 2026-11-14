@@ -41,7 +41,8 @@ async function packageApp() {
       appBundleId: 'ch.wirhabenzeit.imageflow',
       appCategoryType: 'public.app-category.photography',
       extendInfo: {
-        CFBundleIconFile: 'ImageFlow.icns',
+        // macOS 26 and later show the layered Icon Composer icon from Assets.car; earlier versions use ImageFlow.icns.
+        CFBundleIconFile: 'ImageFlow.icns', CFBundleIconName: 'ImageFlow',
         UTExportedTypeDeclarations: [{
           UTTypeIdentifier: 'ch.wirhabenzeit.imageflow.book',
           UTTypeDescription: 'ImageFlow Book',
@@ -65,8 +66,9 @@ async function packageApp() {
       },
       // Agents run the MCP bridge with ImageFlow's executable in Node mode; keep it a plain file outside app.asar.
       asar: { unpackDir: 'node_modules/@img', unpack: '**/{mcp-bridge.cjs,mac-header.node}' },
-      // Document icons; the app icon comes from `icon` below. Sources and generator: resources/brand/, npm run build:icons.
-      extraResource: [esbuildBinary, books, previews, ...['ImageFlowBook.icns', 'ImageFlowTemplate.icns'].map((icon) => join(root, 'resources', icon))],
+      // Document icons and the compiled Icon Composer app icon; the classic app icon comes from `icon` below.
+      // Sources and generator: resources/brand/, npm run build:icons.
+      extraResource: [esbuildBinary, books, previews, ...['ImageFlowBook.icns', 'ImageFlowTemplate.icns', 'Assets.car'].map((icon) => join(root, 'resources', icon))],
       icon: join(root, 'resources', 'ImageFlow.icns'),
       prune: false,
       overwrite: true,

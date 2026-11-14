@@ -1,4 +1,7 @@
-# ImageFlow
+<h1><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="resources/brand/logo/imageflow-horizontal-dark.svg">
+  <img src="resources/brand/logo/imageflow-horizontal-light.svg" alt="ImageFlow" height="56">
+</picture></h1>
 
 ImageFlow is a macOS photobook editor. Its draft starter project is a 32-page WhiteWall Gallery Square book with sample photos, Markdown, and a template you can edit.
 
@@ -58,7 +61,7 @@ The ad-hoc-signed app appears in `out/ImageFlow-darwin-arm64/ImageFlow.app` on A
 
 Set `APPLE_SIGNING_IDENTITY` to a Developer ID Application identity to sign with hardened runtime. `npm run package:mac:release` also notarizes and staples the app and DMG, verifies their tickets, and creates the update ZIP. [Mac signing and notarization](docs/signing.md) covers the credentials, GitHub Actions secret setup, artifact names and verification. `npm run test:packaged:existing` checks a release build without rebuilding it, including its MCP bridge.
 
-The app icon and the book and template document icons are drawn as SVG in `resources/brand/`. After editing one, run `npm run build:icons` to regenerate the `.icns` files in `resources/` and commit both.
+The app icon and the book and template document icons are drawn as SVG in `resources/brand/`, next to the layered Icon Composer version of the app icon (`ImageFlow.icon`, which macOS 26 shows with Liquid Glass) and the DMG window background. After editing one, run `npm run build:icons` on a Mac with Xcode 26 to regenerate the `.icns` files, `resources/Assets.car` and the DMG background in `resources/dmg/`, and commit them with the source. The DMG window layout comes from `scripts/build-dmg-layout.py`. The logo and wordmark live in `resources/brand/logo/` as outlined SVG (the type is Inter Display, under the SIL Open Font License), for light and dark backgrounds, in horizontal and stacked versions.
 
 To prepare a downloadable release, follow [Releasing ImageFlow](docs/releasing.md). Pushing a matching version tag creates signed Apple silicon ZIP and DMG assets in a draft GitHub Release for manual review and publishing.
 

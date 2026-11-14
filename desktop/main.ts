@@ -1557,7 +1557,12 @@ void app.whenReady().then(async () => {
     if (state.layout && (state.layout.mode === 'grid' || state.layout.mode === 'vertical') && gridColumns.includes(state.layout.columns as 1|2|3|4)) document.layout = state.layout;
     updateMenus();
   });
-  app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
+  // The panel shows the bundle's app icon; the credits line carries the same tagline as the start window.
+  app.setAboutPanelOptions({
+    applicationName: 'ImageFlow', applicationVersion: app.getVersion(),
+    credits: 'Your photographs. A book of their own.', copyright: 'Copyright © 2026 the ImageFlow authors',
+    website: 'https://github.com/wirhabenzeit/imageflow',
+  });
   installMenu();
   if (renderPreviewsTo) {
     for (const entry of await library.list()) if (entry.source === 'built-in') await saveTemplatePreview(entry.id);
