@@ -28,6 +28,8 @@ The configuration contains absolute paths, and `~` above stands for your home fo
 
 The pane shows attached client names. Clearing the checkbox closes their app connections and removes the connection file. Selecting it again creates new credentials at the same path. An installed bridge reads the current connection file before each call, so agents reconnect without being set up again.
 
+Access is session-only: quitting ImageFlow removes the connection file. After restarting, open the intended books and select **Allow agents to use open books** again. The existing client configuration then reconnects. Automatic restoration after an update is not implemented; signed-build restart/update acceptance remains tracked in #74 and #79.
+
 For a development checkout, `node scripts/build-mcp.mjs` creates `.build/mcp-bridge.cjs`. Desktop staging bundles that bridge and includes this document. Packaging keeps it outside `app.asar`. A standalone invocation with any Node.js 22.20 or newer has the following form:
 
 ```sh
@@ -38,9 +40,17 @@ The connection file contains a local Unix socket address and a random access tok
 
 ## Authoring workflow
 
-Call `list_projects` and use the returned `project` handle explicitly in subsequent requests. A handle remains stable across edits and reloads. Opening another book, reopening a book, or restarting the app creates a new handle.
+Call `list_projects` and use the returned `project` handle explicitly in subsequent requests. A handle remains stable across edits and reloads. Opening another book adds its own handle and leaves existing handles valid; opening an already-open book focuses its window and keeps its handle. Closing and reopening a book, or restarting the app, creates a new handle. Use the folder and handle to distinguish identically titled books.
 
 Read `get_authoring_context` for template declarations, supported operations, source paths and the installed template API. Its `template` lists `layoutFamilies`, and each layout's `family` and `variant` tags: variants of a family are ordinary layouts, switched by layout ID with the `switch_layout` operation. An agent with workspace access can edit files inside `template/` and existing Markdown files inside `texts/`. While the book is open, change project state through `apply_project_changes` or the UI. Register new content through `import_sources`.
+
+Context and inspection expose `templateIdentity`. Its `saved` section is the `id`, `version` and optional `hash` recorded in `project.json` when the book was created. That saved hash identifies the original library template; it does not prove the book's template is still unchanged. `current` contains the checked declarations' ID/version and a fresh authored-template `hash`, using the library's hashing rules (including bundled dependencies, excluding generated tooling, dotfiles and `node_modules`). `matchesSavedHash` is `true` or `false` when both hashes exist, otherwise `null`. The current hash remains available after a compile failure when its files can be read; unavailable declarations or hashes are `null` with diagnostics. Individual `sources` hashes identify only those files, and `revision` identifies the whole book's inputs.
+
+For an empty book, inspect `template.openingSpreads` and the layout declarations, then insert suitable layouts with `insert_spread`. Opening spreads are new-book defaults; deleting all spreads does not automatically apply them again. `check_book` reports `book-empty` until a spread is inserted, and a preview of an absent page/spread returns a target error. Use `side: "page"` for layouts with `span: "page"`; facing-page layouts use `left` or `right`.
+
+Editors do not change where values are saved. Parameter commands use `scope: "document"`, `"spread"`, `"box"` or `"element"`; box/element commands also name `owner`. Context lists each custom editor's owned `parameters` and any editor-owned `spread` parameters. Change those spread fields with `scope: "spread"`, even when the editor appears on an element. Inline text and custom editors share draft protection and Undo with conventional fields: finish or cancel the human edit and close the editor before applying commands.
+
+The six project tools operate on authorized open books. Template library discovery, save/import/export and creating a book from a library entry use the app's **New Book** and **Manage Templates…** windows; they are not MCP tools. App-level library authorization and non-dialog conflict/trust handling remain separate scope in #81.
 
 Call `check_book` after source edits. It refreshes inputs from disk, bundles the template, resolves the whole book and returns diagnostics. Request a page or spread image when checking its composition. A template error leaves the last successful artwork visible in the app with a stale indication. Correcting the source triggers another reload.
 
@@ -50,9 +60,9 @@ Every inspection/check result identifies an input revision. Pass that revision a
 
 | Tool | Arguments and result |
 | --- | --- |
-| `list_projects` | No arguments. Returns the currently authorized open project, its stable handle, writable state and current revision. |
+| `list_projects` | No arguments. Returns all authorized open books with their folders, stable handles, writable state and current revisions. |
 | `get_authoring_context` | `project`, optional `includeSource` and `includeExamples`. Reads up to eight requested paths inside `template/` or `texts/`, with declarations, authoring guidance and the installed template API (`capabilities.templateApi`: contract, guaranteed `baseline`, all supported capabilities and `imageflow` exports). `includeExamples` adds the shipped example templates, each with name, description and source. |
-| `inspect_book` | `project`, `view` of `summary`, `spreads`, `sources`, `parameters` or `elements`, optional `spread`, `offset` and `limit`. The `elements` view requires `spread` and optionally filters by `box` or `element`. Results are paginated with at most 100 records per call. |
+| `inspect_book` | `project`, `view` of `summary`, `spreads`, `sources`, `parameters` or `elements`, optional `spread`, `offset` and `limit`. Summary/spread/source/parameter results include saved/current `templateIdentity`. The `elements` view requires `spread` and optionally filters by `box` or `element`. Results are paginated with at most 100 records per call. |
 | `check_book` | `project`, optional `expectedRevision`, `preview`, `inspect`, `typescript`, `draft` and `fixtures`. Combines check coverage, diagnostics, measured element inspection and optional artwork. With `draft`, it renders an unsaved command batch on top of the saved book. With `fixtures`, it renders layouts with synthetic content in separate fixture books and reports a coverage matrix. |
 | `apply_project_changes` | `project`, `expectedRevision`, `idempotencyKey`, `label`, `operations`, optional `dryRun`. Validates the complete batch and applies it through the app. One successful batch creates one named Undo entry. |
 | `import_sources` | `project`, `expectedRevision`, `idempotencyKey`, `kind`, `paths`, and `accept` for file inputs. Registers files copied into this project’s `inbox/` folder and returns source IDs. |
@@ -64,6 +74,8 @@ Context and inspection remain available when a manifest is malformed or missing:
 The open project owns a bounded file index. Its first capture hashes registered originals; later captures reuse content hashes while rechecking resolved paths, file identity, size, modification/change timestamps and template directory membership. Watcher events invalidate affected files immediately, before preview reload is debounced. Missing event paths, watcher failure and system resume invalidate the entire index. Every tool operation still reconciles metadata, so it does not depend on watcher delivery alone. Closing or reopening a project retires its index.
 
 Context and inspection reuse the latest successful whole-book check only while both its content revision and local observation remain current. A successful preview can supply those same declarations and diagnostics without retaining its image. An explicit `check_book` always validates and renders again. A delayed watcher notification with identical content and filesystem metadata may cause one fresh check retry; actual changed inputs still invalidate the result.
+
+Template identity hashes are also reused across unchanged inspections, including pagination. Each request reconciles the library's complete authored file list and file identity/size/timestamps before and after inspection, alongside the input observation; large fonts, images and dependency bundles are reread only when that cache is invalidated. With an incomplete input revision, context keeps two hash reads for recovery checks. Hash reads accept cancellation.
 
 Each render check uses a private rendition folder. Only a completed check whose inputs remained valid can supply generated photo renditions to later checks. Reuse is limited to current photo identities and at most 2048 files / 512 MiB per open project; failed attempts are discarded. This avoids resizing unchanged originals again while still rendering the whole book for every explicit preview. Mutation preparation may also retry once for generation-only notification delays, before any save or import occurs.
 
@@ -83,7 +95,7 @@ Address a physical page with a spread ID and side.
 }
 ```
 
-Omit `side` to capture the whole spread. A single-page opening or closing layout produces its available side. Requesting its inactive side returns a target error. In a format without facing pages every spread ID is one page: omit `side`, and the metadata reports `side: "page"` and `page: { "number": n }`; `get_authoring_context` reports each format's `facingPages` and each layout's `span`. A target of `{ "page": 3 }` uses physical book numbering and also requires `expectedRevision`.
+Omit `side` to capture the whole spread. A single-page opening or closing layout produces its available side. Requesting its inactive side returns a target error. In a format without facing pages every spread ID is one page: omit `side` or request `side: "page"`, and the metadata reports `side: "page"` and `page: { "number": n }`; `get_authoring_context` reports each format's `facingPages` and each layout's `span`. A target of `{ "page": 3 }` uses physical book numbering and also requires `expectedRevision`.
 
 The defaults are trim bounds, PNG and 1000 pixels on the longest edge. Set `bounds` to `bleed` for output bleed, or `format` to `jpeg`. The longest edge may be between 1 and 1600 pixels. Images contain clean export-mode artwork after whole-book text flow, including the actual continuation on later pages. Metadata includes pixel and millimetre dimensions, spread identity, side, page numbers and rendering bounds. Image bytes appear once in an MCP image block. The text and structured result carry the image metadata.
 
@@ -215,7 +227,7 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | `layout-render-failed` | A spread whose layout threw, or rendered no single `<Spread>`, with the error message and the template `path`, `line` and `column` where it threw when the source map has them. In a fixture check, the fixture instead of the spread. |
 | `render-impure` | Template code called an API that makes output depend on the network, the GPU or time (`fetch`, a WebGL context, a worker, a timer, …) while the book rendered for a check or export. `details.api` names it; `location.spread` is the layout that was rendering, absent for calls during module setup or later callbacks. An error: print export refuses the book. |
 | `rendered-image-failed` | A `<RenderedImage>` could not be drawn while the book rendered for a check or export: `draw` rejected, did not finish within the timeout, or returned a picture with fewer pixels than the box needs on either axis. The message names the picture's label and the reason; `location` has the spread and element; `details` has `label` and `timedOut`. An error: print export refuses the book. |
-| `template-dependencies` | A warning about the template's saved npm bundle: `package-lock.json` changed since the dependencies were last rebuilt (`scripts/rebuild-template-dependencies.mjs`), a `package.json` has no saved bundle yet, or bundled packages have no type declarations. The book keeps rendering the saved bundle. |
+| `template-dependencies` | A warning about the template's saved npm bundle: `package-lock.json` changed since the last [dependency bundle rebuild](template-api.md#dependencies), a `package.json` has no saved bundle yet, or bundled packages have no type declarations. The book keeps rendering the saved bundle. |
 | `template-preview-invalid`, `template-preview-aspect` | Warnings about the template's own `preview` image: the file is missing, larger than 2 MB, outside the template folder or not a readable PNG, JPEG or WebP with a matching extension (New Book then shows a render of the opening spread), or its width-to-height ratio differs from the default format's trimmed page by more than 5% (New Book crops it to fill the tile). `details.path`, and for the ratio `width`, `height` and `expected`. |
 | `template-declaration-invalid` | A declaration in the template's default export that violates the template API, by `declaration` path such as `spreads.chapter.parameters.heading`. At most 20 per check. |
 | `template-id-mismatch` | The template declares a different `id` from the one `project.json` names. |
@@ -301,7 +313,7 @@ Use `kind: "markdown"` for Markdown sources. File parameters use `kind: "file"` 
 
 ## Limits and recovery
 
-The socket accepts at most eight attached clients and four outstanding calls per client. ImageFlow queues overlapping agent requests in arrival order, with at most 32 waiting requests. Requests wait for active UI operations and earlier agent work; mutations retain exclusive access and the human-editing check. A full queue returns `AUTHORING_QUEUE_FULL`. Transport requests are limited to 1 MiB. Responses, including emitted MCP image content and metadata, are limited to 8 MiB. Reduce page resolution, requested source files or pagination size when a payload is too large.
+The socket accepts at most eight attached clients and four outstanding calls per client. Each book queues overlapping agent requests in arrival order, with at most 32 waiting requests. Requests wait for that book's active UI operations and earlier agent work; mutations retain exclusive access and the human-editing check. A full queue returns `AUTHORING_QUEUE_FULL`. Transport requests are limited to 1 MiB. Responses, including emitted MCP image content and metadata, are limited to 8 MiB. Reduce page resolution, requested source files or pagination size when a payload is too large.
 
 A connection handshake has a five-second timeout. An individual bridge call has a two-minute timeout including time spent waiting in the queue, and artwork rendering has a separate one-minute timeout. MCP cancellation propagates to the app. Disconnecting or revoking a connection cancels its pending work; cancelled waiting requests never execute. A committed mutation can outlive the response, so use the original idempotency key when recovering from a lost response. Normal app shutdown waits for accepted saves and lock release.
 
@@ -320,6 +332,8 @@ Source consistency uses content revisions, filesystem metadata and watcher gener
 ## Verification
 
 `tests/mcp-connection.test.ts` exercises token rejection, private file/socket permissions, argument/path validation, request/response limits, cancellation, revocation, reconnection and SDK client tool discovery/image delivery. `scripts/smoke-mcp.mjs` exercises a real running ImageFlow instance with the official SDK client.
+
+`tests/authoring-context.test.ts` checks saved/current template identity, library hash parity, generated-tooling exclusions, compile failures, unavailable inputs and concurrent edits. `scripts/smoke-mcp-context.mjs` uses the SDK client against the desktop app for empty-book inspection/check/missing-preview/first-insertion, explicit single-page images, inline text and element draft refusal/completion/revision conflict/shared Undo, identically titled books, editing an unfocused book, stale handles after close/reopen, and closing during a pending mutation without blocking another book. It runs in the full desktop suite and, with `--packaged`, the packaged suite. These automated checks do not replace #79's real-client signed-candidate acceptance or #74's two-version update/reconnection test.
 
 See [the large-book benchmark](authoring-performance.md) for the reproducible 300-photo authoring workload, measured timings and hash-byte counts. The benchmark script generates its large fixture under `.build/`; originals are not committed to the repository.
 

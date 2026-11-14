@@ -346,7 +346,7 @@ To share a template, export it as an `.imageflow-template` file: **Export…** i
 
 ### Opening spreads
 
-`openingSpreads` lists the spreads a new book starts with, in order. The editor offers them in an empty book now, and new books get them once books can be created from any template (#63). Each entry names a layout and may set some of that layout's own parameters:
+`openingSpreads` lists the spreads a new book starts with, in order. Creating a book from a library template applies these defaults; the editor also offers them in an empty book. Each entry names a layout and may set some of that layout's own parameters:
 
 ```ts
 defineTemplate({

@@ -36,7 +36,7 @@ import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
-import { assignmentCounts, firstSpreadLayouts, newSpread, openingSpreadStates, readEdit, resolveEditPath } from './editing';
+import { firstSpreadLayouts, newSpread, openingSpreadStates, readEdit, resolveEditPath } from './editing';
 import { moveContent, pickerFamily, swapContent, layoutPreviews, switchLayout } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
@@ -1472,7 +1472,6 @@ export function App() {
   const undoCommand = commandState('undo', menuState), redoCommand = commandState('redo', menuState);
   const pdfCommand = commandState('export', menuState), printCommand = commandState('print', menuState);
 
-  const counts = summary ? assignmentCounts(summary.project, template?.spreads) : {};
   const format = formatOf(template);
   // A saved format the template's named formats no longer include; the Book check reports it and print export is
   // blocked. A template with one fixed format offers no choices and ignores the saved one.
@@ -1743,7 +1742,7 @@ export function App() {
           key={JSON.stringify([summary.handle, spread.id, layoutFamily, summary.templateHash, template.format, summary.network])}
           project={summary.id} template={template} spread={spread} params={summary.project.params} family={layoutFamily}
           readOnly={!writable} blocked={previewNotice || undefined} edit={edit} />}
-        edit={edit} highlight={setHighlight} issues={issue} select={select} />}
+        edit={edit} highlight={setHighlight} select={select} />}
       </div>
     </div>
     {summary && template && elementEditor && !editorTargetGone(spreads, elementEditor) &&

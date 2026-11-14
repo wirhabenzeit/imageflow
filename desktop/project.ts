@@ -15,7 +15,7 @@ import { renditionCacheFor } from './rendition-cache';
 import { photoDate } from './capture-time';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
-import { sourceEntries, sourcePath, sourceLinked, sourceFolder } from '../src/source-locations';
+import { sourceEntries, sourcePath, sourceLinked } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
 import { approveSource, sourceBookKey } from './source-access';

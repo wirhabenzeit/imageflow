@@ -1,4 +1,5 @@
 const icons = {
+  pencil: 'M3 10.5L10.5 3l2.5 2.5L5.5 13H3zM9 4.5L11.5 7',
   check: 'M3 8l3 3 7-7',
   warning: 'M8 2l6 11H2zM8 6v3M8 11v.1',
   document: 'M4 1.5h5l3 3v10H4zM9 1.5v3h3M6 7h4M6 9h4M6 11h3',

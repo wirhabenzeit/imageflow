@@ -9,6 +9,10 @@ function listen<T>(channel: string, listener: (value: T) => void) {
 }
 
 const api: DesktopApi = {
+  showMarkdown: (request) => ipcRenderer.invoke(channels.showMarkdown, request),
+  markdownAction: (request) => ipcRenderer.invoke(channels.markdownAction, request),
+  onMarkdownPrepareClose: (listener) => listen(channels.markdownPrepareClose, listener),
+  onMarkdownChanged: (listener) => listen(channels.markdownChanged, listener),
   onSourceCommand: (listener) => listen(channels.sourceCommand, listener),
   templateAction: (id, action) => ipcRenderer.invoke(channels.templateAction, id, action),
   showContextMenu: (ids, state) => ipcRenderer.invoke(channels.contextMenu, ids, state),
@@ -43,7 +47,6 @@ const api: DesktopApi = {
   onSettingsPane: (listener) => listen(channels.settingsPane, listener),
   fitSettings: (height) => ipcRenderer.invoke(channels.fitSettings, height),
   setBookMenuState: (state) => ipcRenderer.invoke(channels.bookMenu, state),
-  setPanelVisibility: (state) => ipcRenderer.invoke(channels.panelVisibility, state),
   openProject: (action) => ipcRenderer.invoke(channels.open, action),
   saveProject: (id, files, label) => ipcRenderer.invoke(channels.save, id, files, label),
   history: (id, direction) => ipcRenderer.invoke(channels.history, id, direction),

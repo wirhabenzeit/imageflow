@@ -39,6 +39,13 @@ async function setup() {
 const yes = async () => true;
 const no = async () => false;
 
+test('template hashing honours cancellation before reading authored assets', async () => {
+  const controller = new AbortController();
+  controller.abort(new Error('Cancelled template identity request'));
+  await assert.rejects(templateHash('/unreadable', ['large-font.woff2'], controller.signal),
+    /Cancelled template identity request/);
+});
+
 test('template files leave out dotfiles and node_modules, refuse links, and hash the same wherever copied', async () => {
   const { work, done } = await setup();
   try {

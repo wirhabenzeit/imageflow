@@ -1,6 +1,6 @@
 import { sourcePath, sourceLinked } from '../src/source-locations';
 import { createHash } from 'node:crypto';
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { capabilities as templateCapabilities, contract1Capabilities, runtimeExports } from '../src/runtime-exports';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from '../src/authoring-check';
@@ -29,6 +29,7 @@ import { FixtureError, fixtureCases, fixtureFits, fixtureLimits, fixtureRequestS
 import type { FixtureCell } from '../src/fixtures';
 import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
 import { cellReport, fixtureAssets, fixtureDraft, fixtureFindings, fixtureNotEvaluated } from './fixtures';
+import { templateFiles, templateHash } from './template-library';
 
 // Fixture checks share the bridge's two-minute call deadline with queueing, so they stop starting renders after this.
 const fixtureBudgetMs = 60_000;
@@ -95,6 +96,20 @@ async function contextTemplateFiles(folder: string) {
   return entries.filter((entry) => entry.isFile()).map((entry) => relative(folder, join(entry.parentPath, entry.name))).sort().slice(0, 200);
 }
 
+async function templateObservation(folder: string, signal: AbortSignal) {
+  signal.throwIfAborted();
+  const root = join(folder, 'template');
+  const files = await templateFiles(root);
+  const stamps = [];
+  for (const file of files) {
+    signal.throwIfAborted();
+    const info = await lstat(join(root, file), { bigint: true });
+    if (!info.isFile()) throw new AuthoringError('SOURCE_CHANGED', 'Template files changed while inspecting.');
+    stamps.push([file, info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':'));
+  }
+  return { files, key: JSON.stringify(stamps) };
+}
+
 function failureIdentity(error: unknown) {
   if (!(error instanceof Error)) return JSON.stringify([typeof error, String(error)]);
   return JSON.stringify([error.name, 'code' in error ? error.code : undefined, error.message]);
@@ -123,6 +138,7 @@ async function templateExamples(reference: string) {
 
 export function createAuthoringService(hooks: Hooks) {
   let cachedCheck: { session: ProjectSession; inputs: ProjectInputCapture; result: AuthoringCheckResult } | undefined;
+  let cachedTemplateHash: { session: ProjectSession; observation: string; files: string; hash: string } | undefined;
   const get = (handle: unknown) => {
     const session = hooks.session();
     if (!session || session.handle !== handle) throw new AuthoringError('PROJECT_CLOSED', 'This project is no longer open. Call list_projects for current handles.');
@@ -404,6 +420,22 @@ export function createAuthoringService(hooks: Hooks) {
         if (document.status === 'rejected') unavailable(document.reason, index === 0 ? 'project.json' : 'photos.json');
       }
       const template = report.render?.template ?? report.template;
+      // This is the library's authored-file hash, not the saved provenance or a source-file/revision digest.
+      // Reconcile the library's complete file set: revision capture skips e.g. *.tmp files that the library hashes.
+      const observed = await Promise.allSettled([templateObservation(folder, signal)]);
+      const observation = observed[0].status === 'fulfilled' ? observed[0].value : undefined;
+      const reuseHash = observation && before.inputs && cachedTemplateHash?.session === session &&
+        cachedTemplateHash.observation === before.inputs.observation && cachedTemplateHash.files === observation.key;
+      const hashes = await Promise.allSettled([observed[0].status === 'rejected' ? Promise.reject(observed[0].reason)
+        : reuseHash ? Promise.resolve(cachedTemplateHash!.hash) : templateHash(join(folder, 'template'), observed[0].value.files, signal)]);
+      signal.throwIfAborted();
+      if (hashes[0].status === 'rejected') unavailable(hashes[0].reason, 'template');
+      const currentHash = hashes[0].status === 'fulfilled' ? hashes[0].value : null;
+      const templateIdentity = {
+        saved: project?.template ?? null,
+        current: { id: template?.id ?? null, version: template?.version ?? null, hash: currentHash },
+        matchesSavedHash: project?.template.hash && currentHash ? project.template.hash === currentHash : null,
+      };
       let result: Record<string, unknown>;
       let verifySources: (() => Promise<void>) | undefined;
       if (name === 'get_authoring_context') {
@@ -435,9 +467,11 @@ export function createAuthoringService(hooks: Hooks) {
             'Use apply_project_changes for project.json/photos.json; never edit these manifests while the app is open.',
             'Copy new content into inbox/ and call import_sources. Then assign returned IDs with a command batch.',
             'To start or extend a template, call get_authoring_context with includeExamples and copy the closest example layout.',
+            'For an empty book, inspect template.openingSpreads and insert suitable layouts with insert_spread; openingSpreads describes new-book defaults and is not applied again automatically.',
+            'Parameter commands use saved scopes: document, spread, box or element. An element editor can also own spread parameters; use scope:spread for those fields, not scope:element.',
             'To find the parameter a request means, read each parameter\'s description with its unit, range and options; give new parameters a description when their meaning or direction is not obvious from the label.',
             'Use a layout family when layouts are variants of one design (template.layoutFamilies; family and variant on each layout); pickers should choose by variant tags, not hard-coded IDs. Switch variants with switch_layout and the layout ID.'],
-          template, diagnostics, checks: report.checks, sources,
+          template, templateIdentity, diagnostics, checks: report.checks, sources,
           templateFiles: files[0].status === 'fulfilled' ? files[0].value : [],
           apiReference: await readFile(hooks.docs, 'utf8'),
           ...(args.includeExamples ? { examples: await templateExamples(hooks.docs) } : {}),
@@ -468,13 +502,21 @@ export function createAuthoringService(hooks: Hooks) {
           kept: template ? keptOutside(spread, template.spreads) : [],
           ...(view === 'parameters' && template ? { declarations: template.spreads[spread.definition] } : {}),
         })) ?? [];
-        result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format,
+        result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format, templateIdentity,
           pages: report.render?.pages, total: records.length, offset, items: records.slice(offset, offset + limit),
           nextOffset: offset + limit < records.length ? offset + limit : null,
           ...(view === 'parameters' ? { document: { values: project?.params, declarations: template?.parameters } } : {}),
           diagnostics, checks: report.checks, history: session.history };
       }
       await verifySources?.();
+      const observedAfter = await Promise.allSettled([templateObservation(folder, signal)]);
+      signal.throwIfAborted();
+      // A complete input capture supplies the content/race guard below. Keep the second byte read for recovery.
+      const hashesAfter = before.inputs ? hashes : await Promise.allSettled([templateHash(join(folder, 'template'), undefined, signal)]);
+      signal.throwIfAborted();
+      if (settledState(observed) !== settledState(observedAfter) || settledState(hashes) !== settledState(hashesAfter)) {
+        throw new AuthoringError('SOURCE_CHANGED', 'Template files changed while inspecting. Retry for current context.');
+      }
       const documentsAfter = await readDocuments();
       const after = await contextInputs(session.inputs, signal);
       if (!sameDocuments(documents, documentsAfter) || before.failure !== after.failure ||
@@ -482,6 +524,9 @@ export function createAuthoringService(hooks: Hooks) {
         throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while inspecting. Retry for current context.');
       }
       get(session.handle);
+      if (currentHash && observation && after.inputs) {
+        cachedTemplateHash = { session, observation: after.inputs.observation, files: observation.key, hash: currentHash };
+      } else cachedTemplateHash = undefined;
       return result;
     }
     if (name !== 'apply_project_changes' && name !== 'import_sources') throw new AuthoringError('UNKNOWN_TOOL', 'Unknown authoring tool.');
