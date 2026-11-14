@@ -210,7 +210,7 @@ zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: 8, step: .1,
   description: 'Higher values zoom in. 1 shows the whole route; 2 shows half its width.' }),
 ```
 
-Descriptions appear with the parameter's type, range, `step`, `unit` and options in `get_authoring_context` (under `template`) and in `inspect_book`'s parameter view. In the editor, a field shows its parameter's description behind a small info button (on hover, or click to keep it open), so controls stay uncluttered. A `description` on a `controls` entry is shown under the field instead and replaces it there; control descriptions have the same limits. Descriptions never change defaults, allowed values or saved data. Put units in `unit`, not in the description.
+Descriptions appear with the parameter's type, range, `step`, `unit` and options in `get_authoring_context` (under `template`) and in `inspect_book`'s parameter view. In the editor, a field shows its parameter's description only as its hover tooltip, so the settings stay uncluttered; write it for agents first. A `description` on a `controls` entry is shown under the field instead and replaces it there; control descriptions have the same limits. Descriptions never change defaults, allowed values or saved data. Put units in `unit`, not in the description.
 
 Scopes: `parameters` at template level (document), on a spread definition (spread instance), on a box or element (element instance). Values are stored in `project.json` at the matching scope. There is no inheritance between scopes.
 

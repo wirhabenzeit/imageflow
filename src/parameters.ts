@@ -7,7 +7,7 @@ const color = z.string().regex(/^#[0-9a-f]{6}$/i);
 const date = z.iso.date();
 const extension = z.string().regex(/^\.[a-z0-9]{1,10}$/, 'Use lowercase file extensions such as .gpx.');
 // `description` is plain help text: what the value means, its direction and when to change it. Agents read it, and the
-// editor shows it behind an info button on a field without a control description of its own. It never changes
+// editor shows it as the hover tooltip of a field without a control description of its own. It never changes
 // defaults, validation or saved data. Control descriptions share its limits.
 export const maxParameterDescription = 1000;
 const description = z.string().trim().min(1).max(maxParameterDescription).optional();
