@@ -22,7 +22,8 @@ source = source.replace(heading, heading + '\n<ctx.Text presentation="inline" pa
 await writeFile(templateFile, source);
 const projectFile = join(book, 'project.json');
 const initial = JSON.parse(await readFile(projectFile, 'utf8'));
-initial.spreads = initial.spreads.slice(0, 2);
+// The typographic title page, which the sample book replaces with its title photo.
+initial.spreads = [{ ...initial.spreads[0], definition: 'title', boxes: {} }, initial.spreads[1]];
 await writeFile(projectFile, JSON.stringify(initial, null, 2));
 const firstId = initial.spreads[0].id;
 const saved = async (path = 'heading') => JSON.parse(await readFile(projectFile, 'utf8')).spreads[0].params[path];

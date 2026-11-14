@@ -114,6 +114,8 @@ try {
   const mapPage = '[data-spread="water"] [data-rendered]';
   const mapBook = JSON.parse(await readFile(manifest, 'utf8'));
   mapBook.spreads.find(({ id }) => id === 'water').definition = 'map';
+  // The selected page shows Two photos, so the sidebar has a setting to edit on it.
+  mapBook.spreads.find(({ id }) => id === 'settlements').definition = 'pair';
   const beforeMap = await thumbUrl();
   await writeFile(manifest, JSON.stringify(mapBook));
   await nextThumbs(beforeMap);
@@ -126,8 +128,7 @@ try {
     window.__thumbMessages = [];
   });
   const beforeEdit = await thumbUrl();
-  await page.getByRole('spinbutton', { name: 'Gap', exact: true }).fill('7');
-  await page.getByRole('spinbutton', { name: 'Gap', exact: true }).press('Enter');
+  await page.getByRole('checkbox', { name: 'White frame', exact: true }).check();
   await page.waitForFunction(() => window.__thumbMessages.some(({ data }) => data.state === 'ready'));
   assert.notEqual(await thumbUrl(), beforeEdit, 'Inspect the replacement frame, not the previous sidebar');
   assert.equal(await page.locator('iframe.book-frame-thumbs[data-current]').getAttribute('data-ready'), null,
