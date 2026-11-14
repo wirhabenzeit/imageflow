@@ -28,6 +28,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:unit
+      # Reports (never fails on) changes to the book format, template API and MCP shapes; see tests/compat/README.md.
+      - name: Report compatibility surface changes
+        run: npm run compat:report
 
   desktop:
     # Keep private-repository PRs from consuming macOS minutes.

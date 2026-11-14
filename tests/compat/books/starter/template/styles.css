@@ -1,0 +1,134 @@
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-latin-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-latin-600-normal.woff2") format("woff2");
+  font-weight: 600;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-latin-600-italic.woff2") format("woff2");
+  font-weight: 600;
+  font-style: italic;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-latin-800-normal.woff2") format("woff2");
+  font-weight: 800;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-latin-800-italic.woff2") format("woff2");
+  font-weight: 800;
+  font-style: italic;
+}
+@font-face {
+  font-family: "Field Sans";
+  src: url("./fonts/inter-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+}
+
+/* Colour themes. Every colour of the book comes from these variables, so a page never chooses its own. */
+.field-book.theme-light {
+  --paper: #f5f1e8; --ink: #1f2b25; --muted: #66706a; --rule: #cfc7b5; --accent: #9b6a3c;
+  --chip: #f5f1e8f2;
+}
+.field-book.theme-dark {
+  --paper: #1b1c1a; --ink: #ece6da; --muted: #a39e93; --rule: #45433d; --accent: #d4aa6c;
+  --chip: #1b1c1af2;
+}
+.field-book { --heading-font: "Field Serif"; --heading-weight: 600; --heading-tracking: -.025em; }
+.field-book.headings-sans { --heading-font: "Field Sans"; --heading-weight: 500; --heading-tracking: -.035em; }
+
+.field-book { color: var(--ink); font: 500 10pt/1.4 "Field Sans"; }
+.field-book .paper { background: var(--paper); }
+.field-book :is(h1, h2, h3, p, blockquote) { margin: 0; }
+.field-book :is(h1, h2, h3) { font-family: var(--heading-font); font-weight: var(--heading-weight); letter-spacing: var(--heading-tracking); white-space: pre-line; }
+.field-book h1 { font-size: 64pt; line-height: 1; letter-spacing: calc(var(--heading-tracking) * 1.6); }
+.field-book h2 { font-size: 32pt; line-height: 1.08; }
+.field-book h3 { font-size: 20pt; line-height: 1.2; }
+/* Formatted headings (`markdown: 'inline'`): the heading is already semibold, so bold steps up to the 800 face. */
+.field-book :is(h1, h2)[data-edit] strong, .map-title strong { font-weight: 800; }
+.field-book :is(h1, h2)[data-edit] s { text-decoration-thickness: .06em; }
+.field-book .subtitle { font-size: 13pt; color: var(--muted); }
+.field-book .rule { background: var(--accent); }
+.field-book .compass { color: var(--accent); }
+.field-book .compass svg { display: block; width: 100%; height: 100%; }
+
+/* Type set over a photo is white in both themes. The title photo adds a shade below it (see Shade). */
+.field-book .on-photo { color: #fff; }
+.field-book .subtitle.on-photo { color: #ffffffd9; }
+.field-book .shade { pointer-events: none; background: linear-gradient(#0000, #00000073); }
+.field-book .cover-title { display: flex; flex-direction: column; justify-content: flex-end; gap: 5mm; }
+.field-book .eyebrow { font: 500 9pt/1 "Field Sans"; letter-spacing: .14em; text-transform: uppercase; }
+.field-book h2.opener { font-size: 44pt; line-height: 1.02; display: flex; align-items: flex-start; }
+.field-book h2.closing { text-align: center; font-size: 26pt; }
+
+/* Stories, notes and quotes. The text size is a book setting, passed in as --text-size. */
+.field-book .reading { font: 400 var(--text-size, 10.5pt)/1.5 "Field Serif"; column-gap: 6mm; hyphens: auto; }
+.field-book .reading h2 { font: 500 9pt/1.3 "Field Sans"; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); margin: 0 0 3mm; white-space: normal; }
+.field-book .reading p { margin: 0 0 .65em; }
+.field-book .reading strong { font-weight: 600; }
+.field-book .reading :is(ul, ol) { margin: 0 0 .65em; padding-left: 1.3em; }
+.field-book .reading li::marker { color: var(--accent); }
+.field-book .note { font: italic 400 var(--text-size, 10.5pt)/1.5 "Field Serif"; color: var(--muted); white-space: pre-line; }
+.field-book .note.large { font-size: 13pt; color: var(--ink); }
+.field-book .statement { display: flex; flex-direction: column; justify-content: center; gap: 6mm; }
+.field-book .statement .rule { width: 24mm; height: .6mm; }
+.field-book .quote { font: italic 400 24pt/1.25 "Field Serif"; letter-spacing: -.01em; white-space: pre-line; }
+.field-book .attribution { font: 500 9pt/1.3 "Field Sans"; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
+.field-book .caption, .field-book .folio { font: 500 8.5pt/1.35 "Field Sans"; color: var(--muted); }
+.field-book .caption.overlay { color: #fff; }
+.field-book .caption.centred { text-align: center; }
+.field-book .folio { position: absolute; bottom: 12mm; font-variant-numeric: tabular-nums; }
+.field-book .left-folio { left: 15mm; }
+.field-book .right-folio { right: 15mm; }
+
+/* Contents: numbered chapters, with the stories and texts that follow each one. */
+.field-book .contents { margin: 0; padding: 0; list-style: none; }
+.field-book .contents li { display: flex; gap: 6mm; justify-content: space-between; align-items: baseline; }
+.field-book .contents li.chapter { font: var(--heading-weight) 17pt/1.3 var(--heading-font); letter-spacing: -.01em; margin: 7mm 0 2.5mm; }
+.field-book .contents li.chapter:first-child { margin-top: 0; }
+.field-book .contents li.section { font: 400 12pt/1.4 "Field Serif"; margin: 0 0 2mm; padding-left: 10mm; color: var(--muted); }
+.field-book .contents .chapter-number { display: inline-block; width: 10mm; font: 500 9pt/1 "Field Sans"; color: var(--accent); font-variant-numeric: tabular-nums; }
+.field-book .contents-page { font: 500 9pt/1.6 "Field Sans"; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Picture list: every photo once, with its pages. */
+.field-book .picture { display: flex; flex-direction: column; gap: .4mm; }
+.field-book .picture-title { font: 400 9pt/4.2mm "Field Serif"; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Wraps to the number of lines the template worked out for it (`--lines`, set per entry). */
+.field-book .picture-detail { font: 500 8pt/3.7mm "Field Sans"; color: var(--muted); font-variant-numeric: tabular-nums;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--lines, 1); overflow: hidden; overflow-wrap: anywhere; }
+.field-book .colophon { font: 500 8.5pt/1.45 "Field Sans"; color: var(--muted); white-space: pre-line; }
+
+/* Map layout: the saved print image fills the spread; the track and attribution are drawn over it. */
+.map { overflow: hidden; background: #e8ebe4; }
+.map-image, .map-track { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.map-image img { object-fit: cover; }
+.map-track polyline { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.map-attribution { position: absolute; right: 8mm; bottom: 7mm; padding: .6mm 1.4mm; background: #ffffffd0; color: #333;
+  font: 500 8pt/1.2 "Field Sans"; }
+.map-title { margin: 0; padding: 3mm 5mm; background: var(--chip, #fffffff0); color: var(--ink); font: var(--heading-weight, 600) 20pt/1.15 var(--heading-font, "Field Serif"); width: fit-content; }
+.map-editor { position: relative; color: var(--if-editor-text); font-family: "Field Sans", system-ui, sans-serif; }
+.map-editor-map { width: 100%; border: 1px solid var(--if-editor-border); border-radius: 6px; overflow: hidden; }
+/* On the page, the editor is the map element at its printed size: no border, the page's attribution and title on top.
+   Its buttons and messages keep their screen size, whatever the page's zoom (--if-inline-scale). */
+.map-editor-inline { position: absolute; inset: 0; overflow: hidden; background: #e8ebe4; }
+.map-editor-inline .map-editor-map { position: absolute; inset: 0; height: 100%; border: 0; border-radius: 0; }
+.map-editor-inline :is(.map-attribution, .map-title-layer) { pointer-events: none; }
+.map-editor-inline .map-title-layer { position: absolute; inset: 0; background: none; }
+.map-editor-inline :is(.maplibregl-ctrl-top-right, .map-editor-problem) { zoom: calc(1 / var(--if-inline-scale, 1)); }
+.map-editor-problem { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 80px); margin: 0; padding: 4px 8px; border-radius: 6px;
+  background: #fffffff0; color: #a5281b; font: 12px/1.35 system-ui, sans-serif; box-shadow: 0 1px 4px #0003; }
+.map-fit-track { display: grid !important; place-items: center; color: #333; }
+.map-fit-track:disabled { color: #aaa; }

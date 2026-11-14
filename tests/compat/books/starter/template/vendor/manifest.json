@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "lockfile": "e3762910f09bb328207dfdfa63a510de28dcd74bbe8d4b25ba573c154c9c6718",
+  "packages": {
+    "maplibre-gl": "5.24.1"
+  },
+  "modules": {
+    "maplibre-gl": {
+      "js": "modules/m0.js",
+      "exports": [
+        "default"
+      ]
+    },
+    "maplibre-gl/dist/maplibre-gl.css": {
+      "css": "modules/m1.css",
+      "exports": []
+    }
+  },
+  "untyped": [],
+  "licenses": {
+    "maplibre-gl": "LICENSES/maplibre-gl.txt"
+  },
+  "licenseNames": {
+    "maplibre-gl": "BSD-3-Clause"
+  }
+}
