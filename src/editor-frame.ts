@@ -8,6 +8,8 @@ export type FrameMessage =
   | { type: 'editor-mounted' } | { type: 'editor-ready' } | { type: 'editor-draft'; values: unknown; spread?: unknown } | { type: 'editor-size'; height: number }
   | { type: 'editor-commit'; values: unknown; spread?: unknown } | { type: 'editor-flushed'; request: number; values: unknown; spread?: unknown }
   | { type: 'editor-cancel' }
+  | { type: 'editor-step'; direction: 1 | -1; values: unknown }
+  | { type: 'text-size'; height: number }
   | { type: 'editor-import'; request: number; accept: unknown; mode?: unknown } | { type: 'editor-notice'; message: unknown }
   | { type: 'editor-warning'; message: unknown } | { state: 'error'; message: string };
 
@@ -20,6 +22,8 @@ export function useEditorFrame(frame: RefObject<HTMLIFrameElement | null>, handl
   // Done after a flush, or the frame's own commit(); both carry the frame's complete draft.
   done(values: unknown, spread?: unknown): void;
   cancel(): void;
+  step?(direction: 1 | -1, values: unknown): void;
+  textSize?(height: number): void;
   warning?(message: unknown): void;
   import?(data: Extract<FrameMessage, { type: 'editor-import' }>): void;
 }, flushError = 'The editor did not respond, so nothing was saved. Try Done again, or Cancel.',
@@ -84,6 +88,8 @@ options: { initialHeight?: number; minimumHeight?: number; focusOnReady?: boolea
       handlers.done(data.values, data.spread);
     } else if (data.type === 'editor-commit') handlers.done(data.values, data.spread);
     else if (data.type === 'editor-cancel') handlers.cancel();
+    else if (data.type === 'editor-step') handlers.step?.(data.direction, data.values);
+    else if (data.type === 'text-size' && Number.isFinite(data.height) && data.height > 0) handlers.textSize?.(data.height);
   });
   useEffect(() => {
     const listener = (event: MessageEvent) => receive(event);

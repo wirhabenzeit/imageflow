@@ -550,6 +550,7 @@ test('context reports the installed template API and returns shipped examples on
   assert.ok(api.baseline.every((name) => api.capabilities.includes(name)));
   // Editing on the page joined the baseline before the first release (ADR 0008).
   assert.ok(api.capabilities.includes('inline-editors') && api.baseline.includes('inline-editors'));
+  assert.ok(api.capabilities.includes('inline-text') && api.baseline.includes('inline-text'));
   const withExamples = await call('get_authoring_context', { includeExamples: true });
   assert.deepEqual(withExamples.examples, [
     { name: 'a-minimal', description: 'The smallest template.', source: '// The smallest template.\nexport default {};\n' },

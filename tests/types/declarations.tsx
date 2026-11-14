@@ -351,3 +351,15 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: calenda
   // @ts-expect-error only the panel and the page
   editors: { days: { parameters: ['marked'], component: DaysOnPage, presentation: 'sidebar' } },
   spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });
+
+// Inline plain text is additive; only string paths and the supported presentation are accepted.
+defineTemplate({ id: 'inline-text', version: '1', contract: 1, format,
+  spreads: ({ spread }) => ({ title: spread({ label: 'Title', parameters: { heading: p.string({ label: 'Heading', default: '' }), count: p.integer({ label: 'Count', default: 1 }) },
+    render: (ctx) => <Spread>
+      <ctx.Text parameter="heading" presentation="inline" />
+      {/* @ts-expect-error string parameters only */}
+      <ctx.Text parameter="count" presentation="inline" />
+      <ctx.Text parameter="heading" presentation="dialog" />
+      {/* @ts-expect-error 'inline' or 'dialog', as for editors */}
+      <ctx.Text parameter="heading" presentation="popover" />
+    </Spread> }) }) });

@@ -201,6 +201,7 @@ export type BookGeometry = {
   // `occurrence` counts the earlier nodes on the sheet that edit the same fields, so repeated uses of a field, such
   // as a heading shown twice, are separate targets that edit the same saved value.
   targets: (Rect & { spread: string; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string }; upright?: boolean;
+    inlineText?: boolean;
     textFallback?: { parameter: string; text: string; label: string } })[];
 };
 // A preflight finding. `spread` is the spread id and `where` its readable location, such as "Pages 6–7 · Photo grid".

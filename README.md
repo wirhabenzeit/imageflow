@@ -87,3 +87,5 @@ Open **Settings → Agents** to configure the [MCP connection](docs/mcp.md) for 
 When agent connections are enabled, **Agent · N** in the footer shows the number of connected clients. Click it to inspect or disable the connection.
 
 [Linked source ownership and Save a Copy](docs/decisions/0005-linked-sources.md) describes persisted references, refresh/relinking, source snapshots, and collection semantics.
+
+Starter headings support on-page typing. Done or leaving the field applies pending text; Enter inserts a line in multiline headings and ⌘Enter applies. Escape or Discard drops pending typing. Use the Inspector’s text action for the parameter control.

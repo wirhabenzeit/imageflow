@@ -5,8 +5,8 @@ export const runtimeExports = [
   'geometry', 'box', 'issue', 'capabilities', 'RenderedImage',
 ] as const;
 
-// Frozen contract-1 baseline. Every supported contract-1 runtime provides all of these; templates need no
-// `requires` entries for them. Keep this list fixed when adding extensions after the v1 freeze.
+// Contract-1 baseline, open until the first public release (ADR 0008). Templates need no `requires` entries
+// for these features. Freeze this list at that release; later additions are extensions.
 export const contract1Capabilities = [
   'anchors', 'geometry', 'box-helpers', 'template-issues', 'typed-components',
   // `spreads: ({ spread }) => …`, `ctx.geometry` with `rect` props, `ctx.Text`, `printFormat`, and `box.photos`.
@@ -32,6 +32,8 @@ export const contract1Capabilities = [
   'rendered-images',
   // `presentation: 'inline'` on element and document editors: editing on the page, in the frame it was opened from.
   'inline-editors',
+  // Plain string ctx.Text parameters edited in the template's typography.
+  'inline-text',
 ] as const;
 // All supported features, including the baseline names accepted in older templates' `requires` lists. Until the
 // first public release the baseline stays open and new features join it (ADR 0008); after it, additive extensions

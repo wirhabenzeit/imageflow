@@ -29,6 +29,9 @@ import { resolveEditPath } from './editing';
 import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
 import type { VariantTags } from './layouts';
 import { numberOccurrences } from './edit-targets';
+import { textEditorOwner } from './inline-text';
+import { inlineTextFrame } from './inline-text-frame';
+import { readEdit } from './editing';
 import { parsePreviewRequest, PreviewError } from './preview';
 import type { PreviewMetadata, PagePreviewMetadata } from './preview';
 import { inspectionSchema } from './inspection';
@@ -477,6 +480,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       // Nodes that edit the same fields on a sheet, such as a heading shown twice, are told apart by occurrence.
       targets: sheets.flatMap(({ spread, sheet }) => numberOccurrences([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
         spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node), upright: upright(node, sheet),
+        ...(node.hasAttribute('data-inline-text') ? { inlineText: true } : {}),
         ...(node.dataset.textFallback ? { textFallback: { parameter: node.dataset.edit!, text: node.dataset.textFallback,
           label: node.dataset.textFallbackLabel ?? 'inherited text' } } : {}),
         ...(node.dataset.box ? { owner: { type: 'box' as const, id: node.dataset.box } }
@@ -1281,7 +1285,8 @@ export async function startRender(root: HTMLElement) {
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
     if (book.mode === 'edit') {
-      const focus = () => post({ type: 'editor-focus', text: !!document.activeElement?.matches('textarea, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"])') });
+      const focus = () => post({ type: 'editor-focus', text: document.activeElement instanceof HTMLElement &&
+        (document.activeElement.isContentEditable || document.activeElement.matches('textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"])')) });
       document.addEventListener('focusin', focus); document.addEventListener('focusout', focus); window.addEventListener('focus', focus);
       setTimeout(focus, 0);
     }
@@ -1321,7 +1326,8 @@ export async function startRender(root: HTMLElement) {
       return;
     }
     const activeChains = [...chains];
-    const visible = spreads.map((spread, i) => ({ spread, i }));
+    const textEditor = edit && query.get('view') === 'inline-text';
+    const visible = spreads.map((spread, i) => ({ spread, i })).filter(({ spread }) => !textEditor || spread.id === query.get('spread'));
     const where = spreads.map((spread, i) => {
       return pagesText(sequence.spreads[i].page) + ' · ' + (template.spreads[spread.definition]?.label ?? spread.definition);
     });
@@ -1341,6 +1347,19 @@ export async function startRender(root: HTMLElement) {
     })));
     if (renderError) throw renderError;
     if (layoutFailures.size) throw new LayoutRenderError(layoutFailures);
+    if (textEditor) {
+      await document.fonts.ready;
+      const spread = visible[0]?.spread;
+      const path = query.get('parameter') ?? '';
+      const field = spread && resolveEditPath(info!, spread.definition, path);
+      const nodes = [...root.querySelectorAll<HTMLElement>('[data-edit]')].filter((node) => node.dataset.edit === path);
+      const node = nodes[Number(query.get('occurrence')) || 0];
+      if (!spread || !node?.hasAttribute('data-inline-text') || field?.param.type !== 'string' || query.has('readonly') || textEditorOwner(info!, spread.definition, path)) {
+        throw new Error('This text is not available for inline editing. Use its parameter control.');
+      }
+      inlineTextFrame(root, node, field.param, String(readEdit(book.project, spread, field)), post, editorURL.slice(0, -1));
+      return;
+    }
     // A check or export is final only once every asynchronous picture is drawn or has failed; the editor shows
     // them as they arrive.
     const pictureFailures = lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();

@@ -59,10 +59,11 @@ export function sourceUsage(project: Project, pages: string[], layouts?: Layouts
 // Paths: `heading` (spread), `document.paper`, `elements.grid.firstWeekday`, `boxes.hero.showCaption`.
 type EditableTemplate = {
   parameters: Parameters;
+  editors?: Record<string, { parameters: readonly string[] }>;
   spreads: Record<string, {
     parameters: Parameters;
     boxes: Record<string, { parameters: Parameters }>;
-    elements: Record<string, { parameters: Parameters }>;
+    elements: Record<string, { parameters: Parameters; editor?: { parameters: readonly string[]; spread?: readonly string[] } }>;
   }>;
 };
 export type EditTarget = { path: string; scope: 'spread' | 'document' | 'element' | 'box'; owner?: string; key: string; param: Parameter };

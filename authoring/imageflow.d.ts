@@ -483,8 +483,10 @@ export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | '
  * Empty or whitespace-only values inherit `fallback`, without saving it. `fallbackLabel` identifies its source
  * in the editor; `hidden` suppresses the node explicitly. With neither value nor fallback, edit mode shows
  * `placeholder` (default: the parameter's placeholder or label), and export shows an empty node.
+ * `presentation="inline"` opts a string parameter into on-page typing (included in the contract-1 baseline), the same word
+ * as an editor's `presentation`. Without it, or with `'dialog'`, the node opens the parameter panel. Multiline inline strings default to preserving line breaks; template CSS and `style` take precedence.
  */
-export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & { parameter: Path; as?: TextTag; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
+export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & { parameter: Path; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
 
 /** The geometry helpers with the spread's format already applied: `ctx.geometry.page('left', 'bleed')`. */
 export type BoundGeometry = {
@@ -578,7 +580,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
-  'editor-network' | 'rendered-images' | 'inline-editors';
+  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
