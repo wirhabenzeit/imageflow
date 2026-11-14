@@ -243,7 +243,6 @@ export function ParamControl({ param, value, draft, setDraft, apply, autoFocus =
 export function Field({ param, value, change, description, compact = false }: { param: Parameter; value: Value; change: (value: Value) => void; description?: string; compact?: boolean }) {
   const [draft, setDraft] = useState<Value>();
   const [invalid, setInvalid] = useState(false);
-  const [showHelp, setShowHelp] = useState(false);
   const typing = useRef(false);
   // A new saved value replaces what the field shows, unless the user is typing in it. Lists compare by content, as
   // each render resolves them to a new array.
@@ -268,17 +267,13 @@ export function Field({ param, value, change, description, compact = false }: { 
   // A list in a one-line place is its own "Tracks (n)" button, which names it.
   const listButton = param.type === 'list' && (compact || compactLists);
   // A control's own description shows under the field. Otherwise the parameter's description (written for agents
-  // too) is help behind an info button, so fields stay uncluttered until someone asks.
+  // too) is only the field's hover tooltip, so the sidebar stays as plain as the controls themselves.
   const help = !description && param.description ? param.description : undefined;
-  const helpButton = help && !compact && <button type="button" className="field-help" aria-label={'About ' + param.label}
-    aria-expanded={showHelp} title={showHelp ? undefined : help} onClick={() => setShowHelp(!showHelp)}>i</button>;
   return <div className={compact ? 'field compact-field' : 'field' + (param.type === 'list' ? ' field-list' : '')}
-    title={compact ? param.label + (help ? '\n' + help : '') : undefined}>
-    {!compact && !listButton && param.type !== 'boolean' && <span className="field-name">{param.label}{helpButton}</span>}
+    title={compact ? param.label + (help ? '\n' + help : '') : help}>
+    {!compact && !listButton && param.type !== 'boolean' && <span className="field-name">{param.label}</span>}
     <ParamControl param={param} value={value} draft={draft} setDraft={type} apply={apply} compact={compact} commitOnBlur />
-    {param.type === 'boolean' && helpButton}
     {description && <small className="field-description">{description}</small>}
-    {help && showHelp && !compact && <small className="field-description field-help-text">{help}</small>}
     {invalid && <small className="error-text">Enter a value within the field’s limits.</small>}
   </div>;
 }
