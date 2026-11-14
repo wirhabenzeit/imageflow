@@ -12,4 +12,3 @@ test('a group dropped on a filled box replaces only that explicit target, then u
   assert.deepEqual(sourcePlacements(boxes, saved, photos, 'cover'), [{ box: 'cover', source: photos[0] }, { box: 'left', source: photos[1] }]);
   assert.equal(saved.right.photo, 'keep-too');
 });
-
