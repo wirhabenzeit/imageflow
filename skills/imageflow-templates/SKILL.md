@@ -7,7 +7,7 @@ description: Build, edit and check ImageFlow photo book templates (template/inde
 
 An ImageFlow book is a folder with `project.json`, `photos.json`, `texts/` and a `template/` folder. The template is TypeScript and React: `template/index.tsx` default-exports `defineTemplate({...})` with print formats, document parameters and layouts ("spreads"), each with a pure `render(ctx)`. The ImageFlow app renders the whole book, flows text across spreads and owns saving and Undo.
 
-This skill is the template API reference, split into topics under `references/`, plus complete example templates under `examples/`. The ImageFlow MCP server serves the same files: `get_authoring_context` lists them as `topics` and `examples`, and returns them with `docs: [...]` and `includeExamples: [...]`.
+Books created by ImageFlow carry a copy of this skill in `.claude/skills/imageflow-templates/`, from the app version that created them. This skill is the template API reference, split into topics under `references/`, plus complete example templates under `examples/`. The ImageFlow MCP server serves the same files: `get_authoring_context` lists them as `topics` and `examples`, and returns them with `docs: [...]` and `includeExamples: [...]`.
 
 ## Workflow
 

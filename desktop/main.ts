@@ -43,7 +43,7 @@ import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-l
 import { TemplateTrust, trustedOrigins } from './template-trust';
 import { ReleasedTemplates } from './released-templates';
 import { isTemplateArchive, templateArchiveExtension } from './template-archive';
-import { writeAuthoringSnapshot } from './authoring-sdk';
+import { writeAgentSkill, writeAuthoringSnapshot } from './authoring-sdk';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
 import { describeImport, templatePicturePath, templatePictureURL } from '../src/library';
 import type { LibraryEntry, LibraryImportResult, NewBookChoice } from '../src/library';
@@ -531,10 +531,12 @@ async function createBook(stage: string, template: ResolvedTemplate, sample: boo
     project.template = { ...project.template, hash: entry.hash };
     await writeFile(file, JSON.stringify(project, null, 2) + '\n');
     await writeAuthoringSnapshot(join(stage, 'template'), join(__dirname, 'authoring-types'));
+    await writeAgentSkill(stage, join(__dirname, 'skills'));
     return;
   }
   await copyTemplate(folder, join(stage, 'template'));
   await writeAuthoringSnapshot(join(stage, 'template'), join(__dirname, 'authoring-types'));
+  await writeAgentSkill(stage, join(__dirname, 'skills'));
   await Promise.all(['photos', 'texts', 'files'].map((name) => mkdir(join(stage, name))));
   await writeFile(join(stage, 'photos.json'), '{}\n');
   await writeFile(file, JSON.stringify({
