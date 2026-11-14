@@ -3,7 +3,6 @@ import type { BookSpread, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState
 import './styles.css';
 import { MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
 import type { MapEditorProps } from './map';
-import { RouteEditor, RouteMap, routeParameters } from './route';
 
 // Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page.
 // `ctx.geometry.design(canvas)` scales them to the chosen format: horizontal values with the trim width, vertical
@@ -477,7 +476,6 @@ export default defineTemplate({
         const number = ctx.book.anchors('chapter').findIndex(({ spread }) => spread === ctx.spread) + 1;
         return <Paper context={ctx} bled={{ left: true, right: true }}>
           <ctx.PhotoBox id="hero" rect={all} />
-          <Shade context={ctx} rect={{ ...all, width: all.width / 2, y: all.y + all.height * .5, height: all.height * .5 }} />
           <ctx.Text presentation="inline" parameter="eyebrow" className="eyebrow on-photo" rect={at.left(margin, 196, page - 2 * margin, 8)}
             fallback={number ? 'Chapter ' + number : ''} fallbackLabel="Chapter number" />
           <ctx.Text presentation="inline" parameter="heading" as="h2" className="on-photo opener" rect={at.left(margin, 208, page - 2 * margin, 56)} />
@@ -551,17 +549,10 @@ export default defineTemplate({
     panorama: spread({
       label: 'Panorama',
       boxes: { hero: captioned('Panorama photo') },
-      elements: { route: {
-        label: 'Route map',
-        parameters: routeParameters,
-        editor: { label: 'Edit route', parameters: ['track', 'centerX', 'centerY', 'zoom'], component: RouteEditor },
-      } },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx} bled={{ left: true, right: true }}>
           <ctx.PhotoBox id="hero" rect={ctx.geometry.spread('bleed')} />
-          <RouteMap track={ctx.elements.route.params.track} viewport={ctx.elements.route.params} view={ctx.view}
-            rect={at.right(page - margin - 60, margin, 60, 60)} />
           <Caption context={ctx} box={ctx.boxes.hero} className="caption overlay" rect={at.left(margin, 266, 2 * page - 2 * margin, 10)} />
         </Paper>;
       },
