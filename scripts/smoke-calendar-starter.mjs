@@ -1,4 +1,4 @@
-import { exportAction, menuAction, testBook } from './ui-actions.mjs';
+import { exportAction, menuAction, testBook, clickPage } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -81,7 +81,7 @@ try {
   const openCaption = async () => {
     await caption.scrollIntoViewIfNeeded();
     const box = await caption.boundingBox();
-    await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    await clickPage(w, box.x + box.width / 2, box.y + box.height / 2);
     await captionEditor.waitFor();
   };
   await openCaption();
@@ -153,7 +153,7 @@ try {
   const may = frame.locator('.month').nth(4);
   await may.locator('.days').scrollIntoViewIfNeeded();
   const ninth = await may.locator('.days li').nth(8).boundingBox();
-  await w.mouse.click(ninth.x + ninth.width / 2, ninth.y + ninth.height / 2);
+  await clickPage(w, ninth.x + ninth.width / 2, ninth.y + ninth.height / 2);
   await w.locator('.inline-editor.showing').waitFor();
   const picker = w.frameLocator('iframe.inline-editor-frame');
   const locked = () => picker.locator('.days-on-page li.from-file .day').allTextContents();

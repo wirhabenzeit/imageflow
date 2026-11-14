@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { clickClosingWindow } from './ui-actions.mjs';
+import { clickClosingWindow, clickPage } from './ui-actions.mjs';
 
 // The template library: import from its own window, live updates in an open New Book picker, removal, a failed import,
 // creating books from a library template and from the built-in starter without its sample, and Save Template to Library.
@@ -178,7 +178,7 @@ try {
   const mapElement = editor.frameLocator('iframe.book-frame-book[data-current]').locator('[data-spread="map-spread"] [data-element="map"]');
   await mapElement.scrollIntoViewIfNeeded();
   const mapBox = await mapElement.boundingBox();
-  await editor.mouse.click(mapBox.x + mapBox.width / 2, mapBox.y + mapBox.height / 2);
+  await clickPage(editor, mapBox.x + mapBox.width / 2, mapBox.y + mapBox.height / 2);
   // The map is framed on the page; its toolbar is the editor's chrome.
   await editor.getByRole('toolbar', { name: 'Edit map' }).waitFor();
   // Whether the open map editor's frame may reach the map server: a request its policy blocks reports a violation.

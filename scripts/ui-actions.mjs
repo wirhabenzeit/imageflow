@@ -163,3 +163,22 @@ export async function waitForPage(page, predicate, argument, { timeout = 30000 }
   }
   throw new Error('Window did not reach the expected state');
 }
+
+// Clicks a point on the book canvas. The first click on a spread only selects it, so a point on another spread is
+// clicked once to select that spread and again to reach the box or element there.
+export async function clickPage(page, x, y) {
+  const other = await page.evaluate(([x, y]) => {
+    const hit = document.elementFromPoint(x, y);
+    if (!hit?.closest('.canvas .stage') || hit.closest('.inline-editor, .inline-text-editor, .edit-popover, .crop-toolbar, .element-editor')) return false;
+    const selected = document.querySelector('.canvas .sheet-selection')?.getBoundingClientRect();
+    return !selected || x < selected.left || x > selected.right || y < selected.top || y > selected.bottom;
+  }, [x, y]);
+  if (other) {
+    await page.mouse.click(x, y);
+    await page.waitForFunction(([x, y]) => {
+      const selected = document.querySelector('.canvas .sheet-selection')?.getBoundingClientRect();
+      return selected && x >= selected.left && x <= selected.right && y >= selected.top && y <= selected.bottom;
+    }, [x, y]);
+  }
+  await page.mouse.click(x, y);
+}

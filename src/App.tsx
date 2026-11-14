@@ -1449,6 +1449,21 @@ export function App() {
     deleteSelected(selectedSpreads);
   }
 
+  // With a spread selected on the canvas, arrow keys select the neighbouring spread: up and down in the vertical
+  // layout; in a grid, left and right step one spread and up and down one row.
+  function canvasArrowKeys(event: KeyboardEvent<HTMLElement>) {
+    if (event.defaultPrevented || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey || !spreadSelected || !spread) return;
+    if ((event.target as HTMLElement).closest('input, textarea, select, button, [contenteditable], dialog')) return;
+    if (editing || cropping || elementEditor || quick) return;
+    const step = columns
+      ? { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -columns, ArrowDown: columns }[event.key]
+      : { ArrowUp: -1, ArrowDown: 1 }[event.key];
+    const next = step && spreads[index + step];
+    if (!next) return;
+    event.preventDefault();
+    select(next.id);
+  }
+
   function thumbKeys(event: KeyboardEvent<HTMLElement>) {
     spreadDeleteKey(event);
     if (event.defaultPrevented) return;
@@ -1610,7 +1625,7 @@ export function App() {
         <div ref={canvasWrap} className="canvas-wrap">
           <main ref={canvas} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" tabIndex={0} onWheel={() => { pendingAnchor.current = undefined; }} onScroll={() => { rememberViewAnchor(); measureView(); }}
             onContextMenu={(event) => void canvasMenu(event)} onKeyDown={(event) => {
-              if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void spreadMenu(spreadId); } else spreadDeleteKey(event);
+              if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void spreadMenu(spreadId); } else { spreadDeleteKey(event); canvasArrowKeys(event); }
             }} onPointerDown={(event) => {
               if (!(event.target as HTMLElement).closest('input, textarea, select, button, [contenteditable]')) event.currentTarget.focus({ preventScroll: true });
             }}
@@ -1631,8 +1646,11 @@ export function App() {
                 if (moved.current) return;
                 const { sheet, top, target } = locate(event);
                 if (!sheet || !spreads.some(({ id }) => id === sheet)) return;
+                // The first click on a spread selects it; its photos and texts take clicks once it is selected, so a
+                // spread filled by one photo can still be selected.
+                const current = spreadSelected && spreadId === sheet;
                 select(sheet, false);
-                if (blockedInline) return;
+                if (!current || blockedInline) return;
                 if (top) setFocusBox({ box: top.id, at: Date.now() });
                 // What is drawn on top decides: a box or element opens its own editor there (see openOwner). A smaller
                 // click-to-edit node on top, such as a heading over a photo, opens its popover instead.
@@ -1659,7 +1677,7 @@ export function App() {
               onMouseMove={(event) => {
                 const { sheet, target } = locate(event);
                 setHovered(sheet);
-                setHoveredTarget(target && targetKey(target));
+                setHoveredTarget(target && spreadSelected && sheet === spreadId ? targetKey(target) : undefined);
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
               <BookFrame project={summary.id} view="book" title="Book preview" cropPreview={cropPreview} onGeometry={setGeometry} onStatus={bookStatus} onPictures={bookPictures}
                 viewport={viewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
