@@ -94,8 +94,20 @@ try {
   assert.equal(parallel[0].project,project);
   assert.equal(parallel[2].projects[0].project,project);
   let context=await good('get_authoring_context',{project});
-  assert.ok(context.apiReference.includes('defineTemplate'));
+  assert.equal(context.apiReference,undefined);
+  assert.deepEqual(context.sources,{});
+  assert.ok(context.topics.some(t=>t.id==='authoring-workflow'));
+  context=await good('get_authoring_context',{project,docs:['declaration'],includeExamples:['minimal'],includeSource:['template/index.tsx']});
+  assert.ok(context.docs.declaration.includes('defineTemplate'));
+  assert.ok(context.examples.find(e=>e.name==='minimal').source.includes('defineTemplate'));
+  assert.equal(context.examples.find(e=>e.name==='grid-bleed').source,undefined);
   assert.ok(context.sources['template/index.tsx'].text.includes('NEW_LAYOUT'));
+  // Every tool has a title, a short description, a described argument tree and an output schema.
+  for(const tool of tools.tools){
+    assert.ok(tool.title && tool.annotations.title===tool.title,tool.name);
+    assert.ok(tool.description.length<=400,tool.name);
+    assert.equal(tool.outputSchema?.type,'object',tool.name);
+  }
   assert.equal(context.capabilities.typescript,true);
   assert.equal(context.capabilities.contactSheets,true);
   const check=await call('check_book',{project,preview:{target:{spread:'first'},maxEdge:300}});
@@ -299,7 +311,7 @@ try {
   // Inputs that change during a call correctly return SOURCE_CHANGED. Let the app observe this write first.
   await window.locator('.status-error').waitFor();
   for (const name of ['get_authoring_context','inspect_book']) {
-    const result=await good(name,{project,...(name==='inspect_book' ? {view:'summary'} : {})});
+    const result=await good(name,{project,...(name==='inspect_book' ? {view:'summary'} : {includeSource:['template/index.tsx']})});
     assert.ok(result.diagnostics.some(d=>d.message.includes('invalid JSON') && d.location?.path==='project.json'));
     if (name==='get_authoring_context') assert.equal(result.sources['template/index.tsx'].text,authored);
   }

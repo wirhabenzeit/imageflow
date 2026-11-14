@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { authoringSnapshot, writeAuthoringSnapshot } from '../desktop/authoring-sdk';
+import { agentSkillFolder, authoringSnapshot, writeAgentSkill, writeAuthoringSnapshot } from '../desktop/authoring-sdk';
+import { captureProjectInputs } from '../desktop/revisions';
 import { bundleTemplate } from '../desktop/project';
 import { templateHash } from '../desktop/template-library';
 import { extractTemplateArchive, writeTemplateArchive } from '../desktop/template-archive';
@@ -50,4 +51,24 @@ export default defineTemplate({ id: 'sdk', version: '1', contract: 1, format, sp
   await writeFile(join(template, '.imageflow-sdk/runtime.js'), 'export default 1;');
   await writeFile(join(template, 'index.tsx'), "import n from './.imageflow-sdk/runtime.js'; export default n;");
   await assert.rejects(bundleTemplate(join(work, 'book')), /inside \.imageflow-sdk/);
+});
+
+test('new books carry the agent skill outside their inputs and template identity', async (t) => {
+  const work = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-skill-')));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const book = join(work, 'book');
+  await mkdir(join(book, 'template'), { recursive: true });
+  await writeFile(join(book, 'template/index.tsx'), 'export default {};');
+  await writeFile(join(book, 'project.json'), JSON.stringify({ schemaVersion: 1, title: 'T', template: { id: 't', version: '1' }, spreads: [] }));
+  await writeFile(join(book, 'photos.json'), '{}');
+  const hash = await templateHash(join(book, 'template'));
+  const revision = (await captureProjectInputs(book)).revision;
+  await mkdir(join(book, agentSkillFolder, 'references'), { recursive: true });
+  await writeFile(join(book, agentSkillFolder, 'references/stale.md'), 'from an older app');
+  await writeAgentSkill(book, resolve('skills'));
+  assert.equal(await readFile(join(book, agentSkillFolder, 'SKILL.md'), 'utf8'), await readFile(resolve('skills/imageflow-templates/SKILL.md'), 'utf8'));
+  assert.ok((await readFile(join(book, agentSkillFolder, 'references/authoring-workflow.md'), 'utf8')).startsWith('# Authoring workflow'));
+  await assert.rejects(readFile(join(book, agentSkillFolder, 'references/stale.md')), /ENOENT/);
+  assert.equal(await templateHash(join(book, 'template')), hash);
+  assert.equal((await captureProjectInputs(book)).revision, revision);
 });

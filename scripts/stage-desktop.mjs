@@ -45,6 +45,7 @@ export async function stageDesktop({ packaged = false, dev = false, destination 
       name: 'imageflow', productName: 'ImageFlow', version: metadata.version, main: 'main.cjs',
     })),
     cp(join(root, 'docs'), join(destination, 'docs'), { recursive: true }),
+    cp(join(root, 'skills'), join(destination, 'skills'), { recursive: true }),
     buildMcp(join(destination, 'mcp-bridge.cjs')),
     buildMacHeader(destination),
     build(mainBuild(destination)),

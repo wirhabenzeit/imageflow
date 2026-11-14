@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
-import fs, { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import fs, { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import sharp from 'sharp';
@@ -16,6 +17,7 @@ import type { AuthoringDiagnostic } from '../src/authoring';
 import type { RenderStatus } from '../src/desktop';
 import { mm } from '../src/format';
 import { PreviewError } from '../src/preview';
+import { docTopics } from '../src/doc-topics';
 
 const source = 'export default {};';
 const project = { schemaVersion: 1, title: 'Context book', template: { id: 'test', version: '1' }, spreads: [{ id: 'one', definition: 'main' }] };
@@ -39,13 +41,14 @@ async function fixture(t: TestContext) {
   t.after(() => rm(work, { recursive: true, force: true }));
   const folder = join(work, 'book');
   const cache = join(work, 'cache');
-  const docs = join(work, 'api.md');
+  const docs = join(work, 'docs');
   await mkdir(join(folder, 'template'), { recursive: true });
   await mkdir(cache);
   await writeFile(join(folder, 'project.json'), JSON.stringify(project));
   await writeFile(join(folder, 'photos.json'), '{}');
   await writeFile(join(folder, 'template/index.tsx'), source);
-  await writeFile(docs, '# Template API reference');
+  await cp(resolve('docs/template-api'), join(docs, 'template-api'), { recursive: true });
+  await mkdir(join(docs, 'examples'));
   const session = new ProjectSession(await loadProject(folder, cache, true));
   t.after(() => session.close());
   const hooks: Parameters<typeof createAuthoringService>[0] = {
@@ -57,7 +60,7 @@ async function fixture(t: TestContext) {
   };
   const service = createAuthoringService(hooks);
   const call = (name: string, extra: Record<string, unknown> = {}) =>
-    service(name, { project: session.handle, view: 'summary', ...extra }, new AbortController().signal);
+    service(name, { project: session.handle, view: 'summary', ...extra }, new AbortController().signal).then((result) => checkedOutput(name, result));
   return { work, folder, docs, hooks, session, call };
 }
 
@@ -219,13 +222,13 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     test(tool + ' preserves diagnostics for malformed ' + name, async (t) => {
       const { folder, call } = await fixture(t);
       await writeFile(join(folder, name), '{ invalid JSON');
-      const result = await call(tool);
+      const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'] } : {});
       const diagnostics = result.diagnostics as AuthoringDiagnostic[];
       assert.ok(diagnostics.some((diagnostic) => diagnostic.message.includes('invalid JSON') && diagnostic.location?.path === name));
       assert.match(String(result.revision), /^[a-f0-9]{64}$/);
       if (tool === 'get_authoring_context') {
         assert.equal((result.sources as Record<string, { text: string }>)['template/index.tsx'].text, source);
-        assert.equal(result.apiReference, '# Template API reference');
+        assert.deepEqual((result.topics as { id: string }[]).map(({ id }) => id), docTopics.map(({ id }) => id));
       }
     });
 
@@ -253,7 +256,7 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     const { folder, call } = await fixture(t);
     const broken = 'export default );';
     await writeFile(join(folder, 'template/index.tsx'), broken);
-    const result = await call(tool);
+    const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'] } : {});
     assert.ok((result.diagnostics as AuthoringDiagnostic[]).some(({ code }) => code === 'template-compile-error'));
     assert.equal(result.template, undefined);
     assert.deepEqual(result.templateIdentity, {
@@ -262,7 +265,7 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     });
     if (tool === 'get_authoring_context') {
       assert.equal((result.sources as Record<string, { text: string }>)['template/index.tsx'].text, broken);
-      assert.equal(result.apiReference, '# Template API reference');
+      assert.deepEqual((result.topics as { id: string }[]).map(({ id }) => id), docTopics.map(({ id }) => id));
     } else {
       assert.equal(result.title, 'Context book');
       assert.deepEqual((result.items as { boxes: unknown }[])[0].boxes, {});
@@ -302,7 +305,7 @@ test('schema-invalid manifests preserve structured context findings', async (t) 
   const diagnostics = result.diagnostics as AuthoringDiagnostic[];
   assert.ok(diagnostics.some((diagnostic) => diagnostic.location?.path === 'project.json'));
   assert.ok(diagnostics.some((diagnostic) => diagnostic.location?.path === 'photos.json'));
-  assert.equal(result.apiReference, '# Template API reference');
+  assert.deepEqual((result.topics as { id: string }[]).map(({ id }) => id), docTopics.map(({ id }) => id));
 });
 
 test('a template directory outside the project cannot expose its source or filenames', async (t) => {
@@ -313,7 +316,7 @@ test('a template directory outside the project cannot expose its source or filen
   await writeFile(join(outside, 'index.tsx'), 'PRIVATE_SOURCE_MUST_STAY_OUTSIDE');
   await writeFile(join(outside, 'PRIVATE_FILENAME_MUST_STAY_OUTSIDE.tsx'), 'private');
   await symlink(outside, join(folder, 'template'));
-  const result = await call('get_authoring_context');
+  const result = await call('get_authoring_context', { includeSource: ['template/index.tsx'] });
   assert.equal(result.revision, null);
   assert.deepEqual(result.sources, {});
   assert.deepEqual(result.templateFiles, []);
@@ -322,7 +325,7 @@ test('a template directory outside the project cannot expose its source or filen
   });
   assert.equal(JSON.stringify(result).includes('PRIVATE_SOURCE_MUST_STAY_OUTSIDE'), false);
   assert.equal(JSON.stringify(result).includes('PRIVATE_FILENAME_MUST_STAY_OUTSIDE'), false);
-  assert.equal(result.apiReference, '# Template API reference');
+  assert.deepEqual((result.topics as { id: string }[]).map(({ id }) => id), docTopics.map(({ id }) => id));
 });
 
 for (const missingManifest of [false, true]) {
@@ -653,12 +656,12 @@ test('actual input changes during preparation reject the command without retryin
 
 test('context reports the installed template API and returns shipped examples on request', async (t) => {
   const { work, call } = await fixture(t);
-  await mkdir(join(work, 'examples'));
-  await writeFile(join(work, 'examples', 'b-grid.tsx'), '// A grid.\nexport default {};\n');
-  await writeFile(join(work, 'examples', 'a-minimal.tsx'), '// The smallest template.\nexport default {};\n');
-  await writeFile(join(work, 'examples', 'notes.md'), 'Not an example.');
+  await writeFile(join(work, 'docs/examples', 'b-grid.tsx'), '// A grid.\nexport default {};\n');
+  await writeFile(join(work, 'docs/examples', 'a-minimal.tsx'), '// The smallest template.\nexport default {};\n');
+  await writeFile(join(work, 'docs/examples', 'notes.md'), 'Not an example.');
   const plain = await call('get_authoring_context');
-  assert.equal(plain.examples, undefined);
+  // Examples are always listed; only requested ones carry their source.
+  assert.deepEqual(plain.examples, [{ name: 'a-minimal', description: 'The smallest template.' }, { name: 'b-grid', description: 'A grid.' }]);
   const api = (plain.capabilities as { templateApi: { contract: number; baseline: string[]; capabilities: string[]; exports: string[] } }).templateApi;
   assert.equal(api.contract, 1);
   assert.ok(api.capabilities.includes('anchors') && api.exports.includes('geometry'));
@@ -673,4 +676,54 @@ test('context reports the installed template API and returns shipped examples on
     { name: 'a-minimal', description: 'The smallest template.', source: '// The smallest template.\nexport default {};\n' },
     { name: 'b-grid', description: 'A grid.', source: '// A grid.\nexport default {};\n' },
   ]);
+  const one = await call('get_authoring_context', { includeExamples: ['b-grid'] });
+  assert.deepEqual(one.examples, [
+    { name: 'a-minimal', description: 'The smallest template.' },
+    { name: 'b-grid', description: 'A grid.', source: '// A grid.\nexport default {};\n' },
+  ]);
+  await assert.rejects(call('get_authoring_context', { includeExamples: ['missing'] }),
+    (error) => error instanceof AuthoringError && error.code === 'EXAMPLE_NOT_FOUND' && error.message.includes('a-minimal, b-grid'));
+});
+
+test('context lists reference topics and returns only the requested ones', async (t) => {
+  const { call } = await fixture(t);
+  const plain = await call('get_authoring_context');
+  assert.equal(plain.docs, undefined);
+  assert.equal(plain.apiReference, undefined);
+  assert.equal(plain.workflow, undefined);
+  const topics = plain.topics as { id: string; title: string; summary: string; bytes: number }[];
+  assert.deepEqual(topics.map(({ id, title, summary }) => ({ id, title, summary })), docTopics);
+  for (const topic of topics) {
+    assert.equal(topic.bytes, (await stat(resolve('docs/template-api', topic.id + '.md'))).size);
+  }
+  const requested = await call('get_authoring_context', { docs: ['list-parameters', 'authoring-workflow'] });
+  assert.deepEqual(Object.keys(requested.docs as object), ['list-parameters', 'authoring-workflow']);
+  assert.equal((requested.docs as Record<string, string>)['list-parameters'], await readFile(resolve('docs/template-api/list-parameters.md'), 'utf8'));
+  await assert.rejects(call('get_authoring_context', { docs: ['nope'] }),
+    (error) => error instanceof AuthoringError && error.code === 'DOC_NOT_FOUND' && error.message.includes('authoring-workflow'));
+});
+
+test('context returns no source by default and lists generated template folders once', async (t) => {
+  const { folder, call } = await fixture(t);
+  await mkdir(join(folder, 'template/vendor/modules'), { recursive: true });
+  await writeFile(join(folder, 'template/vendor/manifest.json'), '{}');
+  await writeFile(join(folder, 'template/vendor/modules/m0.js'), '');
+  await mkdir(join(folder, 'template/.imageflow-sdk'));
+  await writeFile(join(folder, 'template/.imageflow-sdk/index.d.ts'), '');
+  const result = await call('get_authoring_context');
+  assert.deepEqual(result.sources, {});
+  assert.deepEqual(result.templateFiles, ['template/.imageflow-sdk/', 'template/index.tsx', 'template/vendor/']);
+  const read = await call('get_authoring_context', { includeSource: ['template/index.tsx'] });
+  assert.equal((read.sources as Record<string, { text: string }>)['template/index.tsx'].text, source);
+});
+
+// The context lists the reference instead of embedding it. Everything except the book's own declarations, sources and
+// diagnostics stays within this budget, so the starter book's context stays near 8k tokens (scripts/smoke-mcp-context.mjs).
+test('context outside the book declarations stays within its size budget', async (t) => {
+  const { hooks, call } = await fixture(t);
+  hooks.docs = resolve('docs');
+  const { template: _template, sources: _sources, diagnostics: _diagnostics, ...rest } = await call('get_authoring_context');
+  const bytes = JSON.stringify(rest).length;
+  assert.ok(bytes <= 12_000, 'Context without declarations uses ' + bytes + ' bytes.');
+  assert.ok((rest.examples as { source?: string }[]).length >= 6 && (rest.examples as { source?: string }[]).every(({ source }) => source === undefined));
 });

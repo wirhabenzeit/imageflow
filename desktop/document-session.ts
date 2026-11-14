@@ -134,7 +134,7 @@ export class DocumentSession {
     this.projectSession = new ProjectSession(book);
     this.queue = new AuthoringQueue({ ready: () => !this.busy && !this.closing, maxPending: 32 });
     this.service = createAuthoringService({
-      session: () => this.closing ? undefined : this.projectSession, cache, docs: join(app.getAppPath(), 'docs/template-api.md'),
+      session: () => this.closing ? undefined : this.projectSession, cache, docs: join(app.getAppPath(), 'docs'),
       check: (...args) => this.checkOpenBook(...args),
       changed: (next) => this.notify({ value: this.activate(next) }),
       recovery: (message) => this.notify({ error: message }),

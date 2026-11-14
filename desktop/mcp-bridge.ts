@@ -2,8 +2,7 @@ import { fromJsonSchema, McpServer } from '@modelcontextprotocol/server';
 import type { CallToolResult, JSONObject } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { resolve } from 'node:path';
-import { z } from 'zod';
-import { mcpLimits, mcpToolSchemas, mcpTools } from '../src/mcp-contract';
+import { advertisedSchemas, mcpLimits, mcpTools } from '../src/mcp-contract';
 import { McpAppClient, McpConnectionError } from './mcp-connection';
 
 function toolResult(result: Record<string, unknown>): CallToolResult {
@@ -43,18 +42,21 @@ function start() {
   const descriptorPath = resolve(args[1]);
   const handle = serveStdio(() => {
     const server = new McpServer({ name: 'imageflow', version: '0.1.0' }, {
-      instructions: 'Use list_projects to select an authorized book. Inspect its authoring context and current revision before editing. Edit template and Markdown source files directly with workspace tools. Use ImageFlow commands for project data. Copy import files into inbox/, then register them with import_sources. check_book combines optional TypeScript checking, whole-book layout, contact sheets, close-ups and measured element inspection. Drafts preview unsaved operations; then apply the same operations to save. Layouts in a layout family (template.layoutFamilies, with family and variant on each layout) are ordinary layouts: switch between variants with switch_layout and the layout ID of the variant. fixtures stress-tests layouts, including unused ones, with synthetic content per format and returns a bannered fixture sheet. Coverage identifies checks not run.',
+      instructions: 'ImageFlow edits photo books that are open in the ImageFlow app. Call list_projects for a book handle, then get_authoring_context; ' +
+        'its topics list the template API reference, and docs: ["authoring-workflow"] explains the order of work. Edit template files with ' +
+        'workspace tools, save project data with apply_project_changes, and verify every edit with check_book.',
     });
     const app = new McpAppClient(descriptorPath, () => server.server.getClientVersion()?.name ?? 'MCP client');
     server.server.oninitialized = () => { void app.connect().catch(() => {}); };
     server.server.onclose = () => app.close();
     for (const tool of mcpTools) {
-      // MCP requires an object at the schema root, including tools with discriminated argument unions.
-      const schema = { ...z.toJSONSchema(mcpToolSchemas[tool.name], { io: 'input' }), type: 'object' as const };
+      const { input: schema, output } = advertisedSchemas(tool.name);
       server.registerTool(tool.name, {
+        title: tool.title,
         description: tool.description,
         inputSchema: fromJsonSchema<Record<string, unknown>>(schema as Parameters<typeof fromJsonSchema>[0]),
-        annotations: { readOnlyHint: tool.readOnly, destructiveHint: !tool.readOnly, idempotentHint: true, openWorldHint: false },
+        outputSchema: fromJsonSchema<Record<string, unknown>>(output as Parameters<typeof fromJsonSchema>[0]),
+        annotations: { title: tool.title, readOnlyHint: tool.readOnly, destructiveHint: !tool.readOnly, idempotentHint: true, openWorldHint: false },
       }, async (args, context) => {
         try { return toolResult(await app.call(tool.name, args, context.mcpReq.signal)); }
         catch (error) { return errorResult(error); }

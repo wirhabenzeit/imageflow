@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { checkedOutput } from './mcp-output-check';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { createAuthoringService } from '../desktop/authoring-service';
@@ -48,14 +49,13 @@ async function fixture(t: TestContext, project: object = saved, fails?: (book: O
   await writeFile(join(folder, 'project.json'), JSON.stringify(project));
   await writeFile(join(folder, 'photos.json'), '{}');
   await writeFile(join(folder, 'template/index.tsx'), 'export default {};');
-  await writeFile(join(work, 'api.md'), '# API');
   const session = new ProjectSession(await loadProject(folder, cache, !writable));
   const changed: OpenProject[] = [];
   t.after(() => session.close());
   const renders: Rendered[] = [];
   const typechecks: string[] = [];
   const hooks: Parameters<typeof createAuthoringService>[0] = {
-    session: () => session, cache, docs: join(work, 'api.md'),
+    session: () => session, cache, docs: resolve('docs'),
     check: (book, request, signal, index, draft) => checkProject(book, cache, request, async (snapshot, preview, _signal, inspect) => {
       renders.push({ book: snapshot, preview, inspect });
       if (fails?.(snapshot)) throw new PreviewError('render-failed', 'Heading rejected.', { template: status.template });
@@ -74,7 +74,7 @@ async function fixture(t: TestContext, project: object = saved, fails?: (book: O
   };
   const service = createAuthoringService(hooks);
   const call = (name: string, args: Record<string, unknown> = {}) =>
-    service(name, { project: session.handle, ...args }, new AbortController().signal);
+    service(name, { project: session.handle, ...args }, new AbortController().signal).then((result) => checkedOutput(name, result));
   const revision = async () => ((await call('list_projects')).projects as { revision: string }[])[0].revision;
   return { folder, session, renders, changed, call, revision, hooks, typechecks };
 }

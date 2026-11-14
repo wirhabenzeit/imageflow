@@ -7,23 +7,31 @@ import type { RenderStatus, TemplateInfo } from './desktop';
 
 export const maxPreviewEdge = 1600;
 const owner = identifier.refine((id) => id.length <= 256);
-const paddingMm = z.number().min(0).max(20).default(2);
+const paddingMm = z.number().min(0).max(20).default(2).describe('Margin around the box or element, in millimetres.');
 // `spread` validates the spread target. Draft checks also accept `$alias` batch references, resolved before rendering.
-export const makePreviewRequestSchema = (spread: z.ZodType<string, string>) => z.strictObject({
-  target: z.union([
-    z.strictObject({ spread, side: z.enum(['left', 'right', 'page']).optional() }),
-    z.strictObject({ page: z.int().positive() }),
-    z.strictObject({ spread, box: owner, paddingMm }),
-    z.strictObject({ spread, element: owner, paddingMm }),
-    z.strictObject({ spreads: z.array(spread).min(1).max(12), columns: z.int().min(1).max(4).default(3) }),
-  ]),
-  bounds: z.enum(['trim', 'bleed']).default('trim'),
-  maxEdge: z.int().min(1).max(maxPreviewEdge).default(1000),
-  format: z.enum(['png', 'jpeg']).default('png'),
-  guides: z.boolean().default(false).describe('Draw trim (magenta) and safe-area (cyan, dashed) guides over the artwork.'),
-  labels: z.boolean().default(false).describe('Outline every box and element and label it with its ID.'),
-}).refine((request) => !('spreads' in request.target) || request.maxEdge >= 128,
-  'Contact sheets require maxEdge of at least 128 pixels.');
+export const makePreviewRequestSchema = (spread: z.ZodType<string, string>) => {
+  const spreadId = spread.describe('Spread ID, or a $ref of a spread inserted by the draft.');
+  return z.strictObject({
+    target: z.union([
+      z.strictObject({ spread: spreadId, side: z.enum(['left', 'right', 'page']).optional()
+        .describe('One page of a facing spread (left, right), or page in a format without facing pages. Omit for the whole spread.') })
+        .describe('A spread or one of its pages.'),
+      z.strictObject({ page: z.int().positive().describe('Page number as printed in the book.') })
+        .describe('The spread that holds this page. Requires expectedRevision.'),
+      z.strictObject({ spread: spreadId, box: owner.describe('Box ID.'), paddingMm }).describe('A close-up of one box.'),
+      z.strictObject({ spread: spreadId, element: owner.describe('Element ID.'), paddingMm }).describe('A close-up of one element.'),
+      z.strictObject({ spreads: z.array(spreadId).min(1).max(12).describe('Up to 12 spreads, in order.'),
+        columns: z.int().min(1).max(4).default(3).describe('Spreads per row.') })
+        .describe('A labelled contact sheet of several spreads.'),
+    ]).describe('What to render.'),
+    bounds: z.enum(['trim', 'bleed']).default('trim').describe('Crop to the trimmed page, or include the bleed.'),
+    maxEdge: z.int().min(1).max(maxPreviewEdge).default(1000).describe('Longest image edge in pixels. Contact sheets need at least 128.'),
+    format: z.enum(['png', 'jpeg']).default('png').describe('Image encoding. JPEG is smaller for photo-heavy spreads.'),
+    guides: z.boolean().default(false).describe('Draw trim (magenta) and safe-area (cyan, dashed) guides over the artwork.'),
+    labels: z.boolean().default(false).describe('Outline every box and element and label it with its ID.'),
+  }).refine((request) => !('spreads' in request.target) || request.maxEdge >= 128,
+    'Contact sheets require maxEdge of at least 128 pixels.');
+};
 export const previewRequestSchema = makePreviewRequestSchema(identifier.refine((id) => id.length <= 256));
 
 export type PreviewRequest = z.input<typeof previewRequestSchema>;

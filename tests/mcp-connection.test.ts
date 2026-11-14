@@ -150,9 +150,12 @@ test('tool contracts require revisions for page numbers and restrict source path
   }).args.expectedRevision, hash);
 });
 
+const imageMetadata = { width: 10, height: 10, widthMm: 100, heightMm: 100, bounds: 'trim', spread: 'later', side: 'spread', page: { left: 2, right: 3 } };
+
 test('official MCP client lists six tools and receives image content without duplicated image data', async (t) => {
   const { descriptorPath, work } = await fixture(t, async (name) => name === 'check_book'
-    ? { state: 'ready', revision: hash, image: { data: 'aW1hZ2U=', mimeType: 'image/png', width: 10, height: 10 } }
+    ? { state: 'ready', revision: hash, diagnostics: [], checks: { bundle: 'passed', declarations: 'passed', layout: 'completed', typescript: 'not-run', fixtures: 'not-run', print: 'not-run' },
+      image: { data: 'aW1hZ2U=', mimeType: 'image/png', ...imageMetadata } }
     : { state: 'error', error: { code: 'TEST_FAILURE', message: 'Actionable failure.' } });
   const bridge = join(work, 'bridge.cjs');
   await build({ entryPoints: [resolve('desktop/mcp-bridge.ts')], outfile: bridge, bundle: true, platform: 'node', format: 'cjs', target: 'node22', logLevel: 'silent' });
@@ -165,10 +168,11 @@ test('official MCP client lists six tools and receives image content without dup
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map(({ name }) => name).sort(), mcpTools.map(({ name }) => name).sort());
   assert.ok(tools.every(({ inputSchema }) => inputSchema.type === 'object'));
+  assert.ok(tools.every(({ title, annotations, outputSchema }) => title && annotations?.title === title && outputSchema?.type === 'object'));
   const checked = await client.callTool({ name: 'check_book', arguments: { project: 'book', preview: { target: { spread: 'later' } } } });
   assert.equal(checked.isError, undefined, JSON.stringify(checked));
   assert.equal(checked.content[1].type, 'image');
-  assert.deepEqual((checked.structuredContent as Record<string, unknown>)?.image, { mimeType: 'image/png', width: 10, height: 10 });
+  assert.deepEqual((checked.structuredContent as Record<string, unknown>)?.image, { mimeType: 'image/png', ...imageMetadata });
   assert.doesNotMatch((checked.content[0] as { text: string }).text, /aW1hZ2U=/);
   const failed = await client.callTool({ name: 'list_projects', arguments: {} });
   assert.equal(failed.isError, true);
