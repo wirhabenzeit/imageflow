@@ -356,9 +356,10 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: calenda
 defineTemplate({ id: 'inline-text', version: '1', contract: 1, format,
   spreads: ({ spread }) => ({ title: spread({ label: 'Title', parameters: { heading: p.string({ label: 'Heading', default: '' }), count: p.integer({ label: 'Count', default: 1 }) },
     render: (ctx) => <Spread>
-      <ctx.Text parameter="heading" editing="inline" />
+      <ctx.Text parameter="heading" presentation="inline" />
       {/* @ts-expect-error string parameters only */}
-      <ctx.Text parameter="count" editing="inline" />
-      {/* @ts-expect-error inline is the sole opt-in value */}
-      <ctx.Text parameter="heading" editing="popover" />
+      <ctx.Text parameter="count" presentation="inline" />
+      <ctx.Text parameter="heading" presentation="dialog" />
+      {/* @ts-expect-error 'inline' or 'dialog', as for editors */}
+      <ctx.Text parameter="heading" presentation="popover" />
     </Spread> }) }) });

@@ -16,9 +16,9 @@ const book = join(work, 'Text.imageflow');
 await cp(join(root, 'sample/starter'), book, { recursive: true, filter: (p) => basename(p) !== '.imageflow' });
 const templateFile = join(book, 'template/index.tsx');
 let source = await readFile(templateFile, 'utf8');
-const heading = '<ctx.Text editing="inline" parameter="heading" as="h1" rect={at.right(margin, 120, page - 2 * margin, 110)} />';
+const heading = '<ctx.Text presentation="inline" parameter="heading" as="h1" rect={at.right(margin, 120, page - 2 * margin, 110)} />';
 assert.ok(source.includes(heading));
-source = source.replace(heading, heading + '\n<ctx.Text editing="inline" parameter="heading" as="h2" rect={at.right(margin, 270, page - 2 * margin, 40)} />');
+source = source.replace(heading, heading + '\n<ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.right(margin, 270, page - 2 * margin, 40)} />');
 await writeFile(templateFile, source);
 const projectFile = join(book, 'project.json');
 const initial = JSON.parse(await readFile(projectFile, 'utf8'));
@@ -342,10 +342,10 @@ export default defineTemplate({id:'imageflow-starter',version:'1',contract:1,
     render:(ctx)=><Spread>
       <ctx.PhotoBox id="hero" rect={{x:0,y:0,width:200,height:200}}/>
       <ctx.Element id="note" rect={{x:200,y:0,width:200,height:200}}/>
-      <ctx.Text parameter="elements.note.text" editing="inline" rect={{x:220,y:20,width:150,height:20}}/>
-      <ctx.Text parameter="heading" editing="inline" rect={{x:220,y:60,width:150,height:20}}/>
-      <ctx.Text parameter="document.title" editing="inline" rect={{x:220,y:100,width:150,height:20}}/>
-      <ctx.Text parameter="boxes.hero.caption" editing="inline" rect={{x:220,y:140,width:150,height:20}}/>
+      <ctx.Text parameter="elements.note.text" presentation="inline" rect={{x:220,y:20,width:150,height:20}}/>
+      <ctx.Text parameter="heading" presentation="inline" rect={{x:220,y:60,width:150,height:20}}/>
+      <ctx.Text parameter="document.title" presentation="inline" rect={{x:220,y:100,width:150,height:20}}/>
+      <ctx.Text parameter="boxes.hero.caption" presentation="inline" rect={{x:220,y:140,width:150,height:20}}/>
     </Spread>})})});`);
   const ownedProject = {...initial, spreads:[{id:firstId,definition:'owned',params:{},boxes:{},elements:{}}]};
   await writeFile(join(ownedBook, 'project.json'), JSON.stringify(ownedProject));

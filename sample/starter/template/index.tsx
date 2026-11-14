@@ -280,7 +280,7 @@ const photoGrid = <const S extends keyof typeof gridSizes>(size: S) => (ctx: Ren
   const cells = ctx.geometry.grid(at.right(20, 20, page - 40, page - 40),
     { columns, rows: columns, columnGap: at.width(ctx.params.gutter), rowGap: at.height(ctx.params.gutter) });
   return <Paper context={ctx}>
-    <ctx.Text editing="inline" parameter="heading" as="h2" rect={at.left(margin, 196, page - 2 * margin, 64)} />
+    <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.left(margin, 196, page - 2 * margin, 64)} />
     {ids.map((id, i) => <ctx.PhotoBox id={id} key={id} rect={cells[i]} />)}
   </Paper>;
 };
@@ -338,8 +338,8 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx}>
           <img alt="" className="compass" src={asset('compass.svg')} style={{ ...ctx.geometry.css(at.right(margin, 60, 14, 14)), objectFit: 'contain' }} />
-          <ctx.Text editing="inline" parameter="heading" as="h1" rect={at.right(margin, 120, page - 2 * margin, 110)} />
-          <ctx.Text editing="inline" parameter="subtitle" className="subtitle" rect={at.right(margin, 238, page - 2 * margin, 20)} />
+          <ctx.Text presentation="inline" parameter="heading" as="h1" rect={at.right(margin, 120, page - 2 * margin, 110)} />
+          <ctx.Text presentation="inline" parameter="subtitle" className="subtitle" rect={at.right(margin, 238, page - 2 * margin, 20)} />
         </Paper>;
       },
     }),
@@ -353,7 +353,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx} bled={{ left: true }}>
           <ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />
-          <ctx.Text editing="inline" parameter="heading" as="h2" rect={at.right(margin, 40, page - 2 * margin, 44)} />
+          <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.right(margin, 40, page - 2 * margin, 44)} />
           <ctx.MarkdownBox id="body" {...ctx.edit('textSize')} className="reading" columns={ctx.boxes.body.params.columns}
             rect={at.right(margin, 100, 150, 150)} style={{ fontSize: ctx.params.textSize + 'pt' }} />
           <Caption context={ctx} box={ctx.boxes.hero} rect={at.right(margin, 262, 150, 10)} />
@@ -433,7 +433,7 @@ export default defineTemplate({
         const at = ctx.geometry.design(canvas);
         const size = { fontSize: ctx.params.textSize + 'pt' };
         return <Paper context={ctx}>
-          <ctx.Text editing="inline" parameter="heading" as="h2" rect={at.left(40, 40, 210, 44)} />
+          <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.left(40, 40, 210, 44)} />
           <ctx.MarkdownBox id="body" {...ctx.edit('textSize')} className="reading" columns={ctx.boxes.body.params.columns}
             rect={at.left(70, 100, 170, 160)} style={size} />
           <ctx.MarkdownBox id="continuation" {...ctx.edit('textSize')} className="reading" columns={ctx.boxes.continuation.params.columns}
@@ -471,7 +471,7 @@ export default defineTemplate({
         // layout switches like the folios do.
         const chapters = ctx.book.anchors('chapter');
         return <Paper context={ctx}>
-          <ctx.Text editing="inline" parameter="contentsHeading" as="h2" rect={at.left(margin, 40, page - 2 * margin, 44)} />
+          <ctx.Text presentation="inline" parameter="contentsHeading" as="h2" rect={at.left(margin, 40, page - 2 * margin, 44)} />
           <ol className="contents" style={ctx.geometry.css(at.right(margin, 40, page - 2 * margin, 220))}>
             {chapters.map((chapter) => <li key={chapter.spread + chapter.side}>
               <span>{chapter.title}</span><span className="contents-page">{chapter.page}</span>
@@ -487,7 +487,7 @@ export default defineTemplate({
       // Not `heading`: an ID means the same thing in every layout, and a closing line is not a spread heading.
       parameters: { closingLine: p.string({ label: 'Closing line', default: 'Until next time' }) },
       render: (ctx) => <Paper context={ctx}>
-        <ctx.Text editing="inline" parameter="closingLine" as="h2" rect={ctx.geometry.design(canvas).left(margin, 120, page - 2 * margin, 60)} />
+        <ctx.Text presentation="inline" parameter="closingLine" as="h2" rect={ctx.geometry.design(canvas).left(margin, 120, page - 2 * margin, 60)} />
       </Paper>,
     }),
   }),

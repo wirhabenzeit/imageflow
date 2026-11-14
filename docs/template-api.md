@@ -70,7 +70,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `editor-network` | Declared HTTPS origins for editors and rendering, subject to user approval. |
 | `rendered-images` | `<RenderedImage>` for host-managed asynchronous pictures in preview, check and export. |
 | `inline-editors` | `presentation: 'inline'` on element and document editors: editing on the page, in the frame of what the editor was opened from ([Editing on the page](#editing-on-the-page)). |
-| `inline-text` | `ctx.Text editing="inline"` for plain-string typing in template typography, with existing parameter scopes and Undo. |
+| `inline-text` | `ctx.Text presentation="inline"` for plain-string typing in template typography, with existing parameter scopes and Undo. |
 
 
 `requires` is reserved for additive extensions introduced after the baseline is fixed. Unsupported extensions are rejected when the template loads, with an update hint. Older templates that list baseline features in `requires` remain valid. `capabilities` continues to list all supported feature names, including the baseline, for compatibility and feature discovery. `get_authoring_context` reports the contract, its `baseline`, all `capabilities` and module `exports` as `capabilities.templateApi`.
@@ -874,7 +874,7 @@ The map editor waits for its first measurement, uses the actual output aspect ra
 
 ### Inline plain text (`inline-text`)
 
-Use `<ctx.Text parameter="heading" editing="inline" as="h1" />` to edit a plain string on the page. Inline text is included in the contract-1 baseline under ADR 0008 and needs no `requires` entry. Existing `Text` calls keep the parameter panel; `editing="inline"` chooses the presentation for a particular node. Older `requires: ['inline-text']` declarations remain valid. The starter headings use it. Installed-runtime capability discovery and the generated SDK include `inline-text`.
+Use `<ctx.Text parameter="heading" presentation="inline" as="h1" />` to edit a plain string on the page. Inline text is included in the contract-1 baseline under ADR 0008 and needs no `requires` entry. Existing `Text` calls keep the parameter panel; `presentation="inline"` chooses on-page editing for a particular node, with the same word and values as an editor's `presentation` (`'dialog'`, the default, keeps the panel). Older `requires: ['inline-text']` declarations remain valid. The starter headings use it. Installed-runtime capability discovery and the generated SDK include `inline-text`.
 
 The activated occurrence uses the template's actual font, ancestors, dimensions and CSS at page zoom. Other occurrences continue to show the confirmed parameter until Apply succeeds. The parameter's scope and saved identity do not change. A custom editor that owns the parameter remains its sole editing surface: clicking that text (or using the Inspector/Tab) opens the owner, including layout parameters listed in an element editor's `spread`. The inline-text save path also rejects a draft if ownership changes before its save runs. There is no rich text or Markdown editing. An inline string declared `multiline: true` defaults to `white-space: pre-wrap` in both editing and artwork; template CSS classes and inline styles take precedence.
 

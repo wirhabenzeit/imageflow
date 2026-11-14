@@ -140,8 +140,8 @@ test('Text inherits display-only fallback for empty values, with explicit hiding
 });
 
 test('inline Text validates its opt-in and string binding and renders pure multiline artwork', () => {
-  const render = ({ requires = [], type = 'string', editing = 'inline', mode = 'edit', value = 'First\nSecond' }:
-    { requires?: string[]; type?: string; editing?: string; mode?: 'edit' | 'export'; value?: string } = {}) => {
+  const render = ({ requires = [], type = 'string', presentation = 'inline', mode = 'edit', value = 'First\nSecond' }:
+    { requires?: string[]; type?: string; presentation?: string; mode?: 'edit' | 'export'; value?: string } = {}) => {
     const template = chooseFormat(templateSchema.parse({ id: 'text', version: '1', contract: 1, requires,
       format: { label: 'F', trim: { width: mm(100), height: mm(100) },
         bleed: { top: mm(0), bottom: mm(0), outside: mm(0), binding: mm(0) }, safe: { top: mm(5), bottom: mm(5), outside: mm(5), binding: mm(5) },
@@ -149,7 +149,7 @@ test('inline Text validates its opt-in and string binding and renders pure multi
         output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' } },
       spreads: { main: { label: 'Main', parameters: { heading: type === 'string' ? { type, label: 'Heading', default: '', multiline: true }
         : { type: 'number', label: 'Number', default: 1 } }, render: (ctx: RenderContext) =>
-        createElement(runtime.Spread, {}, createElement(ctx.Text, { parameter: 'heading', editing: editing as 'inline' })) } } }));
+        createElement(runtime.Spread, {}, createElement(ctx.Text, { parameter: 'heading', presentation: presentation as 'inline' })) } } }));
     const project = projectSchema.parse({ schemaVersion: 1, title: 'Text', template: { id: 'text', version: '1' },
       spreads: [{ id: 'one', definition: 'main', params: { heading: value } }] });
     const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode, template: { script: '', assets: {} } } as RenderProject;
@@ -159,7 +159,8 @@ test('inline Text validates its opt-in and string binding and renders pure multi
   assert.match(render({ requires: [] }), /data-inline-text/);
   assert.match(render({ requires: ['inline-text'] }), /data-inline-text/);
   assert.throws(() => render({ type: 'number' }), /string parameter/);
-  assert.throws(() => render({ editing: 'panel' }), /editing must be inline/);
+  assert.throws(() => render({ presentation: 'panel' }), /presentation must be 'inline' or 'dialog'/);
+  assert.doesNotMatch(render({ presentation: 'dialog' }), /data-inline-text/);
   assert.match(render(), /data-multiline/);
   assert.doesNotMatch(render(), /white-space:/);
   assert.match(render({ value: '' }), /if-text-placeholder/);
