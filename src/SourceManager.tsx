@@ -51,7 +51,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   }
   async function menu(keys: string[]) {
     if (busy || disabled || !keys.length) return;
-    const result = await api.showContextMenu(assetMenu(summary, keys, true), assetMenuState(summary, busy || disabled));
+    const result = await api.showContextMenu(assetMenu(summary, keys, true), assetMenuState(busy || disabled));
     if (!result) return;
     if (result.command === 'asset-preview') {
       const item = sourceEntries(summary).find(({ key }) => key === keys[0]);
@@ -60,7 +60,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     } else if (result.command === 'asset-jump') await act({ action: 'jump', spread: result.value });
     else if (result.command in assetActions) await act({ action: assetActions[result.command as keyof typeof assetActions], keys });
   }
-  const locked = busy || disabled || summary.readOnly;
+  const locked = busy || disabled;
   const shown = entries.filter((entry) => (kind === 'all' || kind === entry.kind) &&
     (used === 'all' || (used === 'used') === !!placements(entry).length) &&
     (storage === 'all' || (storage === 'linked') === entry.linked) && (!attention || unavailable(entry.key)) &&

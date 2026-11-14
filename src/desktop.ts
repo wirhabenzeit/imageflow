@@ -28,7 +28,7 @@ export const channels = {
   command: 'project:command', changed: 'project:changed',
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
   check: 'project:check', cancelCheck: 'project:cancel-check',
-  panelVisibility: 'editor:panel-visibility', bookMenu: 'editor:book-menu',
+  bookMenu: 'editor:book-menu',
   settings: 'app:settings', updateSettings: 'app:update-settings', settingsChanged: 'app:settings-changed',
   showSettings: 'app:show-settings', settingsPane: 'app:settings-pane', fitSettings: 'app:fit-settings',
   library: 'library:list', libraryChanged: 'library:changed', libraryImport: 'library:import', libraryRemove: 'library:remove',
@@ -50,7 +50,7 @@ export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, 
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView; selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string> };
 export type Command = PhotoViewCommand | SpreadCommand | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'print' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
-  id: string; folder: string; readOnly: boolean;
+  id: string; folder: string;
   handle?: string; history?: HistoryState; viewKey?: string;
   pageLabels?: Record<string, string>;
   photoDates?: Record<string, { captured: string; capturedEstimated?: boolean }>;
@@ -132,7 +132,6 @@ export type DesktopApi = {
   fitSettings(height: number): Promise<void>;
   // The window's panel and canvas layout state, so the View menu can show it.
   setBookMenuState(state: BookMenuState): Promise<void>;
-  setPanelVisibility(state: { sidebar: boolean; inspector: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout }): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;
   saveProject(id: string, files: ProjectFiles, label?: string): Promise<Result<ProjectSummary>>;
   history(id: string, direction: 'undo' | 'redo'): Promise<Result<ProjectSummary>>;

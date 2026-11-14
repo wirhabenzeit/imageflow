@@ -8,10 +8,10 @@ import { saveInlineText, textEditorOwner, textProblem } from './inline-text';
 import type { Edit } from './Inspector';
 import type { Project, SpreadState } from './project';
 
-export function InlineTextEditor({ projectId, project, spread, template, target, zoom, host, canvasReady, blocked, readOnly,
+export function InlineTextEditor({ projectId, project, spread, template, target, zoom, host, canvasReady, blocked,
   edit, close, step, shown, notice }: {
   projectId: string; project: Project; spread: SpreadState; template: TemplateInfo; target: BookGeometry['targets'][number];
-  zoom: number; host: HTMLElement | null; canvasReady: boolean; blocked?: string; readOnly: boolean;
+  zoom: number; host: HTMLElement | null; canvasReady: boolean; blocked?: string;
   edit: (change: Edit, notice?: string) => Promise<boolean>; close: () => void; step: (direction: 1 | -1) => void;
   shown: (showing: boolean) => void;
   notice: (message: string) => void;
@@ -39,7 +39,7 @@ export function InlineTextEditor({ projectId, project, spread, template, target,
   const field = resolveEditPath(template, spread.definition, opened.field.path);
   const stale = spread.definition !== opened.layout || !!textEditorOwner(template, spread.definition, opened.field.path) || JSON.stringify(field) !== JSON.stringify(opened.field) ||
     (!saving.current && !saved && String(readEdit(project, spread, opened.field)) !== opened.before);
-  const disabled = readOnly || !!blocked || stale || finishing;
+  const disabled = !!blocked || stale || finishing;
   const text = (reported: unknown) => {
     if (reported && typeof reported === 'object' && typeof (reported as Record<string, unknown>)[opened.field.path] === 'string') {
       draft.current = (reported as Record<string, string>)[opened.field.path];
@@ -57,7 +57,7 @@ export function InlineTextEditor({ projectId, project, spread, template, target,
   async function apply() {
     if (saving.current || saved) return;
     const invalid = textProblem(opened.field.param, draft.current);
-    if (invalid || readOnly || blocked || stale || failed) {
+    if (invalid || blocked || stale || failed) {
       setProblem(invalid ? invalid + ' Fix the text or choose Discard to continue.' : 'This text cannot be saved right now. Copy your typing below, then choose Discard to continue.');
       after.current = undefined;
       return;

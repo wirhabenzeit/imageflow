@@ -64,7 +64,7 @@ export function Sources({ view, summary, tab, setTab, selected, choose, usage, w
     const api = window.imageflow;
     if (!api || busy || !ids.length) return;
     const keys = ids.map((id) => (tab === 'photo' ? 'photo:' : 'markdown:') + id);
-    const result = await api.showContextMenu(assetMenu(summary, keys, true, usage), assetMenuState(summary, busy));
+    const result = await api.showContextMenu(assetMenu(summary, keys, true, usage), assetMenuState(busy));
     if (!result) return;
     if (result.command === 'asset-preview') { quickLook({ kind: tab, id: ids[0] }); return; }
     const request = result.command === 'asset-jump' ? { action: 'jump' as const, spread: result.value } :

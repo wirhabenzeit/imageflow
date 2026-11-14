@@ -2,7 +2,7 @@ import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
 import { bookName } from '../src/book-name';
-import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, fileIsAssigned, removeSources } from './source-actions';
+import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, removeSources } from './source-actions';
 import { originalPath } from './source-store';
 import { sourceEntries } from '../src/source-locations';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
@@ -11,12 +11,12 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net,
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, join, relative, isAbsolute, parse } from 'node:path';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
-import type { BookMenuState, CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
+import type { BookMenuState, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
@@ -41,7 +41,7 @@ import { starters } from '../src/starters';
 import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-library';
 import { TemplateTrust, trustedOrigins } from './template-trust';
 import { ReleasedTemplates } from './released-templates';
-import { isTemplateArchive, templateArchiveExtension, writeTemplateArchive } from './template-archive';
+import { isTemplateArchive, templateArchiveExtension } from './template-archive';
 import { writeAuthoringSnapshot } from './authoring-sdk';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
 import { describeImport, templatePicturePath, templatePictureURL } from '../src/library';
@@ -348,7 +348,7 @@ function captureCover(document: DocumentSession, book: OpenProject, closing = fa
   return state.task;
 }
 function scheduleCover(document: DocumentSession, book: OpenProject) {
-  if (book.readOnly || document.closing) return;
+  if (document.closing) return;
   markCoverDirty(document);
   const state = covers.get(document)!;
   state.timer = setTimeout(() => {
@@ -358,28 +358,26 @@ function scheduleCover(document: DocumentSession, book: OpenProject) {
 }
 async function saveDevState() {
   if (devState) await writeFile(devState, JSON.stringify([...documents.values()].filter((document) => !document.closing)
-    .map((document) => ({ folder: document.book.folder, readOnly: document.book.readOnly })))).catch(() => {});
+    .map((document) => ({ folder: document.book.folder })))).catch(() => {});
 }
-async function openDocument(path: string, readOnly = false): Promise<DocumentSession> {
+async function openDocument(path: string): Promise<DocumentSession> {
   if (quitting) throw new Error('ImageFlow is closing.');
-  if (!readOnly && !isDocument(path)) throw new Error('Choose an .imageflow document.');
+  if (!isDocument(path)) throw new Error('Choose an .imageflow document.');
   const { folder, identity } = await documentIdentity(path);
   const existing = identities.get(identity);
   if (existing) {
     if (existing.closing) {
       await existing.close().catch(() => {});
       if (identities.get(identity) === existing) identities.delete(identity);
-      return openDocument(path, readOnly);
+      return openDocument(path);
     }
     if (existing.book.folder !== folder) {
       const relocated = await existing.run(() => existing.relocate(folder));
       if ('error' in relocated) throw new Error(relocated.error);
     }
-    if (!existing.book.readOnly) {
-      await recents.remember(folder, existing.book.project.title);
-      app.addRecentDocument(folder);
-      publishRecents();
-    }
+    await recents.remember(folder, existing.book.project.title);
+    app.addRecentDocument(folder);
+    publishRecents();
     await saveDevState();
     focus(existing.window);
     return existing;
@@ -387,11 +385,11 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
   const pending = opening.get(identity);
   if (pending) return pending;
   const task = (async () => {
-    const release = readOnly ? undefined : await acquireProjectLock(folder);
+    const release = await acquireProjectLock(folder);
     let editor: BrowserWindow | undefined;
     let document: DocumentSession | undefined;
     try {
-      const book = await loadProject(folder, cache, readOnly);
+      const book = await loadProject(folder, cache);
       if (quitting) throw new Error('ImageFlow is closing.');
       editor = new BrowserWindow({ width: 1520, height: 950, minWidth: 940, minHeight: 650, show: false,
         webPreferences: windowOptions() });
@@ -401,7 +399,7 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
       secureWindow(editor);
       document = new DocumentSession(editor, book, cache, sessions, release, (next) => {
         if (document) queueMicrotask(() => { if (document) publishAssets(document); });
-        if (document && !next.readOnly) {
+        if (document) {
           void recents.refresh(next.folder, next.project.title).then(publishRecents).catch((error) => console.warn('ImageFlow could not update recent books', error));
           markCoverDirty(document);
         }
@@ -444,12 +442,10 @@ async function openDocument(path: string, readOnly = false): Promise<DocumentSes
       editor.once('ready-to-show', () => { if (!hidden) focus(current.window); });
       // loadURL may finish after ready-to-show, so showing is also safe here.
       focus(editor);
-      if (!readOnly) {
-        await recents.remember(folder, book.project.title);
-        app.addRecentDocument(folder);
-        publishRecents();
-        scheduleCover(current, book);
-      }
+      await recents.remember(folder, book.project.title);
+      app.addRecentDocument(folder);
+      publishRecents();
+      scheduleCover(current, book);
       startWindow?.hide();
       await saveDevState();
       updateMenus();
@@ -1127,7 +1123,7 @@ void app.whenReady().then(async () => {
     const owner = document ? (assetsOwner(event) ? assetsWindows.get(document)?.window : document.window) : templatesOwner(event) ?? startOwner(event);
     if (!owner || document?.closing || !Array.isArray(input) || input.length > 100) return null;
     const state: BookMenuState = { ...emptyMenuState, ...snapshot, document: !!document,
-      writable: !!document && !document.book.readOnly && (snapshot?.writable ?? true) };
+      writable: !!document && (snapshot?.writable ?? true) };
     let chosen: ContextMenuResult | null = null;
     let count = 0;
     const build = (items: ContextMenuItem[], depth = 0): MenuItemConstructorOptions[] => {
@@ -1264,7 +1260,7 @@ void app.whenReady().then(async () => {
       return { summary: document.summary };
     }
     if (request.action === 'place') {
-      if (document.book.readOnly || !chosen.length) throw new Error('Select assets in an editable book.');
+      if (!chosen.length) throw new Error('Select assets in the book.');
       document.window.webContents.send(channels.sourceCommand, { action: 'place', keys: chosen.map(({ key }) => key) }); focus(document.window);
       return { summary: document.summary };
     }
@@ -1276,7 +1272,6 @@ void app.whenReady().then(async () => {
       else owner.previewFile(path);
       return { summary: document.summary };
     }
-    if (document.book.readOnly) throw new Error('Create an editable book first.');
     let next = document.book;
     let message: string | undefined;
     if (request.action === 'retry') return { summary: activate(await document.reload()) };
@@ -1505,19 +1500,6 @@ void app.whenReady().then(async () => {
     if (state.layout && (state.layout.mode === 'grid' || state.layout.mode === 'vertical') && gridColumns.includes(state.layout.columns as 1|2|3|4)) document.layout = state.layout;
     updateMenus();
   });
-  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout }) => {
-    const document = editorOwner(event);
-    if (!document || typeof state?.sidebar !== 'boolean' || typeof state?.inspector !== 'boolean') return;
-    document.sidebar = state.sidebar;
-    document.inspector = state.inspector;
-    if (typeof state.sources === 'boolean') document.sources = state.sources;
-    if (typeof state.guides === 'boolean') document.guides = state.guides;
-    const layout = state.layout;
-    if (layout && (layout.mode === 'vertical' || layout.mode === 'grid') && gridColumns.some((columns) => columns === layout.columns)) {
-      document.layout = { mode: layout.mode, columns: layout.columns };
-    }
-    updateMenus();
-  });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });
   installMenu();
   if (renderPreviewsTo) {
@@ -1530,8 +1512,8 @@ void app.whenReady().then(async () => {
   if (paths.length) for (const path of paths) await openFromSystem(path);
   else if (devState) {
     try {
-      const state = JSON.parse(await readFile(devState, 'utf8')) as { folder: string; readOnly: boolean }[];
-      for (const entry of state) await openDocument(entry.folder, entry.readOnly);
+      const state = JSON.parse(await readFile(devState, 'utf8')) as { folder: string }[];
+      for (const entry of state) await openDocument(entry.folder);
     } catch { /* No development documents to restore. */ }
   }
   if (!documents.size) showStart();

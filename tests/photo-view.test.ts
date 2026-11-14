@@ -4,7 +4,7 @@ import type { ProjectSummary } from '../src/desktop';
 import { projectSchema } from '../src/project';
 import { captureFact, captureLabel, captureWallTime, defaultPhotoView, orderedPhotos, photoGroups, photoViewChange, validPhotoView } from '../src/photo-view';
 import { sourceList } from '../src/source-items';
-const summary: ProjectSummary = { id: 'x', folder: 'Book', readOnly: false, photos: {}, photoSizes: {}, texts: {},
+const summary: ProjectSummary = { id: 'x', folder: 'Book', photos: {}, photoSizes: {}, texts: {},
   project: projectSchema.parse({ schemaVersion: 1, title: 'Book', template: { id: 't', version: '1' }, spreads: [] }),
   photoIndex: { b: { path: 'b.jpg', title: 'Photo 10' }, no: { path: 'no.jpg' }, a: { path: 'a.jpg', title: 'Photo 2' }, c: { path: 'c.jpg' } },
   photoDates: { b: { captured: '2026-11-03T00:20:00+02:00' }, a: { captured: '2026-11-02T23:50:00+02:00' }, c: { captured: '2026-11-03T07:00:00+02:00' } } };

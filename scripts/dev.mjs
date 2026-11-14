@@ -59,7 +59,7 @@ async function freshProject() {
   await writeFile(path, JSON.stringify(draft, null, 2) + '\n');
   if (fresh && fresh !== folder) await rm(fresh, { recursive: true, force: true });
   fresh = folder;
-  await writeFile(devState, JSON.stringify([{ folder, readOnly: false }]));
+  await writeFile(devState, JSON.stringify([{ folder }]));
   console.log('Fresh starter project: ' + folder);
 }
 if (!keepLast) {

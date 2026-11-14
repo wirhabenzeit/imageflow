@@ -15,7 +15,7 @@ import { renditionCacheFor } from './rendition-cache';
 import { photoDate } from './capture-time';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
-import { sourceEntries, sourcePath, sourceLinked, sourceFolder } from '../src/source-locations';
+import { sourceEntries, sourcePath, sourceLinked } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
 import { approveSource, sourceBookKey } from './source-access';
@@ -382,7 +382,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
 export function projectSummary(book: OpenProject, id: string): ProjectSummary {
   const base = renderOrigin + '/render/' + id;
   return {
-    id, folder: basename(book.folder), viewKey: book.viewKey ?? createHash('sha256').update(book.folder).digest('hex'), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
+    id, folder: basename(book.folder), viewKey: book.viewKey ?? createHash('sha256').update(book.folder).digest('hex'), project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
     photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
     photoDates: Object.fromEntries([...book.photos].flatMap(([id, photo]) => { const date = photoDate(photo); return date ? [[id, date]] : []; })),

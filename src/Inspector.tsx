@@ -3,7 +3,7 @@ import { sourcePath } from './source-locations';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { Fields } from './Fields';
-import type { BookGeometry, Issue, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
+import type { BookGeometry, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
 import { layoutPreviewKey } from './layout-preview';
 import { BookFrame } from './BookFrame';
 import { revealIn } from './reveal';
@@ -123,11 +123,11 @@ function contentState(summary: ProjectSummary, spread: SpreadState, id: string, 
 // page does not already edit, content kept for other layouts, and a list of its boxes and elements. Boxes and
 // elements are edited where they are on the page; the list opens the same editors, also for empty, hidden or
 // overlapping ones, and from the keyboard.
-export function Inspector({ summary, spread, source, template, render, usage, edit, highlight, issues,
-  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker }: {
-  summary: ProjectSummary; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
+export function Inspector({ summary, spread, source, template, render, usage, edit, highlight,
+  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable }: {
+  summary: ProjectSummary; writable: boolean; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void;
-  highlight: (id?: string) => void; issues: string; select: (spread: string) => void;
+  highlight: (id?: string) => void; select: (spread: string) => void;
   quickLook: () => void; focus?: { box: string; at: number };
   targets?: BookGeometry['targets']; open: (owner: { type: 'photo' | 'markdown' | 'element'; id: string }) => void;
   openTarget: (target: BookGeometry['targets'][number]) => void;
@@ -155,7 +155,6 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
       if (current) update(current);
     }, notice);
   }
-  const writable = !summary.readOnly;
   // Content the spread keeps for other layouts; switching back, or to another layout with these boxes, shows it.
   const kept = template ? keptOutside(spread, template.spreads) : [];
   const keptLabel = [
@@ -206,7 +205,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
       } }} onContextMenu={async (event) => {
         event.preventDefault();
         if (!definition || !Object.keys(definition.parameters).length) return;
-        const result = await window.imageflow?.showContextMenu(['reset-defaults'], assetMenuState(summary, false));
+        const result = await window.imageflow?.showContextMenu(['reset-defaults'], assetMenuState(false));
         if (result?.command === 'reset-defaults') changeSpread((item) => { for (const id of Object.keys(definition.parameters)) delete item.params[id]; }, 'Spread settings reset');
       }}>Spread</summary>
         <p className="field-label">Layout</p>
