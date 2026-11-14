@@ -29,6 +29,8 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
     } catch (error) { setError(error instanceof Error ? error.message : 'Could not open this book.'); }
     finally { setBusy(false); }
   }
+  // Books that can't be found stay listed so they can be located, but below the ones that can be opened.
+  const ordered = [...recents.filter((book) => book.available), ...recents.filter((book) => !book.available)];
   return <main className="studio start-window">
     <div className="start-drag" aria-hidden="true" />
     <aside className="start-actions">
@@ -40,7 +42,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
     </aside>
     <section className="recent-books" aria-labelledby="recent-heading">
       <h2 id="recent-heading">Recent books</h2>
-      {recents.length ? <ul>{recents.map((book) => <li key={book.id}>
+      {ordered.length ? <ul>{ordered.map((book) => <li key={book.id} className={book.available ? undefined : 'missing'}>
         <button className="recent-open" disabled={busy || !book.available} onClick={() => void act('open', book.id)}>
           <span className="recent-cover">{book.cover ? <img src={book.cover} alt="" /> : <span aria-hidden="true">◫</span>}</span>
           <span className="recent-description"><strong>{bookName(book.path)}</strong><span className="recent-location" title={book.path}>{book.path.split('/').slice(-2).join('/')}</span>
