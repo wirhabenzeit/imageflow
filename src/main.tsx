@@ -9,6 +9,8 @@ if (window.location.hostname === 'render' && window.location.pathname.startsWith
 } else if (window.location.pathname === '/new') {
   document.title = 'New Book';
   void import('./StarterPicker').then(({ StarterPicker }) => createRoot(root).render(<StarterPicker api={window.imageflow} />));
+} else if (window.location.pathname === '/markdown') {
+  void import('./MarkdownWindow').then(({ MarkdownWindow }) => createRoot(root).render(<MarkdownWindow api={window.imageflow} />));
 } else if (window.location.pathname === '/assets') {
   document.title = 'Assets';
   void import('./AssetsWindow').then(({ AssetsWindow }) => createRoot(root).render(<AssetsWindow api={window.imageflow} />));

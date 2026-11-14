@@ -157,3 +157,23 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
   if (!includeAssets) await transferSourceAccess(book.folder, result, sourceEntries(book));
   return result;
 }
+
+/** Create an ordinary in-book source; the stable source ID is independent of its filename. */
+export async function createMarkdownSource(book: OpenProject, title: string) {
+  if (book.readOnly) throw new Error('Create an editable book before adding text.');
+  const name = title.trim().replace(/\.md$/i, '');
+  if (!name || name.length > 100 || /[\/\\\x00-\x1f]/.test(name) || name === '.' || name === '..') throw new Error('Choose a text name of 1–100 characters without slashes.');
+  const directory = join(book.folder, 'texts');
+  await mkdir(directory, { recursive: true });
+  if (await realpath(directory) !== directory) throw new Error('Texts must be a real folder inside the book.');
+  const id = 'tx-' + randomUUID().slice(0, 12);
+  const path = 'texts/' + id + '-' + name + '.md';
+  const files = filesOf(book);
+  files.project.texts[id] = path;
+  await writeFile(join(book.folder, path), '', { flag: 'wx' });
+  try { return { id, book: await updateProject(book, files, true) }; }
+  catch (error) {
+    if (!(error instanceof CommittedProjectSaveError)) await rm(join(book.folder, path), { force: true });
+    throw error;
+  }
+}

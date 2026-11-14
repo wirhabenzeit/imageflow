@@ -1,0 +1,154 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { MarkdownBuffer } from '../desktop/markdown-buffer';
+import { readMarkdownFile, writeMarkdownFile } from '../desktop/markdown-file';
+import { createMarkdownSource, relocateSource } from '../desktop/source-actions';
+import { importIntoProject, loadProject, updateProject } from '../desktop/project';
+import { configureSourceStore } from '../desktop/source-store';
+import { configureSourceAccess } from '../desktop/source-access';
+import { textSourcePath } from '../desktop/document-actions';
+
+function buffer(initial = 'Original') {
+  let disk = initial;
+  let failure = false;
+  let writes = 0;
+  const value = new MarkdownBuffer({ id: 'text', name: 'Story', path: '/story.md', external: false }, initial, {
+    read: async () => disk,
+    write: async (expected, text) => { assert.equal(disk, expected); if (failure) throw new Error('Disk full'); disk = text; writes++; },
+  }, () => {}, 20);
+  return { value, disk: () => disk, writes: () => writes, outside: (text: string) => { disk = text; }, fail: (next: boolean) => { failure = next; } };
+}
+
+test('autosave debounces input and ignores stale change messages', async (t) => {
+  const f = buffer(); t.after(() => f.value.dispose());
+  f.value.change('First', 1); f.value.change('Latest', 2); f.value.change('Stale', 1);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(f.disk(), 'Latest'); assert.equal(f.writes(), 1);
+  assert.equal(f.value.state.dirty, false);
+});
+
+test('outside text reloads a clean buffer, but preserves a dirty buffer until explicitly resolved', async (t) => {
+  const f = buffer(); t.after(() => f.value.dispose());
+  f.outside('Clean outside edit'); await f.value.refresh();
+  assert.equal(f.value.state.text, 'Clean outside edit');
+  f.value.change('My edit', 1); f.outside('Another outside edit'); await f.value.flush();
+  assert.equal(f.disk(), 'Another outside edit');
+  assert.equal(f.value.state.text, 'My edit'); assert.equal(f.value.state.conflict, 'Another outside edit');
+  await f.value.resolve('keep', 'Another outside edit');
+  assert.equal(f.disk(), 'My edit'); assert.equal(f.value.state.dirty, false);
+});
+
+test('resolving a conflict does not overwrite an even newer outside edit', async (t) => {
+  const f = buffer(); t.after(() => f.value.dispose());
+  f.value.change('Mine', 1); f.outside('Theirs'); await f.value.flush();
+  f.outside('Newer theirs'); await f.value.resolve('keep', 'Theirs');
+  assert.equal(f.disk(), 'Newer theirs'); assert.equal(f.value.state.text, 'Mine');
+  assert.equal(f.value.state.conflict, 'Newer theirs');
+  await f.value.resolve('reload', 'Newer theirs');
+  assert.equal(f.value.state.text, 'Newer theirs'); assert.equal(f.value.state.dirty, false);
+});
+
+test('save failures retain text and can be retried', async (t) => {
+  const f = buffer(); t.after(() => f.value.dispose());
+  f.fail(true); f.value.change('Pending', 1); await f.value.flush();
+  assert.equal(f.disk(), 'Original'); assert.equal(f.value.state.text, 'Pending');
+  assert.equal(f.value.state.error, 'Disk full'); assert.equal(f.value.state.dirty, true);
+  f.fail(false); await f.value.flush();
+  assert.equal(f.disk(), 'Pending'); assert.equal(f.value.state.error, undefined);
+});
+
+test('a newer edit during a slow save stays dirty until the next serialized save', async (t) => {
+  let disk = 'Original'; let release!: () => void;
+  let startedResolve!: () => void;
+  const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  let writes = 0;
+  const value = new MarkdownBuffer({ id: 'x', name: 'x', path: '/x.md', external: false }, disk, {
+    read: async () => disk,
+    write: async (_expected, text) => { if (++writes === 1) { startedResolve(); await pending; } disk = text; },
+  }, () => {}, 10000);
+  t.after(() => value.dispose());
+  value.change('First', 1); const first = value.flush(); await started;
+  value.change('Second', 2); const second = value.flush(); release();
+  await first; await second;
+  assert.equal(disk, 'Second'); assert.equal(value.state.dirty, false); assert.equal(writes, 2);
+});
+
+test('an outside edit matching pending text counts as saved without rewriting it', async (t) => {
+  const f = buffer(); t.after(() => f.value.dispose());
+  f.value.change('Matching', 1); f.outside('Matching'); await f.value.flush();
+  assert.equal(f.writes(), 0); assert.equal(f.value.state.dirty, false);
+});
+
+async function directory(t: { after(fn: () => Promise<void>): void }) {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'if-markdown-')));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  return folder;
+}
+
+test('file saves publish complete UTF-8 text, preserve permissions, and reject changed bytes', async (t) => {
+  const root = await directory(t); const path = join(root, 'story.md');
+  await writeFile(path, 'Original'); await chmod(path, 0o640);
+  await writeMarkdownFile(path, 'Original', '# Zürich\n\nA story.', async () => path);
+  assert.equal(await readMarkdownFile(path), '# Zürich\n\nA story.');
+  assert.equal((await stat(path)).mode & 0o777, 0o640);
+  await assert.rejects(writeMarkdownFile(path, 'Original', 'Lost edit', async () => path), /changed outside/);
+  assert.equal(await readMarkdownFile(path), '# Zürich\n\nA story.');
+  assert.deepEqual(await readdir(root), ['story.md']);
+});
+
+test('two app editors of the same original cannot silently overwrite each other', async (t) => {
+  const root = await directory(t); const path = join(root, 'shared.md');
+  await writeFile(path, 'Original');
+  const results = await Promise.allSettled([
+    writeMarkdownFile(path, 'Original', 'First editor', async () => path),
+    writeMarkdownFile(path, 'Original', 'Second editor', async () => path),
+  ]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  assert.equal(await readFile(path, 'utf8'), 'First editor');
+});
+
+test('invalid UTF-8, oversized files, symlinks, and a changed source target cannot be edited', async (t) => {
+  const root = await directory(t); const path = join(root, 'story.md'); const link = join(root, 'link.md');
+  await writeFile(path, Buffer.from([0xff, 0xfe]));
+  await assert.rejects(readMarkdownFile(path), /UTF-8/);
+  await writeFile(path, Buffer.alloc(5 * 1024 * 1024 + 1));
+  await assert.rejects(readMarkdownFile(path), /smaller than 5 MB/);
+  await writeFile(path, 'Original'); await symlink(path, link);
+  await assert.rejects(readMarkdownFile(link));
+  await assert.rejects(writeMarkdownFile(path, 'Original', 'New', async () => link), /location changed/);
+  assert.equal(await readFile(path, 'utf8'), 'Original');
+});
+
+test('a read-only original cannot be replaced through a writable parent folder', async (t) => {
+  const root = await directory(t); const path = join(root, 'story.md');
+  await writeFile(path, 'Original'); await chmod(path, 0o444);
+  await assert.rejects(writeMarkdownFile(path, 'Original', 'New', async () => path));
+  assert.equal(await readFile(path, 'utf8'), 'Original');
+});
+
+test('creation registers an ordinary source, and copying an external source preserves placements and the original', async (t) => {
+  const root = await directory(t); const folder = join(root, 'Book.imageflow'); const cache = join(root, 'cache');
+  await mkdir(cache); configureSourceStore(join(root, 'sources')); configureSourceAccess(join(root, 'access'));
+  await cp(resolve('sample/starter'), folder, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  const book = await loadProject(folder, cache);
+  const created = await createMarkdownSource(book, 'Introduction');
+  assert.equal(created.book.texts[created.id], '');
+  assert.equal(typeof created.book.project.texts[created.id], 'string');
+  await assert.rejects(createMarkdownSource(created.book, '../escape'), /without slashes/);
+  const external = join(root, 'external.md'); await writeFile(external, 'External text');
+  const imported = await importIntoProject(created.book, { kind: 'markdown', mode: 'link' }, [external]);
+  const id = imported.imported[0];
+  const files = structuredClone({ project: imported.book.project, photoIndex: imported.book.photoIndex });
+  files.project.spreads[0].boxes.story = { text: id, params: {} };
+  const placed = await updateProject(imported.book, files);
+  const copied = await relocateSource(placed, 'markdown:' + id, undefined, true);
+  assert.equal(copied.project.spreads[0].boxes.story.text, id);
+  const copy = await textSourcePath(folder, copied.project.texts[id], id);
+  await writeMarkdownFile(copy, 'External text', 'Copied edit', async () => copy);
+  assert.equal(await readFile(external, 'utf8'), 'External text');
+  assert.equal(await readFile(copy, 'utf8'), 'Copied edit');
+});

@@ -1,3 +1,4 @@
+import { MarkdownWindows } from './markdown-windows';
 import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
@@ -16,7 +17,7 @@ import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
-import type { BookMenuState, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
+import type { BookMenuState, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
@@ -56,6 +57,10 @@ import { previewTypes } from '../src/template-preview';
 const presentationWindows = new WeakMap<BrowserWindow, { simple: boolean; previous: boolean; entered?: () => void }>();
 let templatesWindow: BrowserWindow | null = null;
 const assetsWindows = new Map<DocumentSession, { window: BrowserWindow; accept: string[] }>();
+const markdownWindows = new MarkdownWindows({
+  window: () => ({ webPreferences: windowOptions() }), secure: secureWindow, focus,
+  focused: (document) => { lastDocument = document; updateMenus(); },
+});
 let settingsWindow: BrowserWindow | null = null;
 const settingsPresentation = new WeakMap<BrowserWindow, { painted: boolean; sized: boolean }>();
 let startWindow: BrowserWindow | null = null;
@@ -150,7 +155,7 @@ async function serve(request: Request) {
     const bytes = await readFile(file);
     return response(bytes, previewTypes[extname(file).toLowerCase()] ?? 'application/octet-stream', { 'Cache-Control': 'no-cache' });
   }
-  if (host === 'editor' && ['/', '/settings', '/start', '/new', '/assets', '/templates'].includes(pathname)) {
+  if (host === 'editor' && ['/', '/settings', '/start', '/new', '/assets', '/templates', '/markdown'].includes(pathname)) {
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigin + "; frame-ancestors 'none'; base-uri 'none'",
     });
@@ -231,7 +236,7 @@ async function fromEditor<T>(event: IpcMainInvokeEvent, run: (document: Document
 }
 function focusedDocument(owner: BaseWindow | null | undefined = BrowserWindow.getFocusedWindow()) {
   const browser = owner ? BrowserWindow.fromId(owner.id) : undefined;
-  return browser ? documents.get(browser.webContents.id) ?? [...assetsWindows].find(([, entry]) => entry.window === browser)?.[0] : lastDocument && !lastDocument.closing ? lastDocument : undefined;
+  return browser ? documents.get(browser.webContents.id) ?? markdownWindows.documentFor(browser) ?? [...assetsWindows].find(([, entry]) => entry.window === browser)?.[0] : lastDocument && !lastDocument.closing ? lastDocument : undefined;
 }
 function report(owner: BrowserWindow | null | undefined, error: unknown) {
   if (owner && !owner.isDestroyed()) owner.webContents.send(channels.appError, errorMessage(error));
@@ -414,6 +419,17 @@ async function openDocument(path: string): Promise<DocumentSession> {
       lastDocument = document;
       editor.on('focus', () => { lastDocument = current; updateMenus(); });
       editor.on('blur', () => { if (covers.get(current)?.dirty) scheduleCover(current, current.book); });
+      let closingTextEditors = false;
+      editor.on('close', (event) => {
+        if (!markdownWindows.windows().some((window) => markdownWindows.documentFor(window) === current)) return;
+        event.preventDefault();
+        if (closingTextEditors) return;
+        closingTextEditors = true;
+        void markdownWindows.closeFor(current).then((allowed) => {
+          closingTextEditors = false;
+          if (allowed && !current.window.isDestroyed()) current.window.close();
+        }).catch((error) => { closingTextEditors = false; report(current.window, error); });
+      });
       editor.on('closed', () => {
         documents.delete(webContentsId);
         assetsWindows.get(current)?.window.destroy();
@@ -971,7 +987,7 @@ async function installMcp(target: McpClientTarget) {
 }
 
 
-function appWindows() { return [...documents.values()].map((document) => document.window).concat([startWindow, settingsWindow, templatesWindow, ...[...assetsWindows.values()].map(({ window }) => window)].filter((window): window is BrowserWindow => !!window)); }
+function appWindows() { return [...documents.values()].map((document) => document.window).concat([...markdownWindows.windows(), startWindow, settingsWindow, templatesWindow, ...[...assetsWindows.values()].map(({ window }) => window)].filter((window): window is BrowserWindow => !!window)); }
 function publishMcpSettings() {
   const value = mcpSettings();
   for (const owner of appWindows()) if (!owner.isDestroyed()) owner.webContents.send(channels.mcpChanged, value);
@@ -1081,7 +1097,20 @@ void app.whenReady().then(async () => {
   if (!app.isPackaged && process.env.IMAGEFLOW_BENCHMARK === '1') {
     Object.defineProperty(globalThis, 'imageflowBenchmarkInputs', { value: () => lastDocument?.projectSession.inputs.metrics });
   }
-  app.on('before-quit', () => { quitting = true; clearInterval(sourceMaintenance); });
+  let flushingTextEditors = false;
+  app.on('before-quit', (event) => {
+    if (markdownWindows.windows().length) {
+      event.preventDefault();
+      if (flushingTextEditors) return;
+      flushingTextEditors = true;
+      void (async () => {
+        for (const document of documents.values()) if (!await markdownWindows.closeFor(document)) return;
+        app.quit();
+      })().catch((error) => report(lastDocument?.window, error)).finally(() => { flushingTextEditors = false; });
+      return;
+    }
+    quitting = true; clearInterval(sourceMaintenance);
+  });
   app.on('will-quit', (event) => {
     if (quitReady) return;
     event.preventDefault();
@@ -1246,6 +1275,18 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.documentAction, (event, action: 'reveal' | 'template' | 'text', id?: string) => fromEditor(event, async (document) => {
     await openDocumentLocation(document, action, id);
   }));
+  ipcMain.handle(channels.showMarkdown, (event, request: unknown) => fromBook(event, async (document) => {
+    if (!request || typeof request !== 'object') throw new Error('Choose a Markdown source.');
+    if ('id' in request && typeof request.id === 'string') await markdownWindows.open(document, { id: request.id });
+    else if ('name' in request && typeof request.name === 'string') await markdownWindows.open(document, { name: request.name });
+    else throw new Error('Choose a Markdown source or a name for new text.');
+  }));
+  ipcMain.handle(channels.markdownAction, async (event, request: MarkdownAction) => {
+    const entry = markdownWindows.owner(event);
+    if (!entry) return { error: 'Request is only available to this Markdown editor.' };
+    try { return { value: await markdownWindows.action(entry, request) }; }
+    catch (error) { return { error: errorMessage(error) }; }
+  });
   ipcMain.handle(channels.sourceAction, (event, request: SourceAction) => fromBook(event, async (document) => {
     const owner = assetsOwner(event) ? assetsWindows.get(document)?.window ?? document.window : document.window;
     if (assetsOwner(event)) request = { ...request, accept: assetsWindows.get(document)?.accept };
