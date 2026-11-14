@@ -192,7 +192,7 @@ try {
   });
   await linkedRow.click({ button: 'right' });
   await waitForPage(linkedWindow, async (id) => !(await window.imageflow.currentProject()).value.photoIndex[id].linked, unusedId);
-  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Show in Finder', 'Copy into Book', '', 'Remove from Book']);
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Place on Current Spread', '', 'Show in Finder', 'Copy into Book', '', 'Remove from Book']);
   await linkedRow.getByRole('img', { name: 'Linked to original file' }).waitFor({ state: 'detached' });
   await stat(unused);
   await linkedWindow.close();
@@ -225,7 +225,7 @@ try {
   });
   await unapprovedRow.click({ button: 'right' });
   await accessWindow.waitForFunction(() => !document.querySelector('[data-source="file:notchosen"]')?.textContent.includes('Locate to approve'));
-  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Show in Finder', 'Locate…', '', 'Remove from Book']);
+  assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Place on Current Spread', '', 'Show in Finder', 'Locate…', 'Copy into Book', '', 'Remove from Book']);
   assert.deepEqual((await current(page)).history, historyBeforeLocate, 'Locate does not add an empty Undo step');
   await accessWindow.close();
   await reload(page);

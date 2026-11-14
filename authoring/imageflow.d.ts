@@ -439,7 +439,7 @@ export type BookContext = {
 
 // Render context
 
-export type Photo = { width: number; height: number; caption?: string; title?: string; credit?: string; altText?: string };
+export type Photo = { width: number; height: number; captured?: string; capturedEstimated?: boolean; caption?: string; title?: string; credit?: string; altText?: string };
 /** Where a Markdown box sits in the chain of boxes that share its text. */
 export type FlowPosition = { part: number; parts: number; title?: string };
 export type Values = Record<string, string | number | boolean>;

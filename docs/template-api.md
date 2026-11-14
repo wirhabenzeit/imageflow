@@ -401,7 +401,7 @@ type RenderContext = {
   document: DocumentParams;
   boxes: Record<BoxId, {
     params: BoxParams;
-    photo?: { caption?: string; title?: string; credit?: string; altText?: string; width: number; height: number } | null;
+    photo?: { captured?: string; capturedEstimated?: boolean; caption?: string; title?: string; credit?: string; altText?: string; width: number; height: number } | null;
     text?: { title?: string; part: number; parts: number } | null;  // flow position for Markdown boxes
   }>;
   elements: Record<ElementId, { params: ElementParams }>;
@@ -521,6 +521,8 @@ Saved data and its editing UI are separate. Parameters declare what is saved: ID
    - The authoring types check entry IDs against the scope's parameters. Loading the template reports unknown or repeated IDs, a parameter a custom editor owns, conditions on unknown parameters, on the control's own value, or on values the parameter can never have.
    - Controls that can hide themselves for good load with a `declaration-control-cycle` warning in the Book check: a control inside a group shown only depending on that control (a group shown while `show` is on that contains `show`), or controls whose conditions depend on each other (A shown only when B is on, B only when A is on). For document parameters, any page marking one of them with `ctx.edit('document.…')` or `ctx.Text` provides a way back and exempts the warning. For layout (spread) parameters, the warning is given per spread: a spread that marks one of them on the page with `ctx.edit` or `ctx.Text` gets none, since that node's popover always shows it, while another spread of the same layout that marks none of them (for example because its values hide the marked node) gets the warning on itself. Marking a box's or element's own parameter does not count: its popover follows the same `controls` and conditions.
 3. **A custom editor** for an element, below.
+
+Photo metadata includes `captured` (an ISO date and time) when available. An explicit camera UTC offset is preserved; dates without an offset retain camera-local time. `capturedEstimated` marks a file-modification-time fallback. Photo sorting and grouping are per-book view preferences and do not change the rendered book.
 
 #### Where editing happens
 

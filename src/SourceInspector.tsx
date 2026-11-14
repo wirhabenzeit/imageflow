@@ -8,6 +8,7 @@ import type { Edit } from './Inspector';
 import { markdownToHtml } from './markdown';
 import { fileName, words } from './source-items';
 import type { SourceRef } from './source-items';
+import { captureFact, photoDate } from './photo-view';
 
 const photoFields = [['title', 'Title'], ['caption', 'Caption'], ['credit', 'Credit'], ['altText', 'Alt text']] as const;
 
@@ -46,6 +47,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     const photo = summary.photoIndex[source.id];
     if (!photo) return <p className="muted">This photo is no longer in the project.</p>;
     const size = summary.photoSizes[source.id];
+    const date = captureFact(photoDate(summary, source.id));
     const ppi = template?.format.output.resolution?.target;
     const print = size && ppi && [size.width, size.height].map((px) => (px / ppi * 2.54).toFixed(1)).join(' × ');
     return <div className="source-inspector">
@@ -60,8 +62,9 @@ export function SourceInspector({ summary, source, template, render, usage, writ
             <img src={renderOrigin + '/render/' + summary.id + '/photo/' + source.id} alt={photo.altText || photo.title || ''} />
           </button>
         : <p className="error-text">The photo file is missing from photos/.</p>}
-      {size && <dl className="si-facts">
-        <dt>Size</dt><dd>{size.width} × {size.height} px · {(size.width * size.height / 1e6).toFixed(1)} MP</dd>
+      {(date || size) && <dl className="si-facts">
+        {date && <><dt className={photoDate(summary, source.id)?.capturedEstimated ? 'muted' : undefined}>{date.label}</dt><dd title={date.title} className={photoDate(summary, source.id)?.capturedEstimated ? 'muted' : undefined}>{date.value}</dd></>}
+        {size && <><dt>Size</dt><dd>{size.width} × {size.height} px · {(size.width * size.height / 1e6).toFixed(1)} MP</dd></>}
         {print && <><dt>Prints up to</dt><dd>{print} cm at {ppi} ppi</dd></>}
       </dl>}
       <details open><summary>Placed on</summary>

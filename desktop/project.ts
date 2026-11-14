@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import * as ReactExports from 'react';
 import { dependencyWarning, isBareImport, missingDependency, readDependencyManifest, vendoredModule } from './dependencies';
@@ -17,7 +17,7 @@ import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave 
 import { sourceEntries, sourcePath, sourceLinked, sourceFolder } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
-import { approveSource } from './source-access';
+import { approveSource, sourceBookKey } from './source-access';
 import { runtimeExports } from '../src/runtime-exports';
 import { templateHash } from './template-library';
 
@@ -192,7 +192,7 @@ export async function bundleTemplate(folder: string) {
 
 type TemplateAssets = Awaited<ReturnType<typeof bundleTemplate>>;
 export type OpenProject = ProjectFiles & {
-  folder: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
+  folder: string; viewKey?: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
   texts: Record<string, string>; files: Record<string, ProjectFile>; problems: string[]; readOnly: boolean;
   sources?: Record<string, SourceStatus>;
   manifests: Record<ManifestName, Buffer>;
@@ -216,7 +216,7 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   const hash = await templateHash(join(folder, 'template')).catch(() => undefined);
   const assets = await bundleTemplate(folder);
   const cache = fallback;
-  return readContent({ folder, assets, cache, readOnly, project, photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
+  return readContent({ folder, viewKey: createHash('sha256').update(await sourceBookKey(folder)).digest('hex'), assets, cache, readOnly, project, photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
 }
 
 async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>, pinSources = false): Promise<OpenProject> {
@@ -237,7 +237,9 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
         if (stored) {
           const { path: _path, linked: _linked, ...metadata } = book.photoIndex[source.id];
           const details = await photoDetails(stored.snapshot, null);
-          photos.set(source.id, { ...metadata, ...details, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
+          // A copied file's mtime is its copy time; retain the original estimate saved at import.
+          const dates = !source.linked && metadata.captured && stored.capturedEstimated ? metadata : stored;
+          photos.set(source.id, { ...metadata, ...details, ...(dates.captured ? { captured: dates.captured, capturedEstimated: dates.capturedEstimated } : {}), observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
             width: stored.width!, height: stored.height!, original: stored.snapshot,
             key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
             cache: renditionCacheFor(book.cache), ...(status.problem ? { problem: status.problem } : {}) });
@@ -325,7 +327,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       const folder = kind === 'photo' ? 'photos' : kind === 'file' ? 'files' : 'texts';
       const registry = kind === 'file' ? project.files : project.texts;
       await prepare(folder);
-      if (kind === 'photo') await photoDetails(file);
+      const photo = kind === 'photo' ? await photoDetails(file) : undefined;
       if (kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
       if (kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
       const previous = kind === 'photo'
@@ -344,7 +346,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       const linked = mode === 'link' && !isInside(book.folder, original);
       if (linked) await approveSource(book.folder, { key: kind + ':' + id, kind, path: original, linked }, request.accept);
       if (!linked) { await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path); }
-      if (kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)) };
+      if (kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)), ...(photo ? { captured: photo.captured, ...(photo.capturedEstimated ? { capturedEstimated: true } : {}) } : {}) };
       else registry[id] = linked ? { path: original, linked: true } : relativePath;
       if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++;
       imported.push(id);
@@ -371,9 +373,10 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
 export function projectSummary(book: OpenProject, id: string): ProjectSummary {
   const base = renderOrigin + '/render/' + id;
   return {
-    id, folder: basename(book.folder), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
+    id, folder: basename(book.folder), viewKey: book.viewKey ?? createHash('sha256').update(book.folder).digest('hex'), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
     photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
+    photoDates: Object.fromEntries([...book.photos].flatMap(([id, photo]) => photo.captured ? [[id, { captured: photo.captured, ...(photo.capturedEstimated ? { capturedEstimated: true } : {}) }]] : [])),
     photoSizes: Object.fromEntries([...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
     texts: book.texts, sources: book.sources, ...(book.templateHash ? { templateHash: book.templateHash } : {}),
   };
@@ -385,8 +388,8 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
     project: book.project,
     mode,
     photos: Object.fromEntries([...book.photos].map(([id, photo]) => {
-      const { width, height, caption, title, credit, altText } = photo;
-      return [id, { width, height, caption, title, credit, altText, src: base + '/photo/' + id }];
+      const { width, height, caption, title, credit, altText, captured, capturedEstimated } = photo;
+      return [id, { width, height, caption, title, credit, altText, captured, capturedEstimated, src: base + '/photo/' + id }];
     })),
     texts: book.texts,
     files: book.files,

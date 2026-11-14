@@ -1,12 +1,18 @@
+import { assetMenu, assetMenuState, assetActions } from './asset-menu';
+import { PhotoViewMenu } from './PhotoViewMenu';
+import type { PhotoViewControl } from './PhotoViewMenu';
+import { photoGroups, photoDate, captureLabel, captureFact } from './photo-view';
+import type { PhotoView } from './photo-view';
+import { useListSelection } from './list-selection';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary } from './desktop';
 import type { SourceUsage } from './editing';
 import { markdownToHtml } from './markdown';
-import { excerpt, fileName, photoMime, sourceList, textMime, words } from './source-items';
+import { excerpt, fileName, photosMime, photoMime, sourceList, textMime, words } from './source-items';
 import type { SourceKind, SourceRef } from './source-items';
 
 function pagesText(list: { pages: string }[] | undefined) {
@@ -14,17 +20,25 @@ function pagesText(list: { pages: string }[] | undefined) {
   return (list.length === 1 && !list[0].pages.includes('–') ? 'Page ' : 'Pages ') + list.map(({ pages }) => pages).join(', ');
 }
 
-export function Sources({ summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, manage }: {
-  summary: ProjectSummary; tab: SourceKind; setTab: (tab: SourceKind) => void;
+export function Sources({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, manage, changed, failure }: {
+  view: PhotoViewControl; summary: ProjectSummary; tab: SourceKind; setTab: (tab: SourceKind) => void;
   selected: Partial<Record<SourceKind, string>>; choose: (source: SourceRef) => void; usage: SourceUsage;
   writable: boolean; busy: boolean; importSources: (command: 'import') => void;
   importPaths: (files: File[]) => void; quickLook: (source: SourceRef) => void;
-  manage: () => void;
+  failure: (message: string) => void; manage: () => void; changed: (summary: ProjectSummary) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
   const [unused, setUnused] = useState(false);
-  const items = useMemo(() => sourceList(summary, tab).filter(({ id }) => !unused || !usage[tab][id]?.length), [summary, tab, unused, usage]);
+  const items = useMemo(() => sourceList(summary, tab, view.value).filter(({ id }) => !unused || !usage[tab][id]?.length), [summary, tab, unused, usage, view.value]);
   const current = selected[tab];
+  const visibleCurrent = items.some(({ id }) => id === current) ? current : undefined;
+  const selection = useListSelection(items.map(({ id }) => id), (id) => items.find((item) => item.id === id)?.title ?? id);
+  useEffect(() => {
+    if (!current) selection.setSelection([]);
+    else if (!selection.selected.includes(current)) selection.setSelection([current]);
+  }, [current, tab]);
+  const groups = tab === 'photo' ? photoGroups(summary, items.map(({ id }) => id), view.value) : [];
+  const headers = new Map(groups.filter((group) => group.label).map((group) => [group.ids[0], group]));
 
   useEffect(() => {
     const node = list.current?.querySelector<HTMLElement>('[data-id="' + CSS.escape(current ?? '') + '"]');
@@ -46,19 +60,36 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
     list.current?.querySelector<HTMLElement>('[data-id="' + CSS.escape(id) + '"]')?.focus();
   }
 
-  function keys(event: KeyboardEvent) {
+  async function context(ids: string[]) {
+    const api = window.imageflow;
+    if (!api || busy || !ids.length) return;
+    const keys = ids.map((id) => (tab === 'photo' ? 'photo:' : 'markdown:') + id);
+    const result = await api.showContextMenu(assetMenu(summary, keys, true), assetMenuState(summary, busy));
+    if (!result) return;
+    if (result.command === 'asset-preview') { quickLook({ kind: tab, id: ids[0] }); return; }
+    const request = result.command === 'asset-jump' ? { action: 'jump' as const, spread: result.value } :
+      result.command in assetActions ? { action: assetActions[result.command as keyof typeof assetActions], keys } : undefined;
+    if (!request) return;
+    const response = await api.sourceAction(request);
+    if ('error' in response) failure(response.error);
+    if ('value' in response && response.value.summary.id !== summary.id) changed(response.value.summary);
+  }
+  function keys(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void context(selection.selected.length ? selection.selected : current ? [current] : []); return; }
     const at = items.findIndex(({ id }) => id === current);
     const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
     if (step && items.length) {
       event.preventDefault();
-      focus(items[at < 0 ? 0 : Math.max(0, Math.min(items.length - 1, at + step))].id);
+      const next = items[at < 0 ? 0 : Math.max(0, Math.min(items.length - 1, at + step))].id;
+      if (event.shiftKey) selection.key(event); else selection.setSelection([next]);
+      focus(next);
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
-      if (items.length) focus(items[event.key === 'Home' ? 0 : items.length - 1].id);
+      if (items.length) { const id = items[event.key === 'Home' ? 0 : items.length - 1].id; selection.setSelection([id]); focus(id); }
     } else if (event.key === ' ') {
       event.preventDefault();
       if (current) quickLook({ kind: tab, id: current });
-    }
+    } else selection.key(event);
   }
 
   const tabs: [SourceKind, string, number][] = [
@@ -77,14 +108,15 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
           onClick={() => setTab(kind)}>{label} <span className="count">{count}</span></button>)}
       </div>
       <span className="spacer" />
-      <ActionMenu className="source-view" label={<>View <Icon name="chevron" /></>}>
+      {tab === 'photo' && <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} />}
+      <ActionMenu className="source-view" label={<>Show <Icon name="chevron" /></>}>
         <button onClick={() => setUnused(false)}>All assets{!unused ? ' ✓' : ''}</button>
         <button onClick={() => setUnused(true)}>Unused only{unused ? ' ✓' : ''}</button>
       </ActionMenu>
       <button type="button" className="source-manage" disabled={!writable || busy} onClick={manage}>Assets…</button>
       <button className="source-import" disabled={!writable || busy} onClick={() => importSources('import')}>Import…</button>
     </div>
-    <div ref={list} className={'source-items source-items-' + tab} role="listbox"
+    <div ref={list} className={'source-items source-items-' + tab + (tab === 'photo' && view.value.group !== 'none' ? ' source-items-grouped' : '')} role="listbox"
       aria-label={tab === 'photo' ? 'Photos' : 'Texts'} onKeyDown={keys}>
       {!items.length && <p className="source-empty muted">{tab === 'photo'
         ? 'No photos yet. Import photos or drop them here.' : 'No Markdown sources yet. Import a .md file or drop it here.'}</p>}
@@ -93,24 +125,36 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
         const sourceState = summary.sources?.[(tab === 'photo' ? 'photo:' : 'markdown:') + id];
         const sourceLabel = sourceState?.state !== 'available' && sourceState?.problem ? (sourceState.cached ? 'Cached · Missing' : 'Unavailable') : sourceState?.linked ? 'Linked' : undefined;
         const common = {
-          'data-id': id, role: 'option', 'aria-selected': current === id,
-          tabIndex: current === id || (!current && i === 0) ? 0 : -1,
+          'data-id': id, role: 'option', 'aria-selected': selection.selected.includes(id),
+          tabIndex: visibleCurrent === id || (!visibleCurrent && i === 0) ? 0 : -1,
           title: title + ' · ' + pagesText(placed) + (sourceLabel ? ' · ' + (sourceState?.problem ?? sourceLabel) : ''),
-          onClick: () => focus(id),
+          onClick: (event: React.MouseEvent) => { selection.choose(id, event); choose({ kind: tab, id }); },
+          onContextMenu: (event: React.MouseEvent<HTMLElement>) => { const ids = selection.context(id, event); choose({ kind: tab, id }); void context(ids); },
           onDoubleClick: () => quickLook({ kind: tab, id }),
           draggable: writable && (tab === 'text' || !!summary.photos[id]),
           onDragStart: (event: DragEvent) => {
+            const selected = selection.selected.includes(id) ? selection.selected : [id];
             event.dataTransfer.setData(tab === 'photo' ? photoMime : textMime, id);
+            if (tab === 'photo' && selected.length > 1) event.dataTransfer.setData(photosMime, JSON.stringify(selected));
             event.dataTransfer.effectAllowed = 'copy';
           },
         };
         if (tab === 'photo') {
-          return <div key={id} className="source-item source-photo" style={{ aspectRatio: summary.photoSizes[id] ? summary.photoSizes[id].width / summary.photoSizes[id].height : 1.4 }} {...common}>
+          const group = headers.get(id);
+          const date = photoDate(summary, id);
+          return <Fragment key={id}>
+            {group && <button className="photo-group-divider" aria-label={'Select ' + group.label} onClick={() => {
+              selection.setSelection(group.ids); choose({ kind: 'photo', id: group.ids[0] });
+            }} draggable={writable} onDragStart={(event) => {
+              selection.setSelection(group.ids); event.dataTransfer.setData(photoMime, group.ids[0]); event.dataTransfer.setData(photosMime, JSON.stringify(group.ids));
+            }}><span>{group.label}<small> · {group.ids.length === group.total ? group.total : group.ids.length + ' of ' + group.total}{unused ? ' unused' : group.ids.length === 1 && group.total === 1 ? ' photo' : ' photos'}</small></span></button>}
+          <div className="source-item source-photo" style={{ aspectRatio: summary.photoSizes[id] ? summary.photoSizes[id].width / summary.photoSizes[id].height : 1.4 }} {...common}>
             {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" draggable={false} /> : <span className="missing">Missing</span>}
+            {view.value.showTime && date?.captured && <small className="photo-capture-time" title={date.capturedEstimated ? 'Estimated from file modification time' : date.captured}>{captureLabel(date.captured)}{date.capturedEstimated ? ' ≈' : ''}</small>}
             <span className="source-title">{title}</span>
             {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
             <small className="badge">{placed?.length ? placed.length + '×' : 'Unused'}</small>
-          </div>;
+          </div></Fragment>;
         }
         const source = summary.texts[id];
         const { heading, body } = source === undefined ? { heading: undefined, body: '' } : excerpt(source);
@@ -127,13 +171,13 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
   </section>;
 }
 
-export function QuickLook({ summary, source, usage, navigate, close, jump }: {
-  summary: ProjectSummary; source: SourceRef; usage: SourceUsage;
+export function QuickLook({ view, summary, source, usage, navigate, close, jump }: {
+  view?: PhotoView; summary: ProjectSummary; source: SourceRef; usage: SourceUsage;
   navigate: (step: number) => void; close: () => void; jump?: (spread: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const frame = useRef<HTMLDivElement>(null);
-  const items = sourceList(summary, source.kind);
+  const items = sourceList(summary, source.kind, view);
   const at = items.findIndex(({ id }) => id === source.id);
   const item = items[at];
   const placed = usage[source.kind][source.id] ?? [];
@@ -155,8 +199,9 @@ export function QuickLook({ summary, source, usage, navigate, close, jump }: {
   const photo = source.kind === 'photo' ? summary.photoIndex[source.id] : undefined;
   const size = summary.photoSizes[source.id];
   const text = summary.texts[source.id];
+  const date = photo && captureFact(photoDate(summary, source.id));
   const details = photo
-    ? [fileName(photo.path), size && size.width + ' × ' + size.height + ' px', photo.caption, photo.credit && '© ' + photo.credit]
+    ? [fileName(photo.path), date && date.label + ' ' + date.value, size && size.width + ' × ' + size.height + ' px', photo.caption, photo.credit && '© ' + photo.credit]
     : [fileName(item.path), text !== undefined && words(text) + ' words'];
 
   return <dialog ref={dialog} className={'quicklook quicklook-' + source.kind} aria-label={'Quick Look · ' + item.title}

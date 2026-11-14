@@ -1,3 +1,4 @@
+import { captureTime } from './capture-time';
 import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, realpath, rename, rm, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
@@ -17,6 +18,7 @@ export async function photoDetails(original: string, maximumBytes: number | null
   if (!metadata.width || !metadata.height || (metadata.pages ?? 1) > 1) throw new Error('Expected a still image.');
   const turned = (metadata.orientation ?? 1) >= 5;
   return {
+    ...captureTime(metadata.exif, Number(info.mtimeMs)),
     width: turned ? metadata.height : metadata.width,
     height: turned ? metadata.width : metadata.height,
     alpha: !!metadata.hasAlpha,

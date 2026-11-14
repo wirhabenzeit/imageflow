@@ -59,6 +59,19 @@ test('proof source warnings and page marking use diagnostic codes rather than un
   assert.equal(isUnavailableSource({ code: 'file-unreadable' }), true);
 });
 
+test('copied photos retain the original estimated capture date after import and reopen', async (t) => {
+  const f = await fixture(t);
+  const date = new Date('2020-04-05T12:34:56Z');
+  await utimes(f.photo, date, date);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'copy' }, [f.photo]);
+  const id = added.imported[0];
+  assert.equal(added.book.photoIndex[id].captured, date.toISOString());
+  assert.equal(added.book.photos.get(id)!.captured, date.toISOString());
+  const reopened = await loadProject(f.folder, f.cache);
+  assert.equal(reopened.photos.get(id)!.captured, date.toISOString());
+  assert.equal(reopened.photos.get(id)!.capturedEstimated, true);
+});
+
 test('atomic external replacements refresh dimensions and revisions without changing IDs, crops or immutable snapshots', async (t) => {
   const f = await fixture(t);
   const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);

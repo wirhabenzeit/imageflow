@@ -1,8 +1,11 @@
+import { orderedPhotos, photoGroups, defaultPhotoView } from './photo-view';
+import type { PhotoView } from './photo-view';
 import { sourcePath } from './source-locations';
 import type { SourceReference } from './source-locations';
 import type { ProjectSummary } from './desktop';
 
 // Source helpers live outside Sources.tsx so React fast refresh can treat that file as components only.
+export const photosMime = 'application/x-imageflow-photos';
 export const photoMime = 'application/x-imageflow-photo';
 export const textMime = 'application/x-imageflow-text';
 // Content a spread keeps outside its layout, dragged from the Inspector: `{ spread, box }` as JSON. The drag also
@@ -23,9 +26,9 @@ export function excerpt(source: string) {
   return { heading, body };
 }
 
-export function sourceList(summary: ProjectSummary, kind: SourceKind) {
+export function sourceList(summary: ProjectSummary, kind: SourceKind, view?: PhotoView) {
   return kind === 'photo'
-    ? Object.entries(summary.photoIndex).map(([id, entry]) => ({ id, title: entry.title || fileName(entry.path), path: entry.path }))
+    ? photoGroups(summary, orderedPhotos(summary, view), view ?? defaultPhotoView).flatMap((group) => group.ids).map((id) => ({ id, title: summary.photoIndex[id].title || fileName(summary.photoIndex[id].path), path: summary.photoIndex[id].path }))
     : Object.entries(summary.project.texts).map(([id, path]) => ({ id, title: fileName(path), path: sourcePath(path) }));
 }
 

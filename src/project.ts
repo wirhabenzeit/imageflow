@@ -48,6 +48,8 @@ export const projectSchema = z.object({
 export const photoIndexSchema = z.record(identifier, z.object({
   path: z.string(),
   linked: z.boolean().optional(),
+  captured: z.string().optional(),
+  capturedEstimated: z.boolean().optional(),
   caption: z.string().optional(),
   title: z.string().optional(),
   credit: z.string().optional(),

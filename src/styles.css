@@ -857,3 +857,32 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .project-identity .document-title { font-weight: 400; }
 .studio .document-proxy { border: 0; background: transparent; box-shadow: none; padding: 0; min-width: 16px; }
 .studio .document-proxy:hover { border: 0; background: transparent; }
+.source-items-grouped { padding-top: 32px; }
+.studio .photo-group-divider { position: sticky; left: 0; z-index: 2; flex: 0 0 12px; width: 12px; min-width: 12px; align-self: stretch;
+  padding: 0; border: 0; border-left: 1px solid var(--edge); border-radius: 0; background: transparent; overflow: visible; text-align: left; }
+.photo-group-divider > span { position: absolute; top: -25px; left: 3px; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+  padding: 3px 5px; background: var(--sources-surface); font-size: 11px; }
+.photo-group-divider small { color: var(--muted); font-weight: 400; }
+.photo-capture-time { position: absolute; bottom: 3px; right: 3px; padding: 2px 5px; border-radius: 3px; background: #000b; color: white; font-size: 10px; }
+.studio .asset-group-heading { display: block; width: 100%; text-align: left; min-height: 22px; padding: 3px 8px; border: 0; border-radius: 0; font-size: 11px;
+  position: sticky; top: 0; background: var(--panel-surface); z-index: 1; }
+.time-gap-dialog { border: 1px solid var(--edge); border-radius: 10px; padding: 22px; background: var(--panel-surface); color: var(--text); }
+.time-gap-dialog input { width: 84px; }
+.time-gap-dialog form > div { margin-top: 20px; display: flex; justify-content: flex-end; gap: 8px; }
+.edit-popover-compact { display: flex; align-items: center; width: max-content; min-width: 0; max-width: calc(100% - 24px); padding: 7px 9px;
+  left: 12px; top: 12px; bottom: auto; transform: none; gap: 8px; overflow: visible; }
+.edit-popover-compact > fieldset.ep-compact-row { display: flex; flex-direction: row; align-items: center; gap: 10px; min-width: 0; margin: 0; padding: 0; }
+.edit-popover-compact .ep-field { margin: 0; min-width: 0; }
+.compact-field .pc-row { display: flex; align-items: center; gap: 3px; }
+.compact-field .pc-row input[type="range"] { width: 90px; min-width: 60px; flex: 0 1 90px; }
+.compact-field .pc-number { width: 46px; min-width: 40px; }
+.text-source-menu .action-menu-trigger { display: flex; align-items: center; gap: 5px; max-width: 230px; white-space: nowrap; }
+.text-source-menu .action-menu-trigger > span { overflow: hidden; text-overflow: ellipsis; }
+.text-source-menu small { color: var(--muted); }
+.compact-fields { display: flex; align-items: center; gap: 8px; }
+.compact-fields .field { margin: 0; }
+.compact-overflow { position: relative; }
+.compact-overflow > summary { list-style: none; cursor: pointer; padding: 3px 6px; }
+.compact-overflow > div { position: absolute; right: 0; bottom: calc(100% + 12px); background: var(--popup-surface); border: 1px solid var(--edge);
+  border-radius: 9px; padding: 12px; width: 260px; max-height: 60vh; overflow: auto; box-shadow: 0 8px 28px #0003; z-index: 15; }
+.studio .spread-thumb[aria-pressed="true"] { background: var(--selection-surface); outline: 1px solid var(--accent); outline-offset: -1px; }
