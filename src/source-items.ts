@@ -22,7 +22,7 @@ export function excerpt(source: string) {
   const lines = source.split('\n').map((line) => line.trim()).filter(Boolean);
   const heading = lines.find((line) => /^#{1,6}\s/.test(line))?.replace(/^#+\s*/, '');
   const body = lines.filter((line) => !/^#{1,6}\s/.test(line)).join(' ')
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`>#]|^[-+]\s/g, '').slice(0, 220);
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`>#]|^[-+]\s/g, '').slice(0, 4096);
   return { heading, body };
 }
 

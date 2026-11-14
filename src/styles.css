@@ -178,8 +178,11 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .source-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .badge { position: absolute; right: 4px; top: 4px; display: inline-flex; align-items: center; justify-content: center; min-height: 16px; background: var(--control-surface); color: var(--accent); padding: 0 4px; border-radius: 3px; font-size: 11px; font-weight: 500; }
 .source-text { width: 220px; grid-template-rows: auto minmax(0, 1fr) auto; gap: 3px; padding: 7px 9px; font-size: 11px; }
+.source-items-text { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; align-items: stretch; }
+.source-items-text .source-text { height: 100%; }
 .source-text .source-title { font-size: 12px; }
-.source-excerpt { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; color: var(--muted); font-family: Georgia, serif; font-size: 11.5px; line-height: 1.35; }
+.source-excerpt { overflow: hidden; overflow-wrap: anywhere; color: var(--muted); font-family: Georgia, serif; font-size: 11.5px; line-height: 1.35;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 12px), transparent); }
 .source-meta { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .missing { display: grid; place-items: center; color: var(--error-text); font-size: 11px; }
 
