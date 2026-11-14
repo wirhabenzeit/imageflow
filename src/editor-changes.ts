@@ -25,6 +25,8 @@ function expected(param: Parameter) {
     case 'color': return 'a colour such as "#243b30"';
     case 'date': return 'an ISO date such as "2027-03-01"' + (param.min ? ', from ' + param.min : '') + (param.max ? ', until ' + param.max : '');
     case 'file': return 'a file ID, or "" for none';
+    case 'list': return 'an array of items, each an object with a unique id and the fields ' + Object.keys(param.item).join(', ') +
+      (param.min !== undefined || param.max !== undefined ? ', ' + (param.min ?? 0) + (param.max !== undefined ? ' to ' + param.max : ' or more') + ' items' : '');
   }
 }
 

@@ -363,3 +363,35 @@ defineTemplate({ id: 'inline-text', version: '1', contract: 1, format,
       {/* @ts-expect-error 'inline' or 'dialog', as for editors */}
       <ctx.Text parameter="heading" presentation="popover" />
     </Spread> }) }) });
+
+// List parameters (#115): `render` reads an array of items with their `id` and every field typed.
+const tracks = p.list({ label: 'Tracks', max: 12, item: {
+  track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
+  colour: p.color({ label: 'Colour', default: '#c0392b' }),
+  width: p.number({ label: 'Width', default: 1 }),
+}, default: [{ colour: '#000000' }] });
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
+  map: spread({
+    label: 'Map',
+    elements: { map: { label: 'Map', parameters: { tracks }, controls: ['tracks'] } },
+    render: (ctx) => <Spread>{ctx.elements.map.params.tracks.map((item) => <i key={item.id}>{item.track.length + item.width}{item.colour}</i>)}</Spread>,
+  }),
+}) });
+defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread }) => ({
+  map: spread({
+    label: 'Map',
+    elements: { map: { label: 'Map', parameters: { tracks } } },
+    // @ts-expect-error
+    render: (ctx) => <Spread>{ctx.elements.map.params.tracks[0].label}</Spread>,
+  }),
+}) });
+// Item fields are checked like parameters, and default items only name declared fields.
+// @ts-expect-error
+p.list({ label: 'L', item: { name: p.string({ label: 'Name', default: '', mutliline: true }) } });
+// @ts-expect-error
+p.list({ label: 'L', item: { name: p.string({ label: 'Name', default: '' }) }, default: [{ title: 'x' }] });
+// An editor can show one field of one item.
+function TrackEditor({ values, Control }: ElementEditorProps<{ tracks: typeof tracks }, 'tracks'>) {
+  return <>{values.tracks.map((item) => <Control key={item.id} parameter="tracks" item={item.id} field="track" />)}</>;
+}
+void TrackEditor;

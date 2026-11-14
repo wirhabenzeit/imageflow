@@ -146,18 +146,39 @@ export type DateParameter = Common & { type: 'date'; default: string; min?: stri
  * read the content with `file(id)`. `accept` lists lowercase extensions such as `'.gpx'`.
  */
 export type FileParameter = Common & { type: 'file'; default: ''; accept: readonly string[] };
-export type Parameter = BooleanParameter | StringParameter | IntegerParameter | NumberParameter | EnumParameter | ColorParameter | DateParameter |
+/** A parameter that can be a field of a list item. */
+export type ScalarParameter = BooleanParameter | StringParameter | IntegerParameter | NumberParameter | EnumParameter | ColorParameter | DateParameter |
   FileParameter;
+/** The value of a list item in a list's `default`. Missing fields take their defaults; a missing `id` is given one. */
+export type ListItemInput = { id?: string } & Record<string, string | number | boolean>;
+/**
+ * A list of flat items, such as a map's GPX tracks, each with the fields declared in `item`. `render` reads an array
+ * of items, each with its stable `id` and every field resolved. The user adds, removes, duplicates and reorders items;
+ * `min` and `max` bound how many there are. See *List parameters* in docs/template-api.md.
+ *
+ *     tracks: p.list({ label: 'Tracks', item: { track: p.file({ label: 'GPX track', accept: ['.gpx'] }),
+ *       colour: p.color({ label: 'Colour', default: '#c0392b' }) }, max: 12 })
+ */
+export type ListParameter = Common & { type: 'list'; item: Record<string, ScalarParameter>; min?: number; max?: number;
+  default: readonly ({ id: string } & Record<string, string | number | boolean>)[] };
+export type Parameter = ScalarParameter | ListParameter;
 export type Parameters = Record<string, Parameter>;
 
-export type ParameterValue<P> =
+type ScalarValue<P> =
   P extends { type: 'boolean' } ? boolean :
   P extends { type: 'integer' | 'number' } ? number :
   P extends { type: 'enum'; options: readonly (infer O)[] } ? O :
   string;
+/** One item of a list as `render` and editors read it: its stable `id` and the value of every field. */
+export type ListItemValue<I> = { id: string } & { [K in keyof I]: ScalarValue<I[K]> };
+export type ParameterValue<P> =
+  P extends { type: 'list'; item: infer I } ? ListItemValue<I>[] :
+  ScalarValue<P>;
 export type ParameterValues<P> = { [K in keyof P]: ParameterValue<P[K]> };
 
 type Options<P extends Parameter> = Omit<P, 'type'>;
+/** Rejects fields in a list's default items that its `item` does not declare. */
+type DefaultItemsChecked<D, I> = { [N in keyof D]: { [F in Exclude<keyof D[N], 'id' | keyof I>]: never } };
 /** Rejects option names the parameter type does not have, such as `mutliline`, which ImageFlow would ignore. */
 type Known<O, Allowed> = O & { [K in Exclude<keyof O, keyof Allowed>]: never };
 type EnumKeys<C> = `${Extract<keyof C, string | number>}`;
@@ -174,6 +195,11 @@ export const p: {
   color<const O extends Options<ColorParameter>>(options: Known<O, Options<ColorParameter>>): O & { type: 'color' };
   date<const O extends Options<DateParameter>>(options: Known<O, Options<DateParameter>>): O & { type: 'date' };
   file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: Known<O, Omit<FileParameter, 'type' | 'default'>>): O & { type: 'file'; default: '' };
+  /** A list of flat items. Starts empty unless `default` lists items; item fields are the other parameter types. */
+  list<const O extends Common & { item: Record<string, ScalarParameter>; min?: number; max?: number; default?: readonly ListItemInput[] }>(
+    options: Known<O, Common & { item: unknown; min?: number; max?: number; default?: unknown }> & { item: ParametersChecked<O['item']>;
+      default?: DefaultItemsChecked<O['default'], O['item']> }):
+    Omit<O, 'default'> & { type: 'list'; default: ListItemValue<O['item']>[] };
 };
 
 // Editing UI
@@ -253,8 +279,8 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
    * `<Control parameter="track" />`. `scope="spread"` names one of the layout parameters the editor declares in
    * `spread`: `<Control parameter="heading" scope="spread" />`.
    */
-  Control: EditorFunction<K, { parameter: K; label?: string; scope?: 'element' }, ImageFlowElement>
-    & EditorFunction<SK, { parameter: SK; label?: string; scope: 'spread' }, ImageFlowElement>;
+  Control: EditorFunction<K, { parameter: K; label?: string; scope?: 'element' } & ItemControl, ImageFlowElement>
+    & EditorFunction<SK, { parameter: SK; label?: string; scope: 'spread' } & ItemControl, ImageFlowElement>;
   /**
    * Lets the user import a file into the project, offering these extensions, and resolves to its file ID (or
    * undefined when they cancel). Assign it with `set` to save the assignment immediately; the
@@ -266,6 +292,11 @@ export type ElementEditorProps<P extends Parameters = Parameters, K extends keyo
  * Typed props are checked strictly against the declaration, so an editor typed for `'zoon'` cannot be the editor of
  * an element that owns `'zoom'`. Untyped props (`K` is `string`) stay compatible with every declaration.
  */
+/**
+ * For a list parameter, `item` and `field` name one field of one item, by the item's `id`, instead of the whole list:
+ * `<Control parameter="tracks" item={track.id} field="track" />` offers that track's file chooser and import.
+ */
+type ItemControl = { item?: string; field?: string };
 type EditorChanges<P extends Parameters, K extends keyof P & string> = [K] extends [never] ? Record<string, never> : Partial<Pick<ParameterValues<P>, K>>;
 type EditorFunction<K extends string, A, R> = string extends K ? { bivariant(argument: A): R }['bivariant'] : (argument: A) => R;
 type ParametersOf<T> = T extends { parameters?: infer P } ? P extends Parameters ? P : {} : {};
@@ -334,7 +365,7 @@ export type DocumentEditorProps<D extends Parameters = Parameters, K extends key
    */
   waitUntil(until: Promise<unknown>): void;
   /** ImageFlow's own control for one of this editor's parameters, bound to the draft. */
-  Control: EditorFunction<K, { parameter: K; label?: string }, ImageFlowElement>;
+  Control: EditorFunction<K, { parameter: K; label?: string } & ItemControl, ImageFlowElement>;
   importFile(accept: readonly string[]): Promise<string | undefined>;
 };
 /**
@@ -580,7 +611,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
-  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text';
+  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'list-parameters';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 

@@ -3,8 +3,9 @@ import type { KeyboardEvent, ReactNode } from 'react';
 import { controlLayout } from './controls';
 import type { ControlItem, ControlNode } from './controls';
 import type { Values } from './project';
-import type { Parameter, Parameters } from './parameters';
-import { isParameterValue } from './parameters';
+import type { ListItem, ListParameter, Parameter, Parameters, ScalarParameter } from './parameters';
+import { isParameterValue, newItemId, resolveParams, resolveValue, sameValue } from './parameters';
+import { Icon } from './Icon';
 import { sourcePath } from './source-locations';
 import type { SourceReference, ImportMode } from './source-locations';
 import { fileName } from './source-items';
@@ -16,9 +17,117 @@ export const ProjectFilesContext = createContext<{
   files: Record<string, SourceReference>; importFile?: (accept: string[], mode?: ImportMode) => Promise<string | undefined>;
 }>({ files: {} });
 
+// Lists are drawn in full (rows with their fields) where there is room, and as a "Tracks (3)" button opening the same
+// list in a popover where there is not, such as the inline editor's one-line toolbar.
+export const CompactListsContext = createContext(false);
+
+// One line naming an item: its file's name, its first text, its colour as a swatch, and its other short values.
+function ItemSummary({ param, item, index }: { param: ListParameter; item: ListItem; index: number }) {
+  const { files } = useContext(ProjectFilesContext);
+  const parts: ReactNode[] = [];
+  let swatch: string | undefined;
+  for (const [key, field] of Object.entries(param.item)) {
+    const value = item[key];
+    if (field.type === 'color') swatch ??= String(value);
+    else if (field.type === 'file') parts.push(value ? Object.hasOwn(files, String(value)) ? fileName(files[String(value)]) : 'Missing file' : 'No file');
+    else if (field.type === 'enum') parts.push(field.labels?.[String(value)] ?? String(value));
+    else if (field.type === 'string' && value) parts.push(String(value));
+    else if ((field.type === 'number' || field.type === 'integer') && parts.length < 2) parts.push(String(value) + (field.unit ? ' ' + field.unit : ''));
+  }
+  const text = parts.slice(0, 2).join(' · ') || param.label + ' ' + (index + 1);
+  return <>
+    {swatch && <span className="pc-list-swatch" style={{ background: swatch }} aria-hidden="true" />}
+    <span className="pc-list-name" title={text}>{text}</span>
+  </>;
+}
+
+// A list parameter's control: its items as rows, collapsed to a summary and expanded to their fields on click, with
+// add, duplicate, remove and reordering (drag, or the arrows). Every change applies the whole list at once, so it is
+// one Undo step. New items get a stable ID, which reordering, Undo and drafts use instead of the position.
+function ListControl({ param, value, apply, autoFocus }: { param: ListParameter; value: ListItem[]; apply: (value: ListItem[]) => void; autoFocus: boolean }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const atMax = param.max !== undefined && value.length >= param.max;
+  const atMin = value.length <= (param.min ?? 0);
+  const blank = () => Object.fromEntries(Object.entries(param.item).map(([key, field]) => [key, field.default]));
+  const move = (id: string, to: number) => {
+    const from = value.findIndex((item) => item.id === id);
+    if (from < 0 || to < 0 || to >= value.length || from === to) return;
+    const next = [...value];
+    next.splice(to, 0, ...next.splice(from, 1));
+    apply(next);
+  };
+  const add = () => {
+    const id = newItemId(value);
+    apply([...value, { id, ...blank() }]);
+    setOpen(id);
+  };
+  return <div className="pc-list">
+    {value.length > 0 && <ol className="pc-list-items" aria-label={param.label}>
+      {value.map((item, index) => {
+        const expanded = open === item.id;
+        return <li key={item.id} className={'pc-list-item' + (dragging === item.id ? ' dragging' : '')} data-item={item.id}
+          draggable={!expanded} onDragStart={(event) => { setDragging(item.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', item.id); }}
+          onDragEnd={() => setDragging(null)} onDragOver={(event) => { if (dragging) event.preventDefault(); }}
+          onDrop={(event) => { event.preventDefault(); if (dragging) move(dragging, index); setDragging(null); }}>
+          <div className="pc-list-row">
+            <button type="button" className="pc-list-summary" aria-expanded={expanded} data-autofocus={(autoFocus && index === 0) || undefined}
+              onClick={() => setOpen(expanded ? null : item.id)}>
+              <Icon name={expanded ? 'chevron' : 'next'} size={12} /><ItemSummary param={param} item={item} index={index} />
+            </button>
+            <span className="pc-list-actions">
+              <button type="button" aria-label={'Move ' + param.label + ' ' + (index + 1) + ' up'} title="Move up" disabled={index === 0}
+                onClick={() => move(item.id, index - 1)}><Icon name="up" size={12} /></button>
+              <button type="button" aria-label={'Move ' + param.label + ' ' + (index + 1) + ' down'} title="Move down" disabled={index === value.length - 1}
+                onClick={() => move(item.id, index + 1)}><Icon name="down" size={12} /></button>
+              <button type="button" aria-label={'Duplicate ' + param.label + ' ' + (index + 1)} title="Duplicate" disabled={atMax}
+                onClick={() => { const next = [...value]; next.splice(index + 1, 0, { ...item, id: newItemId(value) }); apply(next); }}><Icon name="duplicate" size={12} /></button>
+              <button type="button" aria-label={'Remove ' + param.label + ' ' + (index + 1)} title="Remove" disabled={atMin}
+                onClick={() => apply(value.filter(({ id }) => id !== item.id))}><Icon name="delete" size={12} /></button>
+            </span>
+          </div>
+          {expanded && <div className="pc-list-fields">
+            {Object.entries(param.item).map(([key, field]) => <Field key={key} param={field} value={item[key]}
+              change={(next) => apply(value.map((other) => other.id === item.id ? { ...other, [key]: next as ListItem[string] } : other))} />)}
+          </div>}
+        </li>;
+      })}
+    </ol>}
+    <button type="button" className="pc-list-add" disabled={atMax} onClick={add}><Icon name="add" size={12} /> Add</button>
+    {param.max !== undefined && atMax && <small className="field-description">At most {param.max}.</small>}
+  </div>;
+}
+
+// The list in a popover from a "Tracks (3)" button, for one-line toolbars. Escape or a click outside closes it.
+function CompactList(props: { param: ListParameter; value: ListItem[]; apply: (value: ListItem[]) => void; autoFocus: boolean }) {
+  const [open, setOpen] = useState(false);
+  const holder = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => { if (!holder.current?.contains(event.target as Node)) setOpen(false); };
+    // Escape closes the list first, not the editor around it, also when focus left the list (a button that was
+    // clicked became disabled, such as moving the first item up).
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setOpen(false);
+      holder.current?.querySelector<HTMLElement>('.pc-list-toggle')?.focus();
+    };
+    document.addEventListener('pointerdown', outside, true);
+    window.addEventListener('keydown', escape, true);
+    return () => { document.removeEventListener('pointerdown', outside, true); window.removeEventListener('keydown', escape, true); };
+  }, [open]);
+  return <div ref={holder} className="pc-list-compact">
+    <button type="button" className="pc-list-toggle" aria-haspopup="dialog" aria-expanded={open} data-autofocus={props.autoFocus || undefined}
+      onClick={() => setOpen(!open)}>{props.param.label} ({props.value.length})<Icon name="chevron" size={12} /></button>
+    {open && <div className="pc-list-popover" role="dialog" aria-label={props.param.label}><ListControl {...props} autoFocus={false} /></div>}
+  </div>;
+}
+
 // Chooses among the project's files with an accepted extension, adds a new one, or clears the assignment.
 function FileControl({ param, value, apply, autoFocus }: {
-  param: Extract<Parameter, { type: 'file' }>; value: string; apply: (value: Value) => void; autoFocus: boolean;
+  param: Extract<ScalarParameter, { type: 'file' }>; value: string; apply: (value: Value) => void; autoFocus: boolean;
 }) {
   const { files, importFile } = useContext(ProjectFilesContext);
   const accepted = Object.entries(files).filter(([, path]) => param.accept.some((ext) => sourcePath(path).toLowerCase().endsWith(ext)));
@@ -49,8 +158,14 @@ export function ParamControl({ param, value, draft, setDraft, apply, autoFocus =
   param: Parameter; value: Value; draft: Value | undefined; setDraft: (value: Value) => void; apply: (value: Value) => void;
   autoFocus?: boolean; commitOnBlur?: boolean;
 }) {
+  const compact = useContext(CompactListsContext);
   const shown = draft ?? value;
   const focusMark = autoFocus || undefined;
+  if (param.type === 'list') {
+    const items = resolveValue(param, shown) as ListItem[];
+    return compact ? <CompactList param={param} value={items} apply={apply} autoFocus={autoFocus} />
+      : <ListControl param={param} value={items} apply={apply} autoFocus={autoFocus} />;
+  }
   const commit = () => { if (draft !== undefined) apply(draft); };
   const blur = commitOnBlur ? commit : undefined;
   const enter = commitOnBlur ? (event: KeyboardEvent<HTMLElement>) => {
@@ -123,12 +238,13 @@ export function Field({ param, value, change, description }: { param: Parameter;
   const [draft, setDraft] = useState<Value>();
   const [invalid, setInvalid] = useState(false);
   const typing = useRef(false);
-  // A new saved value replaces what the field shows, unless the user is typing in it.
+  // A new saved value replaces what the field shows, unless the user is typing in it. Lists compare by content, as
+  // each render resolves them to a new array.
   useEffect(() => {
     if (typing.current) return;
     setDraft(undefined);
     setInvalid(false);
-  }, [value]);
+  }, [Array.isArray(value) ? JSON.stringify(value) : value]);
   function type(next: Value) {
     typing.current = true;
     setDraft(next);
@@ -139,10 +255,12 @@ export function Field({ param, value, change, description }: { param: Parameter;
     setDraft(next);
     const valid = isParameterValue(param, next);
     setInvalid(!valid);
-    if (valid && next !== value) change(next);
+    if (valid && !sameValue(next, value)) change(next);
   }
-  return <div className="field">
-    {param.type !== 'boolean' && <span className="field-name">{param.label}</span>}
+  const compact = useContext(CompactListsContext);
+  const compactList = param.type === 'list' && compact;
+  return <div className={'field' + (param.type === 'list' ? ' field-list' : '')}>
+    {param.type !== 'boolean' && !compactList && <span className="field-name">{param.label}</span>}
     <ParamControl param={param} value={value} draft={draft} setDraft={type} apply={apply} commitOnBlur />
     {description && <small className="field-description">{description}</small>}
     {invalid && <small className="error-text">Enter a value within the field’s limits.</small>}
@@ -162,16 +280,12 @@ export function ControlList({ nodes, field }: { nodes: ControlNode[]; field: (no
     </fieldset>);
 }
 
-// The resolved value of every parameter: the saved one when it is allowed, else the default.
-const resolved = (schema: Parameters, values: Values) => Object.fromEntries(Object.entries(schema).map(([id, param]) =>
-  [id, isParameterValue(param, values[id]) ? values[id] : param.default]));
-
 // Generated controls for a scope, arranged by its `controls` (all parameters when absent). `exclude` leaves out
 // parameters edited elsewhere, such as by a custom editor or on the page.
 export function Fields({ schema, values, update, controls, exclude }: {
   schema: Parameters; values: Values; update: (id: string, value: Value) => void; controls?: ControlItem[]; exclude?: readonly string[];
 }) {
-  const current = resolved(schema, values);
+  const current = resolveParams(schema, values);
   return <ControlList nodes={controlLayout(schema, controls, current, exclude)} field={(node, param) =>
     <Field key={node.key} param={param} value={current[node.key]} description={node.description} change={(next) => update(node.key, next)} />} />;
 }

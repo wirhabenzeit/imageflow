@@ -6,7 +6,10 @@ import type { Dimensions } from './spread';
 export const identifier = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/, 'Use letters, digits, underscores, or hyphens.')
   .refine((id) => !Object.hasOwn(Object.prototype, id), 'This identifier is reserved.');
 const label = z.string().trim().min(1);
-export const values = z.record(identifier, z.union([z.string(), z.boolean(), z.number()])).default({});
+const scalar = z.union([z.string(), z.boolean(), z.number()]);
+// A parameter's saved value: a scalar, or a list parameter's items. Items are kept as saved, even when the template
+// no longer allows them (parameters.ts reports and resolves them).
+export const values = z.record(identifier, z.union([scalar, z.array(z.record(z.string(), scalar))])).default({});
 const unit = z.number().min(0).max(1);
 const crop = z.object({ centerX: unit, centerY: unit, zoom: z.number().min(1).max(20) });
 // A box's content is shared by every layout that declares a box with its ID; layouts without that box keep it on the

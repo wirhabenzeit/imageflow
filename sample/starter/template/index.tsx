@@ -1,7 +1,7 @@
 import { asset, box, defineTemplate, Element, file, geometry, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { ElementEditorProps, ImageFlowNode, LayoutPickerProps, Photo, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
-import { MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
+import { mapControls, MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
 import type { MapEditorProps } from './map';
 
 // Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page.
@@ -384,14 +384,15 @@ export default defineTemplate({
       elements: { map: {
         label: 'Map',
         parameters: mapParameters,
+        controls: mapControls,
         // Framed on the page, in the map's own place; the panel remains the fallback.
         editor: { label: 'Edit map', parameters: [...mapEditorParameters], component: MapLayoutEditor, presentation: 'inline' },
       } },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
-        const { trackColor, trackWidth, ...values } = ctx.elements.map.params;
+        const { trackWidth, ...values } = ctx.elements.map.params;
         return <Paper context={ctx} bled={{ left: true, right: true }}>
-          <MapView values={values} trackColor={trackColor} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
+          <MapView values={values} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
           {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(mapTitleRect(ctx.format))}>{ctx.params.mapTitle}</h2>}
         </Paper>;
       },

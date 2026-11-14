@@ -107,7 +107,9 @@ export async function relinkFolder(book: OpenProject, directory: string, keys?: 
 export function fileIsAssigned(book: OpenProject, id: string) {
   const values = [book.project.params, ...book.project.spreads.flatMap((spread) => [spread.params,
     ...Object.values(spread.boxes).map(({ params }) => params), ...Object.values(spread.elements).map(({ params }) => params)])];
-  return values.some((params) => Object.values(params).some((value) => value === id));
+  // List items count too: a GPX track in a map's list of tracks is assigned like a single file parameter.
+  return values.some((params) => Object.values(params).some((value) => value === id ||
+    (Array.isArray(value) && value.some((item) => Object.entries(item).some(([key, field]) => key !== 'id' && field === id)))));
 }
 export async function removeSources(book: OpenProject, keys: readonly string[]) {
   const sources = sourceEntries(book).filter(({ key }) => keys.includes(key));

@@ -34,6 +34,8 @@ export const contract1Capabilities = [
   'inline-editors',
   // Plain string ctx.Text parameters edited in the template's typography.
   'inline-text',
+  // `p.list`: lists of flat items with stable IDs, a generated list control and item-level project commands (#115).
+  'list-parameters',
 ] as const;
 // All supported features, including the baseline names accepted in older templates' `requires` lists. Until the
 // first public release the baseline stays open and new features join it (ADR 0008); after it, additive extensions

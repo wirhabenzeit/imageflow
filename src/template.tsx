@@ -579,6 +579,7 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
   const data = useSpread();
   const { param, value } = parameterAt(data, parameter);
   if (!param) throw new Error('Text shows parameter ' + parameter + ', which this layout does not declare.');
+  if (param.type === 'list') throw new Error('Text shows parameter ' + parameter + ', which is a list. Show its items with their own markup.');
   if (!textTags.has(as)) throw new Error('Text cannot render as ' + as + '. Use one of ' + [...textTags].join(', ') + '.');
   if (presentation !== undefined && presentation !== 'inline' && presentation !== 'dialog') throw new Error("Text presentation must be 'inline' or 'dialog'.");
   const inline = presentation === 'inline';

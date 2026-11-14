@@ -7,7 +7,7 @@ import { readEdit, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import type { Edit } from './Inspector';
 import { Field, ParamControl } from './Fields';
-import { isParameterValue, resolveParams } from './parameters';
+import { isParameterValue, resolveParams, sameValue } from './parameters';
 import type { Project, SpreadState, Values } from './project';
 import { controlLayout } from './controls';
 import type { ControlNode } from './controls';
@@ -85,7 +85,7 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
 
   function apply(changes: Record<string, Value>) {
     const valid = targets.filter(({ path, param }) => path in changes && isParameterValue(param, changes[path]) &&
-      changes[path] !== readEdit(project, spread, targets.find((target) => target.path === path)!));
+      !sameValue(changes[path], readEdit(project, spread, targets.find((target) => target.path === path)!)));
     if (!valid.length || readOnly || blocked) return;
     edit(({ project: files }) => { for (const target of valid) writeEdit(files, spread.id, target, changes[target.path]); },
       valid.map(({ param }) => param.label).join(', ') + ' updated');
@@ -96,7 +96,7 @@ export function EditPopover({ project, spread, template, edits, host, readOnly, 
     setDrafts((previous) => {
       const pending = Object.entries(previous).filter(([path, value]) => {
         const target = targets.find((item) => item.path === path);
-        return target && readEdit(project, spread, target) !== value;
+        return target && !sameValue(readEdit(project, spread, target), value);
       });
       return pending.length === Object.keys(previous).length ? previous : Object.fromEntries(pending);
     });

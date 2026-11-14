@@ -6,8 +6,8 @@ import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import { describeLayoutChange, discardContent, layoutChoices, planLayoutChange, swapContent, switchLayout } from './layouts';
 import { hasFacingPages, spanFits, spanRequiredAt } from './format';
-import { isParameterValue } from './parameters';
-import type { Parameter, Parameters } from './parameters';
+import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
+import type { ListItem, Parameter, Parameters } from './parameters';
 import { identifier } from './project';
 import type { ProjectFiles, SpreadState, Values } from './project';
 import { maxZoom, setPlacement } from './spread';
@@ -16,8 +16,11 @@ import { insertionProblem, spreadOrder } from './spread-order';
 const id = identifier.refine((value) => value.length <= 256, 'Identifiers must be at most 256 characters.');
 export const spreadReference = z.union([id, z.string().startsWith('$').refine((value) => id.safeParse(value.slice(1)).success,
   'Use a spread ID or $ followed by a batch reference.')]);
-const value = z.union([z.string(), z.boolean(), z.number()]);
+const scalar = z.union([z.string(), z.boolean(), z.number()]);
+// A list parameter's value is its whole array of items, each with its `id`.
+const value = z.union([scalar, z.array(z.record(z.string(), scalar))]);
 const parameterValues = z.record(id, value);
+const itemValues = z.record(id, scalar);
 const unit = z.number().min(0).max(1);
 const placement = z.strictObject({ centerX: unit, centerY: unit, zoom: z.number().min(1).max(maxZoom) });
 const initialBox = z.strictObject({
@@ -36,6 +39,7 @@ function validParameterTarget(target: z.infer<z.ZodObject<typeof parameterTarget
     : target.spread !== undefined && target.owner !== undefined;
 }
 
+const targetMessage = 'Document parameters omit spread/owner, spread parameters require spread, and box/element parameters require spread and owner.';
 export const projectOperationSchema = z.discriminatedUnion('op', [
   z.strictObject({ op: z.literal('set_title'), title: z.string().trim().min(1) }),
   z.strictObject({ op: z.literal('select_format'), format: id }),
@@ -43,6 +47,13 @@ export const projectOperationSchema = z.discriminatedUnion('op', [
     'Document parameters omit spread/owner, spread parameters require spread, and box/element parameters require spread and owner.'),
   z.strictObject({ op: z.literal('reset_parameter'), ...parameterTarget }).refine(validParameterTarget,
     'Document parameters omit spread/owner, spread parameters require spread, and box/element parameters require spread and owner.'),
+  // Item operations on a list parameter, addressed by the item's stable id, so an agent does not resend the list.
+  z.strictObject({ op: z.literal('insert_list_item'), ...parameterTarget, item: itemValues.describe('Field values; missing fields take their defaults. An id is generated unless given.'),
+    after: id.nullable().optional().describe('Item id to insert after, null for the start; omitted appends.') }).refine(validParameterTarget, targetMessage),
+  z.strictObject({ op: z.literal('update_list_item'), ...parameterTarget, id, values: itemValues }).refine(validParameterTarget, targetMessage),
+  z.strictObject({ op: z.literal('remove_list_item'), ...parameterTarget, id }).refine(validParameterTarget, targetMessage),
+  z.strictObject({ op: z.literal('move_list_item'), ...parameterTarget, id,
+    after: id.nullable().describe('Item id to move after, or null to move to the start.') }).refine(validParameterTarget, targetMessage),
   z.strictObject({
     op: z.literal('insert_spread'), definition: id, ref: id.optional(), after: spreadReference.nullable().optional(),
     params: parameterValues.default({}), boxes: z.record(id, initialBox).default({}),
@@ -70,7 +81,8 @@ export type ProjectCommandResult = {
 };
 export type ProjectCommandErrorCode = 'INVALID_OPERATION' | 'SPREAD_NOT_FOUND' | 'LAYOUT_NOT_FOUND' | 'BOX_NOT_FOUND' |
   'ELEMENT_NOT_FOUND' | 'PARAMETER_NOT_FOUND' | 'INVALID_PARAMETER_VALUE' | 'SOURCE_NOT_FOUND' | 'BOX_TYPE_MISMATCH' | 'INCOMPATIBLE_LAYOUT' |
-  'REFERENCE_NOT_FOUND' | 'DUPLICATE_REFERENCE' | 'INVALID_SPREAD_ID' | 'FORMAT_NOT_FOUND' | 'EMPTY_BOX' | 'INVALID_POSITION';
+  'REFERENCE_NOT_FOUND' | 'DUPLICATE_REFERENCE' | 'INVALID_SPREAD_ID' | 'FORMAT_NOT_FOUND' | 'EMPTY_BOX' | 'INVALID_POSITION' |
+  'NOT_A_LIST' | 'ITEM_NOT_FOUND';
 
 export class ProjectCommandError extends Error {
   constructor(readonly code: ProjectCommandErrorCode, message: string, readonly operationIndex?: number) {
@@ -128,6 +140,14 @@ export function applyProjectCommands(
     if (!Object.hasOwn(registry, source)) fail('SOURCE_NOT_FOUND', 'Unknown ' + kind + ' source ' + source + '.');
   }
   function validateValue(parameter: Parameter, value: Values[string], key: string) {
+    if (parameter.type === 'list') {
+      const problems = listProblems(parameter, value);
+      if (problems.length) fail('INVALID_PARAMETER_VALUE', 'Parameter ' + key + ' rejects this value: it ' + problems.slice(0, 3).join('; ') + '.');
+      for (const item of value as ListItem[]) for (const [field, declared] of Object.entries(parameter.item)) {
+        if (Object.hasOwn(item, field)) validateValue(declared, item[field], key + ' item ' + item.id + ' field ' + field);
+      }
+      return;
+    }
     if (!isParameterValue(parameter, value)) fail('INVALID_PARAMETER_VALUE', 'Parameter ' + key + ' rejects this value.');
     if (parameter.type === 'file' && value !== '') {
       const path = own(project.files, String(value));
@@ -190,7 +210,7 @@ export function applyProjectCommands(
     const position = after === undefined ? project.spreads.length : after === null ? 0 : project.spreads.indexOf(findSpread(after)) + 1;
     project.spreads.splice(position, 0, spread);
   }
-  function parameterTarget(operation: Extract<z.output<typeof projectOperationSchema>, { op: 'set_parameter' | 'reset_parameter' }>) {
+  function parameterTarget(operation: { scope: 'document' | 'spread' | 'box' | 'element'; spread?: string; owner?: string; key: string }) {
     const spread = operation.scope === 'document' ? undefined : findSpread(operation.spread!);
     let target: EditTarget | undefined;
     if (operation.scope === 'document') {
@@ -227,7 +247,7 @@ export function applyProjectCommands(
         const values = target.scope === 'document' ? project.params : target.scope === 'spread' ? spread?.params : own(group, target.owner!)?.params;
         if (operation.op === 'set_parameter') {
           validateValue(target.param, operation.value, target.key);
-          if (values && Object.hasOwn(values, target.key) && values[target.key] === operation.value) break;
+          if (values && Object.hasOwn(values, target.key) && sameValue(values[target.key], operation.value)) break;
           if ((target.scope === 'box' || target.scope === 'element') && !Object.hasOwn(group, target.owner!)) group[target.owner!] = { params: {} };
           writeEdit(project, spread?.id, target, operation.value);
         } else {
@@ -236,6 +256,58 @@ export function applyProjectCommands(
         }
         changed((operation.op === 'set_parameter' ? 'Updated ' : 'Reset ') + target.path,
           target.scope === 'document' ? allSpreads() : [spread!.id], true);
+        break;
+      }
+      case 'insert_list_item':
+      case 'update_list_item':
+      case 'remove_list_item':
+      case 'move_list_item': {
+        const { spread, target } = parameterTarget(operation);
+        const param = target.param;
+        if (param.type !== 'list') fail('NOT_A_LIST', 'Parameter ' + target.path + ' is not a list. Use set_parameter.');
+        const group = target.scope === 'box' ? spread?.boxes ?? {} : spread?.elements ?? {};
+        const values = target.scope === 'document' ? project.params : target.scope === 'spread' ? spread?.params : own(group, target.owner!)?.params;
+        const saved = values && Object.hasOwn(values, target.key) ? values[target.key] : undefined;
+        // Item operations start from the saved list, or the default when none is saved. A saved list the template no
+        // longer allows is not rewritten item by item: replace it with set_parameter or reset_parameter.
+        if (saved !== undefined && listProblems(param, saved).length) {
+          fail('INVALID_PARAMETER_VALUE', 'The saved ' + target.path + ' is not a valid list (' + listProblems(param, saved)[0] +
+            '). Replace it with set_parameter or reset_parameter first.');
+        }
+        const items = structuredClone(saved !== undefined ? saved as ListItem[] : resolveValue(param, undefined) as ListItem[]);
+        const index = (item: string) => {
+          const found = items.findIndex(({ id }) => id === item);
+          return found >= 0 ? found : fail('ITEM_NOT_FOUND', target.path + ' has no item ' + item + '.');
+        };
+        const position = (after: string | null | undefined) => after === undefined ? items.length : after === null ? 0 : index(after) + 1;
+        let message: string;
+        if (operation.op === 'insert_list_item') {
+          const { id: given, ...fields } = operation.item;
+          if (given !== undefined && (typeof given !== 'string' || items.some(({ id }) => id === given))) {
+            fail('INVALID_PARAMETER_VALUE', 'Item id ' + String(given) + ' must be a unique identifier in ' + target.path + '.');
+          }
+          const item: ListItem = { id: typeof given === 'string' ? given : newItemId(items), ...fields };
+          items.splice(position(operation.after), 0, item);
+          message = 'Added item ' + item.id + ' to ';
+        } else if (operation.op === 'update_list_item') {
+          if (Object.hasOwn(operation.values, 'id')) fail('INVALID_PARAMETER_VALUE', 'An item keeps its id; update its other fields.');
+          const at = index(operation.id);
+          items[at] = { ...items[at], ...operation.values };
+          message = 'Updated item ' + operation.id + ' of ';
+        } else if (operation.op === 'remove_list_item') {
+          items.splice(index(operation.id), 1);
+          message = 'Removed item ' + operation.id + ' from ';
+        } else {
+          const [item] = items.splice(index(operation.id), 1);
+          if (operation.after === operation.id) fail('INVALID_POSITION', 'An item cannot move after itself.');
+          items.splice(position(operation.after), 0, item);
+          message = 'Moved item ' + operation.id + ' in ';
+        }
+        validateValue(param, items, target.key);
+        if (saved !== undefined && sameValue(saved, items)) break;
+        if ((target.scope === 'box' || target.scope === 'element') && !Object.hasOwn(group, target.owner!)) group[target.owner!] = { params: {} };
+        writeEdit(project, spread?.id, target, items);
+        changed(message + target.path, target.scope === 'document' ? allSpreads() : [spread!.id], true);
         break;
       }
       case 'insert_spread': {
