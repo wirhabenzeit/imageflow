@@ -907,6 +907,17 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
 // draft of the editor's parameters; the frame reports the draft, its height, and commit or cancel to the app, which
 // validates and saves. The frame never changes project data itself. Its read-only context follows the book: the app
 // names each newer render session, and the frame recomputes the context from it.
+// Identifies the project's files and their contents, so a changed file refreshes an open editor. A short hash keeps
+// large files out of the key.
+function filesKey(book: RenderProject) {
+  return JSON.stringify(Object.entries(book.files).map(([id, found]) => {
+    const text = found.text ?? '';
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+    return [id, book.project.files[id], found.problem ?? '', text.length, hash >>> 0];
+  }));
+}
+
 function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, target: { element: string } | { editor: string }, readOnly: boolean,
   presentation: EditorPresentation) {
   const spread = book.project.spreads.find(({ id }) => id === spreadId);
@@ -1003,8 +1014,13 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
       const next = refreshedEditorContext(latest, template, spreadId);
       if (!next) return;
       const measured = withEditorGeometry(next.context, measurements);
-      const key = next.key + JSON.stringify(Object.fromEntries(Object.entries(measured.elements).map(([id, element]) => [id, element.rect])));
+      // The project's files count too: an editor reading `file(id)` shows the file's current content.
+      const key = next.key + JSON.stringify(Object.fromEntries(Object.entries(measured.elements).map(([id, element]) => [id, element.rect])))
+        + filesKey(latest);
       if (key === contextKey) return;
+      setTemplateFiles(latest.files);
+      projectFiles = latest.project.files;
+      updateFiles?.(projectFiles);
       seen = measured;
       contextKey = key;
       updateContext?.(seen);

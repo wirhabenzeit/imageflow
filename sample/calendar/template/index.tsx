@@ -1,6 +1,6 @@
-import { box, defineTemplate, geometry as geometryHelpers, inch, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
+import { box, defineTemplate, file, geometry as geometryHelpers, inch, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { DocumentEditorProps, ImageFlowNode, Rect, RenderContext, ResolvedFormat } from 'imageflow';
-import { changeMark, daysIn, markedDays, markedEntries, markOf, monthFor } from './marks';
+import { changeMark, daysIn, fileDays, markedDays, markedEntries, markOf, monthFor, parseCalendarFile } from './marks';
 import './styles.css';
 
 // A wall calendar without facing pages: a cover, then one page per month. Each page is a full-bleed photo with a
@@ -43,9 +43,33 @@ const documentParameters = {
   // Edited on the month pages: clicking a page's days opens the day picker (see MarkedDaysEditor).
   markedDates: p.string({ label: 'Marked days', default: '', maxLength: 600, multiline: true,
     placeholder: '25.12 every year, 2027-04-16 once' }),
+  // Birthdays or holidays exported from a calendar app. Its all-day events are marked alongside the days above, which
+  // it never changes, so importing a newer file is safe.
+  markedFile: p.file({ label: 'Marked days from calendar', accept: ['.ics'] }),
   highlight: p.color({ label: 'Marked day colour', default: '#f2a93b' }),
 };
 type Context = RenderContext<{ label: string }, typeof documentParameters>;
+
+/**
+ * The calendar file's events and name, and why it cannot be read or what it cannot follow. Nothing when no file is
+ * assigned. Every month page reads it, so the last file read is kept.
+ */
+let lastFile: { name: string; text: string; read: ReturnType<typeof readCalendarFile> } | undefined;
+function calendarFile(id: string) {
+  const source = file(id);
+  if (!source) return undefined;
+  if (lastFile?.name !== source.name || lastFile.text !== source.text) lastFile = { ...source, read: readCalendarFile(source.text) };
+  return { name: source.name, ...lastFile.read };
+}
+function readCalendarFile(text: string) {
+  const parsed = parseCalendarFile(text);
+  if ('problem' in parsed) return { events: [], problem: parsed.problem };
+  if (!parsed.events.length) return { events: [],
+    problem: 'has ' + parsed.count + (parsed.count === 1 ? ' event' : ' events') + ' but none lasts all day' };
+  return { events: parsed.events, ...(parsed.unsupported.length ? { problem: 'marks only the first date of events whose repeat it cannot follow: ' +
+    parsed.unsupported.slice(0, 5).join('; ') + (parsed.unsupported.length > 5 ? ' and ' + (parsed.unsupported.length - 5) + ' more' : '') } : {}) };
+}
+const fromFile = (name: string) => 'From the calendar file ' + name;
 
 const clean = (name: string) => name.replace(/\./g, '').trim();
 // "NOV", "MÄR": the short month name, capitalised like the printed strip.
@@ -90,16 +114,18 @@ function Rule({ context }: { context: Pick<Context, 'geometry'> }) {
   return <div className="rule" style={context.geometry.css({ ...rect, width: trim.x + trim.width - rect.x })} />;
 }
 
-function Days({ month, language, marked, edit, rect, geometry, finding }: {
-  month: Date; language: Language; marked: string; edit: object; rect: Rect; geometry: Context['geometry']; finding: object;
+function Days({ month, language, marked, imported, edit, rect, geometry, finding }: {
+  month: Date; language: Language; marked: string; imported: ReturnType<typeof calendarFile>; edit: object; rect: Rect;
+  geometry: Context['geometry']; finding: object;
 }) {
   const highlighted = markedDays(marked, month);
+  const fromCalendar = imported ? fileDays(imported.events, month) : new Set<number>();
   return <ol className="days" {...edit} {...finding} style={geometry.css(rect)}>
     {Array.from({ length: daysIn(month) }, (_, i) => {
       const date = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth(), i + 1));
       const weekend = date.getUTCDay() === 0 || date.getUTCDay() === 6;
-      const className = [weekend ? 'weekend' : '', highlighted.has(i + 1) ? 'marked' : ''].filter(Boolean).join(' ');
-      return <li key={i} className={className || undefined}><span className="day">{i + 1}</span><span className="weekday">{weekdayName(date, language)}</span></li>;
+      const className = [weekend ? 'weekend' : '', highlighted.has(i + 1) || fromCalendar.has(i + 1) ? 'marked' : ''].filter(Boolean).join(' ');
+      return <li key={i} className={className || undefined} title={fromCalendar.has(i + 1) ? fromFile(imported!.name) : undefined}><span className="day">{i + 1}</span><span className="weekday">{weekdayName(date, language)}</span></li>;
     })}
   </ol>;
 }
@@ -108,7 +134,8 @@ function Days({ month, language, marked, edit, rect, geometry, finding }: {
 // that page shows, which it reads from its context: moving the page to another month updates the open picker.
 // On the page (`presentation: 'inline'`) it is the page's own column of days: a click marks or unmarks a date once,
 // ⌥-click every year. In the panel it is a month grid. A day marked every year is not changed by a plain click, so
-// one click never changes every year's calendar.
+// one click never changes every year's calendar. Days from the calendar file show as marked but cannot be clicked:
+// the file, not the picker, decides them.
 function MarkedDaysEditor(props: DocumentEditorProps<typeof documentParameters, 'markedDates'>) {
   return props.presentation === 'inline' ? <DaysOnPage {...props} /> : <MarkedDaysGrid {...props} />;
 }
@@ -118,7 +145,10 @@ function DaysOnPage({ values, set, context, readOnly }: DocumentEditorProps<type
   const language = context.document.language;
   const marked = values.markedDates;
   const year = month.getUTCFullYear();
+  const imported = calendarFile(context.document.markedFile);
+  const fromCalendar = imported ? fileDays(imported.events, month) : new Set<number>();
   const toggle = (day: number, yearly: boolean) => {
+    if (fromCalendar.has(day)) return;
     const mark = markOf(marked, month, day);
     if (yearly) set({ markedDates: changeMark(marked, month, day, { yearly: !mark.yearly }) });
     else if (!mark.yearly) set({ markedDates: changeMark(marked, month, day, { once: !mark.once }) });
@@ -129,11 +159,14 @@ function DaysOnPage({ values, set, context, readOnly }: DocumentEditorProps<type
       {Array.from({ length: daysIn(month) }, (_, i) => {
         const date = new Date(Date.UTC(year, month.getUTCMonth(), i + 1));
         const { once, yearly } = markOf(marked, month, i + 1);
+        const locked = fromCalendar.has(i + 1);
         const weekend = date.getUTCDay() === 0 || date.getUTCDay() === 6;
-        const className = [weekend ? 'weekend' : '', once || yearly ? 'marked' : '', yearly ? 'yearly' : ''].filter(Boolean).join(' ');
+        const className = [weekend ? 'weekend' : '', locked || once || yearly ? 'marked' : '', yearly ? 'yearly' : '',
+          locked ? 'from-file' : ''].filter(Boolean).join(' ');
         return <li key={i} className={className || undefined}>
-          <button type="button" aria-pressed={once || yearly} disabled={readOnly}
-            title={yearly ? 'Every year · ⌥-click to unmark' : once ? year + ' · ⌥-click for every year' : '⌥-click for every year'}
+          <button type="button" aria-pressed={locked || once || yearly} disabled={readOnly || locked}
+            title={locked ? fromFile(imported!.name)
+              : yearly ? 'Every year · ⌥-click to unmark' : once ? year + ' · ⌥-click for every year' : '⌥-click for every year'}
             onClick={(event: { altKey: boolean }) => toggle(i + 1, event.altKey)}
             onKeyDown={(event: { altKey: boolean; key: string; preventDefault(): void }) => {
               if (event.altKey && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggle(i + 1, true); }
@@ -156,7 +189,9 @@ function MarkedDaysGrid({ values, set, context, readOnly, Control }: DocumentEdi
   // Weeks start on Monday; 1 January 2024 was a Monday.
   const offset = (month.getUTCDay() + 6) % 7;
   const weekdays = Array.from({ length: 7 }, (_, i) => weekdayName(new Date(Date.UTC(2024, 0, 1 + i)), language));
-  const days = Array.from({ length: daysIn(month) }, (_, i) => ({ day: i + 1, ...markOf(marked, month, i + 1) }));
+  const imported = calendarFile(context.document.markedFile);
+  const fromCalendar = imported ? fileDays(imported.events, month) : new Set<number>();
+  const days = Array.from({ length: daysIn(month) }, (_, i) => ({ day: i + 1, ...markOf(marked, month, i + 1), locked: fromCalendar.has(i + 1) }));
   const change = (day: number, next: { once?: boolean; yearly?: boolean }) => set({ markedDates: changeMark(marked, month, day, next) });
   const rejected = markedEntries(marked).filter(({ date }) => !date).map(({ entry }) => entry);
   return <div className="marked-days-editor">
@@ -165,13 +200,14 @@ function MarkedDaysGrid({ values, set, context, readOnly, Control }: DocumentEdi
       {weekdays.map((name) => <strong key={name}>{name}</strong>)}
       {Array.from({ length: offset }, (_, i) => <span key={'blank' + i} />)}
       {/* A regular click changes only this year; Option-click changes the yearly mark. */}
-      {days.map(({ day, once, yearly }) => <button key={day} type="button" className={yearly ? 'yearly' : once ? 'once' : undefined}
-        aria-pressed={once || yearly} disabled={readOnly}
-        title={(yearly ? 'Every year' : once ? 'Once in ' + year : 'Unmarked') + ' · Click: once · ⌥-click: every year'}
+      {days.map(({ day, once, yearly, locked }) => <button key={day} type="button"
+        className={locked ? 'from-file' : yearly ? 'yearly' : once ? 'once' : undefined}
+        aria-pressed={locked || once || yearly} disabled={readOnly || locked}
+        title={locked ? fromFile(imported!.name) : (yearly ? 'Every year' : once ? 'Once in ' + year : 'Unmarked') + ' · Click: once · ⌥-click: every year'}
         onClick={(event: MouseEvent) => change(day, event.altKey ? { yearly: !yearly } : { once: !once })}
         onKeyDown={(event: KeyboardEvent) => { if (event.altKey && event.key === 'Enter') { event.preventDefault(); change(day, { yearly: !yearly }); } }}>{day}</button>)}
     </div>
-    <p className="marked-days-note" title={"Click a day to mark it in " + year}>● Once · ◯ Every year</p>
+    <p className="marked-days-note" title={"Click a day to mark it in " + year}>● Once · ◯ Every year{imported?.events.length ? ' · ▪ From ' + imported.name : ''}</p>
     <details className="marked-days-all">
       <summary>All marked days</summary>
       {rejected.length > 0 && <p className="marked-days-note">Not dates: {rejected.join(', ')}</p>}
@@ -231,6 +267,12 @@ export default defineTemplate({
         const marked = ctx.document.markedDates;
         // Entries that are not dates are reported once, on the first month page.
         const rejected = index === 0 ? markedEntries(marked).filter(({ date }) => !date).map(({ entry }) => entry) : [];
+        const imported = calendarFile(ctx.document.markedFile);
+        const fileFinding = index === 0 && imported?.problem ? issue({ code: 'marked-file-invalid', severity: 'warning',
+          message: 'Marked days from calendar: ' + imported.name + ' ' + imported.problem + (imported.events.length ? '.' : ', so it marks no days.'),
+          parameter: 'markedFile', file: ctx.document.markedFile,
+          suggestion: imported.events.length ? 'Mark the missing dates by hand, or change the repeat in the calendar app to a plain yearly one.'
+            : 'Export the calendar again as .ics with its all-day events, or assign another file.' }) : undefined;
         const finding = rejected.length ? issue({ code: 'marked-day-invalid', severity: 'warning',
           message: 'Marked days: ' + rejected.join(', ') + (rejected.length === 1 ? ' is not a date' : ' are not dates') + ' and ' +
             (rejected.length === 1 ? 'is' : 'are') + ' not shown.',
@@ -242,7 +284,8 @@ export default defineTemplate({
             rect={at.page(strip.x, 8, strip.width, rule - 14)} />
           <Rule context={ctx} />
           <p className="month-name" style={ctx.geometry.css(at.page(strip.x, rule + 5, strip.width, 8))}>{monthName(month, language)}</p>
-          <Days month={month} language={language} marked={marked} edit={ctx.edit('document.markedDates')} finding={finding}
+          {fileFinding && <span hidden {...fileFinding} />}
+          <Days month={month} language={language} marked={marked} imported={imported} edit={ctx.edit('document.markedDates')} finding={finding}
             rect={at.page(strip.x, rule + 20, strip.width, 297 - rule - 26)} geometry={ctx.geometry} />
         </Page>;
       },
