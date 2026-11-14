@@ -9,9 +9,10 @@ const format = printFormat({
 });
 
 const focus = {
-  x: p.number({ label: 'Across', default: 50, min: 0, max: 100, unit: '%' }),
-  y: p.number({ label: 'Down', default: 50, min: 0, max: 100, unit: '%' }),
-  size: p.number({ label: 'Size', default: 30, min: 5, max: 80, unit: '%' }),
+  // `description` tells agents what a value means and which way it goes; `unit` names its unit.
+  x: p.number({ label: 'Across', default: 50, min: 0, max: 100, unit: '%', description: "Centre from the element's left edge (0) to its right edge (100)." }),
+  y: p.number({ label: 'Down', default: 50, min: 0, max: 100, unit: '%', description: "Centre from the element's top edge (0) to its bottom edge (100)." }),
+  size: p.number({ label: 'Size', default: 30, min: 5, max: 80, unit: '%', description: "Diameter as a share of the element's shorter side. Larger values draw it bigger." }),
   colour: p.color({ label: 'Ring colour', default: '#ffffff' }),
 };
 type Focus = { x: number; y: number; size: number; colour: string };

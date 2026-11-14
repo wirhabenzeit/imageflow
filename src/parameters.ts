@@ -6,7 +6,12 @@ const label = z.string().trim().min(1);
 const color = z.string().regex(/^#[0-9a-f]{6}$/i);
 const date = z.iso.date();
 const extension = z.string().regex(/^\.[a-z0-9]{1,10}$/, 'Use lowercase file extensions such as .gpx.');
-const common = { label };
+// `description` is plain help text: what the value means, its direction and when to change it. Agents read it, and the
+// editor shows it behind an info button on a field without a control description of its own. It never changes
+// defaults, validation or saved data. Control descriptions share its limits.
+export const maxParameterDescription = 1000;
+const description = z.string().trim().min(1).max(maxParameterDescription).optional();
+const common = { label, description };
 const numeric = { min: z.number().optional(), max: z.number().optional(), step: z.number().positive().optional(), unit: z.string().optional() };
 
 export const parameterSchema = z.discriminatedUnion('type', [
@@ -52,11 +57,12 @@ type FileOptions = Omit<Extract<Parameter, { type: 'file' }>, 'type' | 'default'
 type EnumParameter = Extract<Parameter, { type: 'enum' }>;
 type EnumKeys<C> = `${Extract<keyof C, string | number>}`;
 function enumParameter<const Options extends Omit<EnumParameter, 'type'>>(options: Options): Options & { type: 'enum' };
-function enumParameter<const Choices extends Record<string, string>>(options: { label: string; options: Choices; default: NoInfer<EnumKeys<Choices>> }):
-  { type: 'enum'; label: string; options: EnumKeys<Choices>[]; labels: Choices; default: EnumKeys<Choices> };
-function enumParameter(options: { label: string; options: string[] | Record<string, string>; default: string; labels?: Record<string, string> }) {
+function enumParameter<const Choices extends Record<string, string>>(options: { label: string; description?: string; options: Choices; default: NoInfer<EnumKeys<Choices>> }):
+  { type: 'enum'; label: string; description?: string; options: EnumKeys<Choices>[]; labels: Choices; default: EnumKeys<Choices> };
+function enumParameter(options: { label: string; description?: string; options: string[] | Record<string, string>; default: string; labels?: Record<string, string> }) {
   return Array.isArray(options.options) ? { ...options, type: 'enum' as const }
-    : { label: options.label, type: 'enum' as const, default: options.default, options: Object.keys(options.options), labels: { ...options.options } };
+    : { label: options.label, ...(options.description !== undefined ? { description: options.description } : {}), type: 'enum' as const,
+      default: options.default, options: Object.keys(options.options), labels: { ...options.options } };
 }
 export const p = {
   boolean: parameter('boolean'), string: parameter('string'), integer: parameter('integer'),

@@ -125,7 +125,7 @@ test('unknown declaration properties are reported with the property they probabl
   assert.match(warnings[0].message, /^Template: ImageFlow does not know property paramters and ignores it\.$/);
   assert.equal(warnings[0].suggestion, 'Rename paramters to parameters.');
   // Known keys come from the schema, per parameter type.
-  assert.match(warnings[4].suggestion, /Known here: label, min, max, step, unit, type, default\./);
+  assert.match(warnings[4].suggestion, /Known here: label, description, min, max, step, unit, type, default\./);
   // A valid declaration has no findings, whatever extra data render functions close over.
   assert.deepEqual(declarationWarnings(defineTemplate({ id: 't', version: '1', contract: 1, formats: { a: format }, defaultFormat: 'a',
     parameters: { accent: p.color({ label: 'A', default: '#000000' }) }, spreads: { main: { label: 'Main', render: () => null } } })), []);
@@ -276,4 +276,28 @@ test('an element editor may edit declared layout parameters, each by one editor,
   assert.deepEqual(messages(declare({ parameters: { caption }, controls: ['caption'],
     elements: { stamp: { label: 'Stamp', editor: { parameters: [], spread: ['caption'], component } } } })),
   ['Control caption is edited by the custom editor, so it has no generated control.']);
+});
+
+test('parameter descriptions survive normalization at every scope and change nothing else', () => {
+  const zoom = 'Higher values zoom in; 1 shows the whole route.';
+  const declared = (description?: string) => ({ id: 't', version: '1', contract: 1, format,
+    parameters: { language: p.enum({ label: 'Language', options: { en: 'English', de: 'Deutsch' }, default: 'en', description: 'Language of month names.' }) },
+    spreads: { main: { label: 'Main', render: () => null,
+      parameters: { gap: p.integer({ label: 'Gap', default: 6, min: 2, max: 20, unit: 'mm', description: '  Space between photos.  ' }) },
+      boxes: { hero: box.photo('Hero', { tilt: p.number({ label: 'Tilt', default: 0, min: -10, max: 10, unit: '°', description: 'Positive turns clockwise.' }) }) },
+      elements: { map: { label: 'Map', parameters: { zoom: p.number({ label: 'Zoom', default: 1, min: 1, max: 8, step: .1, ...(description ? { description } : {}) }) } } } } } });
+  const info = templateInfoOf(templateSchema.parse(declared(zoom)));
+  assert.equal(info.parameters.language.description, 'Language of month names.');
+  assert.deepEqual(info.spreads.main.parameters.gap, { label: 'Gap', description: 'Space between photos.', type: 'integer', default: 6, min: 2, max: 20, unit: 'mm' });
+  assert.equal(info.spreads.main.boxes.hero.parameters?.tilt.description, 'Positive turns clockwise.');
+  assert.equal(info.spreads.main.elements.map.parameters?.zoom.description, zoom);
+  // Without a description the declaration is exactly what it was.
+  const plain = templateInfoOf(templateSchema.parse(declared()));
+  assert.equal('description' in plain.spreads.main.elements.map.parameters!.zoom, false);
+  assert.deepEqual({ ...info.spreads.main.elements.map.parameters!.zoom, description: undefined }, { ...plain.spreads.main.elements.map.parameters!.zoom, description: undefined });
+  assert.deepEqual(declarationWarnings(declared(zoom)), []);
+  // Empty and overlong descriptions are declaration errors, not silently dropped text.
+  assert.equal(templateSchema.safeParse(declared('   ')).success, false);
+  assert.equal(templateSchema.safeParse(declared('x'.repeat(1001))).success, false);
+  assert.equal(templateSchema.safeParse(declared('x'.repeat(1000))).success, true);
 });
