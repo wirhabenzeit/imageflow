@@ -11,7 +11,7 @@ type Topic = { id: string; title: string; summary: string; text: string };
 test('generated API page, skill references and skill examples match the topic files', async () => {
   const outputs = await docsOutputs(resolve('.')) as Record<string, string>;
   for (const [path, text] of Object.entries(outputs)) {
-    assert.equal(await readFile(resolve(path), 'utf8').catch(() => undefined), text, path + ' is stale. Run npm run generate:docs.');
+    assert.equal(await readFile(resolve(path), 'utf8').catch(() => undefined), text, path + ' differs from its source. Edit the topic files in docs/template-api/ (template-api.md is generated), then run npm run generate:docs.');
   }
   for (const folder of ['references', 'examples']) {
     for (const name of await readdir(resolve(skillFolder, folder))) {
