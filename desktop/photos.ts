@@ -3,6 +3,7 @@ import { access, mkdir, mkdtemp, realpath, rename, rm, stat } from 'node:fs/prom
 import { extname, join } from 'node:path';
 import sharp from 'sharp';
 import type { Photo } from '../src/project';
+import { captureMetadata } from '../src/photo-metadata';
 
 export const photoExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 type Rendition = 'thumb' | 'preview' | 'export';
@@ -20,6 +21,9 @@ export async function photoDetails(original: string, maximumBytes: number | null
     width: turned ? metadata.height : metadata.width,
     height: turned ? metadata.width : metadata.height,
     alpha: !!metadata.hasAlpha,
+    // Read from the original on every load, never stored in photos.json: existing books get it without re-importing,
+    // and a replaced or edited source refreshes it.
+    ...captureMetadata(metadata.exif),
     passthrough: metadata.format === 'jpeg' && !metadata.icc && metadata.space === 'srgb' && (metadata.orientation ?? 1) === 1,
     observation: observation(info),
     key: createHash('sha256').update([original, info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs, 'rendition-2'].join(':')).digest('hex'),

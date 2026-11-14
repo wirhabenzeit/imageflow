@@ -392,7 +392,12 @@ type RenderContext = {
   document: DocumentParams;
   boxes: Record<BoxId, {
     params: BoxParams;
-    photo?: { caption?: string; title?: string; credit?: string; altText?: string; width: number; height: number } | null;
+    photo?: {                               // null for an empty box
+      caption?: string; title?: string; credit?: string; altText?: string; width: number; height: number;
+      captured?: { dateTime: string; offset: string | null };   // read from the file (see Photo metadata)
+      location?: { latitude: number; longitude: number };
+      camera?: { make?: string; model?: string };
+    } | null;
     text?: { title?: string; part: number; parts: number } | null;  // flow position for Markdown boxes
   }>;
   elements: Record<ElementId, { params: ElementParams }>;
@@ -411,6 +416,18 @@ type RenderContext = {
   };
 };
 ```
+
+### Photo metadata
+
+`photo.captured`, `photo.location` and `photo.camera` come from the photo file's EXIF data. Each is present only when the file records it in a usable form, and all three are read-only:
+
+- **`captured`**: `{ dateTime, offset }`. `dateTime` is the camera's local wall-clock time, `YYYY-MM-DDTHH:mm:ss`, from the time the photo was taken (or, failing that, digitized), never the file's modification time. `offset` is the recorded UTC offset, such as `'+02:00'`, or `null` when the file has none. `null` means the time zone is unknown, not UTC: show `dateTime` as it is, and use `new Date(dateTime + offset)` for the instant only when `offset` is set. Placeholder dates such as `0000:00:00`, impossible dates and offsets outside −12:00 to +14:00 are left out.
+- **`location`**: `{ latitude, longitude }` in WGS 84 degrees, north and east positive, rounded to 7 decimals. A coordinate without its hemisphere, out of range or with a zero denominator, or a fix the receiver marked void, gives no location.
+- **`camera`**: `{ make?, model? }` as the camera records them, trimmed to at most 100 characters.
+
+ImageFlow reads them from the original file whenever the book opens or a source changes, and never stores them in `photos.json`. Existing books therefore have them without re-importing anything, and replacing a linked photo's original refreshes them under the same photo ID, with crops and assignments unchanged. A photo without EXIF, or with EXIF ImageFlow cannot read, imports and renders as before. The user-written `caption`, `title`, `credit` and `altText` are separate and never overwritten. Writing an extracted field is rejected rather than ignored: in `photos.json` it is a validation error, and `set_photo_metadata` does not accept it.
+
+The same fields appear on `ctx.boxes[id].photo`, in custom editors' `context`, and in `inspect_book`'s `sources` view. [`photo-story.tsx`](examples/photo-story.tsx) builds a caption from them. Raw EXIF is not exposed.
 
 ### Rendered images
 

@@ -17,6 +17,11 @@ import type { CheckDraft } from './check';
 import type { PreviewRequest } from '../src/preview';
 import type { InspectionRequest } from '../src/inspection';
 import { photoExtensions } from './photos';
+import { captureFields } from '../src/photo-metadata';
+import type { CaptureMetadata } from '../src/photo-metadata';
+
+const captureOf = (photo: CaptureMetadata | undefined) =>
+  Object.fromEntries(captureFields.flatMap((field) => photo?.[field] ? [[field, photo[field]]] : [])) as CaptureMetadata;
 import type { OpenProject } from './project';
 import type { ProjectSession } from './project-session';
 import { CommittedProjectSaveError } from './persistence';
@@ -453,7 +458,8 @@ export function createAuthoringService(hooks: Hooks) {
         const usage = project ? sourceUsage(project, labels, template?.spreads) : { photo: {}, text: {} };
         const view = args.view ?? 'summary';
         const records = view === 'sources' ? [
-          ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, usage: usage.photo[id] ?? [] })),
+          // Capture time, location and camera come from the loaded photo file, next to what photos.json records.
+          ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id)), usage: usage.photo[id] ?? [] })),
           ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path: sourcePath(path), linked: sourceLinked(path), usage: usage.text[id] ?? [] })),
           ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path: sourcePath(path), linked: sourceLinked(path) })),
         ] : project?.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...spread,
