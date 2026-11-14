@@ -1,5 +1,6 @@
 import { createContext, Fragment, useContext, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
+import { compactParameter } from './compact-controls';
 import { controlLayout } from './controls';
 import type { ControlItem, ControlNode } from './controls';
 import type { Values } from './project';
@@ -45,9 +46,9 @@ function FileControl({ param, value, apply, autoFocus }: {
 // One control per parameter type, shared by the Inspector and the click-to-edit popover so a parameter looks and
 // behaves the same in both. Discrete choices call `apply` at once. Typed values stay in `draft` until the caller
 // applies them: on blur and Enter when `commitOnBlur` is set (Inspector), or when the popover closes.
-export function ParamControl({ param, value, draft, setDraft, apply, autoFocus = false, commitOnBlur = false }: {
+export function ParamControl({ param, value, draft, setDraft, apply, autoFocus = false, commitOnBlur = false, compact = false }: {
   param: Parameter; value: Value; draft: Value | undefined; setDraft: (value: Value) => void; apply: (value: Value) => void;
-  autoFocus?: boolean; commitOnBlur?: boolean;
+  autoFocus?: boolean; commitOnBlur?: boolean; compact?: boolean;
 }) {
   const shown = draft ?? value;
   const focusMark = autoFocus || undefined;
@@ -73,7 +74,8 @@ export function ParamControl({ param, value, draft, setDraft, apply, autoFocus =
     return <div className="pc-segmented" role="radiogroup" aria-label={param.label}>
       {param.options.map((option, i) => <button key={option} type="button" role="radio" aria-checked={shown === option}
         data-autofocus={(autoFocus && (shown === option || (!param.options.includes(String(shown)) && i === 0))) || undefined}
-        onClick={() => apply(option)}>{param.labels?.[option] ?? option}</button>)}
+        title={param.labels?.[option] ?? option} aria-label={param.labels?.[option] ?? option}
+        onClick={() => apply(option)}>{compact && /^\d+$/.test(option) ? option : param.labels?.[option] ?? option}</button>)}
     </div>;
   }
   if (param.type === 'file') return <FileControl param={param} value={String(shown)} apply={apply} autoFocus={autoFocus} />;
@@ -119,7 +121,7 @@ export function ParamControl({ param, value, draft, setDraft, apply, autoFocus =
 
 // A labelled parameter in the Inspector. Typed values apply on blur or Enter; invalid values are not saved.
 // The field keeps its identity when the saved value changes, so typing is never lost to a save completing.
-export function Field({ param, value, change, description }: { param: Parameter; value: Value; change: (value: Value) => void; description?: string }) {
+export function Field({ param, value, change, description, compact = false }: { param: Parameter; value: Value; change: (value: Value) => void; description?: string; compact?: boolean }) {
   const [draft, setDraft] = useState<Value>();
   const [invalid, setInvalid] = useState(false);
   const typing = useRef(false);
@@ -141,9 +143,9 @@ export function Field({ param, value, change, description }: { param: Parameter;
     setInvalid(!valid);
     if (valid && next !== value) change(next);
   }
-  return <div className="field">
-    {param.type !== 'boolean' && <span className="field-name">{param.label}</span>}
-    <ParamControl param={param} value={value} draft={draft} setDraft={type} apply={apply} commitOnBlur />
+  return <div className={compact ? 'field compact-field' : 'field'} title={compact ? param.label : undefined}>
+    {!compact && param.type !== 'boolean' && <span className="field-name">{param.label}</span>}
+    <ParamControl param={param} value={value} draft={draft} setDraft={type} apply={apply} compact={compact} commitOnBlur />
     {description && <small className="field-description">{description}</small>}
     {invalid && <small className="error-text">Enter a value within the field’s limits.</small>}
   </div>;
@@ -168,10 +170,19 @@ const resolved = (schema: Parameters, values: Values) => Object.fromEntries(Obje
 
 // Generated controls for a scope, arranged by its `controls` (all parameters when absent). `exclude` leaves out
 // parameters edited elsewhere, such as by a custom editor or on the page.
-export function Fields({ schema, values, update, controls, exclude }: {
-  schema: Parameters; values: Values; update: (id: string, value: Value) => void; controls?: ControlItem[]; exclude?: readonly string[];
+export function Fields({ schema, values, update, controls, exclude, compact = false }: {
+  schema: Parameters; values: Values; update: (id: string, value: Value) => void; controls?: ControlItem[]; exclude?: readonly string[]; compact?: boolean;
 }) {
   const current = resolved(schema, values);
-  return <ControlList nodes={controlLayout(schema, controls, current, exclude)} field={(node, param) =>
-    <Field key={node.key} param={param} value={current[node.key]} description={node.description} change={(next) => update(node.key, next)} />} />;
+  const nodes = controlLayout(schema, controls, current, exclude);
+  const field = (inline: boolean) => (node: FieldNode, param: Parameter) =>
+    <Field key={node.key} compact={inline} param={param} value={current[node.key]} description={node.description} change={(next) => update(node.key, next)} />;
+  if (!compact) return <ControlList nodes={nodes} field={field(false)} />;
+  const inline = nodes.filter((node) => node.kind === 'field' && compactParameter(node.param)).slice(0, 4);
+  const overflow = nodes.filter((node) => !inline.includes(node));
+  return <div className="compact-fields">
+    <ControlList nodes={inline} field={field(true)} />
+    {overflow.length > 0 && <details className="compact-overflow"><summary title="More settings" aria-label="More settings">⚙</summary>
+      <div><ControlList nodes={overflow} field={field(false)} /></div></details>}
+  </div>;
 }

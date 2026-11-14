@@ -160,7 +160,7 @@ export class DocumentSession {
   get book() { return this.projectSession.book; }
   get summary(): ProjectSummary {
     return { ...projectSummary(this.book, this.active.id), handle: this.projectSession.handle, history: this.projectSession.history,
-      network: [...this.networkOrigins] };
+      network: [...this.networkOrigins], pageLabels: this.menuState?.pageLabels };
   }
   notify(change: ProjectChange) {
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.changed, change);
@@ -490,12 +490,12 @@ export class DocumentSession {
     const current = this.currentBook(id);
     const book = base ?? current;
     if (book.readOnly) throw new Error('Create a project to import files.');
-    if (request.kind !== 'photo' && request.kind !== 'markdown' && request.kind !== 'file') throw new Error('Unknown import type.');
+    if (request.kind !== undefined && request.kind !== 'photo' && request.kind !== 'markdown' && request.kind !== 'file') throw new Error('Unknown import type.');
     if (request.kind === 'file' && (!Array.isArray(request.accept) || !request.accept.length ||
         !request.accept.every((ext) => typeof ext === 'string' && /^\.[a-z0-9]{1,10}$/.test(ext)) || request.folder)) {
       throw new Error('Invalid file import.');
     }
-    if (request.target && (!identifier.safeParse(request.target.box).success || !identifier.safeParse(request.target.spread).success)) {
+    if (request.target && (!request.kind || !identifier.safeParse(request.target.box).success || !identifier.safeParse(request.target.spread).success)) {
       throw new Error('Invalid import target.');
     }
     let paths = request.paths;
@@ -504,32 +504,36 @@ export class DocumentSession {
       const file = request.kind === 'file';
       const extensions = photo ? [...photoExtensions] : file ? request.accept! : ['.md'];
       const choice = await dialog.showOpenDialog(owner, {
-        title: photo ? 'Import Photos' : file ? 'Choose File' : 'Import Markdown',
-        properties: request.folder ? ['openDirectory'] : file ? ['openFile'] : ['openFile', 'multiSelections'],
-        filters: [{ name: photo ? 'Photos' : file ? request.accept!.join(', ') : 'Markdown', extensions: extensions.map((ext) => ext.slice(1)) }],
+        title: !request.kind ? 'Import' : photo ? 'Import Photos' : file ? 'Choose File' : 'Import Markdown',
+        properties: !request.kind ? ['openFile', 'openDirectory', 'multiSelections'] : request.folder ? ['openDirectory'] : file ? ['openFile'] : ['openFile', 'multiSelections'],
+        filters: !request.kind ? undefined : [{ name: photo ? 'Photos' : file ? request.accept!.join(', ') : 'Markdown', extensions: extensions.map((ext) => ext.slice(1)) }],
       });
       if (choice.canceled) return null;
       paths = choice.filePaths;
     }
     const files: string[] = [];
+    const collect = async (folder: string) => {
+      for (const entry of await readdir(folder, { withFileTypes: true })) {
+        if (entry.name.startsWith('.')) continue;
+        const path = join(folder, entry.name);
+        if (entry.isDirectory()) await collect(path);
+        else if (entry.isFile()) files.push(path);
+      }
+    };
     for (const path of paths) {
-      if ((await stat(path)).isDirectory()) {
-        const entries = await readdir(path, { recursive: true, withFileTypes: true });
-        files.push(...entries.filter((entry) => entry.isFile() && !entry.name.startsWith('.'))
-          .map((entry) => join(entry.parentPath, entry.name)));
-      } else files.push(path);
+      if ((await stat(path)).isDirectory()) await collect(path);
+      else files.push(path);
     }
-    const destination = join(book.folder, request.kind === 'photo' ? 'photos' : request.kind === 'file' ? 'files' : 'texts');
-    const createdDirectory = !await fingerprint(destination);
-    const { book: next, imported, copied } = await importIntoProject(book, request, [...new Set(files)]);
-    for (const file of createdDirectory ? [destination, ...copied] : copied) {
+    const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)]);
+    for (const file of [...createdDirectories, ...copied]) {
       const path = relative(book.folder, file);
       this.importedWrites.set(path, await fingerprint(file), this.observedChanges.has(path));
     }
+    if (!imported.length) return { summary: this.summary, imported, counts };
     if (owner.isDestroyed()) return null;
     this.projectSession!.adoptExternal(book);
     this.projectSession!.record(next, 'Import sources', !!request.target);
-    return { summary: this.activate(next), imported };
+    return { summary: this.activate(next), imported, counts };
   }
 
   /** The origins the template declares that this book's frames may reach, asking once for new ones (ADR 0006):

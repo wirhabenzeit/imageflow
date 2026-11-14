@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
-import { randomUUID } from 'node:crypto';
-import { copyFile, mkdir, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { access, copyFile, mkdir, readFile, readdir, realpath, rm, rmdir, stat, utimes } from 'node:fs/promises';
 import * as ReactExports from 'react';
 import { dependencyWarning, isBareImport, missingDependency, readDependencyManifest, vendoredModule } from './dependencies';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -10,14 +10,15 @@ import { parseDocument, photoIndexSchema, projectSchema } from '../src/project';
 import type { FixtureMarking, PhotoIndex, Project, ProjectFile, ProjectFiles, RenderProject } from '../src/project';
 import { renderOrigin } from '../src/desktop';
 import type { ImportRequest, ProjectSummary } from '../src/desktop';
-import { photoDetails, photoExtensions } from './photos';
+import { importPhotoDetails, photoDetails, photoExtensions } from './photos';
 import { renditionCacheFor } from './rendition-cache';
+import { photoDate } from './capture-time';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
 import { sourceEntries, sourcePath, sourceLinked, sourceFolder } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
-import { approveSource } from './source-access';
+import { approveSource, sourceBookKey } from './source-access';
 import { runtimeExports } from '../src/runtime-exports';
 import { templateHash } from './template-library';
 
@@ -192,7 +193,7 @@ export async function bundleTemplate(folder: string) {
 
 type TemplateAssets = Awaited<ReturnType<typeof bundleTemplate>>;
 export type OpenProject = ProjectFiles & {
-  folder: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
+  folder: string; viewKey?: string; cache: string; assets: TemplateAssets; photos: Map<string, ProjectPhoto>;
   texts: Record<string, string>; files: Record<string, ProjectFile>; problems: string[]; readOnly: boolean;
   sources?: Record<string, SourceStatus>;
   manifests: Record<ManifestName, Buffer>;
@@ -216,7 +217,7 @@ export async function loadProject(path: string, fallback: string, readOnly = fal
   const hash = await templateHash(join(folder, 'template')).catch(() => undefined);
   const assets = await bundleTemplate(folder);
   const cache = fallback;
-  return readContent({ folder, assets, cache, readOnly, project, photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
+  return readContent({ folder, viewKey: createHash('sha256').update(await sourceBookKey(folder)).digest('hex'), assets, cache, readOnly, project, photoIndex, ...(hash ? { templateHash: hash } : {}), manifests: { 'project.json': projectFile, 'photos.json': photoFile } }, pinSources);
 }
 
 async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' | 'problems'>, pinSources = false): Promise<OpenProject> {
@@ -237,7 +238,9 @@ async function readContent(book: Omit<OpenProject, 'photos' | 'texts' | 'files' 
         if (stored) {
           const { path: _path, linked: _linked, ...metadata } = book.photoIndex[source.id];
           const details = await photoDetails(stored.snapshot, null);
-          photos.set(source.id, { ...metadata, ...details, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
+          // Without an EXIF capture time, photo views use the original's modification time, not the snapshot's.
+          const estimate = details.captured ? undefined : stored.modified ?? details.estimatedCapture;
+          photos.set(source.id, { ...metadata, ...details, estimatedCapture: estimate, observation: stored.direct && status.state === 'available' ? stored.observation : details.observation,
             width: stored.width!, height: stored.height!, original: stored.snapshot,
             key: stored.direct ? status.problem ? digestBytes(Buffer.from(stored.key + ':stale')) : stored.key! : digestBytes(Buffer.from(stored.digest + ':rendition-3')),
             cache: renditionCacheFor(book.cache), ...(status.problem ? { problem: status.problem } : {}) });
@@ -307,40 +310,55 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   if (mode !== 'copy' && mode !== 'link') throw new Error('Unknown import mode.');
   const imported: string[] = [];
   const copied: string[] = [];
-  const folder = request.kind === 'photo' ? 'photos' : request.kind === 'file' ? 'files' : 'texts';
-  const extensions = request.kind === 'photo' ? photoExtensions : request.kind === 'file' ? new Set(request.accept) : new Set(['.md']);
-  const registry = request.kind === 'file' ? project.files : project.texts;
-  const targetFolder = join(book.folder, folder);
-  await mkdir(targetFolder, { recursive: true });
-  if (await realpath(targetFolder) !== targetFolder) throw new Error(folder + '/ must be a folder inside the project.');
+  const counts = { photos: 0, texts: 0, files: 0, skipped: 0, failed: 0 };
+  const createdDirectories: string[] = [];
+  const prepare = async (folder: string) => {
+    const destination = join(book.folder, folder);
+    try { await mkdir(destination); createdDirectories.push(destination); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    if (await realpath(destination) !== destination) throw new Error(folder + '/ must be a folder inside the project.');
+  };
   try {
     for (const file of paths) {
-      const info = await stat(file);
-      if (!info.isFile() || !extensions.has(extname(file).toLowerCase())) continue;
-      if (request.kind === 'photo') await photoDetails(file);
-      if (request.kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
-      if (request.kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
-      const previous = request.kind === 'photo'
+      const info = await stat(file).catch(() => undefined);
+      if (!info) { counts.failed++; continue; }
+      const extension = extname(file).toLowerCase();
+      const kind = request.kind ?? (photoExtensions.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : undefined);
+      const extensions = kind === 'photo' ? photoExtensions : kind === 'file' ? new Set(request.accept) : new Set(['.md']);
+      if (!info.isFile() || !kind || !extensions.has(extension)) { counts.skipped++; continue; }
+      const folder = kind === 'photo' ? 'photos' : kind === 'file' ? 'files' : 'texts';
+      const registry = kind === 'file' ? project.files : project.texts;
+      try {
+        if (kind === 'photo') await importPhotoDetails(file);
+        if (kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
+        if (kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
+        await access(file, constants.R_OK);
+      } catch { counts.failed++; continue; }
+      const previous = kind === 'photo'
         ? Object.entries(photoIndex).find(([, photo]) => (!!photo.linked === (mode === 'link') || isInside(book.folder, file)) && (photo.linked ? photo.path : join(book.folder, photo.path)) === file)?.[0]
         : Object.entries(registry).find(([, ref]) => (sourceLinked(ref) === (mode === 'link') || isInside(book.folder, file)) && (sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref))) === file)?.[0];
       if (previous) {
+        if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++; else counts.files++;
         imported.push(previous);
         continue;
       }
-      const id = { photo: 'ph-', markdown: 'tx-', file: 'fl-' }[request.kind] + randomUUID().slice(0, 12);
+      const id = { photo: 'ph-', markdown: 'tx-', file: 'fl-' }[kind] + randomUUID().slice(0, 12);
       const name = basename(file).replace(/[^\p{L}\p{N} ._-]/gu, '-');
       const relativePath = folder + '/' + id + '-' + name;
       const path = join(book.folder, relativePath);
       const original = await realpath(file);
       const linked = mode === 'link' && !isInside(book.folder, original);
-      if (linked) await approveSource(book.folder, { key: request.kind + ':' + id, kind: request.kind, path: original, linked }, request.accept);
-      if (!linked) { await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path); }
-      if (request.kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)) };
+      if (linked) await approveSource(book.folder, { key: kind + ':' + id, kind, path: original, linked }, request.accept);
+      if (!linked) { await prepare(folder); await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path);
+        // Keep the original's modification time: photo views estimate an undated photo's capture time from it.
+        await utimes(path, info.atime, info.mtime).catch(() => {}); }
+      if (kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)) };
       else registry[id] = linked ? { path: original, linked: true } : relativePath;
+      if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++; else counts.files++;
       imported.push(id);
     }
-    if (!imported.length) throw new Error('No supported files were selected.');
-    if (request.target && request.kind !== 'file') {
+    if (!imported.length) return { book, imported, copied, createdDirectories, counts };
+    if (request.target && request.kind && request.kind !== 'file') {
       const spread = project.spreads.find(({ id }) => id === request.target?.spread);
       if (!spread) throw new Error('The selected spread no longer exists.');
       const id = request.target.box;
@@ -350,10 +368,13 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       };
     }
     const next = await updateProject(book, { project, photoIndex }, true);
-    return { book: next, imported, copied };
+    return { book: next, imported, copied, createdDirectories, counts };
   } catch (error) {
     // A durable save intent may already refer to these assets, including when it needs recovery on next open.
-    if (!(error instanceof CommittedProjectSaveError)) await Promise.all(copied.map((path) => rm(path, { force: true })));
+    if (!(error instanceof CommittedProjectSaveError)) {
+      await Promise.all(copied.map((path) => rm(path, { force: true })));
+      for (const folder of [...createdDirectories].reverse()) await rmdir(folder).catch(() => {});
+    }
     throw error;
   }
 }
@@ -361,9 +382,10 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
 export function projectSummary(book: OpenProject, id: string): ProjectSummary {
   const base = renderOrigin + '/render/' + id;
   return {
-    id, folder: basename(book.folder), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
+    id, folder: basename(book.folder), viewKey: book.viewKey ?? createHash('sha256').update(book.folder).digest('hex'), readOnly: book.readOnly, project: book.project, photoIndex: book.photoIndex,
     photos: Object.fromEntries([...book.photos.keys()].map((photo) => [photo, base + '/thumb/' + photo])),
     photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
+    photoDates: Object.fromEntries([...book.photos].flatMap(([id, photo]) => { const date = photoDate(photo); return date ? [[id, date]] : []; })),
     photoSizes: Object.fromEntries([...book.photos].map(([photo, { width, height }]) => [photo, { width, height }])),
     texts: book.texts, sources: book.sources, ...(book.templateHash ? { templateHash: book.templateHash } : {}),
   };

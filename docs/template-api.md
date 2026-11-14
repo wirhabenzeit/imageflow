@@ -539,6 +539,10 @@ Saved data and its editing UI are separate. Parameters declare what is saved: ID
    - Controls that can hide themselves for good load with a `declaration-control-cycle` warning in the Book check: a control inside a group shown only depending on that control (a group shown while `show` is on that contains `show`), or controls whose conditions depend on each other (A shown only when B is on, B only when A is on). For layout (spread) parameters, the warning is given per spread: a spread that marks one of them on the page with `ctx.edit` or `ctx.Text` gets none, since that node's popover always shows it, while another spread of the same layout that marks none of them (for example because its values hide the marked node) gets the warning on itself. Marking a box's or element's own parameter does not count: its popover follows the same `controls` and conditions. For document parameters, the warning is dropped when any spread marks one of the cycle's parameters as `document.<id>`, since that node's popover shows it from any page.
 3. **A custom editor** for an element, below.
 
+Presentation uses the export artwork path (`ctx.mode === 'export'`), including final text flow and crop geometry. Templates should omit editing scaffolding there, just as for PDF output.
+
+Photo capture time, location and camera are described under [Photo metadata](#photo-metadata). The editor's photo views also sort and group photos that have no EXIF capture time by their file's modification time, shown as an estimate; that estimate is editor-only and never reaches templates. Photo views compare camera wall times as shot, and show estimated modification times in the computer's local timezone, so mixed cameras and file dates group consistently. Sorting and grouping are per-book view preferences and do not change the rendered book.
+
 #### Where editing happens
 
 Click a box, element, or marked node to edit it. Generated item controls and photo controls share a fixed position at the bottom center of the visible canvas; the selected item remains outlined on the page. The sidebar lists items without repeating their controls.

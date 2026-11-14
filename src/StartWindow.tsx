@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { emptyMenuState } from './commands';
 import { bookName } from './book-name';
 import type { DesktopApi, RecentDocument } from './desktop';
 
@@ -19,15 +20,20 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
     refresh();
     return () => { mounted = false; changed(); failed(); };
   }, [api]);
-  async function act(action: 'new' | 'open' | 'locate' | 'remove', id?: string) {
+  async function act(action: 'new' | 'open' | 'locate' | 'remove' | 'reveal', id?: string) {
     if (!api || busy) return;
     setBusy(true);
     setError('');
     try {
-      const result = id ? await api.recentDocument(id, action as 'open' | 'locate' | 'remove') : await api.openProject(action as 'new' | 'open');
+      const result = id ? await api.recentDocument(id, action as 'open' | 'locate' | 'remove' | 'reveal') : await api.openProject(action as 'new' | 'open');
       if ('error' in result) setError(result.error);
     } catch (error) { setError(error instanceof Error ? error.message : 'Could not open this book.'); }
     finally { setBusy(false); }
+  }
+  async function menu(book: RecentDocument) {
+    const result = await api?.showContextMenu([{ command: 'recent-open', enabled: book.available },
+      { command: 'recent-reveal', enabled: book.available }, 'recent-remove', ...(!book.available ? ['recent-locate' as const] : [])], { ...emptyMenuState, busy });
+    if (result) void act(({ 'recent-open': 'open', 'recent-reveal': 'reveal', 'recent-remove': 'remove', 'recent-locate': 'locate' } as const)[result.command as 'recent-open'], book.id);
   }
   // Books that can't be found stay listed so they can be located, but below the ones that can be opened.
   const ordered = [...recents.filter((book) => book.available), ...recents.filter((book) => !book.available)];
@@ -42,8 +48,8 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
     </aside>
     <section className="recent-books" aria-labelledby="recent-heading">
       <h2 id="recent-heading">Recent books</h2>
-      {ordered.length ? <ul>{ordered.map((book) => <li key={book.id} className={book.available ? undefined : 'missing'}>
-        <button className="recent-open" disabled={busy || !book.available} onClick={() => void act('open', book.id)}>
+      {ordered.length ? <ul>{ordered.map((book) => <li key={book.id} className={book.available ? undefined : 'missing'} onContextMenu={(event) => { event.preventDefault(); void menu(book); }} onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void menu(book); } }}>
+        <button className="recent-open" disabled={busy} onClick={() => void act(book.available ? 'open' : 'locate', book.id)}>
           <span className="recent-cover">{book.cover ? <img src={book.cover} alt="" /> : <span aria-hidden="true">◫</span>}</span>
           <span className="recent-description"><strong>{bookName(book.path)}</strong><span className="recent-location" title={book.path}>{book.path.split('/').slice(-2).join('/')}</span>
             <span>{book.available ? 'Opened ' + new Date(book.openedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Not found'}</span>

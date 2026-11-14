@@ -1,4 +1,4 @@
-import { exportAction, testBook } from './ui-actions.mjs';
+import { exportAction, menuAction, testBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -194,8 +194,7 @@ try {
 
   // Without the cover the months stay January to December, and twelve pages still print.
   await w.locator('.spread-thumb').first().click();
-  await w.waitForFunction(() => !document.querySelector('button[aria-label="Delete"]')?.disabled);
-  await w.getByRole('button', { name: 'Delete', exact: true }).click();
+  await menuAction(app, 'Delete Spread');
   await frame.locator('.cover').waitFor({ state: 'detached' });
   const coverless = await renderStatus();
   assert.equal(coverless.pages, 12);

@@ -517,7 +517,7 @@ export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...m
       const crop = getCrop(photo, placement, w / h);
       element.dataset.ppi = String(Math.min(photo.width * crop.width / w, photo.height * crop.height / h) * 96);
       if (!img) return;
-      if (book.mode !== 'edit' && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format);
+      if (book.mode !== 'edit' && !lazyPhotos && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format);
       img.style.width = 100 / crop.width + '%';
       img.style.height = 100 / crop.height + '%';
       img.style.left = -100 * crop.x / crop.width + '%';
