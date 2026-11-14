@@ -9,6 +9,14 @@ function listen<T>(channel: string, listener: (value: T) => void) {
 }
 
 const api: DesktopApi = {
+  updateState: () => ipcRenderer.invoke(channels.updateState),
+  onUpdateChanged: (listener) => listen(channels.updateChanged, listener),
+  checkUpdates: () => ipcRenderer.invoke(channels.checkUpdates),
+  restartUpdate: () => ipcRenderer.invoke(channels.restartUpdate),
+  dismissUpdate: () => ipcRenderer.invoke(channels.dismissUpdate),
+  // Acknowledge at once so main can tell a slow save from a hung renderer, then answer when the save queue drains.
+  onPrepareQuit: (listener) => listen<string>(channels.prepareQuit, (id) => { ipcRenderer.send(channels.prepareQuitAck, id); void Promise.resolve().then(listener).then((allowed) => ipcRenderer.send(channels.prepareQuitReply, id, allowed), () => ipcRenderer.send(channels.prepareQuitReply, id, false)); }),
+  onCancelQuit: (listener) => listen(channels.cancelQuit, listener),
   showMarkdown: (request) => ipcRenderer.invoke(channels.showMarkdown, request),
   markdownAction: (request) => ipcRenderer.invoke(channels.markdownAction, request),
   onMarkdownPrepareClose: (listener) => listen(channels.markdownPrepareClose, listener),

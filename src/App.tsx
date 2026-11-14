@@ -265,6 +265,8 @@ export function App() {
   const agentLocked = useRef(false);
   const [agentWorking, setAgentWorking] = useState(false);
   const pendingTasks = useRef(0);
+  const quitLock = useRef(false);
+  const quitAttempt = useRef(0);
   const [saving, setSaving] = useState(false);
   const workspace = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useCanvasLayout(summary?.folder);
@@ -615,6 +617,24 @@ export function App() {
     setAgentWorking(true);
     return true;
   });
+  const finishQuit = useEffectEvent(() => {
+    const reloadRunning = reloading.current && !reloadFailed.current;
+    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || agentLocked.current ||
+        document.querySelector('.field[aria-invalid="true"], .field[data-pending="true"]')) return false;
+    quitLock.current = true;
+    agentLocked.current = true;
+    if (workspace.current) workspace.current.inert = true;
+    return true;
+  });
+  const prepareQuit = useEffectEvent(async () => {
+    const attempt = ++quitAttempt.current;
+    // Inspector fields commit on blur. Focus in a saved field, select or harmless dialog isn't a draft.
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused.matches('input, textarea, select, [contenteditable="true"]') && !focused.closest('dialog')) focused.blur();
+    await queue.current;
+    await new Promise((resolve) => setTimeout(resolve, 0)); // React publishes validation and save results.
+    return attempt === quitAttempt.current && finishQuit();
+  });
   function placeSources(keys: string[], target = spreadId, firstBox?: string) {
     if (!template || !writable || !summary) return;
     const state = spreads.find(({ id }) => id === target);
@@ -643,12 +663,20 @@ export function App() {
   });
   useEffect(() => {
     if (!api) return;
+    const prepare = api.onPrepareQuit(() => prepareQuit());
+    const cancelQuit = api.onCancelQuit(() => {
+      quitAttempt.current++;
+      if (!quitLock.current) return;
+      quitLock.current = false;
+      agentLocked.current = false;
+      if (workspace.current) workspace.current.inert = false;
+    });
     const sourceCommand = api.onSourceCommand(onSourceCommand);
     const presentationClosed = api.onPresentationClosed(onPresentationClosed);
     const lease = api.onAgentLease(() => acquireAgentLease());
     const release = api.onAgentRelease(() => {
-      agentLocked.current = false;
-      if (workspace.current) workspace.current.inert = false;
+      agentLocked.current = quitLock.current;
+      if (workspace.current) workspace.current.inert = quitLock.current;
       setAgentWorking(false);
     });
     const command = api.onCommand((command) => onCommand(command));
@@ -661,7 +689,7 @@ export function App() {
       if ('error' in result) setError(result.error);
       else adopt(result.value, true);
     });
-    return () => { mounted = false; sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); };
+    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); };
   }, [api]);
 
   // Network origins the template declares (ADR 0006): decided once per book and template version (its hash) when it

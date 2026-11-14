@@ -1,29 +1,34 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { isUpdateChannel } from '../src/update-feed';
 import { defaultSettings } from '../src/settings';
 import type { AppSettings } from '../src/settings';
 
 function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) ||
-      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize')) throw new Error('Invalid app settings.');
+      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel')) throw new Error('Invalid app settings.');
   const appearance = 'appearance' in patch ? patch.appearance : current.appearance;
   if (appearance !== 'light' && appearance !== 'dark' && appearance !== 'system') throw new Error('Invalid appearance setting.');
   const newBookSize = 'newBookSize' in patch ? patch.newBookSize as { width?: unknown; height?: unknown } : current.newBookSize;
   if (newBookSize && (!Number.isInteger(newBookSize.width) || !Number.isInteger(newBookSize.height) ||
       Number(newBookSize.width) < 560 || Number(newBookSize.width) > 4000 || Number(newBookSize.height) < 420 || Number(newBookSize.height) > 3000)) throw new Error('Invalid window size.');
-  return { appearance, ...(newBookSize ? { newBookSize: newBookSize as {width:number;height:number} } : {}) };
+  const automaticUpdates = 'automaticUpdates' in patch ? patch.automaticUpdates : current.automaticUpdates;
+  if (typeof automaticUpdates !== 'boolean') throw new Error('Invalid automatic update setting.');
+  const updateChannel = 'updateChannel' in patch ? patch.updateChannel : current.updateChannel;
+  if (!isUpdateChannel(updateChannel)) throw new Error('Invalid update channel.');
+  return { appearance, automaticUpdates, updateChannel, ...(newBookSize ? { newBookSize: newBookSize as {width:number;height:number} } : {}) };
 }
 
 export class SettingsStore {
-  value = { ...defaultSettings };
+  value: AppSettings;
   private writes = Promise.resolve();
-  constructor(private file: string) {}
+  constructor(private file: string, initial: AppSettings = defaultSettings) { this.value = { ...initial }; }
 
   async load() {
     try {
       // The former development-only app default does not override a book's own future-import policy.
       const { importMode: _legacy, ...saved } = JSON.parse(await readFile(this.file, 'utf8'));
-      this.value = applyPatch(defaultSettings, saved);
+      this.value = applyPatch(this.value, saved);
     }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('ImageFlow could not read its settings; using defaults.', error);

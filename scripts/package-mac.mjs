@@ -1,5 +1,5 @@
-import { cp, mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { packager } from '@electron/packager';
@@ -15,7 +15,11 @@ import { macSigningOptions } from './mac-signing-options.mjs';
 if (process.platform !== 'darwin') throw new Error('Run the macOS build on a Mac.');
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const { values } = parseArgs({ options: { release: { type: 'boolean', default: false }, arch: { type: 'string' } } });
+const { values } = parseArgs({ options: { release: { type: 'boolean', default: false }, arch: { type: 'string' }, 'upgrade-fixture': { type: 'string' } } });
+const fixture = values['upgrade-fixture'] ? JSON.parse(await readFile(values['upgrade-fixture'], 'utf8')) : null;
+if (fixture && values.release) throw new Error('Upgrade fixtures cannot be release builds.');
+if (fixture && (!resolve(fixture.output).startsWith(join(root, '.build/upgrade-test/')) || !resolve(fixture.profile).startsWith(join(root, '.build/upgrade-test/')) ||
+    !/^https:\/\/127\.0\.0\.1:\d+\/updates$/.test(fixture.baseURL) || !/^9\.9\.(?:9(?:-beta\.[12])?|10)$/.test(fixture.version) || !resolve(fixture.book).startsWith(join(root, '.build/upgrade-test/')) || !Number.isInteger(fixture.debugPort) || fixture.debugPort < 1024 || fixture.debugPort > 65535)) throw new Error('Invalid isolated upgrade fixture.');
 const options = macBuildOptions({ arch: values.arch, release: values.release });
 async function packageApp() {
   const work = join(root, '.build');
@@ -25,7 +29,8 @@ async function packageApp() {
     const source = join(staging, 'app');
     const books = join(staging, 'sample');
     await Promise.all([
-      stageDesktop({ packaged: true, destination: source }),
+      stageDesktop({ packaged: true, destination: source, version: fixture?.version ?? metadata.version,
+        updateTest: fixture ? { baseURL: fixture.baseURL, profile: fixture.profile, book: fixture.book, debugPort: fixture.debugPort } : null }),
       cp(sample, books, { recursive: true, filter: (path) => !['.imageflow', 'whitewall'].includes(basename(path)) }),
     ]);
     // New Book shows the built-in templates at once on first launch: their opening spreads ship pre-rendered.
@@ -33,14 +38,15 @@ async function packageApp() {
     await renderTemplatePreviews({ app: source, books, output: previews });
     const [output] = await packager({
       dir: source,
-      out: join(root, 'out'),
+      out: fixture?.output ?? join(root, 'out'),
+      appVersion: fixture?.version ?? metadata.version,
       platform: 'darwin',
       arch: options.arch,
       electronVersion: metadata.devDependencies.electron,
       download: { cacheRoot: join(root, '.build', 'electron-cache'), checksums: electronChecksums },
-      appBundleId: 'ch.wirhabenzeit.imageflow',
+      appBundleId: fixture ? 'ch.wirhabenzeit.imageflow.upgrade-test' : 'ch.wirhabenzeit.imageflow',
       appCategoryType: 'public.app-category.photography',
-      extendInfo: {
+      extendInfo: fixture ? {} : {
         // macOS 26 and later show the layered Icon Composer icon from Assets.car; earlier versions use ImageFlow.icns.
         CFBundleIconFile: 'ImageFlow.icns', CFBundleIconName: 'ImageFlow',
         UTExportedTypeDeclarations: [{

@@ -17,14 +17,15 @@ const photoDependencies = [
 ];
 
 // esbuild options for the main process and preload; scripts/dev.mjs rebuilds them in watch mode.
-export const mainBuild = (destination = desktop) => ({
+export const mainBuild = (destination = desktop, updateTest = null) => ({
+  define: { __IMAGEFLOW_UPDATE_TEST__: JSON.stringify(updateTest) },
   entryPoints: [join(root, 'desktop', 'main.ts'), join(root, 'desktop', 'preload.ts'), join(root, 'desktop', 'typecheck-worker.ts')],
   outdir: destination, outExtension: { '.js': '.cjs' }, bundle: true,
   platform: 'node', format: 'cjs', external: ['electron', 'esbuild', 'sharp', 'typescript'],
 });
 
 // `dev` stages without the Vite build; the editor then comes from the Vite dev server.
-export async function stageDesktop({ packaged = false, dev = false, destination = desktop } = {}) {
+export async function stageDesktop({ packaged = false, dev = false, destination = desktop, updateTest = null, version = metadata.version } = {}) {
   await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
   await Promise.all([
@@ -42,13 +43,13 @@ export async function stageDesktop({ packaged = false, dev = false, destination 
     }),
     packaged ? Promise.resolve() : cp(dirname(dirname(esbuildBinary)), join(destination, 'node_modules', platform), { recursive: true }),
     writeFile(join(destination, 'package.json'), JSON.stringify({
-      name: 'imageflow', productName: 'ImageFlow', version: metadata.version, main: 'main.cjs',
+      name: 'imageflow', productName: 'ImageFlow', version, main: 'main.cjs',
     })),
     cp(join(root, 'docs'), join(destination, 'docs'), { recursive: true }),
     cp(join(root, 'skills'), join(destination, 'skills'), { recursive: true }),
     buildMcp(join(destination, 'mcp-bridge.cjs')),
     buildMacHeader(destination),
-    build(mainBuild(destination)),
+    build(mainBuild(destination, updateTest)),
   ]);
 }
 

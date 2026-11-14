@@ -592,6 +592,20 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 @media (prefers-reduced-motion: reduce) { .settings-tab-loading { animation: none; } }
 .studio .settings-tabs button[aria-selected="true"] { background: var(--subtle-hover); color: var(--accent); }
 .studio .settings-tabs button:hover:not(:disabled) { border-color: transparent; }
+
+.update-notice { position: fixed; right: 20px; top: 48px; z-index: 10000; max-width: 330px; padding: 14px 16px; border: 1px solid var(--edge); border-radius: 10px; background: var(--popup-surface); color: var(--text); box-shadow: 0 6px 28px #0003; font: 13px/1.45 var(--ui-font); }
+.update-notice p { margin: 0 0 10px; }
+.update-notice > div, .update-channel { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.settings-update-actions { display: flex; gap: 8px; }
+.update-notice button { cursor: default; min-height: 24px; padding: 3px 10px; border: 0; border-radius: 6px; background: var(--button-fill); box-shadow: var(--button-shadow); color: var(--text); font: 400 12px/16px var(--ui-font); }
+.settings-update-actions { margin-top: 12px; }
+.update-status { min-height: 2.8em; max-width: 330px; }
+
+.update-notice button.primary { background: var(--button-primary); color: #fff; box-shadow: 0 0 0 .5px #00000026, 0 .5px 1.5px #0000002e; font-weight: 500; }
+.update-notice button:active { background: var(--button-pressed); }
+.update-notice button.primary:active { background: var(--button-primary); filter: brightness(.92); }
+.update-notice button:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
+
 .settings-content { padding: 22px 28px 24px; }
 .settings-form { display: grid; grid-template-columns: 120px minmax(0, 1fr); column-gap: 10px; row-gap: 20px; align-items: start; }
 .settings-label { padding-top: 5px; text-align: right; font-size: 13px; white-space: nowrap; }

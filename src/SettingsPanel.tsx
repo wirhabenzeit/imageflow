@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AgentSettings } from './AgentSettings';
 import { Icon } from './Icon';
+import type { UpdateChannel } from './update-feed';
+import type { UpdateState } from './updates';
 import type { DesktopApi } from './desktop';
 import type { AppSettings, Appearance, SettingsPane } from './settings';
 
@@ -12,6 +14,14 @@ const appearances: { value: Appearance; label: string }[] = [
 ];
 
 export function SettingsPanel({ api }: { api?: DesktopApi }) {
+  const [update, setUpdate] = useState<UpdateState>();
+  useEffect(() => {
+    if (!api) return;
+    let active = true, changed = false;
+    const stop = api.onUpdateChanged((state) => { changed = true; setUpdate(state); });
+    void api.updateState().then((state) => { if (active && !changed) setUpdate(state); });
+    return () => { active = false; stop(); };
+  }, [api]);
   const revision = useRef(0);
   const pending = useRef(0);
   const [settings, setSettings] = useState<AppSettings>();
@@ -95,6 +105,24 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
               </label>)}
             </div>
             <p className="settings-note" id="appearance-description">System follows your macOS appearance.</p>
+          </div>
+          <span className="settings-label">Updates:</span>
+          <div className="settings-control">
+            <label><input type="checkbox" checked={settings?.automaticUpdates ?? true} disabled={!settings || !update || update.status === 'unavailable' || update.status === 'initializing'}
+              onChange={(event) => void choose({ automaticUpdates: event.target.checked })} /> Automatically check for updates</label>
+            <label className="update-channel">Channel: <select aria-label="Update channel" value={settings?.updateChannel ?? 'stable'}
+              disabled={!settings || !update || ['initializing', 'unavailable', 'checking', 'downloading', 'ready'].includes(update.status)}
+              onChange={(event) => void choose({ updateChannel: event.target.value as UpdateChannel })}>
+              <option value="stable">Stable</option><option value="beta">Beta</option>
+            </select></label>
+            <p className="settings-note">Beta includes early versions. Switching to Stable does not downgrade the app.</p>
+            <div className="settings-update-actions">
+              <button disabled={!api || update?.status === 'initializing' || update?.status === 'checking' || update?.status === 'downloading'} onClick={() => void api?.checkUpdates()}>Check for Updates…</button>
+              {update?.status === 'ready' && <button onClick={() => void api?.restartUpdate()}>Restart to Update</button>}
+            </div>
+            <p className="settings-note update-status" role="status">{update?.status === 'current' ? "You’re up to date." :
+              update?.status === 'initializing' ? 'Preparing update checks…' : update?.status === 'checking' ? 'Checking for updates…' : update?.status === 'downloading' ? 'Downloading update…' :
+              update?.status === 'ready' ? 'An update is ready to install.' : update?.message ?? ''}</p>
           </div>
           {error && <p role="alert" className="error-text settings-control">{error}</p>}
         </div>}

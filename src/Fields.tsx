@@ -270,6 +270,7 @@ export function Field({ param, value, change, description, compact = false }: { 
   // too) is only the field's hover tooltip, so the sidebar stays as plain as the controls themselves.
   const help = !description && param.description ? param.description : undefined;
   return <div className={compact ? 'field compact-field' : 'field' + (param.type === 'list' ? ' field-list' : '')}
+    aria-invalid={invalid || undefined} data-pending={draft !== undefined && !sameValue(draft, value) || undefined}
     title={compact ? param.label + (help ? '\n' + help : '') : help}>
     {!compact && !listButton && param.type !== 'boolean' && <span className="field-name">{param.label}</span>}
     <ParamControl param={param} value={value} draft={draft} setDraft={type} apply={apply} compact={compact} commitOnBlur />

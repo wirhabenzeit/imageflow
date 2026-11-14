@@ -86,9 +86,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const stop = () => controller.abort();
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
   try {
-    await withMacCredentials({ mode }, (env) => {
+    const credentialMode = mode === 'sign-fixtures' ? 'sign' : mode;
+    const script = mode === 'sign-fixtures' ? 'sign-upgrade-fixtures.mjs' : mode === 'sign' ? 'sign-mac.mjs' : 'notarize-mac.mjs';
+    await withMacCredentials({ mode: credentialMode }, (env) => {
       controller.signal.throwIfAborted();
-      return runCredentialChild([join(root, 'scripts', mode === 'sign' ? 'sign-mac.mjs' : 'notarize-mac.mjs'), ...(values.arch ? ['--arch', values.arch] : [])], { env, signal: controller.signal });
+      return runCredentialChild([join(root, 'scripts', script), ...(values.arch ? ['--arch', values.arch] : [])], { env, signal: controller.signal });
     });
   } finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
 }
