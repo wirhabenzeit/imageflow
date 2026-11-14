@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, readFile, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
@@ -22,6 +22,8 @@ for (const [id, title, date] of [['late', 'C', '2026:11:03 08:00:00'], ['early',
   const image = sharp({ create: { width: id === 'late' ? 600 : 800, height: id === 'late' ? 900 : 600, channels: 3, background: id === 'early' ? '#cbb68b' : '#709fb0' } });
   if (date) image.withExif({ IFD2: { DateTimeOriginal: date, OffsetTimeOriginal: '+02:00' } });
   await image.jpeg().toFile(join(folder, 'photos', id + '.jpg'));
+  // Keep file-date ordering independent of the date and timezone running this check.
+  if (!date) await utimes(join(folder, 'photos', id + '.jpg'), new Date('2026-11-05T12:00:00Z'), new Date('2026-11-05T12:00:00Z'));
   photoIndex[id] = { path: 'photos/' + id + '.jpg', title };
 }
 photoIndex.missing = { path: 'photos/Missing.jpg', title: 'Z' };
@@ -49,6 +51,7 @@ try {
   const summary = await current(page);
   assert.equal(summary.photoDates.early.captured, '2026-11-02T23:50:00+02:00');
   assert.equal(summary.photoDates.estimated.capturedEstimated, true);
+  assert.equal(summary.photoDates.estimated.captured, '2026-11-05T12:00:00.000Z');
   assert.equal(await page.locator('.document-proxy img').count(), 0);
   assert.equal(await page.locator('.document-proxy svg').count(), 1);
   assert.ok(await page.locator('.document-title').evaluate((node) => parseFloat(getComputedStyle(node).fontSize) >= 13));
@@ -56,10 +59,15 @@ try {
   assert.equal(await page.locator('.source-photo[data-id="late"] .badge[aria-label="Used once"] svg').count(), 1);
   // A height change scales every preceding thumbnail; retain the same point in the center photo.
   const divider = page.getByRole('separator', { name: 'Resize Sources', exact: true });
+  // ResizeObserver restores the center after layout. Wait for those frames before scrolling or measuring.
+  const settledStrip = () => page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(null)));
+  }));
   await divider.focus();
   for (let i = 0; i < 13; i++) await page.keyboard.press('ArrowUp');
+  await settledStrip();
   await page.locator('.source-items-photo').evaluate((node) => { node.scrollLeft = (node.scrollWidth - node.clientWidth) / 2; });
-  await page.waitForTimeout(80);
+  await settledStrip();
   const stripCenter = () => page.locator('.source-items-photo').evaluate((node) => {
     const center = node.getBoundingClientRect().left + node.clientWidth / 2;
     const photos = [...node.querySelectorAll('.source-photo')];
@@ -71,11 +79,20 @@ try {
   const stripBefore = await stripCenter();
   assert.ok(stripBefore);
   for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowUp');
-  await page.waitForTimeout(80);
+  await settledStrip();
   const stripAfter = await stripCenter();
-  assert.equal(stripAfter?.id, stripBefore.id);
+  assert.equal(stripAfter?.id, stripBefore.id, JSON.stringify({ stripBefore, stripAfter }));
   assert.ok(Math.abs(stripAfter.fraction - stripBefore.fraction) < .015, JSON.stringify({ stripBefore, stripAfter }));
+  // When shrinking makes the entire strip fit, scrolling is clamped. Growing it again retains the original point.
   for (let i = 0; i < 18; i++) await page.keyboard.press('ArrowDown');
+  await settledStrip();
+  for (let i = 0; i < 18; i++) await page.keyboard.press('ArrowUp');
+  await settledStrip();
+  const stripRestored = await stripCenter();
+  assert.equal(stripRestored?.id, stripBefore.id, JSON.stringify({ stripBefore, stripRestored }));
+  assert.ok(Math.abs(stripRestored.fraction - stripBefore.fraction) < .015, JSON.stringify({ stripBefore, stripRestored }));
+  for (let i = 0; i < 18; i++) await page.keyboard.press('ArrowDown');
+  await settledStrip();
   await page.locator('.source-items-photo').evaluate((node) => { node.scrollLeft = 0; });
   const projectBefore = await readFile(join(folder, 'project.json'), 'utf8');
   const photosBefore = await readFile(join(folder, 'photos.json'), 'utf8');
@@ -86,7 +103,7 @@ try {
   await page.locator('.photo-group-heading').first().waitFor();
   assert.equal(await page.locator('.photo-group-heading').count(), 4);
   await menuAction(app, 'Show Capture Time');
-  assert.equal(await page.locator('.photo-capture-time').count(), 4);
+  await until(async () => await page.locator('.photo-capture-time').count() === 4, 'Capture labels shown');
   await page.locator('.photo-group-heading').nth(1).click();
   assert.equal(await page.locator('.source-photo[aria-selected="true"]').count(), 2);
   assert.equal(await page.locator('.sources-bar').getByRole('button', { name: 'Assets…', exact: true }).count(), 0);
@@ -101,8 +118,9 @@ try {
   await divider.focus();
   for (let i = 0; i < 13; i++) await page.keyboard.press('ArrowUp');
   assert.ok(await strip.evaluate((node) => node.scrollWidth > node.clientWidth + 100));
+  await settledStrip();
   await strip.evaluate((node) => { node.scrollLeft = node.scrollWidth - node.clientWidth; });
-  await page.waitForTimeout(80);
+  await settledStrip();
   const headings = await strip.locator('.photo-strip-group').evaluateAll((groups) => groups.map((group) => {
     const bounds = group.getBoundingClientRect();
     const heading = group.querySelector('.photo-group-heading').getBoundingClientRect();
@@ -116,11 +134,11 @@ try {
     const photo = node.querySelector('.source-photo[data-id="night"]').getBoundingClientRect();
     node.scrollLeft += photo.left + photo.width / 2 - node.getBoundingClientRect().left - node.clientWidth / 2;
   });
-  await page.waitForTimeout(80);
+  await settledStrip();
   const groupedBefore = await stripCenter();
   assert.equal(groupedBefore.id, 'night');
   for (let i = 0; i < 4; i++) await page.keyboard.press('ArrowUp');
-  await page.waitForTimeout(80);
+  await settledStrip();
   const groupedAfter = await stripCenter();
   assert.equal(groupedAfter.id, groupedBefore.id);
   assert.ok(Math.abs(groupedAfter.fraction - groupedBefore.fraction) < .015, JSON.stringify({ groupedBefore, groupedAfter }));
