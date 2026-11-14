@@ -150,7 +150,8 @@ export type ElementEditorProps = {
   waitUntil: (until: Promise<unknown>) => void;
   // The app's own control for one of the editor's parameters, bound to the draft, and the file import it uses.
   // `scope: 'spread'` names one of the layout parameters the editor declares instead of an element parameter.
-  Control: (props: { parameter: string; label?: string; scope?: 'element' | 'spread' }) => ReactNode;
+  // For a list, `itemId` and `field` name one field of one item.
+  Control: (props: { parameter: string; label?: string; scope?: 'element' | 'spread'; itemId?: string; field?: string }) => ReactNode;
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };
 // The read-only view of the book an editor is opened from: the values `render` reads for that spread, without the
@@ -171,7 +172,7 @@ export type DocumentEditorProps = {
   readOnly: boolean; commit: () => void; cancel: () => void;
   presentation: EditorPresentation;
   waitUntil: (until: Promise<unknown>) => void;
-  Control: (props: { parameter: string; label?: string }) => ReactNode;
+  Control: (props: { parameter: string; label?: string; itemId?: string; field?: string }) => ReactNode;
   importFile: (accept: readonly string[]) => Promise<string | undefined>;
 };
 // A layout family's picker chooses one of the family's variants. It runs in a sandboxed frame like an element
@@ -589,6 +590,7 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
   const data = useSpread();
   const { param, value } = parameterAt(data, parameter);
   if (!param) throw new Error('Text shows parameter ' + parameter + ', which this layout does not declare.');
+  if (param.type === 'list') throw new Error('Text shows parameter ' + parameter + ', which is a list. Show its items with their own markup.');
   if (!textTags.has(as)) throw new Error('Text cannot render as ' + as + '. Use one of ' + [...textTags].join(', ') + '.');
   if (presentation !== undefined && presentation !== 'inline' && presentation !== 'dialog') throw new Error("Text presentation must be 'inline' or 'dialog'.");
   const inline = presentation === 'inline';

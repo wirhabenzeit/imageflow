@@ -19,7 +19,9 @@ import type { PrintSide, ResolvedFormat, UnitPages } from './format';
 import { parseDocument } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
-import { isParameterValue, parameterWarnings, resolveParams } from './parameters';
+import { isParameterValue, parameterWarnings, resolveParams, resolveValue } from './parameters';
+import type { ListItem } from './parameters';
+import { fileErrors } from './file-findings';
 import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
@@ -94,30 +96,6 @@ function textAssignments(book: RenderProject, template: Template) {
     });
   }
   return { chains, positions };
-}
-
-// Assigned files that are gone, unreadable, or of a type the parameter does not accept. An unassigned file
-// parameter is valid; the template renders without it.
-function fileErrors(book: RenderProject, schema: Parameters, values: Values, scope: string): Issue[] {
-  return Object.entries(schema).flatMap(([id, param]): Issue[] => {
-    const value = values[id];
-    if (param.type !== 'file' || typeof value !== 'string' || !value) return [];
-    const where = scope + ' · ' + param.label + ': ';
-    const path = book.project.files[value];
-    const found = book.files[value];
-    const finding = (code: string, message: string, suggestion: string): Issue[] =>
-      [{ message: where + message, code, parameter: id, source: value, suggestion }];
-    if (!path || !found) {
-      return finding('file-missing', 'the assigned file is no longer in the project. Choose it again.',
-        'Import the file again with import_sources, then assign its new ID to parameter ' + id + '.');
-    }
-    if (found.problem) return finding('file-unreadable', found.problem, 'Replace the file or assign another file to parameter ' + id + '.');
-    if (!param.accept.includes(found.extension)) {
-      return finding('file-type', found.name + ' is not a ' + param.accept.join(' or ') + ' file. Choose another file.',
-        'Assign a ' + param.accept.join(' or ') + ' file to parameter ' + id + '.');
-    }
-    return [];
-  });
 }
 
 // Converts a measured CSS pixel distance to millimetres, rounded for reporting.
@@ -1217,14 +1195,38 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
 
   const EditorValues = React.createContext({ element: draft, spread: spreadDraft });
   // The app's control for one of this editor's parameters, writing to the draft like `set` (or `setSpread`).
-  function Control({ parameter, label, scope = 'element' }: { parameter: string; label?: string; scope?: 'element' | 'spread' }) {
+  // For a list, `item` and `field` name one field of one item (by its ID), and the control writes the whole list with
+  // that field changed.
+  // Item IDs a list's controls have shown: a control for one of them renders nothing once the item is removed, while
+  // an ID never seen is a mistake in the editor.
+  const seenItems = new Set<string>();
+  function Control({ parameter, label, scope = 'element', itemId: item, field }: { parameter: string; label?: string; scope?: 'element' | 'spread'; itemId?: string; field?: string }) {
     const values = React.useContext(EditorValues)[scope === 'spread' ? 'spread' : 'element'];
     const [owned, parameters] = scope === 'spread' ? [ownedSpread, layout!.parameters] : [editor!.parameters, declared];
     const param = owned.includes(parameter) && Object.hasOwn(parameters, parameter) ? parameters[parameter] : undefined;
     if (!param) throw new Error(unknownControl(parameter, owned, scope));
-    const value = isParameterValue(param, values[parameter]) ? values[parameter] : param.default;
+    const value = resolveValue(param, values[parameter]);
+    const write = (next: Values[string]) => changes(scope === 'spread' ? 'spread' : 'element', { [parameter]: next });
+    if (item !== undefined || field !== undefined) {
+      if (param.type !== 'list') throw new Error('Control ' + parameter + ' is not a list, so it takes no itemId or field.');
+      const items = value as ListItem[];
+      const fieldParam = field !== undefined && Object.hasOwn(param.item, field) ? param.item[field] : undefined;
+      if (!fieldParam) throw new Error('Control ' + parameter + ' needs field, one of: ' + Object.keys(param.item).join(', ') + '.');
+      if (typeof item !== 'string') throw new Error('Control ' + parameter + ' with field ' + field + ' needs itemId, the id of one of its items.');
+      const key = scope + ' ' + parameter + ' ';
+      for (const { id } of items) seenItems.add(key + id);
+      const current = items.find(({ id }) => id === item);
+      // An item that was just removed renders nothing rather than failing the editor; an unknown ID is a mistake.
+      if (!current) {
+        if (seenItems.has(key + item)) return null;
+        throw new Error('Control ' + parameter + ' has no item ' + JSON.stringify(item) + '. Use the id of one of its items.');
+      }
+      return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
+        React.createElement(Field, { param: label ? { ...fieldParam, label } : fieldParam, value: current[field!],
+          change: (next) => write(items.map((other) => other.id === item ? { ...other, [field!]: next as ListItem[string] } : other)) }));
+    }
     return React.createElement('fieldset', { className: 'if-control', disabled: readOnly },
-      React.createElement(Field, { param: label ? { ...param, label } : param, value, change: (next) => changes(scope === 'spread' ? 'spread' : 'element', { [parameter]: next }) }));
+      React.createElement(Field, { param: label ? { ...param, label } : param, value, change: write }));
   }
 
   // Inline, the editor replaces the page's artwork only once it has drawn: after its fonts, what it asked to wait for

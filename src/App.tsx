@@ -487,7 +487,8 @@ export function App() {
     if (!api) return;
     const groups = template ? [template.parameters, ...Object.values(template.spreads).flatMap((spread) => [spread.parameters,
       ...Object.values(spread.boxes).map((box) => box.parameters), ...Object.values(spread.elements).map((element) => element.parameters)])] : [];
-    const accept = [...new Set(groups.flatMap((group) => Object.values(group).flatMap((param) => param.type === 'file' ? param.accept : [])))];
+    const accept = [...new Set(groups.flatMap((group) => Object.values(group).flatMap((param) =>
+      param.type === 'list' ? Object.values(param.item) : [param]).flatMap((param) => param.type === 'file' ? param.accept : [])))];
     const result = await api.showAssets(accept);
     if ('error' in result) setError(result.error);
   }

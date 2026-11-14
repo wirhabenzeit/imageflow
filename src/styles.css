@@ -155,6 +155,29 @@ body { margin: 0; }
 .preview-state { position: absolute; top: 10px; right: 18px; z-index: 2; pointer-events: none;
   padding: 4px 8px; border-radius: 4px; background: var(--control-surface); box-shadow: 0 1px 3px #0002; font-size: 12px; }
 
+/* List parameters: rows collapsed to a summary, expanded to their fields; a popover from a button in toolbars. */
+.pc-list { display: grid; gap: 6px; min-width: 0; }
+.pc-list-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.pc-list-item { border: 1px solid var(--control-border); border-radius: 6px; background: var(--field-surface); min-width: 0; }
+.pc-list-item.dragging { opacity: .5; }
+.pc-list-row { display: flex; align-items: center; gap: 2px; min-width: 0; padding: 2px; }
+.studio .pc-list-summary { all: unset; flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px; font-size: 12px; cursor: default; border-radius: 4px; }
+.studio .pc-list-summary:focus-visible { outline: 2px solid var(--accent); }
+.pc-list-swatch { flex: none; width: 12px; height: 12px; border-radius: 3px; box-shadow: inset 0 0 0 1px #0003; }
+.pc-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-list-actions { display: flex; flex: none; gap: 1px; }
+.studio .pc-list-actions button { display: grid; place-items: center; width: 22px; height: 22px; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.studio .pc-list-actions button:disabled { opacity: .35; }
+.pc-list-fields { display: grid; gap: 8px; padding: 6px 8px 8px; border-top: 1px solid var(--control-border); }
+.studio .pc-list-add { justify-self: start; display: flex; align-items: center; gap: 4px; }
+.pc-list-compact { position: relative; }
+.studio .pc-list-toggle { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+/* The toolbar sits under the canvas, so the list opens upwards, over the canvas. */
+.pc-list-popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 20; width: 300px; max-width: 80vw; max-height: 60vh; overflow: auto;
+  padding: 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--panel-surface); box-shadow: 0 6px 24px #0003; white-space: normal; }
+.inline-editor-fields .pc-list-popover .field { display: grid; gap: 4px; white-space: normal; }
+.inline-editor-fields .pc-list-popover .pc-file .box-photo-info { display: grid; }
+
 /* Source inspector */
 .sources { min-width: 0; border-top: 1px solid var(--edge); display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .sources-bar { display: flex; align-items: center; gap: 6px; padding: 7px 12px 0; }
@@ -259,11 +282,11 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .ep-hint { margin: 6px 0 0; font-size: 11px; }
 
 /* Parameter controls, shared by the Inspector and the popover */
-:is(.inspector, .document-settings, .edit-popover) :is(input:not([type]), input[type="text"], input[type="number"], input[type="date"], input[type="month"], select, textarea) {
+:is(.inspector, .document-settings, .edit-popover, .pc-list-popover) :is(input:not([type]), input[type="text"], input[type="number"], input[type="date"], input[type="month"], select, textarea) {
   width: 100%; min-width: 0; padding: 5px 7px; border: 1px solid var(--control-border); border-radius: 5px; background: var(--field-surface);
   font: 12px/1.4 var(--ui-font); color: var(--text);
 }
-:is(.inspector, .document-settings, .edit-popover) :is(input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+:is(.inspector, .document-settings, .edit-popover, .pc-list-popover) :is(input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 :is(.inspector, .document-settings, .edit-popover) textarea { resize: vertical; }
 .field-name { font-size: 12px; color: var(--muted); }
 .pc-count { justify-self: end; font-size: 11px; color: var(--muted); }
@@ -278,6 +301,29 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .studio .pc-segmented button[aria-checked="true"] { background: var(--field-surface); box-shadow: 0 1px 2px #0002; font-weight: 500; }
 .pc-switch { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 12px; }
 .pc-switch input { accent-color: var(--accent); }
+
+/* List parameters: rows collapsed to a summary, expanded to their fields; a popover from a button in toolbars. */
+.pc-list { display: grid; gap: 6px; min-width: 0; }
+.pc-list-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.pc-list-item { border: 1px solid var(--control-border); border-radius: 6px; background: var(--field-surface); min-width: 0; }
+.pc-list-item.dragging { opacity: .5; }
+.pc-list-row { display: flex; align-items: center; gap: 2px; min-width: 0; padding: 2px; }
+.studio .pc-list-summary { all: unset; flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px; font-size: 12px; cursor: default; border-radius: 4px; }
+.studio .pc-list-summary:focus-visible { outline: 2px solid var(--accent); }
+.pc-list-swatch { flex: none; width: 12px; height: 12px; border-radius: 3px; box-shadow: inset 0 0 0 1px #0003; }
+.pc-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-list-actions { display: flex; flex: none; gap: 1px; }
+.studio .pc-list-actions button { display: grid; place-items: center; width: 22px; height: 22px; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.studio .pc-list-actions button:disabled { opacity: .35; }
+.pc-list-fields { display: grid; gap: 8px; padding: 6px 8px 8px; border-top: 1px solid var(--control-border); }
+.studio .pc-list-add { justify-self: start; display: flex; align-items: center; gap: 4px; }
+.pc-list-compact { position: relative; }
+.studio .pc-list-toggle { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+/* The toolbar sits under the canvas, so the list opens upwards, over the canvas. */
+.pc-list-popover { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 20; width: 300px; max-width: 80vw; max-height: 60vh; overflow: auto;
+  padding: 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--panel-surface); box-shadow: 0 6px 24px #0003; white-space: normal; }
+.inline-editor-fields .pc-list-popover .field { display: grid; gap: 4px; white-space: normal; }
+.inline-editor-fields .pc-list-popover .pc-file .box-photo-info { display: grid; }
 
 /* Source inspector */
 .source-inspector { display: grid; gap: 4px; }

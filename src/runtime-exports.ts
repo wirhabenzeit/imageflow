@@ -34,6 +34,8 @@ export const contract1Capabilities = [
   'inline-editors',
   // Plain string ctx.Text parameters edited in the template's typography.
   'inline-text',
+  // `p.list`: lists of flat items with stable IDs, a generated list control and item-level project commands (#115).
+  'list-parameters',
   // `preview`: the template's own image for New Book, instead of a render of its opening spread.
   'template-preview',
 ] as const;

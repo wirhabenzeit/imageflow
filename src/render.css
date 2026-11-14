@@ -166,6 +166,15 @@ html:has(.if-inline-text-frame), html:has(.if-inline-text-frame) body { overflow
 .if-editor .if-control .pc-segmented button { flex: 1; border: 0; background: transparent; }
 .if-editor .if-control .pc-segmented button[aria-checked="true"] { background: var(--if-editor-control); box-shadow: 0 1px 2px #0002; }
 .if-editor .if-control .pc-file select { flex: 1; min-width: 0; }
+.if-editor .if-control .pc-list-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.if-editor .if-control .pc-list-item { border: 1px solid var(--if-editor-border); border-radius: 6px; }
+.if-editor .if-control .pc-list-row { display: flex; align-items: center; gap: 2px; padding: 2px; }
+.if-editor .if-control .pc-list-summary { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; border: 0; background: transparent; text-align: left; }
+.if-editor .if-control .pc-list-swatch { width: 12px; height: 12px; border-radius: 3px; }
+.if-editor .if-control .pc-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.if-editor .if-control .pc-list-actions button { border: 0; background: transparent; padding: 2px; }
+.if-editor .if-control .pc-list-fields { display: grid; gap: 8px; padding: 6px 8px 8px; }
+.if-editor .if-control .pc-list-add { margin-top: 6px; }
 .if-editor .if-control input.pc-number { width: 64px; }
 .if-layout-settings { padding: 0; background: transparent; }
 html:has(.if-layout-settings) { background: transparent; }

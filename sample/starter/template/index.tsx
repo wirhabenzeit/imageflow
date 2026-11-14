@@ -389,9 +389,9 @@ export default defineTemplate({
       } },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
-        const { trackColor, trackWidth, ...values } = ctx.elements.map.params;
+        const { trackWidth, ...values } = ctx.elements.map.params;
         return <Paper context={ctx} bled={{ left: true, right: true }}>
-          <MapView values={values} trackColor={trackColor} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
+          <MapView values={values} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
           {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(mapTitleRect(ctx.format))}>{ctx.params.mapTitle}</h2>}
         </Paper>;
       },
