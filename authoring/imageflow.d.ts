@@ -130,7 +130,16 @@ export type ResolvedFormat =
 
 // Parameters
 
-type Common = { label: string };
+type Common = {
+  label: string;
+  /**
+   * Plain help text, up to 1000 characters (trimmed, not empty): what the value means, which way it goes and when to
+   * change it, such as `'Higher values zoom in; 1 shows the whole route.'`. Agents read it in the authoring context and
+   * MCP inspection; the editor shows it behind an info button on the field, unless a `controls` entry gives the field
+   * its own description. It changes no default, constraint or saved value. Use `unit` for units.
+   */
+  description?: string;
+};
 type Numeric = { min?: number; max?: number; step?: number; unit?: string };
 export type BooleanParameter = Common & { type: 'boolean'; default: boolean };
 export type StringParameter = Common & { type: 'string'; default: string; multiline?: boolean; maxLength?: number; placeholder?: string };
@@ -544,6 +553,9 @@ export type BoundGeometry = {
   css: typeof geometry.css;
 };
 
+/** Where a render is shown: see `RenderContext.view`. More views may be added; test only `view === 'canvas'`. */
+export type RenderView = 'canvas' | 'thumbnail' | 'layout-preview' | 'export';
+
 /** The context passed to `render`, typed from a spread declared with the `spread` builder or `spreadFor`. */
 export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = {
   params: ValuesOf<S>;
@@ -562,7 +574,19 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   spread: string;
   /** The layout being drawn: the spread's own, or the previewed one in a layout preview. */
   layout: string;
+  /**
+   * `'edit'` for every render in the editor, `'export'` for print and proof export, presentation, the Book check and
+   * MCP artwork. (The Book check is `'export'` here, while `RenderedImage`'s own `mode` tells it apart as `'check'`.)
+   */
   mode: 'edit' | 'export';
+  /**
+   * Where this render is shown, fixed for the whole render. `'canvas'` is the interactive book in the editor, the only
+   * place anyone clicks; `'thumbnail'` (the sidebar) and `'layout-preview'` (the Inspector's layouts) are edit-mode
+   * renders that show what the page will look like. `'export'` matches `mode === 'export'`. Show editing scaffolding,
+   * such as a placeholder that invites a click, only when `view === 'canvas'`. Later versions may add views, so never
+   * switch over the list as if it were complete: compare with `'canvas'` only.
+   */
+  view: RenderView;
   /**
    * Marks the node that shows these parameters, so clicking it in the editor opens them for editing:
    * `<h2 {...ctx.edit('heading')}>{ctx.params.heading}</h2>`. For a single string parameter, `ctx.Text` is shorter.
@@ -601,6 +625,7 @@ export type UntypedRenderContext = {
   spread: string;
   layout: string;
   mode: 'edit' | 'export';
+  view: RenderView;
   edit(...paths: string[]): EditMarker;
   book: BookContext;
   geometry: BoundGeometry;

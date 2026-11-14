@@ -1,10 +1,11 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { TemplateInfo } from '../src/desktop';
 import type { LibraryEntry, LibraryImportResult, TemplatePackage } from '../src/library';
 import { resolveFormat } from '../src/format';
 import { templatePackages } from './dependencies';
+import { hashTemplateFiles, listTemplateFiles, TemplateFilesError } from './template-hash.mjs';
 import { extractTemplateArchive, isTemplateArchive, writeTemplateArchive } from './template-archive';
 import { readTemplatePreview } from './template-preview-file';
 import { trimAspect } from '../src/template-preview';
@@ -28,40 +29,21 @@ export class TemplateImportError extends Error {
   }
 }
 
-const skipped = new Set(['node_modules']);
 /**
- * The files that make up a template folder, as sorted relative paths with forward slashes. Dotfiles and folders
- * (including `.imageflow/`) and `node_modules/` are left out. Symbolic links are refused, so a template can never
- * carry files from outside its folder.
+ * The files that make up a template folder (see listTemplateFiles): dotfiles, `.imageflow/` and `node_modules/` are
+ * left out, and symbolic links are refused. A folder without `index.tsx` is not a template.
  */
 export async function templateFiles(folder: string) {
-  const files: string[] = [];
-  const walk = async (directory: string) => {
-    const entries = await readdir(directory, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.name.startsWith('.') || skipped.has(entry.name)) continue;
-      const path = join(directory, entry.name);
-      if (entry.isSymbolicLink()) throw new TemplateImportError(relative(folder, path) + ' is a symbolic link. Templates must contain their files.');
-      if (entry.isDirectory()) await walk(path);
-      else if (entry.isFile()) files.push(relative(folder, path).split(sep).join('/'));
-    }
-  };
-  const root = await lstat(folder).catch(() => undefined);
-  if (!root?.isDirectory()) throw new TemplateImportError('The template folder could not be read.');
-  await walk(folder);
+  const files = await listTemplateFiles(folder).catch((error) => {
+    throw error instanceof TemplateFilesError ? new TemplateImportError(error.message) : error;
+  });
   if (!files.includes('index.tsx')) throw new TemplateImportError('This folder is not an ImageFlow template: it has no index.tsx.');
-  return files.sort();
+  return files;
 }
 
 /** A hash of a template's files and their paths, so the same template has the same hash wherever it is copied. */
 export async function templateHash(folder: string, files?: string[]) {
-  const hash = createHash('sha256');
-  for (const file of files ?? await templateFiles(folder)) {
-    const bytes = await readFile(join(folder, ...file.split('/')));
-    hash.update(file + '\0' + bytes.length + '\0');
-    hash.update(bytes);
-  }
-  return hash.digest('hex');
+  return hashTemplateFiles(folder, files ?? await templateFiles(folder));
 }
 
 /** Copies a template's files (see templateFiles) into `destination`, which must not exist yet. */

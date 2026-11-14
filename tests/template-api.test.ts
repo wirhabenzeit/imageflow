@@ -6,8 +6,8 @@ import { geometry } from '../src/geometry';
 import { capabilities, runtimeExports } from '../src/runtime-exports';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { projectSchema } from '../src/project';
-import type { RenderProject } from '../src/project';
+import { frameView, projectSchema, renderView } from '../src/project';
+import type { RenderProject, RenderView } from '../src/project';
 import { box, chooseFormat, issue, runtime, SpreadView, templateIssueSchema, templateSchema } from '../src/template';
 import type { RenderContext } from '../src/template';
 
@@ -139,6 +139,40 @@ test('Text inherits display-only fallback for empty values, with explicit hiding
   assert.match(render(' ', 'edit', false, ''), /if-text-placeholder/);
 });
 
+test('render view tells the canvas apart from thumbnails and layout previews, and platform placeholders follow it', () => {
+  const source = { id: 'view', version: '1', contract: 1, parameters: {},
+    format: { label: 'F', trim: { width: mm(100), height: mm(100) },
+      bleed: { top: mm(0), bottom: mm(0), outside: mm(0), binding: mm(0) }, safe: { top: mm(5), bottom: mm(5), outside: mm(5), binding: mm(5) },
+      structure: { delivery: 'pages', ends: 'inside-covers', pageCount: { min: 2, max: 20, step: 2 } },
+      output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' } } };
+  const seen: string[] = [];
+  const template = chooseFormat(templateSchema.parse({ ...source, spreads: { main: { label: 'Main',
+    parameters: { place: { type: 'string', label: 'Place', default: '' } },
+    boxes: { hero: { type: 'photo', label: 'Hero' }, story: { type: 'markdown', label: 'Story' } },
+    render: (ctx: RenderContext) => {
+      seen.push(ctx.mode + ':' + ctx.view);
+      return createElement(runtime.Spread, {}, createElement(ctx.Text, { parameter: 'place' }),
+        createElement(ctx.PhotoBox, { id: 'hero' }), createElement(ctx.MarkdownBox, { id: 'story' }));
+    } } } }));
+  const project = projectSchema.parse({ schemaVersion: 1, title: 'View', template: { id: 'view', version: '1' },
+    spreads: [{ id: 'one', definition: 'main' }] });
+  const render = (mode: 'edit' | 'export', view?: RenderView) => {
+    const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode, view, template: { script: '', assets: {} } } as RenderProject;
+    return renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
+      page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
+  };
+  const canvas = render('edit');
+  assert.match(canvas, /if-text-placeholder/);
+  assert.match(canvas, /Drop a photo/);
+  assert.match(canvas, /Drop a Markdown file/);
+  for (const html of [render('edit', 'thumbnail'), render('edit', 'layout-preview'), render('export'), render('export', 'canvas')]) {
+    assert.doesNotMatch(html, /if-text-placeholder|if-placeholder/);
+    // Edit markers stay, so checks and the canvas can still name what each node shows.
+    assert.match(html, /data-edit="place"/);
+  }
+  assert.deepEqual(seen, ['edit:canvas', 'edit:thumbnail', 'edit:layout-preview', 'export:export', 'export:export']);
+});
+
 test('inline Text validates its opt-in and string binding and renders pure multiline artwork', () => {
   const render = ({ requires = [], type = 'string', presentation = 'inline', mode = 'edit', value = 'First\nSecond' }:
     { requires?: string[]; type?: string; presentation?: string; mode?: 'edit' | 'export'; value?: string } = {}) => {
@@ -168,4 +202,14 @@ test('inline Text validates its opt-in and string binding and renders pure multi
   assert.match(artwork, />First\nSecond<\/p>/);
   assert.doesNotMatch(artwork, /contenteditable|data-text-editor|iframe|textbox/);
   assert.doesNotMatch(render({ value: '', mode: 'export' }), /if-text-placeholder/);
+});
+
+test('only the book frame is the canvas; other and unknown frames are previews, and export is always export', () => {
+  assert.equal(frameView('book'), 'canvas');
+  assert.equal(frameView('thumbs'), 'thumbnail');
+  assert.equal(frameView('layouts'), 'layout-preview');
+  assert.equal(frameView('something-new'), 'thumbnail');
+  assert.equal(frameView(null), 'thumbnail');
+  assert.equal(renderView({ mode: 'export', view: 'canvas' }), 'export');
+  assert.equal(renderView({ mode: 'edit' }), 'canvas');
 });

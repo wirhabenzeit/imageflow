@@ -78,9 +78,19 @@ export type RenderProject = {
   sources?: Record<string, SourceStatus>;
   template: { script: string; css?: string; assets: Record<string, string>; warnings?: string[] };
   mode: 'edit' | 'export';
+  // Where this render is shown, set by the render frame from its URL before rendering (never saved or sent).
+  view?: RenderView;
   // A synthetic authoring fixture book. Its artwork carries a banner and fixture labels so it is never mistaken for the book.
   fixture?: FixtureMarking;
 };
+// `'canvas'` is the interactive book in the editor; thumbnails and layout previews are edit-mode renders nobody clicks.
+export type RenderView = 'canvas' | 'thumbnail' | 'layout-preview' | 'export';
+// The book frame's `?view=` decides which edit-mode render is the canvas. Only the book view itself is; an unknown
+// frame counts as a preview, so a new frame never shows editing scaffolding by accident.
+export const frameView = (view: string | null): Exclude<RenderView, 'export'> =>
+  view === 'book' ? 'canvas' : view === 'layouts' ? 'layout-preview' : 'thumbnail';
+export const renderView = (book: Pick<RenderProject, 'mode' | 'view'>): RenderView =>
+  book.mode === 'export' ? 'export' : book.view ?? 'canvas';
 export type FixtureMarking = { banner: string; labels: Record<string, string> };
 
 export function parseDocument<T>(schema: z.ZodType<T>, input: unknown, label: string): T {
