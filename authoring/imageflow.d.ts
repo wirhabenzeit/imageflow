@@ -177,8 +177,12 @@ export type ParameterValue<P> =
 export type ParameterValues<P> = { [K in keyof P]: ParameterValue<P[K]> };
 
 type Options<P extends Parameter> = Omit<P, 'type'>;
-/** Rejects fields in a list's default items that its `item` does not declare. */
-type DefaultItemsChecked<D, I> = { [N in keyof D]: { [F in Exclude<keyof D[N], 'id' | keyof I>]: never } };
+/**
+ * Checks a list's default items: each field takes the value type its `item` declares, such as one of an enum's
+ * options, and fields `item` does not declare are rejected.
+ */
+type DefaultItemsChecked<D, I> = {
+  [N in keyof D]: { [F in keyof D[N]]: F extends 'id' ? string : F extends keyof I ? ScalarValue<I[F]> : never } };
 /** Rejects option names the parameter type does not have, such as `mutliline`, which ImageFlow would ignore. */
 type Known<O, Allowed> = O & { [K in Exclude<keyof O, keyof Allowed>]: never };
 type EnumKeys<C> = `${Extract<keyof C, string | number>}`;

@@ -394,6 +394,17 @@ defineTemplate({ id: 't', version: '1', contract: 1, format, spreads: ({ spread 
 p.list({ label: 'L', item: { name: p.string({ label: 'Name', default: '', mutliline: true }) } });
 // @ts-expect-error
 p.list({ label: 'L', item: { name: p.string({ label: 'Name', default: '' }) }, default: [{ title: 'x' }] });
+// Default items take each field's value type, including only an enum's declared options.
+// @ts-expect-error a string for a number field
+p.list({ label: 'Rows', item: { count: p.number({ label: 'Count', default: 0 }) }, default: [{ count: 'wrong' }] });
+// @ts-expect-error not one of the enum's options
+p.list({ label: 'Rows', item: { side: p.enum({ label: 'Side', options: ['left', 'right'], default: 'left' }) }, default: [{ side: 'up' }] });
+// @ts-expect-error a number for a string field
+p.list({ label: 'Rows', item: { name: p.string({ label: 'Name', default: '' }) }, default: [{ id: 'a', name: 3 }] });
+p.list({ label: 'Rows', item: { side: p.enum({ label: 'Side', options: ['left', 'right'], default: 'left' }),
+  count: p.number({ label: 'Count', default: 0 }) }, default: [{ id: 'a', side: 'right' }, { count: 2 }] });
+p.list({ label: 'Rows', item: { side: p.enum({ label: 'Side', options: { l: 'Left', r: 'Right' }, default: 'l' }) },
+  default: [{ side: 'r' }] });
 // An editor can show one field of one item.
 function TrackEditor({ values, Control }: ElementEditorProps<{ tracks: typeof tracks }, 'tracks'>) {
   return <>{values.tracks.map((item) => <Control key={item.id} parameter="tracks" itemId={item.id} field="track" />)}</>;
