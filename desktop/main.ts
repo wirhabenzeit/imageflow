@@ -50,6 +50,7 @@ import { configureRenditionCache, pruneRenditions } from './rendition-cache';
 import { decodes, readTemplatePreview } from './template-preview-file';
 import { previewTypes } from '../src/template-preview';
 
+const presentationWindows = new WeakMap<BrowserWindow, { simple: boolean; previous: boolean }>();
 let templatesWindow: BrowserWindow | null = null;
 const assetsWindows = new Map<DocumentSession, { window: BrowserWindow; accept: string[] }>();
 let settingsWindow: BrowserWindow | null = null;
@@ -177,11 +178,11 @@ async function serve(request: Request) {
     const bytes = session.book.assets.files.get(asset);
     if (bytes) return response(bytes, assetTypes[extname(asset).toLowerCase()] ?? 'application/octet-stream');
   }
-  const photoMatch = /^(photo|thumb)\/([\w-]+)(?:\/([1-9]\d{0,5}))?$/.exec(resource);
+  const photoMatch = /^(photo|proof-photo|thumb)\/([\w-]+)(?:\/([1-9]\d{0,5}))?$/.exec(resource);
   if (photoMatch) {
     const [, kind, photoId, size] = photoMatch;
     const photo = session.book.photos.get(photoId);
-    const rendition = kind === 'thumb' ? 'thumb' : session.mode === 'edit' ? 'preview' : 'export';
+    const rendition = kind === 'thumb' ? 'thumb' : kind === 'proof-photo' ? 'export' : session.mode === 'edit' ? 'preview' : 'export';
     const width = size && rendition === 'export' ? Number(size) : undefined;
     if (photo) return net.fetch(pathToFileURL(await photoFile(photo, rendition, width)).href);
   }
@@ -247,6 +248,17 @@ function windowOptions() {
   return { sandbox: true, contextIsolation: true, nodeIntegration: false, preload: join(__dirname, 'preload.cjs'), backgroundThrottling: !hidden };
 }
 function secureWindow(owner: BrowserWindow) {
+  owner.webContents.on('context-menu', (_event, params) => {
+    if (!params.isEditable) return;
+    const suggestions: MenuItemConstructorOptions[] = params.misspelledWord ? [
+      ...params.dictionarySuggestions.map((suggestion) => ({ label: suggestion, click: () => owner.webContents.replaceMisspelling(suggestion) })),
+      { label: 'Add to Dictionary', click: () => owner.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) },
+      { type: 'separator' },
+    ] : [];
+    Menu.buildFromTemplate([...suggestions, { role: 'cut', enabled: params.editFlags.canCut },
+      { role: 'copy', enabled: params.editFlags.canCopy }, { role: 'paste', enabled: params.editFlags.canPaste },
+      { type: 'separator' }, { role: 'selectAll', enabled: params.editFlags.canSelectAll }]).popup({ window: owner });
+  });
   followAppearance(owner);
   owner.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
@@ -826,7 +838,7 @@ function installMenu() {
       { type: 'separator' }, { role: 'close' }, registered('save-copy'), registered('rename-book'), registered('move-book'),
       { label: 'Revert To', submenu: [registered('revert-opened'), registered('reload')] },
       { type: 'separator' },
-      { label: 'Import', submenu: [registered('import-photos'), registered('import-folder'), registered('import-texts')] },
+      registered('import'),
       registered('export'), registered('print'), { type: 'separator' }, registered('reveal-book'),
     ] },
     { label: 'Edit', submenu: [
@@ -837,7 +849,7 @@ function installMenu() {
     ] },
     { label: 'Spread', submenu: [registered('add-spread'), registered('duplicate-spread'), registered('delete-spread'),
       { type: 'separator' }, registered('move-spread-up'), registered('move-spread-down')] },
-    { label: 'Book', submenu: [registered('manage-sources'), registered('book-check')] },
+    { label: 'Book', submenu: [registered('manage-sources'), registered('copy-assets', 'copy-assets', 'checkbox'), registered('book-check')] },
     { label: 'Templates', submenu: [{ label: 'Manage Templates…', click: () => showTemplates() }] },
     { label: 'View', submenu: [
       registered('sidebar', 'toggle-project'), registered('inspector', 'toggle-inspector'), registered('sources', 'toggle-sources'),
@@ -850,6 +862,7 @@ function installMenu() {
       registered('guides', 'toggle-guides', 'checkbox'), { type: 'separator' },
       registered('zoom-in'), { ...registered('zoom-in'), id: 'zoom-in-equals', accelerator: 'CmdOrCtrl+=', visible: false, acceleratorWorksWhenHidden: true },
       registered('zoom-out'), registered('zoom-actual'), registered('zoom-fit'),
+      { type: 'separator' }, registered('presentation'), registered('presentation-start'),
       // macOS supplies its own full-screen item, including the system keyboard shortcut.
       ...process.platform === 'darwin' ? [] : [{ type: 'separator' as const }, { role: 'togglefullscreen' as const }],
     ] },
@@ -1084,6 +1097,35 @@ void app.whenReady().then(async () => {
     const position = Number.isInteger(at?.x) && Number.isInteger(at?.y) ? { x: Number(at.x), y: Number(at.y) } : {};
     await new Promise<void>((resolve) => Menu.buildFromTemplate(entries).popup({ window: owner, ...position, callback: resolve }));
     return selected;
+  });
+  ipcMain.handle(channels.documentIcon, async (event) => {
+    const document = editorOwner(event);
+    return document && !document.closing ? (await app.getFileIcon(document.book.folder, { size: 'small' })).toDataURL() : null;
+  });
+  ipcMain.handle(channels.contextMenu, async (event, ids: unknown, snapshot: BookMenuState) => {
+    const document = editorOwner(event);
+    if (!document || document.closing || !Array.isArray(ids) || ids.length > 30 || !snapshot?.enabled) return null;
+    const state = { ...emptyMenuState, ...snapshot, document: true, writable: !document.book.readOnly && snapshot.writable };
+    let chosen: RegisteredCommand | null = null;
+    const items: MenuItemConstructorOptions[] = ids.filter((id): id is RegisteredCommand => typeof id === 'string' && Object.hasOwn(commandRegistry, id)).map((id) => {
+      const item = commandState(id, state, true);
+      return { ...item, registerAccelerator: false, ...(item.checked !== undefined ? { type: 'checkbox' as const } : {}), click: () => { chosen = id; } };
+    });
+    await new Promise<void>((resolve) => Menu.buildFromTemplate(items).popup({ window: document.window, callback: resolve }));
+    return chosen;
+  });
+  ipcMain.handle(channels.presentation, (event, active: unknown) => {
+    const owner = editorOwner(event)?.window;
+    if (!owner || typeof active !== 'boolean') return;
+    if (active && !presentationWindows.has(owner)) {
+      const simple = process.platform === 'darwin' && !owner.isFullScreen();
+      presentationWindows.set(owner, { simple, previous: simple ? owner.isSimpleFullScreen() : owner.isFullScreen() });
+      if (simple) owner.setSimpleFullScreen(true); else owner.setFullScreen(true);
+    } else if (!active && presentationWindows.has(owner)) {
+      const { simple, previous } = presentationWindows.get(owner)!;
+      presentationWindows.delete(owner);
+      if (simple) owner.setSimpleFullScreen(previous); else owner.setFullScreen(previous);
+    }
   });
   ipcMain.handle(channels.documentProxy, async (event, action: unknown) => {
     const document = editorOwner(event);
@@ -1378,7 +1420,7 @@ void app.whenReady().then(async () => {
         return { summary: document.activate(await document.projectSession.save(files, 'Place asset')), imported: [source.id] };
       }
     }
-    return document.importFiles(document.window, id, { ...request, mode: request.mode ?? settings.value.importMode });
+    return document.importFiles(document.window, id, request);
   }));
   ipcMain.handle(channels.network, async (event, id: string, origins: unknown) => {
     const document = editorOwner(event);

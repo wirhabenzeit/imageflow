@@ -153,7 +153,7 @@ try {
   }, project);
   await menuAction(app, 'Open project…');
   await ready();
-  assert.equal(await window.locator('.project-identity strong').textContent(), 'Draft Photobook');
+  assert.equal(await window.locator('.project-identity .document-title').textContent(), 'Draft Photobook');
   assert.equal((await read()).spreads.length, 16);
   if (!packaged) await checkFlow(app, root);
   console.log('ImageFlow draft workflow passed' + (packaged ? ' (packaged).' : '.'));

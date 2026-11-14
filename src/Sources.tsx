@@ -1,6 +1,6 @@
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, KeyboardEvent } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary } from './desktop';
@@ -17,14 +17,30 @@ function pagesText(list: { pages: string }[] | undefined) {
 export function Sources({ summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, manage }: {
   summary: ProjectSummary; tab: SourceKind; setTab: (tab: SourceKind) => void;
   selected: Partial<Record<SourceKind, string>>; choose: (source: SourceRef) => void; usage: SourceUsage;
-  writable: boolean; busy: boolean; importSources: (command: 'import-photos' | 'import-folder' | 'import-texts') => void;
+  writable: boolean; busy: boolean; importSources: (command: 'import') => void;
   importPaths: (files: File[]) => void; quickLook: (source: SourceRef) => void;
   manage: () => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
-  const items = useMemo(() => sourceList(summary, tab), [summary, tab]);
+  const [unused, setUnused] = useState(false);
+  const items = useMemo(() => sourceList(summary, tab).filter(({ id }) => !unused || !usage[tab][id]?.length), [summary, tab, unused, usage]);
   const current = selected[tab];
 
+  useEffect(() => {
+    const node = list.current?.querySelector<HTMLElement>('[data-id="' + CSS.escape(current ?? '') + '"]');
+    node?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [current, tab]);
+  useEffect(() => {
+    const node = list.current;
+    if (!node || tab !== 'photo') return;
+    const wheel = (event: WheelEvent) => {
+      if (event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY) || node.scrollWidth <= node.clientWidth) return;
+      event.preventDefault();
+      node.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? node.clientWidth : 1);
+    };
+    node.addEventListener('wheel', wheel, { passive: false });
+    return () => node.removeEventListener('wheel', wheel);
+  }, [tab]);
   function focus(id: string) {
     choose({ kind: tab, id });
     list.current?.querySelector<HTMLElement>('[data-id="' + CSS.escape(id) + '"]')?.focus();
@@ -61,13 +77,12 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
           onClick={() => setTab(kind)}>{label} <span className="count">{count}</span></button>)}
       </div>
       <span className="spacer" />
-      <button type="button" className="source-manage" disabled={!writable || busy} onClick={manage}>Assets…</button>
-      <ActionMenu className="source-import" disabled={!writable || busy} label={<>Import <Icon name="chevron" /></>}>
-        <button onClick={() => importSources('import-photos')}>Import photos…</button>
-        <button onClick={() => importSources('import-folder')}>Import folder…</button>
-        <button onClick={() => importSources('import-texts')}>Import Markdown…</button>
-
+      <ActionMenu className="source-view" label={<>View <Icon name="chevron" /></>}>
+        <button onClick={() => setUnused(false)}>All assets{!unused ? ' ✓' : ''}</button>
+        <button onClick={() => setUnused(true)}>Unused only{unused ? ' ✓' : ''}</button>
       </ActionMenu>
+      <button type="button" className="source-manage" disabled={!writable || busy} onClick={manage}>Assets…</button>
+      <button className="source-import" disabled={!writable || busy} onClick={() => importSources('import')}>Import…</button>
     </div>
     <div ref={list} className={'source-items source-items-' + tab} role="listbox"
       aria-label={tab === 'photo' ? 'Photos' : 'Texts'} onKeyDown={keys}>
@@ -90,11 +105,11 @@ export function Sources({ summary, tab, setTab, selected, choose, usage, writabl
           },
         };
         if (tab === 'photo') {
-          return <div key={id} className="source-item source-photo" {...common}>
+          return <div key={id} className="source-item source-photo" style={{ aspectRatio: summary.photoSizes[id] ? summary.photoSizes[id].width / summary.photoSizes[id].height : 1.4 }} {...common}>
             {summary.photos[id] ? <img src={summary.photos[id]} alt="" loading="lazy" draggable={false} /> : <span className="missing">Missing</span>}
             <span className="source-title">{title}</span>
             {sourceLabel && <small className="source-storage">{sourceLabel}</small>}
-            {!!placed?.length && <small className="badge">{placed.length}×</small>}
+            <small className="badge">{placed?.length ? placed.length + '×' : 'Unused'}</small>
           </div>;
         }
         const source = summary.texts[id];
@@ -175,7 +190,7 @@ export function QuickLook({ summary, source, usage, navigate, close, jump }: {
       <footer className="ql-footer">
         <span>{details.filter(Boolean).join(' · ')}</span>
         <span className="ql-usage">{placed.length ? <>Placed on {placed.map(({ spread, pages }) =>
-          jump ? <button key={spread} className="link" onClick={() => { dialog.current?.close(); jump(spread); }}>{pages}</button>
+          jump && spread ? <button key={spread} className="link" onClick={() => { dialog.current?.close(); jump(spread); }}>{pages}</button>
             : <span key={spread}>{pages}</span>)}</> : 'Not placed'}</span>
       </footer>
     </div>

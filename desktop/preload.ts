@@ -9,7 +9,10 @@ function listen<T>(channel: string, listener: (value: T) => void) {
 }
 
 const api: DesktopApi = {
+  showContextMenu: (ids, state) => ipcRenderer.invoke(channels.contextMenu, ids, state),
+  documentIcon: () => ipcRenderer.invoke(channels.documentIcon),
   popupMenu: (items, point) => ipcRenderer.invoke(channels.popupMenu, items, point),
+  setPresentation: (active) => ipcRenderer.invoke(channels.presentation, active),
   documentProxy: (action) => ipcRenderer.invoke(channels.documentProxy, action),
   dragSources: (keys) => ipcRenderer.invoke(channels.dragSources, keys),
   showAssets: (accept) => ipcRenderer.invoke(channels.showAssets, accept),

@@ -825,3 +825,35 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .project-identity .muted { grid-column: 2; }
 .studio .document-proxy { grid-column: 1; grid-row: 1; width: 18px; padding: 0; min-height: 18px; background: transparent; border: 0; box-shadow: none; }
 .quicklook[open] { position: fixed; inset: 8vh 10vw; margin: 0; width: 80vw; height: 80vh; z-index: 100; box-shadow: 0 20px 80px #0005; }
+.editor-shell { display: contents; }
+.presentation { position: fixed; inset: 0; z-index: 1000; background: #111; color: #eee; outline: none; }
+.presentation .book-frame { position: absolute; inset: 0; width: 100%; height: 100% !important; border: 0; pointer-events: none; }
+.presentation-overview .book-frame { pointer-events: auto; }
+.presentation .book-frame-pending { visibility: hidden; }
+.presentation-idle, .presentation-idle * { cursor: none; }
+.presentation-indicator { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 6px 12px;
+  border-radius: 20px; background: #000b; color: #eee; font-size: 12px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+.presentation-indicator.visible { opacity: 1; }
+.presentation-help { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); background: #242424f5;
+  border: 1px solid #666; padding: 20px 28px; border-radius: 12px; color: #eee; font-size: 14px; }
+.presentation-help button { color: #eee; background: #444; border: 1px solid #888; }
+.presentation-message { position: absolute; top: 30%; width: 100%; text-align: center; }
+.source-items-photo { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; align-items: stretch; }
+.source-items-photo .source-photo { width: auto; height: 100%; grid-template-rows: minmax(0, 1fr); }
+.source-items-photo .source-photo .source-title { display: none; }
+.source-items-photo .source-photo .source-storage { position: absolute; bottom: 4px; left: 4px; padding: 2px 5px; border-radius: 3px; background: #000a; color: white; }
+.asset-toolbar input[type="search"] { flex: 1; min-width: 100px; }
+.asset-filter-tokens { display: flex; flex-wrap: wrap; gap: 6px; }
+.asset-filter-tokens button { border-radius: 14px; padding: 2px 9px; font-size: 11px; }
+.asset-status-bar { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.asset-status-bar > span { margin-right: auto; }
+.source-manager .asset-row { min-height: 30px; padding-top: 3px; padding-bottom: 3px; }
+.source-manager .asset-icon { width: 28px; }
+.source-manager .asset-icon img, .source-manager .asset-icon > span { width: 24px; height: 24px; }
+.source-manager .asset-name { font-size: 13px; }
+.source-manager .asset-name strong { max-width: 80%; }
+.source-manager .asset-description > span { direction: ltr; unicode-bidi: plaintext; font-size: 11px; }
+.source-manager .asset-status { display: flex; align-items: center; justify-content: end; gap: 6px; width: auto; font-size: 11px; }
+.project-identity .document-title { font-weight: 400; }
+.studio .document-proxy { border: 0; background: transparent; box-shadow: none; padding: 0; min-width: 16px; }
+.studio .document-proxy:hover { border: 0; background: transparent; }

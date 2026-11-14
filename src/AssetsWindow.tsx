@@ -2,7 +2,7 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { DesktopApi, ProjectSummary } from './desktop';
 import { bookName } from './book-name';
 import { QuickLook } from './Sources';
-import { sourceUsage } from './editing';
+import { assetUsage } from './asset-usage';
 import type { SourceRef } from './source-items';
 import { SourceManager } from './SourceManager';
 
@@ -45,7 +45,7 @@ export function AssetsWindow({ api }: { api?: DesktopApi }) {
   }, [api]);
   return <main className="studio assets-window">
     {summary && api ? <SourceManager api={api} summary={summary} adopt={setSummary} disabled={refreshing} quickLook={setQuick} /> : !error && <p className="muted">Loading assets…</p>}
-    {summary && quick && <QuickLook summary={summary} source={quick} usage={sourceUsage(summary.project, summary.project.spreads.map((_, i) => 'Spread ' + (i + 1)))}
+    {summary && quick && <QuickLook summary={summary} source={quick} usage={assetUsage(summary, summary.project.spreads.map((_, i) => 'Spread ' + (i + 1)))}
       close={() => setQuick(undefined)} navigate={(step) => {
         const ids = quick.kind === 'photo' ? Object.keys(summary.photoIndex) : Object.keys(summary.project.texts);
         const next = ids[ids.indexOf(quick.id) + step]; if (next) setQuick({ ...quick, id: next });

@@ -667,6 +667,8 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   network?: readonly string[];
   /** Book-wide template parameters, shown in the template controls and read through `ctx.document`. */
   parameters?: D & ParametersChecked<D>;
+  /** Arranges book-wide generated controls in Book settings. Editor-owned parameters have no generated control. */
+  controls?: Controls<keyof D & string>;
   /** Families of layouts that are variants of one design, by ID. Layouts join one with `family`. */
   layoutFamilies?: { [K in L]: LayoutFamily };
   /** Editors of document parameters, by ID, opened from nodes marked with their parameters. Included in the contract-1 baseline. */

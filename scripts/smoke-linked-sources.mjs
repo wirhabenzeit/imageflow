@@ -44,7 +44,7 @@ try {
   const page = await testBook(app, folder, true);
   await ready(page);
   let summary = await current(page);
-  assert.ok((await page.evaluate(() => window.imageflow.updateSettings({ importMode: 'link' }))).value);
+  assert.ok((await page.evaluate(async () => { const { value } = await window.imageflow.currentProject(); value.project.importMode = 'link'; return window.imageflow.saveProject(value.id, value); })).value);
   const imported = {};
   for (const [kind, path] of [['photo', photo], ['markdown', text], ['file', file]]) {
     const result = await page.evaluate(async ({ kind, path }) => {
@@ -126,7 +126,7 @@ try {
   // A linked-file refresh may still own the book just after the renderer becomes ready.
   // Retry only that explicit busy response; any other error must fail with its actual message.
   const collection = await retryBookRefresh(async () => {
-    await manager.getByRole('button', { name: 'Copy All into Book', exact: true }).click();
+    await manager.getByRole('button', { name: /^Copy All \d+ into Book$/ }).click();
     const alert = manager.getByRole('alert');
     await alert.waitFor();
     return { error: await alert.innerText(), code: await alert.getAttribute('data-error-code') };

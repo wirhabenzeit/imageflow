@@ -296,6 +296,7 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   formats: z.record(identifier, formatSchema).optional(),
   defaultFormat: identifier.optional(),
   parameters: parametersSchema,
+  controls: controlsSchema,
   // Layouts that are variants of one design, by family ID. Each variant names its family with `family`.
   layoutFamilies: z.record(identifier, layoutFamily).optional(),
   spreads: z.record(identifier, definition).refine((spreads) => Object.keys(spreads).length > 0, 'Declare a spread.')
@@ -306,7 +307,7 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   openingSpreads: z.array(openingSpread).optional(),
   // Editors of document parameters, by ID.
   editors: z.record(identifier, documentEditor).optional(),
-}).superRefine(({ parameters, editors }, context) => {
+}).superRefine(({ parameters, controls, editors }, context) => {
   const owners = new Map<string, string>();
   for (const [id, editor] of Object.entries(editors ?? {})) {
     for (const key of editor.parameters) {
@@ -318,6 +319,7 @@ export const templateSchema = z.preprocess(withSpans, z.object({
       } else owners.set(key, id);
     }
   }
+  checkControls(context, parameters, controls, [...owners.keys()]);
 }).superRefine(({ spreads, layoutFamilies }, context) => {
   for (const { path, message } of familyProblems(spreads, layoutFamilies)) context.addIssue({ code: 'custom', message, path });
 }).superRefine((template, context) => {
@@ -425,7 +427,7 @@ export function templateInfo(template: Template): TemplateInfo {
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
     ...(template.preview ? { preview: previewPath(template.preview)! } : {}),
-    parameters: template.parameters, openingSpreads: template.openingSpreads ?? [],
+    parameters: template.parameters, controls: template.controls, openingSpreads: template.openingSpreads ?? [],
     ...(template.editors ? { editors: Object.fromEntries(Object.entries(template.editors).map(([id, { label, parameters, presentation }]) =>
       [id, { ...(label ? { label } : {}), parameters, presentation }])) } : {}),
     ...(template.network?.length ? { network: [...new Set(template.network)] } : {}),
@@ -512,7 +514,7 @@ export function PhotoBox({ id, className, style, rect, 'data-edit': marked, ...m
       const crop = getCrop(photo, placement, w / h);
       element.dataset.ppi = String(Math.min(photo.width * crop.width / w, photo.height * crop.height / h) * 96);
       if (!img) return;
-      if (book.mode !== 'edit' && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format);
+      if (book.mode !== 'edit' && !lazyPhotos && !img.getAttribute('src')) img.src = exportSource(photo, w / crop.width, format);
       img.style.width = 100 / crop.width + '%';
       img.style.height = 100 / crop.height + '%';
       img.style.left = -100 * crop.x / crop.width + '%';

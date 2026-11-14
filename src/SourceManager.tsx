@@ -4,6 +4,8 @@ import { sourceEntries } from './source-locations';
 import { useListSelection } from './list-selection';
 import { photoMime, textMime } from './source-items';
 import type { SourceRef } from './source-items';
+import { assetUsage } from './asset-usage';
+import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { fileName } from './source-items';
 
@@ -15,16 +17,17 @@ export function SourceManager({ api, summary, adopt, disabled = false, quickLook
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [error, setError] = useState<{ message: string; code?: string }>();
   const [notice, setNotice] = useState('');
-  const [filter, setFilter] = useState<'all' | 'photo' | 'markdown' | 'file' | 'attention'>('all');
+  const [kind, setKind] = useState('all');
+  const [used, setUsed] = useState('all');
+  const [storage, setStorage] = useState('all');
+  const [attention, setAttention] = useState(false);
+  const [search, setSearch] = useState('');
   const entries = sourceEntries(summary);
+  const usage = assetUsage(summary, summary.project.spreads.map((_, i) => 'Spread ' + (i + 1)));
+  const placements = (entry: typeof entries[number]) => usage[entry.kind === 'markdown' ? 'text' : entry.kind][entry.id] ?? [];
   const unavailable = (key: string) => !!summary.sources?.[key] && summary.sources[key].state !== 'available';
   const linked = entries.filter((entry) => entry.linked).length;
   const missing = entries.filter((entry) => unavailable(entry.key)).length;
-  const tabs = [['all', 'All', entries.length], ['photo', 'Photos', entries.filter((entry) => entry.kind === 'photo').length],
-    ['markdown', 'Markdown', entries.filter((entry) => entry.kind === 'markdown').length],
-    ['file', 'Files', entries.filter((entry) => entry.kind === 'file').length],
-    ...(missing ? [['attention', 'Needs attention', missing]] : [])] as const;
-  const active = filter !== 'all' && !tabs.some(([kind, , count]) => kind === filter && Number(count) > 0) ? 'all' : filter;
   async function act(request: SourceAction) {
     setBusy(true); setError(undefined); setNotice('');
     try {
@@ -47,7 +50,10 @@ export function SourceManager({ api, summary, adopt, disabled = false, quickLook
     else if (result.value) await act({ action: result.value, keys });
   }
   const locked = busy || disabled || summary.readOnly;
-  const shown = entries.filter((entry) => active === 'all' || (active === 'attention' ? unavailable(entry.key) : active === entry.kind));
+  const shown = entries.filter((entry) => (kind === 'all' || kind === entry.kind) &&
+    (used === 'all' || (used === 'used') === !!placements(entry).length) &&
+    (storage === 'all' || (storage === 'linked') === entry.linked) && (!attention || unavailable(entry.key)) &&
+    fileName(entry.path).toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   const list = useListSelection(shown.map(({ key }) => key), (key) => fileName(entries.find((entry) => entry.key === key)!.path));
   const chosen = entries.filter(({ key }) => list.selected.includes(key));
   const copyCount = chosen.filter(({ linked }) => linked).length;
@@ -59,15 +65,23 @@ export function SourceManager({ api, summary, adopt, disabled = false, quickLook
   };
   return <section className="source-manager" aria-label="Assets" aria-busy={busy || disabled}>
     <header className="asset-toolbar">
-      <div className="segmented" role="tablist" aria-label="Asset type">
-        {tabs.filter(([kind, , count]) => kind === 'all' || Number(count) > 0).map(([kind, label, count]) => <button key={kind} type="button" role="tab" aria-selected={active === kind}
-          onClick={() => { setFilter(kind as typeof filter); list.setSelection([]); }}>{label} <span className="count">{count}</span></button>)}
-      </div>
+      <input type="search" aria-label="Search assets" placeholder="Search assets" value={search} onChange={(event) => setSearch(event.target.value)} />
+      <ActionMenu className="asset-filter" label={<>Filter <Icon name="chevron" /></>}>
+        {(['photo', 'markdown', 'file'] as const).map((value) => <button key={value} onClick={() => setKind(kind === value ? 'all' : value)}>{({ photo: 'Photos', markdown: 'Markdown', file: 'Files' })[value]}</button>)}
+        <hr />
+        <button onClick={() => setUsed(used === 'unused' ? 'all' : 'unused')}>Unused</button>
+        <button onClick={() => setUsed(used === 'used' ? 'all' : 'used')}>Used</button>
+        <hr />
+        <button onClick={() => setStorage(storage === 'linked' ? 'all' : 'linked')}>Linked</button>
+        <button onClick={() => setStorage(storage === 'book' ? 'all' : 'book')}>In Book</button>
+        <button onClick={() => setAttention(!attention)}>Needs attention</button>
+      </ActionMenu>
     </header>
-    {(linked > 0 || missing > 0) && <div className="asset-banner">
-      <span className="muted">{[linked ? linked + ' linked' : '', missing ? missing + ' need attention' : ''].filter(Boolean).join(' · ')}</span>
-      {missing > 0 && <button disabled={locked} onClick={() => void act({ action: 'locate-folder' })}>Locate Folder…</button>}
-      {linked > 0 && <button disabled={locked || (chosen.length > 0 && !copyCount)} onClick={() => void act({ action: 'collect', keys: copyKeys })}>{chosen.length ? 'Copy ' + copyCount + ' into Book' : 'Copy All into Book'}</button>}
+    {(kind !== 'all' || used !== 'all' || storage !== 'all' || attention) && <div className="asset-filter-tokens" aria-label="Active filters">
+      {kind !== 'all' && <button onClick={() => setKind('all')} aria-label="Remove kind filter">Kind: {kind} ×</button>}
+      {used !== 'all' && <button onClick={() => setUsed('all')} aria-label="Remove usage filter">{used === 'unused' ? 'Unused' : 'Used'} ×</button>}
+      {storage !== 'all' && <button onClick={() => setStorage('all')} aria-label="Remove storage filter">{storage === 'linked' ? 'Linked' : 'In Book'} ×</button>}
+      {attention && <button onClick={() => setAttention(false)} aria-label="Remove attention filter">Needs attention ×</button>}
     </div>}
     <div className="source-manager-list" role="listbox" aria-label="Assets" aria-multiselectable="true" onKeyDown={(event) => {
       if (event.key === ' ') { event.preventDefault(); preview(); }
@@ -95,15 +109,21 @@ export function SourceManager({ api, summary, adopt, disabled = false, quickLook
           <span className="asset-icon">{entry.kind === 'photo' && summary.photos[entry.id] ? <img src={summary.photos[entry.id]} alt="" />
             : <span aria-hidden="true">{entry.kind === 'photo' ? '▧' : entry.kind === 'markdown' ? 'Aa' : '▤'}</span>}</span>
           <span className="asset-name" title={entry.path}><span className="asset-description"><strong>{fileName(entry.path)}</strong>
-            {(entry.linked || problem) && <span className="muted">{entry.path}</span>}</span></span>
-          <span className="asset-status">{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
+            {(entry.linked || problem) && <span className="muted">{entry.path.split('/').slice(-2, -1)[0]}</span>}</span></span>
+          <span className="asset-status"><span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
             {entry.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
           </span>
         </div>;
       })}
 
-      {!shown.length && <p className="asset-empty muted">{active === 'all' ? 'No assets' : 'No ' + (active === 'photo' ? 'photos' : active === 'markdown' ? 'Markdown' : 'files')}</p>}
+      {!shown.length && <p className="asset-empty muted">{entries.length ? 'No matching assets' : 'No assets'}</p>}
     </div>
+    <footer className="asset-status-bar">
+      <span className="muted">{shown.length} of {entries.length}{chosen.length ? ' · ' + chosen.length + ' selected' : ''}</span>
+      {missing > 0 && <button disabled={locked} onClick={() => void act({ action: 'locate-folder' })}>Locate Folder…</button>}
+      {linked > 0 && <button disabled={locked || (chosen.length > 0 && !copyCount)} onClick={() => void act({ action: 'collect', keys: copyKeys })}>
+        {chosen.length ? 'Copy ' + copyCount + ' Selected into Book' : 'Copy All ' + linked + ' into Book'}</button>}
+    </footer>
     {error && <p role="alert" data-error-code={error.code} className="error-text">{error.message}</p>}{notice && <p role="status">{notice}</p>}
   </section>;
 }

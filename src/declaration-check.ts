@@ -169,7 +169,7 @@ function spanWarnings(declared: Record<string, unknown>, found: DeclarationWarni
   }
 }
 
-// Conditional controls that can hide each other for good (controlCycles), at spread, box and element scope. This runs
+// Conditional controls that can hide each other for good (controlCycles), at document, spread, box and element scope. This runs
 // on the declaration as exported, before schema validation, so a controls list the schema rejects is skipped here
 // and reported by the schema instead. `details.edit` is the scope's edit-path prefix (empty for the layout's own
 // parameters), so the Book check can drop the warning for a layout that marks one of them on the page (render.tsx).
@@ -181,7 +181,7 @@ function controlCycleWarnings(declared: Record<string, unknown>, found: Declarat
     if (!controls.success) return;
     for (const cycle of controlCycles(controls.data)) {
       const names = cycle.join(', ');
-      const where = path.join(' → ') + ': ';
+      const where = (path.length ? path.join(' → ') : 'Document') + ': ';
       found.push({
         code: 'declaration-control-cycle', path: [...path, 'controls'].join('.'),
         message: where + (cycle.length === 1
@@ -189,10 +189,11 @@ function controlCycleWarnings(declared: Record<string, unknown>, found: Declarat
           : 'controls ' + names + ' are each shown only depending on another of them. Once all are hidden, the generated controls cannot show them again.'),
         details: { controls: names, layout, edit },
         suggestion: (cycle.length === 1 ? 'Move ' + names + ' out of the group' : 'Make one of ' + names + ' unconditional') +
-          (edit ? '.' : ', or mark ' + (cycle.length === 1 ? 'it' : 'one') + ' as editable on the page with ctx.edit or ctx.Text.'),
+          (edit && edit !== 'document.' ? '.' : ', or mark ' + (cycle.length === 1 ? 'it' : 'one') + ' as editable on the page with ctx.edit or ctx.Text.'),
       });
     }
   };
+  check(declared, [], '', 'document.');
   for (const [id, definition] of Object.entries(declared.spreads)) {
     if (!plain(definition)) continue;
     check(definition, ['spreads', id], id, '');
@@ -214,7 +215,12 @@ export type RenderedSpread = { spread: string; layout: string; marked: ReadonlyS
 export function placeControlWarnings(warnings: DeclarationWarning[], rendered: RenderedSpread[]): (DeclarationWarning & { spread?: string })[] {
   return warnings.flatMap((warning) => {
     const { code, details } = warning;
-    if (code !== 'declaration-control-cycle' || details.edit !== '') return [warning];
+    if (code !== 'declaration-control-cycle') return [warning];
+    if (details.edit === 'document.') {
+      const keys = details.controls.split(', ').map((key) => 'document.' + key);
+      return rendered.some(({ marked }) => keys.some((key) => marked.has(key))) ? [] : [warning];
+    }
+    if (details.edit !== '') return [warning];
     const instances = rendered.filter(({ layout }) => layout === details.layout);
     if (!instances.length) return [warning];
     const keys = details.controls.split(', ');

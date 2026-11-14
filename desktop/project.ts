@@ -307,40 +307,50 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
   if (mode !== 'copy' && mode !== 'link') throw new Error('Unknown import mode.');
   const imported: string[] = [];
   const copied: string[] = [];
-  const folder = request.kind === 'photo' ? 'photos' : request.kind === 'file' ? 'files' : 'texts';
-  const extensions = request.kind === 'photo' ? photoExtensions : request.kind === 'file' ? new Set(request.accept) : new Set(['.md']);
-  const registry = request.kind === 'file' ? project.files : project.texts;
-  const targetFolder = join(book.folder, folder);
-  await mkdir(targetFolder, { recursive: true });
-  if (await realpath(targetFolder) !== targetFolder) throw new Error(folder + '/ must be a folder inside the project.');
+  const counts = { photos: 0, texts: 0, skipped: 0 };
+  const createdDirectories: string[] = [];
+  const prepare = async (folder: string) => {
+    const destination = join(book.folder, folder);
+    try { await mkdir(destination); createdDirectories.push(destination); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    if (await realpath(destination) !== destination) throw new Error(folder + '/ must be a folder inside the project.');
+  };
   try {
     for (const file of paths) {
       const info = await stat(file);
-      if (!info.isFile() || !extensions.has(extname(file).toLowerCase())) continue;
-      if (request.kind === 'photo') await photoDetails(file);
-      if (request.kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
-      if (request.kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
-      const previous = request.kind === 'photo'
+      const extension = extname(file).toLowerCase();
+      const kind = request.kind ?? (photoExtensions.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : undefined);
+      const extensions = kind === 'photo' ? photoExtensions : kind === 'file' ? new Set(request.accept) : new Set(['.md']);
+      if (!info.isFile() || !kind || !extensions.has(extension)) { counts.skipped++; continue; }
+      const folder = kind === 'photo' ? 'photos' : kind === 'file' ? 'files' : 'texts';
+      const registry = kind === 'file' ? project.files : project.texts;
+      await prepare(folder);
+      if (kind === 'photo') await photoDetails(file);
+      if (kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
+      if (kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
+      const previous = kind === 'photo'
         ? Object.entries(photoIndex).find(([, photo]) => (!!photo.linked === (mode === 'link') || isInside(book.folder, file)) && (photo.linked ? photo.path : join(book.folder, photo.path)) === file)?.[0]
         : Object.entries(registry).find(([, ref]) => (sourceLinked(ref) === (mode === 'link') || isInside(book.folder, file)) && (sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref))) === file)?.[0];
       if (previous) {
+        if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++;
         imported.push(previous);
         continue;
       }
-      const id = { photo: 'ph-', markdown: 'tx-', file: 'fl-' }[request.kind] + randomUUID().slice(0, 12);
+      const id = { photo: 'ph-', markdown: 'tx-', file: 'fl-' }[kind] + randomUUID().slice(0, 12);
       const name = basename(file).replace(/[^\p{L}\p{N} ._-]/gu, '-');
       const relativePath = folder + '/' + id + '-' + name;
       const path = join(book.folder, relativePath);
       const original = await realpath(file);
       const linked = mode === 'link' && !isInside(book.folder, original);
-      if (linked) await approveSource(book.folder, { key: request.kind + ':' + id, kind: request.kind, path: original, linked }, request.accept);
+      if (linked) await approveSource(book.folder, { key: kind + ':' + id, kind, path: original, linked }, request.accept);
       if (!linked) { await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path); }
-      if (request.kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)) };
+      if (kind === 'photo') photoIndex[id] = { path: linked ? original : relativePath, ...(linked ? { linked: true } : {}), title: basename(file, extname(file)) };
       else registry[id] = linked ? { path: original, linked: true } : relativePath;
+      if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++;
       imported.push(id);
     }
-    if (!imported.length) throw new Error('No supported files were selected.');
-    if (request.target && request.kind !== 'file') {
+    if (!imported.length) return { book, imported, copied, createdDirectories, counts };
+    if (request.target && request.kind && request.kind !== 'file') {
       const spread = project.spreads.find(({ id }) => id === request.target?.spread);
       if (!spread) throw new Error('The selected spread no longer exists.');
       const id = request.target.box;
@@ -350,7 +360,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       };
     }
     const next = await updateProject(book, { project, photoIndex }, true);
-    return { book: next, imported, copied };
+    return { book: next, imported, copied, createdDirectories, counts };
   } catch (error) {
     // A durable save intent may already refer to these assets, including when it needs recovery on next open.
     if (!(error instanceof CommittedProjectSaveError)) await Promise.all(copied.map((path) => rm(path, { force: true })));

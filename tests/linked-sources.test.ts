@@ -308,3 +308,22 @@ test('permission loss is an actionable source state, including inaccessible pare
   } finally { await chmod(f.external, 0o700); }
   assert.equal((await loadProject(f.folder, f.cache)).sources!['photo:' + id].state, 'available');
 });
+
+test('mixed imports infer every file type and use the book policy, with an explicit mode taking precedence', async (t) => {
+  const f = await fixture(t);
+  const files = { project: structuredClone(f.book.project), photoIndex: structuredClone(f.book.photoIndex) };
+  files.project.importMode = 'link';
+  const book = await updateProject(f.book, files);
+  const mixed = await importIntoProject(book, {}, [f.photo, f.text, f.file]);
+  assert.deepEqual(mixed.counts, { photos: 1, texts: 1, skipped: 1 });
+  const [photo, text] = mixed.imported;
+  assert.equal(mixed.book.photoIndex[photo].linked, true);
+  assert.deepEqual(mixed.book.project.texts[text], { path: f.text, linked: true });
+  assert.equal(Object.keys(mixed.book.project.files).length, Object.keys(book.project.files).length);
+  const copied = await importIntoProject(mixed.book, { mode: 'copy' }, [f.photo]);
+  assert.equal(copied.book.photoIndex[copied.imported[0]].linked, undefined);
+  assert.match(copied.book.photoIndex[copied.imported[0]].path, /^photos\//);
+  const skipped = await importIntoProject(copied.book, {}, [f.file]);
+  assert.equal(skipped.book, copied.book);
+  assert.deepEqual(skipped.counts, { photos: 0, texts: 0, skipped: 1 });
+});

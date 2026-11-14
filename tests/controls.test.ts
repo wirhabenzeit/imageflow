@@ -166,3 +166,27 @@ test('malformed controls reach the schema error instead of crashing the cycle ch
     assert.equal(templateSchema.safeParse(declared).success, false);
   }
 });
+
+test('document controls survive template info and reject unknown or editor-owned parameters', () => {
+  const base = { id: 't', version: '1', contract: 1, format, parameters,
+    controls: ['show', { group: 'Stamp', when: { show: true }, controls: ['text'] }],
+    spreads: { main: { label: 'Main', render: () => null } } };
+  const parsed = templateSchema.parse(base);
+  assert.deepEqual(templateInfo(chooseFormat(parsed)).controls, base.controls);
+  for (const controls of [['unknown'], ['text', 'text'], ['track']]) {
+    const result = templateSchema.safeParse({ ...base, controls, editors: { route: { parameters: ['track'], component: () => null } } });
+    assert.equal(result.success, false);
+    assert.ok(result.error?.issues.some(({ path }) => path.join('.') === 'controls'));
+  }
+});
+
+test('document control cycles are exempt when any rendered page marks a document parameter', () => {
+  const base = { id: 't', version: '1', contract: 1, format, parameters,
+    controls: [{ group: 'Hidden', when: { show: true }, controls: ['show'] }],
+    spreads: { main: { label: 'Main', render: () => null } } };
+  const warnings = declarationWarnings(base, templateSchema as unknown as Schema);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].code, 'declaration-control-cycle');
+  assert.deepEqual(placeControlWarnings(warnings, [{ spread: 'a', layout: 'main', marked: new Set(['show']) }]), warnings);
+  assert.deepEqual(placeControlWarnings(warnings, [{ spread: 'a', layout: 'main', marked: new Set(['document.show']) }]), []);
+});
