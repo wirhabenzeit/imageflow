@@ -44,3 +44,26 @@ test('built-in templates are trusted for all they declare; others only for what 
   assert.deepEqual(trustedOrigins(declared, { builtIn: false, allowed: ['https://fonts.example.com', 'https://other.example.com'] }), ['https://fonts.example.com']);
   assert.deepEqual(trustedOrigins(declared, { builtIn: false, allowed: [] }), []);
 });
+
+test('a built-in template is remembered by hash, so its books stay trusted after an update changes it', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'imageflow-trust-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const file = join(folder, 'template-trust.json');
+  const trust = new TemplateTrust(file);
+  await trust.rememberBuiltIn(hash, ['https://tiles.example.com'], { id: 'imageflow-starter', version: '0.3.0' });
+  const written = await readFile(file, 'utf8');
+  assert.equal(JSON.parse(written).templates[hash].builtIn, true);
+  // The next launch ships another starter; the old hash is no longer a built-in but is still trusted.
+  const updated = new TemplateTrust(file);
+  assert.deepEqual(await updated.allowed(hash), ['https://tiles.example.com']);
+  assert.deepEqual(trustedOrigins(['https://tiles.example.com'], { builtIn: false, allowed: await updated.allowed(hash) }), ['https://tiles.example.com']);
+  // Remembering it again writes nothing; a site the built-in adds is merged in.
+  await updated.rememberBuiltIn(hash, ['https://tiles.example.com'], { id: 'imageflow-starter', version: '0.3.0' });
+  assert.equal(await readFile(file, 'utf8'), written);
+  await updated.rememberBuiltIn(hash, ['https://fonts.example.com'], { id: 'imageflow-starter', version: '0.3.0' });
+  assert.deepEqual(await new TemplateTrust(file).allowed(hash), ['https://fonts.example.com', 'https://tiles.example.com']);
+  // Templates without sites, and malformed hashes, are not recorded.
+  await updated.rememberBuiltIn(other, [], { id: 'whitewall', version: '1.0.0' });
+  await updated.rememberBuiltIn('not-a-hash', ['https://x.example.com'], { id: 'x', version: '1' });
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(file, 'utf8')).templates), [hash]);
+});

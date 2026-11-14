@@ -695,9 +695,11 @@ async function importTemplate(owner: BrowserWindow | undefined, path: string) {
  * `declared`, or before the template has rendered, all the trust covers.
  */
 async function bookNetworkTrust(hash: string, declared?: readonly string[]) {
-  const builtIn = await library.builtInNetwork(hash);
-  const allowed = builtIn ?? await trust.allowed(hash);
-  return declared ? trustedOrigins(declared, { builtIn: builtIn !== undefined, allowed }) : allowed;
+  const entry = await library.builtInEntry(hash);
+  // Remembered like a template the user allowed, so the book stays trusted after an update changes the built-in.
+  if (entry?.network?.length) await trust.rememberBuiltIn(hash, entry.network, entry).catch((error) => console.warn('ImageFlow could not save template trust', error));
+  const allowed = entry ? entry.network ?? [] : await trust.allowed(hash);
+  return declared ? trustedOrigins(declared, { builtIn: entry !== undefined, allowed }) : allowed;
 }
 
 /** Library entries with why their network access needs no question, for Manage Templates and New Book. */

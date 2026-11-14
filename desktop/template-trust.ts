@@ -1,10 +1,12 @@
 // Lasting trust in a library template's network access (ADR 0006). The user allows the sites a template version
 // declares once, when importing it or in Settings → Templates; books whose template still has exactly that hash then
-// need not ask. Any change to the template's files changes its hash, so a changed template asks again.
+// need not ask. Any change to the template's files changes its hash, so a changed template asks again. Built-in
+// templates are recorded too, the first time a book uses them, so a book keeps its trust after an app update ships a
+// changed built-in with another hash.
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-type Grant = { origins: string[]; id: string; version: string; allowedAt: string };
+type Grant = { origins: string[]; id: string; version: string; allowedAt: string; builtIn?: true };
 type Store = { schema: 1; templates: Record<string, Grant> };
 
 const hashPattern = /^[a-f0-9]{64}$/;
@@ -50,6 +52,19 @@ export class TemplateTrust {
     if (!hashPattern.test(hash)) throw new Error('Unknown template version.');
     await this.update((templates) => ({ ...templates,
       [hash]: { origins: [...new Set(origins)].sort(), id: template.id, version: template.version, allowedAt: new Date().toISOString() } }));
+  }
+
+  /**
+   * Records the sites a built-in template with this hash declares, so books made from it stay trusted once a later
+   * app ships a different version. Writes nothing when the hash already has them.
+   */
+  async rememberBuiltIn(hash: string, origins: readonly string[], template: { id: string; version: string }) {
+    if (!hashPattern.test(hash) || !origins.length) return;
+    const known = new Set(await this.allowed(hash));
+    if (origins.every((origin) => known.has(origin))) return;
+    await this.update((templates) => ({ ...templates, [hash]: {
+      origins: [...new Set([...templates[hash]?.origins ?? [], ...origins])].sort(), id: template.id, version: template.version,
+      allowedAt: new Date().toISOString(), builtIn: true } }));
   }
 
   async revoke(hash: string) {
