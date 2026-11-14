@@ -58,14 +58,22 @@ try {
       return decode.call(this);
     };
   });
-  const page = await testBook(app, folder);
-  page.on('pageerror', error => console.error('Renderer error:', error.message));
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
-  await page.locator('.spread-thumb[data-spread="s30"]').click();
-  const nativeWindow = await app.browserWindow(page);
+  const editor = await testBook(app, folder);
+  editor.on('pageerror', error => console.error('Renderer error:', error.message));
+  await editor.emulateMedia({ reducedMotion: 'reduce' });
+  await editor.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
+  await editor.locator('.spread-thumb[data-spread="s30"]').click();
+  const nativeWindow = await app.browserWindow(editor);
+  const originalBounds = await nativeWindow.evaluate((window) => {
+    window.__presentationResizes = 0;
+    window.on('resize', () => { window.__presentationResizes++; });
+    return window.getBounds();
+  });
   const originalHeader = headerHelper ? await macHeaderState(nativeWindow, headerHelper) : undefined;
   const checkHeader = async () => {
+    assert.deepEqual(await nativeWindow.evaluate((window) => window.getBounds()), originalBounds);
+    assert.equal(await nativeWindow.evaluate((window) => window.__presentationResizes), 0, 'Presentation never resizes the editor, including during startup');
+    assert.equal(await nativeWindow.evaluate((window) => window.isFullScreen() || window.isSimpleFullScreen()), false);
     if (!headerHelper) return;
     let restored;
     for (let attempt = 0; attempt < 50; ++attempt) {
@@ -80,29 +88,34 @@ try {
     assert.equal(await nativeWindow.evaluate((window) => window.getRepresentedFilename()), folder);
   };
   if (visible) {
-    const window = await app.browserWindow(page);
+    const window = await app.browserWindow(editor);
     await window.evaluate((window) => window.focus());
     await app.evaluate(({ app }) => app.focus({ steal: true }));
   }
   const requests = [];
-  page.on('request', request => { if(request.url().includes('/proof-photo/')) requests.push(request.url().split('/proof-photo/')[1]); });
+  app.context().on('request', request => { if(request.url().includes('/proof-photo/')) requests.push(request.url().split('/proof-photo/')[1]); });
   const start = performance.now();
-  await page.keyboard.press('Shift+w');
+  const opened = app.waitForEvent('window');
+  await editor.keyboard.press('Shift+w');
+  const page = await opened;
+  await page.waitForURL('imageflow://editor/presentation');
   await page.locator('.presentation .book-frame-present[data-current][data-ready]').waitFor({ timeout: 10000 });
   const startupMs = Math.round(performance.now() - start);
   const proof = page.frameLocator('.presentation .book-frame-present[data-current][data-ready]');
   const started = await proof.locator('body').evaluate(() => window.__startedPictures ?? []);
   const metrics = { startupMs, startedPictures: started, requestedPhotos: [...requests] };
   console.log(JSON.stringify(metrics));
+  await checkHeader();
   if (!process.argv.includes('--measure')) {
     assert.equal(requests[0], 'p30', 'The selected spread is the first original photo requested');
     assert.ok(started.length <= 3 && started.every(index => Math.abs(index - 30) <= 1), 'Only the current spread and neighbours draw artwork at startup');
     assert.ok(await page.evaluate(() => !!document.activeElement?.closest('.presentation')), 'Keyboard focus enters presentation without clicking the slide');
-    const window = await app.browserWindow(page);
+    let window = await app.browserWindow(page);
+    let input = page;
     const nativeKey = async (keyCode) => visible ? window.evaluate((window, keyCode) => {
       window.webContents.sendInputEvent({ type: 'keyDown', keyCode });
       window.webContents.sendInputEvent({ type: 'keyUp', keyCode });
-    }, keyCode) : page.keyboard.press({ Right: 'ArrowRight', Left: 'ArrowLeft' }[keyCode] ?? keyCode);
+    }, keyCode) : input.keyboard.press({ Right: 'ArrowRight', Left: 'ArrowLeft' }[keyCode] ?? keyCode);
     // --visible exercises the native input path, which requires a focused native window. Neither path clicks
     // the slide or manually focuses it after entry, since that would mask the reported focus failure.
     await nativeKey('Right');
@@ -132,20 +145,26 @@ try {
     await proof.locator('.if-presentation:not(.overview) .if-present-crop:visible img[data-src][src$="/p39"]').waitFor();
     await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.decode());
     assert.equal(await proof.locator('.if-present-crop:visible img[data-src]').evaluate(image => image.naturalWidth), 1800, 'Leaving overview restores original photo quality');
-    await page.keyboard.press('Escape');
-    await page.locator('.presentation').waitFor({ state: 'detached' });
+    const closed = page.waitForEvent('close');
+    await page.keyboard.press('Escape').catch((error) => { if (!page.isClosed()) throw error; });
+    await closed;
     await checkHeader();
+    const reopened = app.waitForEvent('window');
     await menuAction(app, 'Presentation');
-    await page.locator('.presentation .book-frame-present[data-current][data-ready]').waitFor();
-    await nativeKey('Left');
-    await page.frameLocator('.presentation .book-frame-present[data-current][data-ready]').locator('.if-present-crop:visible img[data-src][src$="/p0"]').waitFor();
-    await nativeKey('Escape');
-    await page.locator('.presentation').waitFor({ state: 'detached' });
+    input = await reopened;
+    await input.waitForURL('imageflow://editor/presentation');
+    window = await app.browserWindow(input);
+    await input.locator('.presentation .book-frame-present[data-current][data-ready]').waitFor();
+    await nativeKey('Home');
+    await input.frameLocator('.presentation .book-frame-present[data-current][data-ready]').locator('.if-present-crop:visible img[data-src][src$="/p0"]').waitFor();
+    const closedAgain = input.waitForEvent('close');
+    await nativeKey('Escape').catch((error) => { if (!input.isClosed()) throw error; });
+    await closedAgain;
     await checkHeader();
   }
   console.log('Presentation startup checked:', work);
 } catch (error) {
-  for (const page of app.windows().filter(page => page.url() === 'imageflow://editor/')) {
+  for (const page of app.windows().filter(page => ['imageflow://editor/', 'imageflow://editor/presentation'].includes(page.url()))) {
     console.error('Presentation state:', await page.evaluate(() => ({ active: document.activeElement?.outerHTML.slice(0, 300), presentation: !!document.querySelector('.presentation'), message: document.querySelector('.presentation-message')?.textContent,
       frames: [...document.querySelectorAll('.book-frame-present')].map(frame => ({ src: frame.src, ready: frame.dataset.ready, className: frame.className, height: frame.clientHeight })) })));
     for (const frame of page.frames().filter(frame => frame.url().includes('view=present'))) console.error('Artwork state:', await frame.evaluate(() => ({ state: window.imageflowRenderStatus?.state, ready: document.readyState,

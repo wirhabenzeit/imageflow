@@ -29,6 +29,7 @@ static napi_value inspect(napi_env env, napi_callback_info info) {
   number("iconWidth", frame.size.width);
   number("toolbarStyle", window.toolbarStyle);
   number("hasToolbar", window.toolbar ? 1 : 0);
+  number("presentationOptions", NSApp.presentationOptions);
   return result;
 }
 

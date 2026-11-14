@@ -13,6 +13,7 @@ export const editorURL = desktopScheme + '://editor/';
 export const startURL = desktopScheme + '://editor/start';
 export const starterURL = desktopScheme + '://editor/new';
 export const markdownURL = desktopScheme + '://editor/markdown';
+export const presentationURL = desktopScheme + '://editor/presentation';
 export const assetsURL = desktopScheme + '://editor/assets';
 export const templatesURL = desktopScheme + '://editor/templates';
 export const settingsURL = desktopScheme + '://editor/settings';
@@ -21,6 +22,7 @@ export const renderOrigin = desktopScheme + '://render';
 export const channels = {
   contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', toolbarDragRegions: 'document:toolbar-drag-regions', presentation: 'document:presentation', dragSources: 'document:drag-sources',
   showMarkdown: 'markdown:open', markdownAction: 'markdown:action', markdownChanged: 'markdown:changed', markdownPrepareClose: 'markdown:prepare-close',
+  presentationState: 'presentation:state', presentationSpread: 'presentation:spread', presentationClose: 'presentation:close', presentationClosed: 'presentation:closed',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
   current: 'document:current', appError: 'app:error',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
@@ -105,7 +107,11 @@ export type DesktopApi = {
   onSourceCommand(listener: (command: SourceCommand) => void): () => void;
   templateAction(id: string, action: 'reveal' | 'new'): Promise<Result<void>>;
   popupMenu(items: PopupItem[], point?: { x: number; y: number }): Promise<string | null>;
-  setPresentation(active: boolean): Promise<void>;
+  startPresentation(spread: string): Promise<Result<void>>;
+  presentationState(): Promise<Result<{ summary: ProjectSummary; start: string }>>;
+  setPresentationSpread(spread: string): Promise<void>;
+  closePresentation(spread?: string): Promise<void>;
+  onPresentationClosed(listener: (spread: string) => void): () => void;
   documentProxy(action: 'path' | 'drag'): Promise<void>;
   setToolbarDragRegions(regions: Rect[]): Promise<void>;
   dragSources(keys: string[]): Promise<void>;

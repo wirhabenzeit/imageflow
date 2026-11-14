@@ -65,9 +65,6 @@ static napi_value configure(napi_env env, napi_callback_info info) {
   NSToolbar *toolbar = [[NSToolbar alloc] initWithIdentifier:@"ImageFlowDocumentHeader"];
   window.toolbar = toolbar;
   toolbar.visible = NO;
-  // AppKit retains the enum after simple fullscreen removes the toolbar, but not its title layout.
-  // Change the style before restoring Preference so reconfiguration rebuilds the centred header.
-  window.toolbarStyle = NSWindowToolbarStyleAutomatic;
   window.toolbarStyle = NSWindowToolbarStylePreference;
   window.titleVisibility = NSWindowTitleVisible;
   window.titlebarSeparatorStyle = NSTitlebarSeparatorStyleNone;
