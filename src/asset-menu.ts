@@ -23,7 +23,7 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
     { type: 'separator' }, { command: 'asset-remove', label: chosen.length > 1 ? 'Remove ' + chosen.length + ' Assets from Book' : undefined, enabled: removable },
   ];
 }
-export function assetMenuState(summary: ProjectSummary, busy: boolean): BookMenuState {
+export function assetMenuState(busy: boolean): BookMenuState {
   return { ...emptyMenuState, document: true, writable: true, busy };
 }
 export const assetActions = { 'asset-reveal': 'reveal', 'asset-copy': 'copy', 'asset-remove': 'remove', 'asset-locate': 'locate',

@@ -43,7 +43,6 @@ const api: DesktopApi = {
   onSettingsPane: (listener) => listen(channels.settingsPane, listener),
   fitSettings: (height) => ipcRenderer.invoke(channels.fitSettings, height),
   setBookMenuState: (state) => ipcRenderer.invoke(channels.bookMenu, state),
-  setPanelVisibility: (state) => ipcRenderer.invoke(channels.panelVisibility, state),
   openProject: (action) => ipcRenderer.invoke(channels.open, action),
   saveProject: (id, files, label) => ipcRenderer.invoke(channels.save, id, files, label),
   history: (id, direction) => ipcRenderer.invoke(channels.history, id, direction),

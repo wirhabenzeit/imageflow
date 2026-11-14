@@ -17,7 +17,7 @@ import { cssMM, pageLabel, pageNumbers, pageSequence, pagesText, resolveFormat, 
 import { animateReorder } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat, UnitPages } from './format';
-import { frameView, parseDocument } from './project';
+import { frameView } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
 import { isParameterValue, parameterWarnings, resolveParams, resolveValue } from './parameters';

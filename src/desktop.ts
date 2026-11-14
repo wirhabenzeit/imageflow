@@ -28,7 +28,7 @@ export const channels = {
   command: 'project:command', changed: 'project:changed',
   export: 'project:export', progress: 'project:progress', cancel: 'project:cancel',
   check: 'project:check', cancelCheck: 'project:cancel-check',
-  panelVisibility: 'editor:panel-visibility', bookMenu: 'editor:book-menu',
+  bookMenu: 'editor:book-menu',
   settings: 'app:settings', updateSettings: 'app:update-settings', settingsChanged: 'app:settings-changed',
   showSettings: 'app:show-settings', settingsPane: 'app:settings-pane', fitSettings: 'app:fit-settings',
   library: 'library:list', libraryChanged: 'library:changed', libraryImport: 'library:import', libraryRemove: 'library:remove',
@@ -132,7 +132,6 @@ export type DesktopApi = {
   fitSettings(height: number): Promise<void>;
   // The window's panel and canvas layout state, so the View menu can show it.
   setBookMenuState(state: BookMenuState): Promise<void>;
-  setPanelVisibility(state: { sidebar: boolean; inspector: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout }): Promise<void>;
   openProject(action: OpenAction): Promise<Result<ProjectSummary | null>>;
   saveProject(id: string, files: ProjectFiles, label?: string): Promise<Result<ProjectSummary>>;
   history(id: string, direction: 'undo' | 'redo'): Promise<Result<ProjectSummary>>;
