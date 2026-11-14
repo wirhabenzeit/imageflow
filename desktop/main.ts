@@ -2,7 +2,7 @@ import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
 import { bookName } from '../src/book-name';
-import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, fileIsAssigned, removeSources } from './source-actions';
+import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, removeSources } from './source-actions';
 import { originalPath } from './source-store';
 import { sourceEntries } from '../src/source-locations';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
@@ -11,12 +11,12 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net,
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, extname, join, relative, isAbsolute, parse } from 'node:path';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
-import type { BookMenuState, CanvasLayout, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
+import type { BookMenuState, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
@@ -41,7 +41,7 @@ import { starters } from '../src/starters';
 import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-library';
 import { TemplateTrust, trustedOrigins } from './template-trust';
 import { ReleasedTemplates } from './released-templates';
-import { isTemplateArchive, templateArchiveExtension, writeTemplateArchive } from './template-archive';
+import { isTemplateArchive, templateArchiveExtension } from './template-archive';
 import { writeAuthoringSnapshot } from './authoring-sdk';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
 import { describeImport, templatePicturePath, templatePictureURL } from '../src/library';
@@ -1498,19 +1498,6 @@ void app.whenReady().then(async () => {
     if (typeof state.sources === 'boolean') document.sources = state.sources;
     if (typeof state.guides === 'boolean') document.guides = state.guides;
     if (state.layout && (state.layout.mode === 'grid' || state.layout.mode === 'vertical') && gridColumns.includes(state.layout.columns as 1|2|3|4)) document.layout = state.layout;
-    updateMenus();
-  });
-  ipcMain.handle(channels.panelVisibility, (event, state: { sidebar: boolean; inspector: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout }) => {
-    const document = editorOwner(event);
-    if (!document || typeof state?.sidebar !== 'boolean' || typeof state?.inspector !== 'boolean') return;
-    document.sidebar = state.sidebar;
-    document.inspector = state.inspector;
-    if (typeof state.sources === 'boolean') document.sources = state.sources;
-    if (typeof state.guides === 'boolean') document.guides = state.guides;
-    const layout = state.layout;
-    if (layout && (layout.mode === 'vertical' || layout.mode === 'grid') && gridColumns.some((columns) => columns === layout.columns)) {
-      document.layout = { mode: layout.mode, columns: layout.columns };
-    }
     updateMenus();
   });
   app.setAboutPanelOptions({ applicationName: 'ImageFlow', applicationVersion: app.getVersion() });

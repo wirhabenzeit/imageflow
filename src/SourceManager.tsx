@@ -51,7 +51,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   }
   async function menu(keys: string[]) {
     if (busy || disabled || !keys.length) return;
-    const result = await api.showContextMenu(assetMenu(summary, keys, true), assetMenuState(summary, busy || disabled));
+    const result = await api.showContextMenu(assetMenu(summary, keys, true), assetMenuState(busy || disabled));
     if (!result) return;
     if (result.command === 'asset-preview') {
       const item = sourceEntries(summary).find(({ key }) => key === keys[0]);

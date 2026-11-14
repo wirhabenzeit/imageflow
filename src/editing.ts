@@ -27,17 +27,6 @@ function shown(spread: SpreadState, layouts?: Layouts) {
   return Object.entries(spread.boxes).filter(([id]) => !ids || ids.has(id)).map(([, box]) => box);
 }
 
-// How often each photo is shown in the book. Content kept outside a spread's current layout does not count.
-export function assignmentCounts(project: Project, layouts?: Layouts) {
-  const counts: Record<string, number> = {};
-  for (const spread of project.spreads) {
-    for (const { photo } of shown(spread, layouts)) {
-      if (photo) counts[photo] = (counts[photo] ?? 0) + 1;
-    }
-  }
-  return counts;
-}
-
 export type SourceUsage = Record<'photo' | 'text', Record<string, { spread: string; pages: string }[]>>;
 
 // Lists the spreads that show each photo and Markdown source. `pages` holds a readable page range per spread.
