@@ -22,7 +22,7 @@
 .if-spread .left-page { left: calc(-1 * var(--bleed-outside)); }
 .if-spread .right-page { right: calc(-1 * var(--bleed-outside)); }
 .if-photo, .if-markdown { overflow: hidden; }
-.if-photo:not([data-photo-render]) img { position: absolute; max-width: none; display: block; }
+.if-photo:not(:where([data-photo-render])) img { position: absolute; max-width: none; display: block; }
 /* A box with a render callback is positioned for the template's own markup; photo.style places an image. */
 :where(.if-photo[data-photo-render]) { position: relative; }
 .if-photo[data-photo-render] > svg { display: block; }

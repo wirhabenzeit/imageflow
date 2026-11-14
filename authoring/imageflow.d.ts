@@ -601,7 +601,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
-  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'template-preview';
+  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'template-preview' | 'photo-render';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -813,16 +813,13 @@ export type PhotoRender = {
   crop: { x: number; y: number; width: number; height: number };
   /** The crop as saved for this layout (or followed live during a crop gesture): centre in 0–1 and zoom from 1. */
   placement: { centerX: number; centerY: number; zoom: number };
-  /** The original's size in pixels, upright. */
-  pixels: { width: number; height: number };
-  /** Effective resolution of the visible part at print size. */
+  /** Effective resolution of the visible part at print size. The photo's metadata and pixel size are `box.photo`. */
   ppi: number;
-  /** The photo's metadata, as `ctx.boxes[id].photo`. */
-  metadata: Photo;
 };
 /**
  * The box a render callback draws: the same values as `ctx.boxes[id]`, with its resolved parameters. `uid` is unique
- * in the book (it combines the spread and the box), for ids inside the callback's SVG such as a `clipPath` id.
+ * in the book (it combines the spread and the box), for ids inside the callback's SVG such as a `clipPath` id. Derive
+ * further ids with a dot, such as `box.uid + '.mask'`: box IDs never contain one, so they cannot collide with another box.
  */
 export type PhotoBoxState<I extends string = string, P = Values> = { id: I; uid: string; params: P; photo: Photo | null };
 /**

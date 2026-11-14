@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Component, createContext, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import { RenderedImage } from './rendered-image';
 import { renderingSpread } from './purity';
@@ -512,12 +512,11 @@ export type PhotoRender = {
   style: CSSProperties;
   crop: Crop;
   placement: CropPlacement;
-  pixels: { width: number; height: number };
   ppi: number;
-  metadata: Photo;
 };
 // `uid` is unique in the book (spread and box), for SVG ids such as a clipPath's. Ids may contain hyphens, so the
-// spread id's length keeps pairs such as one-x/hero and one/x-hero apart.
+// spread id's length keeps pairs such as one-x/hero and one/x-hero apart. Identifiers never contain '.', so a
+// callback derives further ids as uid + '.mask', and export suffixes its copies with '.p1' (see svg-ids.ts).
 export const photoBoxUid = (spread: string, box: string) => 'if-' + spread.length + '-' + spread + '-' + box;
 export type PhotoBoxState = { id: string; uid: string; params: Values; photo: Photo | null };
 export type PhotoBoxRender = (photo: PhotoRender, box: PhotoBoxState) => ReactNode;
@@ -550,17 +549,56 @@ export function photoRender(photo: Photo & { src: string }, placement: CropPlace
   const crop = getCrop(photo, placement, size.width / size.height);
   const width = size.width / crop.width;
   const height = size.height / crop.height;
-  const { src: _src, ...metadata } = photo;
   return {
     src, alt: photo.altText ?? photo.title ?? '',
     box: { width: size.width, height: size.height },
     image: { x: -crop.x * width, y: -crop.y * height, width, height },
     style: { position: 'absolute', maxWidth: 'none', width: 100 / crop.width + '%', height: 100 / crop.height + '%',
       left: -100 * crop.x / crop.width + '%', top: -100 * crop.y / crop.height + '%' },
-    crop, placement: { ...placement }, pixels: { width: photo.width, height: photo.height },
+    crop, placement: { ...placement },
     ppi: Math.min(photo.width * crop.width / size.width, photo.height * crop.height / size.height) * 96,
-    metadata,
   };
+}
+
+// The editor's book view draws callback boxes after its first render (when their spread comes near) and again during
+// crop gestures, outside the render pass that reports errors. A callback that throws there is caught per box: the box
+// shows that it failed and the failure reaches the live Book check, instead of the whole book view unmounting.
+export type PhotoRenderFailure = { spread: string; box: string; message: string };
+const photoRenderFailures = new Map<string, PhotoRenderFailure>();
+const failureListeners = new Set<() => void>();
+export const currentPhotoRenderFailures = () => [...photoRenderFailures.values()];
+export function watchPhotoRenderFailures(listener: () => void) { failureListeners.add(listener); return () => { failureListeners.delete(listener); }; }
+function setPhotoRenderFailure(key: string, failure: PhotoRenderFailure | undefined) {
+  if (failure) photoRenderFailures.set(key, failure);
+  else if (!photoRenderFailures.delete(key)) return;
+  for (const listener of failureListeners) listener();
+}
+type BoundaryProps = { spread: string; box: string; reset: string; children: ReactNode };
+export class PhotoRenderBoundary extends Component<BoundaryProps, { failed: boolean }> {
+  state = { failed: false };
+  private get key() { return this.props.spread + '\u0000' + this.props.box; }
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: unknown) {
+    setPhotoRenderFailure(this.key, { spread: this.props.spread, box: this.props.box, message: error instanceof Error ? error.message : String(error) });
+  }
+  // A new crop, size or parameter value draws again.
+  componentDidUpdate(previous: BoundaryProps) {
+    if (previous.reset === this.props.reset) return;
+    if (previous.spread !== this.props.spread || previous.box !== this.props.box) setPhotoRenderFailure(previous.spread + '\u0000' + previous.box, undefined);
+    if (this.state.failed) { setPhotoRenderFailure(this.key, undefined); this.setState({ failed: false }); }
+  }
+  componentWillUnmount() { setPhotoRenderFailure(this.key, undefined); }
+  render() { return this.state.failed ? <span className="if-placeholder" data-photo-render-failed="">Photo could not be drawn</span> : this.props.children; }
+}
+
+// Calls a box's render callback as its own component, so a boundary around it catches what it throws.
+function PhotoRenderCall({ render, photo, state, spread }: { render: PhotoBoxRender; photo: PhotoRender; state: PhotoBoxState; spread: string }) {
+  renderingSpread(spread);
+  try {
+    return <>{render(photo, state)}</>;
+  } finally {
+    renderingSpread(undefined);
+  }
 }
 
 export function PhotoBox({ id, className, style, rect, children, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker &
@@ -626,11 +664,12 @@ export function PhotoBox({ id, className, style, rect, children, 'data-edit': ma
     // Export loads a rendition sized for the saved crop at print resolution; the editor its preview or thumbnail.
     shown.src = book.mode === 'edit' ? photo.src : exportSource(photo, size.width / getCrop(photo, saved, size.width / size.height).width, format);
     const resolved = values.boxes[id];
-    renderingSpread(spread.id);
-    try {
-      content = render(shown, { id, uid: photoBoxUid(spread.id, id), params: resolved?.params ?? {}, photo: resolved?.photo ?? null });
-    } finally {
-      renderingSpread(undefined);
+    const state = { id, uid: photoBoxUid(spread.id, id), params: resolved?.params ?? {}, photo: resolved?.photo ?? null };
+    content = <PhotoRenderCall render={render} photo={shown} state={state} spread={spread.id} />;
+    // Outside the editor's book view a throw fails the render as for any other template code.
+    if (lazyPhotos) {
+      content = <PhotoRenderBoundary spread={spread.id} box={id}
+        reset={JSON.stringify([shown.src, shown.placement, shown.box, state.params, state.photo])}>{content}</PhotoRenderBoundary>;
     }
   }
 

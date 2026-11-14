@@ -7,7 +7,7 @@ import { mm, resolveFormat } from '../src/format';
 import { projectSchema } from '../src/project';
 import type { RenderProject } from '../src/project';
 import { getCrop } from '../src/spread';
-import { box, chooseFormat, photoRender, runtime, setLivePlacement, SpreadView, templateSchema } from '../src/template';
+import { box, chooseFormat, currentPhotoRenderFailures, photoRender, PhotoRenderBoundary, runtime, setLivePlacement, SpreadView, templateSchema } from '../src/template';
 import type { PhotoBoxState, PhotoRender, RenderContext } from '../src/template';
 
 const format = { label: 'F', trim: { width: mm(200), height: mm(100) },
@@ -39,7 +39,7 @@ function renderBox(options: { mode?: 'edit' | 'export'; assigned?: string; crops
   return { html, received };
 }
 
-test('a render callback receives the host crop, rendition, resolution, metadata and the resolved box', () => {
+test('a render callback receives the host crop, rendition, resolution and the resolved box', () => {
   const { html, received } = renderBox({ crops: { main: { centerX: .25, centerY: .5, zoom: 2 } } });
   assert.equal(received.length, 1);
   const [{ photo, box: state }] = received;
@@ -48,7 +48,6 @@ test('a render callback receives the host crop, rendition, resolution, metadata 
   assert.deepEqual(photo.crop, crop);
   assert.deepEqual(photo.box, size);
   assert.deepEqual(photo.placement, { centerX: .25, centerY: .5, zoom: 2 });
-  assert.deepEqual(photo.pixels, { width: 6000, height: 2000 });
   // The whole photo sits so the visible part fills the box exactly.
   assert.ok(Math.abs(photo.image.width * crop.width - size.width) < 1e-9 && Math.abs(photo.image.height * crop.height - size.height) < 1e-9);
   assert.ok(Math.abs(photo.image.x + crop.x * photo.image.width) < 1e-9 && Math.abs(photo.image.y + crop.y * photo.image.height) < 1e-9);
@@ -56,7 +55,7 @@ test('a render callback receives the host crop, rendition, resolution, metadata 
   assert.equal(photo.style.left, -100 * crop.x / crop.width + '%');
   assert.ok(Math.abs(photo.ppi - 6000 * crop.width / size.width * 96) < 1e-6);
   assert.equal(photo.alt, 'A wide view');
-  assert.deepEqual(photo.metadata, { width: 6000, height: 2000, caption: 'Wide', altText: 'A wide view' });
+  assert.deepEqual(Object.keys(photo).sort(), ['alt', 'box', 'crop', 'image', 'placement', 'ppi', 'src', 'style']);
   // Export loads a rendition sized for the crop at print resolution (300 ppi by default), rounded up to 16 px.
   assert.match(photo.src, /\/photo\/wide\/\d+$/);
   const width = Number(photo.src.split('/').at(-1));
@@ -108,4 +107,25 @@ test('crop gestures reach the callback in the editor only, and a non-function ch
   }
   assert.deepEqual(renderBox({ mode: 'edit' }).received[0].photo.placement, { centerX: .5, centerY: .5, zoom: 1 });
   assert.throws(() => renderBox({ callback: 'not a function' }), /PhotoBox hero: children must be a render function/);
+});
+
+test('in the editor book view a throwing callback fails its box, reports it, and draws again on the next change', () => {
+  const props = { spread: 'one', box: 'hero', reset: 'a', children: null };
+  const boundary = new PhotoRenderBoundary(props);
+  boundary.setState = (state) => { Object.assign(boundary.state, state); };
+  assert.deepEqual(PhotoRenderBoundary.getDerivedStateFromError(), { failed: true });
+  boundary.state.failed = true;
+  boundary.componentDidCatch(new Error('tilt is undefined'));
+  assert.deepEqual(currentPhotoRenderFailures(), [{ spread: 'one', box: 'hero', message: 'tilt is undefined' }]);
+  assert.match(renderToStaticMarkup(boundary.render() as never), /data-photo-render-failed/);
+  // The same inputs keep the failure; a new crop or parameter value clears it and draws again.
+  boundary.componentDidUpdate(props);
+  assert.equal(currentPhotoRenderFailures().length, 1);
+  (boundary as { props: typeof props }).props = { ...props, reset: 'b' };
+  boundary.componentDidUpdate(props);
+  assert.equal(boundary.state.failed, false);
+  assert.deepEqual(currentPhotoRenderFailures(), []);
+  boundary.componentDidCatch(new Error('again'));
+  boundary.componentWillUnmount();
+  assert.deepEqual(currentPhotoRenderFailures(), []);
 });

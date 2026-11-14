@@ -25,8 +25,8 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
-import type { AnchorLookup, EditorContext, EditorPresentation } from './template';
+import { bookIndex, chooseFormat, currentPhotoRenderFailures, watchPhotoRenderFailures, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import type { AnchorLookup, PhotoRenderFailure, EditorContext, EditorPresentation } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
 import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
@@ -628,7 +628,7 @@ function croppedSheet(sheet: HTMLElement, crop: ReturnType<typeof sheetCrop>, pi
   page.style.width = cssMM(crop.widthMm);
   page.style.height = cssMM(crop.heightMm);
   const clone = sheet.cloneNode(true) as HTMLElement;
-  renameIds(clone, '-p' + ++printCopies);
+  renameIds(clone, '.p' + ++printCopies);
   let scaleX = 1;
   let scaleY = 1;
   if (pixels) {
@@ -1618,6 +1618,9 @@ export async function startRender(root: HTMLElement) {
       suggestion: failed.timedOut ? 'Check the internet connection, then check or export again.'
         : 'Check that the template’s network sites are allowed for this book and reachable, then check or export again.' }));
     errors.push(...pictureIssues(pictureFailures));
+    const photoRenderIssues = (failures: PhotoRenderFailure[]): Issue[] => failures.map(({ spread, box, message: text }) => ({
+      ...located(spread, 'Photo box ' + box + ': its render callback failed: ' + text), code: 'photo-render-failed', box,
+      suggestion: 'Fix the PhotoBox render callback so it returns markup for every crop and parameter value.' }));
     for (const { api, spread } of guards?.calls ?? []) {
       errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api))), code: 'render-impure',
         details: { api }, suggestion: impureSuggestion });
@@ -1776,10 +1779,11 @@ export async function startRender(root: HTMLElement) {
         setTimeout(() => {
           queued = false;
           const { pending, failures } = renderedImageState();
-          post({ type: 'pictures', pending, errors: pictureIssues(failures) });
+          post({ type: 'pictures', pending, errors: [...pictureIssues(failures), ...photoRenderIssues(currentPhotoRenderFailures())] });
         }, 50);
       };
       watchRenderedImages(report);
+      watchPhotoRenderFailures(report);
       report();
     }
   } catch (error) {
