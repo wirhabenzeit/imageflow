@@ -186,8 +186,6 @@ export default defineTemplate({
   label: 'Wall calendar',
   description: 'A landscape wall calendar: one full-bleed photo a month, with the place and the days on a dark strip.',
   contract: 1,
-  // The marked days are clicked on the page (an extension of contract 1).
-  requires: ['inline-editors'],
   formats: {
     a3: calendarFormat('45 × 30 cm (A3 landscape) · 6835 × 4866 px', 6835, 4866),
     a2: calendarFormat('60 × 45 cm (A2 landscape) · 9417 × 6677 px', 9417, 6677),

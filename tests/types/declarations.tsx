@@ -343,7 +343,7 @@ function OnPage({ presentation, values }: ElementEditorProps<typeof route, 'zoom
   return <div>{where}{values.zoom}</div>;
 }
 function DaysOnPage({ presentation }: DocumentEditorProps<typeof calendarDocument, 'marked'>) { return <div>{presentation === 'inline' ? 'page' : 'panel'}</div>; }
-defineTemplate({ id: 't', version: '1', contract: 1, format, requires: ['inline-editors'], parameters: calendarDocument,
+defineTemplate({ id: 't', version: '1', contract: 1, format, parameters: calendarDocument,
   editors: { days: { parameters: ['marked'], component: DaysOnPage, presentation: 'inline' } },
   spreads: ({ spread }) => ({ a: spread({ label: 'A', elements: { e: { label: 'E', parameters: route,
     editor: { parameters: ['zoom'], component: OnPage, presentation: 'inline' } } }, render: () => <Spread /> }) }) });

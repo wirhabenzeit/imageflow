@@ -38,8 +38,6 @@ function FocusEditor({ values, set, readOnly }: ElementEditorProps<typeof focus,
 
 export default defineTemplate({
   id: 'example-inline-editor', version: '1.0.0', contract: 1,
-  // `presentation: 'inline'` is an extension of contract 1.
-  requires: ['inline-editors'],
   format,
   spreads: ({ spread }) => ({
     focus: spread({

@@ -548,8 +548,8 @@ test('context reports the installed template API and returns shipped examples on
   // Agents can distinguish guaranteed features from later extensions without writing redundant requires lists.
   assert.ok(['single-pages', 'document-editors', 'editor-context', 'editor-network', 'rendered-images'].every((name) => api.baseline.includes(name)));
   assert.ok(api.baseline.every((name) => api.capabilities.includes(name)));
-  // Later extensions are discoverable, and outside the baseline.
-  assert.ok(api.capabilities.includes('inline-editors') && !api.baseline.includes('inline-editors'));
+  // Editing on the page joined the baseline before the first release (ADR 0008).
+  assert.ok(api.capabilities.includes('inline-editors') && api.baseline.includes('inline-editors'));
   const withExamples = await call('get_authoring_context', { includeExamples: true });
   assert.deepEqual(withExamples.examples, [
     { name: 'a-minimal', description: 'The smallest template.', source: '// The smallest template.\nexport default {};\n' },

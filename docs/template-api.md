@@ -41,7 +41,7 @@ The examples use the generic `serif` and `sans-serif` font families, so they pre
 
 ### Requirements and compatibility
 
-Every supported contract-1 runtime provides the complete baseline below, including document editors, network declarations and rendered images. A template selects it with `contract: 1`; no `requires` list is needed:
+Every supported contract-1 runtime provides the complete baseline below, including document editors, network declarations, rendered images and editing on the page. A template selects it with `contract: 1`; no `requires` list is needed:
 
 ```ts
 defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
@@ -69,16 +69,12 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `document-editors` | `editors`: editors of document parameters, opened from nodes marked with them. |
 | `editor-network` | Declared HTTPS origins for editors and rendering, subject to user approval. |
 | `rendered-images` | `<RenderedImage>` for host-managed asynchronous pictures in preview, check and export. |
-
-Extensions after the baseline, each declared in `requires` by templates that use it:
-
-| Extension | Provides |
-| --- | --- |
 | `inline-editors` | `presentation: 'inline'` on element and document editors: editing on the page, in the frame of what the editor was opened from ([Editing on the page](#editing-on-the-page)). |
 
-`requires` is reserved for additive extensions introduced after this baseline. Unsupported extensions are rejected when the template loads, with an update hint. Older templates that list baseline features in `requires` remain valid. `capabilities` continues to list all supported feature names, including the baseline, for compatibility and feature discovery. `get_authoring_context` reports the contract, its `baseline`, all `capabilities` and module `exports` as `capabilities.templateApi`.
 
-The baseline is fixed in `src/runtime-exports.ts` and must not shrink or grow when later extensions are added. Earlier development builds are not supported implementations of the frozen contract-1 baseline; use a supported v1 runtime rather than adding a list of baseline flags to target them. See [ADR 0007](decisions/0007-template-v1-baseline.md).
+`requires` is reserved for additive extensions introduced after the baseline is fixed. Unsupported extensions are rejected when the template loads, with an update hint. Older templates that list baseline features in `requires` remain valid. `capabilities` continues to list all supported feature names, including the baseline, for compatibility and feature discovery. `get_authoring_context` reports the contract, its `baseline`, all `capabilities` and module `exports` as `capabilities.templateApi`.
+
+The baseline is defined in `src/runtime-exports.ts`. Until ImageFlow's first public release it stays open: new additive features join it, and templates use them without `requires`. At that release it is fixed, and later additive extensions are declared in `requires`. It never shrinks. Development builds before that release are not supported implementations of contract 1; use a current build rather than adding a list of baseline flags to target an older one. See [ADR 0007](decisions/0007-template-v1-baseline.md) and [ADR 0008](decisions/0008-baseline-freeze-at-release.md).
 
 An app update never rewrites a project's template folder. Renaming an ID, moving a parameter to another scope or changing an ID's type needs an explicit migration in the template and in `project.json`; ImageFlow never reinterprets or deletes saved values on its own.
 
@@ -589,11 +585,11 @@ export default defineTemplate({
 
 ### Editing on the page
 
-An element editor or a document editor can ask to be shown on the page instead of in the panel, with `presentation: 'inline'`, an extension of contract 1 that the template declares in `requires`:
+An element editor or a document editor can ask to be shown on the page instead of in the panel, with `presentation: 'inline'`:
 
 ```tsx
 export default defineTemplate({
-  contract: 1, requires: ['inline-editors'],
+  contract: 1,
   // ...
   elements: { map: { label: 'Map', parameters: mapParameters,
     editor: { parameters: ['longitude', 'latitude', 'zoom'], component: MapEditor, presentation: 'inline' } } },
@@ -847,7 +843,7 @@ Identifiers start with a letter or digit, then contain letters, digits, undersco
 
 `project.json` has `schemaVersion: 1`, `title`, `template: { id, version }`, document `params`, `texts` (ID → relative path), and ordered `spreads`. Each spread has `id`, `definition` (its current layout), and one `params`, `boxes` and `elements` state shared by all its layouts; see [Switching layouts](#switching-layouts). The example above shows one spread, not a complete project. Photo metadata is keyed by stable photo ID in `photos.json`; dimensions are derived from image files. Crop centers are normalized 0–1; zoom is 1–20. Constraints are checked on rendering; invalid saved values remain stored and render using defaults. Sources remain in the project even when no box uses them.
 
-New projects copy the starter template. Updating the app does not replace existing project templates. Every supported contract-1 runtime provides the baseline above. Later extensions use `requires`; keep the app and authoring declarations aligned. Renaming an ID or moving a parameter between scopes requires an explicit project-data migration; there is no automatic migration framework. PR #7 moves the starter calendar month to `elements.grid.params.month`; replacing only the template in an older project does not migrate that saved value.
+New projects copy the starter template. Updating the app does not replace existing project templates. Every supported contract-1 runtime provides the baseline above. Extensions after the first public release will use `requires`; keep the app and authoring declarations aligned. Renaming an ID or moving a parameter between scopes requires an explicit project-data migration; there is no automatic migration framework. PR #7 moves the starter calendar month to `elements.grid.params.month`; replacing only the template in an older project does not migrate that saved value.
 
 ### Preview limitations
 

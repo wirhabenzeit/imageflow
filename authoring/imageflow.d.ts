@@ -286,13 +286,12 @@ export type ElementEditor<K extends string = string, P extends Parameters = Para
   component: EditorFunction<Owned, ElementEditorProps<P, Owned, D, S, OwnedSpread>, ImageFlowNode>;
   /**
    * `'inline'` edits on the page: the component runs in the element's own frame, at its printed size and position, in
-   * place of its artwork, and the element's other parameters appear in a toolbar under the canvas. Needs
-   * `requires: ['inline-editors']`. A rotated or skewed element, or one too small to use, opens in the panel instead,
-   * and the toolbar can move any inline editor to the panel. Default `'dialog'`: the editor panel.
+   * place of its artwork, and the element's other parameters appear in a toolbar under the canvas. A rotated or
+   * skewed element, or one too small to use, opens in the panel instead. Default `'dialog'`: the editor panel.
    */
   presentation?: EditorPresentation;
 };
-/** Where an editor is shown. `'inline'` is an extension: declare `requires: ['inline-editors']`. */
+/** Where an editor is shown: `'dialog'`, the editor panel, or `'inline'`, on the page. */
 export type EditorPresentation = 'dialog' | 'inline';
 /**
  * The read-only view of the book an editor is opened from: the values `render` reads for that spread (its
@@ -350,7 +349,7 @@ export type DocumentEditor<D extends Parameters = Parameters, K extends keyof D 
   component: EditorFunction<K, DocumentEditorProps<D, K>, ImageFlowNode>;
   /**
    * `'inline'` edits on the page, in the frame of the marked node the editor was opened from, in place of that node.
-   * Needs `requires: ['inline-editors']`. Default `'dialog'`: the editor panel.
+   * Default `'dialog'`: the editor panel.
    */
   presentation?: EditorPresentation;
 };
@@ -573,8 +572,8 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
   readonly [typedFamily]?: F;
 };
 /**
- * Known feature names. The contract-1 baseline needs no `requires` entries; later extensions, listed after it, do:
- * `inline-editors` (`presentation: 'inline'` on element and document editors).
+ * Known feature names, all part of the contract-1 baseline, which needs no `requires` entries. Extensions added after
+ * the first public release will be listed after it and declared in `requires` (ADR 0008).
  */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |

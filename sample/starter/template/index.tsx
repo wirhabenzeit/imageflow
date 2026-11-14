@@ -319,8 +319,6 @@ export default defineTemplate({
   label: 'Photobook',
   description: 'A travel journal with photographs, stories, maps, and room for your own layouts.',
   contract: 1,
-  // The map is framed on the page (an extension of contract 1).
-  requires: ['inline-editors'],
   // The Map layout loads OpenFreeMap styles and tiles once the user allows it, in its editor, the page and export.
   network: [mapOrigin],
   formats: {

@@ -32,18 +32,16 @@ const problems = (value: object) => {
   return result.success ? [] : result.error.issues.map(({ path, message }) => path.join('.') + ': ' + message);
 };
 
-test('inline-editors is a declared extension, not part of the frozen baseline', () => {
+test('inline-editors is part of the contract-1 baseline (ADR 0008)', () => {
   assert.ok(capabilities.includes('inline-editors'));
-  assert.ok(!(contract1Capabilities as readonly string[]).includes('inline-editors'));
+  assert.ok((contract1Capabilities as readonly string[]).includes('inline-editors'));
 });
 
-test("presentation: 'inline' needs requires: ['inline-editors']; dialog stays the default", () => {
-  assert.deepEqual(problems(declaration()), [
-    "editors.days.presentation: presentation: 'inline' needs requires: ['inline-editors'].",
-    "spreads.map.elements.map.editor.presentation: presentation: 'inline' needs requires: ['inline-editors'].",
-  ]);
+test("presentation: 'inline' needs no requires entry; dialog stays the default", () => {
+  assert.deepEqual(problems(declaration()), []);
+  // Templates that listed the former extension stay valid.
   assert.deepEqual(problems(declaration({ requires: ['inline-editors'] })), []);
-  assert.match(problems(declaration({ requires: ['inline-editors'], element: 'floating' })).join(), /spreads\.map\.elements\.map\.editor\.presentation/);
+  assert.match(problems(declaration({ element: 'floating' })).join(), /spreads\.map\.elements\.map\.editor\.presentation/);
   // Existing templates keep the panel, with or without the extension.
   const plain = templateInfo(chooseFormat(templateSchema.parse(declaration({ element: 'dialog', document: 'dialog' }))));
   assert.equal(plain.spreads.map.elements.map.editor?.presentation, 'dialog');
@@ -52,7 +50,7 @@ test("presentation: 'inline' needs requires: ['inline-editors']; dialog stays th
   const declared = templateSchema.parse({ ...withoutEditors, spreads: { map: { label: 'Map', render, elements: { map: { label: 'Map',
     parameters: { zoom: p.number({ label: 'Zoom', default: 8 }) }, editor: { parameters: ['zoom'], component } } } } } });
   assert.equal(declared.spreads.map.elements.map.editor?.presentation, 'dialog');
-  const inline = templateInfo(chooseFormat(templateSchema.parse(declaration({ requires: ['inline-editors'] }))));
+  const inline = templateInfo(chooseFormat(templateSchema.parse(declaration())));
   assert.equal(inline.spreads.map.elements.map.editor?.presentation, 'inline');
   assert.equal(inline.editors?.days.presentation, 'inline');
 });

@@ -131,7 +131,7 @@ function editTarget(book: RenderProject, prefix: string, parameters: Parameters 
 export type FlowPosition = { part: number; parts: number; title?: string };
 // An element may supply its own editor for some of its parameters. The component runs in a sandboxed frame
 // and reports changes; ImageFlow owns the non-modal panel, validation, live saving and Undo.
-// An editor asks for 'inline' (requires 'inline-editors'): it then edits on the page, in the frame of the element or
+// An editor asks for 'inline': it then edits on the page, in the frame of the element or
 // marked node it was opened from. It falls back to the panel ('dialog') where it cannot, such as a rotated element.
 export type EditorPresentation = 'dialog' | 'inline';
 const presentation = z.enum(['dialog', 'inline']).default('dialog');
@@ -312,18 +312,6 @@ export const templateSchema = z.preprocess(withSpans, z.object({
       } else if (owners.has(key)) {
         context.addIssue({ code: 'custom', path, message: 'Document parameter ' + key + ' is edited by both ' + owners.get(key) + ' and ' + id + '. Give it to one editor.' });
       } else owners.set(key, id);
-    }
-  }
-}).superRefine(({ requires, spreads, editors }, context) => {
-  // An additive extension (ADR 0007): a template showing an editor inline says so, so an older app rejects it at load.
-  if (requires?.includes('inline-editors')) return;
-  const message = "presentation: 'inline' needs requires: ['inline-editors'].";
-  for (const [id, editor] of Object.entries(editors ?? {})) {
-    if (editor.presentation === 'inline') context.addIssue({ code: 'custom', path: ['editors', id, 'presentation'], message });
-  }
-  for (const [layout, { elements }] of Object.entries(spreads)) {
-    for (const [id, { editor }] of Object.entries(elements)) {
-      if (editor?.presentation === 'inline') context.addIssue({ code: 'custom', path: ['spreads', layout, 'elements', id, 'editor', 'presentation'], message });
     }
   }
 }).superRefine(({ spreads, layoutFamilies }, context) => {
