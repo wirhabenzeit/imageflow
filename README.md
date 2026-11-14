@@ -1,4 +1,7 @@
-# ImageFlow
+<h1><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="resources/brand/logo/imageflow-horizontal-dark.svg">
+  <img src="resources/brand/logo/imageflow-horizontal-light.svg" alt="ImageFlow" height="56">
+</picture></h1>
 
 ImageFlow is a macOS photobook editor. Its draft starter project is a 32-page WhiteWall Gallery Square book with sample photos, Markdown, and a template you can edit.
 
@@ -58,7 +61,7 @@ The ad-hoc-signed app appears in `out/ImageFlow-darwin-arm64/ImageFlow.app` on A
 
 Set `APPLE_SIGNING_IDENTITY` to a Developer ID Application identity to sign with hardened runtime. `npm run package:mac:release` also notarizes and staples the app and DMG, verifies their tickets, and creates the update ZIP. [Mac signing and notarization](docs/signing.md) covers the credentials, GitHub Actions secret setup, artifact names and verification. `npm run test:packaged:existing` checks a release build without rebuilding it, including its MCP bridge.
 
-The app icon and the book and template document icons are drawn as SVG in `resources/brand/`. After editing one, run `npm run build:icons` to regenerate the `.icns` files in `resources/` and commit both.
+The app icon and the book and template document icons are drawn as SVG in `resources/brand/`, next to the layered Icon Composer version of the app icon (`ImageFlow.icon`, which macOS 26 shows with Liquid Glass) and the DMG window background. After editing one, run `npm run build:icons` on a Mac with Xcode 26 to regenerate the `.icns` files, `resources/Assets.car` and the DMG background in `resources/dmg/`, and commit them with the source. The DMG window layout comes from `scripts/build-dmg-layout.py`. The logo and wordmark live in `resources/brand/logo/` as outlined SVG (the type is Inter Display, under the SIL Open Font License), for light and dark backgrounds, in horizontal and stacked versions.
 
 To prepare a downloadable release, follow [Releasing ImageFlow](docs/releasing.md). Pushing a matching version tag creates signed Apple silicon ZIP and DMG assets in a draft GitHub Release for manual review and publishing.
 
@@ -87,6 +90,8 @@ Sidebars slide open and closed (or switch immediately with Reduce Motion enabled
 The canvas shows the book as one **Vertical** column of spreads, or as a **Grid** with 1–4 columns. The grid follows book order left to right across each row and scrolls vertically. Choose the layout under **View → Vertical / Grid / Columns** and toggle guides with **View → Show Guides**. Spreads scale to fit their share of the canvas width, and selecting a spread in the sidebar scrolls it into view. Editing works the same in both layouts. Each book remembers its layout on this computer.
 
 The canvas scrolls through the whole book; the left sidebar contains spread thumbnails and expandable template settings. The bottom **Photos / Texts** strip selects source content for the Inspector. Space, or double-clicking a text box, opens Quick Look. Clicking selects what is drawn on top: a photo is selected for dragging and pinching, an element with its own editor, such as the starter's map (Edit map), opens it, and template-marked text or a parameterized box/element opens a popover. Every parameter is also in the Inspector, which a click scrolls to. Custom element controls apply changes as you edit; each change is undoable. Closing with × or clicking outside applies any text still being typed; Escape discards only uncommitted typing. Typed popover values commit on Enter or an outside click; Escape discards uncommitted typing. Choices apply immediately. Layout thumbnails illustrate composition; Markdown starts at the beginning in these previews.
+
+**Presentation** (⇧W) opens a separate fullscreen window on the editor's display. The editor keeps its size and title bar. Escape or Close Window dismisses presentation and returns to the last viewed spread; closing the book closes its presentation too. Starting presentation from another book switches to that book.
 
 Open **Settings → Agents** to configure the [MCP connection](docs/mcp.md) for local agents. The [imageflow-templates skill](skills/imageflow-templates/SKILL.md) gives agents the template API reference and examples; Settings → Agents saves it for upload, and `/plugin marketplace add wirhabenzeit/imageflow` installs it in Claude Code together with the MCP server.
 

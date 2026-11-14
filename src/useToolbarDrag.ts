@@ -2,12 +2,12 @@ import { useLayoutEffect } from 'react';
 
 // Report the actual blank toolbar area and its controls, rather than estimating
 // button positions in native code. Coordinates remain CSS pixels across zoom.
-export function useToolbarDrag(presenting: boolean) {
+export function useToolbarDrag() {
   useLayoutEffect(() => {
     const api = window.imageflow;
     if (!navigator.platform.includes('Mac') || !api?.setToolbarDragRegions) return;
     const toolbar = document.querySelector<HTMLElement>('header.toolbar');
-    if (!toolbar || presenting) {
+    if (!toolbar) {
       void api.setToolbarDragRegions([]);
       return;
     }
@@ -31,5 +31,5 @@ export function useToolbarDrag(presenting: boolean) {
     changes.observe(toolbar, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
     publish();
     return () => { resize.disconnect(); changes.disconnect(); void api.setToolbarDragRegions([]); };
-  }, [presenting]);
+  }, []);
 }

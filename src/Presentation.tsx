@@ -5,9 +5,10 @@ import type { ProjectSummary, TemplateInfo } from './desktop';
 import { hasFacingPages } from './format';
 import { presentationPage, presentationUnits } from './presentation-model';
 
-export function Presentation({ summary, template, start, close }: {
-  summary: ProjectSummary; template: TemplateInfo; start: string; close: (spread: string) => void;
+export function Presentation({ summary, start, close }: {
+  summary: ProjectSummary; start: string; close: (spread: string) => void;
 }) {
+  const [template, setTemplate] = useState<TemplateInfo>();
   const host = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState({ spread: start, page: 0 });
   const [single, setSingle] = useState(false);
@@ -21,7 +22,7 @@ export function Presentation({ summary, template, start, close }: {
   const [ready, setReady] = useState(false);
   // Navigation uses messages after startup; keep the initial URL stable while choosing other spreads.
   const [query] = useState(() => new URLSearchParams({ spread: start }).toString());
-  const units = useMemo(() => presentationUnits(summary.project.spreads, template, single), [summary.project.spreads, template, single]);
+  const units = useMemo(() => template ? presentationUnits(summary.project.spreads, template, single) : [], [summary.project.spreads, template, single]);
   const at = Math.max(0, units.findIndex((unit) => unit.spread === selected.spread && (!single || !selected.page || unit.pages.includes(selected.page))));
   const unit = units[at];
   const view = useMemo(() => unit && ({ spread: unit.spread, side: unit.side, bounds: bleed ? 'bleed' as const : 'trim' as const, overview }), [unit, bleed, overview]);
@@ -37,13 +38,10 @@ export function Presentation({ summary, template, start, close }: {
   }
   useLayoutEffect(() => { focusPresentation(); }, [ready]);
   useEffect(() => {
-    let active = true;
-    // Fullscreen can replace the native keyboard responder after the initial DOM focus. Reclaim it once the
-    // transition request completes, and when returning to the window, without moving focus off its controls.
-    void window.imageflow?.setPresentation(true).then(() => { if (active) focusPresentation(); });
     window.addEventListener('focus', focusPresentation);
-    return () => { active = false; window.removeEventListener('focus', focusPresentation); void window.imageflow?.setPresentation(false); };
+    return () => window.removeEventListener('focus', focusPresentation);
   }, []);
+  useEffect(() => { if (unit) void window.imageflow?.setPresentationSpread(unit.spread); }, [unit?.spread]);
   useEffect(() => { const timer = setTimeout(() => setActive(false), 2000); return () => clearTimeout(timer); }, [activity]);
   const key = useEffectEvent((event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'metaKey' | 'ctrlKey' | 'altKey'>) => {
     if (event.metaKey || event.ctrlKey) return;
@@ -60,7 +58,7 @@ export function Presentation({ summary, template, start, close }: {
     else if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(event.key)) choose(at + 1);
     else if (event.key === 'Home') choose(0);
     else if (event.key === 'End') choose(units.length - 1);
-    else if (event.key.toLowerCase() === 'f' && hasFacingPages(template.format)) setSingle((value) => !value);
+    else if (event.key.toLowerCase() === 'f' && template && hasFacingPages(template.format)) setSingle((value) => !value);
     else if (event.key.toLowerCase() === 'b') setBleed((value) => !value);
     else if (event.key.toLowerCase() === 'g') setOverview((value) => !value);
     else if (event.key === '?') setHelp((value) => !value);
@@ -90,17 +88,20 @@ export function Presentation({ summary, template, start, close }: {
       if (overview || help || Math.abs(event.deltaX) < 25 || performance.now() - wheelAt.current < 500) return;
       wheelAt.current = performance.now(); choose(at + (event.deltaX > 0 ? 1 : -1));
     }}>
-    {view && <BookFrame project={summary.id} view="present" query={query} title="Presentation artwork" presentation={view}
-      onGeometry={() => {}} onStatus={(status) => { setReady(status.state === 'ready'); setError(status.state === 'error' ? status.message : ''); }} />}
-    {unit && !ready && !error && <p className="presentation-message" role="status">Preparing presentation…</p>}
-    {(!unit || error) && <p className="presentation-message">{error || 'This book has no spreads yet.'}</p>}
+    <BookFrame project={summary.id} view="present" query={query} title="Presentation artwork" presentation={view}
+      onGeometry={() => {}} onStatus={(status) => {
+        setReady(status.state === 'ready'); setError(status.state === 'error' ? status.message : '');
+        if (status.state === 'ready') setTemplate(status.template);
+      }} />
+    {!ready && !error && <p className="presentation-message" role="status">Preparing presentation…</p>}
+    {((ready && !unit) || error) && <p className="presentation-message">{error || 'This book has no spreads yet.'}</p>}
     <div className={'presentation-indicator' + (active || digits ? ' visible' : '')} aria-live="polite">
       {digits ? 'Go to page ' + digits + ' ↵' : unit ? (unit.pages.length > 1 ? 'pp. ' : 'p. ') + unit.label + ' · ' + (at + 1) + ' / ' + units.length : ''}
     </div>
-    {(help || !unit || error) && <div className="presentation-help">
+    {(help || (ready && !unit) || error) && <div className="presentation-help">
       <p>← / → · Space / Shift Space · Page Up / Down · Return: navigate</p>
       <p>Home / End: first / last · Page number + Return: go to page</p>
-      {hasFacingPages(template.format) && <p>F: spreads / single pages</p>}
+      {template && hasFacingPages(template.format) && <p>F: spreads / single pages</p>}
       <p>B: trim / bleed · G: overview · ?: shortcuts · Esc / Shift W: exit</p>
       <button onClick={() => close(unit?.spread ?? start)}>End Presentation</button>
     </div>}

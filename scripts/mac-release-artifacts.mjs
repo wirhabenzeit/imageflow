@@ -1,7 +1,8 @@
 import { constants } from 'node:fs';
-import { access, mkdir, mkdtemp, rename, rm, symlink } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { notarize } from '@electron/notarize';
+import { createMacDmg } from './mac-dmg.mjs';
 import { macArtifactPaths } from './mac-paths.mjs';
 import { run, verifyMacSigning, verifyMacVersion, verifyNotarization } from './verify-mac-signing.mjs';
 
@@ -31,13 +32,7 @@ export async function notarizeMacRelease(options, build) {
 }
 
 async function macReleaseArtifacts({ app, identity, keychain, notarization }, { zip, dmg, work }) {
-  const contents = join(work, 'contents');
-  await mkdir(contents);
-  // ditto preserves the bundle's signed resources and stapled ticket.
-  await run('ditto', [app, join(contents, 'ImageFlow.app')]);
-  await symlink('/Applications', join(contents, 'Applications'));
-  const image = join(work, 'ImageFlow.dmg');
-  await run('hdiutil', ['create', '-volname', 'ImageFlow', '-srcfolder', contents, '-format', 'UDZO', image]);
+  const image = await createMacDmg(app, join(work, 'ImageFlow.dmg'), work);
   await run('codesign', ['--force', '--sign', identity, '--timestamp', ...(keychain ? ['--keychain', keychain] : []), image]);
   await run('codesign', ['--verify', '--strict', image]);
   console.log('Submitting the signed DMG for notarization…');

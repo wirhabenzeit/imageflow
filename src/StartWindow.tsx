@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { emptyMenuState } from './commands';
 import { bookName } from './book-name';
 import type { DesktopApi, RecentDocument } from './desktop';
+import brandMark from '../resources/brand/logo/imageflow-mark.svg';
+import bookIcon from '../resources/brand/book.svg';
 
 export function StartWindow({ api }: { api?: DesktopApi }) {
   const [recents, setRecents] = useState<RecentDocument[]>([]);
@@ -40,8 +42,8 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
   return <main className="studio start-window">
     <div className="start-drag" aria-hidden="true" />
     <aside className="start-actions">
-      <div className="start-brand" aria-hidden="true">◫</div>
-      <h1>ImageFlow</h1>
+      <img className="start-brand" src={brandMark} alt="" />
+      <h1>Image<span className="start-brand-flow">Flow</span></h1>
       <p>Your photographs.<br />A book of their own.</p>
       <button className="primary" disabled={!api || busy} onClick={() => void act('new')}>New Book…</button>
       <button disabled={!api || busy} onClick={() => void act('open')}>Open…</button>
@@ -50,7 +52,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
       <h2 id="recent-heading">Recent books</h2>
       {ordered.length ? <ul>{ordered.map((book) => <li key={book.id} className={book.available ? undefined : 'missing'} onContextMenu={(event) => { event.preventDefault(); void menu(book); }} onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void menu(book); } }}>
         <button className="recent-open" disabled={busy} onClick={() => void act(book.available ? 'open' : 'locate', book.id)}>
-          <span className="recent-cover">{book.cover ? <img src={book.cover} alt="" /> : <span aria-hidden="true">◫</span>}</span>
+          <span className="recent-cover">{book.cover ? <img src={book.cover} alt="" /> : <img className="recent-cover-icon" src={bookIcon} alt="" />}</span>
           <span className="recent-description"><strong>{bookName(book.path)}</strong><span className="recent-location" title={book.path}>{book.path.split('/').slice(-2).join('/')}</span>
             <span>{book.available ? 'Opened ' + new Date(book.openedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Not found'}</span>
           </span>
@@ -59,7 +61,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
           {!book.available && <button disabled={busy} onClick={() => void act('locate', book.id)}>Locate…</button>}
           <button className="recent-remove" aria-label={'Remove ' + bookName(book.path) + ' from Recents'} title="Remove from Recents" disabled={busy} onClick={() => void act('remove', book.id)}>×</button>
         </div>
-      </li>)}</ul> : <div className="recent-empty"><span aria-hidden="true">◫</span><h3>A place for your stories</h3></div>}
+      </li>)}</ul> : <div className="recent-empty"><img src={bookIcon} alt="" /><h3>A place for your stories</h3></div>}
     </section>
     <div className="start-status" role={error ? 'alert' : 'status'}>{error || (busy ? 'Opening…' : '')}</div>
   </main>;
