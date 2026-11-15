@@ -33,6 +33,7 @@ const api: DesktopApi = {
   documentProxy: (action) => ipcRenderer.invoke(channels.documentProxy, action),
   setToolbarDragRegions: (regions) => ipcRenderer.invoke(channels.toolbarDragRegions, regions),
   dragSources: (keys) => ipcRenderer.invoke(channels.dragSources, keys),
+  fileIcons: (extensions) => ipcRenderer.invoke(channels.fileIcons, extensions),
   showAssets: (accept) => ipcRenderer.invoke(channels.showAssets, accept),
   showTemplates: () => ipcRenderer.invoke(channels.showTemplates),
   templatePreview: (id, hash) => ipcRenderer.invoke(channels.templatePreview, id, hash),

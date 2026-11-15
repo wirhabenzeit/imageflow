@@ -22,7 +22,7 @@ export const renderOrigin = desktopScheme + '://render';
 export const channels = {
   updateState: 'app:update-state', updateChanged: 'app:update-changed', checkUpdates: 'app:check-updates', restartUpdate: 'app:restart-update', dismissUpdate: 'app:dismiss-update',
   prepareQuit: 'app:prepare-quit', prepareQuitAck: 'app:prepare-quit-ack', prepareQuitReply: 'app:prepare-quit-reply', cancelQuit: 'app:cancel-quit',
-  contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', toolbarDragRegions: 'document:toolbar-drag-regions', presentation: 'document:presentation', dragSources: 'document:drag-sources',
+  contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', toolbarDragRegions: 'document:toolbar-drag-regions', presentation: 'document:presentation', dragSources: 'document:drag-sources', fileIcons: 'document:file-icons',
   showMarkdown: 'markdown:open', markdownAction: 'markdown:action', markdownChanged: 'markdown:changed', markdownPrepareClose: 'markdown:prepare-close',
   presentationState: 'presentation:state', presentationSpread: 'presentation:spread', presentationClose: 'presentation:close', presentationClosed: 'presentation:closed',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
@@ -81,14 +81,15 @@ export type McpSettings = { enabled: boolean; clients: { name: string }[]; launc
 // Codex, which share ~/.codex/config.toml. `skill` saves the ImageFlow templates agent skill as an archive.
 export type McpClientTarget = 'claude' | 'codex' | 'skill';
 export type ProjectChange = Result<ProjectSummary> | { building: true };
-// `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions.
+// `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions. Without a
+// kind, `accept` lists the extensions of the template's file parameters: files of those types import as files.
 export type ImportRequest = {
   kind?: 'photo' | 'markdown' | 'file'; mode?: ImportMode; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string };
 };
 
 export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string };
 
-export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump'; spread?: string; key?: string; keys?: string[]; accept?: string[] };
+export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[] };
 
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };
@@ -124,6 +125,8 @@ export type DesktopApi = {
   documentProxy(action: 'path' | 'drag'): Promise<void>;
   setToolbarDragRegions(regions: Rect[]): Promise<void>;
   dragSources(keys: string[]): Promise<void>;
+  // The system document icon of each file extension, as image data URLs keyed by extension.
+  fileIcons(extensions: string[]): Promise<Record<string, string>>;
   showAssets(accept: string[]): Promise<Result<void>>;
   showTemplates(): Promise<void>;
   templatePreview(id: string, hash: string): Promise<Result<string | null>>;

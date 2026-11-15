@@ -924,6 +924,19 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .studio .source-text > .markdown-edit { position: absolute; top: 3px; right: 3px; padding: 3px; min-height: 22px; display: grid; place-items: center; }
 .studio .new-markdown { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .asset-status > .markdown-edit { margin-right: 8px; vertical-align: middle; }
+
+/* The Assets tab of the bottom panel: the tab buttons share the toolbar, and every row shows its document icon. */
+.source-manager-embedded { display: flex; flex-direction: column; gap: 0; }
+.source-manager-embedded > .asset-toolbar { gap: 6px; }
+.source-manager-embedded .asset-toolbar input[type="search"] { flex: 0 1 220px; min-width: 90px; margin-left: auto; }
+.source-manager-embedded .asset-toolbar input[type="search"] { height: 26px; padding: 0 8px; border: 1px solid var(--edge); border-radius: 6px; background: var(--control-fill); color: var(--text); font: inherit; font-size: 12px; }
+.source-manager-embedded .source-manager-list { padding: 0 8px; }
+.source-manager-embedded .asset-filter-tokens { padding: 4px 12px 0; }
+.source-manager-embedded .asset-status-bar { padding: 3px 12px; border-top: 1px solid var(--subtle-border); }
+.source-manager-embedded .asset-row { min-height: 28px; }
+.source-manager-embedded .asset-empty { padding: 16px; }
+.asset-icon-document img { object-fit: contain; border-radius: 0; }
+.asset-icon-document > span { background: none; }
 .new-markdown-dialog { width: 360px; max-width: 90vw; padding: 20px; border: 1px solid var(--edge); border-radius: 10px; color: var(--text); background: var(--popup-surface); box-shadow: 0 12px 40px #0003; }
 .new-markdown-dialog::backdrop { background: #0003; }
 .new-markdown-dialog h2 { margin: 0 0 16px; font-size: 16px; }

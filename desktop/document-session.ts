@@ -505,6 +505,11 @@ export class DocumentSession {
         !request.accept.every((ext) => typeof ext === 'string' && /^\.[a-z0-9]{1,10}$/.test(ext)) || request.folder)) {
       throw new Error('Invalid file import.');
     }
+    // Without a kind, `accept` lists the extensions of the template's file parameters that may be imported as files.
+    if (request.kind === undefined && request.accept !== undefined && (!Array.isArray(request.accept) || request.accept.length > 100 ||
+        !request.accept.every((ext) => typeof ext === 'string' && /^\.[a-z0-9]{1,10}$/.test(ext)))) {
+      throw new Error('Invalid file import.');
+    }
     if (request.target && (!request.kind || !identifier.safeParse(request.target.box).success || !identifier.safeParse(request.target.spread).success)) {
       throw new Error('Invalid import target.');
     }

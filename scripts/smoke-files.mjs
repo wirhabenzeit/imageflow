@@ -217,6 +217,73 @@ try {
   data.spreads.find(({ id }) => id === 'road').elements.route.params.track = 'senja-road';
   await writeFile(join(project, 'project.json'), JSON.stringify(data, null, 2));
 
+  await rerendered(() => menuAction(app, 'Reload'));
+  assert.equal(await trackLine(), 1);
+
+  // The Assets tab removes a file that is still assigned only after saying where it is used. Cancel changes nothing;
+  // Remove clears the assignment and the registry entry together, and one Undo brings both back.
+  await app.evaluate(({ dialog }) => {
+    globalThis.prompts = []; globalThis.answer = 1;
+    dialog.showMessageBox = async (_owner, options) => { globalThis.prompts.push(options); return { response: globalThis.answer }; };
+  });
+  await w.locator('.sources-bar [role="tab"]').filter({ hasText: 'Assets' }).click();
+  const row = w.locator('.source-manager-embedded .asset-row[data-source="file:senja-road"]');
+  await row.waitFor();
+  await row.click();
+  await w.keyboard.press('Delete');
+  await w.waitForFunction(() => document.querySelector('.source-manager-embedded[aria-busy="false"]'));
+  const [prompt] = await app.evaluate(() => globalThis.prompts);
+  assert.match(prompt.message, /senja-road\.gpx/);
+  assert.match(prompt.detail, /used in: .*Page/);
+  assert.deepEqual(prompt.buttons, ['Remove', 'Cancel']);
+  assert.equal((await read()).files['senja-road'], 'files/senja-road.gpx', 'Cancel keeps the file');
+  assert.equal((await read()).spreads.find(({ id }) => id === 'road').elements.route.params.track, 'senja-road');
+  await app.evaluate(() => { globalThis.answer = 0; });
+  await rerendered(() => w.keyboard.press('Delete'));
+  assert.equal((await read()).files['senja-road'], undefined);
+  assert.equal((await read()).spreads.find(({ id }) => id === 'road').elements.route.params.track, undefined);
+  assert.equal(await trackLine(), 0);
+  assert.ok((await readdir(join(project, 'files'))).includes('senja-road.gpx'), 'The copied file stays for Undo');
+  await rerendered(() => w.getByRole('button', { name: 'Undo', exact: true }).click());
+  assert.equal((await read()).files['senja-road'], 'files/senja-road.gpx');
+  assert.equal((await read()).spreads.find(({ id }) => id === 'road').elements.route.params.track, 'senja-road');
+  assert.equal(await trackLine(), 1);
+  assert.equal((await app.evaluate(() => globalThis.prompts)).length, 2);
+
+  // Import… takes a file the template's file parameter accepts, and skips one it does not.
+  const extra = join(work, 'Extra ride.gpx');
+  const sheet = join(work, 'Sheet.csv');
+  await writeFile(extra, await readFile(join(project, 'files', 'senja-road.gpx')));
+  await writeFile(sheet, 'a,b\n1,2\n');
+  await openDialog([extra, sheet]);
+  await w.getByRole('button', { name: 'Import…' }).click();
+  await w.locator('.source-manager-embedded .asset-row', { hasText: 'Extra ride.gpx' }).waitFor();
+  const added = Object.values((await read()).files).filter((path) => /Extra ride/.test(path));
+  assert.equal(added.length, 1);
+  assert.match(added[0], /^files\/fl-[a-f0-9-]{12}-Extra ride\.gpx$/);
+  assert.ok(!(await readdir(join(project, 'files'))).some((name) => name.includes('Sheet')), 'Unaccepted files are skipped');
+  await w.getByText('1 unsupported file skipped.').waitFor();
+  await w.locator('.sources-bar [role="tab"]').filter({ hasText: 'Photos' }).click();
+  // The Assets window imports the same way and tells the book window.
+  const second = join(work, 'Second ride.gpx');
+  await writeFile(second, await readFile(extra));
+  await openDialog([second]);
+  await menuAction(app, 'Assets…');
+  const manager = await (async () => {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const found = app.windows().find((window) => window.url() === 'imageflow://editor/assets');
+      if (found) return found;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error('Assets window did not open');
+  })();
+  await manager.getByRole('button', { name: 'Import…' }).click();
+  await manager.locator('.asset-row', { hasText: 'Second ride.gpx' }).waitFor();
+  assert.equal(Object.values((await read()).files).filter((path) => /Second ride/.test(path)).length, 1);
+  await w.locator('.sources-bar [role="tab"]').filter({ hasText: 'Assets' }).click();
+  await w.locator('.source-manager-embedded .asset-row', { hasText: 'Second ride.gpx' }).waitFor();
+  await w.locator('.sources-bar [role="tab"]').filter({ hasText: 'Photos' }).click();
+
   // References are relative to the project: a moved project opens with its track.
   const moved = join(work, 'Moved book.imageflow');
   await rename(project, moved);

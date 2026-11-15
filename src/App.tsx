@@ -6,7 +6,7 @@ import { usePhotoView } from './PhotoViewMenu';
 import { isPhotoViewCommand } from './photo-view';
 import { captureViewAnchor, restoreViewAnchor } from './view-anchor';
 import type { ViewAnchor } from './view-anchor';
-import { assetUsage } from './asset-usage';
+import { assetUsage, fileExtensions } from './asset-usage';
 import { sourcePlacements } from './source-placement';
 import { importFeedback } from './import-feedback';
 import { commandState } from './commands';
@@ -49,7 +49,7 @@ import type { PictureStatus } from './BookFrame';
 import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
 import { keptMime, photosMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
-import type { SourceKind, SourceRef } from './source-items';
+import type { SourceKind, SourceRef, SourcesTab } from './source-items';
 import { hasFacingPages, hasSingleEnds, pageNumbers, pageLabel, pageSequence, pagesText, resolveFormat, sheetPages } from './format';
 import type { ResolvedFormat } from './format';
 import type { ProjectFiles, SpreadState } from './project';
@@ -201,7 +201,7 @@ export function App() {
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const [dropTarget, setDropTarget] = useState<string>();
-  const [sourceTab, setSourceTab] = useState<SourceKind>('photo');
+  const [sourceTab, setSourceTab] = useState<SourcesTab>('photo');
   // Selection is exclusive: a source from the strip, or else the current spread.
   const [selectedSource, setSelectedSource] = useState<SourceRef>();
   const [focusBox, setFocusBox] = useState<{ box: string; at: number }>();
@@ -467,6 +467,8 @@ export function App() {
   }
 
   function importFiles(request: ImportRequest, canvasId?: string) {
+    // Without a kind, photos and Markdown are recognised by type; the template's file parameters add the types they accept.
+    if (!request.kind && !request.accept) request = { ...request, accept: fileExtensions(template) };
     const generation = inputGeneration.current;
     enqueue(async () => {
       const before = current.current;
@@ -479,9 +481,10 @@ export function App() {
       if (result.value.imported.length) adopt(result.value.summary);
       // Imports into the library select the first new source; imports onto a box keep the spread selected.
       if (!request.target && result.value.imported.length) {
-        const kind = result.value.summary.photoIndex[result.value.imported[0]] ? 'photo' : 'text';
-        setSourceTab(kind);
-        setSelectedSource({ kind, id: result.value.imported[0] });
+        const [first] = result.value.imported;
+        // Files for parameters are not photos or texts: the tab stays where it is and nothing is selected.
+        const kind = result.value.summary.photoIndex[first] ? 'photo' : result.value.summary.project.texts[first] ? 'text' : undefined;
+        if (kind) { setSourceTab(kind); setSelectedSource({ kind, id: first }); }
       }
       setNotice(importFeedback(result.value.imported.length, result.value.counts));
     });
@@ -518,10 +521,7 @@ export function App() {
 
   async function showAssets() {
     if (!api) return;
-    const groups = template ? [template.parameters, ...Object.values(template.spreads).flatMap((spread) => [spread.parameters,
-      ...Object.values(spread.boxes).map((box) => box.parameters), ...Object.values(spread.elements).map((element) => element.parameters)])] : [];
-    const accept = [...new Set(groups.flatMap((group) => Object.values(group).flatMap((param) =>
-      param.type === 'list' ? Object.values(param.item) : [param]).flatMap((param) => param.type === 'file' ? param.accept : [])))];
+    const accept = fileExtensions(template);
     const result = await api.showAssets(accept);
     if ('error' in result) setError(result.error);
   }
@@ -1587,6 +1587,13 @@ export function App() {
     const paths = api?.pathsForFiles(files) ?? [];
     if (paths.length) importFiles({ paths });
   });
+  // The Assets tab lists the files of the template's file parameters, and imports only files of those types.
+  const fileTypes = useMemo(() => fileExtensions(template), [template]);
+  const importFileRequest = useLiveCallback((files?: File[]) => {
+    const paths = files && api?.pathsForFiles(files);
+    if (files && !paths?.length) return;
+    importFiles({ kind: 'file', accept: fileTypes, ...(paths ? { paths } : {}) });
+  });
   const updatePhotoView = useLiveCallback(photoView.update);
   const commandPhotoView = useLiveCallback(photoView.command);
   const customPhotoView = useLiveCallback(photoView.custom);
@@ -1608,8 +1615,8 @@ export function App() {
   const sourcesPanel = useMemo(() => (summary && <Sources view={sourcesView} summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={chooseSource}
           failure={setError} changed={adoptSource} usage={usage} writable={writable} busy={!!busy} importSources={importSources} quickLook={setQuick}
-          importPaths={importSourcePaths} />),
-    [summary, sourcesView, sourceTab, selectedSource, usage, writable, busy, chooseSource, adoptSource, importSources, importSourcePaths]);
+          importPaths={importSourcePaths} fileTypes={fileTypes} importFileRequest={importFileRequest} />),
+    [summary, sourcesView, sourceTab, selectedSource, usage, writable, busy, chooseSource, adoptSource, importSources, importSourcePaths, fileTypes, importFileRequest]);
   const inspectorPanel = useMemo(() => (summary && spread && <Inspector summary={summary} writable={writable}
         spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} quickLook={quickSource} focus={focusBox}
