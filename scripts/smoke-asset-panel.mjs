@@ -29,36 +29,38 @@ try {
   const errors = []; page.on('pageerror', (error) => errors.push(error.message));
   await page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
   const tabs = page.locator('.sources-bar [role="tab"]');
-  assert.deepEqual(await tabs.allTextContents(), ['Photos 2', 'Texts 1', 'Assets 4']);
+  // Photos and texts have their own tabs; Assets holds the other assets, the book's files.
+  assert.deepEqual(await tabs.allTextContents(), ['Photos 2', 'Texts 1', 'Assets 1']);
   await tabs.nth(2).click();
   await page.locator('.source-manager-embedded .asset-row').first().waitFor();
-  assert.equal(await page.locator('.sources-bar [role="tab"][aria-selected="true"]').textContent(), 'Assets 4');
+  assert.equal(await page.locator('.sources-bar [role="tab"][aria-selected="true"]').textContent(), 'Assets 1');
   const rows = page.locator('.source-manager-embedded .asset-row');
-  assert.equal(await rows.count(), 4);
-  // No previews: the picture of a photo row is its file type's icon, not the photo itself.
-  const icons = await page.locator('.asset-icon img').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('src')));
+  assert.equal(await rows.count(), 1);
+  assert.equal(await page.locator('.source-manager-embedded .asset-row[data-source="file:data"]').count(), 1);
+  // No previews or photo tools: the list is plain and its picture is the file type's icon.
+  assert.equal(await page.locator('.source-manager-embedded .new-markdown', { hasText: 'New Text' }).count(), 0);
+  assert.equal(await page.locator('.source-manager-embedded .photo-view-menu').count(), 0);
+  assert.equal(await rows.first().getAttribute('draggable'), 'false');
   if (process.platform === 'darwin') {
-    await until(async () => await page.locator('.asset-icon img').count() === 4, 'Document icons loaded');
-    const sources = await page.locator('.asset-icon img').evaluateAll((nodes) => nodes.map((node) => node.src));
-    assert.ok(sources.every((src) => src.startsWith('data:image/png')), 'Icons are system images');
-    assert.ok(!sources.some((src) => src.includes('/photo/')), 'No photo previews');
-    assert.notEqual(new Set(sources).size, 1, 'Types have their own icons');
-  } else assert.ok(icons.length <= 4);
+    await until(async () => await page.locator('.asset-icon img').count() === 1, 'Document icon loaded');
+    const [source] = await page.locator('.asset-icon img').evaluateAll((nodes) => nodes.map((node) => node.src));
+    assert.ok(source.startsWith('data:image/png'), 'The icon is a system image');
+  }
   assert.equal(await page.locator('.asset-icon img[src^="imageflow"]').count(), 0);
-  // Search narrows the list; opening a Quick Look keeps working from the list.
+  // This template declares no file parameter, so there is nothing to import.
+  assert.equal(await page.getByRole('button', { name: 'Import…' }).isDisabled(), true);
+  // Search narrows the list.
   await page.getByRole('searchbox', { name: 'Search assets' }).fill('story');
+  await until(async () => await rows.count() === 0);
+  await page.getByRole('searchbox', { name: 'Search assets' }).fill('data');
   await until(async () => await rows.count() === 1);
-  await page.getByRole('searchbox', { name: 'Search assets' }).fill('');
-  await page.locator('.asset-row[data-source="photo:one"]').click();
-  await page.keyboard.press('Space');
-  await page.locator('dialog.quicklook[open]').waitFor();
-  // Stepping through Quick Look from the Assets tab keeps the tab.
-  await page.keyboard.press('ArrowLeft');
-  await page.keyboard.press('ArrowRight');
-  assert.equal(await page.locator('.sources-bar [role="tab"][aria-selected="true"]').textContent(), 'Assets 4');
-  await page.keyboard.press('Escape');
   await page.screenshot({ path: join(work, 'assets-tab.png') });
-  await tabs.nth(0).click();
+  // An unassigned file is removed at once. A book without files and file parameters has no Assets tab, so the strip
+  // returns to photos.
+  await rows.first().click();
+  await page.keyboard.press('Delete');
+  await until(async () => await tabs.count() === 2);
+  assert.deepEqual(await tabs.allTextContents(), ['Photos 2', 'Texts 1']);
   await page.locator('.source-items-photo').waitFor();
   assert.deepEqual(errors, []);
   console.log('Assets tab passed:', work);
