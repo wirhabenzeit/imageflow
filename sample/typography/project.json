@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "title": "Typography",
+  "template": {
+    "id": "imageflow-typography",
+    "version": "0.1.0"
+  },
+  "params": {},
+  "texts": {
+    "story": "texts/story.md"
+  },
+  "spreads": [
+    { "id": "twotone", "definition": "twotone", "params": {}, "boxes": {} },
+    { "id": "story", "definition": "story", "params": {}, "boxes": { "hero": { "photo": "shore" }, "body": { "text": "story" } } },
+    { "id": "plate", "definition": "plate", "params": {}, "boxes": { "hero": { "photo": "sunset" } } },
+    { "id": "vertical", "definition": "vertical", "params": {}, "boxes": {} },
+    { "id": "fit", "definition": "fit", "params": {}, "boxes": {} },
+    { "id": "effects", "definition": "effects", "params": {}, "boxes": {} }
+  ]
+}

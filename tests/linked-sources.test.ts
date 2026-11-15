@@ -14,6 +14,7 @@ import { collectSources, relocateSource, relinkFolder, saveDocumentCopy } from '
 import { captureProjectInputs } from '../desktop/revisions';
 import { ProjectSession } from '../desktop/project-session';
 import { sourceEntries } from '../src/source-locations';
+import { copySample } from '../desktop/sample-book.mjs';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'if-linked-')));
@@ -24,7 +25,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   await Promise.all([mkdir(external), mkdir(cache)]);
   configureSourceStore(join(root, 'source-cache'));
   configureSourceAccess(join(root, 'source-access'));
-  await cp(resolve('sample/starter'), folder, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  await copySample(resolve('sample/starter'), folder);
   const photo = join(external, 'photo.png');
   const text = join(external, 'story.md');
   const file = join(external, 'route.gpx');

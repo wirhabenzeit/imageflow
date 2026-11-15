@@ -21,11 +21,11 @@
       "definition": "cover",
       "params": {
         "heading": "Along the coast",
-        "subtitle": "Field notes from Senja"
+        "subtitle": "A week on Senja in March"
       },
       "boxes": {
         "hero": {
-          "photo": "segla"
+          "photo": "sunset"
         }
       }
     },
@@ -35,10 +35,10 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "segla",
+          "photo": "peaks",
           "crops": {
             "contents": {
-              "centerX": 0.45,
+              "centerX": 0.82,
               "centerY": 0.4,
               "zoom": 1.6
             }
@@ -54,7 +54,7 @@
       },
       "boxes": {
         "hero": {
-          "photo": "light"
+          "photo": "aurora"
         }
       }
     },
@@ -94,7 +94,7 @@
       "definition": "grid",
       "params": {
         "heading": "Settlements",
-        "note": "Four places along the outer road, from the ridge to the last cottage before the ferry."
+        "note": "Four views along the outer road, from the ridge to the last boathouses before the ferry."
       },
       "boxes": {
         "hero": {
@@ -120,7 +120,7 @@
       },
       "boxes": {
         "hero": {
-          "photo": "cottage"
+          "photo": "island"
         }
       }
     },
@@ -132,7 +132,7 @@
       },
       "boxes": {
         "hero": {
-          "photo": "light"
+          "photo": "hiker"
         },
         "body": {
           "text": "arrival"
@@ -145,17 +145,17 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "shore",
+          "photo": "peaks",
           "params": {
             "caption": true
           }
         },
         "second": {
-          "photo": "segla",
+          "photo": "sunset",
           "crops": {
             "feature3": {
-              "centerX": 0.42,
-              "centerY": 0.38,
+              "centerX": 0.8,
+              "centerY": 0.45,
               "zoom": 2.2
             }
           }
@@ -164,8 +164,8 @@
           "photo": "cottage",
           "crops": {
             "feature3": {
-              "centerX": 0.5,
-              "centerY": 0.5,
+              "centerX": 0.75,
+              "centerY": 0.62,
               "zoom": 2.4
             }
           }
@@ -195,7 +195,7 @@
       },
       "boxes": {
         "hero": {
-          "photo": "cottage"
+          "photo": "light"
         }
       }
     },
@@ -213,7 +213,7 @@
           }
         },
         "second": {
-          "photo": "light",
+          "photo": "island",
           "params": {
             "caption": false
           }
@@ -224,7 +224,7 @@
       "id": "cottage",
       "definition": "single",
       "params": {
-        "note": "The white cottage looked small in the photograph. From the road it felt like the only thing for miles."
+        "note": "The red boathouses looked small against the mountains. From the road they felt like the only lights for miles."
       },
       "boxes": {
         "hero": {
@@ -242,7 +242,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "light",
+          "photo": "sunset",
           "params": {
             "caption": true
           }
@@ -261,9 +261,9 @@
           "photo": "segla",
           "crops": {
             "grid9": {
-              "centerX": 0.3,
-              "centerY": 0.3,
-              "zoom": 2
+              "centerX": 0.62,
+              "centerY": 0.28,
+              "zoom": 2.2
             }
           }
         },
@@ -271,9 +271,9 @@
           "photo": "shore",
           "crops": {
             "grid9": {
-              "centerX": 0.7,
-              "centerY": 0.6,
-              "zoom": 2.5
+              "centerX": 0.72,
+              "centerY": 0.5,
+              "zoom": 2.3
             }
           }
         },
@@ -281,8 +281,8 @@
           "photo": "cottage",
           "crops": {
             "grid9": {
-              "centerX": 0.55,
-              "centerY": 0.48,
+              "centerX": 0.75,
+              "centerY": 0.62,
               "zoom": 3
             }
           }
@@ -291,59 +291,59 @@
           "photo": "light",
           "crops": {
             "grid9": {
-              "centerX": 0.2,
-              "centerY": 0.6,
-              "zoom": 2
-            }
-          }
-        },
-        "fourth": {
-          "photo": "segla",
-          "crops": {
-            "grid9": {
-              "centerX": 0.6,
-              "centerY": 0.7,
-              "zoom": 2.5
-            }
-          }
-        },
-        "sixth": {
-          "photo": "shore",
-          "crops": {
-            "grid9": {
-              "centerX": 0.25,
-              "centerY": 0.3,
-              "zoom": 2.2
-            }
-          }
-        },
-        "seventh": {
-          "photo": "cottage",
-          "crops": {
-            "grid9": {
               "centerX": 0.3,
               "centerY": 0.7,
               "zoom": 2
             }
           }
         },
-        "eighth": {
-          "photo": "light",
+        "fourth": {
+          "photo": "aurora",
           "crops": {
             "grid9": {
-              "centerX": 0.75,
+              "centerX": 0.7,
+              "centerY": 0.22,
+              "zoom": 2
+            }
+          }
+        },
+        "sixth": {
+          "photo": "island",
+          "crops": {
+            "grid9": {
+              "centerX": 0.6,
+              "centerY": 0.8,
+              "zoom": 2.2
+            }
+          }
+        },
+        "seventh": {
+          "photo": "peaks",
+          "crops": {
+            "grid9": {
+              "centerX": 0.85,
               "centerY": 0.35,
-              "zoom": 2.6
+              "zoom": 2
+            }
+          }
+        },
+        "eighth": {
+          "photo": "hiker",
+          "crops": {
+            "grid9": {
+              "centerX": 0.33,
+              "centerY": 0.4,
+              "zoom": 2.8
             }
           }
         },
         "ninth": {
-          "photo": "segla",
+          "photo": "sunset",
           "crops": {
             "grid9": {
-              "centerX": 0.5,
-              "centerY": 0.15,
-              "zoom": 2.4
+              "centerX": 0.8,
+              "centerY": 0.45,
+              "zoom": 2.2
             }
           }
         }

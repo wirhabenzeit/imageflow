@@ -1,4 +1,5 @@
 import { AppUpdater } from './updates';
+import { copySample } from './sample-book.mjs';
 import { updateUnavailable } from './update-environment';
 import { checkUpdateFeed, updateTestConfiguration } from './update-feed';
 import { updateBaseURL, releaseChannel } from '../src/update-feed';
@@ -578,7 +579,7 @@ async function readSampleSpreads(sample: string) {
 // Copies a built-in template's complete sample book, photos included: for the library's preview render, and for New Book
 // in development builds. Packaged apps ship no sample photos (their previews are rendered at build time).
 async function copySampleBook(stage: string, template: ResolvedTemplate, sample: string) {
-  await cp(sample, stage, { recursive: true, filter: (path) => basename(path) !== '.imageflow' && basename(path) !== 'node_modules' });
+  await copySample(sample, stage);
   const file = join(stage, 'project.json');
   const project = JSON.parse(await readFile(file, 'utf8'));
   project.template = { ...project.template, hash: template.entry.hash };

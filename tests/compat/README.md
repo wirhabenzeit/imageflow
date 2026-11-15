@@ -8,7 +8,8 @@ changes visible. They don't stop design changes.
 
 `books/` holds one book per built-in starter, made by `node scripts/compat-books.mjs --write` from the starter's
 complete sample book: the sample's content (which File › New no longer copies into new books), its own copy of the
-template, and that template's hash in `project.json`. They are kept apart from `sample/`, which keeps evolving. The photos and template files are byte-identical
+template, and that template's hash in `project.json`. They are kept apart from `sample/`, which keeps evolving. The
+photos (copied from `sample/shared/photos/` by `copySample`) and template files are byte-identical
 to the samples', so git stores them only once.
 
 - `tests/compat-books.test.ts` (unit tests, every CI run): each book opens with the current schema, resolves every

@@ -6,6 +6,7 @@ import electron from 'electron';
 import { once } from 'node:events';
 import { _electron } from 'playwright-core';
 import { testBook } from './ui-actions.mjs';
+import { copySample } from '../desktop/sample-book.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/markdown-'));
@@ -182,7 +183,7 @@ try {
 
   // Starting from no text sources still offers New Text; quit drains its pending content.
   const empty = join(work, 'Empty.imageflow');
-  await cp(join(root, 'sample/starter'), empty, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  await copySample(join(root, 'sample', 'starter'), empty);
   const json = JSON.parse(await readFile(join(empty, 'project.json'), 'utf8')); json.texts = {};
   for (const spread of json.spreads) for (const box of Object.values(spread.boxes ?? {})) delete box.text;
   await writeFile(join(empty, 'project.json'), JSON.stringify(json));

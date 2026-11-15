@@ -2,6 +2,7 @@ import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashTemplateFiles, listTemplateFiles } from '../desktop/template-hash.mjs';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // Recreates the compatibility books in tests/compat/books/ from the built-in starters' complete sample books (photos and
 // texts included, which File › New no longer copies), with the template copy and the template's hash. Photos and
@@ -19,7 +20,7 @@ await mkdir(books, { recursive: true });
 for (const { folder } of starters) {
   const source = join(root, 'sample', folder);
   const target = join(books, folder);
-  await cp(source, target, { recursive: true, filter: (path) => !['.imageflow', 'node_modules'].includes(basename(path)) });
+  await copySample(source, target);
   const template = join(target, 'template');
   const file = join(target, 'project.json');
   const project = JSON.parse(await readFile(file, 'utf8'));

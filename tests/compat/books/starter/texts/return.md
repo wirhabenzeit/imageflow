@@ -1,6 +1,6 @@
 We packed early and drove out before the clouds had lifted. At the last bend there was a narrow place to pull over. The water below looked almost exactly as it had on the first evening.
 
-I left the camera in its bag and stood by the road for a minute. On the way home, the notebook smelled faintly of the sea.
+I left the camera in its bag and stood by the road for a minute. On the way home, the notebook smelled faintly of woodsmoke.
 
 The road out followed the shore for a long time before it turned inland. We passed the shop by the fuel pump, closed at that hour, and the harbour where the boats were already gone. A thin line of mist lay along the water, and above it the ridge stood out sharp and dark, as if it had been cut from paper.
 
@@ -8,7 +8,7 @@ At the bridge we stopped once more. Behind us the island was still in shadow; ah
 
 ## Afterwards
 
-At home the photographs took longer to sort than the trip took to make. Most of them were fine and a few were good, and the good ones were rarely the ones we had expected. The picture of the ridge we had climbed for was flat and grey. The picture of the harbour in the rain, taken without much thought from a shop doorway, was the one we kept going back to.
+At home the photographs took longer to sort than the trip took to make. Most of them were fine and a few were good, and the good ones were rarely the ones we had expected. The picture of the ridge we had climbed for was flat and grey. The picture of the harbour in the snow, taken without much thought from a shop doorway, was the one we kept going back to.
 
 Making the book was a way of deciding what the trip had been. Each spread was a small argument about what belonged together: which photograph should face which page of notes, where the text should stop and the pictures take over, what to leave out. Leaving things out was the hardest part.
 

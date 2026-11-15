@@ -6,13 +6,14 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { menuAction, testBook } from './ui-actions.mjs';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // UI/quit integration with simulated native events. No release or feed is published by this test.
 const root = fileURLToPath(new URL('../', import.meta.url));
 await mkdir(join(root, '.build'), { recursive: true });
 const work = await mkdtemp(join(root, '.build/update-smoke-'));
 const folder = join(work, 'Updates.imageflow'), profile = join(work, 'profile');
-await cp(join(root, 'sample/starter'), folder, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+await copySample(join(root, 'sample', 'starter'), folder);
 const projectFile = join(folder, 'project.json');
 const initial = JSON.parse(await readFile(projectFile, 'utf8'));
 initial.spreads = [{ ...initial.spreads[0], definition: 'title', boxes: {} }];

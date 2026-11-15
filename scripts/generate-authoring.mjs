@@ -11,7 +11,7 @@ try {
   await cp('authoring', types, { recursive: true });
   await cp('node_modules/@types/react', join(types, 'react-runtime'), { recursive: true });
   await cp('node_modules/csstype', join(types, 'csstype'), { recursive: true });
-  for (const name of ['starter', 'calendar']) {
+  for (const name of ['starter', 'calendar', 'typography']) {
     const template = join('sample', name, 'template');
     await mkdir(template, { recursive: true });
     await writeAuthoringSnapshot(template, types);

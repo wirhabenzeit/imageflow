@@ -67,7 +67,8 @@ try {
   await picker.getByRole('heading', { name: 'New Book' }).waitFor();
   await picker.getByRole('option', { name: /Photobook/ }).waitFor();
   await picker.getByRole('option', { name: /Wall calendar/ }).waitFor();
-  assert.equal(await picker.getByRole('option').count(), 2, 'the built-in photobook and calendar');
+  await picker.getByRole('option', { name: /Typography/ }).waitFor();
+  assert.equal(await picker.getByRole('option').count(), 3, 'the built-in photobook, calendar and typography templates');
 
   assert.equal(await picker.getByRole('button', { name: 'Manage Templates…', exact: true }).count(), 0);
   await menu('Manage Templates…');

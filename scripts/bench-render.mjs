@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
+import { copySample } from '../desktop/sample-book.mjs';
 
 const { values } = parseArgs({ options: {
   spreads: { type: 'string', default: '15' }, unique: { type: 'boolean' }, visible: { type: 'boolean' },
@@ -21,7 +22,7 @@ const { values } = parseArgs({ options: {
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'bench-'));
 const project = join(work, 'Book.imageflow');
-await cp(join(root, 'sample/starter'), project, { recursive: true, filter: (path) => !path.includes('.imageflow') });
+await copySample(join(root, 'sample', 'starter'), project);
 const data = JSON.parse(await readFile(join(project, 'project.json'), 'utf8'));
 const [first, ...middle] = data.spreads.slice(0, -1);
 const body = [];

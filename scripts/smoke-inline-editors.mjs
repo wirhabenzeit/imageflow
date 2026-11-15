@@ -5,6 +5,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // #102: inline element editors. The starter's map is framed on the page, in the map's own place, and the wall
 // calendar's days are marked by clicking them on the page. Checks placement, that dragging, zooming, toolbar
@@ -33,7 +34,7 @@ async function follows(overlay, target, message) {
 
 // A book from the photobook starter with a Map spread after the title page, showing the sample GPX track.
 const book = join(work, 'Map.imageflow');
-await cp(join(root, 'sample', 'starter'), book, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+await copySample(join(root, 'sample', 'starter'), book);
 const projectFile = join(book, 'project.json');
 const project = JSON.parse(await readFile(projectFile, 'utf8'));
 project.spreads.splice(1, 0, { id: 'route', definition: 'map', params: { mapTitle: 'Senja' }, boxes: {},
@@ -42,7 +43,7 @@ await writeFile(projectFile, JSON.stringify(project, null, 2) + '\n');
 const saved = async () => JSON.parse(await readFile(projectFile, 'utf8')).spreads.find(({ id }) => id === 'route').elements.map.params;
 
 const calendar = join(work, 'Calendar.imageflow');
-await cp(join(root, 'sample', 'calendar'), calendar, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+await copySample(join(root, 'sample', 'calendar'), calendar);
 const marked = async () => JSON.parse(await readFile(join(calendar, 'project.json'), 'utf8')).params.markedDates ?? '';
 
 let app;

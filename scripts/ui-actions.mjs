@@ -1,6 +1,7 @@
 import { cp, readFile, writeFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { copySample } from '../desktop/sample-book.mjs';
 const activePages = new WeakMap();
 const pageApps = new WeakMap();
 
@@ -42,7 +43,7 @@ export function nextPresentation(app) {
 
 // Fixtures use real document opening; package creation and picker behavior have their own workflow test.
 export async function testBook(app, path, create = false) {
-  if (create) await cp(fileURLToPath(new URL('../sample/starter', import.meta.url)), path, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  if (create) await copySample(fileURLToPath(new URL('../sample/starter', import.meta.url)), path);
   if (create) {
     const file = path + '/project.json';
     const project = JSON.parse(await readFile(file, 'utf8'));
