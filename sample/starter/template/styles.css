@@ -57,8 +57,8 @@
 .field-book h2 { font-size: 32pt; line-height: 1.08; }
 .field-book h3 { font-size: 20pt; line-height: 1.2; }
 /* Formatted headings (`markdown: 'inline'`): the heading is already semibold, so bold steps up to the 800 face. */
-.field-book :is(h1, h2)[data-edit] strong, .map-title strong { font-weight: 800; }
-.field-book :is(h1, h2)[data-edit] s { text-decoration-thickness: .06em; }
+.field-book :is(h1, h2, h3)[data-edit] strong, .map-title strong { font-weight: 800; }
+.field-book :is(h1, h2, h3)[data-edit] s { text-decoration-thickness: .06em; }
 .field-book .subtitle { font-size: 13pt; color: var(--muted); }
 .field-book .rule { background: var(--accent); }
 .field-book .compass { color: var(--accent); }

@@ -73,9 +73,9 @@ const Shade = ({ context, rect }: { context: Pick<Context, 'geometry'>; rect: Re
 
 // Shared parameters. An ID means the same thing in every layout that declares it, so switching layouts keeps the
 // heading, the note and each photo's caption setting.
-// Headings may be formatted: **bold**, *italic* and ~~strikethrough~~ (styles.css picks the faces).
+// Page text supports **bold**, *italic* and ~~strikethrough~~ (styles.css picks the faces).
 const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: true, maxLength: 90, markdown: 'inline' });
-const note = p.string({ label: 'Note', default: '', multiline: true, maxLength: 400, placeholder: 'A few lines about these photos',
+const note = p.string({ label: 'Note', default: '', multiline: true, maxLength: 400, placeholder: 'A few lines about these photos', markdown: 'inline',
   description: 'A short text beside the photos. Leave it empty for no text.' });
 const oneLine = (text: string) => plainText(text).replace(/\s+/g, ' ').trim();
 // For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
@@ -376,7 +376,7 @@ export default defineTemplate({
     // Book ends: a first right page and a last left page.
     title: spread({
       label: 'Title page', span: 'right',
-      parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow' }) },
+      parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow', markdown: 'inline' }) },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx}>
@@ -389,7 +389,7 @@ export default defineTemplate({
     }),
     cover: spread({
       label: 'Title photo', span: 'right',
-      parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow' }) },
+      parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow', markdown: 'inline' }) },
       boxes: { hero: box.photo('Title photo') },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
@@ -408,7 +408,7 @@ export default defineTemplate({
     closing: spread({
       label: 'Closing page', span: 'left',
       // Not `heading`: an ID means the same thing in every layout, and a closing line is not a spread heading.
-      parameters: { closingLine: p.string({ label: 'Closing line', default: 'Until next time' }) },
+      parameters: { closingLine: p.string({ label: 'Closing line', default: 'Until next time', markdown: 'inline' }) },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx}>
@@ -420,8 +420,8 @@ export default defineTemplate({
     credits: spread({
       label: 'Picture list', span: 'left',
       parameters: {
-        listHeading: p.string({ label: 'Heading', default: 'Pictures' }),
-        colophon: p.string({ label: 'Colophon', default: 'Made with ImageFlow.', multiline: true, maxLength: 300,
+        listHeading: p.string({ label: 'Heading', default: 'Pictures', markdown: 'inline' }),
+        colophon: p.string({ label: 'Colophon', default: 'Made with ImageFlow.', multiline: true, maxLength: 300, markdown: 'inline',
           description: 'A few closing lines under the list: who made the book, when, or a dedication.' }),
       },
       render: (ctx) => {
@@ -438,7 +438,7 @@ export default defineTemplate({
 
     contents: spread({
       label: 'Contents',
-      parameters: { contentsHeading: p.string({ label: 'Contents heading', default: 'Contents' }) },
+      parameters: { contentsHeading: p.string({ label: 'Contents heading', default: 'Contents', markdown: 'inline' }) },
       boxes: { hero: box.photo('Photo (optional)') },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
@@ -465,7 +465,7 @@ export default defineTemplate({
       label: 'Chapter opener',
       parameters: {
         heading,
-        eyebrow: p.string({ label: 'Chapter label', default: '', maxLength: 40, placeholder: 'Chapter 1',
+        eyebrow: p.string({ label: 'Chapter label', default: '', maxLength: 40, placeholder: 'Chapter 1', markdown: 'inline',
           description: 'The small line above the heading. Empty shows the chapter’s number, counted from the book’s chapter openers.' }),
       },
       boxes: { hero: box.photo('Chapter photo') },
@@ -514,9 +514,9 @@ export default defineTemplate({
     statement: spread({
       label: 'Quote and photo',
       parameters: {
-        quote: p.string({ label: 'Quote', default: 'Each turn opened a different view of the same water.', multiline: true, maxLength: 240,
+        quote: p.string({ label: 'Quote', default: 'Each turn opened a different view of the same water.', multiline: true, maxLength: 240, markdown: 'inline',
           description: 'One or two sentences, set large. Longer passages belong in a story.' }),
-        attribution: p.string({ label: 'Attribution', default: '', maxLength: 80, placeholder: 'Who said it, or where' }),
+        attribution: p.string({ label: 'Attribution', default: '', maxLength: 80, placeholder: 'Who said it, or where', markdown: 'inline' }),
       },
       boxes: { hero: captioned('Photo') },
       render: (ctx) => {
@@ -618,7 +618,7 @@ export default defineTemplate({
     // the book and continues on the next.
     pictures: spread({
       label: 'Picture list spread',
-      parameters: { listHeading: p.string({ label: 'Heading', default: 'Pictures' }) },
+      parameters: { listHeading: p.string({ label: 'Heading', default: 'Pictures', markdown: 'inline' }) },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         return <Paper context={ctx}>
