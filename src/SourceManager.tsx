@@ -1,5 +1,6 @@
 import { EditMarkdown, NewMarkdown } from './MarkdownActions';
 import { Fragment, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { DesktopApi, ProjectSummary, SourceAction } from './desktop';
 import { PhotoViewMenu } from './PhotoViewMenu';
 import type { PhotoViewControl } from './PhotoViewMenu';
@@ -9,14 +10,23 @@ import { sourceEntries } from './source-locations';
 import { useListSelection } from './list-selection';
 import { photoMime, textMime } from './source-items';
 import type { SourceRef } from './source-items';
+import type { SourceKind } from './source-locations';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { assetPageLabels, assetUsage } from './asset-usage';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
-import { fileName } from './source-items';
+import { fileName, photosMime } from './source-items';
+import { fileExtension, useFileIcons } from './file-icons';
 
-export function SourceManager({ view, api, summary, adopt, disabled = false, quickLook }: {
+// The Assets window shows photo thumbnails. Embedded in a book window's bottom panel it is a plain list: the
+// panel's tab buttons share its toolbar, every asset shows its system document icon, and dragging an asset
+// starts an in-app drag onto a page rather than a file drag to Finder.
+const Glyph = ({ kind }: { kind: SourceKind }) => <span aria-hidden="true">{kind === 'photo' ? '▧' : kind === 'markdown' ? 'Aa' : '▤'}</span>;
+const DocumentIcon = ({ src, kind }: { src?: string; kind: SourceKind }) => src ? <img src={src} alt="" draggable={false} /> : <Glyph kind={kind} />;
+
+export function SourceManager({ view, api, summary, adopt, disabled = false, quickLook, embedded = false, tabs }: {
   view: PhotoViewControl; api: DesktopApi; summary: ProjectSummary; adopt: (summary: ProjectSummary) => void; disabled?: boolean; quickLook?: (source: SourceRef) => void;
+  embedded?: boolean; tabs?: ReactNode;
 }) {
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
@@ -31,6 +41,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const raw = sourceEntries(summary);
   const entries = [...sourceList(summary, 'photo', view.value).map(({ id }) => raw.find((entry) => entry.kind === 'photo' && entry.id === id)!), ...raw.filter((entry) => entry.kind !== 'photo')];
   const usage = assetUsage(summary, assetPageLabels(summary));
+  const documentIcon = useFileIcons(embedded ? entries.map((entry) => fileExtension(fileName(entry.path))) : []);
   const placements = (entry: typeof entries[number]) => usage[entry.kind === 'markdown' ? 'text' : entry.kind][entry.id] ?? [];
   const unavailable = (key: string) => !!summary.sources?.[key] && summary.sources[key].state !== 'available';
   const linked = entries.filter((entry) => entry.linked).length;
@@ -77,8 +88,9 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     if (item?.kind === 'file') void act({ action: 'preview', key: item.key });
     else if (item) quickLook?.({ kind: item.kind === 'photo' ? 'photo' : 'text', id: item.id });
   };
-  return <section className="source-manager" aria-label="Assets" aria-busy={busy || disabled}>
-    <header className="asset-toolbar">
+  return <section className={embedded ? 'sources source-manager source-manager-embedded' : 'source-manager'} aria-label={embedded ? 'Sources' : 'Assets'} aria-busy={busy || disabled}>
+    <header className={embedded ? 'sources-bar asset-toolbar' : 'asset-toolbar'}>
+      {tabs}
       <input type="search" aria-label="Search assets" placeholder="Search assets" value={search} onChange={(event) => setSearch(event.target.value)} />
       <NewMarkdown api={api} disabled={locked} />
       <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} />
@@ -116,18 +128,27 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
           {group && <button className="asset-group-heading" onClick={() => list.setSelection(group.ids.map((id) => 'photo:' + id))}>
             {group.label} · {group.ids.length === group.total ? group.total : group.ids.length + ' of ' + group.total}</button>}
           <div role="option" aria-selected={list.selected.includes(entry.key)} key={entry.key} data-source={entry.key} data-list-id={entry.key}
-          className="asset-row" tabIndex={(list.focused ?? shown[0]?.key) === entry.key ? 0 : -1} draggable={!locked && !problem}
+          className="asset-row" tabIndex={(list.focused ?? shown[0]?.key) === entry.key ? 0 : -1} draggable={!locked && !problem && (!embedded || entry.kind !== 'file')}
           onClick={(event) => list.choose(entry.key, event)}
           onContextMenu={(event) => void menu(list.context(entry.key, event))}
           onDragStart={(event) => {
             const keys = list.selected.includes(entry.key) ? list.selected : [entry.key];
             if (entry.kind === 'photo') event.dataTransfer.setData(photoMime, entry.id);
             if (entry.kind === 'markdown') event.dataTransfer.setData(textMime, entry.id);
+            if (embedded) {
+              const photos = keys.filter((key) => key.startsWith('photo:')).map((key) => key.slice(6));
+              if (entry.kind === 'photo' && photos.length > 1) event.dataTransfer.setData(photosMime, JSON.stringify(photos));
+              event.dataTransfer.effectAllowed = 'copy';
+              return;
+            }
             event.preventDefault(); void api.dragSources(keys);
           }}
-          onDoubleClick={() => { if (!locked && !problem) void act({ action: 'reveal', keys: list.selected.includes(entry.key) ? list.selected : [entry.key] }); }}>
-          <span className="asset-icon">{entry.kind === 'photo' && summary.photos[entry.id] ? <img src={summary.photos[entry.id]} alt="" />
-            : <span aria-hidden="true">{entry.kind === 'photo' ? '▧' : entry.kind === 'markdown' ? 'Aa' : '▤'}</span>}</span>
+          onDoubleClick={() => {
+            if (embedded) { if (!locked && !problem) preview(); return; }
+            if (!locked && !problem) void act({ action: 'reveal', keys: list.selected.includes(entry.key) ? list.selected : [entry.key] });
+          }}>
+          <span className={'asset-icon' + (embedded ? ' asset-icon-document' : '')}>{embedded ? <DocumentIcon src={documentIcon(fileExtension(fileName(entry.path)))} kind={entry.kind} />
+            : entry.kind === 'photo' && summary.photos[entry.id] ? <img src={summary.photos[entry.id]} alt="" /> : <Glyph kind={entry.kind} />}</span>
           <span className="asset-name" title={entry.path}><span className="asset-description"><strong>{fileName(entry.path)}</strong>
             {(entry.linked || problem) && <span className="muted">{entry.path.split('/').slice(-2, -1)[0]}</span>}</span></span>
           <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={fileName(entry.path)} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}

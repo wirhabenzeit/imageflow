@@ -49,7 +49,7 @@ import type { PictureStatus } from './BookFrame';
 import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
 import { keptMime, photosMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
-import type { SourceKind, SourceRef } from './source-items';
+import type { SourceKind, SourceRef, SourcesTab } from './source-items';
 import { hasFacingPages, hasSingleEnds, pageNumbers, pageLabel, pageSequence, pagesText, resolveFormat, sheetPages } from './format';
 import type { ResolvedFormat } from './format';
 import type { ProjectFiles, SpreadState } from './project';
@@ -200,7 +200,7 @@ export function App() {
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const [dropTarget, setDropTarget] = useState<string>();
-  const [sourceTab, setSourceTab] = useState<SourceKind>('photo');
+  const [sourceTab, setSourceTab] = useState<SourcesTab>('photo');
   // Selection is exclusive: a source from the strip, or else the current spread.
   const [selectedSource, setSelectedSource] = useState<SourceRef>();
   const [focusBox, setFocusBox] = useState<{ box: string; at: number }>();
