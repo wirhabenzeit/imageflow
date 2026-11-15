@@ -79,6 +79,8 @@ try {
   assert.deepEqual(nativePicker, { modal: false, parent: false, resizable: true });
   await start.evaluate(() => window.imageflow.openProject('new'));
   assert.equal(app.windows().filter((page) => page.url() === 'imageflow://editor/new').length, 1, 'New Book is a singleton');
+  // The document workflow below edits the sample's texts, so start from the complete sample book (development builds).
+  await picker.getByRole('group', { name: 'Start with' }).getByRole('radio', { name: 'Sample book (dev)' }).check();
   await clickClosingWindow(picker, picker.getByRole('button', { name: 'Create', exact: true }));
   let one;
   for (let attempt = 0; attempt < 250; attempt++) {
