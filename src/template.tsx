@@ -1,6 +1,7 @@
 import { Component, createContext, Fragment, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import { RenderedImage } from './rendered-image';
+import { Choice } from './choice';
 import { parseFormatted, plainFormatted } from './formatted-text';
 import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
@@ -894,7 +895,7 @@ export function issue(found: TemplateIssue): Required<IssueMarker> {
 
 export const runtime = {
   defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
-  RenderedImage, FormattedText, plainText,
+  RenderedImage, FormattedText, plainText, Choice,
 } satisfies Record<typeof runtimeExports[number], unknown>;
 
 // The values `render` reads for one spread: its parameters, the document's, and its boxes and elements.

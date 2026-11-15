@@ -1,4 +1,4 @@
-import { box, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Spread } from 'imageflow';
+import { box, Choice, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Spread } from 'imageflow';
 import type { BookSpread, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
 import { MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
@@ -110,10 +110,8 @@ function ShapedPhoto(photo: PhotoRender, state: PhotoBoxState<string, { shape: k
 // Layout families: a segmented choice between the variants, by one of their tags, beside the spread's other settings.
 function variantPicker(tag: string, label: string, names: Record<string, string>) {
   return function VariantPicker({ variants, current, choose, readOnly }: LayoutPickerProps) {
-    return <div className="if-control"><div className="pc-segmented" role="radiogroup" aria-label={label}>
-      {variants.map(({ id, variant }) => <button key={id} type="button" role="radio" aria-checked={id === current} disabled={readOnly}
-        onClick={() => choose(id)}>{names[String(variant[tag])] ?? String(variant[tag])}</button>)}
-    </div></div>;
+    return <Choice label={label} hideLabel value={current} onChange={choose} disabled={readOnly}
+      options={variants.map(({ id, variant }) => ({ value: id, label: names[String(variant[tag])] ?? String(variant[tag]) }))} />;
   };
 }
 

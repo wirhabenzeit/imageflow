@@ -465,7 +465,8 @@
       "capabilities",
       "RenderedImage",
       "FormattedText",
-      "plainText"
+      "plainText",
+      "Choice"
     ],
     "contract1Capabilities": [
       "anchors",
@@ -493,7 +494,8 @@
       "list-parameters",
       "template-preview",
       "photo-render",
-      "formatted-text"
+      "formatted-text",
+      "app-controls"
     ],
     "capabilities": [
       "anchors",
@@ -521,7 +523,8 @@
       "list-parameters",
       "template-preview",
       "photo-render",
-      "formatted-text"
+      "formatted-text",
+      "app-controls"
     ],
     "declarations": {
       "imageflow.d.ts": {
@@ -634,7 +637,7 @@
         "FirstStatement #106": "declare const typedDocument: unique symbol;",
         "FirstStatement #107": "declare const typedFamily: unique symbol;",
         "SpreadDefinition": "export type SpreadDefinition<D extends Parameters = Parameters, F extends string = string> = SpreadDeclaration & { render(context: UntypedRenderContext): ImageFlowNode; anchors?(context: AnchorContext): readonly AnchorDeclaration[]; readonly [typedDocument]?: D; readonly [typedFamily]?: F; };",
-        "Capability": "export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' | 'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' | 'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' | 'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' | 'formatted-text';",
+        "Capability": "export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' | 'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' | 'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' | 'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' | 'formatted-text' | 'app-controls';",
         "FirstStatement #110": "export const capabilities: readonly Capability[];",
         "TemplateDeclaration": "export type TemplateDeclaration = { id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string; parameters?: Parameters; controls?: Controls; layoutFamilies?: Record<string, LayoutFamily>; spreads: Record<string, SpreadDefinition>; openingSpreads?: readonly OpeningSpread[]; editors?: Record<string, DocumentEditor>; };",
         "OpeningSpread": "export type OpeningSpread<L extends string = string> = { layout: L; params?: Values; };",
@@ -677,8 +680,12 @@
         "RenderedImageProps": "export type RenderedImageProps = { draw: (target: RenderTarget) => Promise<Blob | HTMLCanvasElement | OffscreenCanvas>; inputs: unknown; label?: string; alt?: string; className?: string; style?: CSSProperties; };",
         "RenderedImage": "export function RenderedImage(props: RenderedImageProps): ImageFlowElement;",
         "FormattedText": "export function FormattedText(props: { value: string; }): ImageFlowElement;",
+        "ChoiceValue": "export type ChoiceValue = string | number | boolean;",
+        "ChoiceOption": "export type ChoiceOption<V extends ChoiceValue = ChoiceValue> = { value: V; label: string; disabled?: boolean; };",
+        "ChoiceProps": "export type ChoiceProps<V extends ChoiceValue = ChoiceValue> = { label: string; value: V | undefined; options: readonly ChoiceOption<V>[]; onChange(value: V): void; disabled?: boolean; hideLabel?: boolean; };",
+        "Choice": "export function Choice<V extends ChoiceValue>(props: ChoiceProps<V>): ImageFlowElement;",
         "plainText": "export function plainText(value: string): string;",
-        "ExportDeclaration #153": "export {};"
+        "ExportDeclaration #157": "export {};"
       },
       "jsx-runtime.d.ts": {
         "ImportDeclaration #0": "import type { CSSProperties, ImageFlowElement, ImageFlowNode } from './imageflow';",

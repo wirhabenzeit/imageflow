@@ -1,7 +1,7 @@
 // Compile-time checks of the authoring types, run by `npm run build` (`tsc -p tests/types`). Each
 // `@ts-expect-error` is a declaration a template author must be told about; the build fails if it compiles.
-import { box, defineTemplate, mm, p, printFormat, Spread, spreadFor } from 'imageflow';
-import type { DocumentEditorProps, ElementEditorProps, LayoutPickerProps, PhotoBoxState, PhotoRender } from 'imageflow';
+import { box, Choice, defineTemplate, mm, p, printFormat, Spread, spreadFor } from 'imageflow';
+import type { DocumentEditorProps, ElementEditorProps, LayoutPickerProps, PhotoBoxState, PhotoRender, VariantTags } from 'imageflow';
 
 const format = printFormat({ label: 'F', trim: { width: mm(100), height: mm(100) }, bleed: mm(0), safe: mm(5),
   pageCount: { min: 2, max: 20, step: 2 }, ends: 'inside-covers' });
@@ -450,3 +450,25 @@ defineTemplate({ id: 'preview', version: '1', contract: 1, format, preview: './p
 // @ts-expect-error a path, not an imported image or a list
 defineTemplate({ id: 'preview', version: '1', contract: 1, format, preview: ['./preview.jpg'],
   spreads: ({ spread }) => ({ a: spread({ label: 'A', render: () => <Spread /> }) }) });
+
+// `Choice`: the app's segmented control, typed by its option values (the layout-families.md examples).
+export function GridSizePicker({ variants, current, choose, readOnly }: LayoutPickerProps) {
+  return <Choice label="Grid size" hideLabel value={current} onChange={choose} disabled={readOnly}
+    options={variants.map(({ id, variant }) => ({ value: id, label: String(variant.size) }))} />;
+}
+export function StagePicker({ variants, current, choose, find, readOnly }: LayoutPickerProps) {
+  const { kind = 'cycling', photos = 1 } = variants.find(({ id }) => id === current)?.variant ?? {};
+  const option = (label: string, tags: VariantTags) => ({ label, value: tags.kind ?? tags.photos, disabled: !find({ kind, photos, ...tags }) });
+  return <>
+    <Choice label="Stage type" value={kind} disabled={readOnly}
+      options={[option('Cycling', { kind: 'cycling' }), option('Stay', { kind: 'stay' })]}
+      onChange={(value) => choose(find({ kind: value, photos })!)} />
+    <Choice label="Facing photos" value={photos} disabled={readOnly}
+      options={[option('Full-page photo', { photos: 1 }), option('Two photos', { photos: 2 })]}
+      onChange={(value) => choose(find({ kind, photos: value })!)} />
+  </>;
+}
+// @ts-expect-error An option's value must have the type of the choice's value.
+export const mismatched = <Choice label="Size" value={1} options={[{ value: 'a', label: 'A' }]} onChange={() => {}} />;
+// @ts-expect-error Every choice is named for assistive technology, even when the label is hidden.
+export const unnamed = <Choice value="a" options={[{ value: 'a', label: 'A' }]} onChange={() => {}} />;

@@ -72,6 +72,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `template-preview` | `preview`: the template's own image for New Book instead of a render of its opening spread ([Template previews](template-library.md#template-previews)). |
 | `photo-render` | `PhotoBox` children: a render callback that draws the box's photo from its crop, such as through an SVG mask ([PhotoBox render callbacks](platform-components.md#photobox-render-callbacks)). |
 | `formatted-text` | `markdown: 'inline'` on string parameters: bold, italic and strikethrough, shown by `ctx.Text` and `<FormattedText>` ([Formatted text](formatted-text.md#formatted-text-formatted-text)). |
+| `app-controls` | `<Choice>`: ImageFlow's own segmented choice for element editors and layout-family pickers ([App controls](layout-families.md#app-controls)). |
 
 
 Use `requires` for extensions beyond the contract-1 baseline. Unsupported extensions are rejected when the template loads, with an update hint. Listing baseline features in `requires` is also valid.
