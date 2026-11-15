@@ -11,6 +11,8 @@ The development server reloads CSS in place, refreshes React components and rest
 
 By default, each run opens a temporary copy of the Photobook starter. Changes to `sample/starter` create another fresh copy; edits to temporary copies are disposable.
 
+The built-in sample books share their photographs. The files live once in `sample/shared/photos/`, and each sample's `photos.json` lists only the photos that book uses, with its own titles and captions. Copy a sample into a book with `copySample` from `desktop/sample-book.mjs`, as the app, the scripts and the tests do, so the copy receives the photos it lists. A plain `cp` of a sample folder leaves its `photos/` empty. To add a photo, put the JPEG in `sample/shared/photos/` (about 6000 px on the long edge, quality 85) and list it in the `photos.json` of the samples that use it.
+
 | Command | Opens |
 | --- | --- |
 | `npm run dev` | Fresh Photobook starter |

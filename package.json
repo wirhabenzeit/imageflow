@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "start": "npm run build && node scripts/stage-desktop.mjs && electron .build/desktop",
-    "build": "npm run generate:authoring && tsc --noEmit && tsc -p sample/starter/template && tsc -p sample/calendar/template && tsc -p tests/types && vite build",
+    "build": "npm run generate:authoring && tsc --noEmit && tsc -p sample/starter/template && tsc -p sample/calendar/template && tsc -p sample/typography/template && tsc -p tests/types && vite build",
     "package:mac": "npm run build && node scripts/package-mac.mjs",
     "test:unit": "node scripts/test-unit.mjs",
     "feeds:generate": "node scripts/generate-update-feeds.mjs",

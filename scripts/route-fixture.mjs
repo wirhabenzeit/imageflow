@@ -2,13 +2,12 @@ import assert from 'node:assert/strict';
 import { cp, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // File-control and custom-editor smoke checks use an explicit route fixture, rather than shipping the old inset
 // in every new photobook. Call before opening this test book.
 export async function createRouteFixture(folder) {
-  await cp(fileURLToPath(new URL('../sample/starter', import.meta.url)), folder, {
-    recursive: true, filter: (path) => basename(path) !== '.imageflow',
-  });
+  await copySample(fileURLToPath(new URL('../sample/starter', import.meta.url)), folder);
   for (const name of ['route.tsx', 'route.css'])
     await cp(fileURLToPath(new URL('./fixtures/' + name, import.meta.url)), join(folder, 'template', name));
   const file = join(folder, 'template/index.tsx');

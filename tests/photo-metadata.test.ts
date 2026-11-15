@@ -11,6 +11,7 @@ import { configureSourceAccess } from '../desktop/source-access';
 import { captureMetadata, exifDateTime, exifOffset } from '../src/photo-metadata';
 import { photoIndexSchema } from '../src/project';
 import { projectOperationsSchema } from '../src/project-commands';
+import { copySample } from '../desktop/sample-book.mjs';
 
 type Exif = Parameters<ReturnType<typeof sharp>['withExif']>[0];
 const jpeg = (exif?: Exif, width = 60, height = 40) => {
@@ -71,7 +72,7 @@ test('photos import and load with capture metadata, existing books get it, and a
   const cache = join(root, 'cache');
   const external = join(root, 'external');
   await Promise.all([mkdir(cache), mkdir(external)]);
-  await cp(resolve('sample/starter'), folder, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  await copySample(resolve('sample/starter'), folder);
   const owned = join(external, 'owned.jpg');
   const linked = join(external, 'linked.jpg');
   await writeFile(owned, await jpeg(full));

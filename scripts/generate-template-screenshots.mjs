@@ -9,6 +9,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
 import { exportAction, testBook } from './ui-actions.mjs';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // Documentation artwork is separate from the New Book picker previews. Render current
 // sample books through the real Book check, using disposable copies and an isolated profile.
@@ -28,8 +29,7 @@ const generated = [];
 
 async function renderSample(folder, name, params = {}) {
   const copy = join(work, name + '.imageflow');
-  await cp(join(root, 'sample', folder), copy, { recursive: true,
-    filter: (path) => !['.imageflow', 'node_modules'].includes(basename(path)) });
+  await copySample(join(root, 'sample', folder), copy);
   const file = join(copy, 'project.json');
   const project = JSON.parse(await readFile(file, 'utf8'));
   project.params = { ...project.params, ...params };

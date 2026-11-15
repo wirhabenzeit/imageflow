@@ -101,7 +101,7 @@ try {
 
   await window.getByRole('button', { name: 'Pages 6–7 · Photo and story' }).click();
   await window.locator('[data-spread="arriving"][aria-current="page"]').waitFor();
-  const photo = join(root, 'sample/starter/photos/shore.jpg');
+  const photo = join(root, 'sample/shared/photos/shore.jpg');
   const markdown = join(work, 'drop.md');
   await writeFile(markdown, 'A small story imported through the canvas.\n');
   await changed(() => dropFile(photo, '[data-box="hero"]'));

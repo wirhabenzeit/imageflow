@@ -248,6 +248,8 @@ export type BookGeometry = {
   // as a heading shown twice, are separate targets that edit the same saved value.
   targets: (Rect & { spread: string; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string }; upright?: boolean;
     inlineText?: boolean;
+    // True for text in a vertical writing mode, whose lines run down the rectangle.
+    vertical?: boolean;
     textFallback?: { parameter: string; text: string; label: string } })[];
 };
 // A preflight finding. `spread` is the spread id and `where` its readable location, such as "Pages 6–7 · Photo grid".

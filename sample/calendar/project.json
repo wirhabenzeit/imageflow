@@ -18,7 +18,7 @@
       },
       "boxes": {
         "hero": {
-          "photo": "shore"
+          "photo": "sunset"
         }
       }
     },
@@ -38,7 +38,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "cottage"
+          "photo": "shore"
         }
       }
     },
@@ -48,7 +48,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "light"
+          "photo": "aurora"
         }
       }
     },
@@ -58,7 +58,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "shore"
+          "photo": "island"
         }
       }
     },
@@ -68,7 +68,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "segla"
+          "photo": "cottage"
         }
       }
     },
@@ -78,7 +78,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "cottage"
+          "photo": "peaks"
         }
       }
     },
@@ -88,7 +88,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "light"
+          "photo": "hiker"
         }
       }
     },
@@ -98,7 +98,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "shore"
+          "photo": "light"
         }
       }
     },
@@ -118,7 +118,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "cottage"
+          "photo": "sunset"
         }
       }
     },
@@ -128,7 +128,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "light"
+          "photo": "island"
         }
       }
     },
@@ -138,7 +138,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "shore"
+          "photo": "cottage"
         }
       }
     }

@@ -6,6 +6,7 @@ import electron from 'electron';
 import { execFileSync } from 'node:child_process';
 import { _electron } from 'playwright-core';
 import { testBook, clickPage } from './ui-actions.mjs';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // A real desktop session: editing typography/occurrences, pending typing, composition, plain paste, fallback,
 // save/reopen, failures and conflicts. Runs separately so the default smoke suite stays small.
@@ -13,7 +14,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 await mkdir(join(root, '.build'), { recursive: true });
 const work = await mkdtemp(join(root, '.build', 'inline-text-'));
 const book = join(work, 'Text.imageflow');
-await cp(join(root, 'sample/starter'), book, { recursive: true, filter: (p) => basename(p) !== '.imageflow' });
+await copySample(join(root, 'sample', 'starter'), book);
 const templateFile = join(book, 'template/index.tsx');
 let source = await readFile(templateFile, 'utf8');
 const heading = '<ctx.Text presentation="inline" parameter="heading" as="h1" rect={at.right(margin, 120, page - 2 * margin, 110)} />';
@@ -358,7 +359,7 @@ try {
 
   // Ownership is tested through both the page and the Inspector, and includes an editor's layout fields.
   const ownedBook = join(work, 'Owned.imageflow');
-  await cp(join(root, 'sample/starter'), ownedBook, { recursive: true, filter: (p) => basename(p) !== '.imageflow' });
+  await copySample(join(root, 'sample', 'starter'), ownedBook);
   await writeFile(join(ownedBook, 'template/index.tsx'), `
 import { defineTemplate, p, Spread, printFormat, mm } from 'imageflow';
 const string = (label) => p.string({label, default:'Default text'});

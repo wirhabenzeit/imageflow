@@ -6,13 +6,14 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { decodePDFRawStream, PDFArray, PDFDict, PDFDocument, PDFName } from 'pdf-lib';
 import { _electron } from 'playwright-core';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // #104: a PhotoBox render callback draws the photo through the template's SVG mask in the book view, follows a crop
 // gesture before it is saved, saves the crop as an ordinary crop, and exports with its image loaded.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'photo-render-'));
 const project = join(work, 'Book.imageflow');
-await cp(join(root, 'sample', 'starter'), project, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+await copySample(join(root, 'sample', 'starter'), project);
 // The starter's story layout (photo on the left) draws its main photo through a circular SVG mask.
 const source = join(project, 'template', 'index.tsx');
 const template = await readFile(source, 'utf8');

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { PDFDocument } from 'pdf-lib';
 import { _electron } from 'playwright-core';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // #27: the calendar starter opens without Book check findings, numbers its months from the page position, and
 // exports a print PDF of single pages in both formats, with or without its cover. `--screenshots <folder>` also
@@ -16,7 +17,7 @@ const flag = process.argv.indexOf('--screenshots');
 const screenshots = flag >= 0 ? process.argv[flag + 1] : undefined;
 const work = await mkdtemp(join(build, 'calendar-starter-'));
 const project = join(work, 'Calendar.imageflow');
-await cp(join(root, 'sample', 'calendar'), project, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+await copySample(join(root, 'sample', 'calendar'), project);
 if (screenshots) await mkdir(screenshots, { recursive: true });
 
 const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 0.5, message + ': ' + actual + ' ≉ ' + expected);
@@ -74,7 +75,7 @@ try {
   assert.deepEqual(await frame.locator('.month').nth(1).locator('.weekend .day').allTextContents(),
     ['6', '7', '13', '14', '20', '21', '27', '28']);
   // The place falls back to the photo's caption; the cover's year is its own text.
-  assert.equal(await frame.locator('.month .place').first().textContent(), 'Segla, Senja');
+  assert.equal(await frame.locator('.month .place').first().textContent(), 'Snow ridge, Senja');
   const caption = frame.locator('.month .place').first();
   await caption.locator('.if-text-inherited').waitFor();
   const captionEditor = w.getByRole('dialog', { name: 'Edit Place', exact: true });
@@ -85,7 +86,7 @@ try {
     await captionEditor.waitFor();
   };
   await openCaption();
-  assert.match(await captionEditor.innerText(), /Using photo caption or title: Segla, Senja/);
+  assert.match(await captionEditor.innerText(), /Using photo caption or title: Snow ridge, Senja/);
   const override = captionEditor.getByRole('textbox');
   await override.fill('Custom place');
   await captionEditor.getByRole('button', { name: 'Close', exact: true }).click();
@@ -94,9 +95,9 @@ try {
   assert.match(await captionEditor.innerText(), /Leave empty to use photo caption or title/);
   await override.fill('');
   await captionEditor.getByRole('button', { name: 'Close', exact: true }).click();
-  await caption.locator('.if-text-inherited', { hasText: 'Segla, Senja' }).waitFor();
+  await caption.locator('.if-text-inherited', { hasText: 'Snow ridge, Senja' }).waitFor();
   const inheritedSaved = JSON.parse(await readFile(join(project, 'project.json'), 'utf8'));
-  assert.notEqual(inheritedSaved.spreads.find((spread) => spread.definition === 'month').params?.place, 'Segla, Senja', 'fallback never becomes a saved override');
+  assert.notEqual(inheritedSaved.spreads.find((spread) => spread.definition === 'month').params?.place, 'Snow ridge, Senja', 'fallback never becomes a saved override');
   assert.equal(await frame.locator('.cover .year').textContent(), '2027');
   await daysFit();
   if (screenshots) await w.screenshot({ path: join(screenshots, 'editor.png') });
@@ -185,12 +186,12 @@ try {
   // Moving the December page to the front makes it January, and the December marks stay in December.
   saved.spreads.splice(1, 0, ...saved.spreads.splice(saved.spreads.findIndex(({ id }) => id === 'dec'), 1));
   await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
-  await frame.locator('.month').first().locator('.place', { hasText: 'Outer coast, Senja' }).waitFor();
+  await frame.locator('.month').first().locator('.place', { hasText: 'Village, Senja' }).waitFor();
   assert.deepEqual(await frame.locator('.month').first().locator('.marked .day').allTextContents(), []);
   assert.deepEqual(await frame.locator('.month').nth(11).locator('.marked .day').allTextContents(), ['24', '25', '26', '31']);
   saved.spreads.splice(12, 0, saved.spreads.splice(1, 1)[0]);
   await writeFile(file, JSON.stringify(saved, null, 2) + '\n');
-  await frame.locator('.month').first().locator('.place', { hasText: 'Segla, Senja' }).waitFor();
+  await frame.locator('.month').first().locator('.place', { hasText: 'Snow ridge, Senja' }).waitFor();
 
   // Without the cover the months stay January to December, and twelve pages still print.
   await w.locator('.spread-thumb').first().click();

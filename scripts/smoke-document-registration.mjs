@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron } from 'playwright-core';
 import metadata from '../package.json' with { type: 'json' };
+import { copySample } from '../desktop/sample-book.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const bundle = packagedMacApp(root);
@@ -24,7 +25,7 @@ await stat(join(bundle, 'Contents/Resources/app.asar.unpacked/native/mac-header.
 const work = await realpath(await mkdtemp(join(root, '.build/document-registration-')));
 const first = join(work, 'Cold Launch.imageflow');
 const second = join(work, 'Finder Open.imageflow');
-for (const path of [first, second]) await cp(join(root, 'sample/starter'), path, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+for (const path of [first, second]) await copySample(join(root, 'sample', 'starter'), path);
 let app;
 try {
   app = await _electron.launch({ executablePath: packagedMacExecutable(root), args: ['--user-data-dir=' + join(work, 'profile'), first],

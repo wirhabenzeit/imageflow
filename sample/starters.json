@@ -1,4 +1,5 @@
 [
   { "folder": "starter", "defaultName": "Untitled Photobook" },
-  { "folder": "calendar", "defaultName": "Untitled Calendar" }
+  { "folder": "calendar", "defaultName": "Untitled Calendar" },
+  { "folder": "typography", "defaultName": "Untitled Typography Book" }
 ]
