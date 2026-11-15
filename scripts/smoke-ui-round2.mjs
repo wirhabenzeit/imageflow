@@ -81,16 +81,19 @@ try {
   assert.ok(Math.abs(beforePanel.relative - afterPanel.relative) < .025, 'Panel changes preserve the reading position at manual zoom');
   await menuAction(app, 'Show Sources');
   await page.waitForTimeout(250);
-  // Native context menu acts on the right-clicked spread, independently of the old selection.
+  // The spread context menu selects its target and leaves presentation in the main menu.
   await app.evaluate(({ Menu }) => {
     Menu.prototype.popup = function ({ callback }) {
-      const item = this.items.find((item) => item.id === 'presentation');
-      if (item) item.click(item);
+      globalThis.spreadContextIds = this.items.map((item) => item.id);
       callback?.();
     };
   });
-  const opened = nextPresentation(app);
   await page.locator('.spread-thumb[data-spread="s3"]').click({ button: 'right' });
+  await until(() => app.evaluate(() => !!globalThis.spreadContextIds));
+  assert.equal(await app.evaluate(() => globalThis.spreadContextIds.includes('presentation')), false);
+  assert.equal(await page.locator('.spread-thumb[data-spread="s3"]').getAttribute('aria-current'), 'page');
+  const opened = nextPresentation(app);
+  await menuAction(app, 'Presentation');
   const presentation = await opened;
   await presentation.waitForURL('imageflow://editor/presentation');
   await presentation.locator('.presentation').waitFor();

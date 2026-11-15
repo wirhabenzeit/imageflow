@@ -981,7 +981,7 @@ export function App() {
     const choices = layoutPreviews(template.spreads, selected.definition, template.layoutFamilies ?? {}, template.format, { index: at, count: spreads.length });
     const result = await api.showContextMenu(['add-spread', { command: 'duplicate-spread', label: ids.length > 1 ? 'Duplicate ' + ids.length + ' Spreads' : undefined }, 'move-spread-up', 'move-spread-down',
       'move-spread-start', 'move-spread-end', ...(choices.length > 1 && ids.length === 1 ? [{ command: 'change-layout' as const, items: choices.map((value) => ({ command: 'change-layout' as const, value, label: template.spreads[value].label, checked: value === selected.definition })) }] : []),
-      { type: 'separator' }, 'presentation', ...(spreadIssues.has(id) ? [{ command: 'book-check' as const, label: 'Check This Spread' }] : []), { command: 'delete-spread', label: ids.length > 1 ? 'Delete ' + ids.length + ' Spreads' : undefined }], state);
+      { type: 'separator' }, ...(spreadIssues.has(id) ? [{ command: 'book-check' as const, label: 'Check This Spread' }] : []), { command: 'delete-spread', label: ids.length > 1 ? 'Delete ' + ids.length + ' Spreads' : undefined }], state);
     if (current.current?.id !== summary?.id) return;
     const command = result?.command;
     if (command === 'change-layout' && result?.value && choices.includes(result.value)) changeSpreadAt(id, (state) => { switchLayout(state, result.value!, template.spreads); }, 'Layout changed');
@@ -992,7 +992,6 @@ export function App() {
     else if (command === 'move-spread-down') moveSelected(ids, 'down');
     else if (command === 'move-spread-start') moveSelected(ids, 'start');
     else if (command === 'move-spread-end') moveSelected(ids, 'end');
-    else if (command === 'presentation') present(id);
     else if (command === 'book-check') { setCheckScope(id); setCheckRequest((value) => value + 1); }
   }
   async function canvasMenu(event: Pick<React.MouseEvent, 'clientX' | 'clientY' | 'preventDefault'>) {

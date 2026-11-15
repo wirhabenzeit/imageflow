@@ -37,7 +37,7 @@ export const commandRegistry = {
   'zoom-in': { label: 'Zoom In', accelerator: 'CmdOrCtrl+Plus', enabled: s => s.document && (s.zoom ?? 1) < 3 },
   'zoom-out': { label: 'Zoom Out', accelerator: 'CmdOrCtrl+-', enabled: s => s.document && (s.zoom ?? 1) > .3 },
   'zoom-actual': { label: 'Actual Size', accelerator: 'CmdOrCtrl+0', enabled: s => s.document },
-  presentation: { label: 'Presentation', contextLabel: 'Present from Here', accelerator: 'Shift+W', registerAccelerator: false, enabled: s => s.document },
+  presentation: { label: 'Presentation', accelerator: 'Shift+W', registerAccelerator: false, enabled: s => s.document },
   'presentation-start': { label: 'Present from Beginning', accelerator: 'Alt+Shift+W', registerAccelerator: false, enabled: s => s.document },
   'photos-sort-capture': { label: 'Capture Time', enabled: book, checked: s => !s.photoView || s.photoView.sort === 'capture' },
   'photos-sort-name': { label: 'Name', enabled: book, checked: s => s.photoView?.sort === 'name' },
