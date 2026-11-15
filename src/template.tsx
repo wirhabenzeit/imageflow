@@ -482,6 +482,7 @@ export function templateInfo(template: Template): TemplateInfo {
   return {
     format: template.format, formatId: template.formatId, formats: template.formatChoices,
     structures: Object.fromEntries(Object.entries(template.formats ?? { default: template.format }).map(([id, format]) => [id, format.structure])),
+    printFormats: { ...template.formats ?? { default: template.format } },
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
     ...(template.preview ? { preview: previewPath(template.preview)! } : {}),

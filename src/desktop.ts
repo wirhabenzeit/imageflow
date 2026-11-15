@@ -220,6 +220,10 @@ export type TemplateInfo = {
   // one format), so commands and fixtures can check layouts against a format other than the current one. Absent in
   // summaries from apps that predate it.
   structures?: Record<string, PrintFormat['structure']>;
+  // Every format the template offers, in full (trim, bleed, safe area, structure, page count and output), by format ID
+  // ('default' for a template with one format), so an agent can compare presets without reading the template source.
+  // Absent in summaries from apps that predate it.
+  printFormats?: Record<string, PrintFormat>;
 };
 export type BoxLocation = { id: string; type: 'photo' | 'markdown'; x: number; y: number; width: number; height: number };
 // The editor shows the whole book in two frames: the scrolling spread view and the sidebar thumbnails.

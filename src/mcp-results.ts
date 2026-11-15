@@ -95,7 +95,7 @@ export const mcpOutputSchemas = {
   get_authoring_context: z.looseObject({
     project: z.string(), root: z.string().describe('The book folder.'), guide: z.string(),
     ...reportFields,
-    template: z.looseObject({}).optional().describe('Parsed template declarations: formats, parameters, layouts with their boxes and elements, layout families and opening spreads.'),
+    template: z.looseObject({}).optional().describe('Parsed template declarations: the active format, every format in full (printFormats), parameters, layouts with their boxes and elements, layout families and opening spreads.'),
     templateIdentity: templateIdentitySchema,
     sources: z.record(z.string(), z.looseObject({ text: z.string(), sha256: z.string(), truncated: z.boolean() })).describe('Requested includeSource files.'),
     templateFiles: z.array(z.string()).describe('Files under template/. Generated folders are listed once, ending in /.'),
