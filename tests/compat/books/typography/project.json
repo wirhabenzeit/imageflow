@@ -4,7 +4,7 @@
   "template": {
     "id": "imageflow-typography",
     "version": "0.1.0",
-    "hash": "099a9cae7d4793aedcc737fb35fe80309378e8aee865ae8297417be3a8d820c7"
+    "hash": "e0a2ff734c1b52886d8b92ac727a6e0102f160832cadc9663051a95f69a87227"
   },
   "params": {},
   "texts": {
@@ -14,6 +14,12 @@
     {
       "id": "twotone",
       "definition": "twotone",
+      "params": {},
+      "boxes": {}
+    },
+    {
+      "id": "cropped",
+      "definition": "cropped",
       "params": {},
       "boxes": {}
     },

@@ -11,6 +11,7 @@
   },
   "spreads": [
     { "id": "twotone", "definition": "twotone", "params": {}, "boxes": {} },
+    { "id": "cropped", "definition": "cropped", "params": {}, "boxes": {} },
     { "id": "story", "definition": "story", "params": {}, "boxes": { "hero": { "photo": "shore" }, "body": { "text": "story" } } },
     { "id": "plate", "definition": "plate", "params": {}, "boxes": { "hero": { "photo": "sunset" } } },
     { "id": "vertical", "definition": "vertical", "params": {}, "boxes": {} },

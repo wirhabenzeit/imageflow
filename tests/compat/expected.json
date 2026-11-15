@@ -1,5 +1,5 @@
 {
   "starter": { "format": "square", "pages": 32, "trimPoints": [822.05, 822.05] },
   "calendar": { "format": "a3", "pages": 13, "trimPoints": [1219.14, 864.72] },
-  "typography": { "format": "default", "pages": 12, "trimPoints": [566.93, 566.93] }
+  "typography": { "format": "default", "pages": 14, "trimPoints": [566.93, 566.93] }
 }

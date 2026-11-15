@@ -83,8 +83,9 @@ export default defineTemplate({
       label: 'Cropped display title',
       parameters: { word: p.string({ label: 'Word', default: 'Photobook', maxLength: 14 }) },
       render: (ctx) => <Spread style={{ background: paper, color: ink, '--accent': ctx.document.accent, '--paper': paper }}>
-        {/* Starts before the left trim and runs past the right bleed: the page edges cut it. */}
-        <ctx.Text parameter="word" presentation="inline" as="h1" className="type-title cropped"
+        {/* Starts before the left trim and runs past the right bleed: the page edges cut it. `decorative` tells the Book
+            check that this cutting is intended, so it reports no safe-area or overflow finding. */}
+        <ctx.Text parameter="word" presentation="inline" as="h1" className="type-title cropped" decorative
           rect={{ x: -30, y: 55, width: 460, height: 90 }} />
       </Spread>,
     }),
@@ -152,8 +153,7 @@ export default defineTemplate({
     }),
   }),
   // The stroked layout is left out: a book that contains it cannot be exported for print.
-  // Cropped display title is also left out: its type deliberately runs off the page, which the Book check reports.
   openingSpreads: [
-    { layout: 'twotone' }, { layout: 'story' }, { layout: 'plate' }, { layout: 'vertical' }, { layout: 'fit' }, { layout: 'effects' },
+    { layout: 'twotone' }, { layout: 'cropped' }, { layout: 'story' }, { layout: 'plate' }, { layout: 'vertical' }, { layout: 'fit' }, { layout: 'effects' },
   ],
 });
