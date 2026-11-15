@@ -32,7 +32,9 @@ try {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath });
   }, filePath);
   async function ready() {
-    await window.waitForFunction((frame) => document.querySelector(frame + '[data-ready]') || document.querySelector('.status-error'), frame);
+    // A render can take longer than the default 15 s on a hosted Mac, most of all the first one, which prepares
+    // previews of the full-size sample photos (the packaged release check timed out here).
+    await window.waitForFunction((frame) => document.querySelector(frame + '[data-ready]') || document.querySelector('.status-error'), frame, { timeout: 60000 });
     const value = await preview().locator('body').evaluate(() => window.imageflowRenderStatus);
     assert.equal(value?.state, 'ready', value?.message ?? await status());
     return value;
