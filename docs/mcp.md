@@ -62,7 +62,7 @@ Every inspection/check result identifies an input revision. Pass that revision a
 | Tool | Arguments and result |
 | --- | --- |
 | `list_projects` | No arguments. Returns all authorized open books with their folders, stable handles, writable state and current revisions. |
-| `get_authoring_context` | `project`, optional `docs`, `includeExamples` and `includeSource`. Returns declarations (`template`), `templateIdentity`, `templateFiles` (generated `template/vendor/` and `template/.imageflow-sdk/` listed once), a short `guide`, the reference `topics` and `examples` lists, and the installed template API (`capabilities.templateApi`: contract, guaranteed `baseline`, all supported capabilities and `imageflow` exports). `docs` returns the named reference topics in `docs`; `includeExamples` (names, or `true`) adds `source` to those examples; `includeSource` reads up to eight paths inside `template/` or `texts/`. |
+| `get_authoring_context` | `project`, optional `docs`, `includeExamples` and `includeSource`. Returns declarations (`template`, including the active `format`, the `formats` labels and every preset in full as `printFormats`), `templateIdentity`, `templateFiles` (generated `template/vendor/` and `template/.imageflow-sdk/` listed once), a short `guide`, the reference `topics` and `examples` lists, and the installed template API (`capabilities.templateApi`: contract, guaranteed `baseline`, all supported capabilities and `imageflow` exports). `docs` returns the named reference topics in `docs`; `includeExamples` (names, or `true`) adds `source` to those examples; `includeSource` reads up to eight paths inside `template/` or `texts/`. |
 | `inspect_book` | `project`, `view` of `summary`, `spreads`, `sources`, `parameters` or `elements`, optional `spread`, `offset` and `limit`. Summary/spread/source/parameter results include saved/current `templateIdentity`. The `elements` view requires `spread` and optionally filters by `box` or `element`. Results are paginated with at most 100 records per call. |
 | `check_book` | `project`, optional `expectedRevision`, `preview`, `inspect`, `typescript`, `draft` and `fixtures`. Combines check coverage, diagnostics, measured element inspection and optional artwork. With `draft`, it renders an unsaved command batch on top of the saved book. With `fixtures`, it renders layouts with synthetic content in separate fixture books and reports a coverage matrix. |
 | `apply_project_changes` | `project`, `expectedRevision`, `idempotencyKey`, `label`, `operations`, optional `dryRun`. Validates the complete batch and applies it through the app. One successful batch creates one named Undo entry. |
@@ -165,7 +165,7 @@ A draft can also repair a saved book whose layout fails to render, for example b
 
 ### Layout fixtures
 
-A draft shows a layout with the book's real content. Fixtures test how layouts cope with content the book does not have yet: long and empty headings, long Markdown, portrait photos and malformed files. They work for layouts the book does not use, and they never touch the saved book.
+A draft shows a layout with the book's real content. Fixtures test how layouts cope with content the book does not have yet: long and empty headings, long Markdown, portrait photos, valid synthetic GPX tracks and malformed files. They work for layouts the book does not use, and they never touch the saved book.
 
 ```json
 {
@@ -182,13 +182,14 @@ ImageFlow first checks the saved book as usual. It then builds one synthetic fix
 
 | Case | Content | Tested when the layout has |
 | --- | --- | --- |
-| `typical` | String parameters use their default, or else their placeholder. Photo boxes get a synthetic 3:2 landscape photo, Markdown boxes about 180 words with a heading. | Always |
+| `typical` | String parameters use their default, or else their placeholder. Photo boxes get a synthetic 3:2 landscape photo, Markdown boxes about 180 words with a heading. File parameters accepting `.gpx` get a valid synthetic track of about 25 km with elevation and times; other file parameters stay unassigned. `long-text` and `portrait-photos` use the same files. | Always |
 | `long-text` | String parameters filled to `maxLength` (at most 400 characters; multiline values get several lines). Markdown of about 2,200 words with long headings, a list, a quotation and an unbreakable URL. | String parameters or Markdown boxes |
 | `empty` | Empty string parameters, no photos or text assigned, file parameters unassigned. | Boxes, string or file parameters |
 | `portrait-photos` | As `typical`, with a synthetic 2:3 portrait photo. | Photo boxes |
 | `malformed-files` | As `typical`, with each file parameter assigned a synthetic file of its first accepted extension whose content is invalid. | File parameters |
+| `alternate-files` | As `typical`, with valid synthetic files in another common shape: a GPX track in three segments without elevation or times. | File parameters accepting `.gpx` |
 
-`layouts` defaults to every declared layout (at most 24), `formats` to the book's current format (`"all"` tests up to four), and `cases` to every case that applies. At most 48 fixtures are rendered per format. Parameters other than strings and files keep their declared defaults; document parameters keep their saved values, so book-wide styling matches the book. Each fixture flows its own Markdown, so synthetic text never continues on another spread, and the saved book's text flow is unaffected.
+`layouts` defaults to every declared layout (at most 24), `formats` to the book's current format (`"all"` tests the first four; a skipped format's reason names the explicit `formats` batches that test the rest), and `cases` to every case that applies. At most 48 fixtures are rendered per format. Synthetic files exist only in the fixture book and are never registered in the saved book. Parameters other than strings and files keep their declared defaults; document parameters keep their saved values, so book-wide styling matches the book. Each fixture flows its own Markdown, so synthetic text never continues on another spread, and the saved book's text flow is unaffected.
 
 The result keeps the saved book's `diagnostics`, `checks.layout` and `render` as for an ordinary check, and adds:
 

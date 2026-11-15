@@ -14,7 +14,7 @@ import { ProjectSession } from '../desktop/project-session';
 import { contactSheetLayout, fixtureBannerHeight } from '../src/authoring-artwork';
 import type { AuthoringCheckResult } from '../src/authoring-check';
 import type { RenderStatus, TemplateInfo } from '../src/desktop';
-import { fixtureMarkdown, fixtureProject, fixtureRequestSchema, planFixtures } from '../src/fixtures';
+import { fixtureFiles, fixtureMarkdown, fixtureProject, fixtureRequestSchema, planFixtures, sampleExtension } from '../src/fixtures';
 import type { FixtureSourceIds } from '../src/fixtures';
 import { mm } from '../src/format';
 import type { PrintFormat } from '../src/format';
@@ -42,7 +42,8 @@ const template: TemplateInfo = {
     cover: { label: 'Cover', span: 'right', parameters: { title: p.string({ label: 'Title', default: '', placeholder: 'Summer' }) }, boxes: {}, elements: {} },
   },
 };
-const ids: FixtureSourceIds = { photo: { landscape: 'land', portrait: 'port' }, file: (extension) => 'file' + extension.replace('.', '-') };
+const ids: FixtureSourceIds = { photo: { landscape: 'land', portrait: 'port' }, file: (extension) => 'file' + extension.replace('.', '-'),
+  sample: (extension, variant) => variant + extension.replace('.', '-') };
 const plan = (request: unknown = {}) => planFixtures(template, fixtureRequestSchema.parse(request));
 
 test('fixture plans cover every applicable layout and case and list what they skip', () => {
@@ -51,7 +52,7 @@ test('fixture plans cover every applicable layout and case and list what they sk
   assert.deepEqual(result.cells.map(({ layout, case: fixture }) => layout + '/' + fixture), [
     'main/typical', 'main/long-text', 'main/empty', 'main/portrait-photos',
     'chapter/typical',
-    'map/typical', 'map/empty', 'map/malformed-files',
+    'map/typical', 'map/empty', 'map/malformed-files', 'map/alternate-files',
     'cover/typical', 'cover/long-text', 'cover/empty',
   ]);
   assert.ok(result.skipped.some(({ layout, case: fixture, reason }) => layout === 'chapter' && fixture === 'long-text' && /no string/.test(reason)));
@@ -70,6 +71,18 @@ test('fixture plans cover every applicable layout and case and list what they sk
   assert.deepEqual(preview.cells.map(({ case: fixture }) => fixture), ['empty', 'typical']);
   assert.deepEqual(preview.preview?.cells.map(({ case: fixture }) => fixture), ['empty']);
   assert.equal(preview.preview?.maxEdge, 1200);
+});
+
+test('fixture skip advice respects the per-check format limit', () => {
+  const five: TemplateInfo = { ...template, formats: { a: 'A', b: 'B', c: 'C', d: 'D', e: 'E' }, formatId: 'a' };
+  const explicit = planFixtures(five, fixtureRequestSchema.parse({ formats: ['a', 'b', 'c', 'd'] }));
+  const skippedE = explicit.skipped.find(({ format: skipped }) => skipped === 'e');
+  assert.ok(skippedE && !/"all"/.test(skippedE.reason) && skippedE.reason.includes('formats: ["e"]'), skippedE?.reason);
+  const current = planFixtures(five, fixtureRequestSchema.parse({}));
+  assert.match(current.skipped.find(({ format: skipped }) => skipped === 'b')!.reason, /formats: \["b","c","d","e"\]/);
+  const all = planFixtures(five, fixtureRequestSchema.parse({ formats: 'all' }));
+  assert.deepEqual(all.formats, ['a', 'b', 'c', 'd']);
+  assert.match(all.skipped.find(({ format: skipped }) => skipped === 'e')!.reason, /formats: \["e"\]/);
 });
 
 test('fixture plans stay bounded and report the cells they leave out', () => {
@@ -107,9 +120,25 @@ test('fixture spreads carry synthetic content for each case without touching sav
   assert.equal(empty.boxes.hero.photo, undefined);
   assert.equal(empty.boxes.story.text, undefined);
   assert.equal(spread('map', 'malformed-files').elements.route.params.track, 'file-gpx');
-  assert.equal(spread('map', 'typical').elements.route.params.track, undefined);
+  assert.equal(spread('map', 'typical').elements.route.params.track, 'typical-gpx');
+  assert.equal(spread('map', 'alternate-files').elements.route.params.track, 'alternate-gpx');
+  assert.equal(spread('map', 'empty').elements.route.params.track, undefined);
   assert.equal(spread('cover', 'typical').params.title, 'Summer');
   assert.equal(project.texts.real, 'texts/real.md');
+});
+
+test('synthetic GPX fixtures are valid tracks with and without elevation', () => {
+  const { typical, alternate } = fixtureFiles['.gpx'];
+  const segments = (text: string) => text.match(/<trkseg>/g)?.length ?? 0;
+  const points = (text: string) => [...text.matchAll(/<trkpt lat="([-\d.]+)" lon="([-\d.]+)">/g)].map(([, lat, lon]) => [Number(lat), Number(lon)]);
+  assert.equal(segments(typical), 1);
+  assert.equal(typical.match(/<ele>/g)?.length, points(typical).length);
+  assert.ok(points(typical).length > 100);
+  assert.equal(segments(alternate), 3);
+  assert.ok(!alternate.includes('<ele>') && !alternate.includes('<time>'));
+  for (const [lat, lon] of [...points(typical), ...points(alternate)]) assert.ok(Math.abs(lat - 46.5) < 0.2 && Math.abs(lon - 8.1) < 0.2);
+  assert.equal(sampleExtension(['.GPX', '.txt']), '.gpx');
+  assert.equal(sampleExtension(['.csv']), undefined);
 });
 
 test('fixture contact sheets reserve a banner inside the requested edge', () => {

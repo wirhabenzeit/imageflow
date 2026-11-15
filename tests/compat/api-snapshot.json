@@ -2429,7 +2429,7 @@
               },
               "cases": {
                 "minItems": 1,
-                "maxItems": 5,
+                "maxItems": 6,
                 "type": "array",
                 "items": {
                   "$ref": "#/$defs/__schema26"
@@ -2678,7 +2678,8 @@
               "long-text",
               "empty",
               "portrait-photos",
-              "malformed-files"
+              "malformed-files",
+              "alternate-files"
             ]
           }
         }
