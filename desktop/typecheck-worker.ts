@@ -52,8 +52,6 @@ function check(): TypecheckResult {
     jsx: ts.JsxEmit.ReactJSX, strict: true, noEmit: true, skipLibCheck: false, types: [],
     allowJs: true, checkJs: false, noUncheckedSideEffectImports: true, resolveJsonModule: true, allowImportingTsExtensions: true,
     lib: ['lib.es2022.d.ts', 'lib.dom.d.ts', 'lib.dom.iterable.d.ts'],
-    // Every bare import, from template code and from vendored declarations alike, resolves among the saved packages.
-    baseUrl: vendorTypes, paths: { '*': ['packages/*', 'packages/@types/*'] },
   };
   const host = ts.createCompilerHost(options);
   const permitted = (path: string) => {
@@ -81,12 +79,30 @@ function check(): TypecheckResult {
     if (name === 'csstype' && inside(types, resolve(containingFile))) {
       return { resolvedFileName: join(types, 'csstype/index.d.ts'), extension: ts.Extension.Dts };
     }
-    if (!name.startsWith('./') && !name.startsWith('../')) {
-      const resolved = ts.resolveModuleName(name, containingFile, options, host).resolvedModule;
-      return resolved && inside(vendorTypes, resolve(resolved.resolvedFileName)) ? resolved : undefined;
-    }
+    if (!name.startsWith('./') && !name.startsWith('../')) return resolveVendored(name, containingFile);
     return ts.resolveModuleName(name, containingFile, options, host).resolvedModule;
   });
+  // Every bare import, from template code and from vendored declarations alike, resolves among the saved packages as if
+  // vendor/types/packages were a node_modules folder, so package.json `exports` (subpaths and `types` conditions),
+  // `typesVersions`, nested packages and @types fall-backs resolve exactly as they did in template/node_modules.
+  const packages = join(vendorTypes, 'packages'), virtual = join(vendorTypes, 'node_modules');
+  const toReal = (path: string) => inside(virtual, resolve(path)) ? join(packages, relative(virtual, resolve(path))) : path;
+  const toVirtual = (path: string) => inside(packages, resolve(path)) ? join(virtual, relative(packages, resolve(path))) : path;
+  const vendoredHost: ts.ModuleResolutionHost = {
+    fileExists: (path) => host.fileExists(toReal(path)), readFile: (path) => host.readFile(toReal(path)),
+    directoryExists: (path) => inside(vendorTypes, resolve(path)) && (resolve(path) === virtual || host.directoryExists!(toReal(path))),
+    realpath: (path) => path, getCurrentDirectory: () => vendorTypes,
+  };
+  const vendoredOptions: ts.CompilerOptions = { ...options, allowJs: false, preserveSymlinks: true };
+  function resolveVendored(name: string, containingFile: string): ts.ResolvedModuleFull | undefined {
+    // Template code resolves from the vendor root; a vendored declaration from its own place, for nested packages.
+    const from = inside(packages, resolve(containingFile)) ? toVirtual(containingFile) : join(vendorTypes, 'index.ts');
+    const resolved = ts.resolveModuleName(name, from, vendoredOptions, vendoredHost).resolvedModule;
+    if (!resolved) return undefined;
+    const real = toReal(resolved.resolvedFileName);
+    const { originalPath: _originalPath, ...rest } = resolved as ts.ResolvedModuleFull & { originalPath?: string };
+    return inside(packages, resolve(real)) ? { ...rest, resolvedFileName: real } : undefined;
+  }
   // JSON participates only when imported; tsconfig.json remains editor configuration, never a compiler input.
   const roots = [...sources.keys()].filter((path) => !path.endsWith('.json')).concat(join(types, 'assets.d.ts'));
   if (host.fileExists(untyped)) roots.push(untyped);
