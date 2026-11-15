@@ -2,7 +2,7 @@
 // bundler exposes exactly these names, and the shipped declarations must declare the same set (src/template-types.ts).
 export const runtimeExports = [
   'defineTemplate', 'spreadFor', 'p', 'mm', 'pt', 'inch', 'printFormat', 'Spread', 'PhotoBox', 'MarkdownBox', 'Element', 'asset', 'file',
-  'geometry', 'box', 'issue', 'capabilities', 'RenderedImage', 'FormattedText', 'plainText',
+  'geometry', 'box', 'issue', 'capabilities', 'RenderedImage', 'FormattedText', 'plainText', 'Choice',
 ] as const;
 
 // Contract-1 baseline, open until the first public release (ADR 0008). Templates need no `requires` entries
@@ -43,6 +43,8 @@ export const contract1Capabilities = [
   // `markdown: 'inline'` on string parameters: **bold**, *italic* and ~~strikethrough~~, shown by ctx.Text and
   // `<FormattedText>` and typed with live conversion and shortcuts in the inline text editor.
   'formatted-text',
+  // `<Choice>`: ImageFlow's own segmented choice for custom editors and layout-family pickers.
+  'app-controls',
 ] as const;
 // All supported features, including the baseline names accepted in older templates' `requires` lists. Until the
 // first public release the baseline stays open and new features join it (ADR 0008); after it, additive extensions

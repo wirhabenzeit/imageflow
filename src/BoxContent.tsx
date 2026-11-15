@@ -3,9 +3,9 @@ import type { ReactNode } from 'react';
 import { Icon } from './Icon';
 import { ActionMenu } from './ActionMenu';
 import { Field } from './Fields';
-import { sourcePath } from './source-locations';
 import type { ProjectSummary } from './desktop';
 import type { SpreadState } from './project';
+import { textChoices } from './source-items';
 import type { SourceRef } from './source-items';
 import { centered, placementIn, setPlacement } from './spread';
 
@@ -150,7 +150,7 @@ export function TextContent({ summary, spread, box, label, change, importText, i
   compact?: boolean; quickLook?: (source: SourceRef) => void; importText: () => void; inspect?: (source: SourceRef) => void; flow?: { part: number; parts: number };
 }) {
   const assigned = spread.boxes[box]?.text;
-  const choices = Object.entries(summary.project.texts).map(([id, path]) => [id, sourcePath(path).split('/').pop()] as const);
+  const choices = textChoices(summary);
   const name = assigned ? choices.find(([id]) => id === assigned)?.[1] ?? 'Missing text' : 'No text';
   function assign(value?: string) {
     change((item) => {
@@ -158,7 +158,7 @@ export function TextContent({ summary, spread, box, label, change, importText, i
     }, value ? (choices.find(([id]) => id === value)?.[1] ?? value) + ' placed in ' + label : 'Text removed from ' + label);
   }
   if (compact) return <ActionMenu className="text-source-menu" label={<>Aa <span>{name}</span>{flow && flow.parts > 1 && <small>{flow.part}/{flow.parts}</small>}<Icon name="chevron" /></>}>
-    {choices.filter(([id]) => id !== assigned).map(([id, name]) => <button key={id} onClick={() => assign(id)}>{name ?? id}</button>)}
+    {choices.filter(([id]) => id !== assigned).map(([id, name]) => <button key={id} onClick={() => assign(id)}>{name}</button>)}
     <hr />
     <button onClick={importText}>Choose Markdown File…</button>
     <button disabled={!assigned || !quickLook} onClick={() => assigned && quickLook?.({ kind: 'text', id: assigned })}>Show in Quick Look</button>
@@ -179,7 +179,7 @@ export function TextContent({ summary, spread, box, label, change, importText, i
         }}>
           <option value={assigned ?? ''}>{assigned ? 'Replace text…' : 'Choose text…'}</option>
           <option value=":import">Choose Markdown file…</option>
-          {choices.filter(([id]) => id !== assigned).map(([id, name]) => <option value={id} key={id}>{name ?? id}</option>)}
+          {choices.filter(([id]) => id !== assigned).map(([id, name]) => <option value={id} key={id}>{name}</option>)}
         </select>
         {assigned && <button type="button" className="link" onClick={() => assign()}>Remove</button>}
 

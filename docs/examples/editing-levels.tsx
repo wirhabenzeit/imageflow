@@ -1,5 +1,5 @@
 // Editing UI at three levels: generated controls, arranged controls with a condition, and a custom editor that reuses ImageFlow's controls.
-import { defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
+import { Choice, defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { ElementEditorProps } from 'imageflow';
 
 const format = printFormat({
@@ -20,12 +20,8 @@ const backdropParameters = {
 // checking: `waves` is not an option, and `opacity` is not one of this editor's parameters.
 function PatternEditor({ values, set, readOnly, Control }: ElementEditorProps<typeof backdropParameters, 'pattern' | 'tint'>) {
   return <div>
-    <div role="radiogroup" aria-label="Pattern" style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-      {patterns.map((pattern) => <button key={pattern} type="button" role="radio" aria-checked={values.pattern === pattern}
-        disabled={readOnly} onClick={() => set({ pattern })}
-        style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--if-editor-border)', color: 'var(--if-editor-text)',
-          background: values.pattern === pattern ? 'var(--if-editor-selection)' : 'var(--if-editor-control)' }}>{pattern}</button>)}
-    </div>
+    <Choice label="Pattern" value={values.pattern} disabled={readOnly} onChange={(pattern) => set({ pattern })}
+      options={patterns.map((pattern) => ({ value: pattern, label: pattern[0].toUpperCase() + pattern.slice(1) }))} />
     <Control parameter="tint" />
   </div>;
 }

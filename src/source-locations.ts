@@ -9,6 +9,9 @@ export type SourceReference = z.infer<typeof sourceReferenceSchema>;
 export type SourceKind = 'photo' | 'markdown' | 'file';
 export type SourceKey = `${SourceKind}:${string}`;
 export const sourcePath = (source: SourceReference | { path: string }) => typeof source === 'string' ? source : source.path;
+// Imported and created files are stored as "<id>-<name>"; the readable name leaves the storage ID out.
+export const sourceFileName = (source: SourceReference | { path: string }) =>
+  (sourcePath(source).split('/').pop() ?? sourcePath(source)).replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');
 export const sourceLinked = (source: SourceReference | { path: string; linked?: boolean }) => typeof source !== 'string' && 'linked' in source && source.linked === true;
 export type SourceEntry = { key: SourceKey; kind: SourceKind; id: string; path: string; linked: boolean };
 export type SourceStatus = SourceEntry & { state: 'available' | 'missing' | 'unreadable' | 'denied' | 'unapproved'; problem?: string; cached?: boolean; digest?: string };

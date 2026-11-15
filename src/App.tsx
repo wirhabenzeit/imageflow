@@ -1885,8 +1885,8 @@ export function App() {
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     {photoView.dialog}
     <footer className="status-bar">
-      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
-        {issue || busy || notice}
+      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
+        {!issue && busy && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice}
       </span>
       <AgentStatus api={api} />
       {summary && <BookCheckIndicator requestSpread={checkScope} request={checkRequest} check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}

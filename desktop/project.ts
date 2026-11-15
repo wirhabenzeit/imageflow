@@ -18,7 +18,7 @@ import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave 
 import { sourceEntries, sourcePath, sourceLinked } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
-import { approveSource, sourceBookKey } from './source-access';
+import { approveSources, sourceBookKey } from './source-access';
 import { runtimeExports } from '../src/runtime-exports';
 import { templateHash } from './template-library';
 
@@ -306,7 +306,13 @@ export function withProjectFiles(book: OpenProject, files: ProjectFiles): OpenPr
   return { ...book, project, photoIndex, photos };
 }
 
-export async function importIntoProject(book: OpenProject, request: ImportRequest, paths: string[]) {
+/** Progress of an import: files checked so far out of all those chosen, then `saving` while the book is updated. */
+export type ImportProgress = { done: number; total: number; saving?: boolean };
+// Checking a photo decodes it, which dominates a large import; a few at a time keep the cores busy without
+// holding many full-size images in memory (the same batch size as loading a book's sources).
+const importConcurrency = 8;
+
+export async function importIntoProject(book: OpenProject, request: ImportRequest, paths: string[], progress?: (value: ImportProgress) => void) {
   const project = structuredClone(book.project);
   const photoIndex: PhotoIndex = structuredClone(book.photoIndex);
   const mode = request.mode ?? book.project.importMode ?? 'copy';
@@ -321,24 +327,43 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
     if (await realpath(destination) !== destination) throw new Error(folder + '/ must be a folder inside the project.');
   };
+  // First check every file, several at a time, without changing anything; then add them in the chosen order.
+  type Checked = { file: string; kind: 'photo' | 'markdown' | 'file'; info: import('node:fs').Stats } | 'skipped' | 'failed';
+  const checked: Checked[] = new Array(paths.length);
+  let done = 0;
+  let next = 0;
+  progress?.({ done, total: paths.length });
+  const check = async (file: string): Promise<Checked> => {
+    const info = await stat(file).catch(() => undefined);
+    if (!info) return 'failed';
+    const extension = extname(file).toLowerCase();
+    // Without a kind, photos and Markdown are recognised by type. Other files are imported only when a file
+    // parameter of the template accepts their extension; nothing else is guessed.
+    const kind = request.kind ?? (photoExtensions.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : request.accept?.includes(extension) ? 'file' : undefined);
+    const extensions = kind === 'photo' ? photoExtensions : kind === 'file' ? new Set(request.accept) : new Set(['.md']);
+    if (!info.isFile() || !kind || !extensions.has(extension)) return 'skipped';
+    try {
+      if (kind === 'photo') await importPhotoDetails(file);
+      if (kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
+      if (kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
+      await access(file, constants.R_OK);
+    } catch { return 'failed'; }
+    return { file, kind, info };
+  };
+  await Promise.all(Array.from({ length: Math.min(importConcurrency, paths.length) }, async () => {
+    while (next < paths.length) {
+      const index = next++;
+      checked[index] = await check(paths[index]);
+      progress?.({ done: ++done, total: paths.length });
+    }
+  }));
+  const approvals: { key: string; kind: 'photo' | 'markdown' | 'file'; path: string; linked: true }[] = [];
   try {
-    for (const file of paths) {
-      const info = await stat(file).catch(() => undefined);
-      if (!info) { counts.failed++; continue; }
-      const extension = extname(file).toLowerCase();
-      // Without a kind, photos and Markdown are recognised by type. Other files are imported only when a file
-      // parameter of the template accepts their extension; nothing else is guessed.
-      const kind = request.kind ?? (photoExtensions.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : request.accept?.includes(extension) ? 'file' : undefined);
-      const extensions = kind === 'photo' ? photoExtensions : kind === 'file' ? new Set(request.accept) : new Set(['.md']);
-      if (!info.isFile() || !kind || !extensions.has(extension)) { counts.skipped++; continue; }
+    for (const entry of checked) {
+      if (entry === 'skipped' || entry === 'failed') { counts[entry]++; continue; }
+      const { file, kind, info } = entry;
       const folder = kind === 'photo' ? 'photos' : kind === 'file' ? 'files' : 'texts';
       const registry = kind === 'file' ? project.files : project.texts;
-      try {
-        if (kind === 'photo') await importPhotoDetails(file);
-        if (kind === 'markdown' && info.size > 5 * 1024 * 1024) throw new Error('Markdown files must be smaller than 5 MB.');
-        if (kind === 'file' && info.size > maximumFileSize) throw new Error(basename(file) + ' is larger than 20 MB.');
-        await access(file, constants.R_OK);
-      } catch { counts.failed++; continue; }
       const previous = kind === 'photo'
         ? Object.entries(photoIndex).find(([, photo]) => (!!photo.linked === (mode === 'link') || isInside(book.folder, file)) && (photo.linked ? photo.path : join(book.folder, photo.path)) === file)?.[0]
         : Object.entries(registry).find(([, ref]) => (sourceLinked(ref) === (mode === 'link') || isInside(book.folder, file)) && (sourceLinked(ref) ? sourcePath(ref) : join(book.folder, sourcePath(ref))) === file)?.[0];
@@ -353,7 +378,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       const path = join(book.folder, relativePath);
       const original = await realpath(file);
       const linked = mode === 'link' && !isInside(book.folder, original);
-      if (linked) await approveSource(book.folder, { key: kind + ':' + id, kind, path: original, linked }, request.accept);
+      if (linked) approvals.push({ key: kind + ':' + id, kind, path: original, linked });
       if (!linked) { await prepare(folder); await copyFile(original, path, constants.COPYFILE_EXCL); copied.push(path);
         // Keep the original's modification time: photo views estimate an undated photo's capture time from it.
         await utimes(path, info.atime, info.mtime).catch(() => {}); }
@@ -362,6 +387,8 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       if (kind === 'photo') counts.photos++; else if (kind === 'markdown') counts.texts++; else counts.files++;
       imported.push(id);
     }
+    // Links are approved before the book refers to them, all in one write.
+    await approveSources(book.folder, approvals, request.accept);
     if (!imported.length) return { book, imported, copied, createdDirectories, counts };
     if (request.target && request.kind && request.kind !== 'file') {
       const spread = project.spreads.find(({ id }) => id === request.target?.spread);
@@ -372,6 +399,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
         ...(request.kind === 'photo' ? { photo: imported[0] } : { text: imported[0] }),
       };
     }
+    progress?.({ done: imported.length, total: imported.length, saving: true });
     const next = await updateProject(book, { project, photoIndex }, true);
     return { book: next, imported, copied, createdDirectories, counts };
   } catch (error) {

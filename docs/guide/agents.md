@@ -17,6 +17,6 @@ No separate Node.js installation is needed. If you move ImageFlow.app, add it to
 
 Open the books you want to use, then select **Allow agents to use open books** in **Settings → Agents**. Keep ImageFlow open.
 
-The **Agent · N** status indicator shows connected agents. Click it to view connections or turn access off. Access ends when you quit ImageFlow. After restarting, open your books and enable access again; existing agent configurations reconnect.
+The **Agent · N** status indicator shows connected agents. Click it to view connections or turn access off. Access stays on until you turn it off: after ImageFlow restarts, it starts again with new credentials, and existing agent configurations reconnect to the books you open.
 
 For tool details and recovery, see [Agent connection and tools](../mcp.md).

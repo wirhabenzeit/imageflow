@@ -15,6 +15,7 @@ import type { RenderProject } from '../src/project';
 import { printBook, savePdf } from './export';
 import { approveNetwork, approvedNetwork } from './source-access';
 import { importIntoProject, loadProject, projectSummary, readProjectManifest } from './project';
+import type { ImportProgress } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
 import { bundledFontNames } from './fonts';
@@ -509,7 +510,8 @@ export class DocumentSession {
     return this.active.book;
   }
 
-  async importFiles(owner: BrowserWindow, id: string, request: ImportRequest, base?: OpenProject) {
+  /** `report` sends progress to the owner's status bar; only the book window's own import, which clears it, asks. */
+  async importFiles(owner: BrowserWindow, id: string, request: ImportRequest, base?: OpenProject, report = false) {
     const current = this.currentBook(id);
     const book = base ?? current;
     if (request.kind !== undefined && request.kind !== 'photo' && request.kind !== 'markdown' && request.kind !== 'file') throw new Error('Unknown import type.');
@@ -551,7 +553,13 @@ export class DocumentSession {
       if ((await stat(path)).isDirectory()) await collect(path);
       else files.push(path);
     }
-    const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)]);
+    const noun = request.kind === 'photo' ? 'photos' : request.kind === 'markdown' ? 'texts' : 'files';
+    const progress = report ? ({ done, total, saving }: ImportProgress) => {
+      if (owner.isDestroyed()) return;
+      owner.webContents.send(channels.progress, saving ? 'Adding ' + total + ' ' + (total === 1 ? noun.slice(0, -1) : noun) + ' to the book…'
+        : total > 1 ? 'Importing ' + noun + '… ' + done + ' of ' + total : 'Importing ' + noun.slice(0, -1) + '…');
+    } : undefined;
+    const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)], progress);
     for (const file of [...createdDirectories, ...copied]) {
       const path = relative(book.folder, file);
       this.importedWrites.set(path, await fingerprint(file), this.observedChanges.has(path));
