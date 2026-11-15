@@ -8,6 +8,16 @@ ImageFlow runs on Macs with Apple silicon. Download the `.dmg` from [GitHub Rele
 
 Until the first release is published, build ImageFlow from source instead; see [Setup](../development/setup.md).
 
+## Updates
+
+The signed macOS release checks for updates automatically. Open **ImageFlow → Settings… → General** to turn **Automatically check for updates** on or off. **ImageFlow → Check for Updates…** checks manually, even when automatic checks are off.
+
+Choose **Stable** for regular releases or **Beta** to include early versions. Switching back to Stable does not downgrade an installed beta; the next update must be newer than your installed version.
+
+Available updates download in the background. When ready, choose **Restart to Update**, or **Later** to keep working. You can restart from Settings when convenient. **Later** dismisses the notice; a downloaded update also installs when you quit normally and is ready the next time you open ImageFlow. ImageFlow finishes saving open books before installing; resolve any save errors or unfinished text edits if they prevent closing.
+
+Updates require a Developer ID signed release in a writable location. Move ImageFlow to **Applications**, eject the disk image and reopen the app before checking. Development and ad-hoc-signed builds cannot use automatic updates.
+
 ## Your first book
 
 1. Open ImageFlow and choose **New Book…**.
