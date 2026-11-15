@@ -24,9 +24,9 @@ import { fileExtension, useFileIcons } from './file-icons';
 const Glyph = ({ kind }: { kind: SourceKind }) => <span aria-hidden="true">{kind === 'photo' ? '▧' : kind === 'markdown' ? 'Aa' : '▤'}</span>;
 const DocumentIcon = ({ src, kind }: { src?: string; kind: SourceKind }) => src ? <img src={src} alt="" draggable={false} /> : <Glyph kind={kind} />;
 
-export function SourceManager({ view, api, summary, adopt, disabled = false, quickLook, embedded = false, tabs }: {
+export function SourceManager({ view, api, summary, adopt, disabled = false, quickLook, embedded = false, tabs, drop }: {
   view: PhotoViewControl; api: DesktopApi; summary: ProjectSummary; adopt: (summary: ProjectSummary) => void; disabled?: boolean; quickLook?: (source: SourceRef) => void;
-  embedded?: boolean; tabs?: ReactNode;
+  embedded?: boolean; tabs?: ReactNode; drop?: (files: File[]) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
@@ -88,7 +88,9 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     if (item?.kind === 'file') void act({ action: 'preview', key: item.key });
     else if (item) quickLook?.({ kind: item.kind === 'photo' ? 'photo' : 'text', id: item.id });
   };
-  return <section className={embedded ? 'sources source-manager source-manager-embedded' : 'source-manager'} aria-label={embedded ? 'Sources' : 'Assets'} aria-busy={busy || disabled}>
+  return <section className={embedded ? 'sources source-manager source-manager-embedded' : 'source-manager'} aria-label={embedded ? 'Sources' : 'Assets'} aria-busy={busy || disabled}
+    onDragOver={drop && ((event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); })}
+    onDrop={drop && ((event) => { event.preventDefault(); drop([...event.dataTransfer.files]); })}>
     <header className={embedded ? 'sources-bar asset-toolbar' : 'asset-toolbar'}>
       {tabs}
       <input type="search" aria-label="Search assets" placeholder="Search assets" value={search} onChange={(event) => setSearch(event.target.value)} />

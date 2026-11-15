@@ -14,10 +14,11 @@ export function useFileIcons(extensions: string[]) {
     const api = window.imageflow;
     if (!asked.length || !api) return;
     let active = true;
-    void api.fileIcons(asked).catch((): Record<string, string> => ({})).then((found) => {
+    // A failed request is not remembered, so a later render can ask again; a type the system has no icon for is.
+    void api.fileIcons(asked).then((found) => {
       for (const extension of asked) icons.set(extension, found[extension]);
       if (active) loaded((count) => count + 1);
-    });
+    }, () => {});
     return () => { active = false; };
   }, [wanted]);
   return (extension: string) => icons.get(extension);

@@ -52,6 +52,10 @@ try {
   await page.locator('.asset-row[data-source="photo:one"]').click();
   await page.keyboard.press('Space');
   await page.locator('dialog.quicklook[open]').waitFor();
+  // Stepping through Quick Look from the Assets tab keeps the tab.
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await page.locator('.sources-bar [role="tab"][aria-selected="true"]').textContent(), 'Assets 4');
   await page.keyboard.press('Escape');
   await page.screenshot({ path: join(work, 'assets-tab.png') });
   await tabs.nth(0).click();
