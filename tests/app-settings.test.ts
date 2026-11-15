@@ -62,3 +62,20 @@ test('a beta installation defaults to Beta while an explicit Stable preference s
   const reopened = new SettingsStore(file, betaDefaults); await reopened.load();
   assert.equal(reopened.value.updateChannel, 'stable');
 });
+
+test('agent access is remembered across reloads and only stored while on', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'if-agents-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const file = join(folder, 'settings.json');
+  const store = new SettingsStore(file);
+  await store.load();
+  assert.equal(store.value.agentAccess, undefined);
+  await store.update({ agentAccess: true });
+  await store.update({ appearance: 'dark' });
+  const reopened = new SettingsStore(file);
+  await reopened.load();
+  assert.equal(reopened.value.agentAccess, true);
+  await reopened.update({ agentAccess: false });
+  assert.equal('agentAccess' in JSON.parse(await readFile(file, 'utf8')), false);
+  await assert.rejects(store.update({ agentAccess: 'yes' }), /Invalid agent access/);
+});

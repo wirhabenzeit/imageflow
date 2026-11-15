@@ -1568,6 +1568,7 @@ void app.whenReady().then(async () => {
     try {
       if (patch && typeof patch === 'object' && 'updateChannel' in patch && patch.updateChannel !== settings.value.updateChannel &&
           ['checking', 'downloading', 'ready'].includes(updates.state.status)) throw new Error('Finish the current update before changing channels.');
+      if (patch && typeof patch === 'object' && 'agentAccess' in patch) throw new Error('Change agent access in Settings → Agents.');
       const previousChannel = settings.value.updateChannel;
       const value = await settings.update(patch);
       nativeTheme.themeSource = value.appearance;
@@ -1690,6 +1691,8 @@ void app.whenReady().then(async () => {
       const update = connectionSettingsQueue.then(async () => {
         if (enabled === true && !mcpConnection) await enableMcp();
         if (enabled === false) await disableMcp();
+        // The choice outlasts this run: the connection starts again when ImageFlow next opens.
+        if (enabled !== undefined && !!settings.value.agentAccess !== enabled) await settings.update({ agentAccess: enabled });
       });
       connectionSettingsQueue = update.catch(() => {});
       await update;
@@ -1771,6 +1774,12 @@ void app.whenReady().then(async () => {
   }
   if (!documents.size) showStart();
   updates.setAutomatic(settings.value.automaticUpdates);
+  // Agent access the user turned on stays on across restarts, with new credentials for this run; installed bridges read
+  // the connection file before each call, so agents reconnect without being set up again.
+  if (settings.value.agentAccess && !quitting && !preparingQuit) {
+    const restore = connectionSettingsQueue.then(async () => { if (!mcpConnection) await enableMcp(); });
+    connectionSettingsQueue = restore.catch((error) => console.warn('ImageFlow could not restore agent access', error));
+  }
   // Signature/filesystem checks must not delay creating the library or the first usable window.
   void updateUnavailable({ packaged: app.isPackaged, platform: process.platform,
     executable: process.execPath, downloads: app.getPath('downloads') }).then((reason) => {

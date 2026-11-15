@@ -29,7 +29,7 @@ The configuration contains absolute paths, and `~` above stands for your home fo
 
 The pane shows attached client names. Clearing the checkbox closes their app connections and removes the connection file. Selecting it again creates new credentials at the same path. An installed bridge reads the current connection file before each call, so agents reconnect without being set up again.
 
-Access is session-only: quitting ImageFlow removes the connection file. After restarting, open the intended books and select **Allow agents to use open books** again. The existing client configuration then reconnects.
+Access is remembered until you turn it off. Quitting ImageFlow closes the connection and removes the connection file; the next launch writes a new one with new credentials, and the existing client configuration reconnects. Agents reach only the books open at the time, and each reopened book gets a new project handle. While ImageFlow is not running, calls return `connection-unavailable`.
 
 For a development checkout, `node scripts/build-mcp.mjs` creates `.build/mcp-bridge.cjs`. Desktop staging bundles that bridge and includes this document. Packaging keeps it outside `app.asar`. A standalone invocation with any Node.js 22.20 or newer has the following form:
 
