@@ -996,6 +996,7 @@ type Viewport = { top: number; bottom: number; left: number; right: number };
 function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
   const containers = [...root.querySelectorAll<HTMLElement>('.if-spread-container')];
   return () => {
+    const profileStart = import.meta.env.IMAGEFLOW_PROFILE ? performance.now() : 0;
     const range = visible() ?? { top: 0, bottom: screen.height, left: 0, right: screen.width };
     const height = Math.max(1, range.bottom - range.top);
     const width = Math.max(1, range.right - range.left);
@@ -1025,6 +1026,7 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
         }
       }
     }
+    if (import.meta.env.IMAGEFLOW_PROFILE) performance.measure('imageflow.photoLoader', { start: profileStart, end: performance.now() });
     return loading;
   };
 }

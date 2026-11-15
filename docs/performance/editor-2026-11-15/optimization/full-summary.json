@@ -1,0 +1,3677 @@
+[
+  {
+    "sample": "starter",
+    "scenario": "hover",
+    "elapsedMs": 1311,
+    "hostCommits": 46,
+    "hostMaxRenderMs": 0.1,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 1,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/CanvasHover": {
+        "renders": 32,
+        "sameProps": 32,
+        "maxInclusiveMs": 0.1
+      },
+      "render/RenderedImage": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.2
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "canvas-scroll",
+    "elapsedMs": 1506,
+    "hostCommits": 1,
+    "hostMaxRenderMs": 0.1,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 12,
+    "photoLoaderMaxMs": 0.9,
+    "components": {
+      "host/CanvasHover": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "thumbnail-scroll",
+    "elapsedMs": 1519,
+    "hostCommits": 1,
+    "hostMaxRenderMs": 0.1,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/CanvasHover": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "select-spread",
+    "elapsedMs": 1527,
+    "hostCommits": 19,
+    "hostMaxRenderMs": 0.7,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 4,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 53,
+    "photoLoaderMaxMs": 0.2,
+    "components": {
+      "host/App": {
+        "renders": 5,
+        "sameProps": 5,
+        "maxInclusiveMs": 0.7
+      },
+      "host/Icon": {
+        "renders": 45,
+        "sameProps": 45,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 5,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Fields": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 19,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 26,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 26,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 27,
+        "sameProps": 13,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 15,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 5,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/AgentStatus": {
+        "renders": 5,
+        "sameProps": 5,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 5,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Inspector": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.4
+      },
+      "host/LayoutPicker": {
+        "renders": 13,
+        "sameProps": 9,
+        "maxInclusiveMs": 0.3
+      },
+      "render/SpreadView": {
+        "renders": 48,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Paper": {
+        "renders": 48,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "render/Spread": {
+        "renders": 48,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "render/PhotoBox": {
+        "renders": 60,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.3
+      },
+      "render/Text": {
+        "renders": 44,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/FormattedText": {
+        "renders": 17,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/MarkdownBox": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Caption": {
+        "renders": 28,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/MapView": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "render/Element": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/RenderedImage": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/PictureList": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/PhotoRenderCall": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "select-source",
+    "elapsedMs": 840,
+    "hostCommits": 4,
+    "hostMaxRenderMs": 5.3,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/App": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 5.3
+      },
+      "host/Icon": {
+        "renders": 28,
+        "sameProps": 28,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 19,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 19,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Sources": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PhotoViewMenu": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Inspector": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 5
+      },
+      "host/SourceInspector": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 5
+      },
+      "host/Placements": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "reorder-shortcuts",
+    "elapsedMs": 1621,
+    "hostCommits": 34,
+    "hostMaxRenderMs": 1.3,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 6,
+    "bookDocuments": 2,
+    "thumbnailDocuments": 2,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 6,
+    "photoLoaderMaxMs": 0.2,
+    "components": {
+      "host/App": {
+        "renders": 13,
+        "sameProps": 13,
+        "maxInclusiveMs": 1.3
+      },
+      "host/Icon": {
+        "renders": 116,
+        "sameProps": 114,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 17,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 17,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 43,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 65,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 65,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 56,
+        "sameProps": 28,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 39,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CanvasHover": {
+        "renders": 13,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/AgentStatus": {
+        "renders": 13,
+        "sameProps": 13,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 13,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Sources": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/PhotoViewMenu": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Inspector": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "host/LayoutPicker": {
+        "renders": 8,
+        "sameProps": 4,
+        "maxInclusiveMs": 0.3
+      },
+      "render/SpreadView": {
+        "renders": 104,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Paper": {
+        "renders": 104,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Spread": {
+        "renders": 104,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/PhotoBox": {
+        "renders": 150,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/Shade": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Text": {
+        "renders": 106,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/FormattedText": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/MapView": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Element": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/RenderedImage": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/MarkdownBox": {
+        "renders": 34,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Caption": {
+        "renders": 58,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/PhotoRenderCall": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/PictureList": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "reorder-drag",
+    "elapsedMs": 862,
+    "hostCommits": 24,
+    "hostMaxRenderMs": 0.9,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 3,
+    "bookDocuments": 1,
+    "thumbnailDocuments": 1,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 3,
+    "photoLoaderMaxMs": 0.2,
+    "components": {
+      "host/App": {
+        "renders": 11,
+        "sameProps": 11,
+        "maxInclusiveMs": 0.9
+      },
+      "host/Icon": {
+        "renders": 97,
+        "sameProps": 96,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 13,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 13,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 35,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 57,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 57,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/BookFrame": {
+        "renders": 35,
+        "sameProps": 12,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 33,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CanvasHover": {
+        "renders": 11,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 11,
+        "sameProps": 11,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 11,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Sources": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PhotoViewMenu": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Inspector": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.4
+      },
+      "host/LayoutPicker": {
+        "renders": 4,
+        "sameProps": 2,
+        "maxInclusiveMs": 0.1
+      },
+      "render/SpreadView": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Paper": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Spread": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/PhotoBox": {
+        "renders": 75,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/Shade": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Text": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/FormattedText": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/MapView": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Element": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/RenderedImage": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/MarkdownBox": {
+        "renders": 17,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Caption": {
+        "renders": 29,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/PhotoRenderCall": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/PictureList": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "toggle-panels",
+    "elapsedMs": 1309,
+    "hostCommits": 74,
+    "hostMaxRenderMs": 0.8,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 1,
+    "panelStorageWrites": 4,
+    "photoLoaderCalls": 36,
+    "photoLoaderMaxMs": 0.2,
+    "components": {
+      "host/App": {
+        "renders": 69,
+        "sameProps": 69,
+        "maxInclusiveMs": 0.8
+      },
+      "host/Icon": {
+        "renders": 621,
+        "sameProps": 621,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 69,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/Fields": {
+        "renders": 69,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 207,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 345,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 345,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 138,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 165,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CanvasHover": {
+        "renders": 69,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 69,
+        "sameProps": 69,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 69,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "resize-panel",
+    "elapsedMs": 1151,
+    "hostCommits": 65,
+    "hostMaxRenderMs": 1.6,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 1,
+    "photoLoaderCalls": 15,
+    "photoLoaderMaxMs": 0.2,
+    "components": {
+      "host/App": {
+        "renders": 61,
+        "sameProps": 61,
+        "maxInclusiveMs": 1.6
+      },
+      "host/Icon": {
+        "renders": 549,
+        "sameProps": 549,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 61,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 61,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ControlList": {
+        "renders": 183,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 305,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 305,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 122,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 184,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CanvasHover": {
+        "renders": 61,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 61,
+        "sameProps": 61,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookCheckIndicator": {
+        "renders": 61,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "open-inline-editor",
+    "elapsedMs": 1642,
+    "hostCommits": 11,
+    "hostMaxRenderMs": 1.7,
+    "editorCommits": 2,
+    "editorMaxRenderMs": 0.7,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/App": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 1.7
+      },
+      "host/Icon": {
+        "renders": 32,
+        "sameProps": 31,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 17,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/Field": {
+        "renders": 33,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ParamControl": {
+        "renders": 33,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/BookFrame": {
+        "renders": 10,
+        "sameProps": 4,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookCheckIndicator": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Inspector": {
+        "renders": 3,
+        "sameProps": 2,
+        "maxInclusiveMs": 0.4
+      },
+      "host/LayoutPicker": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ElementEditorDialog": {
+        "renders": 5,
+        "sameProps": 3,
+        "maxInclusiveMs": 1.3
+      },
+      "host/CompactList": {
+        "renders": 5,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "editor/Host": {
+        "renders": 2,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.7
+      },
+      "editor/MapLayoutEditor": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.5
+      },
+      "editor/MapEditor": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.5
+      },
+      "editor/FormattedText": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "map-pan",
+    "elapsedMs": 2826,
+    "hostCommits": 19,
+    "hostMaxRenderMs": 1.2,
+    "editorCommits": 3,
+    "editorMaxRenderMs": 1.2,
+    "otherRootCommits": 3,
+    "bookDocuments": 1,
+    "thumbnailDocuments": 1,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 3,
+    "photoLoaderMaxMs": 0.3,
+    "components": {
+      "host/App": {
+        "renders": 8,
+        "sameProps": 8,
+        "maxInclusiveMs": 1.2
+      },
+      "host/Icon": {
+        "renders": 79,
+        "sameProps": 78,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 10,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 10,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 34,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 66,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 66,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 32,
+        "sameProps": 15,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 24,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CanvasHover": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ElementEditorDialog": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/CompactList": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/AgentStatus": {
+        "renders": 8,
+        "sameProps": 8,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "editor/Host": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 1.2
+      },
+      "editor/MapLayoutEditor": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.2
+      },
+      "editor/MapEditor": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.1
+      },
+      "editor/FormattedText": {
+        "renders": 2,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Sources": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PhotoViewMenu": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Inspector": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.3
+      },
+      "host/LayoutPicker": {
+        "renders": 5,
+        "sameProps": 3,
+        "maxInclusiveMs": 0.2
+      },
+      "render/SpreadView": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Paper": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Spread": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/PhotoBox": {
+        "renders": 75,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/Shade": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Text": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/FormattedText": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/MapView": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Element": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/RenderedImage": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/MarkdownBox": {
+        "renders": 17,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Caption": {
+        "renders": 29,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/PhotoRenderCall": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/PictureList": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "map-zoom",
+    "elapsedMs": 2018,
+    "hostCommits": 18,
+    "hostMaxRenderMs": 1.6,
+    "editorCommits": 3,
+    "editorMaxRenderMs": 1.5,
+    "otherRootCommits": 3,
+    "bookDocuments": 1,
+    "thumbnailDocuments": 1,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 7,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 3,
+    "photoLoaderMaxMs": 0.2,
+    "components": {
+      "editor/Host": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 1.5
+      },
+      "editor/MapLayoutEditor": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.4
+      },
+      "editor/MapEditor": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.3
+      },
+      "editor/FormattedText": {
+        "renders": 2,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.1
+      },
+      "host/App": {
+        "renders": 8,
+        "sameProps": 8,
+        "maxInclusiveMs": 1.6
+      },
+      "host/Icon": {
+        "renders": 79,
+        "sameProps": 78,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 10,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 10,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ControlList": {
+        "renders": 34,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 66,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 66,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 31,
+        "sameProps": 14,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 24,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ElementEditorDialog": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.3
+      },
+      "host/CompactList": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 8,
+        "sameProps": 8,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Sources": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/PhotoViewMenu": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Inspector": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/LayoutPicker": {
+        "renders": 5,
+        "sameProps": 3,
+        "maxInclusiveMs": 0.2
+      },
+      "render/SpreadView": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "render/Paper": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "render/Spread": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "render/PhotoBox": {
+        "renders": 75,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Shade": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Text": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/FormattedText": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/MapView": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "render/Element": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/RenderedImage": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/MarkdownBox": {
+        "renders": 17,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Caption": {
+        "renders": 29,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/PhotoRenderCall": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/PictureList": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "prepare-map-track",
+    "elapsedMs": 864,
+    "hostCommits": 25,
+    "hostMaxRenderMs": 1.3,
+    "editorCommits": 3,
+    "editorMaxRenderMs": 0.5,
+    "otherRootCommits": 3,
+    "bookDocuments": 1,
+    "thumbnailDocuments": 1,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 3,
+    "photoLoaderMaxMs": 0.2,
+    "components": {
+      "host/App": {
+        "renders": 11,
+        "sameProps": 11,
+        "maxInclusiveMs": 1.3
+      },
+      "host/Icon": {
+        "renders": 206,
+        "sameProps": 194,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 13,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 13,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ControlList": {
+        "renders": 47,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "host/Field": {
+        "renders": 114,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "host/ParamControl": {
+        "renders": 114,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "host/BookFrame": {
+        "renders": 36,
+        "sameProps": 13,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 33,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CanvasHover": {
+        "renders": 11,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ElementEditorDialog": {
+        "renders": 12,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.7
+      },
+      "host/CompactList": {
+        "renders": 13,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.7
+      },
+      "host/AgentStatus": {
+        "renders": 11,
+        "sameProps": 11,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 11,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ListControl": {
+        "renders": 10,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "host/ItemSummary": {
+        "renders": 17,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 7,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "editor/Host": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 0.5
+      },
+      "editor/MapLayoutEditor": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.5
+      },
+      "editor/MapEditor": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.5
+      },
+      "editor/FormattedText": {
+        "renders": 2,
+        "sameProps": 1,
+        "maxInclusiveMs": 0
+      },
+      "host/Sources": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PhotoViewMenu": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Inspector": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/LayoutPicker": {
+        "renders": 4,
+        "sameProps": 2,
+        "maxInclusiveMs": 0.2
+      },
+      "render/SpreadView": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Paper": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "render/Spread": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "render/PhotoBox": {
+        "renders": 75,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Shade": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Text": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/FormattedText": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/MapView": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.5
+      },
+      "render/Element": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/RenderedImage": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/MarkdownBox": {
+        "renders": 17,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Caption": {
+        "renders": 29,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/PictureList": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/PhotoRenderCall": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "type-map-track",
+    "elapsedMs": 1952,
+    "hostCommits": 14,
+    "hostMaxRenderMs": 0.8,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/App": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.8
+      },
+      "host/Icon": {
+        "renders": 21,
+        "sameProps": 21,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Fields": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 24,
+        "sameProps": 13,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ParamControl": {
+        "renders": 24,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/ElementEditorDialog": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/CompactList": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ListControl": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ItemSummary": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/FileControl": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/AgentStatus": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "commit-map-track",
+    "elapsedMs": 816,
+    "hostCommits": 21,
+    "hostMaxRenderMs": 1.1,
+    "editorCommits": 3,
+    "editorMaxRenderMs": 0.6,
+    "otherRootCommits": 3,
+    "bookDocuments": 1,
+    "thumbnailDocuments": 1,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 3,
+    "photoLoaderMaxMs": 0.3,
+    "components": {
+      "host/App": {
+        "renders": 9,
+        "sameProps": 9,
+        "maxInclusiveMs": 1.1
+      },
+      "host/Icon": {
+        "renders": 186,
+        "sameProps": 184,
+        "maxInclusiveMs": 0
+      },
+      "host/ActionMenu": {
+        "renders": 11,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 11,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 38,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/Field": {
+        "renders": 101,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ParamControl": {
+        "renders": 101,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/BookFrame": {
+        "renders": 34,
+        "sameProps": 15,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/ElementEditorDialog": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.3
+      },
+      "host/CompactList": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ListControl": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ItemSummary": {
+        "renders": 18,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 9,
+        "sameProps": 9,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "editor/Host": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 0.6
+      },
+      "editor/MapLayoutEditor": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "editor/MapEditor": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.5
+      },
+      "editor/FormattedText": {
+        "renders": 2,
+        "sameProps": 1,
+        "maxInclusiveMs": 0
+      },
+      "host/Sources": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/PhotoViewMenu": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Inspector": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/LayoutPicker": {
+        "renders": 4,
+        "sameProps": 2,
+        "maxInclusiveMs": 0.2
+      },
+      "render/SpreadView": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.8
+      },
+      "render/Paper": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Spread": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/PhotoBox": {
+        "renders": 75,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/Shade": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Text": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/FormattedText": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/MapView": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.7
+      },
+      "render/Element": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/RenderedImage": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/MarkdownBox": {
+        "renders": 17,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Caption": {
+        "renders": 29,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/PhotoRenderCall": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/PictureList": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "close-inline-editor",
+    "elapsedMs": 808,
+    "hostCommits": 1,
+    "hostMaxRenderMs": 1.3,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/App": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 1.3
+      },
+      "host/Icon": {
+        "renders": 10,
+        "sameProps": 10,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Fields": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/BookFrame": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/PanelDivider": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/ElementEditorDialog": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CompactList": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/AgentStatus": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      }
+    }
+  },
+  {
+    "sample": "starter",
+    "scenario": "open-photo-crop",
+    "elapsedMs": 861,
+    "hostCommits": 16,
+    "hostMaxRenderMs": 1.1,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 1,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 1,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/App": {
+        "renders": 9,
+        "sameProps": 9,
+        "maxInclusiveMs": 1.1
+      },
+      "host/Icon": {
+        "renders": 100,
+        "sameProps": 97,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 36,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 63,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 63,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/BookFrame": {
+        "renders": 23,
+        "sameProps": 4,
+        "maxInclusiveMs": 0
+      },
+      "host/PanelDivider": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CanvasHover": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ElementEditorDialog": {
+        "renders": 6,
+        "sameProps": 2,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CompactList": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/AgentStatus": {
+        "renders": 9,
+        "sameProps": 9,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Inspector": {
+        "renders": 3,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.2
+      },
+      "host/LayoutPicker": {
+        "renders": 4,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CropEditor": {
+        "renders": 5,
+        "sameProps": 2,
+        "maxInclusiveMs": 0.7
+      },
+      "host/PhotoContent": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/CropPhotoActions": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/SpreadView": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.4
+      },
+      "render/Paper": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.3
+      },
+      "render/Spread": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.3
+      },
+      "render/Text": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/FormattedText": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/PhotoBox": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/Shade": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "hover",
+    "elapsedMs": 1310,
+    "hostCommits": 41,
+    "hostMaxRenderMs": 0.2,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/CanvasHover": {
+        "renders": 29,
+        "sameProps": 29,
+        "maxInclusiveMs": 0.2
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "canvas-scroll",
+    "elapsedMs": 1517,
+    "hostCommits": 1,
+    "hostMaxRenderMs": 0.1,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 12,
+    "photoLoaderMaxMs": 1.4,
+    "components": {
+      "host/CanvasHover": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "thumbnail-scroll",
+    "elapsedMs": 1520,
+    "hostCommits": 1,
+    "hostMaxRenderMs": 0.1,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/CanvasHover": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 0
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "select-spread",
+    "elapsedMs": 1509,
+    "hostCommits": 14,
+    "hostMaxRenderMs": 1,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 4,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 51,
+    "photoLoaderMaxMs": 0.3,
+    "components": {
+      "host/App": {
+        "renders": 5,
+        "sameProps": 5,
+        "maxInclusiveMs": 1
+      },
+      "host/Icon": {
+        "renders": 45,
+        "sameProps": 45,
+        "maxInclusiveMs": 0
+      },
+      "host/ActionMenu": {
+        "renders": 5,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Fields": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 29,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 29,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 5,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/BookFrame": {
+        "renders": 22,
+        "sameProps": 8,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 15,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 5,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/AgentStatus": {
+        "renders": 5,
+        "sameProps": 5,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookCheckIndicator": {
+        "renders": 5,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Inspector": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.6
+      },
+      "host/LayoutPicker": {
+        "renders": 8,
+        "sameProps": 4,
+        "maxInclusiveMs": 0.3
+      },
+      "render/SpreadView": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.5
+      },
+      "render/Page": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.2
+      },
+      "render/Spread": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.2
+      },
+      "render/PhotoBox": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/Text": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Rule": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Days": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.2
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "select-source",
+    "elapsedMs": 848,
+    "hostCommits": 4,
+    "hostMaxRenderMs": 9.8,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/App": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 9.8
+      },
+      "host/Icon": {
+        "renders": 28,
+        "sameProps": 28,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 19,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 19,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/BookFrame": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CanvasHover": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/AgentStatus": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Sources": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/PhotoViewMenu": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Inspector": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 8.9
+      },
+      "host/SourceInspector": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 8.7
+      },
+      "host/Placements": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "reorder-shortcuts",
+    "elapsedMs": 1619,
+    "hostCommits": 25,
+    "hostMaxRenderMs": 0.8,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 6,
+    "bookDocuments": 2,
+    "thumbnailDocuments": 2,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 35,
+    "photoLoaderMaxMs": 1.2,
+    "components": {
+      "host/App": {
+        "renders": 12,
+        "sameProps": 12,
+        "maxInclusiveMs": 0.8
+      },
+      "host/Icon": {
+        "renders": 106,
+        "sameProps": 104,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 16,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 16,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 16,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 64,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 64,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/BookFrame": {
+        "renders": 46,
+        "sameProps": 20,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 36,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 12,
+        "sameProps": 12,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Sources": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PhotoViewMenu": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Inspector": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/LayoutPicker": {
+        "renders": 6,
+        "sameProps": 2,
+        "maxInclusiveMs": 0.2
+      },
+      "render/SpreadView": {
+        "renders": 84,
+        "sameProps": 0,
+        "maxInclusiveMs": 4.2
+      },
+      "render/Page": {
+        "renders": 84,
+        "sameProps": 0,
+        "maxInclusiveMs": 4.1
+      },
+      "render/Spread": {
+        "renders": 84,
+        "sameProps": 0,
+        "maxInclusiveMs": 4.1
+      },
+      "render/PhotoBox": {
+        "renders": 84,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.3
+      },
+      "render/Text": {
+        "renders": 90,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Rule": {
+        "renders": 84,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Days": {
+        "renders": 78,
+        "sameProps": 0,
+        "maxInclusiveMs": 4.1
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "reorder-drag",
+    "elapsedMs": 871,
+    "hostCommits": 19,
+    "hostMaxRenderMs": 0.8,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 3,
+    "bookDocuments": 1,
+    "thumbnailDocuments": 1,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 2,
+    "photoLoaderMaxMs": 0.4,
+    "components": {
+      "host/App": {
+        "renders": 10,
+        "sameProps": 10,
+        "maxInclusiveMs": 0.8
+      },
+      "host/Icon": {
+        "renders": 88,
+        "sameProps": 87,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ControlList": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/Field": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 52,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 10,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/BookFrame": {
+        "renders": 29,
+        "sameProps": 8,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 30,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 10,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 10,
+        "sameProps": 10,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 10,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Sources": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PhotoViewMenu": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Inspector": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/LayoutPicker": {
+        "renders": 3,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.1
+      },
+      "render/SpreadView": {
+        "renders": 42,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.3
+      },
+      "render/Page": {
+        "renders": 42,
+        "sameProps": 0,
+        "maxInclusiveMs": 1
+      },
+      "render/Spread": {
+        "renders": 42,
+        "sameProps": 0,
+        "maxInclusiveMs": 1
+      },
+      "render/PhotoBox": {
+        "renders": 42,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/Text": {
+        "renders": 45,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Rule": {
+        "renders": 42,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Days": {
+        "renders": 39,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.9
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "toggle-panels",
+    "elapsedMs": 1288,
+    "hostCommits": 32,
+    "hostMaxRenderMs": 0.6,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 1,
+    "panelStorageWrites": 4,
+    "photoLoaderCalls": 33,
+    "photoLoaderMaxMs": 0.2,
+    "components": {
+      "host/App": {
+        "renders": 27,
+        "sameProps": 27,
+        "maxInclusiveMs": 0.6
+      },
+      "host/Icon": {
+        "renders": 243,
+        "sameProps": 243,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Fields": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 135,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 135,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 54,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 76,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CanvasHover": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 27,
+        "sameProps": 27,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 27,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "resize-panel",
+    "elapsedMs": 1112,
+    "hostCommits": 57,
+    "hostMaxRenderMs": 1.5,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 1,
+    "photoLoaderCalls": 15,
+    "photoLoaderMaxMs": 0.2,
+    "components": {
+      "host/App": {
+        "renders": 53,
+        "sameProps": 53,
+        "maxInclusiveMs": 1.5
+      },
+      "host/Icon": {
+        "renders": 477,
+        "sameProps": 477,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 265,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 265,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 106,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 160,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.1
+      },
+      "host/CanvasHover": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 53,
+        "sameProps": 53,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 53,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "open-inline-editor",
+    "elapsedMs": 937,
+    "hostCommits": 24,
+    "hostMaxRenderMs": 1.1,
+    "editorCommits": 4,
+    "editorMaxRenderMs": 1.6,
+    "otherRootCommits": 4,
+    "bookDocuments": 1,
+    "thumbnailDocuments": 1,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 3,
+    "photoLoaderMaxMs": 0.4,
+    "components": {
+      "host/App": {
+        "renders": 11,
+        "sameProps": 11,
+        "maxInclusiveMs": 1.1
+      },
+      "host/Icon": {
+        "renders": 98,
+        "sameProps": 97,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 13,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 14,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ControlList": {
+        "renders": 14,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/Field": {
+        "renders": 58,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 58,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 11,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 36,
+        "sameProps": 12,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 33,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 12,
+        "sameProps": 1,
+        "maxInclusiveMs": 0
+      },
+      "host/AgentStatus": {
+        "renders": 11,
+        "sameProps": 11,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 11,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Inspector": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.3
+      },
+      "host/LayoutPicker": {
+        "renders": 5,
+        "sameProps": 2,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ElementEditorDialog": {
+        "renders": 10,
+        "sameProps": 2,
+        "maxInclusiveMs": 0.8
+      },
+      "render/SpreadView": {
+        "renders": 44,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.3
+      },
+      "render/Page": {
+        "renders": 44,
+        "sameProps": 0,
+        "maxInclusiveMs": 1
+      },
+      "render/Spread": {
+        "renders": 44,
+        "sameProps": 0,
+        "maxInclusiveMs": 1
+      },
+      "render/PhotoBox": {
+        "renders": 44,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/Text": {
+        "renders": 48,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Rule": {
+        "renders": 44,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Days": {
+        "renders": 40,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.9
+      },
+      "editor/Host": {
+        "renders": 4,
+        "sameProps": 3,
+        "maxInclusiveMs": 1.6
+      },
+      "editor/MarkedDaysEditor": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.5
+      },
+      "editor/DaysOnPage": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.5
+      },
+      "host/Sources": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PhotoViewMenu": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "calendar-edit",
+    "elapsedMs": 841,
+    "hostCommits": 12,
+    "hostMaxRenderMs": 0.6,
+    "editorCommits": 2,
+    "editorMaxRenderMs": 1.4,
+    "otherRootCommits": 3,
+    "bookDocuments": 1,
+    "thumbnailDocuments": 1,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 2,
+    "photoLoaderMaxMs": 0.4,
+    "components": {
+      "editor/Host": {
+        "renders": 2,
+        "sameProps": 2,
+        "maxInclusiveMs": 1.4
+      },
+      "editor/MarkedDaysEditor": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.4
+      },
+      "editor/DaysOnPage": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.4
+      },
+      "host/App": {
+        "renders": 6,
+        "sameProps": 6,
+        "maxInclusiveMs": 0.6
+      },
+      "host/Icon": {
+        "renders": 53,
+        "sameProps": 52,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Fields": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 32,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 32,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/BookFrame": {
+        "renders": 22,
+        "sameProps": 9,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 18,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ElementEditorDialog": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 6,
+        "sameProps": 6,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Sources": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PhotoViewMenu": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Inspector": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/LayoutPicker": {
+        "renders": 3,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.1
+      },
+      "render/SpreadView": {
+        "renders": 42,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.3
+      },
+      "render/Page": {
+        "renders": 42,
+        "sameProps": 0,
+        "maxInclusiveMs": 1
+      },
+      "render/Spread": {
+        "renders": 42,
+        "sameProps": 0,
+        "maxInclusiveMs": 1
+      },
+      "render/PhotoBox": {
+        "renders": 42,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/Text": {
+        "renders": 45,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Rule": {
+        "renders": 42,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/Days": {
+        "renders": 39,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.9
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "close-inline-editor",
+    "elapsedMs": 809,
+    "hostCommits": 3,
+    "hostMaxRenderMs": 1.2,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/App": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 1.2
+      },
+      "host/Icon": {
+        "renders": 27,
+        "sameProps": 27,
+        "maxInclusiveMs": 0
+      },
+      "host/ActionMenu": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ControlList": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/Field": {
+        "renders": 15,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 15,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/FileControl": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/BookFrame": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/PanelDivider": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/ElementEditorDialog": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 3,
+        "sameProps": 3,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookCheckIndicator": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "open-calendar-panel",
+    "elapsedMs": 855,
+    "hostCommits": 8,
+    "hostMaxRenderMs": 1.4,
+    "editorCommits": 2,
+    "editorMaxRenderMs": 1.8,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/CanvasHover": {
+        "renders": 5,
+        "sameProps": 1,
+        "maxInclusiveMs": 0
+      },
+      "host/App": {
+        "renders": 4,
+        "sameProps": 4,
+        "maxInclusiveMs": 1.4
+      },
+      "host/Icon": {
+        "renders": 40,
+        "sameProps": 39,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Fields": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "host/ControlList": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 20,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 20,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 12,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/AgentStatus": {
+        "renders": 4,
+        "sameProps": 4,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 4,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/ElementEditorDialog": {
+        "renders": 4,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.2
+      },
+      "editor/Host": {
+        "renders": 2,
+        "sameProps": 1,
+        "maxInclusiveMs": 1.8
+      },
+      "editor/MarkedDaysEditor": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.7
+      },
+      "editor/MarkedDaysGrid": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.7
+      },
+      "editor/Control": {
+        "renders": 2,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.4
+      },
+      "editor/Field": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.3
+      },
+      "editor/ParamControl": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "type-calendar-field",
+    "elapsedMs": 1434,
+    "hostCommits": 2,
+    "hostMaxRenderMs": 0.4,
+    "editorCommits": 7,
+    "editorMaxRenderMs": 0.2,
+    "otherRootCommits": 0,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 0,
+    "photoLoaderMaxMs": 0,
+    "components": {
+      "host/App": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.4
+      },
+      "host/Icon": {
+        "renders": 10,
+        "sameProps": 10,
+        "maxInclusiveMs": 0
+      },
+      "host/ActionMenu": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Fields": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/ControlList": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Field": {
+        "renders": 5,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/ParamControl": {
+        "renders": 5,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/FileControl": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/BookFrame": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/ElementEditorDialog": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 1,
+        "sameProps": 1,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "editor/Field": {
+        "renders": 7,
+        "sameProps": 7,
+        "maxInclusiveMs": 0.1
+      },
+      "editor/ParamControl": {
+        "renders": 7,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      }
+    }
+  },
+  {
+    "sample": "calendar",
+    "scenario": "open-photo-crop",
+    "elapsedMs": 841,
+    "hostCommits": 11,
+    "hostMaxRenderMs": 1.7,
+    "editorCommits": 0,
+    "editorMaxRenderMs": 0,
+    "otherRootCommits": 1,
+    "bookDocuments": 0,
+    "thumbnailDocuments": 0,
+    "longTasks": 0,
+    "maxLongTaskMs": 0,
+    "frameGapsOver50Ms": 0,
+    "panelStorageWrites": 0,
+    "photoLoaderCalls": 1,
+    "photoLoaderMaxMs": 1.1,
+    "components": {
+      "host/App": {
+        "renders": 6,
+        "sameProps": 6,
+        "maxInclusiveMs": 1.7
+      },
+      "host/Icon": {
+        "renders": 64,
+        "sameProps": 61,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ActionMenu": {
+        "renders": 8,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Fields": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ControlList": {
+        "renders": 9,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/Field": {
+        "renders": 30,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/ParamControl": {
+        "renders": 30,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/FileControl": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/BookFrame": {
+        "renders": 17,
+        "sameProps": 4,
+        "maxInclusiveMs": 0.1
+      },
+      "host/PanelDivider": {
+        "renders": 18,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/CanvasHover": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "host/AgentStatus": {
+        "renders": 6,
+        "sameProps": 6,
+        "maxInclusiveMs": 0
+      },
+      "host/BookCheckIndicator": {
+        "renders": 6,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "host/Inspector": {
+        "renders": 3,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.3
+      },
+      "host/LayoutPicker": {
+        "renders": 4,
+        "sameProps": 1,
+        "maxInclusiveMs": 0.2
+      },
+      "host/CropEditor": {
+        "renders": 4,
+        "sameProps": 2,
+        "maxInclusiveMs": 1.1
+      },
+      "host/PhotoContent": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.3
+      },
+      "host/CropPhotoActions": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.1
+      },
+      "render/SpreadView": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.3
+      },
+      "render/Page": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.1
+      },
+      "render/Spread": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 1.1
+      },
+      "render/PhotoBox": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0.2
+      },
+      "render/Text": {
+        "renders": 3,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Rule": {
+        "renders": 2,
+        "sameProps": 0,
+        "maxInclusiveMs": 0
+      },
+      "render/Days": {
+        "renders": 1,
+        "sameProps": 0,
+        "maxInclusiveMs": 1
+      }
+    }
+  }
+]
