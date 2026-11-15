@@ -73,20 +73,21 @@ export async function transferSourceAccess(from: string, to: string, entries: So
 }
 
 // Network origins the user allowed this book's template to reach (ADR 0006), kept with the source grants: app-owned,
-// outside the book, bound to the book's filesystem identity and to the template's hash when they were allowed. Any
-// change to the template's files ends them, as it ends library trust.
+// outside the book and bound to the book's filesystem identity. They belong to the book, not to one version of its
+// template: editing the template keeps them, and only an origin the template newly declares needs a question. The
+// template hash recorded with older grants is informational only.
 const networkKey = (origin: string) => 'network:' + origin;
-export async function approvedNetwork(folder: string, hash: string | undefined) {
-  if (!hash) return [];
+export async function approvedNetwork(folder: string) {
   const { book } = await accessFor(folder);
-  return Object.entries(book.grants).filter(([key, grant]) => key.startsWith('network:') && grant.hash === hash)
-    .map(([key]) => key.slice('network:'.length));
+  return Object.keys(book.grants).filter((key) => key.startsWith('network:')).map((key) => key.slice('network:'.length));
 }
-/** Called only after the user allowed these origins for the template with this hash. */
-export async function approveNetwork(folder: string, origins: string[], hash: string) {
+/** Called only after the user allowed these origins for this book, or the book's template was trusted for them. */
+export async function approveNetwork(folder: string, origins: readonly string[], hash?: string) {
   const { key, book } = await accessFor(folder);
   const task = book.writes.then(async () => {
-    const grants = { ...book.grants, ...Object.fromEntries(origins.map((origin) => [networkKey(origin), { path: origin, hash }])) };
+    const added = origins.filter((origin) => !book.grants[networkKey(origin)]);
+    if (!added.length) return;
+    const grants = { ...book.grants, ...Object.fromEntries(added.map((origin) => [networkKey(origin), { path: origin, ...(hash ? { hash } : {}) }])) };
     await saveGrants(key, grants);
     book.grants = grants;
   });

@@ -95,6 +95,9 @@ export type RenderProject = {
   view?: RenderView;
   // A synthetic authoring fixture book. Its artwork carries a banner and fixture labels so it is never mistaken for the book.
   fixture?: FixtureMarking;
+  // The network origins this frame may reach (ADR 0006), when the app decides them for the book. Declared origins
+  // missing here are reported as waiting for the user's permission rather than as unreachable sites.
+  network?: string[];
 };
 // `'canvas'` is the interactive book in the editor; thumbnails and layout previews are edit-mode renders nobody clicks.
 export type RenderView = 'canvas' | 'thumbnail' | 'layout-preview' | 'export';

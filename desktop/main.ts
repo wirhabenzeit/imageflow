@@ -204,7 +204,7 @@ async function serve(request: Request) {
       'Content-Security-Policy': renderPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });
   }
-  if (resource === 'data') return Response.json(renderData(session.book, id, session.mode));
+  if (resource === 'data') return Response.json(renderData(session.book, id, session.mode, session.network?.()));
   if (resource === 'template-preview') {
     // The Book check of the template's own preview image: the frame names the declared path, the app reads the file.
     const { file: _file, ...report } = await readTemplatePreview(join(session.book.folder, 'template'), new URL(request.url).searchParams.get('path') ?? '');

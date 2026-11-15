@@ -396,11 +396,12 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
   };
 }
 
-export function renderData(book: OpenProject, id: string, mode: RenderProject['mode']): RenderProject {
+export function renderData(book: OpenProject, id: string, mode: RenderProject['mode'], network?: readonly string[]): RenderProject {
   const base = renderOrigin + '/render/' + id;
   return {
     project: book.project,
     mode,
+    ...(network ? { network: [...network] } : {}),
     photos: Object.fromEntries([...book.photos].map(([id, photo]) => {
       const { width, height, caption, title, credit, altText, captured, location, camera } = photo;
       return [id, { width, height, caption, title, credit, altText, ...(captured ? { captured } : {}), ...(location ? { location } : {}),

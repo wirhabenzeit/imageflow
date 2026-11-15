@@ -47,6 +47,7 @@ import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import { Field, ProjectFilesContext } from './Fields';
 import { editorChanges, unknownControl } from './editor-changes';
 import { pictureTimeoutMs } from './render-budget';
+import { networkPendingIssue, networkPendingSuggestion, pendingNetwork } from './network-access';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -1597,10 +1598,16 @@ export async function startRender(root: HTMLElement) {
       suggestion: 'Use select_format with one of the template formats, or declare format ' + book.project.format + ' again in the template.' });
     }
     errors.push(...fileErrors(book, template.parameters, book.project.params, 'Document'));
+    // Declared sites the user has not allowed (yet): a picture that fails to load from them is waiting for permission,
+    // not looking at an unreachable server.
+    const pendingSites = pendingNetwork(declared.data.network, book.network);
+    if (pendingSites.length) warnings.push(networkPendingIssue(pendingSites));
     const pictureIssues = (failures: RenderedImageFailure[]): Issue[] => failures.map((failed) => ({
       ...(failed.spread ? located(failed.spread, failed.message) : message(failed.message)), code: 'rendered-image-failed',
-      ...(failed.element ? { element: failed.element } : {}), details: { label: failed.label, timedOut: failed.timedOut ? 1 : 0 },
-      suggestion: failed.timedOut ? 'Check the internet connection, then check or export again.'
+      ...(failed.element ? { element: failed.element } : {}),
+      details: { label: failed.label, timedOut: failed.timedOut ? 1 : 0, ...(pendingSites.length ? { networkPending: pendingSites.join(' ') } : {}) },
+      suggestion: pendingSites.length ? networkPendingSuggestion(pendingSites)
+        : failed.timedOut ? 'Check the internet connection, then check or export again.'
         : 'Check that the template’s network sites are allowed for this book and reachable, then check or export again.' }));
     errors.push(...pictureIssues(pictureFailures));
     const photoRenderIssues = (failures: PhotoRenderFailure[]): Issue[] => failures.map(({ spread, box, message: text }) => ({

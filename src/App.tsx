@@ -725,9 +725,9 @@ export function App() {
     return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); };
   }, [api]);
 
-  // Network origins the template declares (ADR 0006): decided once per book and template version (its hash) when it
-  // first renders, and again whenever an element editor opens. Newly allowed origins reload the frames so they may
-  // reach them.
+  // Network origins the template declares (ADR 0006): checked once per book and template version (its hash) when it
+  // first renders, and again whenever an element editor opens. The app asks only about origins the book has not
+  // allowed for any version of its template. Newly allowed origins reload the frames so they may reach them.
   const networkAsked = useRef(new Set<string>());
   // Resolves to the project ID to render from now on.
   function decideNetwork(declared: TemplateInfo | undefined, always = false): Promise<string | void> {

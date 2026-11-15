@@ -86,12 +86,12 @@ export class DocumentSession {
   private agentLeases = new Map<string, (allowed: boolean) => void>();
   private renderIds = new Set<string>();
   private previewPictures = new PreviewPictureCache();
-  // The origins this book's frames may reach (ADR 0006), and the template hash they were allowed for. A frame of a
-  // book whose template has another hash gets none, so a changed template never inherits an earlier approval.
+  // The origins this book's frames may reach (ADR 0006), and the template hash they were last decided for. They
+  // belong to the book: a changed template keeps them, and only origins it newly declares need a question.
   private network: { hash?: string; origins: readonly string[] } = { origins: [] };
   private networkPrepared = false;
-  private originsFor(book: OpenProject) {
-    return book.templateHash && book.templateHash === this.network.hash ? this.network.origins : [];
+  private originsFor(_book: OpenProject) {
+    return this.network.origins;
   }
   /** The network origins the user allowed for this book's template; its render frames may reach them (ADR 0006). */
   get networkOrigins() { return this.originsFor(this.book); }
@@ -103,7 +103,7 @@ export class DocumentSession {
   async prepareNetwork() {
     const book = this.book;
     const hash = book.templateHash;
-    const origins = !hash ? [] : [...new Set([...await approvedNetwork(book.folder, hash),
+    const origins = !hash ? [] : [...new Set([...await approvedNetwork(book.folder),
       ...await this.networkTrust?.(hash).catch(() => []) ?? []])];
     this.network = { hash, origins };
     this.networkPrepared = true;
@@ -116,7 +116,12 @@ export class DocumentSession {
    */
   async updateNetwork() {
     if (this.closing) return;
-    const before = this.network.hash === this.book.templateHash ? this.network.origins : [];
+    const before = this.network.origins;
+    // A local edit of the template keeps what its previous version could reach, including sites the library or a
+    // built-in trusted for that exact version: they become this book's own approval, so editing never asks again.
+    if (this.networkPrepared && before.length && this.network.hash !== this.book.templateHash) {
+      await approveNetwork(this.book.folder, before, this.network.hash).catch((error) => console.warn('ImageFlow could not keep network approvals', error));
+    }
     await this.prepareNetwork();
     if (this.closing) return;
     const after = this.originsFor(this.book);
@@ -559,8 +564,9 @@ export class DocumentSession {
   }
 
   /** The origins the template declares that this book's frames may reach, asking once for new ones (ADR 0006):
-   * element editors, and previews, checks and exports that draw <RenderedImage> pictures. Sites allowed for the
-   * template's exact version in the library need no question. Declining keeps the frames offline, so such pictures
+   * element editors, and previews, checks and exports that draw <RenderedImage> pictures. Sites this book already
+   * allowed, for any version of its template, and sites allowed for the template's exact version in the library
+   * need no question; the question lists only the others. Declining keeps the frames offline, so such pictures
    * fail and export stops; the question comes back the next time an editor opens or the book opens. When the
    * allowed origins change, the book is rendered again under a new ID, which the summary carries. */
   async editorNetwork(id: string, declared: unknown) {
@@ -573,7 +579,7 @@ export class DocumentSession {
     while (this.askingNetwork) await this.askingNetwork.catch(() => {});
     const ask = (async () => {
       const trusted = await this.networkTrust?.(hash, origins).catch(() => []) ?? [];
-      const approved = new Set([...await approvedNetwork(book.folder, hash), ...trusted]);
+      const approved = new Set([...await approvedNetwork(book.folder), ...trusted]);
       const pending = origins.filter((origin) => !approved.has(origin));
       if (pending.length && !this.window.isDestroyed()) {
         const { response } = await dialog.showMessageBox(this.window, {
