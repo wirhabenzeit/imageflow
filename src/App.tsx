@@ -160,8 +160,9 @@ export function App() {
   function setCanvasGeometry(next: BookGeometry | undefined, animate = false, start?: number, revision?: string) {
     setCanvasMotion(animate && start ? { offsets: reorderOffsets(geometry, next), start } : undefined);
     setGeometry(next);
-    // Resize messages from the old displayed frame must not adopt the pending revision's labels.
-    if (revision === summary?.id) setCanvasLabels(Object.fromEntries(spreads.map(({ id, definition }, i) =>
+    // Resize messages from the old displayed frame must not adopt the pending revision's labels. Geometry can arrive
+    // before the template, which has no page numbers or layout names yet; the live labels stand in until it does.
+    if (revision === summary?.id && template) setCanvasLabels(Object.fromEntries(spreads.map(({ id, definition }, i) =>
       [id, pagesLabel(i) + ' · ' + label(definition, i)])));
   }
   const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean; start?: number }>({ animate: true });
@@ -659,6 +660,12 @@ export function App() {
     const focused = document.activeElement;
     if (focused instanceof HTMLElement && focused.matches('input, textarea, select, [contenteditable="true"]') && !focused.closest('dialog')) focused.blur();
     await queue.current;
+    // A book reload (for example after a text was saved) writes nothing and settles on its own, so Quit waits for it
+    // rather than refusing. A reload that is still running after the wait refuses as before.
+    const deadline = Date.now() + 15_000;
+    while (reloading.current && !reloadFailed.current && attempt === quitAttempt.current && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     await new Promise((resolve) => setTimeout(resolve, 0)); // React publishes validation and save results.
     return attempt === quitAttempt.current && finishQuit();
   });

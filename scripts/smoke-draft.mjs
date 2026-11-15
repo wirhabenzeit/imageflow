@@ -99,7 +99,7 @@ try {
   await saveState(() => button('Redo').click(), (data) => data.params.theme === 'dark');
   await saveState(() => window.getByRole('checkbox', { name: 'Page numbers', exact: true }).uncheck(), (data) => data.params.showPageNumbers === false);
 
-  await window.getByRole('button', { name: 'Photo and story 6–7' }).click();
+  await window.getByRole('button', { name: 'Pages 6–7 · Photo and story' }).click();
   await window.locator('[data-spread="arriving"][aria-current="page"]').waitFor();
   const photo = join(root, 'sample/starter/photos/shore.jpg');
   const markdown = join(work, 'drop.md');
