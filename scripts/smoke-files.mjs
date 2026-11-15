@@ -24,7 +24,9 @@ try {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths });
   }, paths);
   const frame = w.frameLocator('iframe.book-frame-book[data-current]');
-  const status = () => frame.locator('body').evaluate(() => window.imageflowRenderStatus);
+  // data-current marks the newest frame, which may still be loading after a change; read only a rendered one.
+  const settled = () => w.waitForSelector('iframe.book-frame-book[data-current][data-ready]', { state: 'attached', timeout: 30000 });
+  const status = async () => { await settled(); return frame.locator('body').evaluate(() => window.imageflowRenderStatus); };
   const saved = (text) => w.waitForFunction((text) => document.querySelector('.status')?.textContent === text, text);
   // Runs a change and waits for the book frame that renders its result.
   const rerendered = async (change) => {
@@ -36,7 +38,7 @@ try {
     }, old, { timeout: 30000 });
   };
   const route = '[data-spread="road"] [data-element="route"]';
-  const trackLine = () => frame.locator(route + ' polyline').count();
+  const trackLine = async () => { await settled(); return frame.locator(route + ' polyline').count(); };
   const messages = async (kind) => (await status())[kind].map(({ message }) => message).join('\n');
   const routeDialog = w.getByRole('dialog', { name: 'Edit route' });
   const routeEditor = w.frameLocator('iframe.element-editor-frame');

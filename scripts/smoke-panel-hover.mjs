@@ -33,6 +33,8 @@ try {
   await page.keyboard.press('Home');
   await page.waitForFunction(() => window.panelWrites.length === 3);
   assert.equal(Number(await divider.getAttribute('aria-valuenow')), 232);
+  // data-current marks the newest frame, which may still be loading behind the shown one; hover a rendered one.
+  await page.waitForSelector('.book-frame-book[data-current][data-ready]', { state: 'attached', timeout: 30000 });
   const sheet = page.frameLocator('.book-frame-book[data-current]').locator('.if-spread-container[data-spread]').nth(2);
   await sheet.scrollIntoViewIfNeeded();
   const bounds = await sheet.boundingBox(); const id = await sheet.getAttribute('data-spread');

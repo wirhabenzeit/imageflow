@@ -1,4 +1,4 @@
-import { exportAction, testBook } from './ui-actions.mjs';
+import { exportAction, nextPresentation, testBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -105,16 +105,22 @@ try {
   // Presentation copies its spreads from a hidden render, so callback boxes draw there at once, with the masked photo
   // and its renamed clip path in the shown copy.
   await w.locator('.spread-thumb[data-spread="arriving"]').click();
+  // Presentation opens in its own fullscreen window.
+  const opened = nextPresentation(app);
   await w.getByRole('button', { name: 'Presentation', exact: true }).click();
-  const present = '.presentation .book-frame-present[data-current][data-ready]';
-  await w.locator(present).waitFor({ timeout: 30000 });
-  const shown = w.frameLocator(present).locator('.if-present-crop:visible [data-box="hero"] image.smoke-image');
+  const viewer = await opened;
+  await viewer.waitForURL('imageflow://editor/presentation');
+  const present = '.book-frame-present[data-current][data-ready]';
+  await viewer.locator(present).waitFor({ timeout: 30000 });
+  const shown = viewer.frameLocator(present).locator('.if-present-crop:visible [data-box="hero"] image.smoke-image');
   await shown.waitFor();
   assert.match(await shown.getAttribute('href'), /\/proof-photo\/segla(\/\d+)?$/);
   assert.match(await shown.getAttribute('clip-path'), /^url\(#if-\d+-arriving-hero\.p\d+\)$/);
-  assert.equal(await w.frameLocator(present).locator('.if-present-crop:visible [data-box="hero"][data-pending]').count(), 0);
-  await w.keyboard.press('Escape');
-  await w.locator('.presentation').waitFor({ state: 'detached' });
+  assert.equal(await viewer.frameLocator(present).locator('.if-present-crop:visible [data-box="hero"][data-pending]').count(), 0);
+  // Escape ends the presentation on key-down, so the window is gone before Playwright sends key-up.
+  const ended = viewer.waitForEvent('close');
+  await viewer.keyboard.press('Escape').catch(() => {});
+  await ended;
 
   // Proof export waits for the SVG image and embeds it.
   const output = join(work, 'proof.pdf');
