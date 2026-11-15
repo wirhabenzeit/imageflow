@@ -1693,6 +1693,12 @@ export function App() {
             <span className="eyebrow">Spreads</span>
             <div className="icon-actions">
               <button aria-label="Add" title="Add spread" disabled={!canAdd} onClick={() => add()}><Icon name="add" /></button>
+              <button aria-label="Duplicate" title={selectedSpreads.length > 1 ? `Duplicate ${selectedSpreads.length} spreads` : 'Duplicate spread'} disabled={!canDuplicate}
+                onClick={() => { if (selectedSpreads.length > 1) duplicateSelected(selectedSpreads); else add(true); }}><Icon name="duplicate" /></button>
+              <button aria-label="Move spread up" title="Move up (⌥⌘↑)" disabled={!canMoveUp} onClick={() => moveSelected(selectedSpreads, 'up')}><Icon name="up" /></button>
+              <button aria-label="Move spread down" title="Move down (⌥⌘↓)" disabled={!canMoveDown} onClick={() => moveSelected(selectedSpreads, 'down')}><Icon name="down" /></button>
+              <button aria-label="Delete" title={selectedSpreads.length > 1 ? `Delete ${selectedSpreads.length} spreads` : 'Delete spread'} disabled={!canDelete}
+                onClick={() => deleteSelected(selectedSpreads)}><Icon name="delete" /></button>
             </div>
           </div>
           <div className="thumbs-scroll" onDragOver={reorder.over} onDragLeave={reorder.leave} onDrop={reorder.drop}>
