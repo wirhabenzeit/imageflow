@@ -49,7 +49,7 @@ import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import { Field, ProjectFilesContext } from './Fields';
 import { editorChanges, unknownControl } from './editor-changes';
 import { pictureTimeoutMs } from './render-budget';
-import { networkPendingIssue, networkPendingSuggestion, pendingNetwork } from './network-access';
+import { networkPendingSuggestion, pendingNetwork } from './network-access';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -1637,9 +1637,9 @@ export async function startRender(root: HTMLElement) {
     }
     errors.push(...fileErrors(book, template.parameters, book.project.params, 'Document'));
     // Declared sites the user has not allowed (yet): a picture that fails to load from them is waiting for permission,
-    // not looking at an unreachable server.
+    // not looking at an unreachable server. Only a failing picture reports them; a book that loads nothing from the
+    // sites has nothing to wait for.
     const pendingSites = pendingNetwork(declared.data.network, book.network);
-    if (pendingSites.length) warnings.push(networkPendingIssue(pendingSites));
     const pictureIssues = (failures: RenderedImageFailure[]): Issue[] => failures.map((failed) => ({
       ...(failed.spread ? located(failed.spread, failed.message) : message(failed.message)), code: 'rendered-image-failed',
       ...(failed.element ? { element: failed.element } : {}),

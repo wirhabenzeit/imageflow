@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { approveNetwork, approvedNetwork, configureSourceAccess, sourceBookKey } from '../desktop/source-access';
-import { networkPendingIssue, pendingNetwork } from '../src/network-access';
+import { networkPendingSuggestion, pendingNetwork } from '../src/network-access';
 
 // A book's network approvals (ADR 0006) belong to the book, not to one version of its template, so editing the
 // template never asks again for sites it was already allowed to reach.
@@ -46,8 +46,5 @@ test('declared origins the book may not reach are reported as waiting for permis
   assert.deepEqual(pendingNetwork(['https://a.example.com', 'https://b.example.com'], ['https://a.example.com']), ['https://b.example.com']);
   assert.deepEqual(pendingNetwork(['https://a.example.com'], undefined), [], 'no report when the app did not decide the origins');
   assert.deepEqual(pendingNetwork(undefined, []), []);
-  const issue = networkPendingIssue(['https://b.example.com']);
-  assert.equal(issue.code, 'network-permission-pending');
-  assert.equal(issue.details.origins, 'https://b.example.com');
-  assert.match(issue.suggestion, /Allow/);
+  assert.match(networkPendingSuggestion(['https://b.example.com']), /Allow/);
 });

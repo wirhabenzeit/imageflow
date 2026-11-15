@@ -11,12 +11,3 @@ export function pendingNetwork(declared: readonly string[] | undefined, allowed:
 export const networkPendingSuggestion = (origins: readonly string[]) =>
   'ImageFlow needs the user’s permission before this book may reach ' + origins.join(', ') + '. Ask the user to choose ' +
   'Allow in the ImageFlow window (opening an element editor that uses these sites asks again after Not Now), then check again.';
-
-export function networkPendingIssue(origins: readonly string[]) {
-  return {
-    message: 'Network access is not allowed yet for ' + origins.join(', ') + '. Pictures that load from these sites cannot draw.',
-    code: 'network-permission-pending',
-    details: { origins: origins.join(' ') },
-    suggestion: networkPendingSuggestion(origins),
-  };
-}
