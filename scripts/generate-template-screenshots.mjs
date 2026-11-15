@@ -11,8 +11,9 @@ import sharp from 'sharp';
 import { exportAction, testBook } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
 
-// Documentation artwork is separate from the New Book picker previews. Render current
-// sample books through the real Book check, using disposable copies and an isolated profile.
+// Renders the current sample books through the real Book check, using disposable copies and an isolated profile, into
+// the documentation artwork and each starter's New Book preview (`template/preview.jpg`, its printed cover page).
+// Rerun it whenever the sample photos or covers change, so the picker doesn't show outdated pictures.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { values } = parseArgs({ options: { output: { type: 'string', default: 'docs/images' } } });
 const output = resolve(root, values.output);
@@ -26,6 +27,13 @@ await mkdir(join(root, '.build'), { recursive: true });
 const work = await mkdtemp(join(root, '.build/template-screenshots-'));
 let app;
 const generated = [];
+// Starter previews, written to sample/<folder>/template/preview.jpg with the documentation images.
+const previews = [];
+async function preview(pictures, folder) {
+  const name = 'preview-' + folder + '.jpg';
+  await sharp(pictures[0].bytes).resize(1200, 1200, { fit: 'inside' }).jpeg({ quality: 85, mozjpeg: true }).toFile(join(work, name));
+  previews.push({ name, target: join(root, 'sample', folder, 'template', 'preview.jpg') });
+}
 
 async function renderSample(folder, name, params = {}) {
   const copy = join(work, name + '.imageflow');
@@ -111,9 +119,11 @@ try {
     const pictures = await renderSample('starter', 'photobook-' + theme, { theme });
     // Facing spreads are twice the width of one square photobook page.
     await sheet(pictures, `photobook-starter-${theme}.jpg`, 2);
+    if (theme === 'light') await preview(pictures, 'starter');
   }
   const calendar = await renderSample('calendar', 'calendar');
   await sheet(calendar, 'calendar-starter.jpg', calendar[0].width / calendar[0].height);
+  await preview(calendar, 'calendar');
   await writeFile(join(work, 'calendar-month.png'), calendar[1].bytes);
   generated.push('calendar-month.png');
   // Don't replace any documented images until every sample has rendered successfully.
@@ -121,6 +131,8 @@ try {
   for (const name of generated) await cp(join(work, name), join(output, name + '.tmp'));
   for (const name of generated) await rename(join(output, name + '.tmp'), join(output, name));
   console.log(`Wrote ${generated.length} documentation images to ${output}`);
+  for (const { name, target } of previews) await cp(join(work, name), target);
+  console.log(`Wrote ${previews.length} starter previews: ${previews.map(({ target }) => target.slice(root.length)).join(', ')}`);
 } finally {
   try { await app?.close(); }
   finally { await rm(work, { recursive: true, force: true }); }

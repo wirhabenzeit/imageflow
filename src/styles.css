@@ -799,6 +799,8 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .starter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 20px; padding: 6px; }
 .studio .starter-choice { display: flex; flex-direction: column; justify-content: start; align-items: center; gap: 8px; padding: 8px; border: 0; background: transparent; box-shadow: none; min-width: 0; }
 .starter-choice[aria-selected="true"] .template-preview > :is(img, .starter-page) { outline: 3px solid var(--accent); outline-offset: 5px; }
+/* Focus moves with the selection, so the selection outline is the focus indicator; a second ring would double it. */
+.studio .starter-choice:focus-visible { outline: none; }
 .starter-choice strong, .starter-choice small { display: block; max-width: 100%; text-align: center; }
 .starter-choice strong { font-size: 13px; }
 .starter-choice small { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
