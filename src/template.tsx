@@ -61,6 +61,10 @@ export type EditMarker = { 'data-edit'?: string };
 // Attributes returned by `issue()`. Platform components forward them to their own node, so a finding can sit on a box,
 // an element or the spread itself.
 export type IssueMarker = { 'data-issue'?: string; 'data-issue-info'?: string };
+// A node marked decorative is ornament, such as display type cut by the page edge: the text checks (safe area, minimum
+// size, overflow and overlap) skip the text inside it.
+export type DecorativeMarker = { decorative?: boolean };
+const decorativeOn = (decorative?: boolean) => ({ 'data-decorative': decorative ? '' : undefined });
 const issueOn = (marker: IssueMarker) => ({ 'data-issue': marker['data-issue'], 'data-issue-info': marker['data-issue-info'] });
 
 // Anchors are declared from a spread's saved values, never from rendered output, so every spread can read every
@@ -650,7 +654,7 @@ function PhotoRenderCall({ render, photo, state, spread }: { render: PhotoBoxRen
   }
 }
 
-export function PhotoBox({ id, className, style, rect, children, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker &
+export function PhotoBox({ id, className, style, rect, children, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker & DecorativeMarker &
   { id: string; children?: PhotoBoxRender }) {
   const { spread, book, format, renderPhotos, definition, lazyPhotos, values } = useSpread();
   if (children !== undefined && typeof children !== 'function') {
@@ -729,7 +733,7 @@ export function PhotoBox({ id, className, style, rect, children, 'data-edit': ma
     <div ref={frame} data-box={id} data-box-type="photo" data-empty={photo ? undefined : ''}
       data-photo-render={render ? 'custom' : undefined} data-pending={render && photo && renderPhotos && !(size && near) ? '' : undefined}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
-      className={['if-photo', className].filter(Boolean).join(' ')} style={place(rect, style)} {...issueOn(marker)}>
+      className={['if-photo', className].filter(Boolean).join(' ')} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
       {photo && renderPhotos && !render &&
         <img ref={image} src={book.mode === 'edit' && !lazyPhotos ? photo.src : undefined}
           data-src={lazyPhotos ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
@@ -740,8 +744,8 @@ export function PhotoBox({ id, className, style, rect, children, 'data-edit': ma
 }
 
 // `columns` splits the box into that many columns; text flows down each column before moving to the next box.
-export function MarkdownBox({ id, className, style, rect, columns = 1, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker &
-  IssueMarker & { id: string; columns?: number | `${number}` }) {
+export function MarkdownBox({ id, className, style, rect, columns = 1, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker &
+  IssueMarker & DecorativeMarker & { id: string; columns?: number | `${number}` }) {
   const { spread, book, definition } = useSpread();
   const text = spread.boxes[id]?.text;
   const count = Math.max(1, Math.min(6, Math.round(Number(columns)) || 1));
@@ -749,7 +753,7 @@ export function MarkdownBox({ id, className, style, rect, columns = 1, 'data-edi
     <div data-box={id} data-box-type="markdown" data-columns={count > 1 ? count : undefined}
       data-edit={editTarget(book, 'boxes.' + id + '.', definition.boxes[id]?.parameters, marked)}
       data-empty={text !== undefined && book.texts[text] !== undefined ? undefined : ''}
-      className={['if-markdown', className].filter(Boolean).join(' ')} style={place(rect, style)} {...issueOn(marker)}>
+      className={['if-markdown', className].filter(Boolean).join(' ')} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
       {renderView(book) === 'canvas' && (!text || book.texts[text] === undefined) &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
     </div>
@@ -757,11 +761,11 @@ export function MarkdownBox({ id, className, style, rect, columns = 1, 'data-edi
 }
 
 // In the editor an element is also an edit target for its own parameters and any it is marked with.
-export function Element({ id, className, style, rect, children, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker &
+export function Element({ id, className, style, rect, children, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker & DecorativeMarker &
   { id: string; children?: ReactNode }) {
   const { book, definition } = useSpread();
   return <div data-element={id} data-edit={editTarget(book, 'elements.' + id + '.', definition.elements[id]?.parameters, marked)}
-    className={className} style={place(rect, style)} {...issueOn(marker)}>{children}</div>;
+    className={className} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>{children}</div>;
 }
 
 export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | 'div' | 'blockquote' | 'figcaption';
@@ -782,7 +786,7 @@ function parameterAt({ definition, documentParameters, values }: Pick<NonNullabl
 }
 
 // Shows a string parameter and marks the node for editing. Empty, it shows an editor-only placeholder.
-export function Text({ parameter, as = 'p', presentation, placeholder, fallback, fallbackLabel = 'inherited text', hidden = false, className, style, rect, ...marker }: Styling & Placement & IssueMarker &
+export function Text({ parameter, as = 'p', presentation, placeholder, fallback, fallbackLabel = 'inherited text', hidden = false, decorative, className, style, rect, ...marker }: Styling & Placement & IssueMarker & DecorativeMarker &
   { parameter: string; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean }) {
   const data = useSpread();
   const { param, value } = parameterAt(data, parameter);
@@ -803,7 +807,7 @@ export function Text({ parameter, as = 'p', presentation, placeholder, fallback,
   return <Tag data-edit={parameter} data-empty={empty ? '' : undefined} data-inline-text={inline ? '' : undefined}
     data-multiline={inline && param.type === 'string' && param.multiline ? '' : undefined}
     data-text-fallback={fallback?.trim() ? fallback : undefined} data-text-fallback-label={fallback?.trim() ? fallbackLabel : undefined}
-    className={className} style={place(rect, style)} {...issueOn(marker)}>
+    className={className} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
     {empty ? <span className="if-text-placeholder">{hint}</span> : inherited && renderView(data.book) === 'canvas'
       ? <span className="if-text-inherited" title={'Using ' + fallbackLabel}>{text}</span>
       : !inherited && param.type === 'string' && param.markdown === 'inline' ? <FormattedText value={text} /> : text}

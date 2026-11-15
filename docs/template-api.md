@@ -880,6 +880,7 @@ Rules:
 
 - Each declared box is rendered exactly once through its component; each declared element at most once.
 - Boxes and elements are positioned and sized by template CSS on the component's element (`className`, `style`), or by `rect` (see Geometry helpers).
+- `decorative` marks a component's text as ornament, so the Book check does not report it for the safe area, size or overlap (see [CSS contract](#fonts-and-output)).
 - An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted, as it is in thumbnails and layout previews; templates can style `[data-empty]`.
 
 ### PhotoBox render callbacks
@@ -975,6 +976,7 @@ Not allowed in Markdown boxes: CSS counters for list numbering, `float`, `positi
 - Fonts are declared with `@font-face` in template CSS, from files in `template/fonts/`. Static files only; system fonts are not allowed. Export fails if the PDF contains Type 3 fonts or fonts not shipped with the template. These are platform rules, independent of the format. Omit `output.fonts`: the old `{ allowType3: false, allowSystemFonts: false }` field is deprecated, accepted only for compatibility, and does not change validation. Values of `true` remain invalid.
 - Effects that create transparency (opacity, `rgba()` fills, shadows, blend modes, filters, gradients, rounded clipping) are allowed; whether they pass depends on the format's transparency policy, checked at export.
 - Text below the format's minimum size and text outside the safe area are reported in edit mode.
+- **Decorative type.** Display type that deliberately runs off the page, or sits behind other type, would raise these findings on every spread that uses it. Mark it `decorative` (a boolean prop of `ctx.Text`, `PhotoBox`, `MarkdownBox` and `Element`, or `data-decorative` on any node) and the Book check skips the text inside it for safe-area, minimum-size, overflow and overlap findings. Print export is unchanged: the page edge still cuts the text, so only mark type whose cutting is intended. A Markdown box's text-flow overflow, which loses text, is still reported. Text inside SVG is already skipped by these checks.
 
 ## Validation
 
