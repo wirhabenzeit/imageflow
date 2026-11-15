@@ -12,6 +12,9 @@ import { bookName } from '../src/book-name';
 import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, removeSources } from './source-actions';
 import { originalPath } from './source-store';
 import { sourceEntries } from '../src/source-locations';
+import type { SourceEntry } from '../src/source-locations';
+import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
+import { importFeedback } from '../src/import-feedback';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
 import { configureSourceAccess } from './source-access';
 import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
@@ -266,6 +269,19 @@ function report(owner: BrowserWindow | null | undefined, error: unknown) {
 }
 function sampleFolder(name: string) {
   return sampleRoot ? join(sampleRoot, name) : app.isPackaged ? join(process.resourcesPath, 'sample', name) : join(app.getAppPath(), 'sample', name);
+}
+/** Removing a file that parameters still use clears those assignments, so the person confirms it first and sees where
+ * it is used. Anything else is removed at once; every removal is one undoable edit. */
+async function confirmRemoval(owner: BrowserWindow, document: DocumentSession, chosen: SourceEntry[]) {
+  const usage = assetUsage(document.book, assetPageLabels(document.summary));
+  const used = chosen.filter(({ kind, id }) => kind === 'file' && usage.file[id]?.length);
+  if (!used.length) return true;
+  const where = [...new Set(used.flatMap(({ id }) => usage.file[id].map(({ pages }) => usageLabel(pages))))];
+  const names = used.map((entry) => basename(entry.path).replace(/^fl-[a-f0-9-]{12}-/, ''));
+  const answer = await dialog.showMessageBox(owner, { type: 'warning', buttons: ['Remove', 'Cancel'], defaultId: 0, cancelId: 1,
+    message: chosen.length === 1 ? 'Remove “' + names[0] + '” from the book?' : 'Remove ' + chosen.length + ' assets from the book?',
+    detail: (used.length === 1 ? 'This file is used in: ' : names.join(', ') + ' are used in: ') + where.join(', ') + '.\nRemoving it clears those assignments. Undo brings it back.' });
+  return answer.response === 0;
 }
 async function openDocumentLocation(document: DocumentSession, action: 'reveal' | 'template' | 'text', id?: string) {
   if (action === 'reveal') { shell.showItemInFolder(document.book.folder); return; }
@@ -1486,8 +1502,16 @@ void app.whenReady().then(async () => {
     let message: string | undefined;
     if (request.action === 'retry') return { summary: activate(await document.reload()) };
     if (request.action === 'collect') next = await collectSources(document.book, keys);
+    else if (request.action === 'import') {
+      // Photos, Markdown and files the template's file parameters accept; the Assets window supplies its own accept list.
+      if (request.paths !== undefined && (!Array.isArray(request.paths) || request.paths.length > 1000 || !request.paths.every((path) => typeof path === 'string'))) throw new Error('Invalid import.');
+      const result = await document.importFiles(owner, document.active.id, { paths: request.paths, accept: request.accept });
+      if (!result) return { summary: document.summary };
+      return { summary: activate(result.summary), message: importFeedback(result.imported.length, result.counts) };
+    }
     else if (request.action === 'remove') {
       if (!keys?.length) throw new Error('Select assets first.');
+      if (!await confirmRemoval(owner, document, chosen)) return { summary: document.summary };
       next = await removeSources(document.book, keys);
       document.projectSession.record(next, 'Remove assets', true, false);
       return { summary: activate(document.activate(next)) };

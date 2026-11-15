@@ -10,7 +10,7 @@ import { configureRenditionCache } from '../desktop/rendition-cache';
 import { photoFile } from '../desktop/photos';
 import { isUnavailableSource } from '../src/source-diagnostics';
 import { importIntoProject, loadProject, projectSummary, renderData, updateProject } from '../desktop/project';
-import { collectSources, relocateSource, relinkFolder, saveDocumentCopy } from '../desktop/source-actions';
+import { collectSources, relocateSource, relinkFolder, removeSources, saveDocumentCopy } from '../desktop/source-actions';
 import { captureProjectInputs } from '../desktop/revisions';
 import { ProjectSession } from '../desktop/project-session';
 import { sourceEntries } from '../src/source-locations';
@@ -365,4 +365,42 @@ test('failed imports do not leave newly created source directories behind', asyn
   await rm(join(f.folder, 'texts'), { recursive: true, force: true });
   await assert.rejects(importIntoProject(f.book, { kind: 'markdown', target: { spread: 'gone', box: 'story' } }, [f.text]), /no longer exists/);
   await assert.rejects(stat(join(f.folder, 'texts')), { code: 'ENOENT' });
+});
+
+test('files of types the template accepts import as files without a kind; other files are still skipped', async (t) => {
+  const f = await fixture(t);
+  const other = join(f.external, 'notes.csv');
+  await writeFile(other, 'a,b');
+  const result = await importIntoProject(f.book, { accept: ['.gpx'] }, [f.file, other, f.text]);
+  assert.deepEqual(result.counts, { photos: 0, texts: 1, files: 1, skipped: 1, failed: 0 });
+  assert.match(result.book.project.files[result.imported[0]] as string, /^files\/fl-[a-f0-9-]{12}-route\.gpx$/);
+  const plain = await importIntoProject(f.book, {}, [f.file]);
+  assert.deepEqual(plain.counts, { photos: 0, texts: 0, files: 0, skipped: 1, failed: 0 });
+});
+
+test('removing an assigned file clears its assignments in one undoable edit that keeps the copied bytes', async (t) => {
+  const f = await fixture(t);
+  const added = await importIntoProject(f.book, { kind: 'file', accept: ['.gpx'] }, [f.file]);
+  const [id] = added.imported;
+  const session = new ProjectSession(added.book);
+  t.after(() => session.close());
+  const assigned = structuredClone({ project: added.book.project, photoIndex: added.book.photoIndex });
+  assigned.project.params.track = id;
+  const spread = assigned.project.spreads[0];
+  spread.elements.route = { params: { track: id, tracks: [{ id: 'a', track: id, name: 'Ride' }, { id: 'b', track: 'other' }] } };
+  const book = await session.save(assigned, 'Assign');
+  const path = join(f.folder, book.project.files[id] as string);
+  const removed = await removeSources(book, ['file:' + id]);
+  session.record(removed, 'Remove assets', true, false);
+  assert.equal(removed.project.files[id], undefined);
+  assert.equal(removed.project.params.track, undefined);
+  assert.deepEqual(removed.project.spreads[0].elements.route.params, { tracks: [{ id: 'a', name: 'Ride' }, { id: 'b', track: 'other' }] });
+  assert.equal(await readFile(path, 'utf8'), '<gpx><trk/></gpx>', 'The copied file stays for Undo');
+  const undone = await session.undo('undo');
+  assert.equal(undone.project.files[id], book.project.files[id]);
+  assert.equal(undone.project.params.track, id);
+  assert.deepEqual(undone.project.spreads[0].elements.route.params, assigned.project.spreads[0].elements.route.params);
+  const redone = await session.undo('redo');
+  assert.equal(redone.project.files[id], undefined);
+  assert.equal(redone.project.params.track, undefined);
 });

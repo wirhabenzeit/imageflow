@@ -81,14 +81,15 @@ export type McpSettings = { enabled: boolean; clients: { name: string }[]; launc
 // Codex, which share ~/.codex/config.toml. `skill` saves the ImageFlow templates agent skill as an archive.
 export type McpClientTarget = 'claude' | 'codex' | 'skill';
 export type ProjectChange = Result<ProjectSummary> | { building: true };
-// `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions.
+// `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions. Without a
+// kind, `accept` lists the extensions of the template's file parameters: files of those types import as files.
 export type ImportRequest = {
   kind?: 'photo' | 'markdown' | 'file'; mode?: ImportMode; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string };
 };
 
 export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string };
 
-export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump'; spread?: string; key?: string; keys?: string[]; accept?: string[] };
+export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[] };
 
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };
