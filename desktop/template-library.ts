@@ -142,7 +142,7 @@ export class TemplateLibrary {
         const packages = await templatePackages(source.template);
         const { image } = await this.previewImage(source.template, info);
         this.builtIns.set(id, { folder: source.template, info, image, sample: source.sample, defaultName: source.defaultName,
-          entry: entryFrom(info, { id }, { source: 'built-in', hash, ...(packages.length ? { packages } : {}), ...(source.sample ? { sample: true } : {}),
+          entry: entryFrom(info, { id }, { source: 'built-in', hash, ...(packages.length ? { packages } : {}),
             ...(problem ? { unavailable: problem } : {}) }) });
       }
       // Renders of earlier versions of the built-in templates are no longer shown.

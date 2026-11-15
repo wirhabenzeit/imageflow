@@ -17,8 +17,6 @@ export type LibraryEntry = {
   // may reach. `networkTrust` says why books made from this exact version need not ask: it ships with the app, or
   // the user allowed it for this hash. Without it, each book asks once.
   packages?: TemplatePackage[]; network?: string[]; networkTrust?: 'built-in' | 'allowed';
-  // A built-in template with a sample book: photos, texts and spreads a new book can start with.
-  sample?: boolean;
   // Why this app cannot create a book from the template, such as a feature it requires that the app lacks.
   unavailable?: string;
   // Pictures the views can show at once, from templatePictureURL: the template's own preview `image`, and a saved
@@ -31,8 +29,9 @@ export type LibraryEntry = {
 export const templatePictureURL = (hash: string, kind: 'image' | 'render') => editorURL + 'template-picture/' + hash + '/' + kind;
 export const templatePicturePath = /^\/template-picture\/([0-9a-f]{64})\/(image|render)$/;
 
-// What New Book creates: a template from the library, with the sample book when the template has one.
-export type NewBookChoice = { id: string; sample: boolean };
+// What New Book creates: a book from a library template, starting with the template's starting spreads or empty.
+export type NewBookStart = 'opening' | 'empty';
+export type NewBookChoice = { id: string; start: NewBookStart };
 
 export function templateFormatSummary(entry: Pick<LibraryEntry, 'shape' | 'formats'>) {
   return [entry.shape, entry.formats.length > 1 ? entry.formats.length + ' formats' : !entry.shape ? entry.formats[0] : ''].filter(Boolean).join(' · ');

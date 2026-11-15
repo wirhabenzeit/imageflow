@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import { clickClosingWindow, clickPage } from './ui-actions.mjs';
 
 // The template library: import from its own window, live updates in an open New Book picker, removal, a failed import,
-// creating books from a library template and from the built-in starter without its sample, and Save Template to Library.
+// creating books from a library template and from the built-in starter's example or opening spreads, and Save Template to Library.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'template-library-'));
 const library = join(work, 'Templates');
@@ -144,8 +144,9 @@ try {
   await settings.getByRole('button', { name: 'Import…' }).click();
   await travelEntry.click();
   await picker.getByRole('option', { name: /Travel journal/ }).click();
-  assert.equal(await picker.getByRole('checkbox').count(), 0, 'only a template with a sample book offers it');
-  assert.equal(await picker.locator('.starter-start').count(), 0);
+  // A copy of the starter's template, so it starts with the same layout tour by default.
+  const tour = JSON.parse(await readFile(join(root, 'sample/starter/project.json'), 'utf8')).spreads.map(({ definition }) => definition);
+  assert.equal(await picker.getByRole('group', { name: 'Start with' }).getByRole('radio', { name: tour.length + ' starting spreads' }).isChecked(), true);
   const book = join(work, 'Journey.imageflow');
   await saveAs(book);
   await clickClosingWindow(picker, picker.getByRole('button', { name: 'Create' }));
@@ -157,14 +158,14 @@ try {
   assert.match(project.template.hash, /^[a-f0-9]{64}$/);
   // Agents started in or above a new book find the template API reference as a project skill.
   assert.match(await readFile(join(book, '.claude/skills/imageflow-templates/SKILL.md'), 'utf8'), /^---\nname: imageflow-templates\n/);
-  assert.deepEqual(project.spreads.map(({ definition }) => definition), ['title', 'story', 'closing']);
+  assert.deepEqual(project.spreads.map(({ definition }) => definition), tour);
   assert.deepEqual(JSON.parse(await readFile(join(book, 'photos.json'), 'utf8')), {});
   for (const folder of ['photos', 'texts', 'files']) assert.ok((await stat(join(book, folder))).isDirectory());
   await assert.rejects(stat(join(book, 'template', 'library.json')));
   assert.equal(await readFile(join(book, 'template', 'index.tsx'), 'utf8'), retitled('1.0.0'));
   const editor = await windowAt('imageflow://editor/');
   await editor.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
-  assert.equal(await editor.locator('.spread-thumb').count(), 3);
+  assert.equal(await editor.locator('.spread-thumb').count(), tour.length);
   // The book's template is the version allowed at import, so its editors go online without asking.
   await answer(1);
   assert.deepEqual(await editorNetwork(editor), ['https://tiles.openfreemap.org']);
@@ -240,22 +241,41 @@ try {
   await travelEntry.waitFor({ state: 'detached' });
   await editor.evaluate(() => window.imageflow.openProject('reload'));
   await editor.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
-  assert.equal(await editor.locator('.spread-thumb').count(), 4);
+  assert.equal(await editor.locator('.spread-thumb').count(), tour.length + 1, 'the starting spreads and the map spread');
 
-  // The built-in starter without its sample book: the template's opening spreads and no photos.
-  const second = editor.evaluate(() => window.imageflow.openProject('new'));
-  void second.catch(() => {});
-  const modal = await windowAt('imageflow://editor/new', new Set([picker]));
-  await modal.getByRole('option', { name: /Photobook/ }).click();
-  await modal.getByRole('checkbox', { name: 'Include sample content' }).uncheck();
-  const plain = join(work, 'Plain.imageflow');
-  await saveAs(plain);
-  await clickClosingWindow(modal, modal.getByRole('button', { name: 'Create' }));
-  assert.deepEqual(await second, { value: null });
-  const starter = JSON.parse(await readFile(join(plain, 'project.json'), 'utf8'));
-  assert.equal(starter.template.id, 'imageflow-starter');
-  assert.deepEqual(starter.spreads.map(({ definition }) => definition), ['title', 'story', 'closing']);
-  assert.deepEqual(JSON.parse(await readFile(join(plain, 'photos.json'), 'utf8')), {});
+  // New Book starts the built-in starter with its starting spreads (the default) or empty. Neither copies the sample's
+  // photos, texts or files into the book.
+  const noContent = async (folder) => {
+    const project = JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
+    assert.equal(project.template.id, 'imageflow-starter');
+    assert.equal(project.title + '.imageflow', basename(folder), 'named after its file');
+    assert.deepEqual([project.texts, project.files], [{}, {}]);
+    assert.deepEqual(JSON.parse(await readFile(join(folder, 'photos.json'), 'utf8')), {});
+    for (const name of ['photos', 'texts', 'files']) assert.deepEqual(await readdir(join(folder, name)), [], name + ' stays empty');
+    for (const spread of project.spreads) assert.deepEqual(Object.values(spread.boxes).filter((box) => box.photo || box.text), []);
+    return project;
+  };
+  const newStarter = async (name, option) => {
+    const pending = editor.evaluate(() => window.imageflow.openProject('new'));
+    void pending.catch(() => {});
+    const modal = await windowAt('imageflow://editor/new', new Set([picker]));
+    await modal.getByRole('option', { name: /Photobook/ }).click();
+    const start = modal.getByRole('group', { name: 'Start with' });
+    assert.deepEqual(await start.getByRole('radio').evaluateAll((items) => items.map((item) => item.closest('label').textContent.trim())),
+      [tour.length + ' starting spreads', 'Empty book'], 'two choices');
+    assert.equal(await start.getByRole('radio', { name: tour.length + ' starting spreads' }).isChecked(), true);
+    if (option) await start.getByRole('radio', { name: option }).check();
+    const folder = join(work, name);
+    await saveAs(folder);
+    await clickClosingWindow(modal, modal.getByRole('button', { name: 'Create' }));
+    assert.deepEqual(await pending, { value: null });
+    return folder;
+  };
+  const started = await noContent(await newStarter('Started.imageflow'));
+  assert.deepEqual(started.spreads.map(({ definition }) => definition), tour, 'the layout tour, in the sample order');
+  assert.ok(!/Senja|Along the coast/.test(JSON.stringify(started)), 'no sample text');
+  const empty = await noContent(await newStarter('Empty.imageflow', 'Empty book'));
+  assert.deepEqual(empty.spreads, []);
 
   // Opening a template file from Finder imports it.
   await answer(0);
