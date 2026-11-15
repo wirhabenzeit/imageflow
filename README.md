@@ -17,9 +17,9 @@ ImageFlow includes Photobook, Wall calendar and Typography templates. Each `.ima
 
 ## Install
 
-Download the Apple silicon `.dmg` from [GitHub Releases](https://github.com/wirhabenzeit/imageflow/releases), open it and drag **ImageFlow** to **Applications**. Until the first release is published, build from source using the commands below.
+ImageFlow is in public beta. Download the Apple silicon `.dmg` from [GitHub Releases](https://github.com/wirhabenzeit/imageflow/releases) (beta builds are marked *Pre-release*), open it and drag **ImageFlow** to **Applications**. Beta builds update themselves through the Beta channel.
 
-See [Getting started](https://wirhabenzeit.github.io/imageflow/guide/getting-started) for your first book and [updates](https://wirhabenzeit.github.io/imageflow/guide/getting-started#updates) for automatic updates and Stable/Beta channels. Open only books and templates you trust: templates run code. Replace the sample photos before ordering a print; they are upscaled placeholders.
+See [Getting started](https://wirhabenzeit.github.io/imageflow/guide/getting-started) for your first book and [updates](https://wirhabenzeit.github.io/imageflow/guide/getting-started#updates) for automatic updates and Stable/Beta channels. Open only books and templates you trust: templates run code.
 
 ## Develop
 
