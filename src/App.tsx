@@ -52,7 +52,7 @@ import type { ProjectFiles, SpreadState } from './project';
 import { useListSelection } from './list-selection';
 import { insertionProblem, spreadOrder, spreadSelectionOrder } from './spread-order';
 import { spreadMime, useSpreadReorder } from './useSpreadReorder';
-import { animateReorder, reorderOffsets } from './reorder-motion';
+import { animateReorder, reorderOffsets, reorderTiming } from './reorder-motion';
 import { useToolbarDrag } from './useToolbarDrag';
 
 type Owner = { type: 'photo' | 'markdown' | 'element'; id: string };
@@ -81,12 +81,12 @@ function formatOf(template?: TemplateInfo) {
   }
 }
 
-function Guides({ sheet, format }: { sheet: Rect; format: ResolvedFormat }) {
+function Guides({ sheet, format }: { sheet: Rect & { spread: string }; format: ResolvedFormat }) {
   const { trim, bleed, safe, spreadWidth, height } = format;
   const x = sheet.width / spreadWidth;
   const y = sheet.height / height;
   const pages = sheetPages(format);
-  return <div className="guides" aria-hidden="true" style={{ left: sheet.x, top: sheet.y, width: sheet.width, height: sheet.height }}>
+  return <div data-canvas-spread={sheet.spread} className="guides" aria-hidden="true" style={{ left: sheet.x, top: sheet.y, width: sheet.width, height: sheet.height }}>
     <div className="trim-guide" style={{ left: pages[0].trimX * x, top: bleed.top * y, width: trim.width * pages.length * x, height: trim.height * y }} />
     {pages.length > 1 && <div className="gutter-guide" style={{ left: sheet.width / 2, top: 0, height: sheet.height }} />}
     {pages.map(({ side, trimX, safeLeft, safeRight }) => <div className="safe-guide" key={side} style={{
@@ -139,10 +139,31 @@ export function App() {
   // like "Flow 1 of 2" do not vanish for a moment and shift the panel.
   const [lastReady, setLastReady] = useState<RenderStatus>();
   const [geometry, setGeometry] = useState<BookGeometry>();
-  const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean }>({ animate: true });
+  const [preparedViews, setPreparedViews] = useState<{ project: string; book?: boolean; thumbs?: boolean; start?: number }>();
+  function preparedView(project: string, view: 'book' | 'thumbs') {
+    const start = performance.timeOrigin + performance.now();
+    setPreparedViews(previous => {
+      if (previous?.project === project && previous[view]) return previous;
+      const next = { ...(previous?.project === project ? previous : { project }), [view]: true };
+      if (next.book && next.thumbs) next.start = start;
+      return next;
+    });
+  }
+  const frameRelease = useMemo(() => preparedViews?.start === undefined ? undefined :
+    { project: preparedViews.project, start: preparedViews.start }, [preparedViews]);
+  const [canvasLabels, setCanvasLabels] = useState<Record<string, string>>({});
+  const [canvasMotion, setCanvasMotion] = useState<{ offsets: ReturnType<typeof reorderOffsets>; start: number }>();
+  function setCanvasGeometry(next: BookGeometry | undefined, animate = false, start?: number, revision?: string) {
+    setCanvasMotion(animate && start ? { offsets: reorderOffsets(geometry, next), start } : undefined);
+    setGeometry(next);
+    // Resize messages from the old displayed frame must not adopt the pending revision's labels.
+    if (revision === summary?.id) setCanvasLabels(Object.fromEntries(spreads.map(({ id, definition }, i) =>
+      [id, pagesLabel(i) + ' · ' + label(definition, i)])));
+  }
+  const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean; start?: number }>({ animate: true });
   const thumbs = thumbnailState.geometry;
-  function setThumbs(geometry: BookGeometry | undefined, animate = true) {
-    setThumbnailState({ geometry, animate });
+  function setThumbs(geometry: BookGeometry | undefined, animate = true, start?: number) {
+    setThumbnailState({ geometry, animate, start });
   }
   const [hovered, setHovered] = useState<string>();
   const [hoveredTarget, setHoveredTarget] = useState<string>();
@@ -236,10 +257,14 @@ export function App() {
     if (!thumbnailState.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     for (const offset of offsets) {
       const node = thumbList.current?.querySelector<HTMLElement>('.spread-thumb[data-spread="' + CSS.escape(offset.spread) + '"]');
-      if (node) thumbAnimations.current.push(animateReorder(node, offset));
+      if (node) {
+        const animation = animateReorder(node, offset);
+        if (thumbnailState.start !== undefined) animation.startTime = thumbnailState.start - performance.timeOrigin;
+        thumbAnimations.current.push(animation);
+      }
     }
     return () => { thumbAnimations.current.forEach(animation => animation.cancel()); };
-  }, [thumbs, thumbnailState.animate]);
+  }, [thumbs, thumbnailState.animate, thumbnailState.start]);
   useEffect(() => {
     const cancel = () => {
       thumbAnimations.current.forEach(animation => animation.cancel());
@@ -1531,6 +1556,19 @@ export function App() {
   const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
   const pagesLabel = (i: number) => (pageLabels[i].includes('–') ? 'Pages ' : 'Page ') + pageLabels[i];
 
+  useLayoutEffect(() => {
+    if (!canvasMotion || performance.timeOrigin + performance.now() >= canvasMotion.start + reorderTiming.duration || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const animations: Animation[] = [];
+    for (const offset of canvasMotion.offsets) {
+      for (const node of stage.current?.querySelectorAll<HTMLElement>('[data-canvas-spread="' + CSS.escape(offset.spread) + '"]') ?? []) {
+        const animation = animateReorder(node, offset);
+        animation.startTime = canvasMotion.start - performance.timeOrigin;
+        animations.push(animation);
+      }
+    }
+    return () => animations.forEach(animation => animation.cancel());
+  }, [canvasMotion, hovered, hoveredTarget, spreadId, spreadSelected, showGuides, activeBox, editKey]);
+
   const nativeDocumentTitle = navigator.platform.includes('Mac');
   return <ProjectFilesContext.Provider value={projectFiles}><div className={nativeDocumentTitle ? 'studio mac-studio' : 'studio'}>
     <div className="editor-shell">
@@ -1601,10 +1639,12 @@ export function App() {
               role="group" aria-label="Spreads" onKeyDown={thumbKeys}>
               {spreads.map(({ id, definition }, i) => {
                 const rect = thumbs?.sheets.find(({ spread }) => spread === id);
+                const displayedLabel = canvasLabels[id] ?? pagesLabel(i) + ' · ' + label(definition, i);
+                const displayedPages = displayedLabel.split(' · ')[0].replace(/^Pages? /, '');
                 const level = spreadIssues.get(id);
                 return <button key={id} data-list-id={id} data-spread={id}
-                  aria-pressed={spreadSelected && selectedSpreads.includes(id)} aria-current={spreadSelected && index === i ? 'page' : undefined} aria-label={label(definition, i) + ' ' + pageLabels[i]}
-                  title={pagesLabel(i) + ' · ' + label(definition, i) + (level ? ' · ' + (level === 'error' ? 'Has errors' : 'Has warnings') : '')}
+                  aria-pressed={spreadSelected && selectedSpreads.includes(id)} aria-current={spreadSelected && index === i ? 'page' : undefined} aria-label={displayedLabel}
+                  title={displayedLabel + (level ? ' · ' + (level === 'error' ? 'Has errors' : 'Has warnings') : '')}
                   className={'spread-thumb' + (reorder.dragging === id ? ' reordering' : '')} tabIndex={index === i ? 0 : -1}
                   draggable={selectedSpreads.length <= 1 && canReorder && (canMoveSpread(id, i - 1) || canMoveSpread(id, i + 1))}
                   onDragStart={(event) => reorder.start(event, id)} onDragEnd={reorder.end}
@@ -1615,13 +1655,13 @@ export function App() {
                   }} onClick={(event) => { spreadSelection.choose(id, event); select(id); }}>
                   <span className="spread-thumb-label">
                     {level && <span className={'issue-dot issue-' + level} />}
-                    <span className="pages">{pageLabels[i]}</span>
+                    <span className="pages">{displayedPages}</span>
                     <span className="name">{label(definition, i)}</span>
                   </span>
                 </button>;
               })}
               {reorder.indicator && <div className="spread-insertion" aria-hidden="true" style={{ top: reorder.indicator.top }} />}
-              <BookFrame project={summary.id} view="thumbs" title="Spread thumbnails" onGeometry={setThumbs}
+              <BookFrame project={summary.id} view="thumbs" onPrepared={(id) => preparedView(id, 'thumbs')} release={frameRelease} title="Spread thumbnails" onGeometry={setThumbs}
                 hold={holdPreview} accept={acceptCandidate} />
             </div>
           </div>
@@ -1687,30 +1727,28 @@ export function App() {
                 setHovered(sheet);
                 setHoveredTarget(target && spreadSelected && sheet === spreadId ? targetKey(target) : undefined);
               }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
-              <BookFrame project={summary.id} view="book" title="Book preview" cropPreview={cropPreview} onGeometry={setGeometry} onStatus={bookStatus} onPictures={bookPictures}
+              <BookFrame project={summary.id} view="book" onPrepared={(id) => preparedView(id, 'book')} release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
                 viewport={viewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
                 onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
-                const i = spreads.findIndex((item) => item.id === id);
-                if (i < 0) return null;
                 const level = spreadIssues.get(id);
-                return <div key={id} className={'sheet-label' + (spreadSelected && id === spread?.id ? ' selected' : '')} style={{ left: x, top: y - 26, width }}>
-                  {level && <span className={'issue-dot issue-' + level} />}{pagesLabel(i)} · {label(spreads[i].definition, i)}
+                return <div key={id} data-canvas-spread={id} className={'sheet-label' + (spreadSelected && id === spread?.id ? ' selected' : '')} style={{ left: x, top: y - 26, width }}>
+                  {level && <span className={'issue-dot issue-' + level} />}{canvasLabels[id]}
                 </div>;
               })}
-              {hoveredSheet && <div className="sheet-hover" aria-hidden="true" style={{
+              {hoveredSheet && <div data-canvas-spread={hoveredSheet.spread} className="sheet-hover" aria-hidden="true" style={{
                 left: hoveredSheet.x, top: hoveredSheet.y, width: hoveredSheet.width, height: hoveredSheet.height }} />}
-              {selectedSheet && <div className="sheet-selection" aria-hidden="true" style={{
+              {selectedSheet && <div data-canvas-spread={selectedSheet.spread} className="sheet-selection" aria-hidden="true" style={{
                 left: selectedSheet.x, top: selectedSheet.y, width: selectedSheet.width, height: selectedSheet.height }} />}
               {showGuides && format && geometry?.sheets.map((sheet) => <Guides key={sheet.spread} sheet={sheet} format={format} />)}
-              {activeBox && <div className="box-highlight" aria-hidden="true" style={{
+              {activeBox && <div data-canvas-spread={activeBox.spread} className="box-highlight" aria-hidden="true" style={{
                 left: activeBox.x, top: activeBox.y, width: activeBox.width, height: activeBox.height,
               }} />}
               {geometry?.targets.filter((target) => {
                 const key = targetKey(target);
                 return !cropping && (key === hoveredTarget || key === editKey);
               }).map((target) => <div key={targetKey(target)} aria-hidden="true"
-                className={'edit-target' + (targetKey(target) === editKey ? ' active' : '')}
+                data-canvas-spread={target.spread} className={'edit-target' + (targetKey(target) === editKey ? ' active' : '')}
                 style={{ left: target.x - 4, top: target.y - 3, width: target.width + 8, height: target.height + 6 }} />)}
               {moving && summary?.photos[moving.photo] && <img className="photo-move-ghost" src={summary.photos[moving.photo]} alt=""
                 style={{ left: moving.x, top: moving.y }} />}
