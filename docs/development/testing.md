@@ -18,7 +18,7 @@ GitHub Actions runs:
 - **desktop:** `npm run test:desktop:smoke` on Apple silicon, covering launch, presentation, rendering, export, saves, updates, shutdown and compatibility books. Runs on every public-repository PR and pushes to `main`; private-repository PRs skip it.
 - **Pages:** site build and internal link checks, with documentation and update feeds published together from `main`. See [Documentation site](docs-site.md).
 
-Run the **Full desktop suite** workflow manually for the complete desktop suite. The release workflow runs packaged-app checks. Review UI appearance and animation manually.
+The **Full desktop suite** workflow runs the complete desktop suite nightly on `main` (02:30 UTC), so a breakage shows up the day after the merge that caused it; start it from Actions to check a branch or release candidate. Each smoke script has a time limit (`SMOKE_TIMEOUT_MINUTES`, default 6), and the run reports every failing script at the end. The release workflow runs packaged-app checks. Review UI appearance and animation manually.
 
 Use `npm run test:updates` for the focused updater and quit checks. `npm run test:upgrade:signed` exercises real signed upgrades; see [Automated signed upgrade test](../releasing.md#automated-signed-upgrade-test) for its requirements.
 
