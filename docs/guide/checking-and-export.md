@@ -4,15 +4,15 @@
 
 The Book check runs after each change. It reports missing content, text that does not fit, low-resolution photos and template findings. Click its status-bar icon or choose **Book → Check Book** (⇧⌘K) to see issues and jump to affected spreads.
 
-Fix errors before print export, and review warnings before ordering.
+Review errors and warnings before ordering a printed book.
 
-## Proof PDF
+## Export PDF
 
-**File → Export PDF…** (⌘E) saves the current layout for screen review or home printing. If photo originals are unavailable, export requires confirmation and marks affected pages with a warning.
+Choose **File → Export PDF…** (⌘E), or click **Export PDF…** in the toolbar. Export uses the book's print format, including trim size and bleed, and reduces photos to its maximum resolution. It checks page count, photo resolution, missing content, unplaced text, PDF fonts, transparency restrictions and file-size limits.
 
-## Print PDF
+If there are errors, export lists them and offers **Cancel** or **Export Anyway**. Exporting anyway saves the PDF with those problems; pages with unavailable originals are marked and may use cached previews or placeholders. Warnings remain in Book check and do not require confirmation.
 
-**File → Export for Print…** (⇧⌘E) checks the book against its print format and reduces photos to the format's maximum resolution. Preflight checks page count, photo resolution, missing content, unplaced text and PDF resources.
+A rendering failure that prevents creating a usable PDF still stops export.
 
 ## Print formats
 

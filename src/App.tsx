@@ -20,7 +20,6 @@ import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
 import type { TargetAnchor } from './edit-targets';
 import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { PanelDivider, useCanvasLayout, usePanels } from './panels';
-import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
 import type { CropPreview } from './BookFrame';
@@ -582,18 +581,18 @@ export function App() {
     enqueue(async () => {
       if (!api || agentLocked.current) return;
       const before = current.current;
-      if (command === 'export' || command === 'print') {
+      if (command === 'export') {
         if (!before || readyId.current !== before.id) return;
         setBusy('Preparing export…');
         setExporting(true);
-        const result = await api.exportBook(before.id, command === 'print' ? 'print' : 'proof');
+        const result = await api.exportBook(before.id);
         if ('error' in result) throw new Error(result.error);
         if (!result.value) return;
         // The export rendered the whole book; its result is the complete Book check for that project state.
         const { errors, warnings } = result.value;
         const counted = (n: number, word: string) => n ? n + ' ' + word + (n === 1 ? '' : 's') : '';
         const found = [counted(errors.length, 'error'), counted(warnings.length, 'warning')].filter(Boolean).join(', ');
-        setNotice((command === 'print' ? 'Print PDF saved.' : 'Proof PDF saved.') + (found ? ' ' + found + ' in Book check.' : ''));
+        setNotice('PDF saved.' + (found ? ' ' + found + ' in Book check.' : ''));
         if (before.id === current.current?.id) setCheck({ id: before.id, errors, warnings });
         return;
       }
@@ -1549,17 +1548,17 @@ export function App() {
     'move-spread-up': canMoveUp, 'move-spread-down': canMoveDown, 'delete-spread': canDelete && spreadFocused },
     editing: controlFocused || !!editing || !!cropping || !!elementEditor || !!quick, textEditing,
     writable, busy: !!busy || exporting || !!reload || agentWorking, history: summary?.history,
-    canExport, canPrint: canExport && checkCurrent && !check?.errors.length,
+    canExport,
     sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom, selectedSpread: spreadId, photoView: photoView.value, selectionCount: selectedSpreads.length,
     saving, pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };
   const menuKey = JSON.stringify(menuState);
   useEffect(() => { void api?.setBookMenuState(menuState); }, [api, menuKey]);
   const undoCommand = commandState('undo', menuState), redoCommand = commandState('redo', menuState);
-  const pdfCommand = commandState('export', menuState), printCommand = commandState('print', menuState);
+  const pdfCommand = commandState('export', menuState);
 
   const format = formatOf(template);
-  // A saved format the template's named formats no longer include; the Book check reports it and print export is
-  // blocked. A template with one fixed format offers no choices and ignores the saved one.
+  // The Book check and export report a saved format the template no longer includes.
+  // A template with one fixed format offers no choices and ignores the saved one.
   const missingFormat = !!template && Object.keys(template.formats).length > 0 && !!summary?.project.format &&
     !Object.hasOwn(template.formats, summary.project.format);
   const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
@@ -1651,12 +1650,8 @@ export function App() {
       <div className="toolbar-actions">
         <button className="toolbar-icon" aria-label="Presentation" title="Presentation (⇧W)" disabled={!summary || !!editing || !!cropping} onClick={() => act('presentation')}><Icon name="play" /></button>
         <div className="export-area">
-          {exporting ? <div className="export-progress"><span role="status" title={busy}>{busy}</span><button onClick={() => void api?.cancelExport()}>Cancel export</button></div> : <ActionMenu className="export-menu" disabled={!summary} label={<><Icon name="export" /><span>Export</span><Icon name="chevron" /></>}>
-            <div className="export-choices">
-              <button className="primary" disabled={!printCommand.enabled} title={!checkCurrent ? 'Checking book…' : check?.errors.length ? 'Resolve book check errors' : undefined} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('print'); }}>Export for Print…</button>
-              <button disabled={!pdfCommand.enabled} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('export'); }}>Export PDF…</button>
-            </div>
-          </ActionMenu>}
+          {exporting ? <div className="export-progress"><span role="status" title={busy}>{busy}</span><button onClick={() => void api?.cancelExport()}>Cancel export</button></div>
+            : <button className="export-button" disabled={!pdfCommand.enabled} title="Export PDF… (⌘E)" onClick={() => act('export')}><Icon name="export" /><span>Export PDF…</span></button>}
         </div>
         <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘I)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>

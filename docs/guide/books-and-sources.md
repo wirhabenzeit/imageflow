@@ -22,7 +22,7 @@ Changes save automatically. **Undo** and **Redo** cover edits made in ImageFlow 
 
 **Book → Copy Assets into Book** controls new imports for this book. Checked (the default), it copies photos, Markdown and parameter files into the package. Uncheck it to link to original files instead. Existing assets keep their storage. A chain symbol marks linked files.
 
-Linked files refresh after external saves. If an original goes missing, a cached copy may remain visible with a warning. Print export and copying linked files into the book require the originals.
+Linked files refresh after external saves. If an original goes missing, a cached copy may remain visible with a warning. PDF export asks for confirmation when used originals are unavailable and marks affected pages. Copying linked files into the book requires the originals.
 
 ## Manage assets
 

@@ -6,7 +6,7 @@ The title bar shows the document name and icon, Undo, Redo and Export. Command-c
 
 | Menu | Commands |
 | --- | --- |
-| File | New Book ⌘N, Open ⌘O, Import ⇧⌘I, Duplicate ⇧⌘S, Rename, Move To, Revert To, Export PDF ⌘E, Export for Print ⇧⌘E |
+| File | New Book ⌘N, Open ⌘O, Import ⇧⌘I, Duplicate ⇧⌘S, Rename, Move To, Revert To, Export PDF ⌘E |
 | Book | New Spread ⇧⌘N, Duplicate Spread ⌘D, Move Up/Down ⌥⌘↑ / ⌥⌘↓, Delete Spread ⌫, Assets, Copy Assets into Book, Check Book ⇧⌘K |
 | Templates | Manage Templates… |
 | View | Canvas layout, guides, panels, zoom, photo sorting and grouping, presentation |

@@ -33,9 +33,9 @@ try {
   const renderStatus = () => frame.locator('body').evaluate(() => window.imageflowRenderStatus);
   const months = () => frame.locator('.month-name').allTextContents();
   const saveTo = (filePath) => app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, filePath);
-  const exported = async (name, file, expected) => {
+  const exported = async (file, expected) => {
     await saveTo(file);
-    await exportAction(w, name);
+    await exportAction(w);
     await w.waitForFunction((expected) => document.querySelector('.status-error') ||
       (document.querySelector('.status')?.textContent ?? '').startsWith(expected), expected, { timeout: 120000 });
     assert.match(await w.locator('.status').textContent(), new RegExp('^' + expected));
@@ -51,7 +51,7 @@ try {
   const pixels = (value) => value * 72 / 400;
   const printed = async (format, size, pages = 13) => {
     const file = join(screenshots ?? work, 'calendar-' + format + '-' + pages + '.pdf');
-    const pdf = await exported('Export print PDF', file, 'Print PDF saved');
+    const pdf = await exported(file, 'PDF saved');
     assert.equal(pdf.getPageCount(), pages);
     for (const page of pdf.getPages()) {
       near(page.getMediaBox().width, pixels(size.width), format + ' page width');

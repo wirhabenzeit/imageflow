@@ -104,12 +104,25 @@ try {
   // Use the real IPC and exporter while giving the native dialog a deterministic destination.
   await instance.evaluate(({ dialog }, path) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
+    dialog.showMessageBox = async (_owner, options) => { globalThis.exportConfirmation = options; return { response: 0 }; };
   }, output);
-  await exportAction(window, 'Export proof PDF');
+  await exportAction(window);
+  await window.locator('.export-button:enabled').waitFor();
+  await assert.rejects(readFile(output), { code: 'ENOENT' });
+  const confirmation = await instance.evaluate(() => globalThis.exportConfirmation);
+  assert.equal(confirmation.message, 'Export PDF with errors?');
+  assert.deepEqual(confirmation.buttons, ['Cancel', 'Export Anyway']);
+  assert.equal(confirmation.defaultId, 0);
+  assert.match(confirmation.detail, /Page count is 2/);
+  await instance.evaluate(({ dialog, Menu }) => {
+    if (Menu.getApplicationMenu().getMenuItemById('print')) throw new Error('Separate print export still exists');
+    dialog.showMessageBox = async () => ({ response: 1 });
+  });
+  await exportAction(window);
   // The short sample is invalid for printing; book-end validation can add further diagnostics.
   await window.waitForFunction(() => document.querySelector('.status-error') ||
-    document.querySelector('.status')?.textContent?.startsWith('Proof PDF saved'), null, { timeout: 45000 });
-  assert.match(await status.textContent(), /^Proof PDF saved\./);
+    document.querySelector('.status')?.textContent?.startsWith('PDF saved'), null, { timeout: 45000 });
+  assert.match(await status.textContent(), /^PDF saved\./);
   await window.waitForFunction(() => /Book check · [1-9]\d* errors?/.test(document.querySelector('.book-check-toggle')?.getAttribute('title') ?? ''));
   await window.locator('.book-check-toggle').click();
   assert.match(await window.locator('.book-check-panel').textContent(), /Page count is 2\./);

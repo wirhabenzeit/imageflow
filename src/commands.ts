@@ -9,7 +9,6 @@ export const commandRegistry = {
   undo: { label: s => s.history?.undo ? 'Undo ' + s.history.undo : 'Undo', accelerator: 'CmdOrCtrl+Z', enabled: s => writable(s) && !!s.history?.undo },
   redo: { label: s => s.history?.redo ? 'Redo ' + s.history.redo : 'Redo', accelerator: 'CmdOrCtrl+Shift+Z', enabled: s => writable(s) && !!s.history?.redo },
   export: { label: 'Export PDF…', accelerator: 'CmdOrCtrl+E', enabled: s => book(s) && s.canExport },
-  print: { label: 'Export for Print…', accelerator: 'CmdOrCtrl+Shift+E', enabled: s => book(s) && s.canPrint },
   'save-copy': { label: 'Duplicate…', accelerator: 'CmdOrCtrl+Shift+S', enabled: writable },
   'rename-book': { label: 'Rename…', enabled: writable },
   'move-book': { label: 'Move To…', enabled: writable },
@@ -88,4 +87,4 @@ export function commandState(id: RegisteredCommand, state: BookMenuState, contex
     accelerator: spec.accelerator, registerAccelerator: spec.registerAccelerator, enabled: spec.enabled(state), checked: spec.checked?.(state) };
 }
 export const emptyMenuState: BookMenuState = { document: false, writable: false, busy: false, editing: false, textEditing: false,
-  canExport: false, canPrint: false, enabled: { 'add-spread': false, 'duplicate-spread': false, 'delete-spread': false, 'move-spread-up': false, 'move-spread-down': false } };
+  canExport: false, enabled: { 'add-spread': false, 'duplicate-spread': false, 'delete-spread': false, 'move-spread-up': false, 'move-spread-down': false } };

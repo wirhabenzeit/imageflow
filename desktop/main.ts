@@ -27,7 +27,7 @@ import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
-import type { BookMenuState, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
+import type { BookMenuState, Command, ImportRequest, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
@@ -913,7 +913,7 @@ function installMenu() {
       { label: 'Revert To', submenu: [registered('revert-opened'), registered('reload')] },
       { type: 'separator' },
       registered('import'),
-      registered('export'), registered('print'), { type: 'separator' }, registered('reveal-book'),
+      registered('export'), { type: 'separator' }, registered('reveal-book'),
     ] },
     { label: 'Edit', submenu: [
       registered('undo'), registered('redo'),
@@ -963,7 +963,7 @@ function updateMenus() {
   const inBook = !!document && owner === document.window;
   const state: BookMenuState = { ...emptyMenuState, ...document?.menuState, document: !!document && !document.closing,
     sidebar: document?.sidebar, inspector: document?.inspector, sources: document?.sources, guides: document?.guides, layout: document?.layout };
-  if (!inBook) { state.editing = true; state.canExport = false; state.canPrint = false; }
+  if (!inBook) { state.editing = true; state.canExport = false; }
   const menu = Menu.getApplicationMenu();
   for (const id of Object.keys(commandRegistry) as RegisteredCommand[]) {
     const item = menu?.getMenuItemById(id);
@@ -1722,7 +1722,7 @@ void app.whenReady().then(async () => {
     try { return { value: await document.editorNetwork(id, origins) }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
-  ipcMain.handle(channels.export, (event, id: string, mode: ExportMode) => fromEditor(event, (document) => document.exportBook(document.window, id, mode)));
+  ipcMain.handle(channels.export, (event, id: string) => fromEditor(event, (document) => document.exportBook(document.window, id)));
   ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) => fromEditor(event, (document) => document.checkOpenBook(document.currentBook(id), request)));
   ipcMain.handle(channels.cancelCheck, (event) => { editorOwner(event)?.cancelCheck(); });
@@ -1749,7 +1749,7 @@ void app.whenReady().then(async () => {
   // The panel shows the bundle's app icon; the credits line carries the same tagline as the start window.
   app.setAboutPanelOptions({
     applicationName: 'ImageFlow', applicationVersion: app.getVersion(),
-    credits: 'Your photographs. A book of their own.', copyright: 'Copyright © 2026 the ImageFlow authors',
+    credits: 'Designed in code. Composed by eye.', copyright: '© 2026 The ImageFlow authors',
     website: 'https://github.com/wirhabenzeit/imageflow',
   });
   installMenu();

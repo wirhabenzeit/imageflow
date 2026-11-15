@@ -318,9 +318,12 @@ try {
   console.log('captured artwork with pending typing');
   assert.equal(pendingImage.value?.image?.data, confirmedImage.value.image.data, 'MCP artwork path excludes typing and UI');
   const pdf = join(work, 'confirmed.pdf');
-  await app.evaluate(({ dialog }, path) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: path }); }, pdf);
+  await app.evaluate(({ dialog }, path) => {
+    dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
+    dialog.showMessageBox = async () => ({ response: 1 });
+  }, pdf);
   console.log('exporting proof');
-  const exported = await w.evaluate((id) => window.imageflow.exportBook(id, 'proof'), id);
+  const exported = await w.evaluate((id) => window.imageflow.exportBook(id), id);
   assert.ok(!exported.error, exported.error);
   const pdfText = execFileSync('pdftotext', [pdf, '-'], { encoding: 'utf8' });
   assert.ok(pdfText.includes('External heading'));

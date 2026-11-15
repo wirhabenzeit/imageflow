@@ -13,7 +13,7 @@ const format = printFormat({
   output: { minimumTextSize: pt(7) },
 });
 
-// Preview only: the generic `serif` and `sans-serif` families render anywhere, but print export accepts only fonts
+// Preview only: the generic `serif` and `sans-serif` families render anywhere, but PDF export reports an error unless fonts are
 // bundled in template/fonts/ and loaded with @font-face from a CSS file the template imports (see the starter).
 export default defineTemplate({
   id: 'example-minimal', version: '1.0.0', contract: 1,

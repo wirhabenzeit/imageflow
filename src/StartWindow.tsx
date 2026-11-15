@@ -44,7 +44,7 @@ export function StartWindow({ api }: { api?: DesktopApi }) {
     <aside className="start-actions">
       <img className="start-brand" src={brandMark} alt="" />
       <h1>Image<span className="start-brand-flow">Flow</span></h1>
-      <p>Your photographs.<br />A book of their own.</p>
+      <p>Designed in code.<br />Composed by eye.</p>
       <button className="primary" disabled={!api || busy} onClick={() => void act('new')}>New Book…</button>
       <button disabled={!api || busy} onClick={() => void act('open')}>Open…</button>
     </aside>

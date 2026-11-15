@@ -8,7 +8,7 @@ hero:
     width: 320
     height: 320
   text: Design photobooks and calendars
-  tagline: Your photos and Markdown, editable layouts, print-ready PDFs. For macOS.
+  tagline: Designed in code. Composed by eye.
   actions:
     - theme: brand
       text: Get started

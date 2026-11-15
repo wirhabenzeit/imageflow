@@ -44,10 +44,10 @@ async function renderSample(folder, name, params = {}) {
   assert.equal(failures.length, 0, `${name}: ${JSON.stringify(failures)}`);
   const pdfFile = join(work, name + '.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, pdfFile);
-  await exportAction(page, 'Export print PDF');
+  await exportAction(page);
   await page.waitForFunction(() => document.querySelector('.status-error') ||
-    document.querySelector('.status')?.textContent?.startsWith('Print PDF saved'), undefined, { timeout: 180000 });
-  assert.match(await page.locator('.status').textContent(), /^Print PDF saved/);
+    document.querySelector('.status')?.textContent?.startsWith('PDF saved'), undefined, { timeout: 180000 });
+  assert.match(await page.locator('.status').textContent(), /^PDF saved/);
   const pdf = await PDFDocument.load(await readFile(pdfFile));
   const units = checked.value.render.units;
   assert.equal(pdf.getPageCount(), units.length, 'Every printed page must be present');

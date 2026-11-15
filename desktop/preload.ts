@@ -73,7 +73,7 @@ const api: DesktopApi = {
   importFiles: (id, request) => ipcRenderer.invoke(channels.import, id, request),
   editorNetwork: (id, origins) => ipcRenderer.invoke(channels.network, id, origins),
   pathsForFiles: (files) => files.map((file) => webUtils.getPathForFile(file)).filter(Boolean),
-  exportBook: (id, mode) => ipcRenderer.invoke(channels.export, id, mode),
+  exportBook: (id) => ipcRenderer.invoke(channels.export, id),
   cancelExport: () => ipcRenderer.invoke(channels.cancel),
   checkBook: (id, request) => ipcRenderer.invoke(channels.check, id, request),
   cancelCheck: () => ipcRenderer.invoke(channels.cancelCheck),

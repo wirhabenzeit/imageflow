@@ -30,6 +30,8 @@ Add pages to the sidebar in `site/.vitepress/config.mts`. Its `history` list con
 
 ## Branding
 
+The tagline is **Designed in code. Composed by eye.** Use it consistently in the app's About and start windows, the README, and the documentation site's home page and description.
+
 The navigation uses the light/dark ImageFlow wordmarks from `resources/brand/logo/`; the home page and favicon use the app mark from the same folder. VitePress serves these canonical SVGs as its public assets, so logo changes require no copy or separate regeneration. The header follows the site's theme switch, and asset URLs respect `DOCS_BASE`.
 
 ## Checks and publishing

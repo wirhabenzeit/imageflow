@@ -58,8 +58,8 @@ try {
 
     const file = join(work, name + '.pdf');
     await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, file);
-    const saved = 'Print PDF saved';
-    await exportAction(w, 'Export print PDF');
+    const saved = 'PDF saved';
+    await exportAction(w);
     await w.waitForFunction((saved) => document.querySelector('.status-error') ||
       (document.querySelector('.status')?.textContent ?? '').startsWith(saved), saved, { timeout: 180000 });
     assert.match(await w.locator('.status').textContent(), new RegExp('^' + saved), name);

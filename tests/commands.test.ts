@@ -4,7 +4,7 @@ import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { BookMenuState } from '../src/desktop';
 
 const book: BookMenuState = { ...emptyMenuState, document: true, writable: true,
-  history: { undo: 'Move photo' }, canExport: true, canPrint: false,
+  history: { undo: 'Move photo' }, canExport: true,
   enabled: { 'add-spread': true, 'duplicate-spread': true, 'delete-spread': true, 'move-spread-up': false, 'move-spread-down': true } };
 
 test('document commands are unavailable without a document', () => {
@@ -18,8 +18,8 @@ test('menus and toolbar share history labels and export restrictions', () => {
   assert.equal(commandState('undo', book).enabled, true);
   assert.equal(commandState('redo', book).enabled, false);
   assert.equal(commandState('export', book).enabled, true);
-  assert.equal(commandState('print', book).enabled, false);
-  assert.equal(commandState('print', { ...book, canPrint: true }).enabled, true);
+  assert.equal('print' in commandRegistry, false, 'PDF export is the only export command');
+  assert.equal(commandState('export', { ...book, canExport: false }).enabled, false);
   assert.equal(commandState('export', { ...book, busy: true }).enabled, false);
 });
 test('typing, busy and read-only states protect spread operations', () => {

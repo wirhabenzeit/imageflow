@@ -17,7 +17,7 @@ export default defineTemplate({
 - **The other parameters:** an element's parameters the editor does not own are generated controls in a toolbar under the canvas, like the photo toolbar, with *Done*. A problem (a rejected change, a conflict, a failure, read-only) shows above the toolbar; nothing on the page moves.
 - **Gestures and keys:** pointer, wheel and pinch gestures and keys inside the frame belong to the editor: they never select, crop or move what is under it, and book shortcuts do not run. The page outside it scrolls as usual. The frame takes focus when it opens. Escape closes it, discarding only unfinished typing; ⌘↩ and *Done* finish the active field and close. Clicking elsewhere on the page finishes the active field first, then acts on that click. Changes already applied stay saved, and each is one Undo step, as in the panel.
 - **Where it falls back to the panel:** an element whose template CSS rotates, skews or mirrors it (its on-page rectangle is only a bounding box), one too small to use on screen, or one not on the page opens in the panel, with the same component and `presentation: 'dialog'`. So does every editor of a template that does not ask for `'inline'`. The sidebar's list of a spread's elements opens the same editor as a click on the page.
-- **Output stays pure:** the inline editor exists only in the editing view. Thumbnails, the Book check, clean MCP artwork and proof and print export never contain it or its toolbar, and always draw the saved values with `render`.
+- **Output stays pure:** the inline editor exists only in the editing view. Thumbnails, the Book check, clean MCP artwork and PDF export never contain it or its toolbar, and always draw the saved values with `render`.
 
 ## Appearance in custom editors
 
