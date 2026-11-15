@@ -34,19 +34,45 @@ export function installPurityGuards(target: Target, scriptPath: string, stack: (
   exempt: () => boolean = () => false): PurityGuards {
   const calls: ImpureCall[] = [];
   const seen = new Set<string>();
+  // Work a drawing starts stays declared after its own call returns (ADR 0006 §4): callbacks it schedules run exempt,
+  // and requests it starts keep the exemption until a task after they settle, so their continuations are covered too.
+  // Libraries such as Mapbox send session and telemetry requests, and repaint, from such callbacks, after `draw` resolved.
+  let inherited = 0;
+  const declared = () => inherited > 0 || exempt();
+  const originalTimeout = target.setTimeout as ((callback: () => void, ms?: number) => unknown) | undefined;
+  const afterTask = (callback: () => void) => {
+    if (typeof originalTimeout === 'function') originalTimeout.call(target, callback, 0); else callback();
+  };
+  const carry = (callback: unknown) => typeof callback !== 'function' ? callback : function (this: unknown, ...args: unknown[]) {
+    inherited++;
+    try { return (callback as (...args: unknown[]) => unknown).apply(this, args); }
+    finally { inherited--; }
+  };
+  const hold = () => {
+    inherited++;
+    let released = false;
+    return () => { if (!released) { released = true; afterTask(() => { inherited--; }); } };
+  };
   const record = (api: string) => {
-    if (exempt() || !stack().includes(scriptPath)) return;
+    if (declared() || !stack().includes(scriptPath)) return;
     const key = api + '\u0000' + (current ?? '');
     if (seen.has(key)) return;
     seen.add(key);
     calls.push({ api, ...(current ? { spread: current } : {}) });
   };
-  const wrapFunction = (name: string) => {
+  const wrapFunction = (name: string, kind: 'call' | 'schedule' | 'request') => {
     const original = target[name];
     if (typeof original !== 'function') return;
     target[name] = function (...args: unknown[]) {
       record(name);
-      return (original as (...args: unknown[]) => unknown).apply(target, args);
+      const inDrawing = declared();
+      if (inDrawing && kind === 'schedule') args[0] = carry(args[0]);
+      const result = (original as (...args: unknown[]) => unknown).apply(target, args);
+      if (inDrawing && kind === 'request' && result && typeof (result as Promise<unknown>).then === 'function') {
+        const release = hold();
+        (result as Promise<unknown>).then(release, release);
+      }
+      return result;
     };
   };
   const wrapConstructor = (name: string) => {
@@ -73,10 +99,17 @@ export function installPurityGuards(target: Target, scriptPath: string, stack: (
     const open = xhr.open;
     xhr.open = function (this: unknown, ...args: unknown[]) {
       record('XMLHttpRequest');
+      const request = this as { addEventListener?: (type: string, listener: () => void, options?: unknown) => void };
+      if (declared() && typeof request?.addEventListener === 'function') {
+        const release = hold();
+        request.addEventListener('loadend', release, { once: true });
+      }
       return open.apply(this, args);
     };
   }
-  for (const name of ['fetch', 'importScripts', 'setTimeout', 'setInterval', 'requestAnimationFrame', 'requestIdleCallback']) wrapFunction(name);
+  wrapFunction('fetch', 'request');
+  wrapFunction('importScripts', 'call');
+  for (const name of ['setTimeout', 'setInterval', 'requestAnimationFrame', 'requestIdleCallback']) wrapFunction(name, 'schedule');
   for (const name of ['WebSocket', 'EventSource', 'Worker', 'SharedWorker']) wrapConstructor(name);
   for (const name of ['HTMLCanvasElement', 'OffscreenCanvas']) wrapContext(name);
   const gpu = (target.navigator as { gpu?: Target } | undefined)?.gpu;
@@ -99,10 +132,16 @@ const kinds: [RegExp, string][] = [
   [/^(setTimeout|setInterval|requestAnimationFrame|requestIdleCallback)$/, 'schedules work for later'],
 ];
 
-export function impureMessage(api: string) {
+/** `located` is false for a call made outside any layout's render, such as a callback that ran later. */
+export function impureMessage(api: string, located = true) {
   const kind = kinds.find(([pattern]) => pattern.test(api))?.[1] ?? 'is not pure';
-  return 'The template calls ' + api + ', which ' + kind + '. Layouts must render from their inputs alone, so the printed book cannot depend on it.';
+  return 'The template calls ' + api + ', which ' + kind + (located ? '' : ', outside any layout render and any <RenderedImage> drawing' +
+    ' (at module load, or in a callback scheduled by neither)') +
+    '. Layouts must render from their inputs alone, so the printed book cannot depend on it.';
 }
 
 export const impureSuggestion = 'Do this work in an element editor and save the result into the book (for example as a file parameter), ' +
   'or remove the call. A 2D canvas is allowed.';
+/** For a call outside any layout render: usually module-level code, or work a library keeps running on its own. */
+export const unlocatedImpureSuggestion = 'Move network, GPU and timer work into a <RenderedImage> draw function, which may also start ' +
+  'background work (its timers and requests stay allowed), or remove the call from module-level code.';
