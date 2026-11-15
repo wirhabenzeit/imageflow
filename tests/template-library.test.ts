@@ -32,10 +32,6 @@ async function setup() {
   const work = await mkdtemp(join(tmpdir(), 'imageflow-library-'));
   const trashed: string[] = [];
   const builtIn = await template(work, 'builtin', { id: 'starter', version: '1.0.0', label: 'Photobook' });
-  // The sample book's spreads become the built-in's example spreads: three, where a new book otherwise starts with one.
-  await mkdir(join(work, 'sample'));
-  await writeFile(join(work, 'sample', 'project.json'), JSON.stringify({ schemaVersion: 1, title: 'Sample', template: { id: 'starter', version: '1.0.0' },
-    params: {}, spreads: ['a', 'b', 'c'].map((id) => ({ id, definition: 'story', params: {}, boxes: {}, elements: {} })) }));
   const library = new TemplateLibrary(join(work, 'Templates'), [{ template: builtIn, sample: join(work, 'sample'), defaultName: 'Untitled Photobook' }],
     validate, async (path) => { trashed.push(path); await rm(path, { recursive: true }); }, 'caps-1');
   return { work, trashed, library, done: () => rm(work, { recursive: true, force: true }) };
@@ -84,7 +80,6 @@ test('the library lists built-ins, imports a template once, and replaces it with
     const [builtIn] = await library.list();
     assert.equal(builtIn.source, 'built-in');
     assert.equal(builtIn.label, 'Photobook');
-    assert.equal(builtIn.exampleSpreads, 3);
     assert.equal(builtIn.openingSpreads, 1);
 
     const v1 = await template(work, 'travel-1', { id: 'travel', version: '1.0.0', label: 'Travel' });

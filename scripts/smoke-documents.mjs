@@ -79,8 +79,6 @@ try {
   assert.deepEqual(nativePicker, { modal: false, parent: false, resizable: true });
   await start.evaluate(() => window.imageflow.openProject('new'));
   assert.equal(app.windows().filter((page) => page.url() === 'imageflow://editor/new').length, 1, 'New Book is a singleton');
-  // The document workflow below edits the sample's texts, so start from the complete sample book (development builds).
-  await picker.getByRole('group', { name: 'Start with' }).getByRole('radio', { name: 'Sample book (dev)' }).check();
   await clickClosingWindow(picker, picker.getByRole('button', { name: 'Create', exact: true }));
   let one;
   for (let attempt = 0; attempt < 250; attempt++) {
@@ -128,6 +126,11 @@ try {
   });
   await one.reload({ waitUntil: 'domcontentloaded' }); await ready(one);
   await cp(first, second, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  // New books start without texts; give the second one a text source for the external-edit check below.
+  await writeFile(join(second, 'texts/arrival.md'), '# Arrival\n');
+  const secondProject = JSON.parse(await readFile(join(second, 'project.json'), 'utf8'));
+  secondProject.texts = { ...secondProject.texts, arrival: 'texts/arrival.md' };
+  await writeFile(join(second, 'project.json'), JSON.stringify(secondProject, null, 2) + '\n');
   await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, second);
   const two = await launchAction(one, 'open');
   assert.notEqual((await current(one)).handle, (await current(two)).handle);

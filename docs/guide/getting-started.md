@@ -21,7 +21,7 @@ Updates require a Developer ID signed release in a writable location. Move Image
 ## Your first book
 
 1. Open ImageFlow and choose **New Book…**.
-2. Pick a template, then name and save the book. Under **Start with**, the **Photobook** offers example spreads that show its layouts, ready for your photos and text, or just its opening spreads. Other templates start with their opening spreads, or empty. New books contain no photos or texts until you add them.
+2. Pick a template, then name and save the book. Under **Start with**, choose the template's starting spreads (the **Photobook** starts with a spread in each of its layouts) or an empty book. New books contain no photos or texts until you add them.
 3. Import JPEG, PNG or WebP photos with **File → Import…**, or drop them onto the Photos strip. Drag photos onto the spread's photo boxes.
 4. Drop a Markdown file onto a text box, or choose **New Text** in the Texts strip.
 5. Click the [Book check](checking-and-export.md#book-check) icon in the status bar to review issues.
