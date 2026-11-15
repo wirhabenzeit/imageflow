@@ -3,8 +3,8 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hashTemplateFiles, listTemplateFiles } from '../desktop/template-hash.mjs';
 
-// Recreates the compatibility books in tests/compat/books/ from the built-in starters, as a book made with
-// File › New from each starter's sample would be: the sample with its template copy and the template's hash. Photos and
+// Recreates the compatibility books in tests/compat/books/ from the built-in starters' complete sample books (photos and
+// texts included, which File › New no longer copies), with the template copy and the template's hash. Photos and
 // template files are byte-identical to the samples', so git stores them once. Run it deliberately, because it replaces books that
 // CI expects to keep opening unchanged: `node scripts/compat-books.mjs --write`. See tests/compat/README.md.
 const root = fileURLToPath(new URL('../', import.meta.url));

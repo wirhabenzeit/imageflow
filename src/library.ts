@@ -17,8 +17,11 @@ export type LibraryEntry = {
   // may reach. `networkTrust` says why books made from this exact version need not ask: it ships with the app, or
   // the user allowed it for this hash. Without it, each book asks once.
   packages?: TemplatePackage[]; network?: string[]; networkTrust?: 'built-in' | 'allowed';
-  // A built-in template with a sample book: photos, texts and spreads a new book can start with.
-  sample?: boolean;
+  // How many example spreads a new book can start with instead of the opening spreads: the layouts of a built-in
+  // template's sample book, without its content. Absent when there are none or they match the opening spreads.
+  exampleSpreads?: number;
+  // Development builds only: a new book can start as a copy of the built-in's complete sample book, photos included.
+  sampleBook?: boolean;
   // Why this app cannot create a book from the template, such as a feature it requires that the app lacks.
   unavailable?: string;
   // Pictures the views can show at once, from templatePictureURL: the template's own preview `image`, and a saved
@@ -31,8 +34,10 @@ export type LibraryEntry = {
 export const templatePictureURL = (hash: string, kind: 'image' | 'render') => editorURL + 'template-picture/' + hash + '/' + kind;
 export const templatePicturePath = /^\/template-picture\/([0-9a-f]{64})\/(image|render)$/;
 
-// What New Book creates: a template from the library, with the sample book when the template has one.
-export type NewBookChoice = { id: string; sample: boolean };
+// What New Book creates: a book from a library template, starting with its example spreads, its opening spreads, or
+// (development builds only) a copy of its sample book.
+export type NewBookStart = 'examples' | 'opening' | 'sample';
+export type NewBookChoice = { id: string; start: NewBookStart };
 
 export function templateFormatSummary(entry: Pick<LibraryEntry, 'shape' | 'formats'>) {
   return [entry.shape, entry.formats.length > 1 ? entry.formats.length + ' formats' : !entry.shape ? entry.formats[0] : ''].filter(Boolean).join(' · ');

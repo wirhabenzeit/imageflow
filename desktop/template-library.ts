@@ -9,6 +9,8 @@ import { hashTemplateFiles, listTemplateFiles, TemplateFilesError } from './temp
 import { extractTemplateArchive, isTemplateArchive, writeTemplateArchive } from './template-archive';
 import { readTemplatePreview } from './template-preview-file';
 import { trimAspect } from '../src/template-preview';
+import { exampleSpreadStates, examplesDiffer } from '../src/example-spreads';
+import { projectSchema } from '../src/project';
 
 // The template library: templates a new book can be created from. A book copies its template when it is created,
 // so nothing here is read while a book renders, and removing or replacing an entry never changes an existing book.
@@ -86,13 +88,23 @@ const renderName = /^([0-9a-f]{64})\.jpg$/;
 
 /** Loads a template in the renderer and returns its declarations, or throws TemplateImportError. */
 export type ValidateTemplate = (folder: string) => Promise<TemplateInfo>;
-export type BuiltIn = { template: string; sample?: string; defaultName?: string };
+// `sampleBook` lets New Book copy the complete sample book (development builds, where the sample keeps its photos).
+export type BuiltIn = { template: string; sample?: string; sampleBook?: boolean; defaultName?: string };
 export type ImportPlan = (
   | { kind: 'new' | 'newer' | 'same'; info: TemplateInfo; current?: LibraryEntry }
   | { kind: 'changed' | 'older'; info: TemplateInfo; current: LibraryEntry }
 ) & { hash: string; packages: TemplatePackage[] };
 export type ImportResult = LibraryImportResult;
 export type ResolvedTemplate = Awaited<ReturnType<TemplateLibrary['resolve']>>;
+
+// How many example spreads a built-in's sample book offers, or 0 when it has none or they match the opening spreads.
+async function exampleCount(sample: string, info: TemplateInfo) {
+  try {
+    const parsed = projectSchema.safeParse(JSON.parse(await readFile(join(sample, 'project.json'), 'utf8')));
+    const examples = parsed.success ? exampleSpreadStates(parsed.data.spreads, info) : [];
+    return examples.length && examplesDiffer(examples, info) ? examples.length : 0;
+  } catch { return 0; }
+}
 
 function entryFrom(info: TemplateInfo | undefined, fallback: { id: string; version?: string }, extra: Omit<LibraryEntry,
   'id' | 'version' | 'label' | 'formats' | 'layouts' | 'openingSpreads'>): LibraryEntry {
@@ -141,8 +153,9 @@ export class TemplateLibrary {
         const id = info?.id ?? 'built-in-' + this.builtIns.size;
         const packages = await templatePackages(source.template);
         const { image } = await this.previewImage(source.template, info);
+        const examples = info && source.sample ? await exampleCount(source.sample, info) : 0;
         this.builtIns.set(id, { folder: source.template, info, image, sample: source.sample, defaultName: source.defaultName,
-          entry: entryFrom(info, { id }, { source: 'built-in', hash, ...(packages.length ? { packages } : {}), ...(source.sample ? { sample: true } : {}),
+          entry: entryFrom(info, { id }, { source: 'built-in', hash, ...(packages.length ? { packages } : {}), ...(examples ? { exampleSpreads: examples } : {}), ...(source.sample && source.sampleBook ? { sampleBook: true } : {}),
             ...(problem ? { unavailable: problem } : {}) }) });
       }
       // Renders of earlier versions of the built-in templates are no longer shown.

@@ -18,6 +18,7 @@ import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nati
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -25,6 +26,7 @@ import sharp from 'sharp';
 import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
 import type { BookMenuState, Command, ExportMode, ImportRequest, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
+import { projectSchema } from '../src/project';
 import { renderPolicy } from './csp';
 import { assetTypes, loadProject, renderData, TemplateCompileError } from './project';
 import type { OpenProject } from './project';
@@ -52,9 +54,10 @@ import { isTemplateArchive, templateArchiveExtension } from './template-archive'
 import { writeAgentSkill, writeAuthoringSnapshot } from './authoring-sdk';
 import type { ImportPlan, ResolvedTemplate } from './template-library';
 import { describeImport, templatePicturePath, templatePictureURL } from '../src/library';
-import type { LibraryEntry, LibraryImportResult, NewBookChoice } from '../src/library';
+import type { LibraryEntry, LibraryImportResult, NewBookChoice, NewBookStart } from '../src/library';
 import { capabilities } from '../src/runtime-exports';
 import { newSpread, openingSpreadStates } from '../src/editing';
+import { exampleSpreadStates } from '../src/example-spreads';
 import { templateFolder, textSourcePath } from './document-actions';
 import { configureRenditionCache, pruneRenditions } from './rendition-cache';
 import { decodes, readTemplatePreview } from './template-preview-file';
@@ -541,21 +544,18 @@ async function createNewBook(owner: BrowserWindow, selected: NewBookChoice, clos
     filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
   if (choice.canceled || !choice.filePath || owner.isDestroyed()) return false;
   const folder = await createDocument(documentPath(choice.filePath),
-    (stage) => library.withTemplate(selected.id, (current) => createBook(stage, current, selected.sample)));
+    (stage) => library.withTemplate(selected.id, (current) => createBook(stage, current, selected.start)));
   await openDocument(folder);
   if (closeOwner) owner.close();
   return true;
 }
-// Fills a new book's staging folder from a library template: its sample book, or the template's own copy with its
-// opening spreads and no content. Either way `project.json` records the template's hash.
-async function createBook(stage: string, template: ResolvedTemplate, sample: boolean) {
+// Fills a new book's staging folder from a library template: the template's own copy, no photos, texts or files, and
+// either its example spreads (the layouts of a built-in's sample book, without their content) or its opening spreads.
+// Either way `project.json` records the template's hash.
+async function createBook(stage: string, template: ResolvedTemplate, start: NewBookStart) {
   const { entry, folder, info } = template;
-  const file = join(stage, 'project.json');
-  if (sample && template.sample) {
-    await cp(template.sample, stage, { recursive: true, filter: (path) => basename(path) !== '.imageflow' && basename(path) !== 'node_modules' });
-    const project = JSON.parse(await readFile(file, 'utf8'));
-    project.template = { ...project.template, hash: entry.hash };
-    await writeFile(file, JSON.stringify(project, null, 2) + '\n');
+  if (start === 'sample' && template.sample && existsSync(join(template.sample, 'photos.json'))) {
+    await copySampleBook(stage, template, template.sample);
     await writeAuthoringSnapshot(join(stage, 'template'), join(__dirname, 'authoring-types'));
     await writeAgentSkill(stage, join(__dirname, 'skills'));
     return;
@@ -565,11 +565,27 @@ async function createBook(stage: string, template: ResolvedTemplate, sample: boo
   await writeAgentSkill(stage, join(__dirname, 'skills'));
   await Promise.all(['photos', 'texts', 'files'].map((name) => mkdir(join(stage, name))));
   await writeFile(join(stage, 'photos.json'), '{}\n');
-  await writeFile(file, JSON.stringify({
+  const sampleSpreads = start !== 'opening' && template.sample ? await readSampleSpreads(template.sample) : undefined;
+  await writeFile(join(stage, 'project.json'), JSON.stringify({
     schemaVersion: 1, title: 'Untitled', template: { id: entry.id, version: entry.version, hash: entry.hash },
-    params: {}, texts: {}, files: {}, spreads: openingSpreadStates(info),
+    params: {}, texts: {}, files: {}, spreads: sampleSpreads ? exampleSpreadStates(sampleSpreads, info) : openingSpreadStates(info),
   }, null, 2) + '\n');
 }
+async function readSampleSpreads(sample: string) {
+  const parsed = projectSchema.safeParse(JSON.parse(await readFile(join(sample, 'project.json'), 'utf8')));
+  return parsed.success ? parsed.data.spreads : undefined;
+}
+// Copies a built-in template's complete sample book, photos included: for the library's preview render, and for New Book
+// in development builds. Packaged apps ship no sample photos (their previews are rendered at build time).
+async function copySampleBook(stage: string, template: ResolvedTemplate, sample: string) {
+  await cp(sample, stage, { recursive: true, filter: (path) => basename(path) !== '.imageflow' && basename(path) !== 'node_modules' });
+  const file = join(stage, 'project.json');
+  const project = JSON.parse(await readFile(file, 'utf8'));
+  project.template = { ...project.template, hash: template.entry.hash };
+  await writeFile(file, JSON.stringify(project, null, 2) + '\n');
+}
+// The library's preview render uses the sample book where it has its photos, or else the example spreads.
+const stagePreviewBook = (stage: string, template: ResolvedTemplate) => createBook(stage, template, 'sample');
 
 // Renders of a template's opening spread, keyed by content hash. Rendering is serialized so opening a library does not
 // launch one hidden browser per card; an offline or empty template keeps the neutral cover placeholder. A render with
@@ -591,7 +607,7 @@ function templatePreview(id: string, hash: string, origins: string[], persist = 
     try {
       await library.withTemplate(id, async (template) => {
         if (template.entry.hash !== hash) throw new Error('Template changed.');
-        await createBook(stage, template, true);
+        await stagePreviewBook(stage, template);
         const file = join(stage, 'project.json');
         const project = JSON.parse(await readFile(file, 'utf8'));
         if (!project.spreads.length) {
@@ -1147,7 +1163,8 @@ void app.whenReady().then(async () => {
   cache = await mkdtemp(join(app.getPath('temp'), 'imageflow-cache-'));
   // IMAGEFLOW_TEMPLATES points tests and development at another library folder.
   library = new TemplateLibrary(process.env.IMAGEFLOW_TEMPLATES || join(app.getPath('userData'), 'Templates'),
-    starters.map((starter) => ({ template: join(sampleFolder(starter.folder), 'template'), sample: sampleFolder(starter.folder), defaultName: starter.defaultName })),
+    starters.map((starter) => ({ template: join(sampleFolder(starter.folder), 'template'), sample: sampleFolder(starter.folder),
+      sampleBook: !app.isPackaged && existsSync(join(sampleFolder(starter.folder), 'photos.json')), defaultName: starter.defaultName })),
     probeTemplate, (path) => shell.trashItem(path), capabilities.join(',') + '@' + app.getVersion(), join(__dirname, 'authoring-types'),
     // Built-in templates ship renders of their opening spreads; later ones are kept with the app's other caches.
     renderPreviewsTo ? { cache: renderPreviewsTo } : {
@@ -1406,7 +1423,7 @@ void app.whenReady().then(async () => {
     const owner = pickerOwner(event);
     if (!owner) return { error: 'Request is only available to New Book.' };
     if (!choice) { owner.close(); return { value: false }; }
-    if (typeof choice.id !== 'string' || typeof choice.sample !== 'boolean') return { error: 'Choose a template.' };
+    if (typeof choice.id !== 'string' || !['examples', 'opening', 'sample'].includes(choice.start) || (choice.start === 'sample' && app.isPackaged)) return { error: 'Choose a template.' };
     try { return { value: await createNewBook(owner, choice) }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
@@ -1595,7 +1612,7 @@ void app.whenReady().then(async () => {
     const owner = templatesOwner(event);
     if (!owner || typeof id !== 'string' || (action !== 'reveal' && action !== 'new')) return { error: 'Choose a template in the library.' };
     try {
-      if (action === 'new') await createNewBook(owner, { id, sample: false }, false);
+      if (action === 'new') await createNewBook(owner, { id, start: 'opening' }, false);
       else shell.showItemInFolder((await library.resolve(id)).folder);
       return { value: undefined };
     } catch (error) { return { error: errorMessage(error) }; }

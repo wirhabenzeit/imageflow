@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import { clickClosingWindow, clickPage } from './ui-actions.mjs';
 
 // The template library: import from its own window, live updates in an open New Book picker, removal, a failed import,
-// creating books from a library template and from the built-in starter without its sample, and Save Template to Library.
+// creating books from a library template and from the built-in starter's example or opening spreads, and Save Template to Library.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'template-library-'));
 const library = join(work, 'Templates');
@@ -143,8 +143,7 @@ try {
   await settings.getByRole('button', { name: 'Import…' }).click();
   await travelEntry.click();
   await picker.getByRole('option', { name: /Travel journal/ }).click();
-  assert.equal(await picker.getByRole('checkbox').count(), 0, 'only a template with a sample book offers it');
-  assert.equal(await picker.locator('.starter-start').count(), 0);
+  assert.equal(await picker.locator('.starter-start').count(), 0, 'only a built-in with example spreads offers the choice');
   const book = join(work, 'Journey.imageflow');
   await saveAs(book);
   await clickClosingWindow(picker, picker.getByRole('button', { name: 'Create' }));
@@ -241,20 +240,46 @@ try {
   await editor.locator('iframe.book-frame-book[data-current][data-ready]').waitFor();
   assert.equal(await editor.locator('.spread-thumb').count(), 4);
 
-  // The built-in starter without its sample book: the template's opening spreads and no photos.
-  const second = editor.evaluate(() => window.imageflow.openProject('new'));
-  void second.catch(() => {});
-  const modal = await windowAt('imageflow://editor/new', new Set([picker]));
-  await modal.getByRole('option', { name: /Photobook/ }).click();
-  await modal.getByRole('checkbox', { name: 'Include sample content' }).uncheck();
-  const plain = join(work, 'Plain.imageflow');
-  await saveAs(plain);
-  await clickClosingWindow(modal, modal.getByRole('button', { name: 'Create' }));
-  assert.deepEqual(await second, { value: null });
-  const starter = JSON.parse(await readFile(join(plain, 'project.json'), 'utf8'));
-  assert.equal(starter.template.id, 'imageflow-starter');
-  assert.deepEqual(starter.spreads.map(({ definition }) => definition), ['title', 'story', 'closing']);
-  assert.deepEqual(JSON.parse(await readFile(join(plain, 'photos.json'), 'utf8')), {});
+  // The built-in starter offers its example spreads (the default) or its opening spreads. Neither copies the sample's
+  // photos, texts or files into the book.
+  const emptyContent = async (folder) => {
+    const project = JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
+    assert.equal(project.template.id, 'imageflow-starter');
+    assert.equal(project.title + '.imageflow', basename(folder), 'named after its file');
+    assert.deepEqual([project.texts, project.files], [{}, {}]);
+    assert.deepEqual(JSON.parse(await readFile(join(folder, 'photos.json'), 'utf8')), {});
+    for (const name of ['photos', 'texts', 'files']) assert.deepEqual(await readdir(join(folder, name)), [], name + ' stays empty');
+    for (const spread of project.spreads) {
+      for (const box of Object.values(spread.boxes)) assert.deepEqual(Object.keys(box), ['params'], 'boxes keep only layout settings');
+    }
+    return project;
+  };
+  const sampleSpreads = JSON.parse(await readFile(join(root, 'sample/starter/project.json'), 'utf8')).spreads;
+  const newStarter = async (name, option) => {
+    const pending = editor.evaluate(() => window.imageflow.openProject('new'));
+    void pending.catch(() => {});
+    const modal = await windowAt('imageflow://editor/new', new Set([picker]));
+    await modal.getByRole('option', { name: /Photobook/ }).click();
+    const start = modal.getByRole('group', { name: 'Start with' });
+    assert.equal(await start.getByRole('radio', { name: sampleSpreads.length + ' example spreads' }).isChecked(), true);
+    if (option) await start.getByRole('radio', { name: option }).check();
+    const folder = join(work, name);
+    await saveAs(folder);
+    await clickClosingWindow(modal, modal.getByRole('button', { name: 'Create' }));
+    assert.deepEqual(await pending, { value: null });
+    return folder;
+  };
+  const example = await emptyContent(await newStarter('Example.imageflow'));
+  assert.deepEqual(example.spreads.map(({ definition }) => definition), sampleSpreads.map(({ definition }) => definition));
+  assert.ok(example.spreads.every(({ id }) => !sampleSpreads.some((spread) => spread.id === id)), 'example spreads get new IDs');
+  assert.ok(!JSON.stringify(example).includes('Senja'), 'no sample text');
+  const plain = await emptyContent(await newStarter('Plain.imageflow', '3 spreads'));
+  assert.deepEqual(plain.spreads.map(({ definition }) => definition), ['title', 'story', 'closing']);
+  // Development builds (this unpackaged app) can still start from the complete sample book, to experiment faster.
+  const dev = await newStarter('Dev sample.imageflow', 'Sample book (dev)');
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(join(dev, 'photos.json'), 'utf8'))).sort(),
+    Object.keys(JSON.parse(await readFile(join(root, 'sample/starter/photos.json'), 'utf8'))).sort());
+  assert.deepEqual((await readdir(join(dev, 'texts'))).sort(), (await readdir(join(root, 'sample/starter/texts'))).sort());
 
   // Opening a template file from Finder imports it.
   await answer(0);

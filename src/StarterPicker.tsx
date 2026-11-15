@@ -3,11 +3,12 @@ import type { DesktopApi } from './desktop';
 import { TemplatePreview } from './TemplatePreview';
 import { useLibrary } from './useLibrary';
 import { templateFormatSummary } from './library';
+import type { LibraryEntry, NewBookStart } from './library';
 
 export function StarterPicker({ api }: { api?: DesktopApi }) {
   const { entries, error } = useLibrary(api);
   const [selected, setSelected] = useState<string>();
-  const [sample, setSample] = useState(true);
+  const [start, setStart] = useState<NewBookStart>('examples');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState('');
   const usable = entries?.filter(({ unavailable }) => !unavailable) ?? [];
@@ -20,7 +21,7 @@ export function StarterPicker({ api }: { api?: DesktopApi }) {
     if (!api || !chosen || busy) return;
     setBusy(true); setFailure('');
     try {
-      const result = await api.chooseStarter({ id: chosen.id, sample: !!chosen.sample && sample });
+      const result = await api.chooseStarter({ id: chosen.id, start: startFor(chosen, start) });
       if ('error' in result) setFailure(result.error);
     } catch { setFailure('Could not create the book. Please try again.'); }
     finally { setBusy(false); }
@@ -57,8 +58,18 @@ export function StarterPicker({ api }: { api?: DesktopApi }) {
       </section>)}
     </div>
     <div className="starter-options">
-      {entry?.sample && <label className="pc-switch"><input type="checkbox" checked={sample} disabled={busy}
-        onChange={(event) => setSample(event.target.checked)} />Include sample content</label>}
+      {entry && (!!entry.exampleSpreads || entry.sampleBook) && <fieldset className="starter-start" disabled={busy}>
+        <legend>Start with</legend>
+        {!!entry.exampleSpreads && <label title="Spreads that show the template's layouts, ready for your photos and text">
+          <input type="radio" name="start" checked={startFor(entry, start) === 'examples'} onChange={() => setStart('examples')} />
+          {entry.exampleSpreads} example spreads</label>}
+        <label title="The template's opening spreads; add more as you go">
+          <input type="radio" name="start" checked={startFor(entry, start) === 'opening'} onChange={() => setStart('opening')} />
+          {entry.openingSpreads ? entry.openingSpreads + (entry.openingSpreads === 1 ? ' spread' : ' spreads') : 'An empty book'}</label>
+        {entry.sampleBook && <label title="Development builds only: a copy of the complete sample book, photos and texts included">
+          <input type="radio" name="start" checked={startFor(entry, start) === 'sample'} onChange={() => setStart('sample')} />
+          Sample book (dev)</label>}
+      </fieldset>}
     </div>
     <div className="starter-notice" role="status">{failure || error}
       {(error || (entries && (!usable.length || entries.some(({ unavailable }) => unavailable)))) && <button className="link" onClick={() => void api?.showTemplates()}>Manage Templates…</button>}
@@ -66,4 +77,11 @@ export function StarterPicker({ api }: { api?: DesktopApi }) {
     <footer><button disabled={busy} onClick={() => void api?.chooseStarter()}>Cancel</button>
       <button className="primary" disabled={!api || !entry || busy} onClick={() => void create()}>Create</button></footer>
   </main>;
+}
+
+// The chosen start where the template offers it; otherwise its example spreads, or its opening spreads.
+function startFor(entry: LibraryEntry, start: NewBookStart): NewBookStart {
+  if (start === 'sample' && entry.sampleBook) return 'sample';
+  if (start !== 'opening' && entry.exampleSpreads) return 'examples';
+  return 'opening';
 }

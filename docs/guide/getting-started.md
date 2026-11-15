@@ -21,7 +21,7 @@ Updates require a Developer ID signed release in a writable location. Move Image
 ## Your first book
 
 1. Open ImageFlow and choose **New Book…**.
-2. Pick a template, then name and save the book. **Photobook** and **Wall calendar** can include sample content; other templates start with their opening spreads or empty.
+2. Pick a template, then name and save the book. Under **Start with**, the **Photobook** offers example spreads that show its layouts, ready for your photos and text, or just its opening spreads. Other templates start with their opening spreads, or empty. New books contain no photos or texts until you add them.
 3. Import JPEG, PNG or WebP photos with **File → Import…**, or drop them onto the Photos strip. Drag photos onto the spread's photo boxes.
 4. Drop a Markdown file onto a text box, or choose **New Text** in the Texts strip.
 5. Click the [Book check](checking-and-export.md#book-check) icon in the status bar to review issues.
@@ -29,9 +29,6 @@ Updates require a Developer ID signed release in a writable location. Move Image
 
 Each book opens in its own window. Closing the last book returns to the start window. **Window → Welcome to ImageFlow** opens it at any time.
 
-::: warning Sample photos
-The Photobook sample photos are upscaled placeholders. They pass the resolution check but print soft. Replace them before ordering.
-:::
 
 ## Built-in templates
 
