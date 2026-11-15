@@ -326,7 +326,9 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       const info = await stat(file).catch(() => undefined);
       if (!info) { counts.failed++; continue; }
       const extension = extname(file).toLowerCase();
-      const kind = request.kind ?? (photoExtensions.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : undefined);
+      // Without a kind, photos and Markdown are recognised by type. Other files are imported only when a file
+      // parameter of the template accepts their extension; nothing else is guessed.
+      const kind = request.kind ?? (photoExtensions.has(extension) ? 'photo' : extension === '.md' ? 'markdown' : request.accept?.includes(extension) ? 'file' : undefined);
       const extensions = kind === 'photo' ? photoExtensions : kind === 'file' ? new Set(request.accept) : new Set(['.md']);
       if (!info.isFile() || !kind || !extensions.has(extension)) { counts.skipped++; continue; }
       const folder = kind === 'photo' ? 'photos' : kind === 'file' ? 'files' : 'texts';

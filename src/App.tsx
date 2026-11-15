@@ -6,7 +6,7 @@ import { usePhotoView } from './PhotoViewMenu';
 import { isPhotoViewCommand } from './photo-view';
 import { captureViewAnchor, restoreViewAnchor } from './view-anchor';
 import type { ViewAnchor } from './view-anchor';
-import { assetUsage } from './asset-usage';
+import { assetUsage, fileExtensions } from './asset-usage';
 import { sourcePlacements } from './source-placement';
 import { importFeedback } from './import-feedback';
 import { commandState } from './commands';
@@ -466,6 +466,8 @@ export function App() {
   }
 
   function importFiles(request: ImportRequest, canvasId?: string) {
+    // Without a kind, photos and Markdown are recognised by type; the template's file parameters add the types they accept.
+    if (!request.kind && !request.accept) request = { ...request, accept: fileExtensions(template) };
     const generation = inputGeneration.current;
     enqueue(async () => {
       const before = current.current;
@@ -518,10 +520,7 @@ export function App() {
 
   async function showAssets() {
     if (!api) return;
-    const groups = template ? [template.parameters, ...Object.values(template.spreads).flatMap((spread) => [spread.parameters,
-      ...Object.values(spread.boxes).map((box) => box.parameters), ...Object.values(spread.elements).map((element) => element.parameters)])] : [];
-    const accept = [...new Set(groups.flatMap((group) => Object.values(group).flatMap((param) =>
-      param.type === 'list' ? Object.values(param.item) : [param]).flatMap((param) => param.type === 'file' ? param.accept : [])))];
+    const accept = fileExtensions(template);
     const result = await api.showAssets(accept);
     if ('error' in result) setError(result.error);
   }

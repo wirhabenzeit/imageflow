@@ -24,9 +24,12 @@ import { fileExtension, useFileIcons } from './file-icons';
 const Glyph = ({ kind }: { kind: SourceKind }) => <span aria-hidden="true">{kind === 'photo' ? '▧' : kind === 'markdown' ? 'Aa' : '▤'}</span>;
 const DocumentIcon = ({ src, kind }: { src?: string; kind: SourceKind }) => src ? <img src={src} alt="" draggable={false} /> : <Glyph kind={kind} />;
 
-export function SourceManager({ view, api, summary, adopt, disabled = false, quickLook, embedded = false, tabs, drop }: {
+export function SourceManager({ view, api, summary, adopt, disabled = false, quickLook, embedded = false, tabs, importFiles }: {
   view: PhotoViewControl; api: DesktopApi; summary: ProjectSummary; adopt: (summary: ProjectSummary) => void; disabled?: boolean; quickLook?: (source: SourceRef) => void;
-  embedded?: boolean; tabs?: ReactNode; drop?: (files: File[]) => void;
+  embedded?: boolean; tabs?: ReactNode;
+  // Imports dropped files, or asks for files to import when none are given. The book window routes this through its own
+  // import queue; the Assets window leaves it unset and imports through the asset actions.
+  importFiles?: (files?: File[]) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
@@ -61,6 +64,10 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     } catch (error) { setError({ message: error instanceof Error ? error.message : 'Could not update assets.' }); }
     finally { setBusy(false); }
   }
+  const bring = (files?: File[]) => {
+    if (importFiles) importFiles(files);
+    else void act({ action: 'import', paths: files && api.pathsForFiles(files) });
+  };
   async function menu(keys: string[]) {
     if (busy || disabled || !keys.length) return;
     const result = await api.showContextMenu(assetMenu(summary, keys, true), assetMenuState(busy || disabled));
@@ -89,12 +96,13 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     else if (item) quickLook?.({ kind: item.kind === 'photo' ? 'photo' : 'text', id: item.id });
   };
   return <section className={embedded ? 'sources source-manager source-manager-embedded' : 'source-manager'} aria-label={embedded ? 'Sources' : 'Assets'} aria-busy={busy || disabled}
-    onDragOver={drop && ((event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); })}
-    onDrop={drop && ((event) => { event.preventDefault(); drop([...event.dataTransfer.files]); })}>
+    onDragOver={(event) => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
+    onDrop={(event) => { if (!event.dataTransfer.types.includes('Files')) return; event.preventDefault(); if (!locked) bring([...event.dataTransfer.files]); }}>
     <header className={embedded ? 'sources-bar asset-toolbar' : 'asset-toolbar'}>
       {tabs}
       <input type="search" aria-label="Search assets" placeholder="Search assets" value={search} onChange={(event) => setSearch(event.target.value)} />
       <NewMarkdown api={api} disabled={locked} />
+      <button type="button" className="new-markdown" title="Import photos, texts and files for the template's file parameters" disabled={locked} onClick={() => bring()}><Icon name="down" /> Import…</button>
       <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} />
       <ActionMenu className="asset-filter" label={<>Filter <Icon name="chevron" /></>}>
         {(['photo', 'markdown', 'file'] as const).map((value) => <button key={value} onClick={() => setKind(kind === value ? 'all' : value)}>{({ photo: 'Photos', markdown: 'Markdown', file: 'Files' })[value]}</button>)}

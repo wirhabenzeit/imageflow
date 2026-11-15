@@ -45,12 +45,12 @@ function SourceTabs({ summary, tab, setTab }: { summary: ProjectSummary; tab: So
 
 // Photos and texts as thumbnails and excerpts, or every asset of the book, files included, as a plain list.
 export function Sources(props: SourcesProps) {
-  const { summary, tab, setTab, view, changed, busy, quickLook, writable, importPaths } = props;
+  const { summary, tab, setTab, view, changed, busy, quickLook, writable, importPaths, importSources } = props;
   const api = window.imageflow;
   if (tab !== 'assets') return <SourceStrip {...props} tab={tab} />;
   if (!api) return <section className="sources" aria-label="Sources"><div className="sources-bar"><SourceTabs summary={summary} tab={tab} setTab={setTab} /></div></section>;
   return <SourceManager embedded view={view} api={api} summary={summary} adopt={changed} disabled={busy} quickLook={quickLook}
-    drop={(files) => { if (writable && !busy) importPaths(files); }} tabs={<SourceTabs summary={summary} tab={tab} setTab={setTab} />} />;
+    importFiles={(files) => { if (writable && !busy) { if (files) importPaths(files); else importSources('import'); } }} tabs={<SourceTabs summary={summary} tab={tab} setTab={setTab} />} />;
 }
 
 function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, changed, failure }: SourcesProps & { tab: SourceKind }) {
