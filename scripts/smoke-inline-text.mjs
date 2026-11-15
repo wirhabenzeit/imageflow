@@ -6,6 +6,7 @@ import electron from 'electron';
 import { execFileSync } from 'node:child_process';
 import { _electron } from 'playwright-core';
 import { testBook, clickPage } from './ui-actions.mjs';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // A real desktop session: editing typography/occurrences, pending typing, composition, plain paste, fallback,
 // save/reopen, failures and conflicts. Runs separately so the default smoke suite stays small.
@@ -361,7 +362,6 @@ try {
   await copySample(join(root, 'sample', 'starter'), ownedBook);
   await writeFile(join(ownedBook, 'template/index.tsx'), `
 import { defineTemplate, p, Spread, printFormat, mm } from 'imageflow';
-import { copySample } from '../desktop/sample-book.mjs';
 const string = (label) => p.string({label, default:'Default text'});
 export default defineTemplate({id:'imageflow-starter',version:'1',contract:1,
   format:printFormat({label:'Test',trim:{width:mm(200),height:mm(200)},bleed:mm(0),safe:mm(5),ends:'inside-covers',pageCount:{min:2,max:20,step:2}}),
