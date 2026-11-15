@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { execFileSync } from 'node:child_process';
 import { _electron } from 'playwright-core';
-import { testBook, clickPage } from './ui-actions.mjs';
+import { closeApp, testBook, clickPage } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
 
 // A real desktop session: editing typography/occurrences, pending typing, composition, plain paste, fallback,
@@ -419,6 +419,6 @@ export default defineTemplate({id:'imageflow-starter',version:'1',contract:1,
   }
   throw error;
 } finally {
-  if (app) await app.close();
+  if (app) await closeApp(app);
   if (process.env.KEEP_INLINE_TEXT_FIXTURE !== '1') await rm(work, { recursive: true, force: true });
 }

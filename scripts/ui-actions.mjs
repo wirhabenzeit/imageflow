@@ -6,6 +6,25 @@ const activePages = new WeakMap();
 const pageApps = new WeakMap();
 
 // Retry only machine-readable transient responses, never user-facing message text.
+/**
+ * Closes a test app in cleanup. A failed test can leave the app unable to quit (a busy book cancels Quit), and
+ * Playwright's close then waits forever, so the failure would surface only as a CI timeout. After `ms` the process is
+ * killed instead, so the original error is reported.
+ */
+export async function closeApp(app, ms = 15000) {
+  const process = app.process();
+  let timer;
+  const closed = await Promise.race([
+    app.close().then(() => true, () => true),
+    new Promise((resolve) => { timer = setTimeout(() => resolve(false), ms); }),
+  ]);
+  clearTimeout(timer);
+  if (!closed && process.exitCode === null) {
+    console.error('The app did not close within ' + ms / 1000 + ' s; killing it.');
+    process.kill('SIGKILL');
+  }
+}
+
 export async function retryBookRefresh(operation, ready, { attempts = 5, delay = 100 } = {}) {
   let result;
   for (let attempt = 0; attempt < attempts; attempt++) {
