@@ -251,7 +251,7 @@ function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: nu
   let outside: { overshootMm: number; owner: ReturnType<typeof ownerOf> } | undefined;
   for (let node = text.nextNode(); node; node = text.nextNode()) {
     const parent = node.parentElement;
-    if (!node.textContent?.trim() || !parent || parent.closest('.if-placeholder, svg')) continue;
+    if (!node.textContent?.trim() || !parent || parent.closest('.if-placeholder, svg, [data-decorative]')) continue;
     const sizeMm = parseFloat(getComputedStyle(parent).fontSize) * mmPerPixel;
     if (minimum && sizeMm < minimum && (!small || sizeMm < small.sizeMm)) small = { sizeMm, owner: ownerOf(parent) };
     range.selectNodeContents(node);
@@ -307,7 +307,7 @@ function checkTextBlocks(sheet: HTMLElement, format: ResolvedFormat) {
   };
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     let block = node.parentElement;
-    if (!node.textContent?.trim() || !block || block.closest('.if-placeholder, svg')) continue;
+    if (!node.textContent?.trim() || !block || block.closest('.if-placeholder, svg, [data-decorative]')) continue;
     if (getComputedStyle(block).visibility !== 'visible' || invisible(block)) continue;
     while (block && block !== sheet && ['inline', 'contents'].includes(getComputedStyle(block).display)) block = block.parentElement;
     if (!block || block === sheet) continue;
