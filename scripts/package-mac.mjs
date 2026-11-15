@@ -31,7 +31,7 @@ async function packageApp() {
     await Promise.all([
       stageDesktop({ packaged: true, destination: source, version: fixture?.version ?? metadata.version,
         updateTest: fixture ? { baseURL: fixture.baseURL, profile: fixture.profile, book: fixture.book, debugPort: fixture.debugPort } : null }),
-      cp(sample, books, { recursive: true, filter: (path) => !['.imageflow', 'whitewall'].includes(basename(path)) }),
+      cp(sample, books, { recursive: true, filter: (path) => basename(path) !== '.imageflow' }),
     ]);
     // New Book shows the built-in templates at once on first launch: their opening spreads ship pre-rendered.
     const previews = join(staging, 'template-previews');

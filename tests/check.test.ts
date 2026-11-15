@@ -37,7 +37,7 @@ async function fixture(t: TestContext) {
   const cache = join(work, 'cache');
   configureSourceStore(join(work, 'source-cache'));
   await mkdir(cache);
-  await cp(resolve('sample/whitewall'), folder, { recursive: true, filter: (path) => !path.includes('.imageflow') });
+  await cp(resolve('tests/fixtures/field-notes'), folder, { recursive: true, filter: (path) => !path.includes('.imageflow') });
   return { book: await loadProject(folder, cache, true), cache, folder };
 }
 

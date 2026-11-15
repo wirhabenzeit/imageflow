@@ -18,10 +18,10 @@ export async function checkFlow(app, root) {
     bundle: true, write: false, format: 'iife', globalName: 'ImageFlowTest',
   });
   const source = await readFile(join(root, 'scripts/fixtures/flow.md'), 'utf8');
-  const css = await readFile(join(root, 'sample/whitewall/template/styles.css'), 'utf8');
+  const css = await readFile(join(root, 'tests/fixtures/field-notes/template/styles.css'), 'utf8');
   const fontRules = css.slice(0, css.indexOf('.field-notes'));
   const fonts = await Promise.all([...fontRules.matchAll(/url\("\.\/fonts\/([^"]+)"\)/g)].map(async ([url, file]) => [
-    url, 'url(data:font/woff2;base64,' + (await readFile(join(root, 'sample/whitewall/template/fonts', file))).toString('base64') + ')',
+    url, 'url(data:font/woff2;base64,' + (await readFile(join(root, 'tests/fixtures/field-notes/template/fonts', file))).toString('base64') + ')',
   ]));
   const faces = fonts.reduce((css, [url, data]) => css.replace(url, data), fontRules);
   await page.setContent(`<style>

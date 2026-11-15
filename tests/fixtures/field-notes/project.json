@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "title": "Senja · Field Notes",
-  "template": { "id": "whitewall-field-notes", "version": "0.1.0" },
+  "template": { "id": "field-notes", "version": "0.1.0" },
   "params": { "showCaption": true },
   "texts": { "arrival": "texts/arrival.md" },
   "spreads": [
