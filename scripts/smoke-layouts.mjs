@@ -281,18 +281,18 @@ try {
   assert.equal(await w.locator('.kept-content').getAttribute('open'), null);
   await w.locator('.kept-content > summary').click();
   const keptNames = () => w.locator('.kept-content .kept-name').allTextContents();
-  assert.deepEqual(await keptNames(), ['Cottage', 'Evening light']);
-  await rerendered(() => w.getByRole('combobox', { name: 'Place Cottage in' }).selectOption('second'));
-  assert.equal(await statusLine(), 'Cottage placed in Right photo');
+  assert.deepEqual(await keptNames(), ['Boathouses in the snow', 'Last light on the ridge']);
+  await rerendered(() => w.getByRole('combobox', { name: 'Place Boathouses in the snow in' }).selectOption('second'));
+  assert.equal(await statusLine(), 'Boathouses in the snow placed in Right photo');
   state = await settlements();
   assert.deepEqual(state.boxes.second, { params: {}, photo: 'cottage', focus: { centerX: 0.5, centerY: 0.5 } });
   assert.deepEqual(state.boxes.third, { params: {} });
-  assert.deepEqual(await keptNames(), ['Evening light']);
-  const swap = w.getByRole('combobox', { name: 'Place Evening light in' });
+  assert.deepEqual(await keptNames(), ['Last light on the ridge']);
+  const swap = w.getByRole('combobox', { name: 'Place Last light on the ridge in' });
   assert.deepEqual(await swap.locator('option').allTextContents(),
-    ['Place in…', 'Left photo · swap with ' + replacedTitle, 'Right photo · swap with Cottage']);
+    ['Place in…', 'Left photo · swap with ' + replacedTitle, 'Right photo · swap with Boathouses in the snow']);
   await rerendered(() => swap.selectOption('hero'));
-  assert.equal(await statusLine(), 'Evening light placed in Left photo; ' + replacedTitle + ' is saved outside this layout');
+  assert.equal(await statusLine(), 'Last light on the ridge placed in Left photo; ' + replacedTitle + ' is saved outside this layout');
   assert.deepEqual(await keptNames(), [replacedTitle]);
 
   // Dragging a kept item onto a box of its spread moves it the same way.
@@ -302,17 +302,17 @@ try {
     document.querySelector('.kept-item').dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: data }));
     document.querySelector('main').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: data }));
   }, { x: target.x + target.width / 2, y: target.y + target.height / 2 }));
-  assert.equal(await statusLine(), replacedTitle + ' placed in Right photo; Cottage is saved outside this layout');
+  assert.equal(await statusLine(), replacedTitle + ' placed in Right photo; Boathouses in the snow is saved outside this layout');
   assert.equal((await settlements()).boxes.second.photo, replacement);
-  assert.deepEqual(await keptNames(), ['Cottage']);
+  assert.deepEqual(await keptNames(), ['Boathouses in the snow']);
 
   // Discard removes kept content from the spread (the source stays); Undo brings it back.
-  await rerendered(() => w.getByRole('button', { name: 'Discard Cottage' }).click());
-  assert.equal(await statusLine(), 'Cottage removed from this spread');
+  await rerendered(() => w.getByRole('button', { name: 'Discard Boathouses in the snow' }).click());
+  assert.equal(await statusLine(), 'Boathouses in the snow removed from this spread');
   assert.equal(await w.locator('.kept-content').count(), 0);
   assert.ok(JSON.parse(await readFile(join(project, 'photos.json'), 'utf8')).cottage);
   await rerendered(() => button('Undo').click());
-  assert.deepEqual(await keptNames(), ['Cottage']);
+  assert.deepEqual(await keptNames(), ['Boathouses in the snow']);
 
   // Chapter openers declare chapter anchors, stories and text spreads section anchors, on the page with their
   // heading; a Contents layout lists them, numbering the chapters.
