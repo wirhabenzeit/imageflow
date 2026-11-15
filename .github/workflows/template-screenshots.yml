@@ -1,0 +1,122 @@
+name: Template screenshots
+
+on:
+  # Refresh the documentation artwork once per published release (not prereleases).
+  # Manual runs from main are also supported.
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: template-screenshots
+  cancel-in-progress: false
+
+jobs:
+  render:
+    # Release runs execute in a tag context but render main (release.yml requires tagged
+    # commits on main); manual runs must select main. No PR/feature code gets publishing credentials.
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'release' && !github.event.release.prerelease)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    outputs:
+      source-sha: ${{ steps.source.outputs.sha }}
+    env:
+      IMAGEFLOW_HIDE_WINDOW: '1'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Record rendered source
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            site/package-lock.json
+      - name: Require Apple silicon
+        run: node -e "if (process.arch !== 'arm64') throw new Error('Screenshot generation requires Apple silicon')"
+      - name: Cache Electron downloads
+        uses: actions/cache@v5
+        with:
+          path: |
+            .build/electron-cache
+            ~/Library/Caches/electron
+          key: ${{ runner.os }}-${{ runner.arch }}-electron-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - run: brew install poppler
+      - name: Generate current template artwork
+        run: npm run screenshots:templates
+      - run: npm ci
+        working-directory: site
+      - name: Validate documentation with refreshed images
+        run: npm run build
+        working-directory: site
+      - uses: actions/upload-artifact@v7
+        with:
+          name: template-screenshots
+          path: |
+            docs/images/photobook-starter-light.jpg
+            docs/images/photobook-starter-dark.jpg
+            docs/images/calendar-starter.jpg
+            docs/images/calendar-month.png
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+      - name: Reject artwork superseded by newer rendering inputs
+        id: source
+        env:
+          SOURCE_SHA: ${{ needs.render.outputs.source-sha }}
+        run: node scripts/check-template-screenshot-source.mjs "$SOURCE_SHA"
+      - uses: actions/download-artifact@v8
+        if: steps.source.outputs.current == 'true'
+        with:
+          name: template-screenshots
+          path: docs/images
+      - name: Open or update the image refresh PR
+        if: steps.source.outputs.current == 'true'
+        id: refresh
+        uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8.1.3
+        with:
+          token: ${{ github.token }}
+          base: main
+          branch: automation/template-screenshots
+          delete-branch: true
+          add-paths: |
+            docs/images/photobook-starter-light.jpg
+            docs/images/photobook-starter-dark.jpg
+            docs/images/calendar-starter.jpg
+            docs/images/calendar-month.png
+          commit-message: Refresh built-in template screenshots
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          title: Refresh built-in template screenshots
+          body: |
+            Regenerated the photobook light/dark sheets, calendar overview and January detail from source commit ${{ needs.render.outputs.source-sha }}.
+
+            Generation uses the real Book check and print PDF exports. The app build, PDF page-count checks and documentation build/link checks passed before these images were uploaded.
+
+            Review the artwork before merging. With the built-in GITHUB_TOKEN, select **Approve workflows to run** on this PR to start its CI checks. Merging publishes the committed images through the existing Pages workflow.
