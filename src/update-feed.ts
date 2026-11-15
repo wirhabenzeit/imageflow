@@ -39,7 +39,9 @@ export function buildUpdateFeeds(releases: PublishedRelease[], platform = 'darwi
   for (const item of releases) {
     if (item.draft || !item.published_at || !item.tag_name.startsWith('v')) continue;
     const version = item.tag_name.slice(1), channel = releaseChannel(version);
-    if (!channel || item.prerelease !== (channel === 'beta')) continue;
+    // The version decides the channel. A final version must also be a full GitHub release to reach stable; a beta may be
+    // published either as a pre-release or, while ImageFlow has no final release, as GitHub's "Latest" release.
+    if (!channel || (channel === 'stable' && item.prerelease)) continue;
     const name = `ImageFlow-${version}-mac-${platform.slice(7)}.zip`;
     const matches = item.assets.filter((a) => a.name === name && (!a.state || a.state === 'uploaded'));
     if (!matches.length) continue;

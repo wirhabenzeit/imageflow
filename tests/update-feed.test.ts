@@ -27,6 +27,13 @@ test('stable excludes prereleases, beta includes stable, and release order is se
   assert.equal(buildUpdateFeeds([version('1.0.0', { prerelease: true })]).stable.release, null);
 });
 
+test('a beta published as a full GitHub release stays in the beta feed and never reaches stable', () => {
+  const latest = buildUpdateFeeds([version('0.9.0'), version('1.0.0-beta.3', { prerelease: false })]);
+  assert.equal(latest.beta.release?.version, '1.0.0-beta.3');
+  assert.equal(latest.stable.release?.version, '0.9.0');
+  assert.equal(buildUpdateFeeds([version('1.0.0-beta.3', { prerelease: false })]).stable.release, null);
+});
+
 test('beta-to-final is an upgrade, equal/older versions never download, and switching to stable never downgrades', () => {
   const release = buildUpdateFeeds([version('1.0.0')]).beta.release!;
   assert.equal(selectUpdate(feed(release), 'beta', 'darwin-arm64', '1.0.0-beta.10')?.version, '1.0.0');
