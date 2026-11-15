@@ -1,16 +1,21 @@
 :root {
-  --vp-c-brand-1: #2f6688;
-  --vp-c-brand-2: #3b7aa0;
-  --vp-c-brand-3: #4a8db5;
-  --vp-c-brand-soft: rgba(59, 122, 160, 0.14);
+  --vp-nav-logo-height: 28px;
+  --vp-button-brand-hover-bg: #066f58;
+  --vp-button-brand-active-bg: #075c49;
+  --vp-c-brand-1: #087f65;
+  --vp-c-brand-2: #10977b;
+  --vp-c-brand-3: #087f65;
+  --vp-c-brand-soft: rgba(20, 166, 135, 0.14);
 }
 .dark {
-  --vp-c-brand-1: #8cc3e4;
-  --vp-c-brand-2: #6fb0d8;
-  --vp-c-brand-3: #4a8db5;
-  --vp-c-brand-soft: rgba(111, 176, 216, 0.16);
+  --vp-c-brand-1: #3ddcb4;
+  --vp-c-brand-2: #6be5c6;
+  --vp-c-brand-3: #087f65;
+  --vp-c-brand-soft: rgba(61, 220, 180, 0.16);
 }
 .page-banner { margin-bottom: 24px; }
 .vp-doc table { display: block; overflow-x: auto; }
 .home-shot { max-width: 1152px; margin: 48px auto 0; padding: 0 24px; }
 .home-shot img { width: 100%; height: auto; border-radius: 12px; box-shadow: var(--vp-shadow-3); }
+
+.VPNavBarTitle .logo { width: auto; margin-right: 0; }

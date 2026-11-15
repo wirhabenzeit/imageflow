@@ -15,7 +15,11 @@ Packaged checks cover document registration, Finder open events, proof and print
 GitHub Actions runs:
 
 - **check:** build, app/template/API type checks and unit tests on Linux.
-- **desktop:** `npm run test:desktop:smoke` on Apple silicon, covering launch, rendering, export, saves and shutdown. Runs on every public-repository PR and pushes to `main`; private-repository PRs skip it.
-- **Docs:** site build and internal link checks. See [Documentation site](docs-site.md).
+- **desktop:** `npm run test:desktop:smoke` on Apple silicon, covering launch, presentation, rendering, export, saves, updates, shutdown and compatibility books. Runs on every public-repository PR and pushes to `main`; private-repository PRs skip it.
+- **Pages:** site build and internal link checks, with documentation and update feeds published together from `main`. See [Documentation site](docs-site.md).
 
 Run the **Full desktop suite** workflow manually for the complete desktop suite. The release workflow runs packaged-app checks. Review UI appearance and animation manually.
+
+Use `npm run test:updates` for the focused updater and quit checks. `npm run test:upgrade:signed` exercises real signed upgrades; see [Automated signed upgrade test](../releasing.md#automated-signed-upgrade-test) for its requirements.
+
+For branch protection, require the `check` and `desktop` checks produced by GitHub Actions after both have passed. Revisit the required `desktop` check if the repository becomes private, since its PR job will then be skipped.
