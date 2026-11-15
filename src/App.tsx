@@ -714,7 +714,10 @@ export function App() {
     });
     const command = api.onCommand((command) => onCommand(command));
     const changed = api.onProjectChanged((change) => onProjectChanged(change));
-    const progress = api.onProgress(setBusy);
+    // Progress belongs to the import or export that is running. A message can arrive after its task has finished and
+    // cleared the status (IPC sends are not ordered with invoke replies); taking it then would leave the book busy,
+    // with a spinner that never stops and Quit refused.
+    const progress = api.onProgress((stage) => { if (pendingTasks.current) setBusy(stage); });
     const appError = api.onAppError(setError);
     let mounted = true;
     void api.currentProject().then((result) => {
