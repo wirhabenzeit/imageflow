@@ -1,0 +1,14 @@
+{
+  "light": {
+    "path": "photos/light.jpg",
+    "title": "Evening light",
+    "caption": "Late light on the hills",
+    "altText": "Late light on the hills"
+  },
+  "shore": {
+    "path": "photos/shore.jpg",
+    "title": "Shore",
+    "caption": "The outer coast of Senja",
+    "altText": "The outer coast of Senja"
+  }
+}

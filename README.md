@@ -11,7 +11,7 @@ ImageFlow is a macOS app for designing photobooks and wall calendars from photos
 
 Sample artwork: [Photobook light](docs/images/photobook-starter-light.jpg) · [Photobook dark](docs/images/photobook-starter-dark.jpg) · [Calendar overview](docs/images/calendar-starter.jpg) · [January page](docs/images/calendar-month.png)
 
-ImageFlow includes Photobook and Wall calendar templates. Each `.imageflow` book keeps its own layouts, settings and content, with support for linked source files. Templates are TypeScript and React code; local AI agents can inspect, preview, check and edit books through MCP.
+ImageFlow includes Photobook, Wall calendar and Typography templates. Each `.imageflow` book keeps its own layouts, settings and content, with support for linked source files. Templates are TypeScript and React code; local AI agents can inspect, preview, check and edit books through MCP.
 
 ## Install
 
