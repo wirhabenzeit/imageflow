@@ -54,6 +54,8 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: node scripts/mac-credentials.mjs sign-fixtures
       - name: Create and trust a one-day loopback TLS certificate
+        # Seconds normally; fail fast if macOS ever waits for a confirmation nobody can give.
+        timeout-minutes: 3
         run: node scripts/upgrade-fixtures.mjs trust
       - name: Exercise real downloads, installation, relaunch and MCP reconnection
         run: node scripts/test-signed-upgrade.mjs

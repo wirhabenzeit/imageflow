@@ -91,7 +91,7 @@ Squirrel also applies a staged update on ordinary Quit, without requesting relau
 
 **Signed upgrade test** performs actual native installation on a fresh Apple silicon runner, without publishing a GitHub Release. It runs with release preparation or on an existing trusted version tag. Its isolated app has bundle ID `ch.wirhabenzeit.imageflow.upgrade-test`, a separate book/profile, a compiled loopback-only feed and a test-only debugging port. Production builds cannot redirect their feed using environment variables. Fixtures do not register the production document types.
 
-The workflow builds four versions without Apple credentials, signs them using the existing temporary-keychain helper, removes signing credentials, creates a fresh one-day self-signed loopback certificate (a leaf, `CA:FALSE`, trusted for SSL only, so it cannot vouch for any other host), trusts it in the ephemeral runner account, and runs three real transitions:
+The workflow builds four versions without Apple credentials, signs them using the existing temporary-keychain helper, removes signing credentials, creates a fresh one-day self-signed loopback certificate (a leaf, `CA:FALSE`, trusted for SSL only, so it cannot vouch for any other host), trusts it in the ephemeral runner's system trust settings (passwordless `sudo`; changing the user's trust settings would wait for a confirmation dialog nobody can answer), and runs three real transitions:
 
 1. `9.9.9-beta.1 → 9.9.9-beta.2` on Beta.
 2. `9.9.9-beta.2 → 9.9.9` on Beta (same-version final release).

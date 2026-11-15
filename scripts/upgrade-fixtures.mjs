@@ -20,16 +20,28 @@ export function child(args, env = process.env) {
   });
 }
 // Remove this run's (or an interrupted earlier run's) loopback certificate from the keychain, then delete it and its key.
+// Changing the user's trust settings asks for confirmation in a system dialog, which nobody can answer on a CI runner
+// (the trust step waited until the job timed out). GitHub's macOS runners are ephemeral with passwordless sudo, so there
+// the certificate is trusted in the admin trust settings instead, which needs no dialog. Local runs keep the user
+// domain and its one-time confirmation.
+const adminTrust = process.env.GITHUB_ACTIONS === 'true';
+const systemKeychain = '/Library/Keychains/System.keychain';
+const security = (args, admin = adminTrust) => admin ? run('sudo', ['-n', 'security', ...args]) : run('security', args);
 async function untrust() {
   const certificate = join(work, 'tls.crt');
   try { await access(certificate); } catch { return; }
-  try { await run('security', ['remove-trusted-cert', certificate]); } catch { /* trust settings may already be gone */ }
-  try {
-    const keychain = JSON.parse(await readFile(join(work, 'tls-keychain.json'), 'utf8'));
+  let saved;
+  try { saved = JSON.parse(await readFile(join(work, 'tls-keychain.json'), 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  // Earlier runs saved only the keychain path, for the user domain.
+  const { keychain, admin } = typeof saved === 'string' ? { keychain: saved, admin: false } : saved ?? {};
+  // In the admin domain remove-trusted-cert waits for a confirmation even with sudo; deleting the certificate from the
+  // System keychain removes it together with its trust settings (checked on a GitHub runner).
+  if (!admin) { try { await security(['remove-trusted-cert', certificate], false); } catch { /* trust settings may already be gone */ } }
+  if (keychain) {
     const { stdout } = await run('openssl', ['x509', '-in', certificate, '-noout', '-fingerprint', '-sha1']);
     const digest = stdout.trim().split('=').at(-1).replaceAll(':', '');
-    await run('security', ['delete-certificate', '-Z', digest, keychain]).catch(() => {});
-  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    await security(['delete-certificate', '-Z', digest, keychain], !!admin).catch(() => {});
+  }
   await rm(join(work, 'tls.key'), { force: true });
   await rm(certificate, { force: true });
 }
@@ -69,10 +81,9 @@ else if (command === 'build') {
   await run('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-sha256', '-keyout', join(work, 'tls.key'),
     '-out', join(work, 'tls.crt'), '-config', join(work, 'tls.conf')]);
   await chmod(join(work, 'tls.key'), 0o600);
-  const { stdout } = await run('security', ['default-keychain', '-d', 'user']);
-  const keychain = JSON.parse(stdout.trim());
-  await writeFile(join(work, 'tls-keychain.json'), JSON.stringify(keychain));
-  await run('security', ['add-trusted-cert', '-r', 'trustRoot', '-p', 'ssl', '-k', keychain, join(work, 'tls.crt')]);
+  const keychain = adminTrust ? systemKeychain : JSON.parse((await run('security', ['default-keychain', '-d', 'user'])).stdout.trim());
+  await writeFile(join(work, 'tls-keychain.json'), JSON.stringify({ keychain, admin: adminTrust }));
+  await security(['add-trusted-cert', ...(adminTrust ? ['-d'] : []), '-r', 'trustRoot', '-p', 'ssl', '-k', keychain, join(work, 'tls.crt')]);
 } else if (command === 'untrust') {
   await untrust();
 } else throw new Error('Choose prepare, build, trust or untrust.');
