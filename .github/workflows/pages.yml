@@ -18,14 +18,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # GitHub Pages accepted deployments made from a release's tag context but kept serving the previous site
+  # (v1.0.0-beta.3: both release-triggered deployments reported success; the feed stayed empty until main deployed
+  # again). A release event therefore starts this workflow on main instead of deploying from the tag.
+  release-refresh:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Rebuild the site and update feeds from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run pages.yml --ref main
+
   build:
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      feeds: ${{ steps.feeds.outputs.feeds }}
     steps:
       - uses: actions/checkout@v6
         with:
-          # Releases run in a tag context. Always publish current main, including
-          # its documentation, rather than replacing it with an older tag's site.
           ref: ${{ github.event_name == 'pull_request' && github.sha || 'main' }}
           persist-credentials: false
           fetch-depth: 0
@@ -60,13 +77,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: node scripts/generate-update-feeds.mjs .build/pages
+      - name: Record the versions the feeds announce
+        id: feeds
+        run: |
+          version() { node -e 'const f=process.argv[1]; try { console.log(require(f).release?.version ?? "none") } catch { console.log("missing") }' "$PWD/.build/pages/updates/$1/darwin-arm64/RELEASES.json"; }
+          echo "feeds=beta:$(version beta) stable:$(version stable)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-pages-artifact@v4
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'release')
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         with:
           path: .build/pages
 
   deploy:
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.event_name == 'release')
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -80,3 +102,24 @@ jobs:
       - name: Publish documentation and update feeds together
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # A deployment can report success without going live, so check what visitors and installed apps actually get.
+  verify:
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: The live update feeds match this build
+        env:
+          EXPECTED: ${{ needs.build.outputs.feeds }}
+        run: |
+          base='https://wirhabenzeit.github.io/imageflow/updates'
+          live() { curl -fsS "$base/$1/darwin-arm64/RELEASES.json?run=$GITHUB_RUN_ID-$RANDOM" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d).release?.version ?? "none"))'; }
+          # The Pages CDN caches for up to ten minutes.
+          for attempt in $(seq 1 26); do
+            actual="beta:$(live beta || echo error) stable:$(live stable || echo error)"
+            [ "$actual" = "$EXPECTED" ] && { echo "Live feeds: $actual"; exit 0; }
+            sleep 30
+          done
+          echo "::error::Live feeds show '$actual', this build announces '$EXPECTED'."
+          exit 1
