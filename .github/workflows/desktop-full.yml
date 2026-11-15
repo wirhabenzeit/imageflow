@@ -1,7 +1,10 @@
 name: Full desktop suite
 
-# Manual only: start it from Actions before a release or after risky desktop changes.
+# Runs nightly on main, so a breakage shows up within a day of the merge that caused it, without slowing down PRs.
+# It can also be started from Actions, for example on a release candidate or a risky branch.
 on:
+  schedule:
+    - cron: '30 2 * * *'
   workflow_dispatch:
 
 permissions:
