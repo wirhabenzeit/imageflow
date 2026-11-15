@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { PDFDocument } from 'pdf-lib';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { closeApp, testBook } from './ui-actions.mjs';
 
 // Check the completed PDF as well as layout findings, with one confirmation before any destination is changed.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -66,4 +66,7 @@ spreads:{page:{label:'Page',render:()=>{${kind === 'fatal' ? "throw new Error('E
     }
   }
   console.log('PDF export passed: clean output, layout/PDF errors, Cancel, Export Anyway, overwrite preservation and fatal render failures.');
-} finally { await app.close(); }
+} finally {
+  await closeApp(app);
+  await rm(work, { recursive: true, force: true });
+}

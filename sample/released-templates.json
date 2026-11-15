@@ -1,4 +1,17 @@
 {
   "schema": 1,
-  "templates": {}
+  "templates": {
+    "006c26492e141da78e89f3734cf189d76b454893e4e6f04fa52052921f994399": {
+      "template": "starter",
+      "app": "1.0.0-beta.1"
+    },
+    "9cb7bbcf3b4eb689e79145ff02b9b680aee22534f0c971aa70d1ca3af9f24978": {
+      "template": "calendar",
+      "app": "1.0.0-beta.1"
+    },
+    "099a9cae7d4793aedcc737fb35fe80309378e8aee865ae8297417be3a8d820c7": {
+      "template": "typography",
+      "app": "1.0.0-beta.1"
+    }
+  }
 }

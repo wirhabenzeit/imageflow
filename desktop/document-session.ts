@@ -9,7 +9,7 @@ import type { FSWatcher } from 'node:fs';
 import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { channels, desktopScheme, issueText, renderOrigin } from '../src/desktop';
-import type { BookMenuState, CanvasLayout, ImportRequest, ProjectChange, ProjectSummary, Result } from '../src/desktop';
+import type { BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
 import type { RenderProject } from '../src/project';
 import { printBook, savePdf } from './export';
@@ -54,6 +54,14 @@ async function fingerprint(path: string) {
 
 
 /** A window owns its writer, history, watchers, jobs and agent queue until all work has settled. */
+// The export confirmation names the first few errors; Book check lists them all.
+const shownExportErrors = 8;
+function exportErrorList(errors: Issue[]) {
+  const shown = errors.slice(0, shownExportErrors).map(issueText);
+  const more = errors.length - shown.length;
+  return shown.join('\n') + (more > 0 ? '\n…and ' + more + ' more ' + (more === 1 ? 'error' : 'errors') + ' in Book check.' : '');
+}
+
 export class DocumentSession {
   active!: { id: string; book: OpenProject };
   busy = false;
@@ -616,7 +624,7 @@ export class DocumentSession {
         const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id, fonts, job.signal, progress);
         if (errors.length) {
           const choice = await dialog.showMessageBox(owner, { type: 'warning', message: 'Export PDF with errors?',
-            detail: errors.map(issueText).join('\n') + '\n\nThe PDF may contain missing content or printing problems. Pages with unavailable originals will be marked. Export anyway?',
+            detail: exportErrorList(errors) + '\n\nThe PDF may contain missing content or printing problems. Pages with unavailable originals will be marked. Export anyway?',
             buttons: ['Cancel', 'Export Anyway'], defaultId: 0, cancelId: 0 });
           if (choice.response !== 1) return null;
         }

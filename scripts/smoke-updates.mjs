@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
+import semver from 'semver';
 import { menuAction, testBook } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
 
@@ -55,10 +56,15 @@ try {
   await automatic.uncheck();
   await savedSetting('automaticUpdates', false);
   const channel = settings.getByRole('combobox', { name: 'Update channel' });
-  assert.equal(await channel.inputValue(), 'stable');
-  await channel.selectOption('beta');
-  await savedSetting('updateChannel', 'beta');
-  await channel.selectOption('stable');
+  // A fresh install starts on its own release's channel (releaseChannel in src/update-feed.ts): Beta for a -beta.N
+  // version, Stable otherwise.
+  const version = await instance.evaluate(({ app }) => app.getVersion());
+  const fresh = semver.prerelease(version)?.[0] === 'beta' ? 'beta' : 'stable';
+  const other = fresh === 'beta' ? 'stable' : 'beta';
+  assert.equal(await channel.inputValue(), fresh, 'the default channel for ' + version);
+  await channel.selectOption(other);
+  await savedSetting('updateChannel', other);
+  await channel.selectOption(fresh);
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('update-not-available'); });
   await settings.getByText('You’re up to date.', { exact: true }).waitFor();
   await instance.evaluate(({ autoUpdater }) => { autoUpdater.emit('error', new Error('offline')); });
