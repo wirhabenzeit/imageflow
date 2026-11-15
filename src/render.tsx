@@ -384,7 +384,7 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
 // one column and book order runs left to right, then continues on the next row. The book grows vertically.
 type GridRequest = { columns: number };
 function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest) {
-  if (view === 'thumbs') {
+  if (view === 'thumbs' || view === 'book') {
     let animations: Animation[] = [];
     window.addEventListener('message', (event: MessageEvent) => {
       if (event.source !== parent || event.origin !== 'imageflow://editor') return;
