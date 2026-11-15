@@ -1367,6 +1367,21 @@ void app.whenReady().then(async () => {
     const files = await Promise.all(entries.map((entry) => originalPath(document.book.folder, entry)));
     if (files.length) assetsWindows.get(document)?.window.webContents.startDrag({ file: files[0], files, icon: await app.getFileIcon(files[0]) });
   });
+  // Document icons are the same for every file of a type, so they are looked up by extension and kept.
+  const fileIcons = new Map<string, string>();
+  ipcMain.handle(channels.fileIcons, async (event, extensions: unknown) => {
+    const found: Record<string, string> = {};
+    if (!(editorOwner(event) ?? assetsOwner(event)) || !Array.isArray(extensions) || extensions.length > 64) return found;
+    for (const extension of extensions) {
+      if (typeof extension !== 'string' || !/^[a-z0-9]{0,10}$/.test(extension)) continue;
+      if (!fileIcons.has(extension)) {
+        const icon = await app.getFileIcon(join(app.getPath('temp'), 'file' + (extension && '.' + extension))).then((image) => image.isEmpty() ? '' : image.toDataURL({ scaleFactor: 2 })).catch(() => '');
+        fileIcons.set(extension, icon);
+      }
+      if (fileIcons.get(extension)) found[extension] = fileIcons.get(extension)!;
+    }
+    return found;
+  });
   ipcMain.handle(channels.showAssets, (event, accept: unknown) => {
     const document = editorOwner(event);
     if (!document || document.closing || !Array.isArray(accept) || !accept.every((ext) => typeof ext === 'string' && /^\.[a-z0-9]{1,10}$/.test(ext)))

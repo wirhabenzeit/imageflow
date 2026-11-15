@@ -49,7 +49,7 @@ import type { PictureStatus } from './BookFrame';
 import type { BookCheck } from './BookCheck';
 import { QuickLook, Sources } from './Sources';
 import { keptMime, photosMime, photoMime, sourceList, sourceTitle, textMime } from './source-items';
-import type { SourceKind, SourceRef } from './source-items';
+import type { SourceKind, SourceRef, SourcesTab } from './source-items';
 import { hasFacingPages, hasSingleEnds, pageNumbers, pageLabel, pageSequence, pagesText, resolveFormat, sheetPages } from './format';
 import type { ResolvedFormat } from './format';
 import type { ProjectFiles, SpreadState } from './project';
@@ -200,7 +200,7 @@ export function App() {
   const [showGuides, setShowGuides] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const [dropTarget, setDropTarget] = useState<string>();
-  const [sourceTab, setSourceTab] = useState<SourceKind>('photo');
+  const [sourceTab, setSourceTab] = useState<SourcesTab>('photo');
   // Selection is exclusive: a source from the strip, or else the current spread.
   const [selectedSource, setSelectedSource] = useState<SourceRef>();
   const [focusBox, setFocusBox] = useState<{ box: string; at: number }>();
@@ -479,7 +479,8 @@ export function App() {
       // Imports into the library select the first new source; imports onto a box keep the spread selected.
       if (!request.target && result.value.imported.length) {
         const kind = result.value.summary.photoIndex[result.value.imported[0]] ? 'photo' : 'text';
-        setSourceTab(kind);
+        // The Assets tab lists everything, so an import there stays on it.
+        setSourceTab((tab) => tab === 'assets' ? tab : kind);
         setSelectedSource({ kind, id: result.value.imported[0] });
       }
       setNotice(importFeedback(result.value.imported.length, result.value.counts));
@@ -1007,7 +1008,7 @@ export function App() {
       case 'box-reset-crop': changeSpreadAt(sheet, (spread) => { const box = spread.boxes[top.id]; if (box?.photo) setPlacement(box, spread.definition, centered); }, 'Crop reset'); break;
       case 'box-edit-text': openOwner(sheet, { type: 'markdown', id: top.id }); break;
       case 'asset-preview': if (source) setQuick(source); break;
-      case 'box-show-assets': if (source) { choose(source); showPanel('bottom'); } break;
+      case 'box-show-assets': if (source) { choose(source, true); showPanel('bottom'); } break;
       case 'box-remove-photo': case 'box-remove-text': changeSpreadAt(sheet, (spread) => { spread.boxes[top.id] = { params: spread.boxes[top.id]?.params ?? {} }; }, photo ? 'Photo removed' : 'Text removed'); setCropping(undefined); break;
     }
   }
@@ -1438,9 +1439,11 @@ export function App() {
     if (state?.photo) return { kind: 'photo', id: state.photo };
     if (state?.text) return { kind: 'text', id: state.text };
   }
-  function choose(source: SourceRef) {
+  // Choosing a source shows it in its own tab, except from the Assets tab, which already lists it and would lose
+  // its place when Quick Look steps through sources. Showing a box's source from the canvas always goes to its tab.
+  function choose(source: SourceRef, show = false) {
     setSelectedSource(source);
-    setSourceTab(source.kind);
+    setSourceTab((tab) => tab === 'assets' && !show ? tab : source.kind);
   }
 
   const quickItems = useMemo(() => summary && quick ? sourceList(summary, quick.kind, photoView.value) : [], [summary, quick, photoView.value]);

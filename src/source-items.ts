@@ -13,6 +13,8 @@ export const textMime = 'application/x-imageflow-text';
 export const keptMime = 'application/x-imageflow-kept';
 export type SourceKind = 'photo' | 'text';
 export type SourceRef = { kind: SourceKind; id: string };
+// The bottom panel shows photos and texts as thumbnails, or every asset as a plain list.
+export type SourcesTab = SourceKind | 'assets';
 
 // Imported files are stored as "<id>-<name>"; show the original name.
 export const fileName = (path: SourceReference) => (sourcePath(path).split('/').pop() ?? sourcePath(path)).replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');

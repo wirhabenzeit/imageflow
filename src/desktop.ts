@@ -22,7 +22,7 @@ export const renderOrigin = desktopScheme + '://render';
 export const channels = {
   updateState: 'app:update-state', updateChanged: 'app:update-changed', checkUpdates: 'app:check-updates', restartUpdate: 'app:restart-update', dismissUpdate: 'app:dismiss-update',
   prepareQuit: 'app:prepare-quit', prepareQuitAck: 'app:prepare-quit-ack', prepareQuitReply: 'app:prepare-quit-reply', cancelQuit: 'app:cancel-quit',
-  contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', toolbarDragRegions: 'document:toolbar-drag-regions', presentation: 'document:presentation', dragSources: 'document:drag-sources',
+  contextMenu: 'app:context-menu', popupMenu: 'app:popup-menu', documentProxy: 'document:proxy', toolbarDragRegions: 'document:toolbar-drag-regions', presentation: 'document:presentation', dragSources: 'document:drag-sources', fileIcons: 'document:file-icons',
   showMarkdown: 'markdown:open', markdownAction: 'markdown:action', markdownChanged: 'markdown:changed', markdownPrepareClose: 'markdown:prepare-close',
   presentationState: 'presentation:state', presentationSpread: 'presentation:spread', presentationClose: 'presentation:close', presentationClosed: 'presentation:closed',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
@@ -124,6 +124,8 @@ export type DesktopApi = {
   documentProxy(action: 'path' | 'drag'): Promise<void>;
   setToolbarDragRegions(regions: Rect[]): Promise<void>;
   dragSources(keys: string[]): Promise<void>;
+  // The system document icon of each file extension, as image data URLs keyed by extension.
+  fileIcons(extensions: string[]): Promise<Record<string, string>>;
   showAssets(accept: string[]): Promise<Result<void>>;
   showTemplates(): Promise<void>;
   templatePreview(id: string, hash: string): Promise<Result<string | null>>;
