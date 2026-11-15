@@ -25,8 +25,10 @@ Drag dividers to resize panels. With a divider focused, use arrow keys to resize
 
 **View → Vertical** stacks spreads in one column. **Grid** uses one to four columns, selected under **View → Columns**. **View → Show Guides** toggles guides. Each book remembers its canvas layout on this Mac.
 
-Choose **View → Presentation** (⇧W) to present from the current spread, or **Present from Beginning** (⌥⇧W).
+Choose **View → Presentation** (⇧W) to present from the current spread, or **Present from Beginning** (⌥⇧W). Presentation opens a separate fullscreen window on the editor's display. Escape or Close Window dismisses it and returns to the last viewed spread. Closing the book closes its presentation; starting from another book switches to that book.
 
 ## Appearance
 
 **ImageFlow → Settings…** (⌘,) opens settings. Under **General**, choose Light, Dark or System. This changes the app's appearance; book pages and PDFs keep the template's colours.
+
+For automatic update checks, Stable/Beta channels and **Restart to Update**, see [Updates](getting-started.md#updates).
