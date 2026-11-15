@@ -20,4 +20,4 @@ At export:
 
 - The format's checks: page count rule, transparency policy, fonts, resolution of each placed photo, file size.
 
-Errors in edit mode appear in Book check. Print export blocks on render errors and PDF preflight failures. Proof export permits reported layout errors, but still requires a successful render and correct PDF page count and dimensions. Warnings do not block print export.
+Errors in edit mode appear in Book check. PDF export reports layout errors and PDF preflight failures, then asks whether to export anyway. It still requires a successful render and correct PDF page count and dimensions. Warnings do not require confirmation.

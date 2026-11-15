@@ -84,9 +84,9 @@ try {
   assert.deepEqual(bookCheck.warnings, [], bookCheck.warnings.map(({ where, message }) => where + ' · ' + message).join('\n'));
 
   await chooseSave(pdf);
-  await exportAction(window, 'Export print PDF');
-  await window.waitForFunction(() => document.querySelector('.status-error') || document.querySelector('.status')?.textContent === 'Print PDF saved.', null, { timeout: 45000 });
-  assert.equal(await status(), 'Print PDF saved.');
+  await exportAction(window);
+  await window.waitForFunction(() => document.querySelector('.status-error') || document.querySelector('.status')?.textContent === 'PDF saved.', null, { timeout: 45000 });
+  assert.equal(await status(), 'PDF saved.');
   const pages = (await PDFDocument.load(await readFile(pdf))).getPages();
   assert.equal(pages.length, 32);
   assert.equal(pages[0].getTrimBox().x, 0);

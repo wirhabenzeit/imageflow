@@ -5,6 +5,7 @@ import { sourcePath } from './source-locations';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { Fields } from './Fields';
+import { Icon } from './Icon';
 import type { BookGeometry, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
 import { layoutPreviewKey } from './layout-preview';
 import { BookFrame } from './BookFrame';
@@ -46,11 +47,14 @@ function LayoutPicker({ summary, spread, template, choose }: {
         const family = familyOf(id);
         const grouped = !family && item.family !== undefined && Object.hasOwn(families, item.family) ? families[item.family].label : undefined;
         return <button key={id} type="button" role="radio" disabled={pending} aria-checked={id === spread.definition} aria-label={name(id)}
-          aria-description={grouped}
+          aria-description={family ? 'Layout variants available' : grouped}
           className={'layout-option' + (family ? ' layout-family' : '')}
           style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
           onClick={() => { if (id !== spread.definition) choose(id); }}>
-          <span className="layout-option-label">{name(id)}</span>
+          <span className="layout-option-label">
+            <span className="layout-option-name">{name(id)}</span>
+            {family && <span className="layout-option-variants" title="Layout variants available" aria-hidden="true"><Icon name="cog" size={11} /></span>}
+          </span>
         </button>;
       })}
       <BookFrame project={preview.project} view="layouts" query={'spread=' + encodeURIComponent(spread.id)} title="Layout previews"

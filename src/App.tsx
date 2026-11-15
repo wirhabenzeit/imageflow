@@ -20,7 +20,6 @@ import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
 import type { TargetAnchor } from './edit-targets';
 import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { PanelDivider, useCanvasLayout, usePanels } from './panels';
-import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
 import type { CropPreview } from './BookFrame';
@@ -582,18 +581,18 @@ export function App() {
     enqueue(async () => {
       if (!api || agentLocked.current) return;
       const before = current.current;
-      if (command === 'export' || command === 'print') {
+      if (command === 'export') {
         if (!before || readyId.current !== before.id) return;
         setBusy('Preparing export…');
         setExporting(true);
-        const result = await api.exportBook(before.id, command === 'print' ? 'print' : 'proof');
+        const result = await api.exportBook(before.id);
         if ('error' in result) throw new Error(result.error);
         if (!result.value) return;
         // The export rendered the whole book; its result is the complete Book check for that project state.
         const { errors, warnings } = result.value;
         const counted = (n: number, word: string) => n ? n + ' ' + word + (n === 1 ? '' : 's') : '';
         const found = [counted(errors.length, 'error'), counted(warnings.length, 'warning')].filter(Boolean).join(', ');
-        setNotice((command === 'print' ? 'Print PDF saved.' : 'Proof PDF saved.') + (found ? ' ' + found + ' in Book check.' : ''));
+        setNotice('PDF saved.' + (found ? ' ' + found + ' in Book check.' : ''));
         if (before.id === current.current?.id) setCheck({ id: before.id, errors, warnings });
         return;
       }
@@ -981,7 +980,7 @@ export function App() {
     const choices = layoutPreviews(template.spreads, selected.definition, template.layoutFamilies ?? {}, template.format, { index: at, count: spreads.length });
     const result = await api.showContextMenu(['add-spread', { command: 'duplicate-spread', label: ids.length > 1 ? 'Duplicate ' + ids.length + ' Spreads' : undefined }, 'move-spread-up', 'move-spread-down',
       'move-spread-start', 'move-spread-end', ...(choices.length > 1 && ids.length === 1 ? [{ command: 'change-layout' as const, items: choices.map((value) => ({ command: 'change-layout' as const, value, label: template.spreads[value].label, checked: value === selected.definition })) }] : []),
-      { type: 'separator' }, 'presentation', ...(spreadIssues.has(id) ? [{ command: 'book-check' as const, label: 'Check This Spread' }] : []), { command: 'delete-spread', label: ids.length > 1 ? 'Delete ' + ids.length + ' Spreads' : undefined }], state);
+      { type: 'separator' }, ...(spreadIssues.has(id) ? [{ command: 'book-check' as const, label: 'Check This Spread' }] : []), { command: 'delete-spread', label: ids.length > 1 ? 'Delete ' + ids.length + ' Spreads' : undefined }], state);
     if (current.current?.id !== summary?.id) return;
     const command = result?.command;
     if (command === 'change-layout' && result?.value && choices.includes(result.value)) changeSpreadAt(id, (state) => { switchLayout(state, result.value!, template.spreads); }, 'Layout changed');
@@ -992,7 +991,6 @@ export function App() {
     else if (command === 'move-spread-down') moveSelected(ids, 'down');
     else if (command === 'move-spread-start') moveSelected(ids, 'start');
     else if (command === 'move-spread-end') moveSelected(ids, 'end');
-    else if (command === 'presentation') present(id);
     else if (command === 'book-check') { setCheckScope(id); setCheckRequest((value) => value + 1); }
   }
   async function canvasMenu(event: Pick<React.MouseEvent, 'clientX' | 'clientY' | 'preventDefault'>) {
@@ -1550,17 +1548,17 @@ export function App() {
     'move-spread-up': canMoveUp, 'move-spread-down': canMoveDown, 'delete-spread': canDelete && spreadFocused },
     editing: controlFocused || !!editing || !!cropping || !!elementEditor || !!quick, textEditing,
     writable, busy: !!busy || exporting || !!reload || agentWorking, history: summary?.history,
-    canExport, canPrint: canExport && checkCurrent && !check?.errors.length,
+    canExport,
     sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom, selectedSpread: spreadId, photoView: photoView.value, selectionCount: selectedSpreads.length,
     saving, pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };
   const menuKey = JSON.stringify(menuState);
   useEffect(() => { void api?.setBookMenuState(menuState); }, [api, menuKey]);
   const undoCommand = commandState('undo', menuState), redoCommand = commandState('redo', menuState);
-  const pdfCommand = commandState('export', menuState), printCommand = commandState('print', menuState);
+  const pdfCommand = commandState('export', menuState);
 
   const format = formatOf(template);
-  // A saved format the template's named formats no longer include; the Book check reports it and print export is
-  // blocked. A template with one fixed format offers no choices and ignores the saved one.
+  // The Book check and export report a saved format the template no longer includes.
+  // A template with one fixed format offers no choices and ignores the saved one.
   const missingFormat = !!template && Object.keys(template.formats).length > 0 && !!summary?.project.format &&
     !Object.hasOwn(template.formats, summary.project.format);
   const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
@@ -1652,12 +1650,8 @@ export function App() {
       <div className="toolbar-actions">
         <button className="toolbar-icon" aria-label="Presentation" title="Presentation (⇧W)" disabled={!summary || !!editing || !!cropping} onClick={() => act('presentation')}><Icon name="play" /></button>
         <div className="export-area">
-          {exporting ? <div className="export-progress"><span role="status" title={busy}>{busy}</span><button onClick={() => void api?.cancelExport()}>Cancel export</button></div> : <ActionMenu className="export-menu" disabled={!summary} label={<><Icon name="export" /><span>Export</span><Icon name="chevron" /></>}>
-            <div className="export-choices">
-              <button className="primary" disabled={!printCommand.enabled} title={!checkCurrent ? 'Checking book…' : check?.errors.length ? 'Resolve book check errors' : undefined} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('print'); }}>Export for Print…</button>
-              <button disabled={!pdfCommand.enabled} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); act('export'); }}>Export PDF…</button>
-            </div>
-          </ActionMenu>}
+          {exporting ? <div className="export-progress"><span role="status" title={busy}>{busy}</span><button onClick={() => void api?.cancelExport()}>Cancel export</button></div>
+            : <button className="export-button" disabled={!pdfCommand.enabled} title="Export PDF… (⌘E)" onClick={() => act('export')}><Icon name="export" /><span>Export PDF…</span></button>}
         </div>
         <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘I)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>
@@ -1693,6 +1687,12 @@ export function App() {
             <span className="eyebrow">Spreads</span>
             <div className="icon-actions">
               <button aria-label="Add" title="Add spread" disabled={!canAdd} onClick={() => add()}><Icon name="add" /></button>
+              <button aria-label="Duplicate" title={selectedSpreads.length > 1 ? `Duplicate ${selectedSpreads.length} spreads` : 'Duplicate spread'} disabled={!canDuplicate}
+                onClick={() => { if (selectedSpreads.length > 1) duplicateSelected(selectedSpreads); else add(true); }}><Icon name="duplicate" /></button>
+              <button aria-label="Move spread up" title="Move up (⌥⌘↑)" disabled={!canMoveUp} onClick={() => moveSelected(selectedSpreads, 'up')}><Icon name="up" /></button>
+              <button aria-label="Move spread down" title="Move down (⌥⌘↓)" disabled={!canMoveDown} onClick={() => moveSelected(selectedSpreads, 'down')}><Icon name="down" /></button>
+              <button aria-label="Delete" title={selectedSpreads.length > 1 ? `Delete ${selectedSpreads.length} spreads` : 'Delete spread'} disabled={!canDelete}
+                onClick={() => deleteSelected(selectedSpreads)}><Icon name="delete" /></button>
             </div>
           </div>
           <div className="thumbs-scroll" onDragOver={reorder.over} onDragLeave={reorder.leave} onDrop={reorder.drop}>

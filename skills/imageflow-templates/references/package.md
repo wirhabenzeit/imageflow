@@ -34,7 +34,7 @@ The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided b
 
 Agents receive them with `get_authoring_context` and `includeExamples`. To start a template, copy `minimal.tsx` (or the closest example) and add layouts. To extend one, copy a single layout and its declarations. The starter template is the complete reference book, not a required starting point.
 
-The examples use the generic `serif` and `sans-serif` font families, so they preview anywhere but **print export rejects them**: print preflight accepts only fonts bundled inside `template/` and loaded with `@font-face` from CSS the template imports. Before printing, add font files to `template/fonts/`, import a stylesheet that declares them, and use those families. The starter template shows the pattern ([Fonts and output](css-contract.md#fonts-and-output)).
+The examples use the generic `serif` and `sans-serif` font families, so they preview anywhere but **PDF export reports them as errors and asks for confirmation**: PDF preflight expects fonts bundled inside `template/` and loaded with `@font-face` from CSS the template imports. Before printing, add font files to `template/fonts/`, import a stylesheet that declares them, and use those families. The starter template shows the pattern ([Fonts and output](css-contract.md#fonts-and-output)).
 
 ## Requirements and compatibility
 

@@ -5,8 +5,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, rgb }
 import type { PDFObject } from 'pdf-lib';
 import { formatSchema, pdfPoints, resolveFormat, trimBox } from '../src/format';
 import { parseDocument } from '../src/project';
-import { issueText } from '../src/desktop';
-import type { ExportMode, Issue, RenderStatus } from '../src/desktop';
+import type { Issue, RenderStatus } from '../src/desktop';
 import { isUnavailableSource } from '../src/source-diagnostics';
 import { renderIdleMs } from '../src/render-budget';
 
@@ -49,7 +48,7 @@ function preflightPage(page: PDFDict, resources: PDFDict | undefined, fontNames:
   return [...errors];
 }
 
-export async function printBook(url: string, mode: ExportMode, fontNames: string[], signal: AbortSignal, progress: (message: string) => void) {
+export async function printBook(url: string, fontNames: string[], signal: AbortSignal, progress: (message: string) => void) {
   signal.throwIfAborted();
   const window = new BrowserWindow({
     show: false,
@@ -83,7 +82,6 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
       })
     `);
     if (status.state === 'error') throw new Error(status.message);
-    if (mode === 'print' && status.errors.length) throw new Error(status.errors.map(issueText).join('\n'));
     if (!status.units.length) throw new Error('The book has no spreads yet. Add a spread before exporting.');
     const format = parseDocument(formatSchema, status.template.format, 'Print format');
     const resolved = resolveFormat(format);
@@ -109,33 +107,31 @@ export async function printBook(url: string, mode: ExportMode, fontNames: string
       page.setCropBox(0, 0, widthPt, heightPt);
       page.setBleedBox(0, 0, widthPt, heightPt);
       page.setTrimBox(pdfPoints(box.x), pdfPoints(box.y), pdfPoints(box.width), pdfPoints(box.height));
-      if (mode === 'proof' && status.errors.some((issue) => isUnavailableSource(issue) &&
+      for (const issue of preflightPage(page.node, page.node.Resources(), fontNames, format.output.transparency === 'forbid')) {
+        issues.add(where + ' · ' + issue[0].toUpperCase() + issue.slice(1) + '.');
+      }
+      if (status.errors.some((issue) => isUnavailableSource(issue) &&
           (!issue.spread || issue.spread === status.units[index].spread))) {
         page.drawRectangle({ x: 0, y: 0, width: widthPt, height: 22, color: rgb(1, .91, .86), opacity: .96 });
-        page.drawText('PROOF: ORIGINAL UNAVAILABLE - cached content or placeholder', { x: 8, y: 7, size: 8, color: rgb(.65, .08, .05) });
-      }
-      if (mode === 'print') {
-        for (const issue of preflightPage(page.node, page.node.Resources(), fontNames, format.output.transparency === 'forbid')) {
-          issues.add(where + ' · ' + issue[0].toUpperCase() + issue.slice(1) + '.');
-        }
+        page.drawText('ORIGINAL UNAVAILABLE - cached content or placeholder', { x: 8, y: 7, size: 8, color: rgb(.65, .08, .05) });
       }
     }
-    if (issues.size) throw new Error([...issues].join('\n'));
+    const errors: Issue[] = [...status.errors, ...[...issues].map((message) => ({ message, code: 'pdf-resource' }))];
     signal.throwIfAborted();
     const bytes = await pdf.save();
     const limit = format.output.maximumFileSize?.pages;
-    if (mode === 'print' && limit && bytes.length > limit) {
-      throw new Error('The PDF is ' + Math.ceil(bytes.length / 1e6) + ' MB; the format allows ' + Math.floor(limit / 1e6) + ' MB.');
+    if (limit && bytes.length > limit) {
+      errors.push({ code: 'pdf-file-size', message: 'The PDF is ' + Math.ceil(bytes.length / 1e6) + ' MB; the format allows ' + Math.floor(limit / 1e6) + ' MB.' });
     }
-    // Proof export proceeds despite layout errors; return them so the editor's Book check keeps showing them.
-    return { bytes, warnings: status.warnings satisfies Issue[], errors: status.errors satisfies Issue[] };
+    // A usable PDF can be saved after the user reviews these findings. Rendering failures still abort above.
+    return { bytes, warnings: status.warnings satisfies Issue[], errors };
   } finally {
     signal.removeEventListener('abort', destroy);
     destroy();
   }
 }
 
-export async function saveProof(path: string, bytes: Uint8Array, signal: AbortSignal) {
+export async function savePdf(path: string, bytes: Uint8Array, signal: AbortSignal) {
   const staging = await mkdtemp(join(dirname(path), '.imageflow-'));
   try {
     const file = join(staging, 'book.pdf');

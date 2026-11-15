@@ -126,7 +126,7 @@ sidebar['/mcp'] = sidebar['/templates/'];
 
 export default defineConfig({
   title: 'ImageFlow',
-  description: 'Design photobooks on the Mac from your photos, Markdown and code-based templates.',
+  description: 'Designed in code. Composed by eye. Design photobooks and calendars on macOS from photos, Markdown and editable templates.',
   srcDir: '../docs',
   srcExclude: ['template-api.md', 'benchmarks/**', 'README.md'],
   base,

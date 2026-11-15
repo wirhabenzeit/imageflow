@@ -3,7 +3,9 @@
   <img src="resources/brand/logo/imageflow-horizontal-light.svg" alt="ImageFlow" height="56">
 </picture></h1>
 
-ImageFlow is a macOS app for designing photobooks and wall calendars from photos, Markdown and editable templates. Arrange spreads, crop photos and edit text on the page, check the book as you work, and export proof or print-ready PDFs.
+**Designed in code. Composed by eye.**
+
+ImageFlow is a macOS app for designing photobooks and wall calendars from photos, Markdown and editable templates. Arrange spreads, crop photos and edit text on the page, check the book as you work, and export PDFs.
 
 [Documentation](https://wirhabenzeit.github.io/imageflow/) · [Getting started](https://wirhabenzeit.github.io/imageflow/guide/getting-started) · [Writing templates](https://wirhabenzeit.github.io/imageflow/templates/)
 

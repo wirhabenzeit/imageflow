@@ -25,6 +25,6 @@ defineTemplate({
 - The template fails to load if an entry names a layout that `spreads` does not declare, sets a parameter the layout does not have, or sets a value the parameter does not allow. TypeScript reports an undeclared layout as a property missing from `spreads`.
 - Single pages must sit at a book end that every declared format allows: a `right` page only first and a `left` page only last, in formats with `ends: 'single-pages'`.
 - The opening spreads don't need to meet the format's page count. Books are built up from them.
-- Without `openingSpreads`, a new book starts with no spreads. A book with no spreads is valid: the editor shows an empty state that offers the opening spreads, if the template has any, and every layout that can start a book. The Book check reports `book-empty` as an error, so neither proof nor print export is possible yet. Deleting the last spread also leaves an empty book.
+- Without `openingSpreads`, a new book starts with no spreads. A book with no spreads is valid: the editor shows an empty state that offers the opening spreads, if the template has any, and every layout that can start a book. The Book check reports `book-empty` as an error, so PDF export is unavailable until a spread is added. Deleting the last spread also leaves an empty book.
 
 The starter declares a title page, one *Photo and story* spread and the closing page.

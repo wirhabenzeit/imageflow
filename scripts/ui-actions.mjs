@@ -84,7 +84,7 @@ export async function testBook(app, path, create = false) {
   return page;
 }
 export async function menuAction(app, name) {
-  const labels = { 'New project…': 'New Book…', 'Open project…': 'Open…', 'Export Print PDF…': 'Export for Print…', 'Export Proof PDF…': 'Export PDF…', Reload: 'Reload from Disk', 'Reload Book': 'Reload from Disk',
+  const labels = { 'New project…': 'New Book…', 'Open project…': 'Open…', Reload: 'Reload from Disk', 'Reload Book': 'Reload from Disk',
     'Agent Connections…': 'Connect an Agent…', 'Move Spread Down': 'Move Down', 'Move Spread Up': 'Move Up', 'Add Spread': 'New Spread',
     'Show Book Check': 'Check Book', 'Save a Copy…': 'Duplicate…' };
   const ids = { 'Delete Spread': 'delete-spread', 'Undo Book Edit': 'undo', 'Redo Book Edit': 'redo', 'Undo Project Edit': 'undo', 'Redo Project Edit': 'redo' };
@@ -123,9 +123,7 @@ export async function popupAction(app, page, trigger, label) {
     poll();
   }));
 }
-export async function exportAction(page, name, app = pageApps.get(page)) {
-  if (!app) throw new Error('Register this book with testBook, or pass its Electron app to exportAction.');
-  const labels = { 'Export proof PDF': 'Export PDF…', 'Export print PDF': 'Export for Print…' };
+export async function exportAction(page) {
   await page.evaluate(() => {
     window.__exportStarted = false;
     const status = document.querySelector('.status');
@@ -138,7 +136,7 @@ export async function exportAction(page, name, app = pageApps.get(page)) {
     observer.observe(document.querySelector('.studio'), { subtree: true, childList: true, characterData: true });
     setTimeout(() => observer.disconnect(), 10000);
   });
-  await popupAction(app, page, page.locator('.export-menu .action-menu-trigger'), labels[name] ?? name);
+  await page.getByRole('button', { name: 'Export PDF…', exact: true }).click();
   await page.waitForFunction(() => window.__exportStarted);
 
 }

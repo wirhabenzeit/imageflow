@@ -111,7 +111,7 @@ try {
   let state = await current(page);
   let raced;
   for (let attempt = 0; attempt < 5; attempt++) {
-    raced = await page.evaluate((id) => window.imageflow.exportBook(id, 'proof'), (await current(page)).id);
+    raced = await page.evaluate((id) => window.imageflow.exportBook(id), (await current(page)).id);
     if (raced.code !== 'BOOK_BUSY' && !raced.error?.includes('while preparing export')) break;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -145,20 +145,23 @@ try {
   }, () => ready(page));
   assert.ok(checked.value?.diagnostics.some((finding) => finding.code === 'source-unavailable'), JSON.stringify(checked));
   const print = join(work, 'Missing-print.pdf');
-  await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, print);
-  const blocked = await page.evaluate((id) => window.imageflow.exportBook(id, 'print'), state.id);
-  assert.ok(blocked.error);
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = async () => ({ canceled: false, filePath });
+    dialog.showMessageBox = async () => ({ response: 0 });
+  }, print);
+  const blocked = await page.evaluate((id) => window.imageflow.exportBook(id), state.id);
+  assert.equal(blocked.value, null, 'Missing originals require confirmation before export');
   await assert.rejects(stat(print), { code: 'ENOENT' });
   const proof = join(work, 'Missing-proof.pdf');
   await app.evaluate(({ dialog }, filePath) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath });
     dialog.showMessageBox = async () => ({ response: 1 });
   }, proof);
-  const warned = await page.evaluate((id) => window.imageflow.exportBook(id, 'proof'), (await current(page)).id);
+  const warned = await page.evaluate((id) => window.imageflow.exportBook(id), (await current(page)).id);
   assert.ok(warned.value, JSON.stringify(warned));
   assert.ok(warned.value.errors.some((finding) => finding.code === 'source-unavailable'));
   await stat(proof);
-  assert.match(execFileSync('pdftotext', [proof, '-']).toString(), /PROOF: ORIGINAL UNAVAILABLE/);
+  assert.match(execFileSync('pdftotext', [proof, '-']).toString(), /ORIGINAL UNAVAILABLE/);
   await Promise.all([writeFile(photo, photoBytes), writeFile(text, textBytes), writeFile(file, fileBytes)]);
   await waitForPage(page, async () => Object.values((await window.imageflow.currentProject()).value.sources).every((source) => source.state === 'available'));
   await ready(page);
@@ -177,8 +180,9 @@ try {
   await waitForPage(page, async (id) => (await window.imageflow.currentProject()).value.sources['photo:' + id].state === 'missing', unusedId);
   const unusedPrint = join(work, 'Unused-missing-print.pdf');
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, unusedPrint);
-  const printable = await page.evaluate((id) => window.imageflow.exportBook(id, 'print'), (await current(page)).id);
+  const printable = await page.evaluate((id) => window.imageflow.exportBook(id), (await current(page)).id);
   assert.ok(printable.value, JSON.stringify(printable));
+  assert.deepEqual(printable.value.errors, [], 'An unused missing original does not introduce export errors');
   await stat(unusedPrint);
   await writeFile(unused, photoBytes);
   await waitForPage(page, async (id) => (await window.imageflow.currentProject()).value.sources['photo:' + id].state === 'available', unusedId);

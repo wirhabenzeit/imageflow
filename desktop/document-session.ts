@@ -1,7 +1,6 @@
 import { bookName } from '../src/book-name';
 import { SourceStore } from './source-store';
 import { sourceEntries } from '../src/source-locations';
-import { isUnavailableSource } from '../src/source-diagnostics';
 import { app, dialog, shell } from 'electron';
 import type { BrowserWindow } from 'electron';
 import { randomUUID } from 'node:crypto';
@@ -9,11 +8,11 @@ import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
-import { channels, desktopScheme, renderOrigin } from '../src/desktop';
-import type { BookMenuState, CanvasLayout, ExportMode, ImportRequest, ProjectChange, ProjectSummary, Result } from '../src/desktop';
+import { channels, desktopScheme, issueText, renderOrigin } from '../src/desktop';
+import type { BookMenuState, CanvasLayout, ImportRequest, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
 import type { RenderProject } from '../src/project';
-import { printBook, saveProof } from './export';
+import { printBook, savePdf } from './export';
 import { approveNetwork, approvedNetwork } from './source-access';
 import { importIntoProject, loadProject, projectSummary, readProjectManifest } from './project';
 import type { OpenProject } from './project';
@@ -593,7 +592,7 @@ export class DocumentSession {
   }
 
 
-  async exportBook(owner: BrowserWindow, projectId: string, mode: ExportMode) {
+  async exportBook(owner: BrowserWindow, projectId: string) {
     this.currentBook(projectId);
     const before = await this.projectSession.inputs.capture();
     const privateCache = await mkdtemp(join(this.cache, 'export-'));
@@ -601,11 +600,9 @@ export class DocumentSession {
       const book = await loadProject(this.book.folder, privateCache, true, true);
       const loaded = await this.projectSession.inputs.capture();
       if (before.revision !== loaded.revision || before.observation !== loaded.observation) throw new Error('Sources changed while preparing export. Please retry.');
-      if (mode !== 'proof' && mode !== 'print') throw new Error('Unknown export mode.');
-      const proof = mode === 'proof';
-      const fileName = bookName(book.folder).replace(/[^\p{L}\p{N} _-]/gu, '-').slice(0, 80) + (proof ? ' - Proof.pdf' : '.pdf');
+      const fileName = bookName(book.folder).replace(/[^\p{L}\p{N} _-]/gu, '-').slice(0, 80) + '.pdf';
       const { canceled, filePath } = await dialog.showSaveDialog(owner, {
-        title: proof ? 'Export Proof PDF' : 'Export Print PDF', defaultPath: join(app.getPath('documents'), fileName),
+        title: 'Export PDF', defaultPath: join(app.getPath('documents'), fileName),
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       });
       if (canceled || !filePath || owner.isDestroyed()) return null;
@@ -615,24 +612,25 @@ export class DocumentSession {
       this.renders.set(id, { book, mode: 'export', network: () => this.originsFor(book) });
       const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
       try {
-        const fonts = mode === 'print' ? bundledFontNames(book.assets.files) : [];
-        const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id, mode, fonts, job.signal, progress);
-        if (proof && errors.some(isUnavailableSource)) {
-          const choice = await dialog.showMessageBox(owner, { type: 'warning', message: 'Save a proof with unavailable sources?',
-            detail: 'This proof may contain cached previews or placeholders. Originals are required for print. Missing-source errors remain in Book check.',
-            buttons: ['Cancel', 'Save Proof'], defaultId: 0, cancelId: 0 });
+        const fonts = bundledFontNames(book.assets.files);
+        const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id, fonts, job.signal, progress);
+        if (errors.length) {
+          const choice = await dialog.showMessageBox(owner, { type: 'warning', message: 'Export PDF with errors?',
+            detail: errors.map(issueText).join('\n') + '\n\nThe PDF may contain missing content or printing problems. Pages with unavailable originals will be marked. Export anyway?',
+            buttons: ['Cancel', 'Export Anyway'], defaultId: 0, cancelId: 0 });
           if (choice.response !== 1) return null;
         }
         const after = await this.projectSession.inputs.capture({ signal: job.signal });
         if (before.revision !== after.revision || before.observation !== after.observation) throw new Error('Sources changed during export. No PDF was saved; retry after the external save finishes.');
         progress('Saving PDF…');
-        await saveProof(filePath, bytes, job.signal);
+        await savePdf(filePath, bytes, job.signal);
         return { warnings, errors };
       } catch (error) {
         if ((job.signal.reason as { networkWithdrawn?: boolean })?.networkWithdrawn) throw job.signal.reason;
         if (job.signal.aborted) return null;
         throw error;
       } finally {
+        progress('');
         this.exportJob = undefined;
         this.renders.delete(id);
       }

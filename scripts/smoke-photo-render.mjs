@@ -125,11 +125,14 @@ try {
 
   // Proof export waits for the SVG image and embeds it.
   const output = join(work, 'proof.pdf');
-  await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, output);
-  await exportAction(w, 'Export proof PDF');
+  await app.evaluate(({ dialog }, filePath) => {
+    dialog.showSaveDialog = async () => ({ canceled: false, filePath });
+    dialog.showMessageBox = async () => ({ response: 1 });
+  }, output);
+  await exportAction(w);
   await w.waitForFunction(() => document.querySelector('.status-error') ||
-    document.querySelector('.status')?.textContent?.startsWith('Proof PDF saved'), null, { timeout: 120000 });
-  assert.match(await w.locator('.status').textContent(), /^Proof PDF saved\./);
+    document.querySelector('.status')?.textContent?.startsWith('PDF saved'), null, { timeout: 120000 });
+  assert.match(await w.locator('.status').textContent(), /^PDF saved\./);
   const pdf = await PDFDocument.load(await readFile(output));
   const units = status.units;
   const page = units.findIndex(({ spread, side }) => spread === 'arriving' && side === 'left');
