@@ -240,3 +240,27 @@ test('Text shows formatting only for markdown strings, and never as HTML', () =>
   assert.ok(capabilities.includes('formatted-text'));
   assert.ok(runtimeExports.includes('FormattedText') && runtimeExports.includes('plainText'));
 });
+
+test('decorative marks text, boxes and elements so the Book check can skip them', () => {
+  const render = (decorative?: boolean) => {
+    const template = chooseFormat(templateSchema.parse({ id: 'decor', version: '1', contract: 1,
+      format: { label: 'F', trim: { width: mm(100), height: mm(100) },
+        bleed: { top: mm(0), bottom: mm(0), outside: mm(0), binding: mm(0) }, safe: { top: mm(5), bottom: mm(5), outside: mm(5), binding: mm(5) },
+        structure: { delivery: 'pages', ends: 'inside-covers', pageCount: { min: 2, max: 20, step: 2 } },
+        output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' } },
+      spreads: { main: { label: 'Main', parameters: { word: { type: 'string', label: 'Word', default: 'Big' } },
+        boxes: { text: { type: 'markdown', label: 'Text' } }, elements: { art: { label: 'Art' } },
+        render: (ctx: RenderContext) => createElement(runtime.Spread, {},
+          createElement(ctx.Text, { parameter: 'word', decorative }),
+          createElement(ctx.MarkdownBox, { id: 'text', decorative }),
+          createElement(ctx.Element, { id: 'art', decorative })) } } }));
+    const project = projectSchema.parse({ schemaVersion: 1, title: 'Decor', template: { id: 'decor', version: '1' },
+      spreads: [{ id: 'one', definition: 'main', params: {} }] });
+    const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+    return renderToStaticMarkup(createElement(SpreadView, { book, template, format: resolveFormat(template.format), spread: project.spreads[0],
+      page: { left: 1, right: 2 }, index: { pages: 2, anchors: [] }, positions: {}, renderPhotos: false }));
+  };
+  assert.equal(render(true).match(/data-decorative=""/g)?.length, 3);
+  assert.doesNotMatch(render(false), /data-decorative/);
+  assert.doesNotMatch(render(), /data-decorative/);
+});

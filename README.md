@@ -50,3 +50,7 @@ The [documentation site](https://wirhabenzeit.github.io/imageflow/) is built fro
 - [Documentation maintenance](docs/development/docs-site.md): sources, generation, link checks and publishing.
 
 Edit template API topics in `docs/template-api/`, then run `npm run generate:docs` to update the combined reference and [agent skill](skills/imageflow-templates/SKILL.md). Design proposals and early implementation plans are kept as history in the site's Development section.
+
+## License
+
+The source code is released under the [MIT License](LICENSE). The ImageFlow name, logo and icons and the sample photographs are not covered by it; see [ASSETS.md](ASSETS.md) for what applies to them, including your use of the sample photos that **File › New** copies into a book.
