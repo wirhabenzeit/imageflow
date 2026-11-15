@@ -5,9 +5,11 @@ import { readEdit, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import type { Project } from './project';
 
-// Text needs less screen area than a map, but still needs a usable caret and line.
+// Text needs less screen area than a map, but still needs a usable caret and line: 64 px along the line and 18 px
+// across it. Vertical text (a non-horizontal writing mode) runs its lines down the box, so the two sides swap.
 export function textFits(target: BookGeometry['targets'][number]) {
-  return target.inlineText && target.upright !== false && target.width >= 64 && target.height >= 18;
+  const [along, across] = target.vertical ? [target.height, target.width] : [target.width, target.height];
+  return target.inlineText && target.upright !== false && along >= 64 && across >= 18;
 }
 
 /** A custom editor remains the sole editing surface for the parameters it owns, including layout fields. */

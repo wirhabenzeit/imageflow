@@ -465,6 +465,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       targets: sheets.flatMap(({ spread, sheet }) => numberOccurrences([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
         spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node), upright: upright(node, sheet),
         ...(node.hasAttribute('data-inline-text') ? { inlineText: true } : {}),
+        ...(/^(vertical|sideways)/.test(getComputedStyle(node).writingMode) ? { vertical: true } : {}),
         ...(node.dataset.textFallback ? { textFallback: { parameter: node.dataset.edit!, text: node.dataset.textFallback,
           label: node.dataset.textFallbackLabel ?? 'inherited text' } } : {}),
         ...(node.dataset.box ? { owner: { type: 'box' as const, id: node.dataset.box } }

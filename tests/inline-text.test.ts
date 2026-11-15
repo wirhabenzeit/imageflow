@@ -28,6 +28,15 @@ test('small, transformed and non-opted-in targets use the parameter panel', () =
   assert.ok(!textFits({ ...target, height: 12 }));
 });
 
+test('vertical text needs length along its height and width for one line', () => {
+  const target = { spread: 'one', edits: ['heading'], occurrence: 0, inlineText: true, vertical: true, x: 0, y: 0, width: 30, height: 200 };
+  assert.ok(textFits(target));
+  assert.ok(!textFits({ ...target, width: 12 }));
+  assert.ok(!textFits({ ...target, height: 40 }));
+  // The same rectangle is too narrow for horizontal text.
+  assert.ok(!textFits({ ...target, vertical: false }));
+});
+
 const field = p.string({ label: 'Heading', default: 'Default', multiline: true, maxLength: 30 });
 const template = { parameters: { title: field }, spreads: { title: { parameters: { heading: field },
   boxes: { hero: { parameters: { caption: field } } }, elements: { note: { parameters: { text: field } } } } } };
