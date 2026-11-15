@@ -17,8 +17,10 @@ const manifestSchema = z.object({
   lockfile: z.string(),
   packages: z.record(z.string(), z.string()),
   modules: z.record(z.string(), z.object({ js: z.string().optional(), css: z.string().optional(), exports: z.array(z.string()) })),
-  // Packages without declarations: the type check sees them as `any` and warns.
+  // Imports without declarations: the type check sees them as `any` and warns.
   untyped: z.array(z.string()),
+  // The declaration entry of each typed import (subpaths included), relative to vendor/, as resolved when rebuilding.
+  types: z.record(z.string(), z.string()).optional(),
   licenses: z.record(z.string(), z.string()),
   // Each package's declared licence (its package.json `license`), shown before a template is imported.
   licenseNames: z.record(z.string(), z.string()).optional(),
@@ -117,24 +119,39 @@ async function licenseFiles(directory: string) {
 }
 
 /**
- * Copies the declaration files the given packages' types reach into `vendor/types/packages/`, laid out by package
- * name. The folder is not called node_modules, which .gitignore files and template export leave out.
+ * Copies the declaration files the given imports' types reach into `vendor/types/packages/`, laid out by package
+ * name. The folder is not called node_modules, which .gitignore files and template export leave out. Each import is
+ * resolved as written, subpath included, through `exports`, `types` and `typesVersions`, then `@types`; links (such as
+ * `file:` dependencies) are copied as they appear in node_modules. Returns the declaration entry of each typed import,
+ * relative to `vendor/`, and the imports without declarations.
  */
-async function vendorTypes(root: string, packages: string[], target: string) {
+async function vendorTypes(root: string, specifiers: string[], target: string) {
   const ts = (await import('typescript')).default;
   const options = { moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022,
-    types: [], noEmit: true, skipLibCheck: true };
+    types: [], noEmit: true, skipLibCheck: true, preserveSymlinks: true };
   const host = ts.createCompilerHost(options);
   const containing = join(root, 'index.ts');
+  const modules = join(root, 'node_modules');
   const untyped: string[] = [];
   const entries: string[] = [];
-  for (const name of packages) {
-    let resolved = ts.resolveModuleName(name, containing, options, host).resolvedModule;
-    if (!resolved?.extension.startsWith('.d.')) resolved = ts.resolveModuleName('@types/' + name.replace(/^@([^/]+)\//, '$1__'), containing, options, host).resolvedModule;
-    if (resolved?.extension.startsWith('.d.')) entries.push(resolved.resolvedFileName);
-    else untyped.push(name);
+  const types: Record<string, string> = {};
+  const declaration = (name: string) => {
+    const resolved = ts.resolveModuleName(name, containing, options, host).resolvedModule;
+    return resolved?.extension.startsWith('.d.') && inside(modules, resolved.resolvedFileName) ? resolved.resolvedFileName : undefined;
+  };
+  for (const specifier of specifiers) {
+    const name = packageName(specifier);
+    const entry = declaration(specifier) ?? declaration('@types/' + name.replace(/^@([^/]+)\//, '$1__') + specifier.slice(name.length));
+    if (!entry) { untyped.push(specifier); continue; }
+    entries.push(entry);
+    types[specifier] = slash(join('types', 'packages', relative(modules, entry)));
   }
-  const modules = join(root, 'node_modules');
+  // The package a copied file belongs to; nested node_modules belong to the innermost package.
+  const ownerOf = (path: string) => {
+    const parts = path.split(sep);
+    const index = parts.lastIndexOf('node_modules') + 1;
+    return parts.slice(0, index + (parts[index]?.startsWith('@') ? 2 : 1)).join(sep);
+  };
   const copied = new Set<string>();
   // Ambient @types packages the copied packages depend on (such as @types/geojson): they declare globals, so
   // nothing imports them; globals.d.ts references them for the type check and code editors.
@@ -149,7 +166,7 @@ async function vendorTypes(root: string, packages: string[], target: string) {
       await mkdir(dirname(join(target, path)), { recursive: true });
       await cp(file.fileName, join(target, path));
       // Each package's package.json, so `types` and `exports` resolve the same way from the copy.
-      const owner = path.split(sep).slice(0, path.startsWith('@') ? 2 : 1).join(sep);
+      const owner = ownerOf(path);
       if (!copied.has(owner)) {
         copied.add(owner);
         await cp(join(modules, owner, 'package.json'), join(target, owner, 'package.json')).catch(() => {});
@@ -170,7 +187,7 @@ async function vendorTypes(root: string, packages: string[], target: string) {
       return entry ? '/// <reference path="./packages/' + slash(relative(modules, entry)) + '" />' : '';
     }).filter(Boolean).join('\n') + '\n');
   }
-  return untyped;
+  return { types, untyped };
 }
 
 /**
@@ -246,8 +263,9 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
       } else manifest.licenses[name] = typeof info.license === 'string' ? info.license : '';
       manifest.licenseNames![name] = typeof info.license === 'string' ? info.license : '';
     }
-    manifest.untyped = await vendorTypes(root, [...new Set(specifiers.filter((specifier) => extname(specifier) !== '.css').map(packageName))],
-      join(staging, 'types', 'packages'));
+    const declarations = await vendorTypes(root, specifiers.filter((specifier) => extname(specifier) !== '.css'), join(staging, 'types', 'packages'));
+    manifest.untyped = declarations.untyped;
+    manifest.types = declarations.types;
     if (manifest.untyped.length) {
       await mkdir(join(staging, 'types'), { recursive: true });
       await writeFile(join(staging, 'types', 'untyped.d.ts'), manifest.untyped.map((name) => 'declare module ' + JSON.stringify(name) + ';').join('\n') + '\n');
@@ -256,7 +274,7 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
     await writeFile(join(staging, '.gitignore'), '# The saved dependency bundle of this template (ImageFlow ADR 0006). Keep every file.\n!*\n');
     await writeFile(join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await replace();
-    await updateTsconfig(root);
+    await updateTsconfig(root, manifest);
     return manifest;
   } finally {
     await rm(staging, { recursive: true, force: true });
@@ -264,12 +282,16 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
 }
 
 /** Points code editors at the vendored declarations, as the book's type check does, when tsconfig.json is plain JSON. */
-async function updateTsconfig(root: string) {
+async function updateTsconfig(root: string, manifest: DependencyManifest) {
   const path = join(root, 'tsconfig.json');
   let config: { compilerOptions?: { paths?: Record<string, string[]> }; exclude?: string[]; files?: string[] };
   try { config = JSON.parse(await readFile(path, 'utf8')); } catch { return; }
   config.compilerOptions ??= {};
-  config.compilerOptions.paths = { ...config.compilerOptions.paths,
+  // Each typed import maps to its exact entry: editors resolve `paths` targets without package.json `exports`.
+  const previous = Object.fromEntries(Object.entries(config.compilerOptions.paths ?? {})
+    .filter(([, targets]) => !targets.every((target) => target.startsWith('./vendor/types/'))));
+  config.compilerOptions.paths = { ...previous,
+    ...Object.fromEntries(Object.entries(manifest.types ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([specifier, entry]) => [specifier, ['./vendor/' + entry]])),
     '*': ['./vendor/types/packages/*', './vendor/types/packages/@types/*'] };
   config.exclude = [...new Set([...(config.exclude ?? []), 'node_modules', 'vendor'])];
   const globals = await stat(join(root, vendorFolder, 'types', 'globals.d.ts')).then(() => true, () => false);
