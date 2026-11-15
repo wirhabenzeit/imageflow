@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const build = join(root, '.build');
 await mkdir(build, { recursive: true });
 const runDir = await mkdtemp(join(build, 'smoke-'));
-const output = join(runDir, 'whitewall-proof.pdf');
+const output = join(runDir, 'field-notes-proof.pdf');
 const packaged = process.argv.includes('--packaged');
 
 function printCheck(binary, args) {
@@ -71,8 +71,8 @@ try {
   });
   const chooser = await instance.firstWindow();
   assert.equal(await chooser.getByRole('button', { name: 'Explore a Sample', exact: true }).count(), 0);
-  const fixture = join(runDir, 'WhiteWall.imageflow');
-  await cp(join(root, 'sample/whitewall'), fixture, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  const fixture = join(runDir, 'FieldNotes.imageflow');
+  await cp(join(root, 'tests/fixtures/field-notes'), fixture, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
   const window = await testBook(instance, fixture);
   window.setDefaultTimeout(15000);
   const status = window.locator('.status');
@@ -126,7 +126,7 @@ try {
   await menuAction(instance, 'Open project…');
   await window.locator('.status-error').waitFor();
   assert.match(await status.textContent(), /project\.json.*schemaVersion/);
-  assert.equal(await (await instance.browserWindow(window)).evaluate((window) => window.getTitle()), 'WhiteWall');
+  assert.equal(await (await instance.browserWindow(window)).evaluate((window) => window.getTitle()), 'FieldNotes');
 
   await menuAction(instance, 'Reload');
   await window.waitForFunction(() => document.querySelector('iframe.book-frame-book[data-current][data-ready]'));

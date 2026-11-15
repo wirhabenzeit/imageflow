@@ -4,11 +4,11 @@ import './styles.css';
 const safe = mm(5);
 
 export default defineTemplate({
-  id: 'whitewall-field-notes',
+  id: 'field-notes',
   version: '0.1.0',
   contract: 1,
   format: {
-    label: 'WhiteWall Gallery Square · 29 × 29 cm',
+    label: 'Square · 29 × 29 cm',
     trim: { width: mm(290), height: mm(290) },
     bleed: { top: mm(3), bottom: mm(3), outside: mm(3), binding: mm(0) },
     safe: { top: safe, bottom: safe, outside: safe, binding: safe },
