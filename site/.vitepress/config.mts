@@ -13,6 +13,7 @@ const repo = 'https://github.com/wirhabenzeit/imageflow';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const docs = join(root, 'docs');
 const site = join(root, 'site');
+const base = process.env.DOCS_BASE ?? '/imageflow/';
 
 type Topic = { id: string; title: string; summary: string };
 const topics: Topic[] = JSON.parse(readFileSync(join(docs, 'template-api/topics.json'), 'utf8'));
@@ -128,10 +129,13 @@ export default defineConfig({
   description: 'Design photobooks on the Mac from your photos, Markdown and code-based templates.',
   srcDir: '../docs',
   srcExclude: ['template-api.md', 'benchmarks/**', 'README.md'],
-  base: process.env.DOCS_BASE ?? '/imageflow/',
+  base,
   cleanUrls: true,
   lastUpdated: true,
-  head: [['meta', { name: 'theme-color', content: '#3b6e8f' }]],
+  head: [
+    ['meta', { name: 'theme-color', content: '#14a687' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: base.replace(/\/?$/, '/') + 'imageflow-mark.svg' }],
+  ],
   markdown: {
     anchor: { slugify: slug },
     config(md) {
@@ -154,6 +158,8 @@ export default defineConfig({
     },
   },
   vite: {
+    // Serve/copy the canonical brand SVGs directly; do not keep another logo copy in docs/.
+    publicDir: join(root, 'resources/brand/logo'),
     // The pages live in docs/, outside this package, so point their imports at site/node_modules.
     resolve: {
       alias: [
@@ -169,6 +175,12 @@ export default defineConfig({
     if (history.includes(page)) pageData.frontmatter.history = true;
   },
   themeConfig: {
+    logo: {
+      light: '/imageflow-horizontal-light.svg',
+      dark: '/imageflow-horizontal-dark.svg',
+      alt: 'ImageFlow',
+    },
+    siteTitle: false,
     nav: [
       { text: 'Guide', link: '/guide/getting-started', activeMatch: '^/guide/' },
       { text: 'Templates', link: '/templates/', activeMatch: '^/(templates|template-api|mcp)' },

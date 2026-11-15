@@ -28,7 +28,11 @@ npm run package:mac
 
 The ad-hoc-signed app is written to `out/ImageFlow-darwin-arm64/ImageFlow.app` on Apple silicon or `out/ImageFlow-darwin-x64/ImageFlow.app` on Intel. See [Signing and notarization](../signing.md) for Developer ID builds and [Releasing](../releasing.md) for the release workflow.
 
-After editing an icon in `resources/brand/`, run `npm run build:icons` and commit the SVG and generated `.icns` files.
+## Icons and branding
+
+The app, book and template icons have SVG sources in `resources/brand/`. The app also has a layered Icon Composer source, `ImageFlow.icon`, for macOS 26 Liquid Glass. After editing these sources, run `npm run build:icons` on a Mac with Xcode 26. Commit the sources together with the generated `.icns` files, `resources/Assets.car` and DMG background in `resources/dmg/`.
+
+The DMG window layout comes from `scripts/build-dmg-layout.py`. Outlined logo and wordmark SVGs live in `resources/brand/logo/`, in horizontal and stacked versions for light and dark backgrounds. They use Inter Display under the SIL Open Font License.
 
 ## Template API docs
 
