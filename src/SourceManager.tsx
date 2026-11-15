@@ -15,7 +15,7 @@ import { assetMenu, assetMenuState, assetActions } from './asset-menu';
 import { assetPageLabels, assetUsage } from './asset-usage';
 import { ActionMenu } from './ActionMenu';
 import { Icon } from './Icon';
-import { fileName, photosMime } from './source-items';
+import { fileName } from './source-items';
 import { fileExtension, useFileIcons } from './file-icons';
 
 // The Assets window shows photo thumbnails. Embedded in a book window's bottom panel it is a plain list: the
@@ -24,12 +24,14 @@ import { fileExtension, useFileIcons } from './file-icons';
 const Glyph = ({ kind }: { kind: SourceKind }) => <span aria-hidden="true">{kind === 'photo' ? '▧' : kind === 'markdown' ? 'Aa' : '▤'}</span>;
 const DocumentIcon = ({ src, kind }: { src?: string; kind: SourceKind }) => src ? <img src={src} alt="" draggable={false} /> : <Glyph kind={kind} />;
 
-export function SourceManager({ view, api, summary, adopt, disabled = false, quickLook, embedded = false, tabs, importFiles }: {
+export function SourceManager({ view, api, summary, adopt, disabled = false, quickLook, embedded = false, tabs, importFiles, fileTypes = [] }: {
   view: PhotoViewControl; api: DesktopApi; summary: ProjectSummary; adopt: (summary: ProjectSummary) => void; disabled?: boolean; quickLook?: (source: SourceRef) => void;
   embedded?: boolean; tabs?: ReactNode;
   // Imports dropped files, or asks for files to import when none are given. The book window routes this through its own
   // import queue; the Assets window leaves it unset and imports through the asset actions.
   importFiles?: (files?: File[]) => void;
+  // Embedded in a book window the list holds only files, and importing takes these extensions.
+  fileTypes?: string[];
 }) {
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
@@ -42,7 +44,9 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const [attention, setAttention] = useState(false);
   const [search, setSearch] = useState('');
   const raw = sourceEntries(summary);
-  const entries = [...sourceList(summary, 'photo', view.value).map(({ id }) => raw.find((entry) => entry.kind === 'photo' && entry.id === id)!), ...raw.filter((entry) => entry.kind !== 'photo')];
+  // The bottom panel's Assets tab holds the files of file parameters; photos and texts have their own tabs there.
+  const entries = embedded ? raw.filter((entry) => entry.kind === 'file')
+    : [...sourceList(summary, 'photo', view.value).map(({ id }) => raw.find((entry) => entry.kind === 'photo' && entry.id === id)!), ...raw.filter((entry) => entry.kind !== 'photo')];
   const usage = assetUsage(summary, assetPageLabels(summary));
   const documentIcon = useFileIcons(embedded ? entries.map((entry) => fileExtension(fileName(entry.path))) : []);
   const placements = (entry: typeof entries[number]) => usage[entry.kind === 'markdown' ? 'text' : entry.kind][entry.id] ?? [];
@@ -89,7 +93,9 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   const list = useListSelection(shown.map(({ key }) => key), (key) => fileName(entries.find((entry) => entry.key === key)!.path));
   const chosen = entries.filter(({ key }) => list.selected.includes(key));
   const copyCount = chosen.filter(({ linked }) => linked).length;
-  const copyKeys = chosen.length ? chosen.filter(({ linked }) => linked).map(({ key }) => key) : undefined;
+  // With nothing selected, the buttons act on every asset of the list; the embedded list holds only files.
+  const everyKey = embedded ? (keep: (entry: typeof entries[number]) => boolean) => entries.filter(keep).map(({ key }) => key) : () => undefined;
+  const copyKeys = chosen.length ? chosen.filter(({ linked }) => linked).map(({ key }) => key) : everyKey(({ linked }) => linked);
   const preview = () => {
     const item = entries.find(({ key }) => key === list.selected[0]);
     if (item?.kind === 'file') void act({ action: 'preview', key: item.key });
@@ -101,12 +107,13 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     <header className={embedded ? 'sources-bar asset-toolbar' : 'asset-toolbar'}>
       {tabs}
       <input type="search" aria-label="Search assets" placeholder="Search assets" value={search} onChange={(event) => setSearch(event.target.value)} />
-      <NewMarkdown api={api} disabled={locked} />
-      <button type="button" className="new-markdown" title="Import photos, texts and files for the template's file parameters" disabled={locked} onClick={() => bring()}><Icon name="down" /> Import…</button>
-      <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} />
+      {!embedded && <NewMarkdown api={api} disabled={locked} />}
+      <button type="button" className="new-markdown" disabled={locked || (embedded && !fileTypes.length)} onClick={() => bring()}
+        title={embedded ? fileTypes.length ? 'Import ' + fileTypes.join(', ') + ' files' : 'This template has no file parameters' : 'Import photos, texts and files for the template\'s file parameters'}><Icon name="down" /> Import…</button>
+      {!embedded && <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} />}
       <ActionMenu className="asset-filter" label={<>Filter <Icon name="chevron" /></>}>
-        {(['photo', 'markdown', 'file'] as const).map((value) => <button key={value} onClick={() => setKind(kind === value ? 'all' : value)}>{({ photo: 'Photos', markdown: 'Markdown', file: 'Files' })[value]}</button>)}
-        <hr />
+        {!embedded && <>{(['photo', 'markdown', 'file'] as const).map((value) => <button key={value} onClick={() => setKind(kind === value ? 'all' : value)}>{({ photo: 'Photos', markdown: 'Markdown', file: 'Files' })[value]}</button>)}
+        <hr /></>}
         <button onClick={() => setUsed(used === 'unused' ? 'all' : 'unused')}>Unused</button>
         <button onClick={() => setUsed(used === 'used' ? 'all' : 'used')}>Used</button>
         <hr />
@@ -138,19 +145,13 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
           {group && <button className="asset-group-heading" onClick={() => list.setSelection(group.ids.map((id) => 'photo:' + id))}>
             {group.label} · {group.ids.length === group.total ? group.total : group.ids.length + ' of ' + group.total}</button>}
           <div role="option" aria-selected={list.selected.includes(entry.key)} key={entry.key} data-source={entry.key} data-list-id={entry.key}
-          className="asset-row" tabIndex={(list.focused ?? shown[0]?.key) === entry.key ? 0 : -1} draggable={!locked && !problem && (!embedded || entry.kind !== 'file')}
+          className="asset-row" tabIndex={(list.focused ?? shown[0]?.key) === entry.key ? 0 : -1} draggable={!locked && !problem && !embedded}
           onClick={(event) => list.choose(entry.key, event)}
           onContextMenu={(event) => void menu(list.context(entry.key, event))}
           onDragStart={(event) => {
             const keys = list.selected.includes(entry.key) ? list.selected : [entry.key];
             if (entry.kind === 'photo') event.dataTransfer.setData(photoMime, entry.id);
             if (entry.kind === 'markdown') event.dataTransfer.setData(textMime, entry.id);
-            if (embedded) {
-              const photos = keys.filter((key) => key.startsWith('photo:')).map((key) => key.slice(6));
-              if (entry.kind === 'photo' && photos.length > 1) event.dataTransfer.setData(photosMime, JSON.stringify(photos));
-              event.dataTransfer.effectAllowed = 'copy';
-              return;
-            }
             event.preventDefault(); void api.dragSources(keys);
           }}
           onDoubleClick={() => {
@@ -171,7 +172,7 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     </div>
     <footer className="asset-status-bar">
       <span className="muted">{shown.length} of {entries.length}{chosen.length ? ' · ' + chosen.length + ' selected' : ''}</span>
-      {missing > 0 && <button disabled={locked} onClick={() => void act({ action: 'locate-folder' })}>Locate Folder…</button>}
+      {missing > 0 && <button disabled={locked} onClick={() => void act({ action: 'locate-folder', keys: everyKey(({ key }) => unavailable(key)) })}>Locate Folder…</button>}
       {linked > 0 && <button disabled={locked || (chosen.length > 0 && !copyCount)} onClick={() => void act({ action: 'collect', keys: copyKeys })}>
         {chosen.length ? 'Copy ' + copyCount + ' Selected into Book' : 'Copy All ' + linked + ' into Book'}</button>}
     </footer>
