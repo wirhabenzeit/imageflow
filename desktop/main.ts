@@ -1719,7 +1719,7 @@ void app.whenReady().then(async () => {
         return { summary: document.activate(await document.projectSession.save(files, 'Place asset')), imported: [source.id] };
       }
     }
-    return document.importFiles(document.window, id, request);
+    return document.importFiles(document.window, id, request, undefined, true);
   }));
   ipcMain.handle(channels.network, async (event, id: string, origins: unknown) => {
     const document = editorOwner(event);

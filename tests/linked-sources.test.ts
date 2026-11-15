@@ -52,6 +52,27 @@ test('document default links all three source kinds while per-import copy remain
   assert.equal(sourceEntries(copied.book).filter((entry) => entry.linked).length, 3);
 });
 
+test('a large linked import checks photos concurrently, keeps the chosen order and reports progress', async (t) => {
+  const f = await fixture(t);
+  const paths: string[] = [];
+  for (let index = 0; index < 20; index++) {
+    const path = join(f.external, 'p' + String(index).padStart(2, '0') + '.png');
+    await sharp({ create: { width: 40, height: 30, channels: 3, background: '#00' + String(index).padStart(2, '0') + '00' } }).png().toFile(path);
+    paths.push(path);
+  }
+  const broken = join(f.external, 'broken.png');
+  await writeFile(broken, 'not a png');
+  const steps: { done: number; total: number; saving?: boolean }[] = [];
+  const result = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [...paths.slice(0, 10), broken, join(f.external, 'story.md'), ...paths.slice(10)],
+    (step) => steps.push(step));
+  assert.deepEqual(result.counts, { photos: 20, texts: 0, files: 0, skipped: 1, failed: 1 });
+  assert.deepEqual(result.imported.map((id) => result.book.photoIndex[id].path), paths);
+  assert.ok(result.imported.every((id) => result.book.photos.has(id)), 'every linked photo is approved and loads');
+  assert.deepEqual(steps.filter((step) => !step.saving).map((step) => step.done), Array.from({ length: 23 }, (_, index) => index));
+  assert.ok(steps.every((step) => step.saving || step.total === 22));
+  assert.deepEqual(steps.at(-1), { done: 20, total: 20, saving: true });
+});
+
 test('proof source warnings and page marking use diagnostic codes rather than unrelated wording', () => {
   assert.equal(isUnavailableSource({ code: 'template:missing-caption' }), false);
   assert.equal(isUnavailableSource({ code: 'layout-error' }), false);

@@ -46,12 +46,21 @@ export async function approvedExtensions(folder: string, key: string) {
 }
 /** Called only after an explicit file/folder selection, never while loading a manifest. */
 export async function approveSource(folder: string, source: Target, accept?: string[]) {
-  if (!source.linked || !source.key) throw new Error('Choose an external source to link.');
-  const path = await realpath(source.path);
-  if (source.kind === 'file' && !accept?.includes(extname(path).toLowerCase())) throw new Error('Choose a file with an extension accepted by the parameter.');
+  await approveSources(folder, [source], accept);
+}
+/** Approves the sources of one explicit selection together, so importing many files writes the registry once. */
+export async function approveSources(folder: string, sources: readonly Target[], accept?: string[]) {
+  const approved: Grants = {};
+  for (const source of sources) {
+    if (!source.linked || !source.key) throw new Error('Choose an external source to link.');
+    const path = await realpath(source.path);
+    if (source.kind === 'file' && !accept?.includes(extname(path).toLowerCase())) throw new Error('Choose a file with an extension accepted by the parameter.');
+    approved[source.key] = { path, ...(source.kind === 'file' ? { accept } : {}) };
+  }
+  if (!sources.length) return;
   const { key, book } = await accessFor(folder);
   const task = book.writes.then(async () => {
-    const grants = { ...book.grants, [source.key!]: { path, ...(source.kind === 'file' ? { accept } : {}) } };
+    const grants = { ...book.grants, ...approved };
     await saveGrants(key, grants);
     book.grants = grants;
   });
