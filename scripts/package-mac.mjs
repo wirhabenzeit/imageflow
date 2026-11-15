@@ -1,5 +1,5 @@
 import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { packager } from '@electron/packager';
@@ -22,6 +22,14 @@ if (fixture && (!resolve(fixture.output).startsWith(join(root, '.build/upgrade-t
     !/^https:\/\/127\.0\.0\.1:\d+\/updates$/.test(fixture.baseURL) || !/^9\.9\.(?:9(?:-beta\.[12])?|10)$/.test(fixture.version) || !resolve(fixture.book).startsWith(join(root, '.build/upgrade-test/')) || !Number.isInteger(fixture.debugPort) || fixture.debugPort < 1024 || fixture.debugPort > 65535)) throw new Error('Invalid isolated upgrade fixture.');
 const options = macBuildOptions({ arch: values.arch, release: values.release });
 async function packageApp() {
+  // The app ships each starter's template and the project.json its example spreads come from, but no sample photos,
+  // texts or files: new books never receive them, and the library's preview renders are made here at build time.
+  const shippedSample = (path) => {
+    const parts = relative(sample, path).split(sep).filter(Boolean);
+    if (parts.includes('.imageflow')) return false;
+    if (parts.length <= 1) return parts.length === 0 || !parts[0].includes('.') || parts[0].endsWith('.json');
+    return parts[1] === 'template' || (parts.length === 2 && parts[1] === 'project.json');
+  };
   const work = join(root, '.build');
   await mkdir(work, { recursive: true });
   const staging = await mkdtemp(join(work, 'package-'));
@@ -31,11 +39,12 @@ async function packageApp() {
     await Promise.all([
       stageDesktop({ packaged: true, destination: source, version: fixture?.version ?? metadata.version,
         updateTest: fixture ? { baseURL: fixture.baseURL, profile: fixture.profile, book: fixture.book, debugPort: fixture.debugPort } : null }),
-      cp(sample, books, { recursive: true, filter: (path) => basename(path) !== '.imageflow' }),
+      cp(sample, books, { recursive: true, filter: shippedSample }),
     ]);
     // New Book shows the built-in templates at once on first launch: their opening spreads ship pre-rendered.
     const previews = join(staging, 'template-previews');
-    await renderTemplatePreviews({ app: source, books, output: previews });
+    // Rendered from the full sample books in the repository, photos included; the app ships only the result.
+    await renderTemplatePreviews({ app: source, books: sample, output: previews });
     const [output] = await packager({
       dir: source,
       out: fixture?.output ?? join(root, 'out'),

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { execFileSync } from 'node:child_process';
 import { _electron } from 'playwright-core';
-import { testBook, clickPage } from './ui-actions.mjs';
+import { closeApp, testBook, clickPage } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
 
 // A real desktop session: editing typography/occurrences, pending typing, composition, plain paste, fallback,
@@ -51,6 +51,15 @@ try {
     await input().waitFor();
     await w.locator('.inline-text-editor.showing').waitFor();
   }
+  // Escape, Tab and single-line Enter close or replace the editor frame on key-down. Playwright's keyboard.press then
+  // waits for a key-up the gone frame never acknowledges, which hung CI on a slow runner. Send the key-down to the field
+  // instead: it runs the same handler as the real key and doesn't wait on the replaced frame.
+  async function frameKey(combo) {
+    const key = combo.replace('Shift+', '');
+    await input().evaluate((node, { key, shiftKey }) => {
+      node.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true }));
+    }, { key, shiftKey: combo.startsWith('Shift+') });
+  }
   async function done() {
     await w.getByRole('button', { name: 'Done', exact: true }).click();
     await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
@@ -68,7 +77,7 @@ try {
   assert.equal(await saved(), baseline, 'typing stays pending');
   if (process.env.INLINE_TEXT_SCREENSHOT) await w.screenshot({ path: process.env.INLINE_TEXT_SCREENSHOT });
   assert.equal(await occurrence(0).innerText(), baseline, 'other occurrence stays confirmed');
-  await w.keyboard.press('Escape');
+  await frameKey('Escape');
   await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
   assert.equal(await saved(), baseline);
   console.log('pending typing, occurrence and Escape passed');
@@ -159,7 +168,7 @@ try {
 
   await open(0, 'subtitle');
   await input().fill('Single line');
-  await w.keyboard.press('Enter');
+  await frameKey('Enter');
   await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
   assert.equal(await saved('subtitle'), 'Single line');
   await w.locator(ready).waitFor();
@@ -167,15 +176,15 @@ try {
 
   await open();
   await input().fill('Keyboard heading');
-  await w.keyboard.press('Tab');
+  await frameKey('Tab');
   await editor().getByRole('textbox', { name: 'Subtitle', exact: true }).waitFor();
   assert.equal(await saved(), 'Keyboard heading');
-  await w.keyboard.press('Shift+Tab');
+  await frameKey('Shift+Tab');
   await editor().getByRole('textbox', { name: 'Heading', exact: true }).waitFor();
   await editor().locator('body').evaluate(() => { window.inlineTextInstance = 'retained'; });
   await w.setViewportSize({ width: 1300, height: 900 }).catch(() => {});
   assert.equal(await editor().locator('body').evaluate(() => window.inlineTextInstance), 'retained');
-  await w.keyboard.press('Escape');
+  await frameKey('Escape');
   await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
   await w.setViewportSize({ width: 1500, height: 1000 }).catch(() => {});
   console.log('Tab navigation and stable resize passed');
@@ -237,7 +246,7 @@ try {
   assert.equal(await saved(), 'Outside apply');
   await input().waitFor();
   assert.equal(await input().innerText(), 'Outside apply');
-  await w.keyboard.press('Escape');
+  await frameKey('Escape');
   await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
   console.log('outside apply and switching occurrence passed');
 
@@ -255,7 +264,7 @@ try {
   assert.equal(await saved(), 'Gesture guard');
   assert.equal(await w.evaluate(() => window.outerPresses), 0, 'the canvas receives no premature press');
   await input().waitFor();
-  await w.keyboard.press('Escape');
+  await frameKey('Escape');
   await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
 
   // A trusted-activation action is never replayed synthetically; the next real click performs it.
@@ -289,7 +298,7 @@ try {
   await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
   await open();
   assert.equal(await input().innerText(), 'External heading');
-  await w.keyboard.press('Escape');
+  await frameKey('Escape');
   await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
   console.log('external conflict recovery passed');
 
@@ -328,7 +337,7 @@ try {
   const pdfText = execFileSync('pdftotext', [pdf, '-'], { encoding: 'utf8' });
   assert.ok(pdfText.includes('External heading'));
   assert.ok(!pdfText.includes('Unconfirmed export typing'));
-  await w.keyboard.press('Escape');
+  await frameKey('Escape');
   await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
   console.log('proof export contains confirmed text only');
 
@@ -401,7 +410,7 @@ export default defineTemplate({id:'imageflow-starter',version:'1',contract:1,
     await w.locator('.element-editor').waitFor({state:'detached'});
   }
   await open(1,'boxes.hero.caption');
-  await w.keyboard.press('Escape');await w.locator('.inline-text-editor').waitFor({state:'detached'});
+  await frameKey('Escape');await w.locator('.inline-text-editor').waitFor({state:'detached'});
   const ownedHeading=w.getByRole('button',{name:'Edit Spread title',exact:true});
   await ownedHeading.focus();await w.keyboard.press('Enter');
   await w.locator('.element-editor').waitFor();
@@ -422,6 +431,6 @@ export default defineTemplate({id:'imageflow-starter',version:'1',contract:1,
   }
   throw error;
 } finally {
-  if (app) await app.close();
+  if (app) await closeApp(app);
   if (process.env.KEEP_INLINE_TEXT_FIXTURE !== '1') await rm(work, { recursive: true, force: true });
 }

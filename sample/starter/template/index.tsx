@@ -630,6 +630,12 @@ export default defineTemplate({
       },
     }),
   }),
-  // A new book without the sample content starts with a title page, one story spread and the closing page.
-  openingSpreads: [{ layout: 'title' }, { layout: 'story' }, { layout: 'closing' }],
+  // A new book starts with a tour of the layouts, in the sample book's order, ready for photos and text. New Book can
+  // also start an empty book.
+  openingSpreads: [
+    { layout: 'cover' }, { layout: 'contents' }, { layout: 'opener' }, { layout: 'story' }, { layout: 'panorama' },
+    { layout: 'grid' }, { layout: 'statement' }, { layout: 'storyRight' }, { layout: 'feature3' }, { layout: 'text' },
+    { layout: 'opener' }, { layout: 'pair', params: { framed: false } }, { layout: 'single' }, { layout: 'panorama' },
+    { layout: 'grid9' }, { layout: 'text' }, { layout: 'credits' },
+  ],
 });

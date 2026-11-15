@@ -80,7 +80,6 @@ test('the library lists built-ins, imports a template once, and replaces it with
     const [builtIn] = await library.list();
     assert.equal(builtIn.source, 'built-in');
     assert.equal(builtIn.label, 'Photobook');
-    assert.equal(builtIn.sample, true);
     assert.equal(builtIn.openingSpreads, 1);
 
     const v1 = await template(work, 'travel-1', { id: 'travel', version: '1.0.0', label: 'Travel' });

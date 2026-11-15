@@ -19,14 +19,14 @@ an official ImageFlow release.
 
 Copyright © 2026 the ImageFlow authors. All rights reserved.
 
-- `sample/*/photos/` and each starter's `template/preview.jpg`
+- `sample/shared/photos/`, any `sample/*/photos/`, and each starter's `template/preview.jpg`
 - the copies in `tests/compat/books/*/photos/`, `tests/compat/books/*/template/preview.jpg` and `tests/fixtures/*/photos/`
 - the screenshots in `docs/images/`
 
-**File › New** copies a starter's sample photographs into each new book. You may keep and use those copies inside your
-own books, including in books and calendars you print for yourself, and you may use them to develop and test ImageFlow
-and its templates. Other uses, such as publishing or selling the photographs on their own or in stock or image
-collections, need permission.
+New books don't receive the sample photographs, and release builds of the app don't contain them. You may use them to
+develop and test ImageFlow and its templates, including books made with the development-build **Sample book (dev)**
+option. Other uses, such as publishing or selling the photographs on their own or in stock or image collections, need
+permission.
 
 ## Third-party files
 

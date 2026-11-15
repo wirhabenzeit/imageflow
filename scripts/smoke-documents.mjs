@@ -126,6 +126,11 @@ try {
   });
   await one.reload({ waitUntil: 'domcontentloaded' }); await ready(one);
   await cp(first, second, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  // New books start without texts; give the second one a text source for the external-edit check below.
+  await writeFile(join(second, 'texts/arrival.md'), '# Arrival\n');
+  const secondProject = JSON.parse(await readFile(join(second, 'project.json'), 'utf8'));
+  secondProject.texts = { ...secondProject.texts, arrival: 'texts/arrival.md' };
+  await writeFile(join(second, 'project.json'), JSON.stringify(secondProject, null, 2) + '\n');
   await app.evaluate(({ dialog }, folder) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [folder] }); }, second);
   const two = await launchAction(one, 'open');
   assert.notEqual((await current(one)).handle, (await current(two)).handle);

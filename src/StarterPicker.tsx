@@ -3,11 +3,12 @@ import type { DesktopApi } from './desktop';
 import { TemplatePreview } from './TemplatePreview';
 import { useLibrary } from './useLibrary';
 import { templateFormatSummary } from './library';
+import type { NewBookStart } from './library';
 
 export function StarterPicker({ api }: { api?: DesktopApi }) {
   const { entries, error } = useLibrary(api);
   const [selected, setSelected] = useState<string>();
-  const [sample, setSample] = useState(true);
+  const [start, setStart] = useState<NewBookStart>('opening');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState('');
   const usable = entries?.filter(({ unavailable }) => !unavailable) ?? [];
@@ -20,7 +21,7 @@ export function StarterPicker({ api }: { api?: DesktopApi }) {
     if (!api || !chosen || busy) return;
     setBusy(true); setFailure('');
     try {
-      const result = await api.chooseStarter({ id: chosen.id, sample: !!chosen.sample && sample });
+      const result = await api.chooseStarter({ id: chosen.id, start: chosen.openingSpreads ? start : 'empty' });
       if ('error' in result) setFailure(result.error);
     } catch { setFailure('Could not create the book. Please try again.'); }
     finally { setBusy(false); }
@@ -57,8 +58,15 @@ export function StarterPicker({ api }: { api?: DesktopApi }) {
       </section>)}
     </div>
     <div className="starter-options">
-      {entry?.sample && <label className="pc-switch"><input type="checkbox" checked={sample} disabled={busy}
-        onChange={(event) => setSample(event.target.checked)} />Include sample content</label>}
+      {!!entry?.openingSpreads && <fieldset className="starter-start" disabled={busy}>
+        <legend>Start with</legend>
+        <label title="The spreads this template starts a book with, ready for your photos and text">
+          <input type="radio" name="start" checked={start === 'opening'} onChange={() => setStart('opening')} />
+          {entry.openingSpreads + (entry.openingSpreads === 1 ? ' starting spread' : ' starting spreads')}</label>
+        <label title="No spreads; add them as you go">
+          <input type="radio" name="start" checked={start === 'empty'} onChange={() => setStart('empty')} />
+          Empty book</label>
+      </fieldset>}
     </div>
     <div className="starter-notice" role="status">{failure || error}
       {(error || (entries && (!usable.length || entries.some(({ unavailable }) => unavailable)))) && <button className="link" onClick={() => void api?.showTemplates()}>Manage Templates…</button>}

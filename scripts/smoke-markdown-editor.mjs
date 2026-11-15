@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { once } from 'node:events';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { closeApp, testBook } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -13,7 +13,8 @@ const work = await mkdtemp(join(root, '.build/markdown-'));
 const folder = join(work, 'Book.imageflow');
 const current = async (page) => (await page.evaluate(() => window.imageflow.currentProject())).value;
 const until = async (check, label = 'operation settled') => {
-  for (let attempt = 0; attempt < 200; attempt++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 50)); }
+  // 30 s, like the page timeouts: on a hosted Mac a new window can take over 10 s while the sample photos are prepared.
+  for (let attempt = 0; attempt < 600; attempt++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 50)); }
   assert.ok(await check(), label);
 };
 const errors = [];
@@ -205,7 +206,7 @@ try {
 } finally {
   if (appProcess.exitCode === null) {
     await app.evaluate(() => globalThis.finishMarkdownQuestion?.()).catch(() => {});
-    await app.close().catch(() => {});
+    await closeApp(app);
   }
   await rm(work, { recursive: true, force: true });
 }

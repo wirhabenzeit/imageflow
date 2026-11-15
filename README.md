@@ -55,4 +55,4 @@ Edit template API topics in `docs/template-api/`, then run `npm run generate:doc
 
 ## License
 
-The source code is released under the [MIT License](LICENSE). The ImageFlow name, logo and icons and the sample photographs are not covered by it; see [ASSETS.md](ASSETS.md) for what applies to them, including your use of the sample photos that **File › New** copies into a book.
+The source code is released under the [MIT License](LICENSE). The ImageFlow name, logo and icons and the sample photographs are not covered by it; see [ASSETS.md](ASSETS.md) for what applies to them.
