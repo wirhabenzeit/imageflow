@@ -7,6 +7,12 @@ const port = Number(process.env.IMAGEFLOW_DEV_PORT ?? 5173);
 
 export default defineConfig({
   plugins: [react()],
+  // Explicit diagnostic build only; normal dev and release bundles keep the standard renderer.
+  ...(process.env.IMAGEFLOW_PROFILE === '1' ? {
+    define: { 'import.meta.env.IMAGEFLOW_PROFILE': 'true' },
+    resolve: { alias: [{ find: 'react-dom/client', replacement: 'react-dom/profiling' }] },
+    build: { minify: false as const },
+  } : {}),
   server: {
     port, strictPort: true,
     hmr: { protocol: 'ws', host: 'localhost', port, clientPort: port },

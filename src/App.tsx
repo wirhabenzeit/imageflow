@@ -1,3 +1,7 @@
+import { CanvasHover } from './CanvasHover';
+import { inspectorTargets } from './inspector-targets';
+import type { InspectorTarget } from './inspector-targets';
+import { useLiveCallback } from './useLiveCallback';
 import { usePhotoView } from './PhotoViewMenu';
 import { isPhotoViewCommand } from './photo-view';
 import { captureViewAnchor, restoreViewAnchor } from './view-anchor';
@@ -117,8 +121,8 @@ function EmptyBook({ template, writable, start }: { template?: TemplateInfo; wri
 
 export function App() {
   const api = window.imageflow;
-  const { panels, bottomMaximum, toggle: togglePanelState, show: showPanelState, resize: resizePanelState } = usePanels();
   const [resizing, setResizing] = useState(false);
+  const { panels, bottomMaximum, toggle: togglePanelState, show: showPanelState, resize: resizePanelState } = usePanels(resizing);
   const [summary, setSummary] = useState<ProjectSummary>();
   useEffect(() => { if (summary) document.title = bookName(summary.folder); }, [summary?.folder]);
   const photoView = usePhotoView(summary?.viewKey ?? summary?.folder);
@@ -165,8 +169,7 @@ export function App() {
   function setThumbs(geometry: BookGeometry | undefined, animate = true, start?: number) {
     setThumbnailState({ geometry, animate, start });
   }
-  const [hovered, setHovered] = useState<string>();
-  const [hoveredTarget, setHoveredTarget] = useState<string>();
+  const [hoverEpoch, setHoverEpoch] = useState(0);
   // The inline editor that is open: for a marked node (a target), or for a box or element itself (`owner`).
   // `session` names one opening of an editor: it stays while the node the editor is anchored to is renamed (`key`), so
   // the popover and its unsaved drafts are kept, and changes when the user opens another target.
@@ -331,8 +334,7 @@ export function App() {
 
   function clearCanvasEditors() {
     setCropping(undefined);
-    setHovered(undefined);
-    setHoveredTarget(undefined);
+    setHoverEpoch(value => value + 1);
     setDropTarget(undefined);
     setHighlight(undefined);
     setFocusBox(undefined);
@@ -853,7 +855,9 @@ export function App() {
     if (canvas.current?.clientWidth + 'x' + canvas.current?.clientHeight !== anchorSize.current) {
       pendingAnchor.current ??= viewAnchor.current;
       // A height-only panel change can leave the frame's width unchanged, so it may report no new geometry.
-      setGeometry((current) => current && { ...current });
+      if (String(canvas.current?.clientWidth) === anchorSize.current?.split('x')[0]) {
+        setGeometry((current) => current && { ...current });
+      }
     }
     measureView();
   });
@@ -1528,7 +1532,6 @@ export function App() {
   const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id }) => spread + ':' + id === dropTarget) :
     highlight ? geometry?.boxes.find(({ spread: owner, id }) => owner === spread?.id && id === highlight) : undefined;
   const selectedSheet = spreadSelected ? geometry?.sheets.find(({ spread: id }) => id === spread?.id) : undefined;
-  const hoveredSheet = hovered !== spread?.id ? geometry?.sheets.find(({ spread: id }) => id === hovered) : undefined;
   const previewError = typeof reload === 'object' ? reload.error : render?.state === 'error' ? render.message : '';
   const issue = previewError || error;
   const previewNotice = agentWorking ? 'Agent is updating the book…' : previewError ? (geometry ? 'Showing the last successful preview' : 'Book preview unavailable') : '';
@@ -1561,13 +1564,57 @@ export function App() {
     const animations: Animation[] = [];
     for (const offset of canvasMotion.offsets) {
       for (const node of stage.current?.querySelectorAll<HTMLElement>('[data-canvas-spread="' + CSS.escape(offset.spread) + '"]') ?? []) {
+        if (node.closest('[data-canvas-hover]')) continue;
         const animation = animateReorder(node, offset);
         animation.startTime = canvasMotion.start - performance.timeOrigin;
         animations.push(animation);
       }
     }
     return () => animations.forEach(animation => animation.cancel());
-  }, [canvasMotion, hovered, hoveredTarget, spreadId, spreadSelected, showGuides, activeBox, editKey]);
+  }, [canvasMotion, spreadId, spreadSelected, showGuides, activeBox, editKey]);
+
+  const chooseSource = useLiveCallback(choose);
+  const adoptSource = useLiveCallback((next: ProjectSummary) => adopt(next));
+  const importSources = useLiveCallback(act);
+  const importSourcePaths = useLiveCallback((files: File[]) => {
+    const paths = api?.pathsForFiles(files) ?? [];
+    if (paths.length) importFiles({ paths });
+  });
+  const updatePhotoView = useLiveCallback(photoView.update);
+  const commandPhotoView = useLiveCallback(photoView.command);
+  const customPhotoView = useLiveCallback(photoView.custom);
+  const sourcesView = useMemo(() => ({ value: photoView.value, update: updatePhotoView, command: commandPhotoView, custom: customPhotoView, dialog: false }),
+    [photoView.value, updatePhotoView, commandPhotoView, customPhotoView]);
+  const editFromPanel = useLiveCallback(edit);
+  const selectFromPanel = useLiveCallback(select);
+  const quickSource = useLiveCallback(() => { if (selectedSource) setQuick(selectedSource); });
+  const openInspectorOwner = useLiveCallback((owner: Parameters<typeof openOwner>[1]) => {
+    if (spread) { reveal(spread.id); openOwner(spread.id, owner); }
+  });
+  const openInspectorTarget = useLiveCallback((target: InspectorTarget) => {
+    const live = geometry?.targets.find(item => targetKey(item) === targetKey(target));
+    if (live) { reveal(live.spread); openTarget(live, true); }
+  });
+  const placeInspector = useLiveCallback((from: string, to: string) => { if (spread) place(spread.id, from, to); });
+  const targetsKey = JSON.stringify(inspectorTargets(geometry?.targets ?? [], spread?.id));
+  const panelTargets: InspectorTarget[] = useMemo(() => JSON.parse(targetsKey), [targetsKey]);
+  const sourcesPanel = useMemo(() => (summary && <Sources view={sourcesView} summary={summary} tab={sourceTab} setTab={setSourceTab}
+          selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={chooseSource}
+          failure={setError} changed={adoptSource} usage={usage} writable={writable} busy={!!busy} importSources={importSources} quickLook={setQuick}
+          importPaths={importSourcePaths} />),
+    [summary, sourcesView, sourceTab, selectedSource, usage, writable, busy, chooseSource, adoptSource, importSources, importSourcePaths]);
+  const inspectorPanel = useMemo(() => (summary && spread && <Inspector summary={summary} writable={writable}
+        spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
+        usage={usage} quickLook={quickSource} focus={focusBox}
+        targets={panelTargets}
+        open={openInspectorOwner}
+        openTarget={openInspectorTarget} place={placeInspector}
+        familyPicker={template && layoutFamily && <LayoutFamilyPicker
+          key={JSON.stringify([summary.handle, spread.id, layoutFamily, summary.templateHash, template.format, summary.network])}
+          project={summary.id} template={template} spread={spread} params={summary.project.params} family={layoutFamily}
+          readOnly={!writable} blocked={previewNotice || undefined} edit={editFromPanel} />}
+        edit={editFromPanel} highlight={setHighlight} select={selectFromPanel} />),
+    [summary, spread, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, editFromPanel, selectFromPanel]);
 
   const nativeDocumentTitle = navigator.platform.includes('Mac');
   return <ProjectFilesContext.Provider value={projectFiles}><div className={nativeDocumentTitle ? 'studio mac-studio' : 'studio'}>
@@ -1687,7 +1734,6 @@ export function App() {
             {summary && <div ref={stage} className="stage"
               // A grid fills the canvas width; the frame reports the height of all its rows.
               style={{ width: zoom !== 1 ? (zoom * 100) + '%' : columns ? '100%' : undefined, height: geometry?.height,
-                cursor: hoveredTarget ? 'pointer' : undefined,
                 '--aspect': format ? format.spreadWidth / format.height : undefined } as CSSProperties}
               onClick={(event) => {
                 // A click that ended a photo move is not a click.
@@ -1722,11 +1768,7 @@ export function App() {
                 const photo = top?.type === 'photo' && spreads.find(({ id }) => id === top.spread)?.boxes[top.id]?.photo;
                 pendingMove.current = photo ? { spread: top.spread, box: top.id, photo, x: event.clientX, y: event.clientY } : undefined;
               }}
-              onMouseMove={(event) => {
-                const { sheet, target } = locate(event);
-                setHovered(sheet);
-                setHoveredTarget(target && spreadSelected && sheet === spreadId ? targetKey(target) : undefined);
-              }} onMouseLeave={() => { setHovered(undefined); setHoveredTarget(undefined); }}>
+              >
               <BookFrame project={summary.id} view="book" onPrepared={(id) => preparedView(id, 'book')} release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
                 viewport={viewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
                 onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
@@ -1736,20 +1778,14 @@ export function App() {
                   {level && <span className={'issue-dot issue-' + level} />}{canvasLabels[id]}
                 </div>;
               })}
-              {hoveredSheet && <div data-canvas-spread={hoveredSheet.spread} className="sheet-hover" aria-hidden="true" style={{
-                left: hoveredSheet.x, top: hoveredSheet.y, width: hoveredSheet.width, height: hoveredSheet.height }} />}
+              <CanvasHover key={hoverEpoch} stage={stage} geometry={geometry} selected={spreadSelected} spread={spread?.id}
+                editKey={editKey} cropping={!!cropping} locate={locate} motion={canvasMotion} />
               {selectedSheet && <div data-canvas-spread={selectedSheet.spread} className="sheet-selection" aria-hidden="true" style={{
                 left: selectedSheet.x, top: selectedSheet.y, width: selectedSheet.width, height: selectedSheet.height }} />}
               {showGuides && format && geometry?.sheets.map((sheet) => <Guides key={sheet.spread} sheet={sheet} format={format} />)}
               {activeBox && <div data-canvas-spread={activeBox.spread} className="box-highlight" aria-hidden="true" style={{
                 left: activeBox.x, top: activeBox.y, width: activeBox.width, height: activeBox.height,
               }} />}
-              {geometry?.targets.filter((target) => {
-                const key = targetKey(target);
-                return !cropping && (key === hoveredTarget || key === editKey);
-              }).map((target) => <div key={targetKey(target)} aria-hidden="true"
-                data-canvas-spread={target.spread} className={'edit-target' + (targetKey(target) === editKey ? ' active' : '')}
-                style={{ left: target.x - 4, top: target.y - 3, width: target.width + 8, height: target.height + 6 }} />)}
               {moving && summary?.photos[moving.photo] && <img className="photo-move-ghost" src={summary.photos[moving.photo]} alt=""
                 style={{ left: moving.x, top: moving.y }} />}
               {cropping && cropFrame && cropPhoto && summary && <CropEditor key={cropping.spread + ':' + cropping.box}
@@ -1813,28 +1849,12 @@ export function App() {
         </div>
         {summary && (!panels.bottomHidden ? <PanelDivider side="bottom" size={panels.bottom} maximum={bottomMaximum} resize={resizePanel} onResizing={setResizing} /> : <div />)}
         <div className="sources-host" inert={panels.bottomHidden} aria-hidden={panels.bottomHidden}>
-        {summary && <Sources view={photoView} summary={summary} tab={sourceTab} setTab={setSourceTab}
-          selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={choose}
-          failure={setError} changed={(next) => adopt(next)} usage={usage} writable={writable} busy={!!busy} importSources={act} quickLook={setQuick}
-          importPaths={(files) => {
-            const paths = api?.pathsForFiles(files) ?? [];
-            if (paths.length) importFiles({ paths });
-          }} />}
+        {sourcesPanel}
         </div>
       </div>
       {summary && (!panels.rightHidden ? <PanelDivider side="right" size={panels.right} resize={resizePanel} onResizing={setResizing} /> : <div />)}
       <div className={'inspector-host' + (panels.rightHidden ? ' is-collapsed' : '')} inert={panels.rightHidden} aria-hidden={panels.rightHidden || !summary}>
-    {summary && spread && <Inspector summary={summary} writable={writable}
-        spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
-        usage={usage} quickLook={() => selectedSource && setQuick(selectedSource)} focus={focusBox}
-        targets={geometry?.targets.filter((target) => target.spread === spread.id)}
-        open={(owner) => { reveal(spread.id); openOwner(spread.id, owner); }}
-        openTarget={(target) => { reveal(spread.id); openTarget(target, true); }} place={(from, to) => place(spread.id, from, to)}
-        familyPicker={template && layoutFamily && <LayoutFamilyPicker
-          key={JSON.stringify([summary.handle, spread.id, layoutFamily, summary.templateHash, template.format, summary.network])}
-          project={summary.id} template={template} spread={spread} params={summary.project.params} family={layoutFamily}
-          readOnly={!writable} blocked={previewNotice || undefined} edit={edit} />}
-        edit={edit} highlight={setHighlight} select={select} />}
+    {inspectorPanel}
       </div>
     </div>
     {summary && template && elementEditor && !editorTargetGone(spreads, elementEditor) &&

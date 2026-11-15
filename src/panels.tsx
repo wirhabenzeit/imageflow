@@ -20,7 +20,7 @@ function restore() {
       leftHidden: saved.leftHidden === true, rightHidden: saved.rightHidden === true, bottomHidden: saved.bottomHidden === true };
   } catch { return initial; }
 }
-export function usePanels() {
+export function usePanels(resizing = false) {
   const [panels, setPanels] = useState(restore);
   const [windowHeight, setWindowHeight] = useState(() => innerHeight);
   useEffect(() => {
@@ -30,13 +30,16 @@ export function usePanels() {
   }, []);
   const bottomMaximum = Math.max(limits.bottom[0], Math.min(limits.bottom[1], Math.floor(windowHeight / 2)));
   useEffect(() => {
+    if (resizing) return;
     try { localStorage.setItem(key, JSON.stringify(panels)); } catch { /* Preferences are optional. */ }
-  }, [panels]);
+  }, [panels, resizing]);
   const hiddenKey = (side: Side) => (side + 'Hidden') as 'leftHidden' | 'rightHidden' | 'bottomHidden';
   const toggle = (side: Side) => setPanels((value) => ({ ...value, [hiddenKey(side)]: !value[hiddenKey(side)] }));
   const show = (side: Side) => setPanels((value) => value[hiddenKey(side)] ? { ...value, [hiddenKey(side)]: false } : value);
-  const resize = (side: Side, size: number) => setPanels((value) => ({ ...value,
-    [side]: side === 'bottom' ? Math.min(bottomMaximum, bounded(side, size)) : bounded(side, size) }));
+  const resize = (side: Side, size: number) => setPanels((value) => {
+    const next = side === 'bottom' ? Math.min(bottomMaximum, bounded(side, size)) : bounded(side, size);
+    return value[side] === next ? value : { ...value, [side]: next };
+  });
   return { panels: { ...panels, bottom: Math.min(panels.bottom, bottomMaximum) }, bottomMaximum, toggle, show, resize };
 }
 export function PanelDivider({ side, size, maximum = limits[side][1], resize, onResizing }: {

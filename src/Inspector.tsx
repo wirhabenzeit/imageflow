@@ -1,3 +1,4 @@
+import type { InspectorTarget } from './inspector-targets';
 import { plainFormatted } from './formatted-text';
 import { assetMenuState } from './asset-menu';
 import { sourcePath } from './source-locations';
@@ -130,8 +131,8 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   edit: (change: Edit, notice?: string | (() => string)) => void;
   highlight: (id?: string) => void; select: (spread: string) => void;
   quickLook: () => void; focus?: { box: string; at: number };
-  targets?: BookGeometry['targets']; open: (owner: { type: 'photo' | 'markdown' | 'element'; id: string }) => void;
-  openTarget: (target: BookGeometry['targets'][number]) => void;
+  targets?: InspectorTarget[]; open: (owner: { type: 'photo' | 'markdown' | 'element'; id: string }) => void;
+  openTarget: (target: InspectorTarget) => void;
   place: (from: string, to: string) => void;
   familyPicker?: ReactNode;
 }) {
@@ -177,7 +178,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   // boxes and elements, so every editor on the page can be opened from the keyboard.
   const marked = template ? targets.filter((target) => !target.owner)
     .filter((target, i, all) => all.findIndex((other) => other.edits.join(' ') === target.edits.join(' ')) === i)
-    .sort((a, b) => Math.abs(a.y - b.y) > 4 ? a.y - b.y : a.x - b.x)
+    .sort((a, b) => a.order - b.order)
     .flatMap((target) => {
       const fields = target.edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((field) => !!field);
       if (!fields.length) return [];

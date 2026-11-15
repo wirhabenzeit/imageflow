@@ -47,7 +47,9 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     const photo = summary.photoIndex[source.id];
     if (!photo) return <p className="muted">This photo is no longer in the project.</p>;
     const size = summary.photoSizes[source.id];
+    const profileStart = import.meta.env.IMAGEFLOW_PROFILE ? performance.now() : 0;
     const date = captureFact(photoDate(summary, source.id));
+    if (import.meta.env.IMAGEFLOW_PROFILE) performance.measure('imageflow.captureFact', { start: profileStart, end: performance.now() });
     const ppi = template?.format.output.resolution?.target;
     const print = size && ppi && [size.width, size.height].map((px) => (px / ppi * 2.54).toFixed(1)).join(' × ');
     return <div className="source-inspector">
