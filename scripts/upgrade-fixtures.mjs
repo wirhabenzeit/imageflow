@@ -34,7 +34,9 @@ async function untrust() {
   try { saved = JSON.parse(await readFile(join(work, 'tls-keychain.json'), 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   // Earlier runs saved only the keychain path, for the user domain.
   const { keychain, admin } = typeof saved === 'string' ? { keychain: saved, admin: false } : saved ?? {};
-  try { await security(['remove-trusted-cert', ...(admin ? ['-d'] : []), certificate], !!admin); } catch { /* trust settings may already be gone */ }
+  // In the admin domain remove-trusted-cert waits for a confirmation even with sudo; deleting the certificate from the
+  // System keychain removes it together with its trust settings (checked on a GitHub runner).
+  if (!admin) { try { await security(['remove-trusted-cert', certificate], false); } catch { /* trust settings may already be gone */ } }
   if (keychain) {
     const { stdout } = await run('openssl', ['x509', '-in', certificate, '-noout', '-fingerprint', '-sha1']);
     const digest = stdout.trim().split('=').at(-1).replaceAll(':', '');
