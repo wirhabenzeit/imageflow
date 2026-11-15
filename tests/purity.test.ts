@@ -68,3 +68,41 @@ test('declared asynchronous rendering may use timers, the GPU and the network wh
   assert.deepEqual(guards.calls.map(({ api }) => api), ['setTimeout']);
   assert.deepEqual(log, ['fetch https://tiles.example/2.pbf', 'context webgl2', 'timeout']);
 });
+
+test('work a drawing starts stays declared after the drawing returns: its timers, frames and request continuations', async () => {
+  const queue: (() => void)[] = [];
+  const later = (callback: () => void) => { queue.push(callback); return queue.length; };
+  const run = () => { while (queue.length) queue.shift()!(); };
+  const microtasks = () => new Promise<void>((resolve) => setImmediate(resolve));
+  let settle = () => {};
+  const target: Record<string, unknown> = {
+    setTimeout: later, requestAnimationFrame: later,
+    fetch: () => new Promise<void>((resolve) => { settle = resolve; }),
+  };
+  let drawing = true;
+  const guards = installPurityGuards(target, script, () => 'at draw (http://render/render/view/template/template.js:3:4)', () => drawing);
+  const fetch = target.fetch as (url: string) => Promise<void>;
+  const timeout = target.setTimeout as (callback: () => void) => number;
+  const frame = target.requestAnimationFrame as (callback: () => void) => number;
+  // A library starts a session request and a repaint loop while drawing; both continue after draw has resolved.
+  void fetch('https://api.example/session').then(() => fetch('https://events.example/telemetry'));
+  frame(() => frame(() => timeout(() => {})));
+  drawing = false;
+  queue.shift()!();
+  queue.shift()!();
+  settle();
+  await microtasks();
+  assert.deepEqual(guards.calls, [], 'background work started by a drawing is declared');
+  // Once that work has settled, the exemption ends with it.
+  run();
+  settle();
+  await microtasks();
+  run();
+  void fetch('https://elsewhere.example/');
+  assert.deepEqual(guards.calls.map(({ api }) => api), ['fetch']);
+});
+
+test('calls outside any render are described as such', () => {
+  assert.match(impureMessage('fetch', false), /outside any layout render and any <RenderedImage> drawing/);
+  assert.doesNotMatch(impureMessage('fetch'), /outside/);
+});
