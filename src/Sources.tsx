@@ -29,13 +29,19 @@ type SourcesProps = {
   writable: boolean; busy: boolean; importSources: (command: 'import') => void;
   importPaths: (files: File[]) => void; quickLook: (source: SourceRef) => void;
   failure: (message: string) => void; changed: (summary: ProjectSummary) => void;
+  // The extensions the template's file parameters accept, and the import that takes them as files (dropped files, or a chooser).
+  fileTypes: string[]; importFileRequest: (files?: File[]) => void;
 };
 
-function SourceTabs({ summary, tab, setTab }: { summary: ProjectSummary; tab: SourcesTab; setTab: (tab: SourcesTab) => void }) {
+// The Assets tab holds the book's other assets: the files of file parameters. It is offered when the template has such
+// parameters or the book already holds files, so a book without any does not carry an empty tab.
+const hasAssets = (summary: ProjectSummary, fileTypes: string[]) => fileTypes.length > 0 || Object.keys(summary.project.files).length > 0;
+
+function SourceTabs({ summary, tab, setTab, assets }: { summary: ProjectSummary; tab: SourcesTab; setTab: (tab: SourcesTab) => void; assets: boolean }) {
   const tabs: [SourcesTab, string, number][] = [
     ['photo', 'Photos', Object.keys(summary.photoIndex).length],
     ['text', 'Texts', Object.keys(summary.project.texts).length],
-    ['assets', 'Assets', sourceEntries(summary).length],
+    ...(assets ? [['assets', 'Assets', Object.keys(summary.project.files).length] as [SourcesTab, string, number]] : []),
   ];
   return <div className="segmented" role="tablist" aria-label="Source type">
     {tabs.map(([kind, label, count]) => <button key={kind} role="tab" aria-selected={tab === kind}
@@ -43,17 +49,20 @@ function SourceTabs({ summary, tab, setTab }: { summary: ProjectSummary; tab: So
   </div>;
 }
 
-// Photos and texts as thumbnails and excerpts, or every asset of the book, files included, as a plain list.
+// Photos and texts as thumbnails and excerpts, or the book's other assets, the files of file parameters, as a plain list.
 export function Sources(props: SourcesProps) {
-  const { summary, tab, setTab, view, changed, busy, quickLook, writable, importPaths } = props;
+  const { summary, tab, setTab, view, changed, busy, quickLook, writable, fileTypes, importFileRequest } = props;
   const api = window.imageflow;
-  if (tab !== 'assets') return <SourceStrip {...props} tab={tab} />;
-  if (!api) return <section className="sources" aria-label="Sources"><div className="sources-bar"><SourceTabs summary={summary} tab={tab} setTab={setTab} /></div></section>;
-  return <SourceManager embedded view={view} api={api} summary={summary} adopt={changed} disabled={busy} quickLook={quickLook}
-    drop={(files) => { if (writable && !busy) importPaths(files); }} tabs={<SourceTabs summary={summary} tab={tab} setTab={setTab} />} />;
+  const assets = hasAssets(summary, fileTypes);
+  // The last file removed while its tab is open takes the tab with it; the strip shows photos again.
+  if (tab !== 'assets' || !assets) return <SourceStrip {...props} tab={tab === 'assets' ? 'photo' : tab} assets={assets} />;
+  const tabs = <SourceTabs summary={summary} tab={tab} setTab={setTab} assets />;
+  if (!api) return <section className="sources" aria-label="Sources"><div className="sources-bar">{tabs}</div></section>;
+  return <SourceManager embedded view={view} api={api} summary={summary} adopt={changed} disabled={busy} quickLook={quickLook} tabs={tabs}
+    fileTypes={fileTypes} importFiles={(files) => { if (writable && !busy) importFileRequest(files); }} />;
 }
 
-function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, changed, failure }: SourcesProps & { tab: SourceKind }) {
+function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, changed, failure, assets }: SourcesProps & { tab: SourceKind; assets: boolean }) {
   const list = useRef<HTMLDivElement>(null);
   const [unused, setUnused] = useState(false);
   const items = useMemo(() => sourceList(summary, tab, view.value).filter(({ id }) => !unused || !usage[tab][id]?.length), [summary, tab, unused, usage, view.value]);
@@ -171,7 +180,7 @@ function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writ
     if (writable && !busy) importPaths([...event.dataTransfer.files]);
   }}>
     <div className="sources-bar">
-      <SourceTabs summary={summary} tab={tab} setTab={setTab} />
+      <SourceTabs summary={summary} tab={tab} setTab={setTab} assets={assets} />
       <span className="spacer" />
       <PhotoViewMenu view={view.value} update={view.update} custom={view.custom} photos={tab === 'photo'}>
         <button onClick={() => setUnused(false)}>All assets{!unused ? ' ✓' : ''}</button>

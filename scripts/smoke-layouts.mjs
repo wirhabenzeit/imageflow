@@ -32,7 +32,11 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1400, 900));
   await app.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, project);
   const frame = w.frameLocator('iframe.book-frame-book[data-current]');
-  const status = () => frame.locator('body').evaluate(() => window.imageflowRenderStatus);
+  // data-current marks the newest frame, which may still be loading after a change; read only a rendered one.
+  const status = async () => {
+    await w.waitForSelector('iframe.book-frame-book[data-current][data-ready]', { state: 'attached', timeout: 30000 });
+    return frame.locator('body').evaluate(() => window.imageflowRenderStatus);
+  };
   const statusLine = () => w.locator('.status').textContent();
   // Runs a change and waits for the book frame that renders its result.
   const rerendered = async (change) => {
@@ -123,7 +127,7 @@ try {
     await layoutReady(spread);
     assert.equal(await pickerHasNoOverlap(), true);
   }
-  await button('Photo grid 2×2 10–11').click();
+  await button('Pages 10–11 · Photo grid 2×2').click();
   await w.locator('[data-spread="settlements"][aria-current="page"]').waitFor();
 
   // Only layouts with the same footprint are offered: no single title or closing page for a full spread. The grid

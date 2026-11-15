@@ -13,6 +13,7 @@ Rules:
 
 - Each declared box is rendered exactly once through its component; each declared element at most once.
 - Boxes and elements are positioned and sized by template CSS on the component's element (`className`, `style`), or by `rect` (see Geometry helpers).
+- `decorative` marks a component's text as ornament, so the Book check does not report it for the safe area, size or overlap (see [CSS contract](css-contract.md#fonts-and-output)).
 - An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted, as it is in thumbnails and layout previews; templates can style `[data-empty]`.
 
 ## PhotoBox render callbacks

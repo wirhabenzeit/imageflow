@@ -36,7 +36,8 @@ jobs:
     # Keep private-repository PRs from consuming macOS minutes.
     if: github.event.repository.private == false || github.event_name == 'push'
     runs-on: macos-latest
-    timeout-minutes: 5
+    # The focused smoke suite takes about five minutes on a hosted Mac; leave room so a passing run isn't cancelled.
+    timeout-minutes: 10
     env:
       IMAGEFLOW_HIDE_WINDOW: '1'
       HOMEBREW_NO_AUTO_UPDATE: '1'

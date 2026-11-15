@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { copyFile, cp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { ProjectFiles } from '../src/project';
+import { clearFileAssignments, fileAssigned } from '../src/asset-usage';
 import { sourceEntries, sourceFolder } from '../src/source-locations';
 import type { ImportMode, SourceEntry } from '../src/source-locations';
 import { createDocument } from './documents';
@@ -104,18 +105,16 @@ export async function relinkFolder(book: OpenProject, directory: string, keys?: 
   return { book: next, repaired, ambiguous };
 }
 
-export function fileIsAssigned(book: OpenProject, id: string) {
-  const values = [book.project.params, ...book.project.spreads.flatMap((spread) => [spread.params,
-    ...Object.values(spread.boxes).map(({ params }) => params), ...Object.values(spread.elements).map(({ params }) => params)])];
-  // List items count too: a GPX track in a map's list of tracks is assigned like a single file parameter.
-  return values.some((params) => Object.values(params).some((value) => value === id ||
-    (Array.isArray(value) && value.some((item) => Object.entries(item).some(([key, field]) => key !== 'id' && field === id)))));
-}
+export const fileIsAssigned = (book: OpenProject, id: string) => fileAssigned(book.project, id);
+
+/** Removes assets from the book. Files still assigned to parameters are cleared from those parameters in the same
+ * edit, so one Undo restores the registry entry and every assignment. Copied bytes stay in the book for Undo; a
+ * linked original is never touched. */
 export async function removeSources(book: OpenProject, keys: readonly string[]) {
   const sources = sourceEntries(book).filter(({ key }) => keys.includes(key));
   if (sources.length !== new Set(keys).size) throw new Error('An asset changed. Select it again.');
-  if (sources.some((source) => source.kind === 'file' && fileIsAssigned(book, source.id))) throw new Error('Remove the file’s assignments before removing it from the book.');
   const files = filesOf(book);
+  clearFileAssignments(files.project, sources.filter(({ kind }) => kind === 'file').map(({ id }) => id));
   for (const source of sources) {
     if (source.kind === 'photo') delete files.photoIndex[source.id];
     else delete files.project[source.kind === 'markdown' ? 'texts' : 'files'][source.id];

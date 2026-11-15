@@ -571,6 +571,12 @@ export type EditMarker = { 'data-edit'?: string };
 /** Attributes returned by `issue`. Spread them onto a native node or any platform component, including `Spread`. */
 export type IssueMarker = { 'data-issue'?: string; 'data-issue-info'?: string };
 /**
+ * `decorative` marks a node as ornament, such as display type that deliberately runs off the page or sits behind other
+ * type. The Book check skips the text inside it for safe-area, minimum-size, overflow and overlap findings. Print export
+ * is unchanged: the page edge still cuts the text. A Markdown box's own text-flow overflow is still reported.
+ */
+export type Decorative = { decorative?: boolean };
+/**
  * Places a platform component at a rectangle (millimetres, spread coordinates) with absolute positioning. Properties
  * in `style` win over the ones `rect` sets, so `style={{ height: 'auto' }}` lets a heading grow.
  */
@@ -585,7 +591,7 @@ export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | '
  * `presentation="inline"` opts a string parameter into on-page typing (included in the contract-1 baseline), the same word
  * as an editor's `presentation`. Without it, or with `'dialog'`, the node opens the parameter panel. Multiline inline strings default to preserving line breaks; template CSS and `style` take precedence.
  */
-export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & { parameter: Path; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
+export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & Decorative & { parameter: Path; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
 
 /** The geometry helpers with the spread's format already applied: `ctx.geometry.page('left', 'bleed')`. */
 export type BoundGeometry = {
@@ -650,15 +656,15 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   /** The geometry helpers for this spread's format: `<ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />`. */
   geometry: BoundGeometry;
   /** `PhotoBox` limited to this layout's photo box IDs: `<ctx.PhotoBox id="hero" />` fails type checking for unknown IDs. */
-  PhotoBox<I extends BoxIds<S, 'photo'>>(props: Styling & Placement & EditMarker & IssueMarker & {
+  PhotoBox<I extends BoxIds<S, 'photo'>>(props: Styling & Placement & EditMarker & IssueMarker & Decorative & {
     id: I;
     /** Renders the photo yourself; `box.params` is typed from this box's declared parameters. See `PhotoRender`. */
     children?: (photo: PhotoRender, box: PhotoBoxState<I, ValuesOf<S['boxes'][I]>>) => ImageFlowNode;
   }): ImageFlowElement;
   /** `MarkdownBox` limited to this layout's Markdown box IDs. */
-  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
+  MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: BoxIds<S, 'markdown'>; columns?: Columns }): ImageFlowElement;
   /** `Element` limited to this layout's element IDs. */
-  Element(props: Styling & Placement & EditMarker & IssueMarker & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
+  Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: keyof S['elements'] & string; children?: ImageFlowNode }): ImageFlowElement;
   /**
    * Shows a string parameter and makes it editable by clicking it: `<ctx.Text parameter="heading" as="h2" rect={...} />`.
    * Use `ctx.edit` for nodes that combine several parameters or show more than the value.
@@ -942,18 +948,18 @@ export type PhotoBoxState<I extends string = string, P = Values> = { id: I; uid:
  * ImageFlow still owns assignment, cropping, rendition choice, resolution checks and image loading; the callback must
  * draw the photo at `photo.image` for the printed crop to match. It is not called for an empty box.
  */
-export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & { id: string; children?: (photo: PhotoRender, box: PhotoBoxState) => ImageFlowNode }): ImageFlowElement;
+export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; children?: (photo: PhotoRender, box: PhotoBoxState) => ImageFlowNode }): ImageFlowElement;
 /**
  * A box that shows its part of the Markdown text assigned to box `id`. `columns` (1–6, default 1) splits it into
  * columns; set the gap with the `columnGap` style. Text fills each column before continuing in the next box.
  * In the editor, clicking it edits the box's parameters and any others it is marked with: `{...ctx.edit('textSize')}`.
  */
-export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & { id: string; columns?: Columns }): ImageFlowElement;
+export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; columns?: Columns }): ImageFlowElement;
 /**
  * Generated content with parameters, such as a calendar grid. In the editor, clicking it edits the element's
  * parameters and any others it is marked with: `<Element id="grid" {...ctx.edit('month')}>`.
  */
-export function Element(props: Styling & Placement & EditMarker & IssueMarker & { id: string; children?: ImageFlowNode }): ImageFlowElement;
+export function Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; children?: ImageFlowNode }): ImageFlowElement;
 // Reusable declarations
 
 /**

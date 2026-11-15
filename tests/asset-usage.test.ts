@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assetPageLabels, assetUsage } from '../src/asset-usage';
+import { assetPageLabels, assetUsage, clearFileAssignments, fileAssigned, fileExtensions, usageLabel } from '../src/asset-usage';
 import { assetMenu } from '../src/asset-menu';
 import type { ProjectSummary } from '../src/desktop';
 import { projectSchema } from '../src/project';
@@ -27,4 +27,29 @@ test('unused detection includes document, layout, box and element parameter refe
   assert.equal(usage.text.story[0].spread, 's');
   assert.equal(usage.file.route[0].pages, 'Book settings');
   assert.equal(usage.photo.unused, undefined);
+});
+
+test('a file held in a list item counts as used, and clearing takes it out of every scope', () => {
+  const project = projectSchema.parse({ schemaVersion: 1, title: 'Book', template: { id: 't', version: '1' },
+    params: { route: 'a' }, files: { a: 'files/a.gpx', b: 'files/b.gpx', c: 'files/c.gpx' },
+    spreads: [{ id: 's', definition: 'x', params: {}, boxes: {}, elements: { map: { params: { tracks: [{ id: 'one', track: 'b', label: 'Ride' }, { id: 'two', track: 'c' }] } } } }] });
+  const usage = assetUsage({ project, photoIndex: {} }, ['2–3']);
+  assert.deepEqual(usage.file.b, [{ spread: 's', pages: '2–3' }]);
+  assert.equal(usage.file.c?.length, 1);
+  assert.equal(fileAssigned(project, 'b'), true);
+  clearFileAssignments(project, ['a', 'b']);
+  assert.deepEqual(project.params, {});
+  assert.deepEqual(project.spreads[0].elements.map.params, { tracks: [{ id: 'one', label: 'Ride' }, { id: 'two', track: 'c' }] });
+  assert.equal(fileAssigned(project, 'a'), false);
+  assert.equal(fileAssigned(project, 'c'), true);
+});
+
+test('the template\'s file parameters decide which file types can be imported', () => {
+  const file = (accept: string[]) => ({ label: 'File', type: 'file' as const, default: '' as const, accept });
+  const template = { parameters: { logo: file(['.svg']) }, spreads: { map: { parameters: {}, boxes: {},
+    elements: { route: { parameters: { track: file(['.gpx', '.kml']), tracks: { label: 'Tracks', type: 'list' as const, item: { track: file(['.gpx', '.fit']) }, default: [] } } } } } } };
+  assert.deepEqual(fileExtensions(template).sort(), ['.fit', '.gpx', '.kml', '.svg']);
+  assert.deepEqual(fileExtensions(undefined), []);
+  assert.equal(usageLabel('4–5'), 'Pages 4–5');
+  assert.equal(usageLabel('Book settings'), 'Book settings');
 });

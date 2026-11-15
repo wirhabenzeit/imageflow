@@ -6,7 +6,7 @@ import { usePhotoView } from './PhotoViewMenu';
 import { isPhotoViewCommand } from './photo-view';
 import { captureViewAnchor, restoreViewAnchor } from './view-anchor';
 import type { ViewAnchor } from './view-anchor';
-import { assetUsage } from './asset-usage';
+import { assetUsage, fileExtensions } from './asset-usage';
 import { sourcePlacements } from './source-placement';
 import { importFeedback } from './import-feedback';
 import { commandState } from './commands';
@@ -160,8 +160,9 @@ export function App() {
   function setCanvasGeometry(next: BookGeometry | undefined, animate = false, start?: number, revision?: string) {
     setCanvasMotion(animate && start ? { offsets: reorderOffsets(geometry, next), start } : undefined);
     setGeometry(next);
-    // Resize messages from the old displayed frame must not adopt the pending revision's labels.
-    if (revision === summary?.id) setCanvasLabels(Object.fromEntries(spreads.map(({ id, definition }, i) =>
+    // Resize messages from the old displayed frame must not adopt the pending revision's labels. Geometry can arrive
+    // before the template, which has no page numbers or layout names yet; the live labels stand in until it does.
+    if (revision === summary?.id && template) setCanvasLabels(Object.fromEntries(spreads.map(({ id, definition }, i) =>
       [id, pagesLabel(i) + ' · ' + label(definition, i)])));
   }
   const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean; start?: number }>({ animate: true });
@@ -466,6 +467,8 @@ export function App() {
   }
 
   function importFiles(request: ImportRequest, canvasId?: string) {
+    // Without a kind, photos and Markdown are recognised by type; the template's file parameters add the types they accept.
+    if (!request.kind && !request.accept) request = { ...request, accept: fileExtensions(template) };
     const generation = inputGeneration.current;
     enqueue(async () => {
       const before = current.current;
@@ -478,10 +481,10 @@ export function App() {
       if (result.value.imported.length) adopt(result.value.summary);
       // Imports into the library select the first new source; imports onto a box keep the spread selected.
       if (!request.target && result.value.imported.length) {
-        const kind = result.value.summary.photoIndex[result.value.imported[0]] ? 'photo' : 'text';
-        // The Assets tab lists everything, so an import there stays on it.
-        setSourceTab((tab) => tab === 'assets' ? tab : kind);
-        setSelectedSource({ kind, id: result.value.imported[0] });
+        const [first] = result.value.imported;
+        // Files for parameters are not photos or texts: the tab stays where it is and nothing is selected.
+        const kind = result.value.summary.photoIndex[first] ? 'photo' : result.value.summary.project.texts[first] ? 'text' : undefined;
+        if (kind) { setSourceTab(kind); setSelectedSource({ kind, id: first }); }
       }
       setNotice(importFeedback(result.value.imported.length, result.value.counts));
     });
@@ -518,10 +521,7 @@ export function App() {
 
   async function showAssets() {
     if (!api) return;
-    const groups = template ? [template.parameters, ...Object.values(template.spreads).flatMap((spread) => [spread.parameters,
-      ...Object.values(spread.boxes).map((box) => box.parameters), ...Object.values(spread.elements).map((element) => element.parameters)])] : [];
-    const accept = [...new Set(groups.flatMap((group) => Object.values(group).flatMap((param) =>
-      param.type === 'list' ? Object.values(param.item) : [param]).flatMap((param) => param.type === 'file' ? param.accept : [])))];
+    const accept = fileExtensions(template);
     const result = await api.showAssets(accept);
     if ('error' in result) setError(result.error);
   }
@@ -660,6 +660,12 @@ export function App() {
     const focused = document.activeElement;
     if (focused instanceof HTMLElement && focused.matches('input, textarea, select, [contenteditable="true"]') && !focused.closest('dialog')) focused.blur();
     await queue.current;
+    // A book reload (for example after a text was saved) writes nothing and settles on its own, so Quit waits for it
+    // rather than refusing. A reload that is still running after the wait refuses as before.
+    const deadline = Date.now() + 15_000;
+    while (reloading.current && !reloadFailed.current && attempt === quitAttempt.current && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     await new Promise((resolve) => setTimeout(resolve, 0)); // React publishes validation and save results.
     return attempt === quitAttempt.current && finishQuit();
   });
@@ -1008,7 +1014,7 @@ export function App() {
       case 'box-reset-crop': changeSpreadAt(sheet, (spread) => { const box = spread.boxes[top.id]; if (box?.photo) setPlacement(box, spread.definition, centered); }, 'Crop reset'); break;
       case 'box-edit-text': openOwner(sheet, { type: 'markdown', id: top.id }); break;
       case 'asset-preview': if (source) setQuick(source); break;
-      case 'box-show-assets': if (source) { choose(source, true); showPanel('bottom'); } break;
+      case 'box-show-assets': if (source) { choose(source); showPanel('bottom'); } break;
       case 'box-remove-photo': case 'box-remove-text': changeSpreadAt(sheet, (spread) => { spread.boxes[top.id] = { params: spread.boxes[top.id]?.params ?? {} }; }, photo ? 'Photo removed' : 'Text removed'); setCropping(undefined); break;
     }
   }
@@ -1439,11 +1445,9 @@ export function App() {
     if (state?.photo) return { kind: 'photo', id: state.photo };
     if (state?.text) return { kind: 'text', id: state.text };
   }
-  // Choosing a source shows it in its own tab, except from the Assets tab, which already lists it and would lose
-  // its place when Quick Look steps through sources. Showing a box's source from the canvas always goes to its tab.
-  function choose(source: SourceRef, show = false) {
+  function choose(source: SourceRef) {
     setSelectedSource(source);
-    setSourceTab((tab) => tab === 'assets' && !show ? tab : source.kind);
+    setSourceTab(source.kind);
   }
 
   const quickItems = useMemo(() => summary && quick ? sourceList(summary, quick.kind, photoView.value) : [], [summary, quick, photoView.value]);
@@ -1583,6 +1587,13 @@ export function App() {
     const paths = api?.pathsForFiles(files) ?? [];
     if (paths.length) importFiles({ paths });
   });
+  // The Assets tab lists the files of the template's file parameters, and imports only files of those types.
+  const fileTypes = useMemo(() => fileExtensions(template), [template]);
+  const importFileRequest = useLiveCallback((files?: File[]) => {
+    const paths = files && api?.pathsForFiles(files);
+    if (files && !paths?.length) return;
+    importFiles({ kind: 'file', accept: fileTypes, ...(paths ? { paths } : {}) });
+  });
   const updatePhotoView = useLiveCallback(photoView.update);
   const commandPhotoView = useLiveCallback(photoView.command);
   const customPhotoView = useLiveCallback(photoView.custom);
@@ -1604,8 +1615,8 @@ export function App() {
   const sourcesPanel = useMemo(() => (summary && <Sources view={sourcesView} summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={chooseSource}
           failure={setError} changed={adoptSource} usage={usage} writable={writable} busy={!!busy} importSources={importSources} quickLook={setQuick}
-          importPaths={importSourcePaths} />),
-    [summary, sourcesView, sourceTab, selectedSource, usage, writable, busy, chooseSource, adoptSource, importSources, importSourcePaths]);
+          importPaths={importSourcePaths} fileTypes={fileTypes} importFileRequest={importFileRequest} />),
+    [summary, sourcesView, sourceTab, selectedSource, usage, writable, busy, chooseSource, adoptSource, importSources, importSourcePaths, fileTypes, importFileRequest]);
   const inspectorPanel = useMemo(() => (summary && spread && <Inspector summary={summary} writable={writable}
         spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} quickLook={quickSource} focus={focusBox}
