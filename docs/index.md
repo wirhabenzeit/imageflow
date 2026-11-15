@@ -2,6 +2,11 @@
 layout: home
 hero:
   name: ImageFlow
+  image:
+    src: /imageflow-mark.svg
+    alt: ImageFlow app icon
+    width: 320
+    height: 320
   text: Design photobooks and calendars
   tagline: Your photos and Markdown, editable layouts, print-ready PDFs. For macOS.
   actions:

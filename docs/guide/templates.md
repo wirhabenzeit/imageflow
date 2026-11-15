@@ -11,3 +11,11 @@ The library keeps one entry per template ID. A newer version replaces it; import
 To share a template edited inside a book, import the book's `template/` folder, then export the library entry.
 
 Templates run code. Only import templates you trust. To create your own, see [Writing templates](../templates/index.md).
+
+## Built-in examples
+
+The Photobook starter includes a complete sample book in [light](https://github.com/wirhabenzeit/imageflow/blob/main/docs/images/photobook-starter-light.jpg) and [dark](https://github.com/wirhabenzeit/imageflow/blob/main/docs/images/photobook-starter-dark.jpg) themes.
+
+The Wall calendar starter includes a cover and twelve monthly pages. [Open the January page](https://github.com/wirhabenzeit/imageflow/blob/main/docs/images/calendar-month.png) to see the month strip in detail.
+
+![Cover and all twelve months of the Wall calendar sample](../images/calendar-starter.jpg)
