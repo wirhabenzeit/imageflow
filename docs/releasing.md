@@ -71,6 +71,8 @@ The app compares semantic versions before starting Electron's native updater. It
 
 **Pages** regenerates both channel heads after a release is published, edited, unpublished or deleted. It can also run manually. It reads all release pages, ignores drafts, rehearsal/alpha/RC versions and incomplete platform assets, validates the expected GitHub ZIP URL and GitHub's SHA-256 asset digest, and selects by SemVer rather than publication date. An API or metadata error stops deployment, preserving the existing site. With no published release, the feed explicitly reports no available version. Apple silicon is shipped; the x64 feed remains empty until matching x64 assets exist.
 
+After publishing, check that the beta (or stable) feed lists the new version. GitHub Pages identifies a deployment by its commit, and the release-triggered run deploys `main`'s current commit. If `main` hasn't moved since its last Pages deployment (as when the release was tagged at `main`'s latest commit, the usual case), Pages reports success but keeps serving the earlier copy, so the feed still shows the previous release. Any later push to `main` redeploys with the release included; until then, merge any small change to `main`. This happened with `v1.0.0-beta.3`.
+
 GitHub Pages is configured to use Actions, with its protected `github-pages` environment allowing `main` and `v*` tags. After this PR merges:
 
 1. Keep the default site URL above stable (feed requests refuse redirects, so adding a Pages custom domain would make every check fail until the app's feed URL changes) and retain the environment's `main` and `v*` policies (published-release events run in their tag context).
