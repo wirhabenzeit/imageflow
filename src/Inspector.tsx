@@ -1,7 +1,7 @@
 import type { InspectorTarget } from './inspector-targets';
 import { plainFormatted } from './formatted-text';
 import { assetMenuState } from './asset-menu';
-import { sourcePath } from './source-locations';
+import { sourceFileName } from './source-locations';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { Fields } from './Fields';
@@ -121,7 +121,7 @@ function contentState(summary: ProjectSummary, spread: SpreadState, id: string, 
   const state = spread.boxes[id];
   if (kind === 'photo') return state?.photo ? summary.photoIndex[state.photo]?.title || (summary.photos[state.photo] ? state.photo : 'Missing photo') : 'Empty';
   if (!state?.text) return 'No text';
-  const name = summary.project.texts[state.text] ? sourcePath(summary.project.texts[state.text]).split('/').pop() : 'Missing text';
+  const name = summary.project.texts[state.text] ? sourceFileName(summary.project.texts[state.text]) : 'Missing text';
   return flow && flow.parts > 1 ? name + ' · ' + flow.part + ' of ' + flow.parts : name;
 }
 

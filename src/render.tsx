@@ -1,6 +1,6 @@
 import type { PresentationView } from './presentation-model';
 import { presentationPhotoSource } from './presentation-model';
-import { sourcePath } from './source-locations';
+import { sourceFileName, sourcePath } from './source-locations';
 import { renameIds } from './svg-ids';
 import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
 import { activateRenderedImageSpreads, configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
@@ -91,7 +91,7 @@ function textAssignments(book: RenderProject, template: Template) {
     }
   }
   for (const [source, chain] of chains) {
-    const title = (book.project.texts[source] && sourcePath(book.project.texts[source]))?.split('/').pop();
+    const title = book.project.texts[source] ? sourceFileName(book.project.texts[source]) : undefined;
     chain.forEach(({ spread, box }, index) => {
       positions[spread + ':' + box] = { part: index + 1, parts: chain.length, title };
     });
