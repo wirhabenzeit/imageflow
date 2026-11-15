@@ -1,22 +1,10 @@
 name: Template screenshots
 
 on:
-  push:
-    branches: [main]
-    # Keep these inputs aligned with scripts/check-template-screenshot-source.mjs.
-    # Image-only refresh PRs and ordinary documentation edits do not trigger a run.
-    paths:
-      - 'sample/**'
-      - 'authoring/**'
-      - 'desktop/**'
-      - 'src/**'
-      - 'scripts/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'vite.config.ts'
-      - 'index.html'
-      - '.github/workflows/template-screenshots.yml'
+  # Refresh the documentation artwork once per published release (not prereleases).
+  # Manual runs from main are also supported.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -28,8 +16,9 @@ concurrency:
 
 jobs:
   render:
-    # Manual runs must select main too; no PR/feature code receives publishing credentials.
-    if: github.ref == 'refs/heads/main'
+    # Release runs execute in a tag context but render main (release.yml requires tagged
+    # commits on main); manual runs must select main. No PR/feature code gets publishing credentials.
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'release' && !github.event.release.prerelease)
     runs-on: macos-latest
     timeout-minutes: 20
     outputs:
