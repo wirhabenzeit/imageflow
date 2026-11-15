@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 await mkdir(join(root, '.build'), { recursive: true });
 const work = await mkdtemp(join(root, '.build', 'inline-text-'));
 const book = join(work, 'Text.imageflow');
-await cp(join(root, 'sample/starter'), book, { recursive: true, filter: (p) => basename(p) !== '.imageflow' });
+await copySample(join(root, 'sample', 'starter'), book);
 const templateFile = join(book, 'template/index.tsx');
 let source = await readFile(templateFile, 'utf8');
 const heading = '<ctx.Text presentation="inline" parameter="heading" as="h1" rect={at.right(margin, 120, page - 2 * margin, 110)} />';
@@ -358,9 +358,10 @@ try {
 
   // Ownership is tested through both the page and the Inspector, and includes an editor's layout fields.
   const ownedBook = join(work, 'Owned.imageflow');
-  await cp(join(root, 'sample/starter'), ownedBook, { recursive: true, filter: (p) => basename(p) !== '.imageflow' });
+  await copySample(join(root, 'sample', 'starter'), ownedBook);
   await writeFile(join(ownedBook, 'template/index.tsx'), `
 import { defineTemplate, p, Spread, printFormat, mm } from 'imageflow';
+import { copySample } from '../desktop/sample-book.mjs';
 const string = (label) => p.string({label, default:'Default text'});
 export default defineTemplate({id:'imageflow-starter',version:'1',contract:1,
   format:printFormat({label:'Test',trim:{width:mm(200),height:mm(200)},bleed:mm(0),safe:mm(5),ends:'inside-covers',pageCount:{min:2,max:20,step:2}}),

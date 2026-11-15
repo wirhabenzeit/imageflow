@@ -1,26 +1,56 @@
 {
   "segla": {
     "path": "photos/segla.jpg",
-    "title": "Segla",
-    "caption": "The ridge above Fjordgård",
-    "altText": "The ridge above Fjordgård"
+    "title": "Snowy ridge",
+    "caption": "A snow ridge in low sun, Senja",
+    "altText": "Sun behind a jagged snow-covered ridge above a fjord"
   },
   "shore": {
     "path": "photos/shore.jpg",
-    "title": "Shore",
-    "caption": "The outer coast of Senja",
-    "altText": "The outer coast of Senja"
+    "title": "Harbour breakwater",
+    "caption": "A breakwater and rough sea, Senja",
+    "altText": "A rocky breakwater leading out to a rough, blue-green sea"
   },
   "cottage": {
     "path": "photos/cottage.jpg",
-    "title": "Cottage",
-    "caption": "A cottage above the water",
-    "altText": "A cottage above the water"
+    "title": "Village in snow",
+    "caption": "A snowed-in fishing village, Senja",
+    "altText": "Red boathouses and street lights in a snow-covered village below mountains"
   },
   "light": {
     "path": "photos/light.jpg",
-    "title": "Evening light",
-    "caption": "Late light on the hills",
-    "altText": "Late light on the hills"
+    "title": "Evening ridge",
+    "caption": "Evening light on a ridge, Senja",
+    "altText": "A snow ridge against an orange horizon"
+  },
+  "aurora": {
+    "path": "photos/aurora.jpg",
+    "title": "Northern lights",
+    "caption": "Aurora over the fjord, Senja",
+    "altText": "Green and violet northern lights over a fjord and distant town lights"
+  },
+  "island": {
+    "path": "photos/island.jpg",
+    "title": "Island and skerries",
+    "caption": "An island and skerries seen from above, Senja",
+    "altText": "A mountain island and turquoise skerries in dark blue water"
+  },
+  "peaks": {
+    "path": "photos/peaks.jpg",
+    "title": "Peaks across the fjord",
+    "caption": "Snow-covered rocks and jagged peaks, Senja",
+    "altText": "Snowy rocks in the foreground and jagged peaks across a grey fjord"
+  },
+  "hiker": {
+    "path": "photos/hiker.jpg",
+    "title": "Ridge walk",
+    "caption": "A walker on a snow ridge, Senja",
+    "altText": "A small figure on a snow ridge above a fjord"
+  },
+  "sunset": {
+    "path": "photos/sunset.jpg",
+    "title": "Sunset peaks",
+    "caption": "Jagged peaks at sunset, Senja",
+    "altText": "Dark jagged peaks against an orange sunset sky"
   }
 }

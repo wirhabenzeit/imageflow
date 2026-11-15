@@ -11,6 +11,7 @@ import { importIntoProject, loadProject, updateProject } from '../desktop/projec
 import { configureSourceStore } from '../desktop/source-store';
 import { configureSourceAccess } from '../desktop/source-access';
 import { textSourcePath } from '../desktop/document-actions';
+import { copySample } from '../desktop/sample-book.mjs';
 
 function buffer(initial = 'Original') {
   let disk = initial;
@@ -216,7 +217,7 @@ test('a read-only original cannot be replaced through a writable parent folder',
 test('creation registers an ordinary source, and copying an external source preserves placements and the original', async (t) => {
   const root = await directory(t); const folder = join(root, 'Book.imageflow'); const cache = join(root, 'cache');
   await mkdir(cache); configureSourceStore(join(root, 'sources')); configureSourceAccess(join(root, 'access'));
-  await cp(resolve('sample/starter'), folder, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+  await copySample(resolve('sample/starter'), folder);
   const book = await loadProject(folder, cache);
   const created = await createMarkdownSource(book, 'Introduction');
   assert.equal(created.book.texts[created.id], '');

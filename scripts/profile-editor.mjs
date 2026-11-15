@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { testBook, menuAction, clickPage } from './ui-actions.mjs';
+import { copySample } from '../desktop/sample-book.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const out = join(root, '.build', 'editor-profile-' + Date.now());
 await mkdir(out, { recursive: true });
@@ -61,7 +62,7 @@ try {
   const requestedSample = process.argv.slice(2).find(arg => !arg.startsWith('--'));
   for (const sample of ['starter', 'calendar'].filter(sample => !requestedSample || sample === requestedSample)) {
     const book = join(out, sample + '.imageflow');
-    await cp(join(root, 'sample', sample), book, { recursive: true, filter: path => basename(path) !== '.imageflow' });
+    await copySample(join(root, 'sample', sample), book);
     const file = join(book, 'project.json'); const project = JSON.parse(await readFile(file, 'utf8'));
     if (sample === 'starter') project.spreads.splice(1, 0, { id: 'route', definition: 'map', params: { mapTitle: 'Senja' }, boxes: {}, elements: { map: { params: { tracks: [{ id: 'senja', track: 'senja-road' }], longitude: 17.4, latitude: 69.3, zoom: 9 } } } });
     const seed = project.spreads.slice(1).filter(s => s.definition !== 'map');

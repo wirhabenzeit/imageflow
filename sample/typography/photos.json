@@ -1,14 +1,14 @@
 {
-  "light": {
-    "path": "photos/light.jpg",
-    "title": "Evening light",
-    "caption": "Late light on the hills",
-    "altText": "Late light on the hills"
-  },
   "shore": {
     "path": "photos/shore.jpg",
-    "title": "Shore",
-    "caption": "The outer coast of Senja",
-    "altText": "The outer coast of Senja"
+    "title": "Harbour breakwater",
+    "caption": "A breakwater and rough sea, Senja",
+    "altText": "A rocky breakwater leading out to a rough, blue-green sea"
+  },
+  "sunset": {
+    "path": "photos/sunset.jpg",
+    "title": "Sunset peaks",
+    "caption": "Jagged peaks at sunset, Senja",
+    "altText": "Dark jagged peaks against an orange sunset sky"
   }
 }

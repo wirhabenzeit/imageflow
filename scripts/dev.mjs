@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { context } from 'esbuild';
 import { mainBuild, stageDesktop } from './stage-desktop.mjs';
+import { copySample } from '../desktop/sample-book.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 // Dev mode stages into its own folder, so builds and test runs, which restage .build/desktop, leave it alone.
@@ -52,7 +53,7 @@ let fresh;
 async function freshProject() {
   const folder = join(scratch, 'Book ' + new Date().toTimeString().slice(0, 8).replaceAll(':', '.') + '.imageflow');
   await rm(folder, { recursive: true, force: true });
-  await cp(starter, folder, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+  await copySample(starter, folder);
   const path = join(folder, 'project.json');
   const draft = JSON.parse(await readFile(path, 'utf8'));
   draft.title = 'Dev book';

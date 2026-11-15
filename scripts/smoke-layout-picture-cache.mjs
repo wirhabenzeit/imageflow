@@ -5,12 +5,13 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { testBook } from './ui-actions.mjs';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // A deliberately slow map makes redraws observable without depending on internet access or a WebGL driver.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/layout-picture-cache-'));
 const book = join(work, 'Book.imageflow');
-await cp(join(root, 'sample/starter'), book, { recursive: true, filter: (path) => !path.includes('/.imageflow') });
+await copySample(join(root, 'sample', 'starter'), book);
 const mapFile = join(book, 'template/map.tsx');
 const drawing = `async function drawMap(view, target) {
   window.__mapDraws = (window.__mapDraws ?? 0) + 1;

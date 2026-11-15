@@ -11,8 +11,8 @@
   },
   "spreads": [
     { "id": "twotone", "definition": "twotone", "params": {}, "boxes": {} },
-    { "id": "story", "definition": "story", "params": {}, "boxes": { "hero": { "photo": "light" }, "body": { "text": "story" } } },
-    { "id": "plate", "definition": "plate", "params": {}, "boxes": { "hero": { "photo": "shore" } } },
+    { "id": "story", "definition": "story", "params": {}, "boxes": { "hero": { "photo": "shore" }, "body": { "text": "story" } } },
+    { "id": "plate", "definition": "plate", "params": {}, "boxes": { "hero": { "photo": "sunset" } } },
     { "id": "vertical", "definition": "vertical", "params": {}, "boxes": {} },
     { "id": "fit", "definition": "fit", "params": {}, "boxes": {} },
     { "id": "effects", "definition": "effects", "params": {}, "boxes": {} }

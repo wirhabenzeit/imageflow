@@ -6,6 +6,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
 import { testBook } from './ui-actions.mjs';
+import { copySample } from '../desktop/sample-book.mjs';
 
 // Template pictures in New Book (#117): the built-in templates' own preview images, cropped to their format; a render
 // of the opening spread made when a template without an image is imported, saved on disk so a second launch shows it
@@ -98,7 +99,7 @@ try {
   app = await launch();
   await app.firstWindow();
   const book = join(work, 'Calendar.imageflow');
-  await cp(join(root, 'sample/calendar'), book, { recursive: true, filter: (path) => basename(path) !== '.imageflow' });
+  await copySample(join(root, 'sample', 'calendar'), book);
   await writeFile(join(book, 'template', 'preview.jpg'), await sharp({ create: { width: 400, height: 400, channels: 3, background: '#335' } }).jpeg().toBuffer());
   const page = await testBook(app, book);
   const frame = 'iframe.book-frame-book[data-ready]';

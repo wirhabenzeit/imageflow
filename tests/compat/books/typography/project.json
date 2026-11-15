@@ -23,7 +23,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "light"
+          "photo": "shore"
         },
         "body": {
           "text": "story"
@@ -36,7 +36,7 @@
       "params": {},
       "boxes": {
         "hero": {
-          "photo": "shore"
+          "photo": "sunset"
         }
       }
     },
