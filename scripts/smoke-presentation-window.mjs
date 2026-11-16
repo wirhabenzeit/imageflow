@@ -46,6 +46,13 @@ try {
   const window = await app.browserWindow(editor);
   const originalBounds = await window.evaluate((window) => window.getBounds());
   const originalHeader = headerHelper ? await macHeaderState(window, headerHelper) : undefined;
+  // Capture both editors in the normal desktop work area. On a small screen, opening an oversized editor
+  // while simple fullscreen hides the menu/Dock gives it temporary screen-sized bounds; macOS fits it back
+  // into the work area when presentation ends. That automatic fit is separate from resizing an existing editor.
+  const other = await testBook(app, two);
+  await other.locator('.book-frame-book[data-current][data-ready]').waitFor();
+  const otherWindow = await app.browserWindow(other);
+  const otherBounds = await otherWindow.evaluate((window) => window.getBounds());
   const presentation = await open(editor, 'b');
   console.log('Presentation opened in its own window.');
   const viewer = await app.browserWindow(presentation);
@@ -77,10 +84,8 @@ try {
     await presentation.waitForFunction((id) => document.querySelector('.book-frame-present[data-current][data-ready]')?.getAttribute('src')?.includes(id), saved.value.id);
   }
   console.log('Live revisions reached the presentation.');
-  const other = await testBook(app, two);
-  await other.locator('.book-frame-book[data-current][data-ready]').waitFor();
-  const otherWindow = await app.browserWindow(other);
-  const otherBounds = await otherWindow.evaluate((window) => window.getBounds());
+  assert.deepEqual(await otherWindow.evaluate((window) => window.getBounds()), otherBounds,
+    'Presenting the first book leaves the other editor unchanged');
   const firstClosed = presentation.waitForEvent('close');
   const otherPresentation = await open(other, 'a');
   await firstClosed;
