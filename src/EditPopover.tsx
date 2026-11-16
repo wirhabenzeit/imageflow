@@ -9,7 +9,8 @@ import type { EditTarget } from './editing';
 import type { Edit } from './Inspector';
 import { Field, ParamControl } from './Fields';
 import { isParameterValue, resolveParams, sameValue } from './parameters';
-import type { Project, SpreadState, Values } from './project';
+import { scopeSpread } from './project';
+import type { PageSide, Project, SpreadState, Values } from './project';
 import { controlLayout } from './controls';
 import type { ControlNode } from './controls';
 
@@ -58,10 +59,10 @@ function arrange(targets: EditTarget[], template: TemplateInfo, spread: SpreadSt
 
 // Fields for parameters marked on a node, saved as each is applied, for places that show them beside another
 // editor (the selected photo's toolbar).
-export function MarkedFields({ project, spread, template, edits, edit, compact = false }: {
-  compact?: boolean; project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; edit: (change: Edit, notice?: string) => void;
+export function MarkedFields({ project, spread, template, edits, edit, compact = false, page }: {
+  page?: PageSide; compact?: boolean; project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; edit: (change: Edit, notice?: string) => void;
 }) {
-  return edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((target): target is EditTarget => !!target)
+  return edits.map((path) => resolveEditPath(template, scopeSpread(spread, page)?.definition ?? '', path, page)).filter((target): target is EditTarget => !!target)
     .map((target) => <Field compact={compact && compactParameter(target.param)} key={target.path} param={target.param} value={readEdit(project, spread, target)}
       change={(value) => edit(({ project: files }) => writeEdit(files, spread.id, target, value), target.param.label + ' updated')} />);
 }
@@ -69,8 +70,8 @@ export function MarkedFields({ project, spread, template, edits, edit, compact =
 // Edits the selected item from a stable panel at the bottom of the visible canvas: a node the template marked with `ctx.edit(...)` or
 // `ctx.Text`, or a box or element. For a box, `children` is the platform's part (its photo or text) and `title`
 // names the box.
-export function EditPopover({ project, spread, template, edits, host, blocked, edit, close, step, actions, title, children, textFallback, compact = false, anchor }: {
-  project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; host?: HTMLElement | null;
+export function EditPopover({ project, spread, template, edits, host, blocked, edit, close, step, actions, title, children, textFallback, compact = false, anchor, page }: {
+  page?: PageSide; project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; host?: HTMLElement | null;
   blocked?: string; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
   compact?: boolean; anchor?: () => Rect | undefined; actions?: ReactNode; title?: string; children?: ReactNode;
   textFallback?: { parameter: string; text: string; label: string };
@@ -78,10 +79,10 @@ export function EditPopover({ project, spread, template, edits, host, blocked, e
   const panel = useRef<HTMLDivElement>(null);
   const [drafts, setDrafts] = useState<Record<string, Value>>({});
   // Parameters owned by a template-supplied element editor are edited there; the popover offers it as an action.
-  const editors = template.spreads[spread.definition]?.elements ?? {};
-  const targets = edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((target): target is EditTarget =>
+  const editors = template.spreads[scopeSpread(spread, page)?.definition ?? '']?.elements ?? {};
+  const targets = edits.map((path) => resolveEditPath(template, scopeSpread(spread, page)?.definition ?? '', path, page)).filter((target): target is EditTarget =>
     !!target && !(target.scope === 'element' && editors[target.owner!]?.editor?.parameters.includes(target.key)));
-  const shown = arrange(targets, template, spread, drafts);
+  const shown = arrange(targets, template, scopeSpread(spread, page) ?? spread, drafts);
   const visible = shownFields(shown);
 
   function apply(changes: Record<string, Value>) {

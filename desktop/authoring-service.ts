@@ -1,3 +1,4 @@
+import { layoutFootprint } from '../src/layouts';
 import { sourcePath, sourceLinked } from '../src/source-locations';
 import { DependencyInstallError } from './dependency-install';
 import { createHash } from 'node:crypto';
@@ -512,7 +513,7 @@ export function createAuthoringService(hooks: Hooks) {
         };
       } else {
         const offset = args.offset ?? 0, limit = args.limit ?? 30;
-        const sequence = template && project && pageSequence(project.spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
+        const sequence = template && project && pageSequence(project.spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
         const labels = project?.spreads.map((_, i) => pageLabel(sequence?.spreads[i].page ?? {})) ?? [];
         const usage = project ? sourceUsage(project, labels, template?.spreads) : { photo: {}, text: {} };
         const view = args.view ?? 'summary';

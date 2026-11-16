@@ -6,6 +6,7 @@ import { readEdit, resolveEditPath } from './editing';
 import { useEditorFrame } from './editor-frame';
 import { saveInlineText, textEditorOwner, textProblem } from './inline-text';
 import type { Edit } from './Inspector';
+import { scopeSpread } from './project';
 import type { Project, SpreadState } from './project';
 
 export function InlineTextEditor({ projectId, project, spread, template, target, zoom, host, canvasReady, blocked,
@@ -16,12 +17,13 @@ export function InlineTextEditor({ projectId, project, spread, template, target,
   shown: (showing: boolean) => void;
   notice: (message: string) => void;
 }) {
+  const layout = scopeSpread(spread, target.page)?.definition ?? '';
   // One stable frame and baseline per opening. Saves and unrelated book redraws never replace pending typing.
   const [opened] = useState(() => {
-    const field = resolveEditPath(template, spread.definition, target.edits[0])!;
-    return { field, layout: spread.definition, before: String(readEdit(project, spread, field)),
+    const field = resolveEditPath(template, layout, target.edits[0], target.page)!;
+    return { field, layout, before: String(readEdit(project, spread, field)),
       source: renderOrigin + '/render/' + projectId + '?view=inline-text&spread=' + encodeURIComponent(spread.id) +
-        '&parameter=' + encodeURIComponent(field.path) + '&occurrence=' + target.occurrence };
+        (target.page ? '&page=' + target.page : '') + '&parameter=' + encodeURIComponent(field.path) + '&occurrence=' + target.occurrence };
   });
   const frame = useRef<HTMLIFrameElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -36,8 +38,8 @@ export function InlineTextEditor({ projectId, project, spread, template, target,
   const after = useRef<(() => void) | undefined>(undefined);
   const latestStep = useRef(step);
   latestStep.current = step;
-  const field = resolveEditPath(template, spread.definition, opened.field.path);
-  const stale = spread.definition !== opened.layout || !!textEditorOwner(template, spread.definition, opened.field.path) || JSON.stringify(field) !== JSON.stringify(opened.field) ||
+  const field = resolveEditPath(template, layout, opened.field.path, target.page);
+  const stale = layout !== opened.layout || !!textEditorOwner(template, layout, opened.field.path) || JSON.stringify(field) !== JSON.stringify(opened.field) ||
     (!saving.current && !saved && String(readEdit(project, spread, opened.field)) !== opened.before);
   const disabled = !!blocked || stale || finishing;
   const text = (reported: unknown) => {

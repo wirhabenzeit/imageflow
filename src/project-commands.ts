@@ -4,7 +4,7 @@ import type { TemplateInfo } from './desktop';
 import type { PrintFormat } from './format';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
-import { describeLayoutChange, discardContent, layoutChoices, swapContent, switchLayout } from './layouts';
+import { describeLayoutChange, discardContent, layoutChoices, layoutFootprint, swapContent, switchLayout } from './layouts';
 import { hasFacingPages, spanFits, spanRequiredAt } from './format';
 import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
 import type { ListItem, Parameter, Parameters } from './parameters';
@@ -242,7 +242,7 @@ export function applyProjectCommands(
   }
   function checkInsertion(spread: SpreadState, after: string | null | undefined) {
     const position = after === undefined ? project.spreads.length : after === null ? 0 : project.spreads.indexOf(findSpread(after)) + 1;
-    const problem = insertionProblem(project.spreads, position, template.spreads[spread.definition]?.span ?? 'spread', { spreads: template.spreads, format });
+    const problem = insertionProblem(project.spreads, position, layoutFootprint(spread, template.spreads).span, { spreads: template.spreads, format }, layoutFootprint(spread, template.spreads).sides);
     if (problem) fail('INVALID_POSITION', problem);
   }
   function insertAfter(spread: SpreadState, after: string | null | undefined) {
@@ -407,7 +407,7 @@ export function applyProjectCommands(
             : 'Layout ' + operation.definition + ' does not fit the book\'s format ' + format.label + (hasFacingPages(format)
               ? ', which has facing pages. Choose a spread layout.' : ', which has no facing pages. Choose a single-page layout.'));
         }
-        if (spread.definition === operation.definition) break;
+        if (!spread.split && spread.definition === operation.definition) break;
         const plan = switchLayout(spread, operation.definition, template.spreads);
         changed('Changed layout of ' + spread.id + '. ' + describeLayoutChange(plan), [spread.id], plan.reflow);
         break;

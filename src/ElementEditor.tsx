@@ -6,6 +6,7 @@ import { renderOrigin } from './desktop';
 import type { BookGeometry, Rect, TemplateInfo } from './desktop';
 import type { Edit } from './Inspector';
 import { isParameterValue, resolveParams } from './parameters';
+import { scopeSpread } from './project';
 import type { SpreadState, Values } from './project';
 import { controlLayout } from './controls';
 import { CompactListsContext, ControlList, Field, ProjectFilesContext } from './Fields';
@@ -24,7 +25,7 @@ import type { EditorState, EditorTarget } from './editor-session';
 // redraws, scrolls or zooms around it; only its position and scale follow. The element's other parameters, and
 // moving the editor to the panel, sit in a toolbar under the canvas, so no panel covers the artwork.
 export type InlinePlacement = Rect & { zoom: number };
-export function ElementEditorDialog({ project, template, spread, params, target, blocked, canvasReady, edit, close, importFile, prepare, network = '', host, geometry,
+export function ElementEditorDialog({ project, template, spread: sheet, params, target, blocked, canvasReady, edit, close, importFile, prepare, network = '', host, geometry,
   presentation = 'dialog', placement, stage, shown, click }: {
   project: string; template: TemplateInfo; spread: SpreadState; params: Values; target: EditorTarget;
   blocked?: string; canvasReady: boolean; host?: HTMLElement | null;
@@ -41,6 +42,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   // The network origins the book may reach now; when they change, the frame loads again under the new policy.
   network?: string;
 }) {
+  const spread = scopeSpread(sheet, target.page) ?? sheet;
   const element = target.kind === 'element' ? target.element : '';
   const layout = template.spreads[spread.definition];
   const definition = target.kind === 'element' ? layout?.elements[element] : undefined;
@@ -48,7 +50,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   const editor = documentEditor ?? definition?.editor;
   // The parameters the editor's `set` writes: the element's, or the document's.
   const declared = target.kind === 'document' ? template.parameters : definition?.parameters;
-  const state: EditorState = { spread, params };
+  const state: EditorState = { spread: sheet, params };
   const inline = presentation === 'inline';
   const panel = useRef<HTMLDivElement>(null);
   const inlineBox = useRef<HTMLDivElement>(null);
@@ -81,7 +83,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   // render the book again (newly allowed network origins), so the frame opens on the project as it is then.
   const address = (id: string) => renderOrigin + '/render/' + id + '?view=editor&spread=' + encodeURIComponent(spread.id) +
     (target.kind === 'document' ? '&editor=' + encodeURIComponent(target.editor) : '&element=' + encodeURIComponent(element)) +
-    (inline ? '&presentation=inline' : '');
+    (target.page ? '&page=' + target.page : '') + (inline ? '&presentation=inline' : '');
   const latestProject = useRef(project);
   latestProject.current = project;
   const [source, setSource] = useState(() => address(project));
@@ -173,7 +175,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   // The book the frame's context comes from follows each new render session, so a reorder or another photo shows
   // in the open editor; the editor's draft is kept.
   const rects = JSON.stringify(Object.fromEntries((canvasReady ? geometry?.boxes ?? [] : [])
-    .filter((box) => box.spread === spread.id && box.type === 'element' && box.rect).map((box) => [box.id, box.rect])));
+    .filter((box) => box.spread === spread.id && box.page === target.page && box.type === 'element' && box.rect).map((box) => [box.id, box.rect])));
   useEffect(() => {
     if (mounted) frame.current?.contentWindow?.postMessage({ type: 'editor-context', project, elementRects: JSON.parse(rects) }, renderOrigin);
   }, [mounted, generation, project, rects]);

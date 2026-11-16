@@ -1,3 +1,6 @@
+import { scopeSpread } from './project';
+import type { PageSide } from './project';
+import { layoutFootprint } from './layouts';
 import { CanvasHover } from './CanvasHover';
 import { inspectorTargets } from './inspector-targets';
 import type { InspectorTarget } from './inspector-targets';
@@ -58,7 +61,7 @@ import { spreadMime, useSpreadReorder } from './useSpreadReorder';
 import { animateReorder, reorderOffsets, reorderTiming } from './reorder-motion';
 import { useToolbarDrag } from './useToolbarDrag';
 
-type Owner = { type: 'photo' | 'markdown' | 'element'; id: string };
+type Owner = { page?: PageSide; type: 'photo' | 'markdown' | 'element'; id: string };
 // `hidden`: the box or element is declared but not on the page, so the editor opens at the spread's corner.
 type Target = BookGeometry['targets'][number] & { hidden?: boolean };
 type InlineContext = {
@@ -67,7 +70,7 @@ type InlineContext = {
 
 function inlineValues({ project, spread, template, target }: InlineContext) {
   return JSON.stringify([spread.definition, target.edits.map((path) => {
-    const field = resolveEditPath(template, spread.definition, path);
+    const field = resolveEditPath(template, scopeSpread(spread, target.page)?.definition ?? '', path, target.page);
     return [field, field && readEdit(project, spread, field)];
   })]);
 }
@@ -173,14 +176,14 @@ export function App() {
   // The inline editor that is open: for a marked node (a target), or for a box or element itself (`owner`).
   // `session` names one opening of an editor: it stays while the node the editor is anchored to is renamed (`key`), so
   // the popover and its unsaved drafts are kept, and changes when the user opens another target.
-  const [editing, setEditing] = useState<{ spread: string; key: string; session: number; held?: InlineContext; owner?: Owner; panel?: boolean; text?: boolean }>();
+  const [editing, setEditing] = useState<{ page?: PageSide; spread: string; key: string; session: number; held?: InlineContext; owner?: Owner; panel?: boolean; text?: boolean }>();
   const editorSessions = useRef(0);
-  const openEditing = (next: { spread: string; key: string; owner?: Owner; panel?: boolean }) => {
+  const openEditing = (next: { page?: PageSide; spread: string; key: string; owner?: Owner; panel?: boolean }) => {
     const target = geometry?.targets.find((item) => targetKey(item) === next.key);
     if (target?.inlineText && openTextOwner(target)) return;
     const state = summary?.project.spreads.find(({ id }) => id === next.spread);
     const text = !!(!next.owner && !next.panel && canvasReady && readyId.current === summary?.id && target && textFits(target));
-    setEditing({ ...next, session: ++editorSessions.current, text,
+    setEditing({ ...next, page: next.page ?? next.owner?.page ?? target?.page, session: ++editorSessions.current, text,
       ...(text && summary && template && state && target ? { held: { project: summary.project, spread: state, template, target } } : {}) });
   };
   // Crop mode for one photo box. After a commit, `settling` holds the project id the edit started from; the
@@ -188,7 +191,7 @@ export function App() {
   // The selected photo, whose crop drags and pinches adjust. `layout` is the spread's layout when it was selected:
   // each layout has its own crop. `saved` holds the project id the last crop edit started from; after the photo is
   // deselected, `settling` keeps its overlay until the book has re-rendered, so the frame does not flash back.
-  const [cropping, setCropping] = useState<{ spread: string; box: string; layout: string; saved?: string; settling?: string }>();
+  const [cropping, setCropping] = useState<{ page?: PageSide; spread: string; box: string; layout: string; saved?: string; settling?: string }>();
   // The unsaved placement of a crop gesture on a box the template draws with a render callback, which the book view draws.
   const [cropPreview, setCropPreview] = useState<CropPreview>();
   // A template-supplied editor that is open: an element's, or a document editor opened from a spread.
@@ -309,7 +312,7 @@ export function App() {
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
   const layoutFamily = spread && template && pickerFamily(template.spreads, spread.definition, template.layoutFamilies);
-  const sequence = template && pageSequence(spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
+  const sequence = template && pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
   const pageLabels = spreads.map((_, i) => pageLabel(sequence?.spreads[i]?.page ?? {}));
   const writable = !!summary && !reload && !agentWorking;
   const canvasReady = render?.state === 'ready' && !reload;
@@ -324,7 +327,7 @@ export function App() {
     : Object.values(template.spreads).some(({ span }) => span === (hasFacingPages(template.format) ? 'spread' : 'page')));
   // A single opening or closing page cannot be duplicated where the format requires one of each.
   const canDuplicate = canChangeBook && !!template && spreadSelected && !!spread &&
-    !selectedSpreads.some((id) => hasSingleEnds(template.format) && ['left', 'right'].includes(template.spreads[spreads.find((spread) => spread.id === id)?.definition ?? '']?.span ?? ''));
+    !selectedSpreads.some((id) => hasSingleEnds(template.format) && ['left', 'right'].includes(sequence?.spreads[spreads.findIndex((spread) => spread.id === id)]?.span ?? ''));
   const canDelete = canChangeBook && spreadSelected && !!spread;
   const canMoveUp = canReorder && spreadSelected && !!spread && (selectedSpreads.length > 1 ? !!spreadSelectionOrder(spreads, selectedSpreads, 'up', template!) : canMoveSpread(spread.id, index - 1));
   const canMoveDown = canReorder && spreadSelected && !!spread && (selectedSpreads.length > 1 ? !!spreadSelectionOrder(spreads, selectedSpreads, 'down', template!) : canMoveSpread(spread.id, index + 1));
@@ -668,9 +671,9 @@ export function App() {
     await new Promise((resolve) => setTimeout(resolve, 0)); // React publishes validation and save results.
     return attempt === quitAttempt.current && finishQuit();
   });
-  function placeSources(keys: string[], target = spreadId, firstBox?: string) {
+  function placeSources(keys: string[], target = spreadId, firstBox?: string, page?: PageSide) {
     if (!template || !writable || !summary) return;
-    const state = spreads.find(({ id }) => id === target);
+    const state = scopeSpread(spreads.find(({ id }) => id === target), page);
     const definition = state && template.spreads[state.definition];
     if (!definition) return;
     const sources = keys.flatMap<SourceRef>((key) => {
@@ -681,7 +684,7 @@ export function App() {
     if (!assignments.length) { setNotice('This spread has no empty matching boxes.'); return; }
     select(target, false);
     edit(({ project }) => {
-      const spread = project.spreads.find(({ id }) => id === target);
+      const spread = scopeSpread(project.spreads.find(({ id }) => id === target), page);
       if (spread?.definition !== state.definition) return false;
       for (const { box, source } of assignments) spread.boxes[box] = { params: spread.boxes[box]?.params ?? {}, ...(source.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
     }, 'Placed ' + assignments.length + ' of ' + sources.length + ' assets');
@@ -919,7 +922,7 @@ export function App() {
       const ordered = spreadOrder(project.spreads, id, target, template);
       if (!ordered) return false;
       project.spreads = ordered;
-      const pages = pageSequence(ordered.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format).spreads[target].page;
+      const pages = pageSequence(ordered.map((spread) => layoutFootprint(spread, template.spreads)), template.format).spreads[target].page;
       destination = pagesText(pages).toLowerCase();
     }, () => 'Spread moved to ' + destination, id);
   }
@@ -949,8 +952,10 @@ export function App() {
     edit(({ project }) => {
       const position = project.spreads.findIndex(({ id }) => id === spread.id);
       // Next to the selected spread, but never before a single opening page or after a single closing page.
-      const insert = template.spreads[spread.definition]?.span === 'left' ? position : position + 1;
-      if (insertionProblem(project.spreads, insert, template.spreads[next.definition]?.span ?? 'spread', template)) return false;
+      const footprint = layoutFootprint(spread, template.spreads);
+      const closing = hasSingleEnds(template.format) && position === project.spreads.length - 1 && project.spreads.length > 1 && (footprint.span === 'left' || footprint.span === 'page');
+      const insert = closing || footprint.span === 'left' ? position : position + 1;
+      if (insertionProblem(project.spreads, insert, layoutFootprint(next, template.spreads).span, template, layoutFootprint(next, template.spreads).sides)) return false;
       project.spreads.splice(insert, 0, next);
     }, undefined, next.id);
   }
@@ -978,7 +983,7 @@ export function App() {
     const at = spreads.indexOf(selected);
     const state: BookMenuState = { ...menuState, editing: false, enabled: {
       'add-spread': canAdd, 'delete-spread': canChangeBook,
-      'duplicate-spread': canChangeBook && !ids.some((id) => hasSingleEnds(template.format) && ['left', 'right'].includes(template.spreads[spreads.find((spread) => spread.id === id)?.definition ?? '']?.span ?? '')),
+      'duplicate-spread': canChangeBook && !ids.some((id) => hasSingleEnds(template.format) && ['left', 'right'].includes(sequence?.spreads[spreads.findIndex((spread) => spread.id === id)]?.span ?? '')),
       'move-spread-up': canReorder && !!spreadSelectionOrder(spreads, ids, 'up', template), 'move-spread-down': canReorder && !!spreadSelectionOrder(spreads, ids, 'down', template),
     } };
     const choices = layoutPreviews(template.spreads, selected.definition, template.layoutFamilies ?? {}, template.format, { index: at, count: spreads.length });
@@ -1003,21 +1008,21 @@ export function App() {
     if (!sheet || !summary || !template || !api) return;
     if (!top || top.type === 'element') { await spreadMenu(sheet); return; }
     select(sheet, false);
-    const source = boxSource(sheet, top.id);
+    const source = boxSource(sheet, top.id, top.page);
     const photo = top.type === 'photo';
     const items: import('./desktop').ContextMenuItem[] = photo ? ['box-replace-photo',
-      { command: 'box-adjust-crop', enabled: !!source && !cropBlocked(sheet, top.id) }, { command: 'box-reset-crop', enabled: !!source }] : ['box-edit-text', 'box-replace-text'];
+      { command: 'box-adjust-crop', enabled: !!source && !cropBlocked(sheet, top.id, top.page) }, { command: 'box-reset-crop', enabled: !!source }] : ['box-edit-text', 'box-replace-text'];
     if (source) items.push({ type: 'separator' }, 'asset-preview', 'box-show-assets', photo ? 'box-remove-photo' : 'box-remove-text');
     const result = await api.showContextMenu(items, { ...menuState, editing: false });
     if (!result || current.current?.id !== summary.id) return;
     switch (result.command) {
-      case 'box-replace-photo': case 'box-replace-text': importFiles({ kind: photo ? 'photo' : 'markdown', target: { spread: sheet, box: top.id } }); break;
-      case 'box-adjust-crop': startCrop(sheet, top.id); break;
-      case 'box-reset-crop': changeSpreadAt(sheet, (spread) => { const box = spread.boxes[top.id]; if (box?.photo) setPlacement(box, spread.definition, centered); }, 'Crop reset'); break;
-      case 'box-edit-text': openOwner(sheet, { type: 'markdown', id: top.id }); break;
+      case 'box-replace-photo': case 'box-replace-text': importFiles({ kind: photo ? 'photo' : 'markdown', target: { spread: sheet, box: top.id, page: top.page } }); break;
+      case 'box-adjust-crop': startCrop(sheet, top.id, top.page); break;
+      case 'box-reset-crop': changeSpreadAt(sheet, (spread) => { const box = spread.boxes[top.id]; if (box?.photo) setPlacement(box, spread.definition, centered); }, 'Crop reset', top.page); break;
+      case 'box-edit-text': openOwner(sheet, { type: 'markdown', id: top.id, page: top.page }); break;
       case 'asset-preview': if (source) setQuick(source); break;
       case 'box-show-assets': if (source) { choose(source); showPanel('bottom'); } break;
-      case 'box-remove-photo': case 'box-remove-text': changeSpreadAt(sheet, (spread) => { spread.boxes[top.id] = { params: spread.boxes[top.id]?.params ?? {} }; }, photo ? 'Photo removed' : 'Text removed'); setCropping(undefined); break;
+      case 'box-remove-photo': case 'box-remove-text': changeSpreadAt(sheet, (spread) => { spread.boxes[top.id] = { params: spread.boxes[top.id]?.params ?? {} }; }, photo ? 'Photo removed' : 'Text removed', top.page); setCropping(undefined); break;
     }
   }
   function changeFormat(format: string) {
@@ -1025,26 +1030,27 @@ export function App() {
     edit(({ project }) => { project.format = format; }, 'Format changed to ' + template.formats[format]);
   }
 
-  function assign(spread: string, box: string, source: SourceRef) {
+  function assign(spread: string, box: string, source: SourceRef, page?: PageSide) {
     editCanvas(({ project }) => {
-      const state = project.spreads.find(({ id }) => id === spread);
+      const state = scopeSpread(project.spreads.find(({ id }) => id === spread), page);
       if (state) state.boxes[box] = { params: state.boxes[box]?.params ?? {}, ...(source.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
     });
   }
 
   // Moves content a spread keeps outside its layout into one of its boxes; content already there is kept instead.
-  function place(spread: string, from: string, to: string, fromCanvas = false) {
+  function place(spread: string, from: string, to: string, fromCanvas = false, page?: PageSide) {
     if (!summary || !template) return;
     const state = spreads.find(({ id }) => id === spread);
     const moving = state?.boxes[from];
-    const label = state && template.spreads[state.definition]?.boxes[to]?.label;
+    const label = state && template.spreads[scopeSpread(state, page)?.definition ?? '']?.boxes[to]?.label;
     if (!moving || !label) return;
     const kind = moving.photo ? 'photo' : 'text';
     let swapped: string | undefined;
     const apply = fromCanvas ? editCanvas : edit;
     apply(({ project }) => {
       const current = project.spreads.find(({ id }) => id === spread);
-      if (current) swapped = moveContent(current, from, to);
+      const destination = scopeSpread(current, page);
+      if (current && destination) swapped = page ? swapContent(current, from, destination, to) : moveContent(current, from, to);
     }, () => sourceTitle(summary, kind, (moving.photo ?? moving.text)!) + ' placed in ' + label +
       (swapped ? '; ' + sourceTitle(summary, kind, swapped) + ' is saved outside this layout' : ''));
     // The Inspector scrolls to the box that received it.
@@ -1096,12 +1102,12 @@ export function App() {
   // declared parameters.
   function ownerTarget(spread: string, owner: Owner): Target | undefined {
     const type = owner.type === 'element' ? 'element' : 'box';
-    const own = geometry?.targets.find((target) => target.spread === spread && target.owner?.type === type && target.owner.id === owner.id);
+    const own = geometry?.targets.find((target) => target.spread === spread && target.page === owner.page && target.owner?.type === type && target.owner.id === owner.id);
     if (own) return own;
-    const rect = geometry?.boxes.find((box) => box.spread === spread && box.id === owner.id && (box.type === 'element') === (type === 'element'));
-    if (rect) return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, spread, edits: [], occurrence: 0, owner: { type, id: owner.id } };
+    const rect = geometry?.boxes.find((box) => box.spread === spread && box.page === owner.page && box.id === owner.id && (box.type === 'element') === (type === 'element'));
+    if (rect) return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, spread, page: owner.page, edits: [], occurrence: 0, owner: { type, id: owner.id } };
     const sheet = geometry?.sheets.find((item) => item.spread === spread);
-    const layout = template?.spreads[spreads.find(({ id }) => id === spread)?.definition ?? ''];
+    const layout = template?.spreads[scopeSpread(spreads.find(({ id }) => id === spread), owner.page)?.definition ?? ''];
     const declared = type === 'element' ? layout?.elements[owner.id] : layout?.boxes[owner.id];
     if (!sheet || !declared) return undefined;
     return { x: sheet.x + 12, y: sheet.y + 12, width: 0, height: 0, spread, occurrence: 0, owner: { type, id: owner.id }, hidden: true,
@@ -1110,7 +1116,7 @@ export function App() {
   // Parameters a template marked on a box besides its own, such as a spread setting shown in its caption.
   const attachedEdits = (target: Target | undefined, owner: Owner) =>
     target?.edits.filter((path) => !path.startsWith((owner.type === 'element' ? 'elements.' : 'boxes.') + owner.id + '.')) ?? [];
-  const ownerKey = (spread: string, id: string) => spread + '|#' + id;
+  const ownerKey = (spread: string, id: string, page?: PageSide) => spread + (page ? '@' + page : '') + '|#' + id;
   // A marked node is found by its key when the editor opens, and afterwards by where it was on its sheet, since a
   // re-render can shift the occurrence numbers of its field. The anchor belongs to one editor session: opening
   // another target, also by Tab, starts from its key again.
@@ -1145,21 +1151,21 @@ export function App() {
   // Flow positions of the last finished render, kept while an edit re-renders so "Flow 1 of 2" does not flicker.
   const readyFlow = render?.state === 'ready' ? render.flow : lastReady?.state === 'ready' ? lastReady.flow : undefined;
   // Edits one spread, if it still exists when the edit applies.
-  function changeSpreadAt(id: string, update: (spread: SpreadState) => void, notice?: string) {
+  function changeSpreadAt(id: string, update: (spread: SpreadState) => void, notice?: string, page?: PageSide) {
     edit(({ project }) => {
-      const state = project.spreads.find((item) => item.id === id);
+      const state = scopeSpread(project.spreads.find((item) => item.id === id), page);
       if (state) update(state);
     }, notice);
   }
   // The same for the spread an inline editor is open on, and only while it shows the layout it opened in.
   function changeSpreadInline(update: (spread: SpreadState) => void, notice?: string) {
     editInline(({ project }) => {
-      const state = project.spreads.find((item) => item.id === liveInline?.spread.id);
+      const state = scopeSpread(project.spreads.find((item) => item.id === liveInline?.spread.id), liveInline?.target.page);
       if (state) update(state);
     }, notice);
   }
   function ownerLabel(spread: SpreadState, owner: Owner) {
-    const layout = template?.spreads[spread.definition];
+    const layout = template?.spreads[scopeSpread(spread, owner.page)?.definition ?? ''];
     return (owner.type === 'element' ? layout?.elements[owner.id]?.label : layout?.boxes[owner.id]?.label) ?? owner.id;
   }
 
@@ -1167,26 +1173,26 @@ export function App() {
     if (!liveInline || (editing?.held && !resumeInline)) return;
     edit((files) => {
       const active = files.project.spreads.find(({ id }) => id === liveInline.spread.id);
-      if (active?.definition === liveInline.spread.definition) change(files);
+      if ((!liveInline.target.page || active?.split) && scopeSpread(active, liveInline.target.page)?.definition === scopeSpread(liveInline.spread, liveInline.target.page)?.definition) change(files);
     }, notice);
   }
   const editOwner = editTarget && /^boxes\.([^.]+)\./.exec(editTarget.edits[0])?.[1];
   const editElement = editTarget?.edits.map((path) => /^elements\.([^.]+)\./.exec(path)?.[1]).find(Boolean);
-  const editPhotoBox = editOwner && geometry?.boxes.some(({ spread, id, type }) => spread === editing?.spread && id === editOwner && type === 'photo')
+  const editPhotoBox = editOwner && geometry?.boxes.some(({ spread, id, type, page }) => spread === editing?.spread && page === editTarget?.page && id === editOwner && type === 'photo')
     ? editOwner : undefined;
 
   // Crop mode: the frame comes from the rendered book, the photo size and crop from the project.
-  const cropFrame = cropping && geometry?.boxes.find(({ spread, id }) => spread === cropping.spread && id === cropping.box);
+  const cropFrame = cropping && geometry?.boxes.find(({ spread, id, page }) => spread === cropping.spread && page === cropping.page && id === cropping.box);
   const cropSheet = cropping && geometry?.sheets.find(({ spread }) => spread === cropping.spread);
-  const cropState = cropping && spreads.find(({ id }) => id === cropping.spread)?.boxes[cropping.box];
+  const cropState = cropping && scopeSpread(spreads.find(({ id }) => id === cropping.spread), cropping.page)?.boxes[cropping.box];
   const cropPhoto = cropState?.photo;
   const cropPlacement = cropping && placementIn(cropState, cropping.layout);
   const cropBox = cropping && template?.spreads[cropping.layout]?.boxes[cropping.box];
-  const cropAttached = cropping && template ? attachedEdits(ownerTarget(cropping.spread, { type: 'photo', id: cropping.box }), { type: 'photo', id: cropping.box }) : [];
-  function cropBlocked(spread: string, box: string) {
+  const cropAttached = cropping && template ? attachedEdits(ownerTarget(cropping.spread, { type: 'photo', id: cropping.box, page: cropping.page }), { type: 'photo', id: cropping.box, page: cropping.page }) : [];
+  function cropBlocked(spread: string, box: string, page?: PageSide) {
     if (readyId.current !== summary?.id) return 'The book preview is updating.';
-    const state = spreads.find(({ id }) => id === spread)?.boxes[box];
-    const frame = geometry?.boxes.find((rect) => rect.spread === spread && rect.id === box);
+    const state = scopeSpread(spreads.find(({ id }) => id === spread), page)?.boxes[box];
+    const frame = geometry?.boxes.find((rect) => rect.spread === spread && rect.page === page && rect.id === box);
     if (!state?.photo || !summary?.photos[state.photo] || !summary.photoSizes[state.photo]) return 'Add a photo to this box first.';
     if (!frame) return 'The book is still rendering.';
     if (!frame.upright) return 'The template rotates or mirrors this frame; use its crop values.';
@@ -1200,18 +1206,18 @@ export function App() {
       return;
     }
     if (owner.type === 'photo') {
-      const blocked = cropBlocked(spread, owner.id);
+      const blocked = cropBlocked(spread, owner.id, owner.page);
       if (!blocked) {
-        startCrop(spread, owner.id);
+        startCrop(spread, owner.id, owner.page);
         return;
       }
       // A placed photo that cannot be selected says why; its popover offers the crop as numbers.
-      if (boxSource(spread, owner.id)) setNotice(blocked);
+      if (boxSource(spread, owner.id, owner.page)) setNotice(blocked);
     }
-    if (owner.type === 'element' && openElementEditor(spread, owner.id)) return;
+    if (owner.type === 'element' && openElementEditor(spread, owner.id, owner.page)) return;
     deselectPhoto();
     select(spread, false);
-    openEditing({ spread, key: ownerKey(spread, owner.id), owner });
+    openEditing({ spread, key: ownerKey(spread, owner.id, owner.page), owner });
   }
   // Opens the popover of a node the template marked, such as a ctx.Text heading, from the sidebar's list.
   function openTarget(target: Target, panel = false) {
@@ -1222,37 +1228,37 @@ export function App() {
     openEditing({ spread: target.spread, key: targetKey(target), panel });
   }
   function openTextOwner(target: Target) {
-    const state = spreads.find(({ id }) => id === target.spread);
+    const state = scopeSpread(spreads.find(({ id }) => id === target.spread), target.page);
     const owner = template && state && target.edits.length === 1 && textEditorOwner(template, state.definition, target.edits[0]);
     if (!owner) return false;
-    const opened = owner.kind === 'element' ? openElementEditor(target.spread, owner.element) : openDocumentEditor(target);
+    const opened = owner.kind === 'element' ? openElementEditor(target.spread, owner.element, target.page) : openDocumentEditor(target);
     if (!opened) setNotice('The book preview is updating; try again in a moment.');
     return true;
   }
-  function editorOf(spread: string, element: string) {
-    const state = spreads.find(({ id }) => id === spread);
+  function editorOf(spread: string, element: string, page?: PageSide) {
+    const state = scopeSpread(spreads.find(({ id }) => id === spread), page);
     return state && template?.spreads[state.definition]?.elements[element]?.editor;
   }
-  function openElementEditor(spread: string, element: string) {
-    if (readyId.current !== summary?.id || !editorOf(spread, element)) return false;
+  function openElementEditor(spread: string, element: string, page?: PageSide) {
+    if (readyId.current !== summary?.id || !editorOf(spread, element, page)) return false;
     setEditing(undefined);
     deselectPhoto();
     select(spread, false);
     // Inline when the editor asks for it and the element is on the page, upright and large enough; else the panel.
-    setElementEditor({ kind: 'element', spread, element,
-      presentation: presentationFor(editorOf(spread, element)!.presentation, elementRect(geometry, spread, element)) });
+    setElementEditor({ kind: 'element', spread, element, page,
+      presentation: presentationFor(editorOf(spread, element, page)!.presentation, elementRect(geometry, spread, element, page)) });
     return true;
   }
   // A node marked only with document parameters a document editor owns opens that editor, with this spread's context.
   function openDocumentEditor(target: Target, click?: OpenEditor['click']) {
     const editor = template && documentEditorFor(template, target.edits);
-    const layout = spreads.find(({ id }) => id === target.spread)?.definition;
+    const layout = scopeSpread(spreads.find(({ id }) => id === target.spread), target.page)?.definition;
     if (!editor || !layout || readyId.current !== summary?.id) return false;
     setEditing(undefined);
     deselectPhoto();
     select(target.spread, false);
     const presentation = target.hidden ? 'dialog' : presentationFor(template.editors?.[editor]?.presentation, target);
-    setElementEditor({ kind: 'document', spread: target.spread, layout, editor, presentation,
+    setElementEditor({ kind: 'document', spread: target.spread, page: target.page, layout, editor, presentation,
       ...(presentation === 'inline' ? { at: targetKey(target), ...(click ? { click } : {}) } : {}) });
     return true;
   }
@@ -1267,7 +1273,7 @@ export function App() {
   }, [elementEditor, inlineTarget, inlineSheet]);
   const placement = elementEditor && inlinePlacement(geometry, elementEditor, inlineTarget);
   const inlineEditing = elementEditor && inlineShown && elementEditor !== leavingEditor ? hiddenOccurrence(elementEditor, inlineTarget)
-    : textInline && textShown && inline ? { spread: inline.target.spread, edits: inline.target.edits.join(' '), occurrence: inline.target.occurrence } : undefined;
+    : textInline && textShown && inline ? { spread: inline.target.spread, page: inline.target.page, edits: inline.target.edits.join(' '), occurrence: inline.target.occurrence } : undefined;
   const leaveEditor = () => {
     setElementEditor((current) => current === leavingEditor ? undefined : current);
     setLeavingEditor(undefined);
@@ -1277,17 +1283,17 @@ export function App() {
     const timeout = setTimeout(leaveEditor, 800);
     return () => clearTimeout(timeout);
   }, [leavingEditor]);
-  function startCrop(spread: string, box: string) {
-    const blocked = cropBlocked(spread, box);
+  function startCrop(spread: string, box: string, page?: PageSide) {
+    const blocked = cropBlocked(spread, box, page);
     if (blocked) {
       setNotice(blocked);
       return false;
     }
-    const layout = spreads.find(({ id }) => id === spread)?.definition;
+    const layout = scopeSpread(spreads.find(({ id }) => id === spread), page)?.definition;
     if (!layout) return false;
     setEditing(undefined);
     select(spread, false);
-    setCropping({ spread, box, layout });
+    setCropping({ spread, box, layout, page });
     return true;
   }
   // Saves the selected photo's crop; the photo stays selected. The edit compares with the project when it applies,
@@ -1299,9 +1305,9 @@ export function App() {
     const aspect = cropFrame.width / cropFrame.height;
     const normal = (value: Placement) => JSON.stringify(placementOf(getCrop(size, value, aspect), value.zoom));
     const fits = normal(placement) === normal(centered);
-    const { spread, box, layout } = cropping;
+    const { spread, box, layout, page } = cropping;
     edit(({ project }) => {
-      const state = project.spreads.find(({ id }) => id === spread);
+      const state = scopeSpread(project.spreads.find(({ id }) => id === spread), page);
       const target = state?.boxes[box];
       // Repeated crop edits can queue while an earlier crop renders. Check that this is still the same photo and layout.
       if (target?.photo !== cropPhoto || state?.definition !== layout) return;
@@ -1326,7 +1332,7 @@ export function App() {
 
   // Moving a placed photo: press an unselected photo and drag it onto another photo box, on this spread or another.
   // The two swap; onto an empty box it moves. Its crops were made for the old frame and stay behind.
-  const pendingMove = useRef<{ spread: string; box: string; photo: string; x: number; y: number }>(undefined);
+  const pendingMove = useRef<{ page?: PageSide; spread: string; box: string; photo: string; x: number; y: number }>(undefined);
   const moved = useRef(false);
   const [moving, setMoving] = useState<{ photo: string; x: number; y: number }>();
   const moveDrag = useEffectEvent((event: PointerEvent) => {
@@ -1335,7 +1341,7 @@ export function App() {
     if (!moving && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
     setMoving({ photo: start.photo, x: event.clientX, y: event.clientY });
     const { box } = locate(event, [photoMime]);
-    setDropTarget(box && !(box.spread === start.spread && box.id === start.box) ? box.spread + ':' + box.id : undefined);
+    setDropTarget(box && !(box.spread === start.spread && box.page === start.page && box.id === start.box) ? box.spread + ':' + (box.page ? box.page + ':' : '') + box.id : undefined);
     // Near the top or bottom of the canvas, scroll it so another spread can be reached.
     const bounds = canvas.current?.getBoundingClientRect();
     if (bounds) {
@@ -1353,13 +1359,13 @@ export function App() {
     moved.current = true;
     setTimeout(() => { moved.current = false; });
     const { box } = locate(event, [photoMime]);
-    if (!box || box.type !== 'photo' || !summary || (box.spread === start.spread && box.id === start.box)) return;
-    const target = { spread: box.spread, box: box.id };
-    const label = template?.spreads[spreads.find(({ id }) => id === target.spread)?.definition ?? '']?.boxes[target.box]?.label ?? target.box;
+    if (!box || box.type !== 'photo' || !summary || (box.spread === start.spread && box.page === start.page && box.id === start.box)) return;
+    const target = { spread: box.spread, box: box.id, page: box.page };
+    const label = template?.spreads[scopeSpread(spreads.find(({ id }) => id === target.spread), target.page)?.definition ?? '']?.boxes[target.box]?.label ?? target.box;
     let swapped: string | undefined;
     editCanvas(({ project }) => {
-      const from = project.spreads.find(({ id }) => id === start.spread);
-      const to = project.spreads.find(({ id }) => id === target.spread);
+      const from = scopeSpread(project.spreads.find(({ id }) => id === start.spread), start.page);
+      const to = scopeSpread(project.spreads.find(({ id }) => id === target.spread), target.page);
       if (from?.boxes[start.box]?.photo === start.photo && to) swapped = swapContent(from, start.box, to, target.box);
     }, () => sourceTitle(summary, 'photo', start.photo) + (swapped ? ' and ' + sourceTitle(summary, 'photo', swapped) + ' swapped' :
       ' moved to ' + label));
@@ -1410,7 +1416,7 @@ export function App() {
       const { sheet, box } = locate(event, event.dataTransfer.types);
       try {
         const ids: unknown = JSON.parse(event.dataTransfer.getData(photosMime));
-        if (sheet && Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) placeSources(ids.map((id) => 'photo:' + id), sheet, box?.id);
+        if (sheet && Array.isArray(ids) && ids.length <= 1000 && ids.every((id) => typeof id === 'string')) placeSources(ids.map((id) => 'photo:' + id), sheet, box?.id, box?.page);
       } catch { setNotice('Could not read the selected photos.'); }
       return;
     }
@@ -1421,7 +1427,7 @@ export function App() {
     if (kept && box && box.type !== 'element') {
       const origin = JSON.parse(kept) as { spread: string; box: string };
       if (origin.spread === box.spread) {
-        place(origin.spread, origin.box, box.id, true);
+        place(origin.spread, origin.box, box.id, true, box.page);
         select(box.spread, false);
         return;
       }
@@ -1429,8 +1435,8 @@ export function App() {
     const photoId = event.dataTransfer.getData(photoMime);
     const textId = event.dataTransfer.getData(textMime);
     if (photoId || textId) {
-      if (photoId && box?.type === 'photo' && summary.photoIndex[photoId]) assign(box.spread, box.id, { kind: 'photo', id: photoId });
-      if (textId && box?.type === 'markdown' && summary.project.texts[textId]) assign(box.spread, box.id, { kind: 'text', id: textId });
+      if (photoId && box?.type === 'photo' && summary.photoIndex[photoId]) assign(box.spread, box.id, { kind: 'photo', id: photoId }, box.page);
+      if (textId && box?.type === 'markdown' && summary.project.texts[textId]) assign(box.spread, box.id, { kind: 'text', id: textId }, box.page);
       if (box) select(box.spread, false);
       return;
     }
@@ -1438,12 +1444,12 @@ export function App() {
     if (!paths.length) return;
     const kind = box?.type === 'markdown' ? 'markdown' : box?.type === 'photo' ? 'photo' : undefined;
     if (box) select(box.spread, false);
-    importFiles({ kind, paths, target: box && box.type !== 'element' ? { spread: box.spread, box: box.id } : undefined }, summary.id);
+    importFiles({ kind, paths, target: box && box.type !== 'element' ? { spread: box.spread, box: box.id, page: box.page } : undefined }, summary.id);
   }
 
   // Clicking a box shows its source in the source inspector; double-clicking opens Quick Look.
-  function boxSource(spread: string, box: string): SourceRef | undefined {
-    const state = spreads.find(({ id }) => id === spread)?.boxes[box];
+  function boxSource(spread: string, box: string, page?: PageSide): SourceRef | undefined {
+    const state = scopeSpread(spreads.find(({ id }) => id === spread), page)?.boxes[box];
     if (state?.photo) return { kind: 'photo', id: state.photo };
     if (state?.text) return { kind: 'text', id: state.text };
   }
@@ -1538,7 +1544,7 @@ export function App() {
 
   const usage = useMemo(() => summary ? assetUsage(summary, pageLabels) : { photo: {}, text: {} },
     [summary, template, pageLabels.join()]);
-  const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id }) => spread + ':' + id === dropTarget) :
+  const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id, page }) => spread + ':' + (page ? page + ':' : '') + id === dropTarget) :
     highlight ? geometry?.boxes.find(({ spread: owner, id }) => owner === spread?.id && id === highlight) : undefined;
   const selectedSheet = spreadSelected ? geometry?.sheets.find(({ spread: id }) => id === spread?.id) : undefined;
   const previewError = typeof reload === 'object' ? reload.error : render?.state === 'error' ? render.message : '';
@@ -1746,7 +1752,7 @@ export function App() {
               if (!writable || !canvasReady || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime)) return;
               event.preventDefault();
               const { box } = locate(event, event.dataTransfer.types);
-              setDropTarget(box ? box.spread + ':' + box.id : undefined);
+              setDropTarget(box ? box.spread + ':' + (box.page ? box.page + ':' : '') + box.id : undefined);
             }} onDragLeave={() => setDropTarget(undefined)} onDrop={drop}>
             {summary && !spreads.length && <EmptyBook template={template} writable={writable && !busy} start={start} />}
             {summary && <div ref={stage} className="stage"
@@ -1766,25 +1772,25 @@ export function App() {
                 if (top) setFocusBox({ box: top.id, at: Date.now() });
                 // What is drawn on top decides: a box or element opens its own editor there (see openOwner). A smaller
                 // click-to-edit node on top, such as a heading over a photo, opens its popover instead.
-                const own = !target || (!!top && (target.edits.every((path) =>
+                const own = !target || (!!top && target.page === top.page && (target.edits.every((path) =>
                   path.startsWith((top.type === 'element' ? 'elements.' : 'boxes.') + top.id + '.')) ||
                   (target.owner?.id === top.id && (target.owner.type === 'element') === (top.type === 'element'))));
                 if (target?.inlineText) openTarget(target);
-                else if (top && own) openOwner(top.spread, { type: top.type, id: top.id });
+                else if (top && own) openOwner(top.spread, { type: top.type, id: top.id, page: top.page });
                 else if (target && !openDocumentEditor(target, clickAt(event, target))) openEditing({ spread: target.spread, key: targetKey(target) });
               }}
               onDoubleClick={(event) => {
                 // Double-clicking a Markdown box shows its text in Quick Look.
                 const { top } = locate(event);
-                const source = top?.type === 'markdown' && boxSource(top.spread, top.id);
+                const source = top?.type === 'markdown' && boxSource(top.spread, top.id, top.page);
                 if (source) setQuick(source);
               }}
               onPointerDown={(event) => {
                 // Pressing an unselected photo may start moving it to another box (the selected one pans instead).
                 if (event.button !== 0 || !writable || busy) return;
                 const { top } = locate(event);
-                const photo = top?.type === 'photo' && spreads.find(({ id }) => id === top.spread)?.boxes[top.id]?.photo;
-                pendingMove.current = photo ? { spread: top.spread, box: top.id, photo, x: event.clientX, y: event.clientY } : undefined;
+                const photo = top?.type === 'photo' && scopeSpread(spreads.find(({ id }) => id === top.spread), top.page)?.boxes[top.id]?.photo;
+                pendingMove.current = photo ? { spread: top.spread, box: top.id, page: top.page, photo, x: event.clientX, y: event.clientY } : undefined;
               }}
               >
               <BookFrame project={summary.id} view="book" onPrepared={(id) => preparedView(id, 'book')} release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
@@ -1811,26 +1817,26 @@ export function App() {
                 placement={cropPlacement} settling={!!cropping.settling}
                 inchesPerPixel={format && cropSheet ? format.spreadWidth / cropSheet.width / 25.4 : undefined}
                 resolution={template?.format.output.resolution} save={saveCrop} close={deselectPhoto}
-                custom={!!cropFrame.custom} preview={(placement) => setCropPreview(placement && { spread: cropping.spread, box: cropping.box, placement })}
+                custom={!!cropFrame.custom} preview={(placement) => setCropPreview(placement && { spread: cropping.spread, box: cropping.box, page: cropping.page, placement })}
                 toolbarHost={canvasWrap.current}>
                 {/* The box's photo and its own parameters (such as Show caption) sit with the selected photo. Replacing or
                     removing the photo ends the selection. */}
                 {cropState && summary && <div className="crop-params crop-content">
-                  <PhotoContent summary={summary} spread={spreads.find(({ id }) => id === cropping.spread)!} box={cropping.box} compact values
+                  <PhotoContent summary={summary} spread={scopeSpread(spreads.find(({ id }) => id === cropping.spread), cropping.page)!} box={cropping.box} compact values
                     label={cropBox?.label ?? cropping.box} assigned={deselectPhoto}
-                    change={(update, notice) => changeSpreadAt(cropping.spread, update, notice)} />
+                    change={(update, notice) => changeSpreadAt(cropping.spread, update, notice, cropping.page)} />
                 </div>}
                 {cropBox && Object.keys(cropBox.parameters).length > 0 && <div className="crop-params">
                   <Fields compact schema={cropBox.parameters} controls={cropBox.controls} values={cropState?.params ?? {}} update={(key, value) => edit(({ project }) => {
-                    const state = project.spreads.find(({ id }) => id === cropping.spread);
+                    const state = scopeSpread(project.spreads.find(({ id }) => id === cropping.spread), cropping.page);
                     if (state?.definition !== cropping.layout || state.boxes[cropping.box]?.photo !== cropPhoto) return;
                     state.boxes[cropping.box].params[key] = value;
                   }, cropBox.parameters[key].label + ' updated')} />
                 </div>}
                 {cropAttached.length > 0 && <div className="crop-params">
-                  <MarkedFields compact project={summary.project} spread={spreads.find(({ id }) => id === cropping.spread)!} template={template!}
+                  <MarkedFields compact project={summary.project} spread={spreads.find(({ id }) => id === cropping.spread)!} page={cropping.page} template={template!}
                     edits={cropAttached} edit={(change, notice) => edit((files) => {
-                      if (files.project.spreads.find(({ id }) => id === cropping.spread)?.definition === cropping.layout) change(files);
+                      if (scopeSpread(files.project.spreads.find(({ id }) => id === cropping.spread), cropping.page)?.definition === cropping.layout) change(files);
                     }, notice)} />
                 </div>}
               </CropEditor>}
@@ -1842,23 +1848,23 @@ export function App() {
                 compact={editing.owner?.type === 'markdown'} anchor={() => {
                   const stageRect = stage.current?.getBoundingClientRect(), host = canvasWrap.current?.getBoundingClientRect();
                   return stageRect && host ? { x: stageRect.left - host.left + inline.target.x, y: stageRect.top - host.top + inline.target.y, width: inline.target.width, height: inline.target.height } : undefined;
-                }} project={inline.project} spread={inline.spread} template={inline.template} edits={inline.target.edits} host={canvasWrap.current}
+                }} project={inline.project} spread={inline.spread} page={inline.target.page} template={inline.template} edits={inline.target.edits} host={canvasWrap.current}
                 textFallback={inline.target.textFallback}
                 blocked={blockedInline || undefined}
                 edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}
                 actions={!editing.owner && editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)
-                  ? <button type="button" onClick={() => startCrop(editing.spread, editPhotoBox)}>Adjust crop…</button>
+                  ? <button type="button" onClick={() => startCrop(editing.spread, editPhotoBox, inline.target.page)}>Adjust crop…</button>
                   : editElement && editorOf(editing.spread, editElement)
-                    ? <button type="button" onClick={() => openElementEditor(editing.spread, editElement)}>
+                    ? <button type="button" onClick={() => openElementEditor(editing.spread, editElement, inline.target.page)}>
                       {(editorOf(editing.spread, editElement)!.label ?? 'Open editor') + '…'}</button> : undefined}>
 
-                {editing.owner?.type === 'photo' && <PhotoContent summary={summary} spread={inline.spread} box={editing.owner.id}
-                  label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose} values={!!boxSource(editing.spread, editing.owner.id)}
-                  adjustCrop={cropBlocked(editing.spread, editing.owner.id) ? undefined : () => startCrop(editing.spread, editing.owner!.id)} />}
-                {editing.owner?.type === 'markdown' && <TextContent compact quickLook={setQuick} summary={summary} spread={inline.spread} box={editing.owner.id}
+                {editing.owner?.type === 'photo' && <PhotoContent summary={summary} spread={scopeSpread(inline.spread, inline.target.page)!} box={editing.owner.id}
+                  label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose} values={!!boxSource(editing.spread, editing.owner.id, inline.target.page)}
+                  adjustCrop={cropBlocked(editing.spread, editing.owner.id, inline.target.page) ? undefined : () => startCrop(editing.spread, editing.owner!.id, inline.target.page)} />}
+                {editing.owner?.type === 'markdown' && <TextContent compact quickLook={setQuick} summary={summary} spread={scopeSpread(inline.spread, inline.target.page)!} box={editing.owner.id}
                   label={ownerLabel(inline.spread, editing.owner)} change={changeSpreadInline} inspect={choose}
-                  flow={readyFlow?.[editing.spread + ':' + editing.owner.id]}
-                  importText={() => importFiles({ kind: 'markdown', target: { spread: editing.spread, box: editing.owner!.id } })} />}
+                  flow={readyFlow?.[editing.spread + ':' + (inline.target.page ? inline.target.page + ':' : '') + editing.owner.id]}
+                  importText={() => importFiles({ kind: 'markdown', target: { spread: editing.spread, box: editing.owner!.id, page: inline.target.page } })} />}
               </EditPopover>}
             </div>}
             {!summary && <p className="book-loading" role="status">{error || 'Opening book…'}</p>}

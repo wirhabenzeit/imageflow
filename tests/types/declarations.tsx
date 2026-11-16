@@ -1,6 +1,6 @@
 // Compile-time checks of the authoring types, run by `npm run build` (`tsc -p tests/types`). Each
 // `@ts-expect-error` is a declaration a template author must be told about; the build fails if it compiles.
-import { box, Choice, defineTemplate, mm, p, printFormat, Spread, spreadFor } from 'imageflow';
+import { box, Choice, defineTemplate, mm, p, printFormat, Page, Spread, spreadFor } from 'imageflow';
 import type { DocumentEditorProps, ElementEditorProps, LayoutPickerProps, PhotoBoxState, PhotoRender, VariantTags } from 'imageflow';
 
 const format = printFormat({ label: 'F', trim: { width: mm(100), height: mm(100) }, bleed: mm(0), safe: mm(5),
@@ -472,3 +472,18 @@ export function StagePicker({ variants, current, choose, find, readOnly }: Layou
 export const mismatched = <Choice label="Size" value={1} options={[{ value: 'a', label: 'A' }]} onChange={() => {}} />;
 // @ts-expect-error Every choice is named for assistive technology, even when the label is hidden.
 export const unnamed = <Choice value="a" options={[{ value: 'a', label: 'A' }]} onChange={() => {}} />;
+
+// Page builders infer exactly the same parameter and box types as spread builders.
+defineTemplate({ id: 'page-builder', version: '1', contract: 1, format,
+  spreads: ({ page }) => ({ photo: page({ label: 'Photo page', sides: ['right'],
+    parameters: { title: p.string({ label: 'Title', default: '' }) },
+    boxes: { hero: { type: 'photo', label: 'Hero' } },
+    render: (ctx) => {
+      const title: string = ctx.params.title;
+      const side: 'left' | 'right' | 'page' = ctx.side;
+      // @ts-expect-error page builders reject box IDs the layout does not declare
+      const unknown = <ctx.PhotoBox id="missing" />;
+      return <Page><ctx.PhotoBox id="hero" rect={ctx.geometry.page('safe')} /></Page>;
+    },
+  }) }),
+});

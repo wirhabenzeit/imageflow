@@ -125,21 +125,18 @@ export function declarationWarnings(declared: unknown, schema: Schema): Declarat
   return found.slice(0, 50);
 }
 
-// Layouts no declared format can use: single-page layouts (`span: 'page'`) need a format without facing pages, the
-// others one with them. `span` defaults to 'page' when no format has facing pages, so that case only arises when a
-// layout states its span.
+// Page layouts fit both format kinds. Legacy left/right layouts require single ends, and spread layouts need facing pages.
 function spanWarnings(declared: Record<string, unknown>, found: DeclarationWarning[]) {
   if (!plain(declared.spreads)) return;
   const formats = (plain(declared.formats) ? Object.values(declared.formats) : [declared.format]).filter(plain);
   const structure = (format: Record<string, unknown>) => plain(format.structure) ? format.structure : {};
-  const single = formats.filter((format) => structure(format).facingPages === false);
   const facing = formats.filter((format) => structure(format).facingPages !== false);
   // Single end pages belong to page delivery with ends: 'single-pages', as the schema requires.
   const ends = facing.filter((format) => structure(format).delivery === 'pages' && structure(format).ends === 'single-pages');
   const spans = Object.entries(declared.spreads).filter(([, definition]) => plain(definition))
     .map(([id, definition]) => [id, (definition as Record<string, unknown>).span ?? (facing.length || !formats.length ? 'spread' : 'page')] as const);
   for (const [id, span] of spans) {
-    const fits = span === 'page' ? single.length > 0 : span === 'left' || span === 'right' ? ends.length > 0 : facing.length > 0 || !formats.length;
+    const fits = span === 'page' ? formats.length > 0 : span === 'left' || span === 'right' ? ends.length > 0 : facing.length > 0 || !formats.length;
     if (fits) continue;
     found.push({
       code: 'declaration-span-unused', path: 'spreads.' + id + '.span',
@@ -157,7 +154,7 @@ function spanWarnings(declared: Record<string, unknown>, found: DeclarationWarni
   // A format with single ends requires a right page to open and a left page to close the book.
   if (ends.length) {
     for (const side of ['right', 'left'] as const) {
-      if (spans.some(([, span]) => span === side)) continue;
+      if (spans.some(([id, span]) => span === side || (span === 'page' && (!(declared.spreads as Record<string, { sides?: string[] }>)[id].sides || (declared.spreads as Record<string, { sides?: string[] }>)[id].sides!.includes(side))))) continue;
       found.push({
         code: 'declaration-ends-missing', path: 'spreads',
         message: "spreads: a format has ends: 'single-pages', which requires every book to " + (side === 'right' ? 'open on a single right' : 'close on a single left') +

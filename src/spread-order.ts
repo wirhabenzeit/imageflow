@@ -1,3 +1,4 @@
+import { layoutFootprint } from './layouts';
 import { hasSingleEnds, spanAllowedAt } from './format';
 import type { PrintFormat, Span } from './format';
 import type { TemplateInfo } from './desktop';
@@ -9,10 +10,19 @@ type Book = { spreads: TemplateInfo['spreads']; format: Pick<PrintFormat, 'struc
 // format requires a single opening and closing page, nothing goes before the opening page or after the closing page,
 // an opening page only goes first and a closing page only last; a book still missing one may get it. Other formats
 // take any fitting span anywhere (layoutChoices and spanFits decide what fits).
-export function insertionProblem(spreads: SpreadState[], position: number, span: Span, template: Book) {
+export function insertionProblem(spreads: SpreadState[], position: number, span: Span, template: Book, sides?: readonly ('left' | 'right')[]) {
   if (!hasSingleEnds(template.format)) return undefined;
-  const spanOf = (spread?: SpreadState) => spread && (template.spreads[spread.definition]?.span ?? 'spread');
-  const first = spanOf(spreads[0]), last = spanOf(spreads.at(-1));
+  const spanOf = (spread: SpreadState | undefined, side: 'left' | 'right') => {
+    if (!spread) return undefined;
+    const { span } = layoutFootprint(spread, template.spreads);
+    return span === 'page' ? side : span;
+  };
+  const first = spanOf(spreads[0], 'right'), last = spanOf(spreads.at(-1), spreads.length === 1 ? 'right' : 'left');
+  if (span === 'page') {
+    if (position === 0 && first !== 'right' && (!sides || sides.includes('right'))) return undefined;
+    if (spreads.length && position === spreads.length && last !== 'left' && (!sides || sides.includes('left'))) return undefined;
+    return 'A page layout can only open or close this book on a side it allows.';
+  }
   if (span === 'right') return position === 0 && first !== 'right' ? undefined : 'A single right page can only open the book, before its first spread.';
   if (span === 'left') return position === spreads.length && last !== 'left' ? undefined : 'A single left page can only close the book, after its last spread.';
   if (position === 0) return 'The book must open on a single right page, so nothing can go before ' + (first === 'right' ? 'it.' : 'its first spread.');
@@ -28,7 +38,7 @@ export function spreadOrder(spreads: SpreadState[], id: string, target: number, 
   const [item] = ordered.splice(start, 1);
   ordered.splice(target, 0, item);
   const allowed = (spread: SpreadState, index: number) =>
-    spanAllowedAt(template.spreads[spread.definition]?.span ?? 'spread', index, spreads.length, template.format);
+    spanAllowedAt(layoutFootprint(spread, template.spreads).span, index, spreads.length, template.format, layoutFootprint(spread, template.spreads).sides);
   const misplaced = new Set(spreads.filter((spread, index) => !allowed(spread, index)).map(({ id }) => id));
   // Existing problems must not freeze the book: allow partial repairs and unrelated moves. Track the affected
   // spreads, rather than just counting errors, so fixing one cannot displace a previously valid end page.
@@ -40,7 +50,7 @@ export function spreadOrder(spreads: SpreadState[], id: string, target: number, 
 // Move a selection as a set, preserving book order within it. Existing invalid ends do not freeze unrelated moves.
 export function spreadSelectionOrder(spreads: SpreadState[], ids: readonly string[], direction: 'up' | 'down' | 'start' | 'end', template: Book) {
   const selected = new Set(ids);
-  const allowed = (spread: SpreadState, index: number) => spanAllowedAt(template.spreads[spread.definition]?.span ?? 'spread', index, spreads.length, template.format);
+  const allowed = (spread: SpreadState, index: number) => spanAllowedAt(layoutFootprint(spread, template.spreads).span, index, spreads.length, template.format, layoutFootprint(spread, template.spreads).sides);
   const misplaced = new Set(spreads.filter((spread, i) => !allowed(spread, i)).map(({ id }) => id));
   const valid = (ordered: SpreadState[]) => !ordered.some((spread, i) => !allowed(spread, i) && !misplaced.has(spread.id));
   let ordered = [...spreads];

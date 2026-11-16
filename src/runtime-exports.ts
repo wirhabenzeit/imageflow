@@ -1,7 +1,7 @@
 // The named exports of the `imageflow` module that templates import. The renderer provides them at runtime, the
 // bundler exposes exactly these names, and the shipped declarations must declare the same set (src/template-types.ts).
 export const runtimeExports = [
-  'defineTemplate', 'spreadFor', 'p', 'mm', 'pt', 'inch', 'printFormat', 'Spread', 'PhotoBox', 'MarkdownBox', 'Element', 'asset', 'file',
+  'defineTemplate', 'spreadFor', 'p', 'mm', 'pt', 'inch', 'printFormat', 'Spread', 'Page', 'PhotoBox', 'MarkdownBox', 'Element', 'asset', 'file',
   'geometry', 'box', 'issue', 'capabilities', 'RenderedImage', 'FormattedText', 'plainText', 'Choice', 'fonts',
 ] as const;
 

@@ -213,7 +213,7 @@ const boxPages: Record<string, Record<string, 'left' | 'right' | 'both'>> = {
 function pagesOf(spread: BookSpread, box: string): number[] {
   const { left, right, number } = spread.page;
   if (number !== undefined) return [number];
-  const side = boxPages[spread.layout]?.[box] ?? 'left';
+  const side = boxPages[spread.layout ?? '']?.[box] ?? 'left';
   const pages = side === 'both' ? [left, right] : side === 'right' ? [right ?? left] : [left ?? right];
   return pages.filter((at): at is number => at !== undefined);
 }
@@ -274,7 +274,7 @@ function picturePage(ctx: PictureContext) {
   const pictures = pictureList(ctx.book.spreads);
   // The spread being drawn counts with the layout drawn, so a layout preview shows what the spread would hold.
   const lists = ctx.book.spreads
-    .map(({ id, layout }) => ({ id, layout: id === ctx.spread ? ctx.layout : layout }))
+    .map(({ id, layout }) => ({ id, layout: id === ctx.spread ? ctx.layout : layout ?? '' }))
     .filter(({ layout }) => pictureLayouts.includes(layout));
   const own: PictureEntry[] = [];
   let next = 0;

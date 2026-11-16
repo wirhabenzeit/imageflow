@@ -13,9 +13,9 @@ export type Side = 'left' | 'right';
 export type Area = 'trim' | 'safe' | 'bleed';
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
 
-// A layout drawn in a format it does not fit (a spread layout without facing pages, or a page layout with them) is
+// A layout drawn in a format it does not fit (a spread layout without facing pages, for example) is
 // still previewed, and the Book check reports it; `lenient` answers its geometry calls instead of throwing.
-type Mode = { lenient?: boolean };
+type Mode = { lenient?: boolean; side?: Side | 'page' };
 // The format a mismatched layout receives as ctx.format carries this mark, so the standalone helpers called with it,
 // such as geometry.spread(ctx.format, 'bleed'), answer leniently too.
 const lenientFormats = new WeakSet<object>();
@@ -24,11 +24,17 @@ export function lenientFormat<F extends ResolvedFormat>(format: F): F {
   lenientFormats.add(copy);
   return copy;
 }
-const modeOf = (format: ResolvedFormat, mode: Mode): Mode => mode.lenient || lenientFormats.has(format) ? { lenient: true } : mode;
+const modeOf = (format: ResolvedFormat, mode: Mode): Mode => mode.lenient || lenientFormats.has(format) ? { ...mode, lenient: true } : mode;
 const sides = new Set(['left', 'right']);
 
 function pageRect(format: ResolvedFormat, side: Side | undefined, area: Area, mode: Mode): Rect {
   const { lenient } = modeOf(format, mode);
+  if (mode.side) {
+    if (side && side !== mode.side) throw new Error('A page layout cannot read the facing page geometry.');
+    const selected = mode.side === 'page' ? undefined : mode.side;
+    const rect = pageRect(format, selected, area, { lenient });
+    return { ...rect, x: rect.x - (format.facingPages && selected === 'right' ? format.trim.width : 0) };
+  }
   if (!format.facingPages) {
     if (side && !lenient) {
       throw new Error('This format has no facing pages, so a page has no side. Call page(' + (area === 'trim' ? '' : "'" + area + "'") + ') without one.');
@@ -61,6 +67,7 @@ export function page(format: ResolvedFormat, side?: Side | Area, area?: Area, mo
 // Both pages. `safe` keeps the outer, top and bottom insets; content that crosses the fold should leave room for
 // the binding itself. A format without facing pages has no spreads.
 export function spread(format: ResolvedFormat, area: Area = 'trim', mode: Mode = {}): Rect {
+  if (mode.side) throw new Error('A page layout has no spread geometry. Use geometry.page().');
   if (!format.facingPages) {
     if (modeOf(format, mode).lenient) return pageRect(format, undefined, area, mode);
     throw new Error("This format has no facing pages, so there is no spread. Use page(" + (area === 'trim' ? '' : "'" + area + "'") + ') for the page.');

@@ -1,6 +1,6 @@
 import { isParameterValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
-import { pageSides, scopeState, storedBoxes } from './project';
+import { pageSides, scopeSpread, scopeState, storedBoxes } from './project';
 import type { LayoutState, PageSide, PageState, SpreadState, StateLocation, Values } from './project';
 import { hasFacingPages, spanFits, spanRequiredAt } from './format';
 import type { PrintFormat, Span } from './format';
@@ -12,6 +12,7 @@ import type { PrintFormat, Span } from './format';
 export type Layout = {
   label: string;
   span: Span;
+  sides?: ('left' | 'right')[];
   parameters: Parameters;
   boxes: Record<string, { type: 'photo' | 'markdown'; label: string; parameters: Parameters }>;
   elements: Record<string, { label: string; parameters: Parameters }>;
@@ -71,15 +72,23 @@ export function declarationConflicts(layouts: Layouts) {
 // right page) may choose the required span instead. The current layout is always a choice.
 export function layoutChoices(layouts: Layouts, current: string, format?: Pick<PrintFormat, 'structure'>, position?: { index: number; count: number }) {
   const span = own(layouts, current)?.span;
+  const required = format && position ? spanRequiredAt(position.index, position.count, format) : undefined;
   const fits = (id: string) => !format || spanFits(layouts[id].span, format);
-  if (format && span && !spanFits(span, format)) {
-    const wanted: Span = position ? spanRequiredAt(position.index, position.count, format) : hasFacingPages(format) ? 'spread' : 'page';
-    return Object.keys(layouts).filter((id) => id === current || layouts[id].span === wanted);
-  }
-  // A misplaced spread keeps its own footprint's layouts and may also take the one its position requires.
-  const required = format && position ? spanRequiredAt(position.index, position.count, format) : span;
-  if (span && required !== span) return Object.keys(layouts).filter((id) => id === current || layouts[id].span === span || layouts[id].span === required);
-  return Object.keys(layouts).filter((id) => id === current || ((!span || layouts[id].span === span) && fits(id)));
+  const isEnd = (value: Span | undefined) => value === 'left' || value === 'right';
+  return Object.keys(layouts).filter((id) => {
+    if (id === current) return true;
+    const next = layouts[id];
+    if (!fits(id)) return false;
+    if (next.span === 'page' && format && hasFacingPages(format)) {
+      const side = isEnd(required) ? required : isEnd(span) ? span : undefined;
+      return !!side && (!next.sides || next.sides.includes(side as PageSide));
+    }
+    if (!span) return true;
+    if (span === 'page' && format && hasFacingPages(format) && !isEnd(required)) return next.span === 'spread';
+    if (format && !spanFits(span, format)) return next.span === (required ?? (hasFacingPages(format) ? 'spread' : 'page'));
+    if (span === 'page' && format && hasFacingPages(format) && isEnd(required)) return next.span === required;
+    return next.span === span || (!!required && required !== span && next.span === required);
+  });
 }
 
 // Layout families. Every variant is an ordinary layout with its own ID and boxes, so switching between variants
@@ -116,6 +125,9 @@ export function familyProblems(layouts: Layouts, families: LayoutFamilies = {}) 
     if (spans.length > 1) {
       problems.push({ path: ['layoutFamilies', family], message: 'The layouts of family ' + family + ' have different page footprints (' +
         ids.map((id) => id + ': ' + layouts[id].span).join(', ') + '). Switching between variants must keep the pages, so give them the same span.' });
+    }
+    if (new Set(ids.map((id) => JSON.stringify([...(layouts[id].sides ?? ['left', 'right'])].sort()))).size > 1) {
+      problems.push({ path: ['layoutFamilies', family], message: 'The layouts of family ' + family + ' must allow the same page sides.' });
     }
     const tagged = ids.filter((id) => layouts[id].variant !== undefined);
     if (tagged.length && tagged.length < ids.length) {
@@ -519,4 +531,17 @@ export function keptElements(spread: SpreadState, layouts: Layouts) {
 export function boxLabel(layouts: Layouts, id: string) {
   const layout = Object.values(layouts).find((item) => own(item.boxes, id));
   return layout ? { box: layout.boxes[id].label, layout: layout.label } : undefined;
+}
+
+/** The sheet's footprint, independent of the spread layout a split spread remembers. */
+export function layoutFootprint(spread: Pick<SpreadState, 'definition' | 'split'>, layouts: Layouts) {
+  const layout = own(layouts, spread.definition);
+  return spread.split ? { span: 'spread' as const } : { span: layout?.span ?? 'spread', sides: layout?.sides };
+}
+
+export function shownLayoutStates(spread: SpreadState) {
+  return (spread.split ? pageSides : [undefined]).flatMap((page) => {
+    const state = scopeSpread(spread, page);
+    return state?.definition ? [{ page, state }] : [];
+  });
 }
