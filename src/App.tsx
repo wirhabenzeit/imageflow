@@ -1845,9 +1845,9 @@ export function App() {
                 if (moved.current) return;
                 const { sheet, side, top, target } = locate(event);
                 if (!sheet || !spreads.some(({ id }) => id === sheet)) return;
-                // The first click on a spread selects it; its photos and texts take clicks once it is selected, so a
-                // spread filled by one photo can still be selected.
-                const current = spreadSelected && spreadId === sheet && (!spreads.find(item => item.id === sheet)?.split || (selectedSide ?? 'left') === side);
+                // Select the clicked page first, even when one image spans both halves. Only a click on the
+                // already selected page opens its content editor.
+                const current = spreadSelected && spreadId === sheet && selectionSide === side;
                 select(sheet, false, side);
                 if (!current || blockedInline) return;
                 if (top) setFocusBox({ box: top.id, at: Date.now() });

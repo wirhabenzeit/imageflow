@@ -74,6 +74,24 @@ try {
     await w.mouse.click(bounds.x + bounds.width * (side === 'left' ? .2 : .8), bounds.y + 4);
     await inspector.locator('details > summary').first().filter({ hasText: 'Templates' }).waitFor();
   };
+  // A shared full-spread photo still requires selecting the opposite page before opening its editor.
+  const beforePageSelection = await readBook();
+  await selectSide('headlands', 'left');
+  const panorama = await frame.locator('[data-spread="headlands"] [data-box="hero"]').boundingBox();
+  assert.ok(panorama);
+  for (const side of ['right', 'left']) {
+    const x = panorama.x + panorama.width * (side === 'left' ? .25 : .75), y = panorama.y + panorama.height * .5;
+    await w.mouse.click(x, y);
+    await w.locator('.active-spread-page[data-page="' + side + '"]').waitFor();
+    assert.equal(await w.locator('.crop-editor, .edit-popover, .element-editor').count(), 0,
+      'Clicking the opposite half selects it without editing the shared image');
+    await w.mouse.click(x, y);
+    await w.locator('.crop-editor').waitFor();
+    await w.keyboard.press('Escape');
+    await w.locator('.crop-editor').waitFor({ state: 'detached' });
+  }
+  assert.deepEqual(await readBook(), beforePageSelection, 'Selection and opening crop mode do not change the book');
+  console.log('Full-spread photo: changing halves selects first; the next click edits.');
   await selectSide('arriving', textSide);
   const editHeading = inspector.getByRole('button', { name: 'Edit Heading', exact: true });
   await editHeading.click();
