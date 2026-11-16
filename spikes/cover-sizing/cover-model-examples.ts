@@ -1,4 +1,10 @@
-/** Type-checked draft declarations. These helpers are not in the shipped SDK. */
+/**
+ * Type-checked draft declarations. These helpers are not in the shipped SDK.
+ *
+ * Illustrative examples only. Printer values (safe insets, file-size caps, page-count limits,
+ * fold bands) come from the printers' documentation and calculators cited in README.md and are
+ * UNVERIFIED against the live uploaders. Re-check them before shipping a real printer profile.
+ */
 import { mm, pt, printFormat } from '../../src/format';
 import type { CoverFormat, CoverWidthsHelper, Edges, Length, PageCount, PrintDeclaration, PrintSpecification, WrapCover } from './cover-model';
 
@@ -39,6 +45,7 @@ export function whitewallCover(
       outer: { kind: 'wrap', insets: {
         top: mm(10), bottom: mm(10), left: mm(size === 'landscape' ? 15 : 10), right: mm(size === 'landscape' ? 15 : 10),
       } },
+      // Unverified: safe insets and file-size cap from WhiteWall's help pages, not tested by upload.
       safe: { back: edges(mm(5)), front: edges(mm(5)), spine: edges(mm(2)) },
       // Conservative warning band for the published 10–12 mm fold zone.
       // It does not alter sheet size or claim an exact physical hinge width.
@@ -64,6 +71,7 @@ export function blurbPremiumCover(
   // Derived from the printer's complete trim and spine/flap measurements.
   const panel = jacket ? (square ? 879 : 931) : (square ? 858 : 918);
   return {
+    // Unverified: Blurb's published limit for Premium paper, not tested by upload.
     pageCount: { min: 20, max: 240, step: 2 },
     cover: {
       kind: 'wrap',
