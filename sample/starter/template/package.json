@@ -1,6 +1,6 @@
 {
   "private": true,
-  "description": "Packages the starter template uses. Run npm install here, then run node scripts/rebuild-template-dependencies.mjs sample/starter/template from the ImageFlow source checkout; books use the saved bundle in vendor/.",
+  "description": "Packages the starter template uses. After changing them, rebuild the saved bundle in vendor/ with the rebuild_dependencies agent tool or Templates → Rebuild Template Dependencies (node scripts/rebuild-template-dependencies.mjs sample/starter/template in a source checkout); never run npm install here.",
   "dependencies": {
     "maplibre-gl": "5.24.1"
   }

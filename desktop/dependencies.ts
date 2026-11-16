@@ -59,20 +59,25 @@ async function lockfileHash(root: string) {
   return lock ? createHash('sha256').update(lock).digest('hex') : '';
 }
 
-/** A warning when installed packages no longer match the saved bundle; books keep using the saved bundle. */
+// How a template's packages are rebuilt, for messages: by the agent tool or the menu command.
+const rebuildHint = 'Rebuild the dependencies with the rebuild_dependencies agent tool or Templates → Rebuild Template Dependencies.';
+
+/** A warning when the saved bundle no longer matches package.json and its lockfile; books keep using the saved bundle. */
 export async function dependencyWarning(root: string, manifest: DependencyManifest | undefined) {
   const hasPackage = await stat(join(root, 'package.json')).then(() => true, () => false);
-  if (!hasPackage) return undefined;
-  if (!manifest) {
-    return 'The template has a package.json but no saved dependency bundle. Run the template dependency rebuild script after npm install.';
-  }
+  // Packages are installed outside the book; a node_modules folder left in the template only makes the book larger.
+  const leftover = await stat(join(root, 'node_modules')).then((info) => info.isDirectory(), () => false)
+    ? 'template/node_modules is not used: the book renders the saved bundle in template/vendor/, and ImageFlow installs packages outside the book when it rebuilds them. Delete the folder to make the book smaller.'
+    : undefined;
+  const joined = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(' ') || undefined;
+  if (!hasPackage) return leftover;
+  if (!manifest) return joined('The template has a package.json but no saved dependency bundle. ' + rebuildHint, leftover);
   const lock = await lockfileHash(root);
   if (lock && lock !== manifest.lockfile) {
-    return 'template/package-lock.json changed since the dependency bundle was saved; the book still uses the saved bundle. ' +
-      'Run the template dependency rebuild script to use the installed packages.';
+    return joined('template/package-lock.json changed since the dependency bundle was saved; the book still uses the saved bundle. ' + rebuildHint, leftover);
   }
-  return manifest.untyped.length ? 'These template dependencies have no type declarations, so the type check treats them as any: ' +
-    manifest.untyped.join(', ') + '. Install their @types packages and rebuild the dependencies.' : undefined;
+  return joined(manifest.untyped.length ? 'These template dependencies have no type declarations, so the type check treats them as any: ' +
+    manifest.untyped.join(', ') + '. Add their @types packages to package.json and rebuild the dependencies.' : undefined, leftover);
 }
 
 /** The module a bare import resolves to: its saved JS and CSS, as source for the bundler's virtual module. */
@@ -90,7 +95,7 @@ export function vendoredModule(_root: string, manifest: DependencyManifest | und
 }
 
 export const missingDependency = (specifier: string) => 'The template imports ' + specifier + ', which is not in its saved dependency bundle ' +
-  '(template/vendor/manifest.json). Install it in template/ with npm install, then run the template dependency rebuild script.';
+  '(template/vendor/manifest.json). Add it to template/package.json, then ' + rebuildHint.charAt(0).toLowerCase() + rebuildHint.slice(1);
 
 const assetLoaders: Record<string, Loader> = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.woff', '.woff2', '.ttf', '.otf']
   .map((extension) => [extension, 'dataurl' as const]));
@@ -125,13 +130,13 @@ async function licenseFiles(directory: string) {
  * `file:` dependencies) are copied as they appear in node_modules. Returns the declaration entry of each typed import,
  * relative to `vendor/`, and the imports without declarations.
  */
-async function vendorTypes(root: string, specifiers: string[], target: string) {
+async function vendorTypes(modules: string, specifiers: string[], target: string) {
   const ts = (await import('typescript')).default;
   const options = { moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022,
     types: [], noEmit: true, skipLibCheck: true, preserveSymlinks: true };
   const host = ts.createCompilerHost(options);
-  const containing = join(root, 'index.ts');
-  const modules = join(root, 'node_modules');
+  // Resolved as from a file beside node_modules, so a node_modules elsewhere (such as one in the template) is never used.
+  const containing = join(dirname(modules), 'index.ts');
   const untyped: string[] = [];
   const entries: string[] = [];
   const types: Record<string, string> = {};
@@ -191,10 +196,11 @@ async function vendorTypes(root: string, specifiers: string[], target: string) {
 }
 
 /**
- * Bundles the packages the template imports from `template/node_modules` into `template/vendor/`, replacing it
- * atomically. Without bare imports, `vendor/` is removed. Returns the new manifest.
+ * Bundles the packages the template imports from `modules`, the node_modules of an install outside the book
+ * (dependency-install.ts), into `template/vendor/`, replacing it atomically. Without bare imports, `vendor/` is
+ * removed. Returns the new manifest.
  */
-export async function rebuildDependencies(root: string): Promise<DependencyManifest | undefined> {
+export async function rebuildDependencies(root: string, modules: string): Promise<DependencyManifest | undefined> {
   const specifiers = await templateImports(root);
   const vendor = join(root, vendorFolder);
   const staging = join(root, '.vendor-' + process.pid + '-' + Date.now());
@@ -209,10 +215,11 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
     await rm(vendor, { recursive: true, force: true });
     return undefined;
   }
-  const modules = join(root, 'node_modules');
   if (!await stat(modules).then((info) => info.isDirectory(), () => false)) {
-    throw new Error('The template imports ' + specifiers.join(', ') + ' but template/node_modules is missing. Run npm install in template/ first.');
+    throw new Error('The template imports ' + specifiers.join(', ') + ' but its packages are not installed.');
   }
+  // Packages resolve from the install, never from a node_modules folder the template may still contain.
+  const base = dirname(modules);
   const own = (name: string) => ['react', 'react-dom', 'imageflow'].includes(name);
   const conflicting = specifiers.filter((specifier) => own(packageName(specifier)));
   if (conflicting.length) throw new Error('ImageFlow provides React and imageflow; import them directly, not ' + conflicting.join(', ') + '.');
@@ -222,7 +229,7 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
     const outdir = join(staging, 'modules');
     const result = await build({
       entryPoints: specifiers.map((specifier, i) => ({ in: specifier, out: 'm' + i })),
-      absWorkingDir: root, outdir, bundle: true, splitting: true, format: 'esm', platform: 'browser', target: 'es2022',
+      absWorkingDir: base, outdir, bundle: true, splitting: true, format: 'esm', platform: 'browser', target: 'es2022',
       minify: true, legalComments: 'none', metafile: true, write: true, logLevel: 'silent', chunkNames: 'chunk-[hash]',
       external: [...hostModuleNames], loader: assetLoaders, define: { 'process.env.NODE_ENV': '"production"' },
       nodePaths: [modules],
@@ -233,15 +240,15 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
       const js = outputs.find(([path]) => basename(path) === 'm' + i + '.js');
       const css = outputs.find(([path]) => basename(path) === 'm' + i + '.css');
       manifest.modules[specifier] = {
-        ...(js ? { js: slash(relative(staging, resolve(root, js[0]))) } : {}),
-        ...(css ? { css: slash(relative(staging, resolve(root, css[0]))) } : {}),
+        ...(js ? { js: slash(relative(staging, resolve(base, js[0]))) } : {}),
+        ...(css ? { css: slash(relative(staging, resolve(base, css[0]))) } : {}),
         exports: js ? [...js[1].exports].sort() : [],
       };
     });
     // Every package that contributed code, with its version and licence.
     const directories = new Set<string>();
     for (const input of Object.keys(result.metafile.inputs)) {
-      const path = resolve(root, input);
+      const path = resolve(base, input);
       if (!inside(modules, path)) continue;
       const parts = relative(modules, path).split(sep);
       // Nested node_modules belong to the innermost package.
@@ -263,7 +270,7 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
       } else manifest.licenses[name] = typeof info.license === 'string' ? info.license : '';
       manifest.licenseNames![name] = typeof info.license === 'string' ? info.license : '';
     }
-    const declarations = await vendorTypes(root, specifiers.filter((specifier) => extname(specifier) !== '.css'), join(staging, 'types', 'packages'));
+    const declarations = await vendorTypes(modules, specifiers.filter((specifier) => extname(specifier) !== '.css'), join(staging, 'types', 'packages'));
     manifest.untyped = declarations.untyped;
     manifest.types = declarations.types;
     if (manifest.untyped.length) {

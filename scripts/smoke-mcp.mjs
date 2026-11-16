@@ -1,7 +1,7 @@
 import { packagedMacExecutable } from './mac-paths.mjs';
 import { testBook, menuAction, agentSettings, closeSettings, undoBook, waitForProject } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
@@ -72,7 +72,7 @@ try {
   assert.match((await window.evaluate(()=>window.imageflow.installMcp('claude'))).error,/only available to Settings/);
   await closeSettings(app);
   const tools = await client.listTools();
-  assert.deepEqual(tools.tools.map(t=>t.name).sort(),['apply_project_changes','check_book','get_authoring_context','import_sources','inspect_book','list_projects'].sort());
+  assert.deepEqual(tools.tools.map(t=>t.name).sort(),['apply_project_changes','check_book','get_authoring_context','import_sources','inspect_book','list_projects','rebuild_dependencies'].sort());
   const call = async(name,args={}) => {
     const response=await client.callTool({name,arguments:args},{timeout:110000});
     return {response,data:response.structuredContent ?? JSON.parse(response.content.find(c=>c.type==='text').text)};
@@ -326,6 +326,34 @@ try {
   await window.evaluate(()=>window.imageflow.mcpSettings(true));
   await window.getByRole('button', { name: /^(Connected:|No agent connected)/ }).waitFor();
   assert.equal((await good('list_projects')).projects[0].project,project);
+  // Template packages install outside the book (ADR 0006): a local package, bundled into template/vendor/ by
+  // rebuild_dependencies, renders, and nothing is installed into the template.
+  const local=join(work,'tiny-local');
+  await mkdir(local,{recursive:true});
+  await writeFile(join(local,'package.json'),JSON.stringify({name:'tiny-local',version:'1.0.0',type:'module',main:'index.js',types:'index.d.ts'}));
+  await writeFile(join(local,'index.js'),"export const greeting = 'Packaged hello';\n");
+  await writeFile(join(local,'index.d.ts'),'export declare const greeting: string;\n');
+  await writeFile(join(folder,'template','package.json'),JSON.stringify({private:true,dependencies:{'tiny-local':'file:'+local}}));
+  const plainSource=await readFile(entry,'utf8');
+  await writeFile(entry,"import { greeting } from 'tiny-local';\n"+plainSource.replace("default:'Hello'","default:greeting"));
+  const rebuilt=await good('rebuild_dependencies',{project});
+  assert.equal(rebuilt.state,'ready');
+  assert.deepEqual(rebuilt.imports,['tiny-local']);
+  assert.ok(JSON.parse(await readFile(join(folder,'template','vendor','manifest.json'),'utf8')).modules['tiny-local']);
+  await assert.rejects(stat(join(folder,'template','node_modules')),'nothing is installed into the book');
+  await ready();
+  const packagedCheck=await good('check_book',{project,typescript:true});
+  assert.equal(packagedCheck.state,'ready',JSON.stringify(packagedCheck.diagnostics));
+  // The package renders and its vendored declarations resolve (this test template has unrelated type errors of its own).
+  assert.ok(!packagedCheck.diagnostics.some(({code,message,details})=>code==='template-compile-error'||details?.typescriptCode===2307||/tiny-local/.test(message)),JSON.stringify(packagedCheck.diagnostics));
+  // The menu command runs the same rebuild for people and says what it bundled.
+  await app.evaluate(({ BrowserWindow, Menu }) => {
+    const owner = BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/');
+    Menu.getApplicationMenu().getMenuItemById('rebuild-dependencies').click(undefined, owner);
+  });
+  await window.waitForFunction(()=>document.querySelector('.status')?.textContent?.includes('1 import bundled into template/vendor'));
+  await writeFile(entry,plainSource);
+  await ready();
   const priorFrame=await window.locator('iframe.book-frame-book[data-current]').getAttribute('src');
   await menuAction(app, 'Open project…');
   await ready();

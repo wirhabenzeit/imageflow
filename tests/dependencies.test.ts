@@ -53,7 +53,7 @@ test('the rebuild saves bundled modules, CSS, versions, licences and declaration
   // Before a rebuild, installed packages are not used.
   await assert.rejects(bundleTemplate(folder), /tiny-lib, which is not in its saved dependency bundle/);
 
-  const manifest = await rebuildDependencies(root);
+  const manifest = await rebuildDependencies(root, join(root, 'node_modules'));
   assert.ok(manifest);
   assert.deepEqual(manifest.packages, { 'tiny-lib': '1.0.0', 'untyped-lib': '0.3.0' });
   assert.deepEqual(manifest.modules['tiny-lib'].exports, ['default', 'double', 'hook']);
@@ -94,17 +94,17 @@ test('the rebuild saves bundled modules, CSS, versions, licences and declaration
 
   // A template without packages has no vendor folder.
   await writeFile(join(root, 'index.tsx'), `import { defineTemplate } from 'imageflow';\nexport default defineTemplate({ id: 'deps', version: '1', contract: 1, spreads: {} } as never);\n`);
-  assert.equal(await rebuildDependencies(root), undefined);
+  assert.equal(await rebuildDependencies(root, join(root, 'node_modules')), undefined);
   assert.equal(await readDependencyManifest(root), undefined);
 });
 
 test('React and imageflow cannot be bundled, and a rebuild needs installed packages', async (t) => {
   const { root } = await fixture(t);
   await writeFile(join(root, 'index.tsx'), `import { createRoot } from 'react-dom/client';\nexport const root = createRoot;\n`);
-  await assert.rejects(rebuildDependencies(root), /ImageFlow provides React and imageflow/);
+  await assert.rejects(rebuildDependencies(root, join(root, 'node_modules')), /ImageFlow provides React and imageflow/);
   await writeFile(join(root, 'index.tsx'), template);
   await rm(join(root, 'node_modules'), { recursive: true });
-  await assert.rejects(rebuildDependencies(root), /node_modules is missing\. Run npm install/);
+  await assert.rejects(rebuildDependencies(root, join(root, 'node_modules')), /packages are not installed/);
 });
 
 test('relative imports cannot reach installed packages or dotfiles, which the hash and copies leave out', async (t) => {
@@ -139,7 +139,7 @@ async function typeChecker(t: TestContext, folder: string) {
 
 test('the type check resolves packages from the saved declarations, without node_modules', async (t) => {
   const { folder, root } = await fixture(t);
-  await rebuildDependencies(root);
+  await rebuildDependencies(root, join(root, 'node_modules'));
   await rm(join(root, 'node_modules'), { recursive: true });
   const check = await typeChecker(t, folder);
   assert.deepEqual((await check()).diagnostics, []);
@@ -180,7 +180,7 @@ export const label: string = chart(linear(bridge('abc')));
 export default defineTemplate({ id: 'deps', version: '1', contract: 1, spreads: {} } as never);
 `;
   await writeFile(join(root, 'index.tsx'), source);
-  const manifest = await rebuildDependencies(root);
+  const manifest = await rebuildDependencies(root, join(root, 'node_modules'));
   assert.ok(manifest);
   assert.deepEqual(manifest.untyped, []);
   assert.deepEqual(manifest.types, {

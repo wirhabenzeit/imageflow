@@ -91,6 +91,7 @@ export const mcpToolSchemas = {
     operations: projectOperationsSchema,
     dryRun: z.boolean().default(false).describe('Validate and report the changes without saving them.'),
   }),
+  rebuild_dependencies: z.strictObject({ project }),
   import_sources: z.discriminatedUnion('kind', [
     z.strictObject({ ...importFields, kind: z.literal('photo').describe('Import photos (.jpg, .jpeg, .png or .webp).') }),
     z.strictObject({ ...importFields, kind: z.literal('markdown').describe('Import Markdown texts (.md).') }),
@@ -113,6 +114,8 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
     description: 'Render the whole book and return diagnostics, optionally with a preview image, type checking, an unsaved draft or synthetic layout fixtures. Call it after every edit; it never saves.' },
   { name: 'apply_project_changes', title: 'Apply changes', readOnly: false,
     description: 'Save a batch of project commands (spreads, layouts, parameters, sources, crops, photo metadata) atomically as one named Undo step. Use it for project.json and photos.json instead of editing them.' },
+  { name: 'rebuild_dependencies', title: 'Rebuild template dependencies', readOnly: false,
+    description: 'Install the npm packages listed in template/package.json outside the book, in a cache ImageFlow manages, and bundle the ones the template imports into template/vendor/, which is all the book renders. Call it after changing template/package.json or adding a package import; never run npm install in template/. A long install answers state "installing": call again until it is "ready", then check_book.' },
   { name: 'import_sources', title: 'Import sources', readOnly: false,
     description: 'Register files you copied into the book\'s inbox/ folder as photos, Markdown texts or files, and return their source IDs for assign_source or file parameters.' },
 ];
