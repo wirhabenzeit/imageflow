@@ -1,3 +1,4 @@
+import { storedBoxes, storedStates } from './project';
 import type { Project, ProjectFiles } from './project';
 import type { Parameters } from './parameters';
 import type { SourceUsage } from './editing';
@@ -9,12 +10,14 @@ export const assetPageLabels = (summary: ProjectSummary) => summary.project.spre
 // A usage's place as people read it: "Page 4", "Pages 4–5", or a name such as "Book settings".
 export const usageLabel = (pages: string) => /^\d/.test(pages) ? (pages.includes('–') ? 'Pages ' : 'Page ') + pages : pages;
 
-// Every set of saved parameter values in the book: document settings, then each spread's own, its boxes' and its
-// elements'. Values kept for a layout the spread no longer uses are still saved, so they count.
+// Every set of saved parameter values in the book: document settings, then, for each spread, the parameters of each
+// state it stores (its own and its pages'), of their elements, and of every box it stores, replaced content included.
+// Values kept for a layout the spread no longer uses are still saved, so they count.
 export function parameterValues(project: Project) {
-  return [{ values: project.params, spread: '' }, ...project.spreads.flatMap((spread) => [{ values: spread.params, spread: spread.id },
-    ...Object.values(spread.boxes).map(({ params }) => ({ values: params, spread: spread.id })),
-    ...Object.values(spread.elements).map(({ params }) => ({ values: params, spread: spread.id }))])];
+  return [{ values: project.params, spread: '' }, ...project.spreads.flatMap((spread) => [
+    ...storedStates(spread).flatMap(({ state }) => [{ values: state.params, spread: spread.id },
+      ...Object.values(state.elements).map(({ params }) => ({ values: params, spread: spread.id }))]),
+    ...storedBoxes(spread).map(({ state }) => ({ values: state.params, spread: spread.id }))])];
 }
 // The values a parameter holds: itself, or, for a list, each field of each item. An item's own `id` is not a value.
 const held = (value: unknown): unknown[] => Array.isArray(value)

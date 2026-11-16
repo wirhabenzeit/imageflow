@@ -6,8 +6,9 @@ import { test } from 'node:test';
 import { loadProject, updateProject } from '../desktop/project';
 import { bookFormatOf, bookFormatVersion, pagesUnsupportedMessage, projectSchema, scopeState, spreadSchema, unsupportedBookMessage } from '../src/project';
 
-// Book format 2 adds page states (ADR 0009). A book is written in the lowest format that holds it. Until phases 2 and
-// 3 can handle what format 2 stores, books that use it are refused with a request to update (release gates).
+// Book format 2 adds page states (ADR 0009). A book is written in the lowest format that holds it. Every reference
+// consumer reads page states and replaced content (phase 2), so books that store them open; until pages are drawn
+// (phase 3), a book with a spread shown as pages is refused with a request to update (release gate).
 
 const spread = { id: 'one', definition: 'story', params: {}, boxes: { hero: { photo: 'a', params: {} } }, elements: {} };
 const book = (spreads: unknown[], schemaVersion = 1) => ({ schemaVersion, title: 'Pages', template: { id: 't', version: '1' }, spreads });
@@ -35,7 +36,8 @@ test('page states follow the same rules as the spread state', () => {
   assert.equal(scopeState(parsed), parsed);
   assert.equal(scopeState(parsed, 'left')?.boxes.hero.photo, 'b');
   assert.equal(spreadSchema.safeParse({ ...spread, pages: { left: { ...left, boxes: { hero: { photo: 'b', text: 'c', params: {} } } } } }).success, false);
-  assert.equal(spreadSchema.safeParse({ ...spread, pages: { left: { params: {} } } }).success, false, 'a page needs its layout');
+  // A page without a layout shows ImageFlow's blank page and still keeps its content.
+  assert.equal(spreadSchema.parse({ ...spread, pages: { left: { boxes: { hero: { photo: 'b' } } } } }).pages?.left?.definition, undefined);
   assert.equal(spreadSchema.safeParse({ ...spread, split: true }).success, false, 'a spread shown as pages needs a page');
   assert.equal(spreadSchema.parse({ ...spread, pages: { left }, split: true }).split, true);
 });
@@ -47,14 +49,17 @@ test('content a layout change replaced is set aside with where it came from', ()
   assert.equal(spreadSchema.safeParse({ ...spread, displaced: [{ from: 'middle', box: 'hero', state: { photo: 'b' } }] }).success, false);
 });
 
-test('books with page states, replaced content or pages shown are refused until this version supports them', () => {
-  // Asset usage and source removal do not read page states yet (phase 2), and pages are not drawn yet (phase 3).
-  for (const gated of [{ ...spread, pages: { left } }, { ...spread, displaced }, { ...spread, pages: { left }, split: true }]) {
-    assert.equal(unsupportedBookMessage(book([spread, { ...gated, id: 'two' }], 2)), pagesUnsupportedMessage);
-    const result = projectSchema.safeParse(book([gated], 2));
-    assert.equal(result.success, false);
-    assert.ok(result.error!.issues.some(({ message }) => message === pagesUnsupportedMessage));
+test('books with page states or replaced content open; books with pages shown are refused until pages are drawn', () => {
+  for (const stored of [{ ...spread, pages: { left } }, { ...spread, displaced }]) {
+    assert.equal(unsupportedBookMessage(book([spread, { ...stored, id: 'two' }], 2)), undefined);
+    assert.equal(projectSchema.parse(book([stored], 1)).schemaVersion, 2);
   }
+  // Pages are not drawn yet (phase 3).
+  const gated = { ...spread, pages: { left }, split: true };
+  assert.equal(unsupportedBookMessage(book([spread, { ...gated, id: 'two' }], 2)), pagesUnsupportedMessage);
+  const result = projectSchema.safeParse(book([gated], 2));
+  assert.equal(result.success, false);
+  assert.ok(result.error!.issues.some(({ message }) => message === pagesUnsupportedMessage));
   assert.equal(unsupportedBookMessage(book([spread], 2)), undefined);
   assert.match(unsupportedBookMessage(book([spread], 3))!, /book format 3/);
 });
@@ -65,24 +70,27 @@ test('a newer format than 2 asks for an update', () => {
   assert.match(result.error!.issues[0].message, /book format 3; this version reads formats up to 2/);
 });
 
-test('a book with page states is refused on opening and left unchanged; saving writes format 1', async () => {
+test('a book with pages shown is refused on opening and left unchanged; saving writes the lowest format', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-book-format-')));
   const folder = join(root, 'Book');
   try {
     await mkdir(join(folder, 'template'), { recursive: true });
     await writeFile(join(folder, 'template/index.tsx'), 'export default {};\n');
     await writeFile(join(folder, 'photos.json'), '{}');
-    const source = JSON.stringify(book([{ ...spread, pages: { left } }], 2));
+    const source = JSON.stringify(book([{ ...spread, pages: { left }, split: true }], 2));
     await writeFile(join(folder, 'project.json'), source);
     await assert.rejects(loadProject(folder, join(root, 'cache')), (error: Error) => error.message === pagesUnsupportedMessage);
     assert.equal(await readFile(join(folder, 'project.json'), 'utf8'), source);
     // A format-2 book without page states opens, and saving it writes format 1.
     await writeFile(join(folder, 'project.json'), JSON.stringify(book([spread], 2)));
     const opened = await loadProject(folder, join(root, 'cache'));
-    await updateProject(opened, { project: { ...opened.project, title: 'Saved' }, photoIndex: opened.photoIndex });
+    const saved = await updateProject(opened, { project: { ...opened.project, title: 'Saved' }, photoIndex: opened.photoIndex });
     assert.equal(JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).schemaVersion, 1);
+    // Stored page states make it format 2 again.
+    const paged = await updateProject(saved, { project: { ...saved.project, spreads: [{ ...saved.project.spreads[0], pages: { left } }] }, photoIndex: saved.photoIndex });
+    assert.equal(JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).schemaVersion, 2);
     // Saving cannot write what this version refuses to open.
-    await assert.rejects(updateProject(opened, { project: { ...opened.project, spreads: [{ ...opened.project.spreads[0], pages: { left } }] },
-      photoIndex: opened.photoIndex }), /page layouts/);
+    await assert.rejects(updateProject(paged, { project: { ...paged.project, spreads: [{ ...paged.project.spreads[0], pages: { left }, split: true }] },
+      photoIndex: paged.photoIndex }), /page layouts/);
   } finally { await rm(root, { recursive: true }); }
 });

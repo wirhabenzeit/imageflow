@@ -4,11 +4,11 @@ import type { TemplateInfo } from './desktop';
 import type { PrintFormat } from './format';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
-import { describeLayoutChange, discardContent, layoutChoices, planLayoutChange, swapContent, switchLayout } from './layouts';
+import { describeLayoutChange, discardContent, layoutChoices, swapContent, switchLayout } from './layouts';
 import { hasFacingPages, spanFits, spanRequiredAt } from './format';
 import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
 import type { ListItem, Parameter, Parameters } from './parameters';
-import { identifier } from './project';
+import { identifier, storedBoxes } from './project';
 import type { ProjectFiles, SpreadState, Values } from './project';
 import { maxZoom, setPlacement } from './spread';
 import { insertionProblem, spreadOrder } from './spread-order';
@@ -408,8 +408,7 @@ export function applyProjectCommands(
               ? ', which has facing pages. Choose a spread layout.' : ', which has no facing pages. Choose a single-page layout.'));
         }
         if (spread.definition === operation.definition) break;
-        const plan = planLayoutChange(spread, operation.definition, template.spreads);
-        switchLayout(spread, operation.definition, template.spreads);
+        const plan = switchLayout(spread, operation.definition, template.spreads);
         changed('Changed layout of ' + spread.id + '. ' + describeLayoutChange(plan), [spread.id], plan.reflow);
         break;
       }
@@ -480,7 +479,7 @@ export function applyProjectCommands(
           else if (value !== null && value !== undefined && photo[field] !== value) { photo[field] = value; updated = true; }
         }
         if (updated) changed('Updated photo metadata for ' + operation.photo,
-          project.spreads.filter(({ boxes }) => Object.values(boxes).some(({ photo }) => photo === operation.photo)).map(({ id }) => id));
+          project.spreads.filter((spread) => storedBoxes(spread).some(({ state }) => state.photo === operation.photo)).map(({ id }) => id));
         break;
       }
     }

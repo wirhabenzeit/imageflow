@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { copyFile, cp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { storedBoxes } from '../src/project';
 import type { ProjectFiles } from '../src/project';
 import { clearFileAssignments, fileAssigned } from '../src/asset-usage';
 import { sourceEntries, sourceFolder } from '../src/source-locations';
@@ -118,9 +119,17 @@ export async function removeSources(book: OpenProject, keys: readonly string[]) 
   for (const source of sources) {
     if (source.kind === 'photo') delete files.photoIndex[source.id];
     else delete files.project[source.kind === 'markdown' ? 'texts' : 'files'][source.id];
-    if (source.kind !== 'file') for (const spread of files.project.spreads) for (const box of Object.values(spread.boxes)) {
-      if (source.kind === 'photo' && box.photo === source.id) delete box.photo;
-      if (source.kind === 'markdown' && box.text === source.id) delete box.text;
+    // Every box the spread stores, on its pages too. A photo's crops and focus go with it; replaced content that
+    // held the source has nothing left to set aside, so its entry goes.
+    if (source.kind !== 'file') for (const spread of files.project.spreads) {
+      for (const { state: box } of storedBoxes(spread)) {
+        if (source.kind === 'photo' && box.photo === source.id) { delete box.photo; delete box.crops; delete box.focus; }
+        if (source.kind === 'markdown' && box.text === source.id) delete box.text;
+      }
+      if (spread.displaced) {
+        spread.displaced = spread.displaced.filter(({ state }) => state.photo || state.text);
+        if (!spread.displaced.length) delete spread.displaced;
+      }
     }
   }
   return updateProject(book, files, true);

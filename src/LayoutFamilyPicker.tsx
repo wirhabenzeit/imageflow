@@ -3,7 +3,7 @@ import { renderOrigin } from './desktop';
 import type { TemplateInfo } from './desktop';
 import type { Edit } from './Inspector';
 import type { SpreadState, Values } from './project';
-import { describeLayoutChange, familyLayouts, planLayoutChange, switchLayout } from './layouts';
+import { describeLayoutChange, familyLayouts, switchLayout } from './layouts';
 import { useEditorFrame } from './editor-frame';
 
 // A family keeps one frame while choices save. Its context follows the book without resetting height or focus.
@@ -32,8 +32,7 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
     edit(({ project: files }) => {
       const state = files.spreads.find(({ id }) => id === spread.id);
       if (!state || !variants.includes(state.definition) || state.definition === next) return;
-      consequence = describeLayoutChange(planLayoutChange(state, next, template.spreads));
-      switchLayout(state, next, template.spreads);
+      consequence = describeLayoutChange(switchLayout(state, next, template.spreads));
     }, () => consequence ? template.spreads[next].label + ' · ' + consequence : '');
   };
   const { height, ready, error, setError, failed } = useEditorFrame(frame,
