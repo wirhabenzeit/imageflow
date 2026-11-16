@@ -1,6 +1,7 @@
 import { isParameterValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
-import type { SpreadState, Values } from './project';
+import { pageSides, scopeState, storedBoxes } from './project';
+import type { LayoutState, PageSide, PageState, SpreadState, StateLocation, Values } from './project';
 import { hasFacingPages, spanFits, spanRequiredAt } from './format';
 import type { PrintFormat, Span } from './format';
 
@@ -163,86 +164,291 @@ export function pickerFamily(layouts: Layouts, id: string, families: LayoutFamil
 }
 
 type Kind = 'photo' | 'text';
-const kindOf = (box: SpreadState['boxes'][string]): Kind | undefined => box.photo ? 'photo' : box.text ? 'text' : undefined;
+type BoxState = SpreadState['boxes'][string];
+const kindOf = (box: BoxState | undefined): Kind | undefined => box?.photo ? 'photo' : box?.text ? 'text' : undefined;
 const boxKind = (layout: Layout | undefined, id: string): Kind | undefined => {
   const box = layout && own(layout.boxes, id);
   return box ? (box.type === 'photo' ? 'photo' : 'text') : undefined;
 };
 
+/** ImageFlow's own blank page (ADR 0009 §3): the paper, with no boxes, elements or parameters. Every template has it
+ * without declaring it, and a page state without `definition` shows it. */
+export const blankPage: Layout = { label: 'Blank page', span: 'page', parameters: {}, boxes: {}, elements: {} };
+/** The layout a state shows: its definition's, the blank page for a page without one, or undefined when the template no
+ * longer has it. */
+export const stateLayout = (layouts: Layouts, definition: string | undefined) => definition === undefined ? blankPage : own(layouts, definition);
+
 // Box IDs whose content a layout shows.
-export function shownBoxes(spread: SpreadState, layout: Layout | undefined) {
-  return Object.entries(spread.boxes).filter(([id, box]) => kindOf(box) && kindOf(box) === boxKind(layout, id)).map(([id]) => id);
+export function shownBoxes(state: Pick<LayoutState, 'boxes'>, layout: Layout | undefined) {
+  return Object.entries(state.boxes).filter(([id, box]) => kindOf(box) && kindOf(box) === boxKind(layout, id)).map(([id]) => id);
 }
 
-// Content the spread keeps that its current layout does not show.
-export function keptOutside(spread: SpreadState, layouts: Layouts) {
-  const layout = own(layouts, spread.definition);
-  const shown = new Set(shownBoxes(spread, layout));
-  return Object.entries(spread.boxes).filter(([id, box]) => kindOf(box) && !shown.has(id))
-    .map(([id, box]) => ({ id, kind: kindOf(box)!, source: box.photo ?? box.text! }));
+// The states a spread shows: its pages when it is shown as pages, else its own.
+const shownStates = (spread: SpreadState): StateLocation[] => spread.split ? pageSides.filter((side) => spread.pages?.[side]) : ['spread'];
+
+export type KeptContent = { id: string; kind: Kind; source: string; location: StateLocation; replaced?: true };
+// Content the spread stores that no shown layout shows: in a state's boxes its layout does not show, in a state that is
+// not shown at all (the spread's own while it is shown as pages, a page's while it is not), and content set aside as
+// replaced, which never shows by itself.
+export function keptOutside(spread: SpreadState, layouts: Layouts): KeptContent[] {
+  const shown = shownStates(spread);
+  return storedBoxes(spread).flatMap(({ location, box: id, state, displaced }) => {
+    const kind = kindOf(state);
+    if (!kind) return [];
+    if (displaced === undefined && shown.includes(location)) {
+      const layout = stateLayout(layouts, scopeState(spread, location === 'spread' ? undefined : location)!.definition);
+      if (kindOf(state) === boxKind(layout, id)) return [];
+    }
+    return [{ id, kind, source: state.photo ?? state.text!, location, ...(displaced !== undefined ? { replaced: true as const } : {}) }];
+  });
 }
 
 export type Counts = Record<Kind, number>;
+/** A layout change (ADR 0009 §3): the layout `definition` for the spread, or for one of its pages with `page` (no
+ * `definition` there gives the page ImageFlow's blank page). `side` is the selected side when a spread layout merges a
+ * spread shown as pages: its content wins when both pages show a value; without it the left page's does. */
+export type LayoutTarget = { definition?: string; page?: PageSide; side?: PageSide };
+// The values a change moves between states, keyed by the IDs the target layouts declare.
+type Unit = { key: string; kind: 'box' | 'param' | 'element'; id: string; param?: string; label: string };
 export type LayoutChange = {
+  // The spread after the change. Planning changes nothing; `switchLayout` applies it.
+  spread: SpreadState;
   carried: Counts; restored: Counts; kept: Counts;
   // Labels of stored parameter values the target layout's declarations reject; it uses their defaults instead.
   fallbacks: string[];
   reflow: boolean;
+  // Values that move to another state, content that stays in a state no longer shown, and content set aside as
+  // replaced, by label and location. A change within one state has none of them.
+  moves: { label: string; from: StateLocation; to: StateLocation }[];
+  keptIn: { label: string; location: StateLocation }[];
+  replaced: { label: string; location: StateLocation }[];
+  // The facing page a split shows as ImageFlow's blank page, because it remembers no layout.
+  blank?: PageSide;
 };
 
-function rejected(before: Parameters | undefined, after: Parameters | undefined, values: Values) {
-  return Object.entries(values).flatMap(([id, value]) => {
-    const param = after && own(after, id);
-    const was = before && own(before, id);
-    return param && !isParameterValue(param, value) && (!was || isParameterValue(was, value)) ? [param.label] : [];
-  });
+function declaredUnits(layout: Layout | undefined): Unit[] {
+  if (!layout) return [];
+  return [
+    ...Object.entries(layout.parameters).map(([id, param]): Unit => ({ key: 'param\0' + id, kind: 'param', id, label: param.label })),
+    ...Object.entries(layout.boxes).map(([id, box]): Unit => ({ key: 'box\0' + id, kind: 'box', id, label: box.label })),
+    ...Object.entries(layout.elements).flatMap(([id, element]) => Object.entries(element.parameters).map(([param, declared]): Unit =>
+      ({ key: 'element\0' + id + '\0' + param, kind: 'element', id, param, label: declared.label }))),
+  ];
 }
+const declares = (layout: Layout | undefined, unit: Unit) => !!layout && (unit.kind === 'param' ? !!own(layout.parameters, unit.id)
+  : unit.kind === 'box' ? !!own(layout.boxes, unit.id) : !!own(own(layout.elements, unit.id)?.parameters ?? {}, unit.param!));
+// Whether a state stores a value for the ID: content for a box (an empty box is no value), a saved parameter value.
+function hasValue(state: LayoutState | undefined, unit: Unit) {
+  if (!state) return false;
+  if (unit.kind === 'box') return !!kindOf(own(state.boxes, unit.id));
+  if (unit.kind === 'param') return Object.hasOwn(state.params, unit.id);
+  return Object.hasOwn(own(state.elements, unit.id)?.params ?? {}, unit.param!);
+}
+const where = (location: StateLocation) => location === 'spread' ? 'the spread' : 'the ' + location + ' page';
+const opposite = (side: PageSide): PageSide => side === 'left' ? 'right' : 'left';
 
-// What switching a spread to `target` would show, keep and fall back on. Planning reads the spread and changes nothing.
-export function planLayoutChange(spread: SpreadState, target: string, layouts: Layouts): LayoutChange {
-  const before = own(layouts, spread.definition);
-  const after = own(layouts, target);
-  if (!after) throw new Error('The template has no layout ' + target + '.');
-  const shownBefore = new Set(shownBoxes(spread, before));
-  const shownAfter = new Set(shownBoxes(spread, after));
+/**
+ * Plans a layout change by ADR 0009 §3, without changing `spread`. A change replaces the layout of one or more states
+ * and gives one or more targets a new layout. For each ID a target's new layout declares, the value comes from the
+ * first of: (1) a replaced layout that shows it, empty boxes and defaults included, a value beating an empty box or a
+ * default and the selected side winning between two values, each value going to one target only (the chosen side
+ * first when splitting); (2) the target's own memory; (3) for a page, what the spread stores while no layout shows it.
+ * A value that moves leaves its state; content the target stored for the ID is set aside as replaced, and a parameter
+ * value is overwritten. A page that stays visible is neither a source nor a target.
+ */
+export function planLayoutChange(spread: SpreadState, request: string | LayoutTarget, layouts: Layouts): LayoutChange {
+  const target: LayoutTarget = typeof request === 'string' ? { definition: request } : request;
+  const layout = target.page && target.definition === undefined ? blankPage : own(layouts, target.definition ?? '');
+  if (!layout) throw new Error('The template has no layout ' + target.definition + '.');
+  const next = structuredClone(spread);
+  const stateAt = (location: StateLocation): LayoutState | undefined => location === 'spread' ? next : next.pages?.[location];
+  const ensure = (location: StateLocation): LayoutState => stateAt(location) ?? ((next.pages ??= {})[location as PageSide] = { params: {}, boxes: {}, elements: {} });
+  // The layout each state showed or remembered before the change.
+  const before = (location: StateLocation) => location === 'spread' ? own(layouts, spread.definition) : stateLayout(layouts, spread.pages?.[location]?.definition);
+
+  let replaced: StateLocation[];
+  let targets: { location: StateLocation; layout: Layout | undefined }[];
+  let selected: PageSide = target.side ?? 'left';
+  let blank: PageSide | undefined;
+  if (!target.page) {
+    // A spread layout: on a full spread, or merging both pages.
+    replaced = spread.split ? pageSides.filter((side) => spread.pages?.[side]) : ['spread'];
+    targets = [{ location: 'spread', layout }];
+  } else if (spread.split) {
+    // A page layout on one page of a spread shown as pages: only that page changes.
+    selected = target.page;
+    replaced = [target.page];
+    targets = [{ location: target.page, layout }];
+  } else {
+    // Splitting: the chosen side gets the page layout, the other side the layout it remembers or the blank page.
+    selected = target.page;
+    const other = opposite(target.page);
+    replaced = ['spread'];
+    targets = [{ location: target.page, layout }, { location: other, layout: before(other) }];
+    if (spread.pages?.[other]?.definition === undefined) blank = other;
+  }
+
+  // Content shown before, as the box objects themselves: they keep their identity when they move between states.
+  const shownIn = (locations: StateLocation[], layoutOf: (location: StateLocation) => Layout | undefined) => new Set(locations.flatMap((location) => {
+    const state = stateAt(location);
+    return state ? shownBoxes(state, layoutOf(location)).map((id) => state.boxes[id]) : [];
+  }));
+  const shownBefore = shownIn(replaced, before);
+  const displaced: NonNullable<SpreadState['displaced']> = [];
+  const moves: LayoutChange['moves'] = [];
+  const replacedContent: LayoutChange['replaced'] = [];
+  // The layout that showed each value a target holds after the change, for reporting values it now rejects.
+  const origin = new Map<string, Layout | undefined>();
+
+  function move(from: StateLocation, to: StateLocation, unit: Unit) {
+    origin.set(to + '\0' + unit.key, before(from));
+    if (from === to) return;
+    const source = stateAt(from);
+    const destination = ensure(to);
+    if (hasValue(source, unit)) moves.push({ label: unit.label, from, to });
+    if (unit.kind === 'box') {
+      const incoming = source && own(source.boxes, unit.id);
+      if (source) delete source.boxes[unit.id];
+      const old = own(destination.boxes, unit.id);
+      if (old && kindOf(old)) {
+        displaced.push({ from: to, box: unit.id, state: old });
+        replacedContent.push({ label: unit.label, location: to });
+      }
+      if (incoming) destination.boxes[unit.id] = incoming;
+      else delete destination.boxes[unit.id];
+    } else if (unit.kind === 'param') {
+      if (source && Object.hasOwn(source.params, unit.id)) destination.params[unit.id] = source.params[unit.id];
+      else delete destination.params[unit.id];
+      if (source) delete source.params[unit.id];
+    } else {
+      const incoming = source && own(source.elements, unit.id);
+      const has = !!incoming && Object.hasOwn(incoming.params, unit.param!);
+      const value = has ? incoming.params[unit.param!] : undefined;
+      if (has) {
+        delete incoming.params[unit.param!];
+        if (!Object.keys(incoming.params).length) delete source!.elements[unit.id];
+      }
+      const element = own(destination.elements, unit.id);
+      if (has) (element ?? (destination.elements[unit.id] = { params: {} })).params[unit.param!] = value!;
+      else if (element) {
+        delete element.params[unit.param!];
+        if (!Object.keys(element.params).length) delete destination.elements[unit.id];
+      }
+    }
+  }
+
+  const claimed = new Set<string>();
+  for (const { location, layout: shows } of targets) for (const unit of declaredUnits(shows)) {
+    // 1. A replaced layout that shows the ID: what it shows is final, including nothing.
+    const showing = claimed.has(unit.key) ? [] : replaced.filter((from) => declares(before(from), unit));
+    if (showing.length) {
+      claimed.add(unit.key);
+      const valued = showing.filter((from) => hasValue(stateAt(from), unit));
+      const pool = valued.length ? valued : showing;
+      move(pool.find((from) => from === selected) ?? pool[0], location, unit);
+      continue;
+    }
+    // 2. The target's own memory.
+    if (location === 'spread' || hasValue(stateAt(location), unit)) {
+      origin.set(location + '\0' + unit.key, before(location));
+      continue;
+    }
+    // 3. For a page, what the spread stores and no layout shows.
+    if (hasValue(next, unit)) move('spread', location, unit);
+    else origin.set(location + '\0' + unit.key, before(location));
+  }
+
+  if (!target.page) {
+    next.definition = target.definition!;
+    delete next.split;
+  } else {
+    const page = ensure(target.page) as PageState;
+    if (target.definition === undefined) delete page.definition;
+    else page.definition = target.definition;
+    next.split = true;
+  }
+  if (displaced.length) next.displaced = [...(next.displaced ?? []), ...displaced];
+
   const counts = (): Counts => ({ photo: 0, text: 0 });
-  const change: LayoutChange = { carried: counts(), restored: counts(), kept: counts(), fallbacks: [], reflow: false };
-  for (const [id, box] of Object.entries(spread.boxes)) {
-    const kind = kindOf(box);
-    if (!kind) continue;
-    if (shownBefore.has(id) && shownAfter.has(id)) change.carried[kind]++;
-    else if (shownAfter.has(id)) change.restored[kind]++;
-    else if (shownBefore.has(id)) change.kept[kind]++;
-    if (kind === 'text' && (shownBefore.has(id) || shownAfter.has(id))) change.reflow = true;
+  const change: LayoutChange = { spread: next, carried: counts(), restored: counts(), kept: counts(), fallbacks: [], reflow: false,
+    moves: [], keptIn: [], replaced: replacedContent, ...(blank ? { blank } : {}) };
+  const shownAfter = shownIn(targets.map(({ location }) => location), (location) => targets.find((item) => item.location === location)!.layout);
+  for (const box of shownAfter) change[shownBefore.has(box) ? 'carried' : 'restored'][kindOf(box)!]++;
+  const targetLocations = targets.map(({ location }) => location);
+  for (const box of shownBefore) {
+    if (shownAfter.has(box)) continue;
+    change.kept[kindOf(box)!]++;
+    // Content left in a state that no longer shows: named with where it stays, unless that state is a target.
+    for (const { location, box: id, state } of storedBoxes(next)) {
+      if (state !== box || targetLocations.includes(location)) continue;
+      change.keptIn.push({ label: own(before(location)?.boxes ?? {}, id)?.label ?? id, location });
+    }
   }
-  change.fallbacks.push(...rejected(before?.parameters, after.parameters, spread.params));
-  for (const [id, box] of Object.entries(spread.boxes)) {
-    change.fallbacks.push(...rejected(before && own(before.boxes, id)?.parameters, own(after.boxes, id)?.parameters, box.params));
-  }
-  for (const [id, element] of Object.entries(spread.elements)) {
-    change.fallbacks.push(...rejected(before && own(before.elements, id)?.parameters, own(after.elements, id)?.parameters, element.params));
+  change.reflow = [...shownBefore, ...shownAfter].some((box) => kindOf(box) === 'text');
+  // Moves of content and values, merged by label and route.
+  for (const item of moves) if (!change.moves.some((other) => other.label === item.label && other.from === item.from && other.to === item.to)) change.moves.push(item);
+
+  // Values the new layouts reject, judged against the layout that showed them before.
+  for (const { location, layout: shows } of targets) {
+    const state = stateAt(location);
+    if (!state || !shows) continue;
+    const from = (key: string) => origin.has(location + '\0' + key) ? origin.get(location + '\0' + key) : before(location);
+    for (const [id, value] of Object.entries(state.params)) {
+      change.fallbacks.push(...rejected(own(from('param\0' + id)?.parameters ?? {}, id), own(shows.parameters, id), value));
+    }
+    for (const [id, box] of Object.entries(state.boxes)) for (const [key, value] of Object.entries(box.params)) {
+      change.fallbacks.push(...rejected(own(own(from('box\0' + id)?.boxes ?? {}, id)?.parameters ?? {}, key), own(own(shows.boxes, id)?.parameters ?? {}, key), value));
+    }
+    for (const [id, element] of Object.entries(state.elements)) for (const [key, value] of Object.entries(element.params)) {
+      const was = from('element\0' + id + '\0' + key);
+      change.fallbacks.push(...rejected(own(own(was?.elements ?? {}, id)?.parameters ?? {}, key), own(own(shows.elements, id)?.parameters ?? {}, key), value));
+    }
   }
   change.fallbacks = [...new Set(change.fallbacks)];
   return change;
 }
 
-// A one-line summary such as "2 photos carried over · 2 photos kept outside this layout · text will reflow".
+// Whether a value the layout `after` declares is rejected there but was accepted (or not declared) before.
+function rejected(was: Parameter | undefined, param: Parameter | undefined, value: Values[string]) {
+  return param && !isParameterValue(param, value) && (!was || isParameterValue(was, value)) ? [param.label] : [];
+}
+
+// A one-line summary such as "Hero and Title move to the left page · Story kept on the spread · right page becomes
+// blank", or, within one state, "2 photos set aside · Title will reset".
 export function describeLayoutChange(change: LayoutChange) {
   const amount = (counts: Counts) => [
     counts.photo && counts.photo + (counts.photo === 1 ? ' photo' : ' photos'),
     counts.text && counts.text + (counts.text === 1 ? ' text' : ' texts'),
   ].filter(Boolean).join(', ');
+  const list = (labels: string[]) => labels.length < 2 ? labels.join('') : labels.slice(0, -1).join(', ') + ' and ' + labels[labels.length - 1];
+  const grouped = <T extends { label: string }>(items: T[], key: (item: T) => string) => [...new Set(items.map(key))]
+    .map((group) => ({ group, labels: [...new Set(items.filter((item) => key(item) === group).map(({ label }) => label))] }));
   const parts = [
-    amount(change.kept) && amount(change.kept) + ' set aside',
+    ...grouped(change.moves, ({ to }) => to).map(({ group, labels }) => list(labels) + (labels.length === 1 ? ' moves' : ' move') + ' to ' + where(group as StateLocation)),
+    // Content kept in a state that still has a layout is counted; content left in a state no longer shown is named.
+    !change.keptIn.length && amount(change.kept) && amount(change.kept) + ' set aside',
+    ...grouped(change.keptIn, ({ location }) => location).map(({ group, labels }) => list(labels) + ' kept on ' + where(group as StateLocation)),
+    change.blank && change.blank + ' page becomes blank',
+    ...grouped(change.replaced, ({ location }) => location).map(({ group, labels }) => list(labels) + ' on ' + where(group as StateLocation) + ' replaced'),
     ...change.fallbacks.map((label) => label + ' will reset'),
-  ].filter(Boolean);
+  ].filter(Boolean) as string[];
   return parts.join(' · ');
 }
 
-// Switches the spread's layout. Content, crops and parameter values all stay with the spread.
-export function switchLayout(spread: SpreadState, target: string, layouts: Layouts) {
-  if (!own(layouts, target)) throw new Error('The template has no layout ' + target + '.');
-  spread.definition = target;
+/** Applies a layout change to `spread` in place (see planLayoutChange) and returns what it did. */
+export function switchLayout(spread: SpreadState, target: string | LayoutTarget, layouts: Layouts) {
+  const change = planLayoutChange(spread, target, layouts);
+  for (const key of Object.keys(spread) as (keyof SpreadState)[]) delete spread[key];
+  Object.assign(spread, change.spread);
+  return change;
+}
+
+/** Exchanges the two page states of a spread shown as pages, layouts included (ADR 0009 §5). The caller offers it only
+ * when each page's layout is allowed on the other side. */
+export function swapPages(spread: SpreadState) {
+  if (!spread.split || !spread.pages) throw new Error('Only a spread shown as pages has pages to swap.');
+  const { left, right } = spread.pages;
+  spread.pages = { ...(right ? { left: right } : {}), ...(left ? { right: left } : {}) };
 }
 
 // Whether any layout of the template declares this box (for its content type), element, or parameter. State the
@@ -270,7 +476,6 @@ export function declaredInTemplate(layouts: Layouts) {
   };
 }
 
-type BoxState = SpreadState['boxes'][string];
 // A box's content: the assignment and the crop focus. Box parameters belong to the box ID and stay put; per-layout
 // crops were made for this box's frames, so they do not travel with the content.
 function content(box: BoxState | undefined): Partial<BoxState> {

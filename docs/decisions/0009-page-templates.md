@@ -1,6 +1,6 @@
 # 0009: Page templates
 
-Status: accepted, 2026-11-16; §3 revised the same day after review on #183 (the facing page never changes, empty and default values carry over, replaced content is set aside explicitly). Phase 1 (page-scoped addressing and book format 2) implemented; books that use format 2's page states are refused until phases 2 and 3 can handle them (see *Release gates*). Motivated by beta feedback: a user builds more and more spread layouts that combine one left-page design with one right-page design, each with its own parameters for both sides.
+Status: accepted, 2026-11-16; §3 revised the same day after review on #183 (the facing page never changes, empty and default values carry over, replaced content is set aside explicitly). Phase 1 (page-scoped addressing and book format 2) and phase 2 (the change planner and every reference consumer reading every state) implemented; books with a spread shown as pages are refused until phase 3 draws them (see *Release gates*). Motivated by beta feedback: a user builds more and more spread layouts that combine one left-page design with one right-page design, each with its own parameters for both sides.
 
 ## Problem
 
@@ -42,7 +42,7 @@ A spread keeps up to three states: its own (for spread layouts, as today) and on
   split?: true,                   // the pages are shown, not `definition`
   displaced?: { from: 'spread' | 'left' | 'right', box, state }[],   // content a layout change replaced (§3)
 }
-PageState = { definition, params, boxes, elements }   // a page remembers its layout and content
+PageState = { definition?, params, boxes, elements }  // a page remembers its layout and content; no definition: the blank page
 ```
 
 - Each state follows today's switching rules within itself: a value is stored once set, content a layout has no box for is kept, crops are keyed by layout ID.
@@ -55,7 +55,7 @@ PageState = { definition, params, boxes, elements }   // a page remembers its la
 
 **Release gates.** Format 2 is defined before the app can handle everything it stores, so a build refuses, with a request to update, any book that uses what it cannot handle yet:
 
-- **Stored page states and replaced content** (`pages`, `displaced`) hold references to photos, texts and files (box assignments, and file sources in parameters). Code that enumerates references (asset usage, source removal, saving a copy with its assets, commands) reads only the spread's own state, so it would report such sources as unused, and removing one would leave a dangling reference. Storing them safely does not make them safe to edit. Phase 2 lifts this gate once every reference consumer reads every state.
+- **Stored page states and replaced content** (`pages`, `displaced`) hold references to photos, texts and files (box assignments, and file sources in parameters). Code that enumerated references (asset usage, source removal, commands) read only the spread's own state, so it would have reported such sources as unused, and removing one would have left a dangling reference. Phase 2 lifted this gate: every reference consumer reads every state.
 - **A spread shown as pages** (`split`) would be drawn and exported as the spread layout it remembers. Phase 3 lifts this gate once pages are drawn.
 
 A release must not ship a build that accepts a part of format 2 it does not fully handle.
@@ -162,7 +162,7 @@ The contract-1 baseline is open until the first public release ([ADR 0008](0008-
 Effort as relative size (S, M, L).
 
 1. **Page-scoped DOM addressing and book format 2 (M). Done** (see [below](#phase-1-as-implemented)). An invisible refactor before any feature, with the book format that stores page states. DOM lookups (the `[data-box]`/`[data-element]` selectors in `src/render.tsx` and `src/rendered-image.tsx`: validation, findings, overflow, safe-area and flow measurement, editor geometry, inline editing, inspection and close-ups) are scoped by page container, so two `hero` boxes can share a sheet.
-2. **Slot-aware state access and the change planner (L).** Box, element and parameter access in the app goes through `scopeState` and the page (`.boxes[` 65 uses in 10 files, `.definition` 118 in 18, `.elements[` 24 in 7), and the app reads `page` from the frame's geometry and findings; the crop editor and element editors send it back. One pure function in `src/layouts.ts` plans every change by §3 and replaces `planLayoutChange`/`switchLayout`; `describeLayoutChange` describes moves and replacements across states. The planner is the riskiest part of this design. Besides the worked examples, property tests run random sequences of layout changes, clears, resets, Undo and Swap pages on random templates and check that:
+2. **Slot-aware state access and the change planner (L). Done**, except the app's per-page state access, which moves to phases 3 and 5 (see [below](#phase-2-as-implemented)). Box, element and parameter access in the app goes through `scopeState` and the page (`.boxes[` 65 uses in 10 files, `.definition` 118 in 18, `.elements[` 24 in 7), and the app reads `page` from the frame's geometry and findings; the crop editor and element editors send it back. One pure function in `src/layouts.ts` plans every change by §3 and replaces `planLayoutChange`/`switchLayout`; `describeLayoutChange` describes moves and replacements across states. The planner is the riskiest part of this design. Besides the worked examples, property tests run random sequences of layout changes, clears, resets, Undo and Swap pages on random templates and check that:
    - content is conserved: every photo and text assignment is in exactly one state or in `displaced`, never two;
    - a page that stays visible is unchanged by the other page's change;
    - results are deterministic for the same book, change and selection;
@@ -170,7 +170,7 @@ Effort as relative size (S, M, L).
    - Undo restores every state exactly.
 
    Every code path that reads or rewrites references (asset usage, source removal and relinking, saving a copy with its assets, commands, authoring context) goes through one function that lists a spread's states and its replaced content. A test seeds a book whose photos, texts and files are referenced only from page states, page parameters and `displaced`, and checks every such consumer. With it, phase 2 sets `pageStatesSupported` and lifts the first release gate.
-3. **Render API (M).** `page()` builder, `<Page>`, `ctx.side`, side-aware `ctx.geometry` and `design().page()`, `ctx.page` per side; `pageSequence`, `layoutChoices`, `spanFits`/`spanAllowedAt`, `declaration-check.ts`, `spread-order.ts` insertion rules and `editing.ts` first-spread layouts learn page layouts. Composition of two pages into one sheet in `SpreadView`. Authoring types and `template-types.ts` checks.
+3. **Render API (M).** With it, the app's box, element and parameter access by page (deferred from phase 2), since only drawn pages give the frame's geometry and findings a page to report. `page()` builder, `<Page>`, `ctx.side`, side-aware `ctx.geometry` and `design().page()`, `ctx.page` per side; `pageSequence`, `layoutChoices`, `spanFits`/`spanAllowedAt`, `declaration-check.ts`, `spread-order.ts` insertion rules and `editing.ts` first-spread layouts learn page layouts. Composition of two pages into one sheet in `SpreadView`. Authoring types and `template-types.ts` checks.
 4. **Book context, checks and fixtures (M).** Flow keys and order, anchors, `ctx.book.spreads`, editor contexts, Book check findings with sides, fixtures on both sides, `layout-preview.ts` cache keys, purity attribution by page.
 5. **Editor (L).** Selection with sides, Inspector for a page, *Set aside* by location, sidebar groups, drag onto a half, hover previews, Swap pages, end pages accepting page layouts.
 6. **Commands and MCP (M).** `page` on the commands in §6, `openingSpreads` with pages, `get_authoring_context`, `mcp-contract.ts` and `mcp-results.ts`.
@@ -186,6 +186,18 @@ Phases 1 and 2 carry most of the risk and land before any visible feature.
 - **Release gates.** `pageStatesSupported` and `pageLayoutsShown` are false: a book with `pages`, `displaced` or `split` is refused before validation with a request to update (`unsupportedBookMessage`) and left unchanged, and `projectSchema` refuses it for saves and revisions. `spreadSchema` itself is ungated, so format 2's spread is tested on its own. Phase 2 sets the first, phase 3 the second.
 - **Pages in results.** Findings (`Issue`, diagnostics' `location`), the editor's box geometry, element inspection and rendered-image failures carry `page` for a box or element on a page. Every edit target carries `page` itself, also a standalone `ctx.edit('heading')` that is no box or element: target keys (`spread@left|…`; keys without a page are unchanged), occurrence numbers and an open editor's anchor are per page, and the inline-editing and crop-preview messages carry it. Live crop placements and photo-box `uid`s (`ifl-…`, `ifr-…`) are keyed by page. MCP output schemas do not list `page` yet, because `location` already allows extra fields and the schemas are at their size budget; phase 6 documents it with the `page` inputs.
 - Nothing draws page containers yet, so every lookup resolves to the spread, and books, findings and messages are unchanged.
+
+### Phase 2 as implemented
+
+- **The planner** (`planLayoutChange` in `src/layouts.ts`) takes a `LayoutTarget`: `{ definition }` for a spread layout (with `side`, the selected side, when it merges), `{ definition, page }` for a page layout, `{ page }` for the blank page. It returns the changed spread without touching its input; `switchLayout` applies it in place and returns the same description. Every existing caller (Inspector, family picker, context menu, `switch_layout`) goes through it; with spread layouts only, a change replaces and targets the spread itself, so its behaviour is unchanged.
+- **Granularity.** A box is one ID: its whole state (assignment, box parameters, focus, per-layout crops) moves, and a box *has a value* when it holds a photo or text. Layout parameters and each element parameter are IDs of their own; one *has a value* when it is stored.
+- **Rules 2 and 3.** A page keeps its own value when it has one; otherwise it takes the spread's. A page box that is empty but has box parameters therefore takes the spread's box state, parameters included. An ID a replaced layout showed empty is claimed by the target that takes first, so the other target of a split falls back to its own memory for it, as for a value.
+- **The blank page** is a page state without `definition` (`blankPage`, `stateLayout`). Splitting creates a state only for the chosen page; the other side without a remembered layout stays without one and shows the blank page.
+- **Descriptions** (`describeLayoutChange`) name moves, content left in a state no longer shown, the blank side and replaced content, for example *Title and Hero move to the left page · Story kept on the spread · right page becomes blank*. A change within one state keeps the earlier summary (*2 photos set aside · Title will reset*). Rejected values are judged against the layout that showed them before the move.
+- **Swap pages** (`swapPages`) exchanges the two page states; the caller checks `sides`.
+- **References.** `storedStates` and `storedBoxes` (`src/project.ts`) list a spread's states and its boxes, replaced content included. Asset usage, file assignment and clearing, source usage, source removal, `set_photo_metadata` and `keptOutside` (which the authoring context reports) read them. Removing a photo also removes its crops and focus, and drops replaced content left without a source.
+- **The Inspector** still lists and places only content kept in the spread's own state; content on pages and replaced content is listed with its location in phase 5.
+- **Tests.** `tests/page-changes.test.ts` checks the worked examples of §4, and 300 random templates with 40 random edits, changes and page swaps each against the invariants: content is conserved, the facing page is unchanged, results are deterministic and leave the input as it was (so Undo's snapshot restores every state), rule 1 shows what a replaced layout showed (a value over an empty box or default, the selected side's first), rules 2 and 3 fill the rest from memory, and no change shows a value nobody stored. `tests/page-references.test.ts` seeds books whose sources are referenced only from page states, page parameters and replaced content.
 
 ## Deferred
 

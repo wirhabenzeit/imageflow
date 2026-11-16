@@ -11,7 +11,7 @@ import { layoutPreviewKey } from './layout-preview';
 import { BookFrame } from './BookFrame';
 import { revealIn } from './reveal';
 import type { ProjectFiles, SpreadState } from './project';
-import { boxLabel, describeLayoutChange, discardContent, keptElements, keptOutside, layoutPreviews, pickerFamily, planLayoutChange, switchLayout } from './layouts';
+import { boxLabel, describeLayoutChange, discardContent, keptElements, keptOutside, layoutPreviews, pickerFamily, switchLayout } from './layouts';
 import { keptMime, photoMime, sourceTitle, textMime } from './source-items';
 import { readEdit, resolveEditPath } from './editing';
 import type { SourceUsage } from './editing';
@@ -162,7 +162,9 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     }, notice);
   }
   // Content the spread keeps for other layouts; switching back, or to another layout with these boxes, shows it.
-  const kept = template ? keptOutside(spread, template.spreads) : [];
+  // Content stored on a page or set aside as replaced is listed with its location once pages can be edited (ADR 0009,
+  // phase 5); *Place in…* and *Discard* here act on the spread's own boxes.
+  const kept = template ? keptOutside(spread, template.spreads).filter(({ location, replaced }) => location === 'spread' && !replaced) : [];
   const keptLabel = [
     ['photo', 'photo', 'photos'], ['text', 'text', 'texts'],
   ].map(([kind, one, many]) => {
@@ -223,8 +225,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
           // Planned against the project the switch applies to, which may be newer than this render.
           let consequence = '';
           changeSpread((item) => {
-            consequence = describeLayoutChange(planLayoutChange(item, next, template.spreads));
-            switchLayout(item, next, template.spreads);
+            consequence = describeLayoutChange(switchLayout(item, next, template.spreads));
           }, () => consequence ? template.spreads[next].label + ' · ' + consequence : '');
         }} />
         {familyPicker}

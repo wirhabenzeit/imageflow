@@ -37,12 +37,11 @@ export const newerBookMessage = (version: number) => 'This book was saved by a n
   version + '; this version reads formats up to ' + bookFormatVersion + '). Update ImageFlow to open it. The book was not changed.';
 // Release gates (ADR 0009). Format 2 is defined before this version can handle what it stores, so a book that uses
 // it is refused with a request to update rather than opened with parts the app does not yet see:
-// - Stored page states and replaced content (`pages`, `displaced`) hold references to photos, texts and files that
-//   asset usage, source removal and saving a copy do not enumerate yet; they would report such sources as unused or
-//   leave dangling references. Phase 2 lifts this gate once every reference consumer reads every state.
+// - Stored page states and replaced content (`pages`, `displaced`) hold references to photos, texts and files. Every
+//   reference consumer reads them through `storedStates` and `storedBoxes` (phase 2), so this gate is lifted.
 // - A spread shown as pages (`split`) would be drawn and exported as the spread layout it remembers. Phase 3 lifts
 //   this gate once pages are drawn.
-export const pageStatesSupported = false;
+export const pageStatesSupported = true;
 export const pageLayoutsShown = false;
 export const pagesUnsupportedMessage = 'This book uses page layouts, which this version of ImageFlow does not support yet. ' +
   'Update ImageFlow to open it. The book was not changed.';
@@ -70,7 +69,9 @@ const layoutState = {
   boxes: z.record(identifier, box).default({}),
   elements: z.record(identifier, z.object({ params: values })).default({}),
 };
-const pageState = z.object(layoutState);
+// A page without `definition` shows ImageFlow's blank page (ADR 0009 §3), which every template has without declaring
+// it; the page still keeps what it stores for other layouts.
+const pageState = z.object({ ...layoutState, definition: identifier.optional() });
 export const pageSides = ['left', 'right'] as const;
 
 // A spread as format 2 defines it. The release gates above apply to whole books (`projectSchema`), so this schema
@@ -134,6 +135,26 @@ export type PageState = NonNullable<NonNullable<SpreadState['pages']>[PageSide]>
 /** The state a box, element or parameter of a spread lives in: one of its pages', or the spread's own without a page. */
 export const scopeState = (spread: SpreadState, page?: PageSide): SpreadState | PageState | undefined => page ? spread.pages?.[page] : spread;
 export type BoxState = z.infer<typeof box>;
+/** Where a spread stores a state: its own, or one of its pages'. */
+export type StateLocation = 'spread' | PageSide;
+export type LayoutState = SpreadState | PageState;
+type StoredSpread = Pick<SpreadState, 'params' | 'boxes' | 'elements' | 'pages' | 'displaced'>;
+
+// Every reference consumer (asset usage, source removal, commands, the authoring context) reads a spread through the
+// two functions below, so content stored only on a page or set aside as replaced is never reported unused or left
+// dangling (ADR 0009, phase 2).
+
+/** Every layout state a spread stores, in order: its own, then the left and the right page's. */
+export function storedStates<T extends StoredSpread>(spread: T): { location: StateLocation; state: Pick<T, 'params' | 'boxes' | 'elements'> }[] {
+  return [{ location: 'spread' as const, state: spread },
+    ...pageSides.flatMap((side) => spread.pages?.[side] ? [{ location: side, state: spread.pages[side] }] : [])];
+}
+
+/** Every box state a spread stores: the boxes of each layout state, then the content set aside as replaced. */
+export function storedBoxes(spread: StoredSpread): { location: StateLocation; box: string; state: BoxState; displaced?: number }[] {
+  return [...storedStates(spread).flatMap(({ location, state }) => Object.entries(state.boxes).map(([box, item]) => ({ location, box, state: item }))),
+    ...(spread.displaced ?? []).map(({ from, box, state }, displaced) => ({ location: from, box, state, displaced }))];
+}
 export type Values = z.infer<typeof values>;
 export type PhotoIndex = z.infer<typeof photoIndexSchema>;
 export type Photo = Omit<PhotoIndex[string], 'path' | 'linked' | typeof captureFields[number]> & Dimensions & CaptureMetadata;

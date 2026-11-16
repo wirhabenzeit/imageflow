@@ -840,9 +840,10 @@ function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Temp
   const nodes = request.box ? findDeclared(sheet, { box: request.box }) : request.element ? findDeclared(sheet, { element: request.element }) : declaredNodes(sheet);
   if ((request.box || request.element) && !nodes.length) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread.id + '.');
   const items: ElementMeasurement[] = nodes.slice(request.offset, request.offset + request.limit).map(({ node, kind: declared, id, page }) => {
-    // A node on a page belongs to that page's layout and state (validated before inspection).
+    // A node on a page belongs to that page's layout and state (validated before inspection); a page that draws a box
+    // or element shows a declared layout, never the blank page.
     const state = scopeState(spread, page)!;
-    const definition = template.spreads[state.definition];
+    const definition = template.spreads[state.definition!];
     const box = declared === 'box', kind = box ? definition.boxes[id].type : 'element';
     const prefix = (box ? 'boxes.' : 'elements.') + id + '.';
     const parameters = box ? definition.boxes[id].parameters : definition.elements[id].parameters;

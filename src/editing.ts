@@ -1,3 +1,4 @@
+import { storedBoxes } from './project';
 import type { Project, SpreadState, Values } from './project';
 import { resolveValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
@@ -21,10 +22,13 @@ export function firstSpreadLayouts(layouts: Layouts, format: PrintFormat) {
   return Object.entries(layouts).filter(([, layout]) => spanAllowedAt(layout.span ?? 'spread', 0, 2, format)).map(([id]) => id);
 }
 
-// The boxes a spread shows. Without the template (still loading), every assigned box counts.
+// The boxes a spread shows: its own layout's, or its pages' when it is shown as pages. Without the template (still
+// loading), every box the spread stores counts, on its pages and among replaced content too.
 function shown(spread: SpreadState, layouts?: Layouts) {
-  const ids = layouts ? new Set(shownBoxes(spread, Object.hasOwn(layouts, spread.definition) ? layouts[spread.definition] : undefined)) : undefined;
-  return Object.entries(spread.boxes).filter(([id]) => !ids || ids.has(id)).map(([, box]) => box);
+  if (!layouts) return storedBoxes(spread).map(({ state }) => state);
+  const layout = (definition: string | undefined) => definition !== undefined && Object.hasOwn(layouts, definition) ? layouts[definition] : undefined;
+  const states = spread.split ? Object.values(spread.pages ?? {}) : [spread];
+  return states.flatMap((state) => shownBoxes(state, layout(state.definition)).map((id) => state.boxes[id]));
 }
 
 export type SourceUsage = Record<'photo' | 'text', Record<string, { spread: string; pages: string }[]>>;
