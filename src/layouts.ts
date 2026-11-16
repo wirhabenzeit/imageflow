@@ -91,6 +91,13 @@ export function layoutChoices(layouts: Layouts, current: string, format?: Pick<P
   });
 }
 
+/** The name of what a sheet shows: its layout's label, or both pages' labels when it is shown as pages. A split
+ * sheet's own `definition` is hidden state, so it never names the sheet. Undefined for an undeclared spread layout. */
+export function sheetLayoutLabel(layouts: Record<string, { label: string }> | undefined, spread: Pick<SpreadState, 'definition' | 'split' | 'pages'>) {
+  const label = (id: string | undefined) => id === undefined || !layouts ? undefined : own(layouts, id)?.label;
+  return spread.split ? pageSides.map((side) => label(spread.pages?.[side]?.definition) ?? 'Blank page').join(' / ') : label(spread.definition);
+}
+
 // Editor choices may change a full sheet between a spread and independently chosen pages. End pages and
 // non-facing units remain one state; switching those to a page layout must never split their footprint.
 export type LayoutPosition = { index: number; count: number };
@@ -507,6 +514,8 @@ export function swapPages(spread: SpreadState) {
   if (!spread.split || !spread.pages) throw new Error('Only a spread shown as pages has pages to swap.');
   const { left, right } = spread.pages;
   spread.pages = { ...(right ? { left: right } : {}), ...(left ? { right: left } : {}) };
+  // Replaced content belongs to the page state it came from, so it moves with that state.
+  for (const item of spread.displaced ?? []) if (item.from !== 'spread') item.from = opposite(item.from);
 }
 
 // Whether any layout of the template declares this box (for its content type), element, or parameter. State the

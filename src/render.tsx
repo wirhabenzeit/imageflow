@@ -1,5 +1,5 @@
 import { textAssignments } from './text-assignments';
-import { layoutFootprint, shownLayoutStates, planLayoutChange } from './layouts';
+import { layoutFootprint, shownLayoutStates, planLayoutChange, sheetLayoutLabel } from './layouts';
 import type { PresentationView } from './presentation-model';
 import { presentationPhotoSource } from './presentation-model';
 import { sourceFileName, sourcePath } from './source-locations';
@@ -172,13 +172,17 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     reported.add(key);
     (severity === 'error' ? errors : warnings).push(finding);
   }
-  for (const page of scopes.keys()) {
-    const unknown = new Set([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].filter((node) => pageOf(node) === page).flatMap((node) =>
-      node.dataset.edit!.split(' ').filter(Boolean).filter((path) => !resolveEditPath(template, scopeSpread(spread, page)?.definition ?? '', path))));
-    if (unknown.size) {
-      warn(['The layout marks unknown parameters as editable: ' + [...unknown].join(', ') + '.'], { code: 'edit-path-unknown', ...onPage(page),
-        details: { paths: [...unknown].join(' ') }, suggestion: 'Declare these parameters in the layout, or remove them from ctx.edit(...).' });
-    }
+  const unknownAt = new Map<PageSide | undefined, Set<string>>();
+  for (const node of sheet.querySelectorAll<HTMLElement>('[data-edit]')) {
+    const page = pageOf(node);
+    // On a sheet shown as pages, a mark outside every drawn page belongs to no layout, so none of its paths resolve.
+    const definition = scopes.has(page) ? scopeSpread(spread, page)?.definition ?? '' : undefined;
+    const unknown = node.dataset.edit!.split(' ').filter(Boolean).filter((path) => definition === undefined || !resolveEditPath(template, definition, path));
+    if (unknown.length) unknownAt.set(page, new Set([...unknownAt.get(page) ?? [], ...unknown]));
+  }
+  for (const [page, unknown] of unknownAt) {
+    warn(['The layout marks unknown parameters as editable: ' + [...unknown].join(', ') + '.'], { code: 'edit-path-unknown', ...onPage(page),
+      details: { paths: [...unknown].join(' ') }, suggestion: 'Declare these parameters in the layout, or remove them from ctx.edit(...).' });
   }
   // Boxes by ID, prefixed with their page on a page (`left:hero`), so text flow finds each page's own box.
   const boxes = new Map<string, HTMLElement>();
@@ -1026,7 +1030,7 @@ async function settle(images: HTMLImageElement[]) {
 
 // Renders one spread in every layout of the template, carrying its content over the way switching layouts does.
 // Markdown boxes show their source from the beginning; the previews are for choosing a layout, not for proofing.
-async function renderLayouts(root: HTMLElement, book: RenderProject, template: Template, info: TemplateInfo, spreadId: string, side?: PageSide, group?: string) {
+async function renderLayouts(root: HTMLElement, book: RenderProject, template: Template, info: TemplateInfo, spreadId: string, side?: PageSide) {
   const { spreads } = book.project;
   const index = spreads.findIndex(({ id }) => id === spreadId);
   if (index < 0) throw new Error('Spread does not exist.');
@@ -1045,14 +1049,13 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
       const target = editorLayoutTarget(template.spreads, definition, template.format, position, previewSide);
       const planned = planLayoutChange(spreads[index], target, template.spreads).spread;
       const pageLayout = template.spreads[definition].span === 'page';
-      const selected = target.page ?? (layout.sides && !layout.sides.includes(wantedSide) ? layout.sides[0] : required === 'left' || required === 'right' ? required : side ?? 'left');
       // A page candidate is shown alone, with its side's values after the actual change planner has run. The facing
       // page remains in the planned sheet for switching, but has no place in this single-page thumbnail.
       const state = target.page ? scopeSpread(planned, target.page)! : planned;
       const spread = { ...state, id: definition };
-      const page = pageLayout && format.facingPages ? { [selected]: sequence.spreads[index].page[selected] ?? sequence.spreads[index].page.left ?? sequence.spreads[index].page.right } : sequence.spreads[index].page;
+      const page = pageLayout && format.facingPages ? { [previewSide]: sequence.spreads[index].page[previewSide] ?? sequence.spreads[index].page.left ?? sequence.spreads[index].page.right } : sequence.spreads[index].page;
       return { definition, span: pageLayout ? 'page' : template.spreads[definition].span, spread, page,
-        crop: format.facingPages ? pageLayout ? selected : template.spreads[definition].span === 'left' ? 'left' : template.spreads[definition].span === 'right' ? 'right' : undefined : undefined };
+        crop: format.facingPages ? pageLayout ? previewSide : template.spreads[definition].span === 'left' ? 'left' : template.spreads[definition].span === 'right' ? 'right' : undefined : undefined };
     });
   // Previews read the anchors of the book as saved, so a contents layout shows the real pages.
   const anchors = bookIndex(book, template, sequence);
@@ -1634,14 +1637,14 @@ export async function startRender(root: HTMLElement) {
           : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
     if (edit && view === 'layouts') {
       await renderLayouts(root, book, template, info, query.get('spread') ?? '',
-        query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined, query.get('group') ?? undefined);
+        query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined);
       return;
     }
     const activeChains = [...chains];
     const textEditor = edit && query.get('view') === 'inline-text';
     const visible = spreads.map((spread, i) => ({ spread, i })).filter(({ spread }) => !textEditor || spread.id === query.get('spread'));
     const where = spreads.map((spread, i) => {
-      return pagesText(sequence.spreads[i].page) + ' · ' + (template.spreads[spread.definition]?.label ?? spread.definition);
+      return pagesText(sequence.spreads[i].page) + ' · ' + (sheetLayoutLabel(template.spreads, spread) ?? spread.definition);
     });
     if (edit) root.className = 'if-preview';
     const lookups = new Map<string, AnchorLookup>();

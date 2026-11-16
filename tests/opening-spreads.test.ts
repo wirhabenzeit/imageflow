@@ -52,13 +52,13 @@ test('single pages in opening spreads must sit at a book end every format allows
 
 test('a new book gets the opening spreads with fresh IDs, and an empty book is a valid project', () => {
   const opening = [{ layout: 'title' }, { layout: 'story', params: { heading: 'Day one' } }];
-  const first = openingSpreadStates({ openingSpreads: opening });
-  const second = openingSpreadStates({ openingSpreads: opening });
+  const first = openingSpreadStates({ openingSpreads: opening, spreads: {} });
+  const second = openingSpreadStates({ openingSpreads: opening, spreads: {} });
   assert.deepEqual(first.map(({ definition, params }) => ({ definition, params })), [
     { definition: 'title', params: {} }, { definition: 'story', params: { heading: 'Day one' } }]);
   assert.notEqual(first[0].id, second[0].id);
   assert.notEqual(first[0].id, first[1].id);
-  assert.deepEqual(openingSpreadStates({}), []);
+  assert.deepEqual(openingSpreadStates({ spreads: {} }), []);
   const project = { schemaVersion: 1, title: 'New', template: { id: 't', version: '1' }, spreads: [] };
   assert.ok(projectSchema.safeParse(project).success);
   assert.ok(projectSchema.safeParse({ ...project, spreads: first }).success);
@@ -81,6 +81,8 @@ test('opening page pairs validate sides and materialize independent format-2 sta
   assert.equal(states[0].pages!.left!.params.heading, 'Left');
   assert.equal(states[0].pages!.right!.definition, 'right');
   assert.equal(states[1].pages!.left!.definition, undefined);
+  // A sheet of blank pages still names a declared layout, never an ID the template does not have.
+  assert.ok(Object.hasOwn(info.spreads, states[1].definition), states[1].definition);
   assert.equal(projectSchema.parse({ schemaVersion: 1, title: 'Pages', template: { id: 'pages', version: '1' }, spreads: states }).schemaVersion, 2);
   states[0].pages!.left!.params.heading = 'Edited';
   assert.equal(openingSpreadStates(info)[0].pages!.left!.params.heading, 'Left');

@@ -3,7 +3,7 @@ import { plainFormatted } from './formatted-text';
 import { assetMenuState } from './asset-menu';
 import { sourceFileName } from './source-locations';
 import type { ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Fields } from './Fields';
 import { Icon } from './Icon';
 import type { BookGeometry, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
@@ -29,33 +29,41 @@ export type Edit = (files: ProjectFiles) => void;
 function LayoutPicker({ summary, spread, template, page, choose }: {
   summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; page?: PageSide; choose: (definition?: string) => void;
 }) {
-  const families = template.layoutFamilies ?? {};
-  const position = { index: summary.project.spreads.findIndex(({ id }) => id === spread.id), count: summary.project.spreads.length };
-  const choices = editorLayoutPreviews(template.spreads, spread, families, template.format, position, page, true);
-  const facing = hasFacingPages(template.format);
-  const required = spanRequiredAt(position.index, position.count, template.format);
+  const index = summary.project.spreads.findIndex(({ id }) => id === spread.id), count = summary.project.spreads.length;
+  // The choices, and what each would change, depend only on the sheet, its page and position: the Inspector
+  // re-renders far more often (hover, focus, usage), and each description plans a whole layout change.
+  const { choices, allowed, consequence } = useMemo(() => {
+    const position = { index, count };
+    const previews = editorLayoutPreviews(template.spreads, spread, template.layoutFamilies ?? {}, template.format, position, page, true);
+    const blank = hasFacingPages(template.format) && spanRequiredAt(index, count, template.format) === 'spread';
+    const ordered = [...previews].sort((a, b) => Number(template.spreads[b].span === 'spread') - Number(template.spreads[a].span === 'spread'));
+    const described = new Map<string | undefined, string>();
+    const consequence = (id?: string) => {
+      if (!described.has(id)) {
+        let text = '';
+        try { text = describeLayoutChange(planLayoutChange(spread, editorLayoutTarget(template.spreads, id, template.format, position, page), template.spreads)); }
+        catch { /* A choice the planner refuses has nothing to describe. */ }
+        described.set(id, text);
+      }
+      return described.get(id)!;
+    };
+    return { choices: [...ordered, ...(blank ? ['__blank__'] : [])],
+      allowed: new Set(editorLayoutChoices(template.spreads, spread, template.format, position, page)), consequence };
+  }, [template, spread, page, index, count]);
   const current = spread.split ? scopeSpread(spread, page ?? 'left')?.definition : spread.definition;
-  const consequence = (id?: string) => {
-    try { return describeLayoutChange(planLayoutChange(spread, editorLayoutTarget(template.spreads, id, template.format, position, page), template.spreads)); }
-    catch { return ''; }
-  };
-  const blank = facing && required === 'spread';
-  const ordered = [...choices].sort((a, b) => Number(template.spreads[b].span === 'spread') - Number(template.spreads[a].span === 'spread'));
   return <LayoutGrid summary={summary} spread={spread} template={template} page={page}
-    choices={[...ordered, ...(blank ? ['__blank__'] : [])]} current={current} choose={choose} consequence={consequence} />;
+    choices={choices} allowed={allowed} current={current} choose={choose} consequence={consequence} />;
 }
 
-function LayoutGrid({ summary, spread, template, page, choices, current, choose, consequence }: {
+function LayoutGrid({ summary, spread, template, page, choices, allowed, current, choose, consequence }: {
   summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; page?: PageSide;
-  choices: string[]; current?: string; choose: (definition?: string) => void; consequence: (id?: string) => string;
+  choices: string[]; allowed: ReadonlySet<string>; current?: string; choose: (definition?: string) => void; consequence: (id?: string) => string;
 }) {
   const key = layoutPreviewKey(summary, template, spread) + ':' + (page ?? '');
   const [preview, setPreview] = useState(() => ({ key, project: summary.id }));
   if (preview.key !== key) setPreview({ key, project: summary.id });
   const [geometry, setGeometry] = useState<BookGeometry>();
   const families = template.layoutFamilies ?? {};
-  const allowed = new Set(editorLayoutChoices(template.spreads, spread, template.format,
-    { index: summary.project.spreads.findIndex(item => item.id === spread.id), count: summary.project.spreads.length }, page));
   const familyOf = (id: string) => pickerFamily(template.spreads, id, families);
   const name = (id: string) => id === '__blank__' ? 'Blank page' : familyOf(id) ? families[familyOf(id)!].label : template.spreads[id].label;
   const displayed = geometry ? geometry.sheets.map(({ spread }) => spread).filter(id => id === '__blank__' || Object.hasOwn(template.spreads, id)) : choices;

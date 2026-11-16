@@ -157,6 +157,17 @@ test('swapping pages exchanges their states, layouts included', () => {
   assert.throws(() => swapPages({ ...spread, split: undefined }), /shown as pages/);
 });
 
+test('swapping pages moves replaced content with the page it came from', () => {
+  const spread: SpreadState = { id: 's', definition: 'feature', split: true, ...empty,
+    pages: { left: { definition: 'photoPage', ...empty }, right: { definition: 'textPage', ...empty } },
+    displaced: [{ from: 'left', box: 'hero', state: { photo: 'A', params: {} } },
+      { from: 'spread', box: 'story', state: { text: 'T', params: {} } }] };
+  swapPages(spread);
+  assert.deepEqual(spread.displaced!.map(({ from, box }) => [from, box]), [['right', 'hero'], ['spread', 'story']]);
+  swapPages(spread);
+  assert.deepEqual(spread.displaced!.map(({ from }) => from), ['left', 'spread']);
+});
+
 // Random sequences. A seeded generator keeps every failure reproducible.
 function random(seed: number) {
   let state = seed >>> 0 || 1;

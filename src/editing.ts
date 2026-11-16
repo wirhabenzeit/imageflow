@@ -14,10 +14,13 @@ export function newSpread(definition: string): SpreadState {
 export type OpeningPageInput = { layout?: string; params?: Values };
 export type OpeningSpreadInput = { layout: string; params?: Values } | { pages: Partial<Record<PageSide, OpeningPageInput>> };
 /** Materialize the template's starting units, with independent records and fresh sheet IDs. */
-export function openingSpreadStates(template: { openingSpreads?: readonly OpeningSpreadInput[] }): SpreadState[] {
+export function openingSpreadStates(template: { openingSpreads?: readonly OpeningSpreadInput[]; spreads: Layouts }): SpreadState[] {
   return (template.openingSpreads ?? []).map((entry) => {
     if ('layout' in entry) return { ...newSpread(entry.layout), params: structuredClone(entry.params ?? {}) };
-    const definition = entry.pages.left?.layout ?? entry.pages.right?.layout ?? 'blank';
+    // A sheet shown as pages still needs a declared layout as its own `definition`, as `newEditorSpread` gives it.
+    // It is not shown; it only names the state a later merge starts from, so a sheet of two blank pages takes the
+    // template's first layout rather than an ID the template may not declare (or may declare for something else).
+    const definition = entry.pages.left?.layout ?? entry.pages.right?.layout ?? Object.keys(template.spreads)[0];
     const pages = Object.fromEntries(Object.entries(entry.pages).map(([side, page]) => [side, {
       ...(page.layout ? { definition: page.layout } : {}), params: structuredClone(page.params ?? {}), boxes: {}, elements: {},
     }]));

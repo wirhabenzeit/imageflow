@@ -5,7 +5,7 @@ import type { PrintFormat } from './format';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
 import { describeLayoutChange, discardContent, layoutChoices, layoutFootprint, swapContent, switchLayout } from './layouts';
-import { hasFacingPages, spanFits, spanRequiredAt } from './format';
+import { hasFacingPages, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
 import type { ListItem, Parameter, Parameters } from './parameters';
 import { identifier, storedBoxes } from './project';
@@ -407,9 +407,17 @@ export function applyProjectCommands(
         const spread = findSpread(operation.spread);
         findLayout(operation.definition);
         const position = { index: project.spreads.indexOf(spread), count: project.spreads.length };
-        if (!layoutChoices(template.spreads, spread.definition, format, position).includes(operation.definition)) {
+        if (spread.split) {
+          // A sheet shown as pages can only be merged here, into a layout that fills its whole position. Its own
+          // `definition` is hidden state (a page layout, or any declared layout), so it says nothing about which fit.
+          const layout = template.spreads[operation.definition];
+          if (!spanAllowedAt(layout.span ?? 'spread', position.index, position.count, format, layout.sides)) {
+            fail('INCOMPATIBLE_LAYOUT', 'Spread ' + spread.id + ' is shown as pages. switch_layout can only merge it into a layout with span: \'' +
+              spanRequiredAt(position.index, position.count, format) + '\' in ' + format.label + '.');
+          }
+        } else if (!layoutChoices(template.spreads, spread.definition, format, position).includes(operation.definition)) {
           const required = spanRequiredAt(position.index, position.count, format);
-          if (template.spreads[operation.definition].span !== required && required !== template.spreads[spread.definition].span) {
+          if (template.spreads[operation.definition].span !== required && required !== own(template.spreads, spread.definition)?.span) {
             fail('INCOMPATIBLE_LAYOUT', 'This position requires a layout with span: \'' + required + '\' in ' + format.label + '.');
           }
           fail('INCOMPATIBLE_LAYOUT', spanFits(template.spreads[operation.definition].span, format)

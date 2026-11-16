@@ -45,7 +45,7 @@ import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
 import { editorLayoutsAt, firstEditorLayouts, newEditorSpread, openingSpreadStates, readEdit, resolveEditPath } from './editing';
-import { describeLayoutChange, editorLayoutChoices, editorLayoutPreviews, editorLayoutTarget, pickerFamily, swapContent, swapPages, switchLayout } from './layouts';
+import { describeLayoutChange, editorLayoutChoices, editorLayoutPreviews, editorLayoutTarget, pickerFamily, swapContent, sheetLayoutLabel, swapPages, switchLayout } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { Edit } from './Inspector';
@@ -168,8 +168,8 @@ export function App() {
     setGeometry(next);
     // Resize messages from the old displayed frame must not adopt the pending revision's labels. Geometry can arrive
     // before the template, which has no page numbers or layout names yet; the live labels stand in until it does.
-    if (revision === summary?.id && template) setCanvasLabels(Object.fromEntries(spreads.map(({ id, definition }, i) =>
-      [id, pagesLabel(i) + ' · ' + label(definition, i)])));
+    if (revision === summary?.id && template) setCanvasLabels(Object.fromEntries(spreads.map(({ id }, i) =>
+      [id, pagesLabel(i) + ' · ' + label(i)])));
   }
   const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean; start?: number }>({ animate: true });
   const thumbs = thumbnailState.geometry;
@@ -418,6 +418,8 @@ export function App() {
     setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0]?.id :
       next.project.spreads.find(({ id }) => id === previous)?.id ?? next.project.spreads[0]?.id) ?? '');
     if (selected) { pendingReveal.current = selected; if (selected !== spreadId) setSelectedSide(undefined); }
+    // The selected sheet is gone (an agent removed it, say): the fallback sheet starts on its default page.
+    else if (!next.project.spreads.some(({ id }) => id === spreadId)) setSelectedSide(undefined);
     setRender(undefined);
     setSummary(next);
   }
@@ -913,10 +915,12 @@ export function App() {
     revealedThumb.current = spreadId;
   }, [spreadId, thumbs]);
 
+  // Without a side, reselecting the current sheet keeps its selected page (a click on its label, say); another
+  // sheet starts on its default page.
   function select(id: string, scroll = true, side?: PageSide) {
     pendingAnchor.current = undefined;
     setSpreadId(id);
-    setSelectedSide(side);
+    setSelectedSide(side ?? (id === spreadId ? selectedSide : undefined));
     setSelectedSource(undefined);
     if (scroll) reveal(id);
   }
@@ -1073,7 +1077,7 @@ export function App() {
       swapped = placeKeptContent(sheet, from, to);
     }, () => sourceTitle(sourceSummary, from.kind, from.source) + ' placed in ' + (label ?? to.box) +
       (swapped ? '; ' + sourceTitle(sourceSummary, from.kind, swapped) + ' is set aside' : ''));
-    select(id, false, to.page ?? selectedSide);
+    select(id, false, to.page);
     setFocusBox({ box: to.box, at: Date.now() });
   }
 
@@ -1274,7 +1278,7 @@ export function App() {
     }
     if (owner.type === 'element' && openElementEditor(spread, owner.id, owner.page)) return;
     deselectPhoto();
-    select(spread, false, owner.page ?? (spread === spreadId ? selectedSide : undefined));
+    select(spread, false, owner.page);
     openEditing({ spread, key: ownerKey(spread, owner.id, owner.page), owner });
   }
   // Opens the popover of a node the template marked, such as a ctx.Text heading, from the sidebar's list.
@@ -1282,7 +1286,7 @@ export function App() {
     if (target.inlineText && openTextOwner(target)) return;
     if (openDocumentEditor(target)) return;
     deselectPhoto();
-    select(target.spread, false, target.page ?? (target.spread === spreadId ? selectedSide : undefined));
+    select(target.spread, false, target.page);
     openEditing({ spread: target.spread, key: targetKey(target), panel });
   }
   function openTextOwner(target: Target) {
@@ -1301,7 +1305,7 @@ export function App() {
     if (readyId.current !== summary?.id || !editorOf(spread, element, page)) return false;
     setEditing(undefined);
     deselectPhoto();
-    select(spread, false, page ?? (spread === spreadId ? selectedSide : undefined));
+    select(spread, false, page);
     // Inline when the editor asks for it and the element is on the page, upright and large enough; else the panel.
     setElementEditor({ kind: 'element', spread, element, page,
       presentation: presentationFor(editorOf(spread, element, page)!.presentation, elementRect(geometry, spread, element, page)) });
@@ -1314,7 +1318,7 @@ export function App() {
     if (!editor || !layout || readyId.current !== summary?.id) return false;
     setEditing(undefined);
     deselectPhoto();
-    select(target.spread, false, target.page ?? (target.spread === spreadId ? selectedSide : undefined));
+    select(target.spread, false, target.page);
     const presentation = target.hidden ? 'dialog' : presentationFor(template.editors?.[editor]?.presentation, target);
     setElementEditor({ kind: 'document', spread: target.spread, page: target.page, layout, editor, presentation,
       ...(presentation === 'inline' ? { at: targetKey(target), ...(click ? { click } : {}) } : {}) });
@@ -1350,7 +1354,7 @@ export function App() {
     const layout = scopeSpread(spreads.find(({ id }) => id === spread), page)?.definition;
     if (!layout) return false;
     setEditing(undefined);
-    select(spread, false, page ?? (spread === spreadId ? selectedSide : undefined));
+    select(spread, false, page);
     setCropping({ spread, box, layout, page });
     return true;
   }
@@ -1427,7 +1431,7 @@ export function App() {
       if (from?.boxes[start.box]?.photo === start.photo && to) swapped = swapContent(from, start.box, to, target.box);
     }, () => sourceTitle(summary, 'photo', start.photo) + (swapped ? ' and ' + sourceTitle(summary, 'photo', swapped) + ' swapped' :
       ' moved to ' + label));
-    select(target.spread, false, target.page ?? (target.spread === spreadId ? selectedSide : undefined));
+    select(target.spread, false, target.page);
     setFocusBox({ box: target.box, at: Date.now() });
   });
   useEffect(() => {
@@ -1648,9 +1652,7 @@ export function App() {
   // A template with one fixed format offers no choices and ignores the saved one.
   const missingFormat = !!template && Object.keys(template.formats).length > 0 && !!summary?.project.format &&
     !Object.hasOwn(template.formats, summary.project.format);
-  const label = (definition: string, i: number) => spreads[i]?.split
-    ? (['left', 'right'] as const).map(side => template?.spreads[spreads[i].pages?.[side]?.definition ?? '']?.label ?? 'Blank page').join(' / ')
-    : template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
+  const label = (i: number) => sheetLayoutLabel(template?.spreads, spreads[i]) ?? 'Spread ' + (i + 1);
   const pagesLabel = (i: number) => (pageLabels[i].includes('–') ? 'Pages ' : 'Page ') + pageLabels[i];
 
   useLayoutEffect(() => {
@@ -1787,9 +1789,9 @@ export function App() {
           <div className="thumbs-scroll" onDragOver={reorder.over} onDragLeave={reorder.leave} onDrop={reorder.drop}>
             <div ref={thumbList} className={thumbs ? 'spread-thumbs placed' : 'spread-thumbs'} style={{ height: thumbs?.height }}
               role="group" aria-label="Spreads" onKeyDown={thumbKeys}>
-              {spreads.map(({ id, definition }, i) => {
+              {spreads.map(({ id }, i) => {
                 const rect = thumbs?.sheets.find(({ spread }) => spread === id);
-                const displayedLabel = canvasLabels[id] ?? pagesLabel(i) + ' · ' + label(definition, i);
+                const displayedLabel = canvasLabels[id] ?? pagesLabel(i) + ' · ' + label(i);
                 const displayedPages = displayedLabel.split(' · ')[0].replace(/^Pages? /, '');
                 const level = spreadIssues.get(id);
                 return <button key={id} data-list-id={id} data-spread={id}
@@ -1806,7 +1808,7 @@ export function App() {
                   <span className="spread-thumb-label">
                     {level && <span className={'issue-dot issue-' + level} />}
                     <span className="pages">{displayedPages}</span>
-                    <span className="name">{label(definition, i)}</span>
+                    <span className="name">{label(i)}</span>
                   </span>
                 </button>;
               })}
@@ -1878,7 +1880,7 @@ export function App() {
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const level = spreadIssues.get(id);
                 const at = spreads.findIndex(sheet => sheet.id === id);
-                const displayedLabel = canvasLabels[id] ?? (at >= 0 ? pagesLabel(at) + ' · ' + label(spreads[at].definition, at) : id);
+                const displayedLabel = canvasLabels[id] ?? (at >= 0 ? pagesLabel(at) + ' · ' + label(at) : id);
                 return <div key={id} data-canvas-spread={id} className={'sheet-label' + (spreadSelected && id === spread?.id ? ' selected' : '')} style={{ left: x, top: y - 26, width }}>
                   {level && <span className={'issue-dot issue-' + level} />}<span className="sheet-label-name" title={displayedLabel}>{displayedLabel}</span>
                   {spreadSelected && id === spread?.id && <span className="sheet-layout-mode" data-layout-mode={selectedLayoutMode} aria-label={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'} title={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'}>
