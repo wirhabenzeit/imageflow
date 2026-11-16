@@ -62,4 +62,4 @@ jobs:
       - run: npm ci
       - name: Install PDF test tools
         run: brew install poppler
-      - run: npm run test:desktop:smoke
+      - run: npm run test:desktop:smoke -- --visible

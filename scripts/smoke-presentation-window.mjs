@@ -8,6 +8,7 @@ import { nextPresentation, testBook } from './ui-actions.mjs';
 import { buildMacHeaderState, macHeaderState } from './mac-header-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const visible = process.argv.includes('--visible');
 const work = await mkdtemp(join(root, '.build/presentation-window-'));
 const headerHelper = buildMacHeaderState(work);
 async function fixture(name) {
@@ -24,7 +25,7 @@ spreads:{page:{label:'Page',parameters:{note:p.string({label:'Note',default:'A p
 }
 const [one, two] = await Promise.all([fixture('One'), fixture('Two')]);
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
-  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
+  env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: visible ? '' : '1' } });
 const current = async (page) => (await page.evaluate(() => window.imageflow.currentProject())).value;
 async function open(editor, spread) {
   const opened = nextPresentation(app);
@@ -50,7 +51,8 @@ try {
   const viewer = await app.browserWindow(presentation);
   assert.notEqual(await viewer.evaluate((window) => window.id), await window.evaluate((window) => window.id));
   assert.deepEqual(await window.evaluate((window) => window.getBounds()), originalBounds);
-  assert.equal(await viewer.evaluate((window) => window.isSimpleFullScreen() || window.isFullScreen()), true);
+  assert.equal(await viewer.evaluate((window) => window.isSimpleFullScreen() || window.isFullScreen()), visible);
+  assert.equal(await viewer.evaluate((window) => window.isVisible()), visible);
   const state = (await presentation.evaluate(() => window.imageflow.presentationState())).value;
   assert.equal(state.start, 'b');
   assert.equal(state.summary.folder, 'One.imageflow');

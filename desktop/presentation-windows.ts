@@ -10,6 +10,7 @@ type Entry = { document: DocumentSession; window: BrowserWindow; spread: string 
 export class PresentationWindows {
   private entries = new Map<DocumentSession, Entry>();
   constructor(private options: {
+    hidden(): boolean;
     window(): Electron.BrowserWindowConstructorOptions;
     secure(window: BrowserWindow): void;
     focus(window: BrowserWindow): void;
@@ -36,7 +37,7 @@ export class PresentationWindows {
     // there is no visible resize or macOS Space transition, and the editor remains exactly where it was.
     const window = new BrowserWindow({ ...this.options.window(), ...display.bounds, title: 'Presentation — ' + bookName(document.book.folder),
       frame: false, show: false, backgroundColor: '#111111', roundedCorners: false, hasShadow: false,
-      resizable: false, minimizable: false, maximizable: false, fullscreenable: !mac, fullscreen: !mac });
+      resizable: false, minimizable: false, maximizable: false, fullscreenable: !mac, fullscreen: !mac && !this.options.hidden() });
     const entry = { document, window, spread };
     this.entries.set(document, entry);
     this.options.secure(window);
@@ -55,7 +56,7 @@ export class PresentationWindows {
     });
     // Call the simple-fullscreen API directly. The generic fullscreen constructor path marks an asynchronous
     // native transition pending, which simple fullscreen never completes and can leave Close Window waiting.
-    if (mac) window.setSimpleFullScreen(true);
+    if (mac && !this.options.hidden()) window.setSimpleFullScreen(true);
     // As with document windows, loadURL can complete without a ready-to-show notification on macOS.
     void window.loadURL(presentationURL).then(() => this.options.focus(window)).catch((error) => {
       if (window.isDestroyed() || document.closing || document.window.isDestroyed()) return;
