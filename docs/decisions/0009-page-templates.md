@@ -1,6 +1,6 @@
 # 0009: Page templates
 
-Status: accepted, 2026-11-16; §3 revised the same day after review on #183 (the facing page never changes, empty and default values carry over, replaced content is set aside explicitly). Phase 1 (page-scoped addressing and book format 2) implemented; the page states it stores are not yet shown or edited, and books that show pages are refused until they are. Motivated by beta feedback: a user builds more and more spread layouts that combine one left-page design with one right-page design, each with its own parameters for both sides.
+Status: accepted, 2026-11-16; §3 revised the same day after review on #183 (the facing page never changes, empty and default values carry over, replaced content is set aside explicitly). Phase 1 (page-scoped addressing and book format 2) implemented; books that use format 2's page states are refused until phases 2 and 3 can handle them (see *Release gates*). Motivated by beta feedback: a user builds more and more spread layouts that combine one left-page design with one right-page design, each with its own parameters for both sides.
 
 ## Problem
 
@@ -53,7 +53,12 @@ PageState = { definition, params, boxes, elements }   // a page remembers its la
 
 **Book format 2.** `projectSchema` strips unknown keys, so an older app would open a book with page states, drop them and save the loss. A book with any stored `pages`, `split` or `displaced` is written with `schemaVersion: 2`; other books stay at 1, so they still open in earlier versions. Older apps refuse format 2 with the existing *saved by a newer version* message.
 
-**Release gate.** Storing page states comes before drawing them (phase 3). Until then, a build refuses a book with a spread shown as pages (`split`), with a request to update, rather than show and export the spread layout that spread remembers. Stored `pages` and `displaced` are harmless (the spread layout is what is shown) and are accepted. A release must not ship a build that accepts `split` without drawing it.
+**Release gates.** Format 2 is defined before the app can handle everything it stores, so a build refuses, with a request to update, any book that uses what it cannot handle yet:
+
+- **Stored page states and replaced content** (`pages`, `displaced`) hold references to photos, texts and files (box assignments, and file sources in parameters). Code that enumerates references (asset usage, source removal, saving a copy with its assets, commands) reads only the spread's own state, so it would report such sources as unused, and removing one would leave a dangling reference. Storing them safely does not make them safe to edit. Phase 2 lifts this gate once every reference consumer reads every state.
+- **A spread shown as pages** (`split`) would be drawn and exported as the spread layout it remembers. Phase 3 lifts this gate once pages are drawn.
+
+A release must not ship a build that accepts a part of format 2 it does not fully handle.
 
 ### 3. Changing layouts: where content comes from
 
@@ -163,6 +168,8 @@ Effort as relative size (S, M, L).
    - results are deterministic for the same book, change and selection;
    - a cleared box or reset parameter is never shown again with an older value unless the user places it;
    - Undo restores every state exactly.
+
+   Every code path that reads or rewrites references (asset usage, source removal and relinking, saving a copy with its assets, commands, authoring context) goes through one function that lists a spread's states and its replaced content. A test seeds a book whose photos, texts and files are referenced only from page states, page parameters and `displaced`, and checks every such consumer. With it, phase 2 sets `pageStatesSupported` and lifts the first release gate.
 3. **Render API (M).** `page()` builder, `<Page>`, `ctx.side`, side-aware `ctx.geometry` and `design().page()`, `ctx.page` per side; `pageSequence`, `layoutChoices`, `spanFits`/`spanAllowedAt`, `declaration-check.ts`, `spread-order.ts` insertion rules and `editing.ts` first-spread layouts learn page layouts. Composition of two pages into one sheet in `SpreadView`. Authoring types and `template-types.ts` checks.
 4. **Book context, checks and fixtures (M).** Flow keys and order, anchors, `ctx.book.spreads`, editor contexts, Book check findings with sides, fixtures on both sides, `layout-preview.ts` cache keys, purity attribution by page.
 5. **Editor (L).** Selection with sides, Inspector for a page, *Set aside* by location, sidebar groups, drag onto a half, hover previews, Swap pages, end pages accepting page layouts.
@@ -176,7 +183,7 @@ Phases 1 and 2 carry most of the risk and land before any visible feature.
 - **Book format 2** (`src/project.ts`). `schemaVersion` accepts 1 and 2; spreads accept `pages` (each page a `PageState`: `definition`, `params`, `boxes`, `elements`, with the spread's rules) and `split`, which needs at least one page. Parsing sets `schemaVersion` to `bookFormatOf(project)`, so every save writes the lowest format that holds the book: 2 only while a spread stores page states, 1 again once none does. Formats above 2 are refused with the update message, as before. `scopeState(spread, page?)` returns the state a box, element or parameter lives in.
 - **Page-scoped lookups** (`src/page-scope.ts`). Page containers are marked `data-if-page`, prefixed so a template's own `data-page` markup is not mistaken for one. Every lookup of a box or element by ID in the render frame (`src/render.tsx`, `src/rendered-image.tsx`) goes through `findDeclared`, `declaredNodes` or `ownerOf`, which name the page; no page means the spread's own layout. Validation checks each drawn layout's boxes and elements against that layout, and refuses page containers on a spread that is not shown as pages, since only ImageFlow draws them.
 - **`displaced`** stores replaced content (§3) with `from` and `box`; only a photo or text can be set aside. It makes a book format 2.
-- **Release gate.** `pageLayoutsShown` is false: a book with `split` is refused before validation with a request to update (`unsupportedBookMessage`), and the schema refuses it for saves and revisions. Phase 3 sets it.
+- **Release gates.** `pageStatesSupported` and `pageLayoutsShown` are false: a book with `pages`, `displaced` or `split` is refused before validation with a request to update (`unsupportedBookMessage`) and left unchanged, and `projectSchema` refuses it for saves and revisions. `spreadSchema` itself is ungated, so format 2's spread is tested on its own. Phase 2 sets the first, phase 3 the second.
 - **Pages in results.** Findings (`Issue`, diagnostics' `location`), the editor's box geometry, element inspection and rendered-image failures carry `page` for a box or element on a page. Every edit target carries `page` itself, also a standalone `ctx.edit('heading')` that is no box or element: target keys (`spread@left|…`; keys without a page are unchanged), occurrence numbers and an open editor's anchor are per page, and the inline-editing and crop-preview messages carry it. Live crop placements and photo-box `uid`s (`ifl-…`, `ifr-…`) are keyed by page. MCP output schemas do not list `page` yet, because `location` already allows extra fields and the schemas are at their size budget; phase 6 documents it with the `page` inputs.
 - Nothing draws page containers yet, so every lookup resolves to the spread, and books, findings and messages are unchanged.
 
