@@ -11,7 +11,7 @@ const icons = {
   next: 'M6 3l5 5-5 5',
   minus: 'M3 8h10',
   plus: 'M8 3v10M3 8h10',
-  spreadLayout: 'M2 3h12v10H2zM8 3v10',
+  spreadLayout: 'M2 3h12v10H2z',
   pageLayouts: 'M1.5 3h5.25v10H1.5zM9.25 3h5.25v10H9.25z',
   sidebarLeft: 'M3 3h10v10H3zM6 3v10',
   sidebarRight: 'M3 3h10v10H3zM10 3v10',
@@ -31,7 +31,10 @@ const icons = {
   settings: 'M2.5 5h5.5M11.5 5h2M2.5 11h1.5M7.5 11h6M8 5a1.75 1.75 0 1 0 3.5 0a1.75 1.75 0 1 0-3.5 0M4 11a1.75 1.75 0 1 0 3.5 0a1.75 1.75 0 1 0-3.5 0',
   agent: 'M7 2.5l1.3 3.7 3.7 1.3-3.7 1.3L7 12.5 5.7 8.8 2 7.5l3.7-1.3zM12 10.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z',
 };
-export const Icon = ({ name, size = 14 }: { name: keyof typeof icons; size?: number }) => <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">
-  <path d={icons[name]} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+export const Icon = ({ name, size = 14, activeSide }: { name: keyof typeof icons; size?: number; activeSide?: 'left' | 'right' }) => <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">
+  {name === 'pageLayouts' ? <>
+    <rect data-page-side="left" x="1.5" y="3" width="5.25" height="10" rx=".5" fill={activeSide === 'left' ? 'var(--accent)' : 'var(--muted)'} />
+    <rect data-page-side="right" x="9.25" y="3" width="5.25" height="10" rx=".5" fill={activeSide === 'right' ? 'var(--accent)' : 'var(--muted)'} />
+  </> : <path d={icons[name]} fill={name === 'spreadLayout' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />}
 </svg>;
 

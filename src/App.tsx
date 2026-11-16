@@ -1885,7 +1885,7 @@ export function App() {
                 return <div key={id} data-canvas-spread={id} className={'sheet-label' + (spreadSelected && id === spread?.id ? ' selected' : '')} style={{ left: x, top: y - 26, width }}>
                   {level && <span className={'issue-dot issue-' + level} />}<span className="sheet-label-name" title={displayedLabel}>{displayedLabel}</span>
                   {spreadSelected && id === spread?.id && <span className="sheet-layout-mode" data-layout-mode={selectedLayoutMode} aria-label={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'} title={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'}>
-                    <Icon name={selectedLayoutMode === 'pages' ? 'pageLayouts' : selectedLayoutMode === 'spread' ? 'spreadLayout' : 'document'} size={13} />
+                    <Icon name={selectedLayoutMode === 'pages' ? 'pageLayouts' : selectedLayoutMode === 'spread' ? 'spreadLayout' : 'document'} size={16} activeSide={selectionSide} />
                   </span>}
                 </div>;
               })}

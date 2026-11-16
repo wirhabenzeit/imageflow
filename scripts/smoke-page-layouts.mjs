@@ -85,6 +85,9 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   assert.equal(await inspector.locator('.inspector-layout-structure').count(), 0);
   assert.equal(await w.locator('.sheet-label.selected .sheet-layout-mode').getAttribute('aria-label'), 'Two page layouts');
   assert.equal(await w.locator('.facing-page-selection').count(), 1);
+  const modeIcon = w.locator('.sheet-label.selected .sheet-layout-mode');
+  assert.equal(await modeIcon.locator('[data-page-side=left]').getAttribute('fill'), 'var(--accent)');
+  assert.equal(await modeIcon.locator('[data-page-side=right]').getAttribute('fill'), 'var(--muted)');
   const pairedOutline = await w.locator('.sheet-selection').boundingBox();
   const pairedSheet = await frame.locator('[data-spread="pair"] .if-sheet').boundingBox();
   assert.ok(Math.abs(pairedOutline.width * 2 - pairedSheet.width) < 2);
@@ -112,6 +115,8 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   await w.locator('main.canvas').focus();
   await w.keyboard.press('ArrowRight');
   await w.waitForFunction(() => [...document.querySelectorAll('.inspector input')].some(input => input.value === 'Right note'));
+  assert.equal(await modeIcon.locator('[data-page-side=right]').getAttribute('fill'), 'var(--accent)');
+  assert.equal(await modeIcon.locator('[data-page-side=left]').getAttribute('fill'), 'var(--muted)');
   await w.keyboard.press('ArrowLeft');
   await w.waitForFunction(() => [...document.querySelectorAll('.inspector input')].some(input => input.value === 'Left note'));
   const remembered = inspector.getByRole('radio', { name: 'Full layouts', exact: true });
