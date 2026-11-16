@@ -3,7 +3,7 @@
 When the template is loaded:
 
 - `id`, `version`, `contract` present; contract version supported; every capability in `requires` provided by this app.
-- Exactly one of `format` or `formats`. Unknown declaration properties and `spreadFor` document mismatches are warnings (see [Declaring spreads](declaration.md#declaring-spreads)).
+- Exactly one of `format` or `formats`. Unknown declaration properties and `spreadFor` document mismatches are warnings (see [Declaring layouts](declaration.md#declaring-layouts)).
 - Unique, stable identifiers for spreads, boxes, elements, and parameters; valid parameter defaults.
 - A valid print format.
 - Unique `flowOrder` among Markdown boxes of a spread.
