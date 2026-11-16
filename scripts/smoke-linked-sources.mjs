@@ -62,18 +62,24 @@ try {
   await reload(page);
   summary = await current(page);
   assert.equal(Object.values(summary.sources).filter((source) => source.linked).length, 3);
-  summary.project.spreads[3].boxes.hero = { photo: imported.photo, params: {}, crops: { story: { centerX: .3, centerY: .6, zoom: 1.2 } } };
-  summary.project.spreads[5].boxes.hero = { photo: imported.photo, params: {} };
-  summary.project.spreads[3].boxes.body = { text: imported.markdown, params: {} };
-  summary.project.spreads[13].elements.route.params.track = imported.file;
+  // Independent pages render their own boxes; the remembered spread state is inactive.
+  const arrival = summary.project.spreads.find(({ id }) => id === 'arriving');
+  const grid = summary.project.spreads.find(({ id }) => id === 'settlements');
+  assert.equal(arrival.pages.left.definition, 'photo');
+  assert.equal(arrival.pages.right.definition, 'textPage');
+  assert.equal(grid.pages.right.definition, 'gridPage');
+  arrival.pages.left.boxes.hero = { photo: imported.photo, params: {}, crops: { photo: { centerX: .3, centerY: .6, zoom: 1.2 } } };
+  grid.pages.right.boxes.hero = { photo: imported.photo, params: {} };
+  arrival.pages.right.boxes.body = { text: imported.markdown, params: {} };
+  summary.project.spreads.find(({ id }) => id === 'road').elements.route.params.track = imported.file;
   assert.ok((await page.evaluate((s) => window.imageflow.saveProject(s.id, { project: s.project, photoIndex: s.photoIndex }), summary)).value);
   await reload(page);
-  const crop = (await current(page)).project.spreads[3].boxes.hero.crops;
+  const crop = (await current(page)).project.spreads.find(({ id }) => id === 'arriving').pages.left.boxes.hero.crops;
   const replacement = join(external, 'New.png');
   await sharp({ create: { width: 3600, height: 2800, channels: 3, background: '#e4b874' } }).png().toFile(replacement);
   await rename(replacement, photo);
   await waitForPage(page, async (id) => (await window.imageflow.currentProject()).value.photoSizes[id]?.width === 3600, imported.photo);
-  assert.deepEqual((await current(page)).project.spreads[3].boxes.hero.crops, crop);
+  assert.deepEqual((await current(page)).project.spreads.find(({ id }) => id === 'arriving').pages.left.boxes.hero.crops, crop);
   const goodPhoto = await readFile(photo);
   await writeFile(photo, goodPhoto.subarray(0, 12));
   await waitForPage(page, async (id) => {
@@ -143,7 +149,10 @@ try {
     state = await current(page);
     return page.evaluate((id) => window.imageflow.checkBook(id, {}), state.id);
   }, () => ready(page));
-  assert.ok(checked.value?.diagnostics.some((finding) => finding.code === 'source-unavailable'), JSON.stringify(checked));
+  for (const source of [imported.photo, imported.markdown]) {
+    assert.ok(checked.value?.diagnostics.some((finding) => finding.code === 'source-unavailable' && finding.location?.source === source),
+      'A placed linked source is reported unavailable: ' + source + '\n' + JSON.stringify(checked));
+  }
   const print = join(work, 'Missing-print.pdf');
   await app.evaluate(({ dialog }, filePath) => {
     dialog.showSaveDialog = async () => ({ canceled: false, filePath });
@@ -262,8 +271,8 @@ try {
   await ready(copy);
   const portableState = await current(copy);
   assert.ok(Object.values(portableState.sources).every((source) => !source.linked && source.state === 'available'));
-  assert.deepEqual(portableState.project.spreads[3].boxes.hero.crops, crop);
-  assert.equal(portableState.project.spreads[3].boxes.hero.photo, imported.photo);
+  assert.deepEqual(portableState.project.spreads.find(({ id }) => id === 'arriving').pages.left.boxes.hero.crops, crop);
+  assert.equal(portableState.project.spreads.find(({ id }) => id === 'arriving').pages.left.boxes.hero.photo, imported.photo);
   await rm(external, { recursive: true });
   await copy.evaluate(() => window.imageflow.openProject('reload'));
   await reload(copy);
