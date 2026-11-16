@@ -256,13 +256,18 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
         return true;
       }
       const next = URL.createObjectURL(blob);
-      // Decoded in the image on the page: Chromium keeps showing the picture it had until the new one has decoded, and a
-      // detached image may never finish decoding in a hidden frame.
+      // Loaded in the image on the page: Chromium keeps showing the picture it had until the new one has loaded. Its
+      // load event, not decode(): decode() may never settle in a frame that is still hidden, such as a presentation
+      // frame being prepared in a visible window.
       const decoded = img;
+      const loaded = new Promise<void>((resolve, reject) => {
+        decoded.addEventListener('load', () => resolve(), { once: true });
+        decoded.addEventListener('error', () => reject(new Error('the picture could not be loaded.')), { once: true });
+      });
       decoded.src = next;
       const old = shown.current;
       shown.current = next;
-      try { await decoded.decode(); } finally { if (old) URL.revokeObjectURL(old); }
+      try { await loaded; } finally { if (old) URL.revokeObjectURL(old); }
       if (controller.signal.aborted) return false;
       // The picture covers the box, cropped to its proportions, so its resolution is the lower of the two axes. It
       // must have the pixels asked for on both; a small or stretched picture would print blurred.
