@@ -1545,7 +1545,7 @@ export function App() {
   const usage = useMemo(() => summary ? assetUsage(summary, pageLabels) : { photo: {}, text: {} },
     [summary, template, pageLabels.join()]);
   const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id, page }) => spread + ':' + (page ? page + ':' : '') + id === dropTarget) :
-    highlight ? geometry?.boxes.find(({ spread: owner, id }) => owner === spread?.id && id === highlight) : undefined;
+    highlight ? geometry?.boxes.find(({ spread: owner, id, page }) => owner === spread?.id && id === highlight && page === undefined) : undefined;
   const selectedSheet = spreadSelected ? geometry?.sheets.find(({ spread: id }) => id === spread?.id) : undefined;
   const previewError = typeof reload === 'object' ? reload.error : render?.state === 'error' ? render.message : '';
   const issue = previewError || error;

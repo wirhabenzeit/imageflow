@@ -22,7 +22,7 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
   const title = declared?.picker?.label ?? declared?.label ?? family;
   const choose = (reported: unknown) => {
     const next = reported && typeof reported === 'object' ? (reported as { layout?: unknown }).layout : undefined;
-    if (failed || stale || blocked || readOnly || next === (applied.current ?? spread.definition)) return;
+    if (failed || stale || blocked || readOnly || next === (applied.current ?? (spread.split ? '' : spread.definition))) return;
     if (typeof next !== 'string' || !variants.includes(next)) {
       setError('The picker must choose a layout from ' + (declared?.label ?? family) + '.');
       return;
@@ -31,7 +31,7 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
     let consequence = '';
     edit(({ project: files }) => {
       const state = files.spreads.find(({ id }) => id === spread.id);
-      if (!state || !variants.includes(state.definition) || state.definition === next) return;
+      if (!state || !variants.includes(state.definition) || (!state.split && state.definition === next)) return;
       consequence = describeLayoutChange(switchLayout(state, next, template.spreads));
     }, () => consequence ? template.spreads[next].label + ' · ' + consequence : '');
   };
@@ -39,10 +39,10 @@ export function LayoutFamilyPicker({ project, template, spread, params, family, 
     { draft: choose, done: choose, cancel: () => frame.current?.blur() }, undefined,
     { initialHeight: 28, minimumHeight: 1, focusOnReady: false });
   const disabled = readOnly || stale || !!blocked || failed;
-  const contextKey = JSON.stringify([spread.definition, params, disabled]);
+  const contextKey = JSON.stringify([spread.definition, spread.split, params, disabled]);
   useEffect(() => {
     if (!ready) return;
-    frame.current?.contentWindow?.postMessage({ type: 'layout-picker-state', saved: spread.definition, document: params, readOnly: disabled }, renderOrigin);
+    frame.current?.contentWindow?.postMessage({ type: 'layout-picker-state', saved: spread.split ? '' : spread.definition, document: params, readOnly: disabled }, renderOrigin);
     if (applied.current === spread.definition) applied.current = undefined;
   }, [ready, contextKey]);
   return <div className="field layout-family-field" role="region" aria-label={title} aria-disabled={disabled} aria-busy={!ready || undefined} title={blocked}>

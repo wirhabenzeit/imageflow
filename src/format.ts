@@ -296,11 +296,13 @@ export function pageSequence(spans: (Span | { span: Span; sides?: readonly ('lef
       return { span, page, sides: ['page'] as PrintSide[] };
     }
     const required = spanRequiredAt(index, spans.length, format);
-    const shown = span === 'page' ? (required === 'left' ? 'left' : 'right') : span;
+    const shown = span === 'page' ? required : span;
     if (!spanAllowedAt(span, index, spans.length, format, allowedSides)) {
       issues.push(span === 'page' && required !== 'spread' && allowedSides && !allowedSides.includes(required as 'left' | 'right')
         ? 'Spread ' + (index + 1) + ' requires a single ' + required + ' page, but this layout allows only the ' + allowedSides.join(' and ') + ' side. Choose a page layout that allows ' + required + '.'
-        : endIssue(shown, index, spans.length, format));
+        : span === 'page' && required === 'spread'
+          ? 'Spread ' + (index + 1) + ' uses a single-page layout without being shown as pages. Choose a spread layout or split it into page layouts.'
+          : endIssue(shown, index, spans.length, format));
     }
     const left = shown === 'right' ? undefined : ++count;
     const right = shown === 'left' ? undefined : ++count;

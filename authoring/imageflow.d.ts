@@ -482,6 +482,8 @@ export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'r
 export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
 /** A photo box of a spread's current layout, in `BookContext.spreads`. */
 export type BookPhotoPlacement = {
+  /** The shown page this placement belongs to, when the spread is shown as pages. */
+  readonly page?: 'left' | 'right';
   /** The box ID in the spread's current layout. */
   readonly box: string;
   /** The assigned photo's ID, or `null` for an empty box. The same photo placed twice appears in both placements. */
@@ -601,7 +603,7 @@ export type IssueMarker = { 'data-issue'?: string; 'data-issue-info'?: string };
  */
 export type Decorative = { decorative?: boolean };
 /**
- * Places a platform component at a rectangle (millimetres, spread coordinates) with absolute positioning. Properties
+ * Places a platform component at a rectangle in millimetres with absolute positioning: page-local coordinates in page layouts, sheet coordinates in spread layouts. Properties
  * in `style` win over the ones `rect` sets, so `style={{ height: 'auto' }}` lets a heading grow.
  */
 type Placement = { rect?: Rect };
@@ -619,11 +621,11 @@ export type TextProps<Path extends string = string> = Styling & Placement & Issu
 
 /** In page layouts, page() is local to ctx.side and spread() throws. Otherwise the format is applied: `ctx.geometry.page('left', 'bleed')`. */
 export type BoundGeometry = {
-  /** One page of the spread. Works for single first and last pages too. */
+  /** In spread layouts, one page in sheet coordinates. In page layouts, only ctx.side is allowed and coordinates are local to that page. */
   page(side: 'left' | 'right', area?: Area): Rect;
-  /** The page, in a format without facing pages: `ctx.geometry.page('safe')`. */
+  /** The current page in a page layout (including facing formats), or the page of a format without facing pages: `ctx.geometry.page('safe')`. */
   page(area?: Area): Rect;
-  /** Both pages. Its `safe` area keeps only the outer, top and bottom insets. Throws without facing pages. */
+  /** Both pages in a spread layout. Its `safe` area keeps only the outer, top and bottom insets. Throws in page layouts and without facing pages. */
   spread(area?: Area): Rect;
   /** Design coordinates on a fixed canvas scaled to this format's trim; see `geometry.design`. */
   design(canvas: { width: number; height: number }): DesignCanvas;
@@ -1032,7 +1034,7 @@ export type Area = 'trim' | 'safe' | 'bleed';
 export type DesignCanvas = {
   left(x: number, y: number, width: number, height: number): Rect;
   right(x: number, y: number, width: number, height: number): Rect;
-  /** The page of a format without facing pages. `left` and `right` throw there, and `page` throws with facing pages. */
+  /** With ctx.geometry in a page layout, local coordinates on ctx.side. With standalone geometry.design, the page of a format without facing pages; it requires left/right for facing formats. */
   page(x: number, y: number, width: number, height: number): Rect;
   width(value: number): number;
   height(value: number): number;
@@ -1042,11 +1044,11 @@ export type DesignCanvas = {
   length(value: number, unit: 'mm' | 'pt' | 'px', axis: 'x' | 'y' | 'min' | 'max'): string;
 };
 export const geometry: {
-  /** One page of the spread. Works for single first and last pages too. */
+  /** In spread layouts, one page in sheet coordinates. In page layouts, only ctx.side is allowed and coordinates are local to that page. */
   page(format: ResolvedFormat, side: 'left' | 'right', area?: Area): Rect;
   /** The page, in a format without facing pages. */
   page(format: ResolvedFormat, area?: Area): Rect;
-  /** Both pages. Its `safe` area keeps only the outer, top and bottom insets. Throws without facing pages. */
+  /** Both pages in a spread layout. Its `safe` area keeps only the outer, top and bottom insets. Throws in page layouts and without facing pages. */
   spread(format: ResolvedFormat, area?: Area): Rect;
   /** Shrinks a rectangle by millimetres on every side, or on the named sides. */
   inset(rect: Rect, by: number | { top?: number; right?: number; bottom?: number; left?: number }): Rect;

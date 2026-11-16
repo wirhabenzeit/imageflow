@@ -1404,7 +1404,7 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   let document = resolveParams(template.parameters, book.project.params);
   const format = resolveFormat(template.format);
   root.className = 'if-editor if-layout-settings';
-  let saved = spread.definition;
+  let saved = spread.split ? '' : spread.definition;
   let disabled = readOnly;
 
   // The draft lives outside React so choose() followed directly by commit() sends the newest choice.
@@ -1442,7 +1442,7 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   window.addEventListener('message', (event) => {
     if (event.source !== parent || event.origin !== editorURL.slice(0, -1)) return;
     if (event.data?.type === 'layout-picker-state') {
-      if (typeof event.data.saved !== 'string' || !Object.hasOwn(template.spreads, event.data.saved) || typeof event.data.readOnly !== 'boolean') return;
+      if (typeof event.data.saved !== 'string' || (event.data.saved !== '' && !Object.hasOwn(template.spreads, event.data.saved)) || typeof event.data.readOnly !== 'boolean') return;
       saved = event.data.saved;
       draft = saved;
       document = resolveParams(template.parameters, event.data.document ?? {});

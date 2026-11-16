@@ -96,6 +96,7 @@ export type CreditConflict = { id: string; spread: string; text: string; url?: s
 // One spread of the book as the index lists it: derived from the saved book and the template's declarations before
 // any spread renders, so every spread reads the same index whatever the render order.
 export type BookPhotoPlacement = {
+  page?: PageSide;
   box: string;
   // The assigned photo's ID, or null for an empty box.
   photoId: string | null;
@@ -238,7 +239,9 @@ export function spreadIndex(book: RenderProject, template: Template, sequence: {
       const state = scopeSpread(spread, side);
       return [side, { ...(state?.definition ? { layout: state.definition } : {}), photos: state ? placements(state) : [] }];
     })) : undefined;
-    return { id: spread.id, ...(pages ? { pages } : { layout: spread.definition }), page: Object.fromEntries(Object.entries(sequence.spreads[i].page).filter(([, value]) => value !== undefined)), photos: pages ? [] : placements(spread) };
+    const photos = pages ? pageSides.flatMap((side) => pages[side].photos.map((photo: BookPhotoPlacement) => ({ ...photo, page: side }))) : placements(spread);
+    return { id: spread.id, ...(pages ? { pages } : { layout: spread.definition }),
+      page: Object.fromEntries(Object.entries(sequence.spreads[i].page).filter(([, value]) => value !== undefined)), photos };
   }));
 }
 
@@ -1142,7 +1145,7 @@ function LayoutView({ book, template, format, spread, page, index, positions, re
   let content: ReturnType<typeof definition.render>;
   try {
     content = definition.render({
-      ...values, page, side, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode, view: renderView(book),
+      ...values, page: side && side !== 'page' ? { [side]: page[side] } : page, side, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode, view: renderView(book),
       spread: bookSpread, layout: spread.definition,
       edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
       book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits, side }),

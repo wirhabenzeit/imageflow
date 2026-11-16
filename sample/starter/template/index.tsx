@@ -210,21 +210,22 @@ const boxPages: Record<string, Record<string, 'left' | 'right' | 'both'>> = {
   feature5: { second: 'right', third: 'right', fourth: 'right', fifth: 'right' },
   cover: { hero: 'right' },
 };
-function pagesOf(spread: BookSpread, box: string): number[] {
+function pagesOf(spread: BookSpread, box: string, side?: 'left' | 'right'): number[] {
+  if (side) { const number = spread.page[side]; return number === undefined ? [] : [number]; }
   const { left, right, number } = spread.page;
   if (number !== undefined) return [number];
-  const side = boxPages[spread.layout ?? '']?.[box] ?? 'left';
-  const pages = side === 'both' ? [left, right] : side === 'right' ? [right ?? left] : [left ?? right];
+  const boxSide = boxPages[spread.layout ?? '']?.[box] ?? 'left';
+  const pages = boxSide === 'both' ? [left, right] : boxSide === 'right' ? [right ?? left] : [left ?? right];
   return pages.filter((at): at is number => at !== undefined);
 }
 
 /** Every photo in the book once, with the pages it is on, in book order. */
 function pictureList(spreads: readonly BookSpread[]) {
   const pictures = new Map<string, { photo: Photo; pages: number[] }>();
-  for (const spread of spreads) for (const { box, photoId, photo } of spread.photos) {
+  for (const spread of spreads) for (const { box, page, photoId, photo } of spread.photos) {
     if (!photoId || !photo) continue;
     const entry = pictures.get(photoId) ?? pictures.set(photoId, { photo, pages: [] }).get(photoId)!;
-    for (const at of pagesOf(spread, box)) if (!entry.pages.includes(at)) entry.pages.push(at);
+    for (const at of pagesOf(spread, box, page)) if (!entry.pages.includes(at)) entry.pages.push(at);
   }
   return [...pictures.values()];
 }

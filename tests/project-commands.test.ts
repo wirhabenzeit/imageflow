@@ -258,3 +258,41 @@ test('no-op operations preserve state and do not report changes', () => {
   assert.deepEqual(result.affectedSpreads, []);
   assert.equal(result.reflow, false);
 });
+
+test('commands refuse split-spread targets until page addressing is supported; merging stays available', () => {
+  const original = files();
+  const spread = original.project.spreads[0];
+  spread.split = true;
+  spread.pages = { left: { definition: 'page', params: { heading: 'Visible' },
+    boxes: { hero: { photo: 'p2', params: {} } }, elements: {} } };
+  const info: TemplateInfo = { ...template, spreads: { ...template.spreads, page: { ...template.spreads.main, span: 'page' } } };
+  const operations = [
+    { op: 'assign_source', spread: 'one', box: 'hero', kind: 'photo', source: 'p1' },
+    { op: 'clear_box', spread: 'one', box: 'hero' },
+    { op: 'set_crop', spread: 'one', box: 'hero', centerX: .5, centerY: .5, zoom: 2 },
+    { op: 'set_parameter', spread: 'one', scope: 'spread', key: 'heading', value: 'Hidden' },
+    { op: 'reset_parameter', spread: 'one', scope: 'spread', key: 'heading' },
+    { op: 'set_parameter', spread: 'one', scope: 'box', owner: 'hero', key: 'caption', value: true },
+    { op: 'set_parameter', spread: 'one', scope: 'element', owner: 'calendar', key: 'month', value: '2026-02-01' },
+    { op: 'insert_list_item', spread: 'one', scope: 'spread', key: 'items', item: { id: 'x' } },
+    { op: 'update_list_item', spread: 'one', scope: 'spread', key: 'items', id: 'x', values: { title: 'x' } },
+    { op: 'remove_list_item', spread: 'one', scope: 'spread', key: 'items', id: 'x' },
+    { op: 'move_list_item', spread: 'one', scope: 'spread', key: 'items', id: 'x', after: null },
+    { op: 'duplicate_spread', spread: 'one' },
+    { op: 'move_spread', spread: 'one', after: 'two' },
+    { op: 'remove_spread', spread: 'one' },
+    { op: 'swap_content', from: { spread: 'one', box: 'hero' }, to: { spread: 'two', box: 'hero' } },
+    { op: 'swap_content', from: { spread: 'two', box: 'hero' }, to: { spread: 'one', box: 'hero' } },
+  ];
+  const before = structuredClone(original);
+  for (const operation of operations) {
+    assert.throws(() => applyProjectCommands(original, info, [{ op: 'set_title', title: 'Unsaved' }, operation]),
+      (error) => error instanceof ProjectCommandError && error.code === 'SPREAD_SHOWN_AS_PAGES' &&
+        error.operationIndex === 1 && /shown as pages/.test(error.message), operation.op);
+    assert.deepEqual(original, before);
+  }
+  const merged = applyProjectCommands(original, info, [{ op: 'switch_layout', spread: 'one', definition: 'main' }]);
+  assert.equal(merged.files.project.spreads[0].split, undefined);
+  assert.equal(merged.files.project.spreads[0].boxes.hero.photo, 'p2');
+  assert.equal(merged.files.project.spreads[0].params.heading, 'Visible');
+});

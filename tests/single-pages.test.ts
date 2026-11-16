@@ -92,8 +92,8 @@ test('layouts of the other kind are drawn and reported as page-sequence problems
   assert.deepEqual(single.spreads.map(({ page }) => page.number), [1, 2, 3]);
   assert.deepEqual(single.issues, ['Page 2 uses a spread layout, but Wall calendar · A4 portrait has no facing pages. Switch it to a single-page layout.']);
   const facing = pageSequence(['spread', 'page'], { ...book, structure: { ...book.structure, ends: 'inside-covers' } });
-  assert.deepEqual(facing.spreads[1], { span: 'right', page: { left: undefined, right: 3 }, sides: ['right'] });
-  assert.ok(facing.issues.some((message) => message.includes('no single pages at the book ends')));
+  assert.deepEqual(facing.spreads[1], { span: 'spread', page: { left: 3, right: 4 }, sides: ['left', 'right'] });
+  assert.ok(facing.issues.some((message) => message.includes('without being shown as pages')));
   assert.equal(spanAllowedAt('page', 0, 1, calendar), true);
   assert.equal(spanAllowedAt('spread', 0, 1, calendar), false);
   assert.equal(spanAllowedAt('page', 0, 1, book), true);
@@ -227,3 +227,13 @@ test('a fixture preview in a format shows the layouts that fit it, however many 
 
 // Keep the narrowed types in use, so a change to the union shows up here at compile time.
 export const kinds: [SinglePageFormat['structure']['facingPages'], ResolvedFormat['facingPages']] = [false, true];
+
+
+test('an unsplit page layout in the middle retains the full-spread footprint until repaired', () => {
+  const sequence = pageSequence(['right', 'page', 'spread', 'left'], book);
+  assert.deepEqual(sequence.spreads.map(({ page }) => page), [
+    { left: undefined, right: 1 }, { left: 2, right: 3 }, { left: 4, right: 5 }, { left: 6, right: undefined },
+  ]);
+  assert.equal(sequence.count, 6);
+  assert.ok(sequence.issues.some((message) => /Spread 2.*without being shown as pages/.test(message)));
+});
