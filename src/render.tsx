@@ -19,7 +19,7 @@ import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, s
 import { animateReorder } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat } from './format';
-import { frameView } from './project';
+import { frameView, scopeState } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
 import { isParameterValue, parameterWarnings, resolveParams, resolveValue } from './parameters';
@@ -36,6 +36,7 @@ import { resolveEditPath } from './editing';
 import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
 import type { VariantTags } from './layouts';
 import { numberOccurrences } from './edit-targets';
+import { declaredName, declaredNode, declaredNodes, findDeclared, onPage, ownerOf, ownTarget, pageAttribute } from './page-scope';
 import { textEditorOwner } from './inline-text';
 import { inlineTextFrame } from './inline-text-frame';
 import { readEdit } from './editing';
@@ -106,12 +107,6 @@ function textAssignments(book: RenderProject, template: Template) {
 const reportedMm = (pixels: number, mmPerPixel: number) => Math.round(pixels * mmPerPixel * 10) / 10;
 const ptPerMm = 72 / 25.4;
 
-// The declared box or element that contains a node, for locating findings inside a spread.
-function ownerOf(node: Element) {
-  const owner = node.closest<HTMLElement>('[data-box], [data-element]');
-  return owner?.dataset.box !== undefined ? { box: owner.dataset.box } : owner?.dataset.element !== undefined ? { element: owner.dataset.element } : {};
-}
-
 function validateSpread(container: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat, where: string,
   warnings: Issue[], errors: Issue[]) {
   const sheet = container.firstElementChild;
@@ -119,8 +114,16 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     throw new Error('Spread ' + spread.id + ' must render one <Spread> at its root.');
   }
   const definition = template.spreads[spread.definition];
-  const remaining = new Set(Object.keys(definition.boxes));
-  const elements = new Set(Object.keys(definition.elements));
+  // The sheet draws the spread's own layout, or one layout per page container (ADR 0009). Each drawn layout must
+  // draw each of its boxes exactly once, and nothing it does not declare.
+  const drawnPages = (['left', 'right'] as const).filter((side) => sheet.querySelector('[' + pageAttribute + '="' + side + '"]'));
+  if (drawnPages.length && !spread.split) throw new Error(where + ' draws page containers (' + pageAttribute + '), which only ImageFlow draws for a spread shown as pages.');
+  const scopes = new Map((drawnPages.length ? drawnPages : [undefined]).map((page) => {
+    const id = page ? scopeState(spread, page)?.definition : spread.definition;
+    const layout = id !== undefined && Object.hasOwn(template.spreads, id) ? template.spreads[id] : undefined;
+    if (!layout) throw new Error(where + ' draws the ' + page + ' page without a known layout.');
+    return [page, { layout, boxes: new Set(Object.keys(layout.boxes)), elements: new Set(Object.keys(layout.elements)) }] as const;
+  }));
   const bounds = sheet.getBoundingClientRect();
   const mmPerPixel = format.spreadWidth / bounds.width;
   const resolution = template.format.output.resolution;
@@ -194,28 +197,34 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     warn(['The layout marks unknown parameters as editable: ' + [...unknown].join(', ') + '.'], { code: 'edit-path-unknown',
       details: { paths: [...unknown].join(' ') }, suggestion: 'Declare these parameters in the layout, or remove them from ctx.edit(...).' });
   }
+  // Boxes by ID, prefixed with their page on a page (`left:hero`), so text flow finds each page's own box.
   const boxes = new Map<string, HTMLElement>();
-  for (const box of sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')) {
-    const id = box.dataset.box ?? box.dataset.element!;
-    if (box.dataset.element !== undefined) {
-      if (!elements.delete(id)) throw new Error(where + ' renders an unknown or duplicate element: ' + id + '.');
+  for (const found of declaredNodes(sheet)) {
+    const { node: box, id, page } = found;
+    const scope = scopes.get(page);
+    const name = page ? declaredName(found) : id;
+    const at = onPage(page);
+    if (!scope) throw new Error(where + ' renders ' + declaredName(found) + ' outside the layouts it draws.');
+    const { layout } = scope;
+    if (found.kind === 'element') {
+      if (!scope.elements.delete(id)) throw new Error(where + ' renders an unknown or duplicate element: ' + name + '.');
     } else {
-      if (!remaining.delete(id) || definition.boxes[id].type !== box.dataset.boxType) {
-        throw new Error(where + ' renders an unknown, duplicate, or incompatible box: ' + id + '.');
+      if (!scope.boxes.delete(id) || layout.boxes[id].type !== found.boxType) {
+        throw new Error(where + ' renders an unknown, duplicate, or incompatible box: ' + name + '.');
       }
-      if (!box.clientWidth || !box.clientHeight) throw new Error(where + ' · ' + id + ' has no area.');
-      boxes.set(id, box);
-      const assignment = spread.boxes[id];
+      if (!box.clientWidth || !box.clientHeight) throw new Error(where + ' · ' + name + ' has no area.');
+      boxes.set(page ? page + ':' + id : id, box);
+      const assignment = scopeState(spread, page)?.boxes[id];
       const ppi = Number(box.dataset.ppi);
       if (assignment?.photo && box.hasAttribute('data-empty')) {
-        errors.push(issue(definition.boxes[id].label + ' is missing photo ' + assignment.photo + '.', {
-          code: 'photo-missing', box: id, source: assignment.photo,
+        errors.push(issue(layout.boxes[id].label + ' is missing photo ' + assignment.photo + '.', {
+          code: 'photo-missing', box: id, ...at, source: assignment.photo,
           suggestion: 'Restore the original file, import it again with import_sources, or assign another photo to box ' + id + '.',
         }));
       }
       if (resolution && Number.isFinite(ppi) && ppi < resolution.minimum) {
-        errors.push(issue(definition.boxes[id].label + ' is ' + Math.round(ppi) + ' ppi (minimum ' + resolution.minimum + ').', {
-          code: 'photo-resolution-low', box: id, source: assignment?.photo,
+        errors.push(issue(layout.boxes[id].label + ' is ' + Math.round(ppi) + ' ppi (minimum ' + resolution.minimum + ').', {
+          code: 'photo-resolution-low', box: id, ...at, source: assignment?.photo,
           details: { ppi: Math.round(ppi), minimumPpi: resolution.minimum,
             boxWidthMm: reportedMm(box.getBoundingClientRect().width, mmPerPixel),
             boxHeightMm: reportedMm(box.getBoundingClientRect().height, mmPerPixel) },
@@ -230,15 +239,17 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     };
     if (rect.left < bounds.left - 1 || rect.top < bounds.top - 1 ||
         rect.right > bounds.right + 1 || rect.bottom > bounds.bottom + 1) {
-      const owner = box.dataset.element !== undefined ? { element: id } : { box: id };
-      errors.push(issue((definition.boxes[id]?.label ?? definition.elements[id]?.label ?? id) + ' extends outside the bleed.', {
-        code: 'outside-bleed', ...owner,
+      const owner = found.kind === 'element' ? { element: id } : { box: id };
+      errors.push(issue((layout.boxes[id]?.label ?? layout.elements[id]?.label ?? id) + ' extends outside the bleed.', {
+        code: 'outside-bleed', ...owner, ...at,
         details: Object.fromEntries(Object.entries(overshoot).filter(([, value]) => value > 0)),
         suggestion: 'Change the template CSS so this ' + (owner.box ? 'box' : 'element') + ' stays within the sheet, which includes the bleed.',
       }));
     }
   }
-  if (remaining.size) throw new Error(where + ' is missing boxes: ' + [...remaining].join(', ') + '.');
+  for (const [page, scope] of scopes) {
+    if (scope.boxes.size) throw new Error(where + (page ? ' · ' + page + ' page' : '') + ' is missing boxes: ' + [...scope.boxes].join(', ') + '.');
+  }
   return { sheet, boxes };
 }
 
@@ -280,11 +291,11 @@ function textOwner(block: HTMLElement) {
   const owner = ownerOf(block);
   const parameter = block.closest<HTMLElement>('[data-edit]')?.dataset.edit;
   const text = (block.textContent ?? '').replace(/\s+/g, ' ').trim();
-  const self = block.dataset.box !== undefined || block.dataset.element !== undefined;
+  const self = declaredNode(block) !== undefined;
   return { ...owner, ...(parameter ? { parameter } : {}), tag: block.localName, self, text: text.length > 60 ? text.slice(0, 59) + '…' : text };
 }
-const describe = ({ box, element, parameter, tag, self }: ReturnType<typeof textOwner>) => {
-  const owner = box !== undefined ? 'box ' + box : element !== undefined ? 'element ' + element : '';
+const describe = ({ box, element, page, parameter, tag, self }: ReturnType<typeof textOwner>) => {
+  const owner = box !== undefined ? declaredName({ kind: 'box', id: box, page }) : element !== undefined ? declaredName({ kind: 'element', id: element, page }) : '';
   if (self && owner) return owner;
   return '<' + tag + '>' + (parameter ? ' showing ' + parameter : '') + (owner ? ' in ' + owner : '');
 };
@@ -452,14 +463,14 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       boxes: sheets.flatMap(({ spread, sheet }) => {
         const scale = Number(sheet.style.getPropertyValue('--if-zoom')) || 1;
         const origin = measuredBounds(sheet.querySelector<HTMLElement>('.if-spread')!, sheet, format);
-        return [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].map((box) => {
+        return declaredNodes(sheet).map(({ node: box, id, page, boxType }) => {
           const rect = relative(box);
           const measured = measuredBounds(box, sheet, format);
           const sized = Math.abs(rect.width - box.offsetWidth * scale) < 1.5 && Math.abs(rect.height - box.offsetHeight * scale) < 1.5;
           return {
-            spread, id: (box.dataset.box ?? box.dataset.element)!, upright: sized && upright(box, sheet),
+            spread, id, ...onPage(page), upright: sized && upright(box, sheet),
             rect: { ...measured, x: measured.x - origin.x, y: measured.y - origin.y },
-            type: (box.dataset.boxType ?? 'element') as BookGeometry['boxes'][number]['type'], ...rect,
+            type: (boxType ?? 'element') as BookGeometry['boxes'][number]['type'], ...rect,
             ...(box.dataset.photoRender === 'custom' ? { custom: true } : {}),
           };
         });
@@ -471,8 +482,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
         ...(/^(vertical|sideways)/.test(getComputedStyle(node).writingMode) ? { vertical: true } : {}),
         ...(node.dataset.textFallback ? { textFallback: { parameter: node.dataset.edit!, text: node.dataset.textFallback,
           label: node.dataset.textFallbackLabel ?? 'inherited text' } } : {}),
-        ...(node.dataset.box ? { owner: { type: 'box' as const, id: node.dataset.box } }
-          : node.dataset.element ? { owner: { type: 'element' as const, id: node.dataset.element } } : {}),
+        ...ownTarget(node),
       })))),
     };
     post(geometry);
@@ -486,13 +496,13 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       if (event.source !== parent || event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'inline-editing') return;
       for (const node of hidden) node.removeAttribute('data-if-editing');
       hidden = [];
-      const { spread, element, edits, occurrence, key } = event.data;
+      const { spread, element, page, edits, occurrence, key } = event.data;
       // Answered once drawn, so the app shows a frame, or removes an editor, only when the artwork is right.
       void afterPaint().then(() => post({ type: 'inline-editing-applied', key }));
       const sheet = sheets.find((item) => item.spread === spread)?.sheet;
       if (!sheet) return;
       if (typeof element === 'string') {
-        hidden = [...sheet.querySelectorAll<HTMLElement>('[data-element]')].filter((node) => node.dataset.element === element);
+        hidden = findDeclared(sheet, { element, page: page === 'left' || page === 'right' ? page : undefined }).map(({ node }) => node);
       } else if (typeof edits === 'string') {
         const marked = [...sheet.querySelectorAll<HTMLElement>('[data-edit]')]
           .filter((node) => node.dataset.edit!.split(' ').filter(Boolean).join(' ') === edits)[Number(occurrence) || 0];
@@ -522,7 +532,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     requestAnimationFrame(() => { measuring = false; laidOut = ''; fit(); });
   };
   const elements = new ResizeObserver(measure);
-  for (const { sheet } of sheets) for (const node of sheet.querySelectorAll<HTMLElement>('[data-element]')) elements.observe(node);
+  for (const { sheet } of sheets) for (const { node, kind } of declaredNodes(sheet)) if (kind === 'element') elements.observe(node);
   // Position can change without resizing: a class/style change or a sibling's content may move an element.
   // Observe template content only; fit() writes the surrounding sheet/slot styles, so it cannot retrigger this.
   const layout = new MutationObserver(measure);
@@ -783,18 +793,19 @@ function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: ResolvedF
 
 function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat,
   request: ReturnType<typeof inspectionSchema.parse>): ElementInspection {
-  const nodes = [...sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')].filter((node) =>
-    (!request.box || node.dataset.box === request.box) && (!request.element || node.dataset.element === request.element));
+  const nodes = request.box ? findDeclared(sheet, { box: request.box }) : request.element ? findDeclared(sheet, { element: request.element }) : declaredNodes(sheet);
   if ((request.box || request.element) && !nodes.length) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread.id + '.');
-  const definition = template.spreads[spread.definition];
-  const items: ElementMeasurement[] = nodes.slice(request.offset, request.offset + request.limit).map((node) => {
-    const box = node.dataset.box, id = box ?? node.dataset.element!, kind = box ? definition.boxes[id].type : 'element';
+  const items: ElementMeasurement[] = nodes.slice(request.offset, request.offset + request.limit).map(({ node, kind: declared, id, page }) => {
+    // A node on a page belongs to that page's layout and state (validated before inspection).
+    const state = scopeState(spread, page)!;
+    const definition = template.spreads[state.definition];
+    const box = declared === 'box', kind = box ? definition.boxes[id].type : 'element';
     const prefix = (box ? 'boxes.' : 'elements.') + id + '.';
     const parameters = box ? definition.boxes[id].parameters : definition.elements[id].parameters;
     const style = getComputedStyle(node);
     const points = (value: string) => Math.round(parseFloat(value) * 72 / 96 * 100) / 100;
-    const source = box ? spread.boxes[id]?.photo ?? spread.boxes[id]?.text : undefined;
-    return { spread: spread.id, id, kind, boundsMm: measuredBounds(node, sheet, format), upright: upright(node, sheet),
+    const source = box ? state.boxes[id]?.photo ?? state.boxes[id]?.text : undefined;
+    return { spread: spread.id, id, ...onPage(page), kind, boundsMm: measuredBounds(node, sheet, format), upright: upright(node, sheet),
       typography: { fontFamily: style.fontFamily, fontSizePt: points(style.fontSize),
         lineHeightPt: style.lineHeight === 'normal' ? null : points(style.lineHeight), fontWeight: style.fontWeight, color: style.color },
       editPaths: Object.keys(parameters).map((key) => prefix + key), ...(source ? { source } : {}) };
@@ -828,9 +839,8 @@ function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, lab
     layer.append(node);
   };
   if (labels) {
-    for (const node of sheet.querySelectorAll<HTMLElement>('[data-box], [data-element]')) {
-      const rect = measuredBounds(node, sheet, format);
-      add(rect, { border: '0.35mm solid #ff6a00' }, node.dataset.box !== undefined ? 'box ' + node.dataset.box : 'element ' + node.dataset.element);
+    for (const found of declaredNodes(sheet)) {
+      add(measuredBounds(found.node, sheet, format), { border: '0.35mm solid #ff6a00' }, declaredName(found));
     }
   }
   if (guides) {
@@ -925,8 +935,7 @@ function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: Spread
   if ('box' in artwork.target || 'element' in artwork.target) {
     const request = artwork.target;
     const box = 'box' in request ? request.box : undefined, element = 'element' in request ? request.element : undefined;
-    const node = [...sheets[index].querySelectorAll<HTMLElement>('[data-box], [data-element]')]
-      .find((node) => box ? node.dataset.box === box : node.dataset.element === element);
+    const node = findDeclared(sheets[index], box ? { box } : { element: element! })[0]?.node;
     if (!node) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread + '.');
     const rect = measuredBounds(node, sheets[index], format), padding = request.paddingMm;
     const x = Math.max(crop.x, rect.x - padding), y = Math.max(crop.y, rect.y - padding);
@@ -1642,7 +1651,7 @@ export async function startRender(root: HTMLElement) {
     const pendingSites = pendingNetwork(declared.data.network, book.network);
     const pictureIssues = (failures: RenderedImageFailure[]): Issue[] => failures.map((failed) => ({
       ...(failed.spread ? located(failed.spread, failed.message) : message(failed.message)), code: 'rendered-image-failed',
-      ...(failed.element ? { element: failed.element } : {}),
+      ...(failed.element ? { element: failed.element } : {}), ...onPage(failed.page),
       details: { label: failed.label, timedOut: failed.timedOut ? 1 : 0, ...(pendingSites.length ? { networkPending: pendingSites.join(' ') } : {}) },
       suggestion: pendingSites.length ? networkPendingSuggestion(pendingSites)
         : failed.timedOut ? 'Check the internet connection, then check or export again.'
@@ -1680,11 +1689,12 @@ export async function startRender(root: HTMLElement) {
     for (const [i, result] of decoded.entries()) {
       if (result.status !== 'rejected') continue;
       const source = pictureSource.get(images[i]) ?? images[i];
-      const box = source.closest<HTMLElement>('[data-box]')?.dataset.box;
+      const { box, page } = ownerOf(source);
       const spread = source.closest<HTMLElement>('[data-spread]')?.dataset.spread;
-      const photo = spread && box ? spreads.find(({ id }) => id === spread)?.boxes[box]?.photo : undefined;
+      const state = spread ? spreads.find(({ id }) => id === spread) : undefined;
+      const photo = state && box ? scopeState(state, page)?.boxes[box]?.photo : undefined;
       errors.push({ ...(spread ? located(spread, '') : {}), message: 'Could not decode photo ' + (images[i].alt || box) + '.',
-        code: 'photo-decode-failed', box, source: photo,
+        code: 'photo-decode-failed', box, ...onPage(page), source: photo,
         suggestion: 'Replace the original with a valid JPEG, PNG or WebP file, or assign another photo.' });
     }
     for (const { spread, anchor, found } of lookups.values()) {

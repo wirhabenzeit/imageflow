@@ -28,14 +28,41 @@ const box = z.object({
   'A box holds one assignment, and only photos have a crop.');
 
 
-// The book format this app reads and writes (`project.json` → `schemaVersion`). A book saved by a newer app with a
-// higher number is refused with a request to update ImageFlow, and is left as it is.
-export const bookFormatVersion = 1;
+// The book formats this app reads and writes (`project.json` → `schemaVersion`). A book saved by a newer app with a
+// higher number is refused with a request to update ImageFlow, and is left as it is. Format 2 adds page states (ADR
+// 0009). A book is always written in the lowest format that holds it: only a book with page states is format 2, so
+// every other book stays readable by apps that know format 1, which would drop the page states they do not know.
+export const bookFormatVersion = 2;
 export const newerBookMessage = (version: number) => 'This book was saved by a newer version of ImageFlow (book format ' +
-  version + '; this version reads format ' + bookFormatVersion + '). Update ImageFlow to open it. The book was not changed.';
-const schemaVersion = z.literal(bookFormatVersion, {
+  version + '; this version reads formats up to ' + bookFormatVersion + '). Update ImageFlow to open it. The book was not changed.';
+const schemaVersion = z.literal([1, bookFormatVersion], {
   error: ({ input }) => typeof input === 'number' && Number.isInteger(input) && input > bookFormatVersion ? newerBookMessage(input) : undefined,
 });
+
+// The state a spread or one of its pages keeps for all its layouts: `definition` is the layout it shows, or showed
+// last, and picks which of the boxes, elements and parameters are shown.
+const layoutState = {
+  definition: identifier,
+  params: values,
+  boxes: z.record(identifier, box).default({}),
+  elements: z.record(identifier, z.object({ params: values })).default({}),
+};
+const pageState = z.object(layoutState);
+export const pageSides = ['left', 'right'] as const;
+
+const spreadSchema = z.object({
+  id: identifier,
+  ...layoutState,
+  // Each page's own state, once the spread was shown as page layouts (ADR 0009). A page keeps it, and its layout,
+  // while the spread shows a spread layout, so showing pages again restores them.
+  pages: z.object({ left: pageState.optional(), right: pageState.optional() }).optional(),
+  // The spread shows its pages' layouts rather than `definition`.
+  split: z.literal(true).optional(),
+}).refine(({ pages, split }) => !split || !!(pages?.left || pages?.right), { message: 'A spread shown as pages needs the state of at least one page.', path: ['split'] });
+
+// The lowest book format that holds a project.
+export const bookFormatOf = (project: { spreads: readonly { pages?: unknown; split?: unknown }[] }) =>
+  project.spreads.some(({ pages, split }) => pages !== undefined || split !== undefined) ? 2 : 1;
 
 export const projectSchema = z.object({
   schemaVersion,
@@ -51,14 +78,9 @@ export const projectSchema = z.object({
   // File parameter sources (such as GPX tracks), by ID: owned relative paths or explicit external links.
   files: z.record(identifier, sourceReferenceSchema).default({}),
   // Each spread keeps one state for all its layouts: `definition` picks which boxes and elements are shown.
-  spreads: z.array(z.object({
-    id: identifier,
-    definition: identifier,
-    params: values,
-    boxes: z.record(identifier, box).default({}),
-    elements: z.record(identifier, z.object({ params: values })).default({}),
-  })).refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
-});
+  spreads: z.array(spreadSchema).refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
+  // Every parsed book carries the format that holds it, so saving it writes that format.
+}).transform((project) => ({ ...project, schemaVersion: bookFormatOf(project) as 1 | 2 }));
 
 export const photoIndexSchema = z.record(identifier, z.object({
   path: z.string(),
@@ -74,6 +96,10 @@ export const photoIndexSchema = z.record(identifier, z.object({
 
 export type Project = z.infer<typeof projectSchema>;
 export type SpreadState = Project['spreads'][number];
+export type PageSide = typeof pageSides[number];
+export type PageState = NonNullable<NonNullable<SpreadState['pages']>[PageSide]>;
+/** The state a box, element or parameter of a spread lives in: one of its pages', or the spread's own without a page. */
+export const scopeState = (spread: SpreadState, page?: PageSide): SpreadState | PageState | undefined => page ? spread.pages?.[page] : spread;
 export type BoxState = z.infer<typeof box>;
 export type Values = z.infer<typeof values>;
 export type PhotoIndex = z.infer<typeof photoIndexSchema>;

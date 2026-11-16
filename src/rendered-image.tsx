@@ -4,6 +4,8 @@
 // timeout, before a Book check or an export page is final. The result is an image owned by the frame: rendering
 // never changes the book's saved content. Thumbnails can reuse pictures from their book window's cache.
 import { useLayoutEffect, useRef, useState } from 'react';
+import { onPage, pageOf } from './page-scope';
+import type { PageSide } from './project';
 import type { CSSProperties } from 'react';
 import { previewPictureUrl, readPreviewPicture, savePreviewPicture } from './preview-picture';
 
@@ -31,7 +33,7 @@ export type RenderedImageProps = {
 };
 
 type Settings = { mode: RenderMode; pixelRatio: number; concurrency: number; timeoutMs: number; previewCache?: string; activeSpreads?: ReadonlySet<string> };
-export type RenderedImageFailure = { label: string; message: string; spread?: string; element?: string; timedOut: boolean };
+export type RenderedImageFailure = { label: string; message: string; spread?: string; element?: string; page?: PageSide; timedOut: boolean };
 
 let settings: Settings = { mode: 'preview', pixelRatio: 1, concurrency: 2, timeoutMs: 60_000 };
 let running = 0;
@@ -160,7 +162,7 @@ export function RenderedImage({ draw, inputs, label = 'Picture', alt = '', class
       node.dataset.rendered = 'failed';
       node.title = message;
       failures.set(node, { label, message, timedOut, spread: node.closest<HTMLElement>('[data-spread]')?.dataset.spread,
-        element: node.closest<HTMLElement>('[data-element]')?.dataset.element });
+        element: node.closest<HTMLElement>('[data-element]')?.dataset.element, ...onPage(pageOf(node)) });
     };
     const restored = previewCache && mode === 'preview' ? restorePicture() : () => {};
     const task = (async () => {
