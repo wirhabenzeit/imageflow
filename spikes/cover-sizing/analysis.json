@@ -1,0 +1,9149 @@
+{
+  "whitewall": {
+    "samples": 519,
+    "failures": [],
+    "dimensions": [
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 100,
+        "spine": 12.6,
+        "pdfWidth": 820.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 104,
+        "spine": 12.6,
+        "pdfWidth": 820.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 108,
+        "spine": 13.7,
+        "pdfWidth": 821.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 112,
+        "spine": 13.7,
+        "pdfWidth": 821.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 116,
+        "spine": 13.7,
+        "pdfWidth": 821.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 120,
+        "spine": 13.7,
+        "pdfWidth": 821.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 124,
+        "spine": 14.8,
+        "pdfWidth": 822.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 128,
+        "spine": 14.8,
+        "pdfWidth": 822.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 132,
+        "spine": 14.8,
+        "pdfWidth": 822.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 136,
+        "spine": 14.8,
+        "pdfWidth": 822.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 140,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 144,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 148,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 152,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 156,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 160,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 164,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 168,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 172,
+        "spine": 18.1,
+        "pdfWidth": 826.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 176,
+        "spine": 18.1,
+        "pdfWidth": 826.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 180,
+        "spine": 18.1,
+        "pdfWidth": 826.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 184,
+        "spine": 18.1,
+        "pdfWidth": 826.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 188,
+        "spine": 19.2,
+        "pdfWidth": 827.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 192,
+        "spine": 19.2,
+        "pdfWidth": 827.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 196,
+        "spine": 19.2,
+        "pdfWidth": 827.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 200,
+        "spine": 19.2,
+        "pdfWidth": 827.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 28,
+        "spine": 8.2,
+        "pdfWidth": 816.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 32,
+        "spine": 8.2,
+        "pdfWidth": 816.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 36,
+        "spine": 8.2,
+        "pdfWidth": 816.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 40,
+        "spine": 8.2,
+        "pdfWidth": 816.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 44,
+        "spine": 9.3,
+        "pdfWidth": 817.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 48,
+        "spine": 9.3,
+        "pdfWidth": 817.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 52,
+        "spine": 9.3,
+        "pdfWidth": 817.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 56,
+        "spine": 9.3,
+        "pdfWidth": 817.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 60,
+        "spine": 10.4,
+        "pdfWidth": 818.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 64,
+        "spine": 10.4,
+        "pdfWidth": 818.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 68,
+        "spine": 10.4,
+        "pdfWidth": 818.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 72,
+        "spine": 10.4,
+        "pdfWidth": 818.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 76,
+        "spine": 11.5,
+        "pdfWidth": 819.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 80,
+        "spine": 11.5,
+        "pdfWidth": 819.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 84,
+        "spine": 11.5,
+        "pdfWidth": 819.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 88,
+        "spine": 11.5,
+        "pdfWidth": 819.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 92,
+        "spine": 12.6,
+        "pdfWidth": 820.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-glossy",
+        "pages": 96,
+        "spine": 12.6,
+        "pdfWidth": 820.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 100,
+        "spine": 12.6,
+        "pdfWidth": 820.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 104,
+        "spine": 12.6,
+        "pdfWidth": 820.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 108,
+        "spine": 13.7,
+        "pdfWidth": 821.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 112,
+        "spine": 13.7,
+        "pdfWidth": 821.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 116,
+        "spine": 13.7,
+        "pdfWidth": 821.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 120,
+        "spine": 13.7,
+        "pdfWidth": 821.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 124,
+        "spine": 14.8,
+        "pdfWidth": 822.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 128,
+        "spine": 14.8,
+        "pdfWidth": 822.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 132,
+        "spine": 14.8,
+        "pdfWidth": 822.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 136,
+        "spine": 14.8,
+        "pdfWidth": 822.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 140,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 144,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 148,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 152,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 156,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 160,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 164,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 168,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 172,
+        "spine": 18.1,
+        "pdfWidth": 826.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 176,
+        "spine": 18.1,
+        "pdfWidth": 826.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 180,
+        "spine": 18.1,
+        "pdfWidth": 826.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 184,
+        "spine": 18.1,
+        "pdfWidth": 826.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 188,
+        "spine": 19.2,
+        "pdfWidth": 827.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 192,
+        "spine": 19.2,
+        "pdfWidth": 827.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 196,
+        "spine": 19.2,
+        "pdfWidth": 827.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 200,
+        "spine": 19.2,
+        "pdfWidth": 827.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 28,
+        "spine": 8.2,
+        "pdfWidth": 816.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 32,
+        "spine": 8.2,
+        "pdfWidth": 816.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 36,
+        "spine": 8.2,
+        "pdfWidth": 816.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 40,
+        "spine": 8.2,
+        "pdfWidth": 816.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 44,
+        "spine": 9.3,
+        "pdfWidth": 817.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 48,
+        "spine": 9.3,
+        "pdfWidth": 817.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 52,
+        "spine": 9.3,
+        "pdfWidth": 817.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 56,
+        "spine": 9.3,
+        "pdfWidth": 817.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 60,
+        "spine": 10.4,
+        "pdfWidth": 818.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 64,
+        "spine": 10.4,
+        "pdfWidth": 818.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 68,
+        "spine": 10.4,
+        "pdfWidth": 818.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 72,
+        "spine": 10.4,
+        "pdfWidth": 818.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 76,
+        "spine": 11.5,
+        "pdfWidth": 819.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 80,
+        "spine": 11.5,
+        "pdfWidth": 819.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 84,
+        "spine": 11.5,
+        "pdfWidth": 819.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 88,
+        "spine": 11.5,
+        "pdfWidth": 819.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 92,
+        "spine": 12.6,
+        "pdfWidth": 820.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-highgloss",
+        "pages": 96,
+        "spine": 12.6,
+        "pdfWidth": 820.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 100,
+        "spine": 14.4,
+        "pdfWidth": 822.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 104,
+        "spine": 14.4,
+        "pdfWidth": 822.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 108,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 112,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 116,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 120,
+        "spine": 15.9,
+        "pdfWidth": 823.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 124,
+        "spine": 17.4,
+        "pdfWidth": 825.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 128,
+        "spine": 17.4,
+        "pdfWidth": 825.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 132,
+        "spine": 17.4,
+        "pdfWidth": 825.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 136,
+        "spine": 17.4,
+        "pdfWidth": 825.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 140,
+        "spine": 18.9,
+        "pdfWidth": 826.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 144,
+        "spine": 18.9,
+        "pdfWidth": 826.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 148,
+        "spine": 18.9,
+        "pdfWidth": 826.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 152,
+        "spine": 18.9,
+        "pdfWidth": 826.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 156,
+        "spine": 20.4,
+        "pdfWidth": 828.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 160,
+        "spine": 20.4,
+        "pdfWidth": 828.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 164,
+        "spine": 20.4,
+        "pdfWidth": 828.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 168,
+        "spine": 20.4,
+        "pdfWidth": 828.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 172,
+        "spine": 21.9,
+        "pdfWidth": 829.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 176,
+        "spine": 21.9,
+        "pdfWidth": 829.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 180,
+        "spine": 21.9,
+        "pdfWidth": 829.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 184,
+        "spine": 21.9,
+        "pdfWidth": 829.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 188,
+        "spine": 23.4,
+        "pdfWidth": 831.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 192,
+        "spine": 23.4,
+        "pdfWidth": 831.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 196,
+        "spine": 23.4,
+        "pdfWidth": 831.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 200,
+        "spine": 23.4,
+        "pdfWidth": 831.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 28,
+        "spine": 8.4,
+        "pdfWidth": 816.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 32,
+        "spine": 8.4,
+        "pdfWidth": 816.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 36,
+        "spine": 8.4,
+        "pdfWidth": 816.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 40,
+        "spine": 8.4,
+        "pdfWidth": 816.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 44,
+        "spine": 9.9,
+        "pdfWidth": 817.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 48,
+        "spine": 9.9,
+        "pdfWidth": 817.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 52,
+        "spine": 9.9,
+        "pdfWidth": 817.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 56,
+        "spine": 9.9,
+        "pdfWidth": 817.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 60,
+        "spine": 11.4,
+        "pdfWidth": 819.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 64,
+        "spine": 11.4,
+        "pdfWidth": 819.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 68,
+        "spine": 11.4,
+        "pdfWidth": 819.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 72,
+        "spine": 11.4,
+        "pdfWidth": 819.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 76,
+        "spine": 12.9,
+        "pdfWidth": 820.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 80,
+        "spine": 12.9,
+        "pdfWidth": 820.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 84,
+        "spine": 12.9,
+        "pdfWidth": 820.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 88,
+        "spine": 12.9,
+        "pdfWidth": 820.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 92,
+        "spine": 14.4,
+        "pdfWidth": 822.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-digital-matte",
+        "pages": 96,
+        "spine": 14.4,
+        "pdfWidth": 822.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 100,
+        "spine": 24.5,
+        "pdfWidth": 832.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 28,
+        "spine": 11.0,
+        "pdfWidth": 819.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 32,
+        "spine": 11.0,
+        "pdfWidth": 819.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 36,
+        "spine": 12.5,
+        "pdfWidth": 820.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 40,
+        "spine": 12.5,
+        "pdfWidth": 820.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 44,
+        "spine": 14.0,
+        "pdfWidth": 822.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 48,
+        "spine": 14.0,
+        "pdfWidth": 822.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 52,
+        "spine": 15.5,
+        "pdfWidth": 823.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 56,
+        "spine": 15.5,
+        "pdfWidth": 823.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 60,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 64,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 68,
+        "spine": 18.5,
+        "pdfWidth": 826.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 72,
+        "spine": 18.5,
+        "pdfWidth": 826.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 76,
+        "spine": 20.0,
+        "pdfWidth": 828.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 80,
+        "spine": 20.0,
+        "pdfWidth": 828.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 84,
+        "spine": 21.5,
+        "pdfWidth": 829.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 88,
+        "spine": 21.5,
+        "pdfWidth": 829.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 92,
+        "spine": 23.0,
+        "pdfWidth": 831.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 96,
+        "spine": 23.0,
+        "pdfWidth": 831.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 100,
+        "spine": 24.5,
+        "pdfWidth": 832.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 28,
+        "spine": 11.0,
+        "pdfWidth": 819.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 32,
+        "spine": 11.0,
+        "pdfWidth": 819.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 36,
+        "spine": 12.5,
+        "pdfWidth": 820.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 40,
+        "spine": 12.5,
+        "pdfWidth": 820.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 44,
+        "spine": 14.0,
+        "pdfWidth": 822.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 48,
+        "spine": 14.0,
+        "pdfWidth": 822.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 52,
+        "spine": 15.5,
+        "pdfWidth": 823.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 56,
+        "spine": 15.5,
+        "pdfWidth": 823.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 60,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 64,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 68,
+        "spine": 18.5,
+        "pdfWidth": 826.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 72,
+        "spine": 18.5,
+        "pdfWidth": 826.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 76,
+        "spine": 20.0,
+        "pdfWidth": 828.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 80,
+        "spine": 20.0,
+        "pdfWidth": 828.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 84,
+        "spine": 21.5,
+        "pdfWidth": 829.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 88,
+        "spine": 21.5,
+        "pdfWidth": 829.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 92,
+        "spine": 23.0,
+        "pdfWidth": 831.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 96,
+        "spine": 23.0,
+        "pdfWidth": 831.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 100,
+        "spine": 24.5,
+        "pdfWidth": 832.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 28,
+        "spine": 11.0,
+        "pdfWidth": 819.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 32,
+        "spine": 11.0,
+        "pdfWidth": 819.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 36,
+        "spine": 12.5,
+        "pdfWidth": 820.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 40,
+        "spine": 12.5,
+        "pdfWidth": 820.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 44,
+        "spine": 14.0,
+        "pdfWidth": 822.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 48,
+        "spine": 14.0,
+        "pdfWidth": 822.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 52,
+        "spine": 15.5,
+        "pdfWidth": 823.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 56,
+        "spine": 15.5,
+        "pdfWidth": 823.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 60,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 64,
+        "spine": 17.0,
+        "pdfWidth": 825.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 68,
+        "spine": 18.5,
+        "pdfWidth": 826.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 72,
+        "spine": 18.5,
+        "pdfWidth": 826.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 76,
+        "spine": 20.0,
+        "pdfWidth": 828.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 80,
+        "spine": 20.0,
+        "pdfWidth": 828.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 84,
+        "spine": 21.5,
+        "pdfWidth": 829.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 88,
+        "spine": 21.5,
+        "pdfWidth": 829.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 92,
+        "spine": 23.0,
+        "pdfWidth": 831.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3landscape",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 96,
+        "spine": 23.0,
+        "pdfWidth": 831.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 100,
+        "spine": 12.6,
+        "pdfWidth": 584.6,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 104,
+        "spine": 12.6,
+        "pdfWidth": 584.6,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 108,
+        "spine": 13.7,
+        "pdfWidth": 585.7,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 112,
+        "spine": 13.7,
+        "pdfWidth": 585.7,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 116,
+        "spine": 13.7,
+        "pdfWidth": 585.7,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 120,
+        "spine": 13.7,
+        "pdfWidth": 585.7,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 124,
+        "spine": 14.8,
+        "pdfWidth": 586.8,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 128,
+        "spine": 14.8,
+        "pdfWidth": 586.8,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 132,
+        "spine": 14.8,
+        "pdfWidth": 586.8,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 136,
+        "spine": 14.8,
+        "pdfWidth": 586.8,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 140,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 144,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 148,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 152,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 156,
+        "spine": 17.0,
+        "pdfWidth": 589.0,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 160,
+        "spine": 17.0,
+        "pdfWidth": 589.0,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 164,
+        "spine": 17.0,
+        "pdfWidth": 589.0,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 168,
+        "spine": 17.0,
+        "pdfWidth": 589.0,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 172,
+        "spine": 18.1,
+        "pdfWidth": 590.1,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 176,
+        "spine": 18.1,
+        "pdfWidth": 590.1,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 180,
+        "spine": 18.1,
+        "pdfWidth": 590.1,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 184,
+        "spine": 18.1,
+        "pdfWidth": 590.1,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 188,
+        "spine": 19.2,
+        "pdfWidth": 591.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 192,
+        "spine": 19.2,
+        "pdfWidth": 591.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 196,
+        "spine": 19.2,
+        "pdfWidth": 591.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 200,
+        "spine": 19.2,
+        "pdfWidth": 591.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 28,
+        "spine": 8.2,
+        "pdfWidth": 580.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 32,
+        "spine": 8.2,
+        "pdfWidth": 580.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 36,
+        "spine": 8.2,
+        "pdfWidth": 580.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 40,
+        "spine": 8.2,
+        "pdfWidth": 580.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 44,
+        "spine": 9.3,
+        "pdfWidth": 581.3,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 48,
+        "spine": 9.3,
+        "pdfWidth": 581.3,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 52,
+        "spine": 9.3,
+        "pdfWidth": 581.3,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 56,
+        "spine": 9.3,
+        "pdfWidth": 581.3,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 60,
+        "spine": 10.4,
+        "pdfWidth": 582.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 64,
+        "spine": 10.4,
+        "pdfWidth": 582.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 68,
+        "spine": 10.4,
+        "pdfWidth": 582.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 72,
+        "spine": 10.4,
+        "pdfWidth": 582.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 76,
+        "spine": 11.5,
+        "pdfWidth": 583.5,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 80,
+        "spine": 11.5,
+        "pdfWidth": 583.5,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 84,
+        "spine": 11.5,
+        "pdfWidth": 583.5,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 88,
+        "spine": 11.5,
+        "pdfWidth": 583.5,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 92,
+        "spine": 12.6,
+        "pdfWidth": 584.6,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-glossy",
+        "pages": 96,
+        "spine": 12.6,
+        "pdfWidth": 584.6,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 100,
+        "spine": 12.6,
+        "pdfWidth": 584.6,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 104,
+        "spine": 12.6,
+        "pdfWidth": 584.6,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 108,
+        "spine": 13.7,
+        "pdfWidth": 585.7,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 112,
+        "spine": 13.7,
+        "pdfWidth": 585.7,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 116,
+        "spine": 13.7,
+        "pdfWidth": 585.7,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 120,
+        "spine": 13.7,
+        "pdfWidth": 585.7,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 124,
+        "spine": 14.8,
+        "pdfWidth": 586.8,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 128,
+        "spine": 14.8,
+        "pdfWidth": 586.8,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 132,
+        "spine": 14.8,
+        "pdfWidth": 586.8,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 136,
+        "spine": 14.8,
+        "pdfWidth": 586.8,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 140,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 144,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 148,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 152,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 156,
+        "spine": 17.0,
+        "pdfWidth": 589.0,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 160,
+        "spine": 17.0,
+        "pdfWidth": 589.0,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 164,
+        "spine": 17.0,
+        "pdfWidth": 589.0,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 168,
+        "spine": 17.0,
+        "pdfWidth": 589.0,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 172,
+        "spine": 18.1,
+        "pdfWidth": 590.1,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 176,
+        "spine": 18.1,
+        "pdfWidth": 590.1,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 180,
+        "spine": 18.1,
+        "pdfWidth": 590.1,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 184,
+        "spine": 18.1,
+        "pdfWidth": 590.1,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 188,
+        "spine": 19.2,
+        "pdfWidth": 591.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 192,
+        "spine": 19.2,
+        "pdfWidth": 591.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 196,
+        "spine": 19.2,
+        "pdfWidth": 591.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 200,
+        "spine": 19.2,
+        "pdfWidth": 591.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 28,
+        "spine": 8.2,
+        "pdfWidth": 580.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 32,
+        "spine": 8.2,
+        "pdfWidth": 580.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 36,
+        "spine": 8.2,
+        "pdfWidth": 580.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 40,
+        "spine": 8.2,
+        "pdfWidth": 580.2,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 44,
+        "spine": 9.3,
+        "pdfWidth": 581.3,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 48,
+        "spine": 9.3,
+        "pdfWidth": 581.3,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 52,
+        "spine": 9.3,
+        "pdfWidth": 581.3,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 56,
+        "spine": 9.3,
+        "pdfWidth": 581.3,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 60,
+        "spine": 10.4,
+        "pdfWidth": 582.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 64,
+        "spine": 10.4,
+        "pdfWidth": 582.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 68,
+        "spine": 10.4,
+        "pdfWidth": 582.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 72,
+        "spine": 10.4,
+        "pdfWidth": 582.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 76,
+        "spine": 11.5,
+        "pdfWidth": 583.5,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 80,
+        "spine": 11.5,
+        "pdfWidth": 583.5,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 84,
+        "spine": 11.5,
+        "pdfWidth": 583.5,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 88,
+        "spine": 11.5,
+        "pdfWidth": 583.5,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 92,
+        "spine": 12.6,
+        "pdfWidth": 584.6,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-highgloss",
+        "pages": 96,
+        "spine": 12.6,
+        "pdfWidth": 584.6,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 100,
+        "spine": 14.4,
+        "pdfWidth": 586.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 104,
+        "spine": 14.4,
+        "pdfWidth": 586.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 108,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 112,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 116,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 120,
+        "spine": 15.9,
+        "pdfWidth": 587.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 124,
+        "spine": 17.4,
+        "pdfWidth": 589.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 128,
+        "spine": 17.4,
+        "pdfWidth": 589.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 132,
+        "spine": 17.4,
+        "pdfWidth": 589.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 136,
+        "spine": 17.4,
+        "pdfWidth": 589.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 140,
+        "spine": 18.9,
+        "pdfWidth": 590.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 144,
+        "spine": 18.9,
+        "pdfWidth": 590.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 148,
+        "spine": 18.9,
+        "pdfWidth": 590.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 152,
+        "spine": 18.9,
+        "pdfWidth": 590.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 156,
+        "spine": 20.4,
+        "pdfWidth": 592.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 160,
+        "spine": 20.4,
+        "pdfWidth": 592.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 164,
+        "spine": 20.4,
+        "pdfWidth": 592.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 168,
+        "spine": 20.4,
+        "pdfWidth": 592.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 172,
+        "spine": 21.9,
+        "pdfWidth": 593.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 176,
+        "spine": 21.9,
+        "pdfWidth": 593.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 180,
+        "spine": 21.9,
+        "pdfWidth": 593.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 184,
+        "spine": 21.9,
+        "pdfWidth": 593.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 188,
+        "spine": 23.4,
+        "pdfWidth": 595.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 192,
+        "spine": 23.4,
+        "pdfWidth": 595.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 196,
+        "spine": 23.4,
+        "pdfWidth": 595.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 200,
+        "spine": 23.4,
+        "pdfWidth": 595.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 28,
+        "spine": 8.4,
+        "pdfWidth": 580.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 32,
+        "spine": 8.4,
+        "pdfWidth": 580.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 36,
+        "spine": 8.4,
+        "pdfWidth": 580.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 40,
+        "spine": 8.4,
+        "pdfWidth": 580.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 44,
+        "spine": 9.9,
+        "pdfWidth": 581.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 48,
+        "spine": 9.9,
+        "pdfWidth": 581.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 52,
+        "spine": 9.9,
+        "pdfWidth": 581.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 56,
+        "spine": 9.9,
+        "pdfWidth": 581.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 60,
+        "spine": 11.4,
+        "pdfWidth": 583.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 64,
+        "spine": 11.4,
+        "pdfWidth": 583.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 68,
+        "spine": 11.4,
+        "pdfWidth": 583.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 72,
+        "spine": 11.4,
+        "pdfWidth": 583.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 76,
+        "spine": 12.9,
+        "pdfWidth": 584.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 80,
+        "spine": 12.9,
+        "pdfWidth": 584.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 84,
+        "spine": 12.9,
+        "pdfWidth": 584.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 88,
+        "spine": 12.9,
+        "pdfWidth": 584.9,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 92,
+        "spine": 14.4,
+        "pdfWidth": 586.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3portrait",
+        "paper": "paper-digital-matte",
+        "pages": 96,
+        "spine": 14.4,
+        "pdfWidth": 586.4,
+        "pdfHeight": 382
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 100,
+        "spine": 12.6,
+        "pdfWidth": 624.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 104,
+        "spine": 12.6,
+        "pdfWidth": 624.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 108,
+        "spine": 13.7,
+        "pdfWidth": 625.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 112,
+        "spine": 13.7,
+        "pdfWidth": 625.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 116,
+        "spine": 13.7,
+        "pdfWidth": 625.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 120,
+        "spine": 13.7,
+        "pdfWidth": 625.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 124,
+        "spine": 14.8,
+        "pdfWidth": 626.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 128,
+        "spine": 14.8,
+        "pdfWidth": 626.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 132,
+        "spine": 14.8,
+        "pdfWidth": 626.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 136,
+        "spine": 14.8,
+        "pdfWidth": 626.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 140,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 144,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 148,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 152,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 156,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 160,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 164,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 168,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 172,
+        "spine": 18.1,
+        "pdfWidth": 630.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 176,
+        "spine": 18.1,
+        "pdfWidth": 630.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 180,
+        "spine": 18.1,
+        "pdfWidth": 630.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 184,
+        "spine": 18.1,
+        "pdfWidth": 630.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 188,
+        "spine": 19.2,
+        "pdfWidth": 631.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 192,
+        "spine": 19.2,
+        "pdfWidth": 631.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 196,
+        "spine": 19.2,
+        "pdfWidth": 631.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 200,
+        "spine": 19.2,
+        "pdfWidth": 631.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 28,
+        "spine": 8.2,
+        "pdfWidth": 620.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 32,
+        "spine": 8.2,
+        "pdfWidth": 620.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 36,
+        "spine": 8.2,
+        "pdfWidth": 620.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 40,
+        "spine": 8.2,
+        "pdfWidth": 620.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 44,
+        "spine": 9.3,
+        "pdfWidth": 621.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 48,
+        "spine": 9.3,
+        "pdfWidth": 621.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 52,
+        "spine": 9.3,
+        "pdfWidth": 621.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 56,
+        "spine": 9.3,
+        "pdfWidth": 621.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 60,
+        "spine": 10.4,
+        "pdfWidth": 622.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 64,
+        "spine": 10.4,
+        "pdfWidth": 622.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 68,
+        "spine": 10.4,
+        "pdfWidth": 622.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 72,
+        "spine": 10.4,
+        "pdfWidth": 622.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 76,
+        "spine": 11.5,
+        "pdfWidth": 623.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 80,
+        "spine": 11.5,
+        "pdfWidth": 623.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 84,
+        "spine": 11.5,
+        "pdfWidth": 623.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 88,
+        "spine": 11.5,
+        "pdfWidth": 623.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 92,
+        "spine": 12.6,
+        "pdfWidth": 624.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-glossy",
+        "pages": 96,
+        "spine": 12.6,
+        "pdfWidth": 624.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 100,
+        "spine": 12.6,
+        "pdfWidth": 624.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 104,
+        "spine": 12.6,
+        "pdfWidth": 624.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 108,
+        "spine": 13.7,
+        "pdfWidth": 625.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 112,
+        "spine": 13.7,
+        "pdfWidth": 625.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 116,
+        "spine": 13.7,
+        "pdfWidth": 625.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 120,
+        "spine": 13.7,
+        "pdfWidth": 625.7,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 124,
+        "spine": 14.8,
+        "pdfWidth": 626.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 128,
+        "spine": 14.8,
+        "pdfWidth": 626.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 132,
+        "spine": 14.8,
+        "pdfWidth": 626.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 136,
+        "spine": 14.8,
+        "pdfWidth": 626.8,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 140,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 144,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 148,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 152,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 156,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 160,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 164,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 168,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 172,
+        "spine": 18.1,
+        "pdfWidth": 630.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 176,
+        "spine": 18.1,
+        "pdfWidth": 630.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 180,
+        "spine": 18.1,
+        "pdfWidth": 630.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 184,
+        "spine": 18.1,
+        "pdfWidth": 630.1,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 188,
+        "spine": 19.2,
+        "pdfWidth": 631.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 192,
+        "spine": 19.2,
+        "pdfWidth": 631.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 196,
+        "spine": 19.2,
+        "pdfWidth": 631.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 200,
+        "spine": 19.2,
+        "pdfWidth": 631.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 28,
+        "spine": 8.2,
+        "pdfWidth": 620.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 32,
+        "spine": 8.2,
+        "pdfWidth": 620.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 36,
+        "spine": 8.2,
+        "pdfWidth": 620.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 40,
+        "spine": 8.2,
+        "pdfWidth": 620.2,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 44,
+        "spine": 9.3,
+        "pdfWidth": 621.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 48,
+        "spine": 9.3,
+        "pdfWidth": 621.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 52,
+        "spine": 9.3,
+        "pdfWidth": 621.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 56,
+        "spine": 9.3,
+        "pdfWidth": 621.3,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 60,
+        "spine": 10.4,
+        "pdfWidth": 622.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 64,
+        "spine": 10.4,
+        "pdfWidth": 622.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 68,
+        "spine": 10.4,
+        "pdfWidth": 622.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 72,
+        "spine": 10.4,
+        "pdfWidth": 622.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 76,
+        "spine": 11.5,
+        "pdfWidth": 623.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 80,
+        "spine": 11.5,
+        "pdfWidth": 623.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 84,
+        "spine": 11.5,
+        "pdfWidth": 623.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 88,
+        "spine": 11.5,
+        "pdfWidth": 623.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 92,
+        "spine": 12.6,
+        "pdfWidth": 624.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-highgloss",
+        "pages": 96,
+        "spine": 12.6,
+        "pdfWidth": 624.6,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 100,
+        "spine": 14.4,
+        "pdfWidth": 626.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 104,
+        "spine": 14.4,
+        "pdfWidth": 626.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 108,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 112,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 116,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 120,
+        "spine": 15.9,
+        "pdfWidth": 627.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 124,
+        "spine": 17.4,
+        "pdfWidth": 629.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 128,
+        "spine": 17.4,
+        "pdfWidth": 629.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 132,
+        "spine": 17.4,
+        "pdfWidth": 629.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 136,
+        "spine": 17.4,
+        "pdfWidth": 629.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 140,
+        "spine": 18.9,
+        "pdfWidth": 630.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 144,
+        "spine": 18.9,
+        "pdfWidth": 630.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 148,
+        "spine": 18.9,
+        "pdfWidth": 630.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 152,
+        "spine": 18.9,
+        "pdfWidth": 630.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 156,
+        "spine": 20.4,
+        "pdfWidth": 632.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 160,
+        "spine": 20.4,
+        "pdfWidth": 632.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 164,
+        "spine": 20.4,
+        "pdfWidth": 632.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 168,
+        "spine": 20.4,
+        "pdfWidth": 632.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 172,
+        "spine": 21.9,
+        "pdfWidth": 633.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 176,
+        "spine": 21.9,
+        "pdfWidth": 633.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 180,
+        "spine": 21.9,
+        "pdfWidth": 633.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 184,
+        "spine": 21.9,
+        "pdfWidth": 633.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 188,
+        "spine": 23.4,
+        "pdfWidth": 635.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 192,
+        "spine": 23.4,
+        "pdfWidth": 635.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 196,
+        "spine": 23.4,
+        "pdfWidth": 635.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 200,
+        "spine": 23.4,
+        "pdfWidth": 635.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 28,
+        "spine": 8.4,
+        "pdfWidth": 620.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 32,
+        "spine": 8.4,
+        "pdfWidth": 620.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 36,
+        "spine": 8.4,
+        "pdfWidth": 620.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 40,
+        "spine": 8.4,
+        "pdfWidth": 620.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 44,
+        "spine": 9.9,
+        "pdfWidth": 621.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 48,
+        "spine": 9.9,
+        "pdfWidth": 621.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 52,
+        "spine": 9.9,
+        "pdfWidth": 621.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 56,
+        "spine": 9.9,
+        "pdfWidth": 621.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 60,
+        "spine": 11.4,
+        "pdfWidth": 623.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 64,
+        "spine": 11.4,
+        "pdfWidth": 623.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 68,
+        "spine": 11.4,
+        "pdfWidth": 623.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 72,
+        "spine": 11.4,
+        "pdfWidth": 623.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 76,
+        "spine": 12.9,
+        "pdfWidth": 624.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 80,
+        "spine": 12.9,
+        "pdfWidth": 624.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 84,
+        "spine": 12.9,
+        "pdfWidth": 624.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 88,
+        "spine": 12.9,
+        "pdfWidth": 624.9,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 92,
+        "spine": 14.4,
+        "pdfWidth": 626.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-digital-matte",
+        "pages": 96,
+        "spine": 14.4,
+        "pdfWidth": 626.4,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 100,
+        "spine": 24.5,
+        "pdfWidth": 636.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 104,
+        "spine": 24.5,
+        "pdfWidth": 636.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 108,
+        "spine": 26.0,
+        "pdfWidth": 638.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 112,
+        "spine": 26.0,
+        "pdfWidth": 638.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 28,
+        "spine": 11.0,
+        "pdfWidth": 623.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 32,
+        "spine": 11.0,
+        "pdfWidth": 623.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 36,
+        "spine": 12.5,
+        "pdfWidth": 624.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 40,
+        "spine": 12.5,
+        "pdfWidth": 624.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 44,
+        "spine": 14.0,
+        "pdfWidth": 626.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 48,
+        "spine": 14.0,
+        "pdfWidth": 626.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 52,
+        "spine": 15.5,
+        "pdfWidth": 627.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 56,
+        "spine": 15.5,
+        "pdfWidth": 627.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 60,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 64,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 68,
+        "spine": 18.5,
+        "pdfWidth": 630.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 72,
+        "spine": 18.5,
+        "pdfWidth": 630.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 76,
+        "spine": 20.0,
+        "pdfWidth": 632.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 80,
+        "spine": 20.0,
+        "pdfWidth": 632.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 84,
+        "spine": 21.5,
+        "pdfWidth": 633.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 88,
+        "spine": 21.5,
+        "pdfWidth": 633.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 92,
+        "spine": 23.0,
+        "pdfWidth": 635.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-glossy",
+        "pages": 96,
+        "spine": 23.0,
+        "pdfWidth": 635.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 100,
+        "spine": 24.5,
+        "pdfWidth": 636.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 104,
+        "spine": 24.5,
+        "pdfWidth": 636.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 108,
+        "spine": 26.0,
+        "pdfWidth": 638.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 112,
+        "spine": 26.0,
+        "pdfWidth": 638.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 28,
+        "spine": 11.0,
+        "pdfWidth": 623.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 32,
+        "spine": 11.0,
+        "pdfWidth": 623.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 36,
+        "spine": 12.5,
+        "pdfWidth": 624.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 40,
+        "spine": 12.5,
+        "pdfWidth": 624.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 44,
+        "spine": 14.0,
+        "pdfWidth": 626.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 48,
+        "spine": 14.0,
+        "pdfWidth": 626.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 52,
+        "spine": 15.5,
+        "pdfWidth": 627.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 56,
+        "spine": 15.5,
+        "pdfWidth": 627.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 60,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 64,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 68,
+        "spine": 18.5,
+        "pdfWidth": 630.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 72,
+        "spine": 18.5,
+        "pdfWidth": 630.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 76,
+        "spine": 20.0,
+        "pdfWidth": 632.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 80,
+        "spine": 20.0,
+        "pdfWidth": 632.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 84,
+        "spine": 21.5,
+        "pdfWidth": 633.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 88,
+        "spine": 21.5,
+        "pdfWidth": 633.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 92,
+        "spine": 23.0,
+        "pdfWidth": 635.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-semi-matte",
+        "pages": 96,
+        "spine": 23.0,
+        "pdfWidth": 635.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 100,
+        "spine": 24.5,
+        "pdfWidth": 636.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 104,
+        "spine": 24.5,
+        "pdfWidth": 636.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 108,
+        "spine": 26.0,
+        "pdfWidth": 638.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 112,
+        "spine": 26.0,
+        "pdfWidth": 638.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 28,
+        "spine": 11.0,
+        "pdfWidth": 623.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 32,
+        "spine": 11.0,
+        "pdfWidth": 623.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 36,
+        "spine": 12.5,
+        "pdfWidth": 624.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 40,
+        "spine": 12.5,
+        "pdfWidth": 624.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 44,
+        "spine": 14.0,
+        "pdfWidth": 626.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 48,
+        "spine": 14.0,
+        "pdfWidth": 626.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 52,
+        "spine": 15.5,
+        "pdfWidth": 627.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 56,
+        "spine": 15.5,
+        "pdfWidth": 627.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 60,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 64,
+        "spine": 17.0,
+        "pdfWidth": 629.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 68,
+        "spine": 18.5,
+        "pdfWidth": 630.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 72,
+        "spine": 18.5,
+        "pdfWidth": 630.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 76,
+        "spine": 20.0,
+        "pdfWidth": 632.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 80,
+        "spine": 20.0,
+        "pdfWidth": 632.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 84,
+        "spine": 21.5,
+        "pdfWidth": 633.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 88,
+        "spine": 21.5,
+        "pdfWidth": 633.5,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 92,
+        "spine": 23.0,
+        "pdfWidth": 635.0,
+        "pdfHeight": 316
+      },
+      {
+        "size": "A3square",
+        "paper": "paper-fujiCrystal-velvet",
+        "pages": 96,
+        "spine": 23.0,
+        "pdfWidth": 635.0,
+        "pdfHeight": 316
+      }
+    ]
+  },
+  "blurb": [
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 72,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 74,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 78,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 84,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 98,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 124,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 136,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 142,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 146,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 150,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 176,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 202,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 216,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 218,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 222,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 230,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 282,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 294,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 296,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 300,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 308,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 334,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 360,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 366,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 368,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 372,
+          "pdf": [
+            1849,
+            918
+          ],
+          "trim": [
+            1805,
+            874
+          ],
+          "spine": 89,
+          "flap": null
+        },
+        {
+          "pages": 386,
+          "pdf": [
+            1849,
+            918
+          ],
+          "trim": [
+            1805,
+            874
+          ],
+          "spine": 89,
+          "flap": null
+        },
+        {
+          "pages": 440,
+          "pdf": [
+            1849,
+            918
+          ],
+          "trim": [
+            1805,
+            874
+          ],
+          "spine": 89,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "hardcover",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 66,
+          "flap": 267
+        }
+      ]
+    },
+    {
+      "size": "large_square",
+      "paper": "premium-matte",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 46,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 48,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 52,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 74,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 88,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 94,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 98,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 102,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 130,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 156,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 158,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 162,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 170,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 184,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 198,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 204,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 212,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_square",
+      "paper": "premium-matte",
+      "cover": "hardcover",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 66,
+          "flap": 267
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 79,
+          "flap": 261
+        }
+      ]
+    },
+    {
+      "size": "large_square",
+      "paper": "pro-uncoated-paper",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 32,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 38,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 46,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 74,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 84,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 88,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 102,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 116,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 118,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 122,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 130,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 156,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 158,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 162,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 170,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 184,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 198,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 204,
+          "pdf": [
+            1849,
+            918
+          ],
+          "trim": [
+            1805,
+            874
+          ],
+          "spine": 89,
+          "flap": null
+        },
+        {
+          "pages": 212,
+          "pdf": [
+            1849,
+            918
+          ],
+          "trim": [
+            1805,
+            874
+          ],
+          "spine": 89,
+          "flap": null
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            1849,
+            918
+          ],
+          "trim": [
+            1805,
+            874
+          ],
+          "spine": 89,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_square",
+      "paper": "pro-uncoated-paper",
+      "cover": "hardcover",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 66,
+          "flap": 267
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 79,
+          "flap": 261
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 89,
+          "flap": 256
+        }
+      ]
+    },
+    {
+      "size": "large_square",
+      "paper": "pro-medium-gloss-paper",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 32,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 38,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1793,
+            918
+          ],
+          "trim": [
+            1749,
+            874
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 46,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 74,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1801,
+            918
+          ],
+          "trim": [
+            1757,
+            874
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 84,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 88,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 102,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 116,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 118,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 122,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 130,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 156,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 158,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            1826,
+            918
+          ],
+          "trim": [
+            1782,
+            874
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 162,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 170,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 184,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 198,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            1839,
+            918
+          ],
+          "trim": [
+            1795,
+            874
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 204,
+          "pdf": [
+            1849,
+            918
+          ],
+          "trim": [
+            1805,
+            874
+          ],
+          "spine": 89,
+          "flap": null
+        },
+        {
+          "pages": 212,
+          "pdf": [
+            1849,
+            918
+          ],
+          "trim": [
+            1805,
+            874
+          ],
+          "spine": 89,
+          "flap": null
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            1849,
+            918
+          ],
+          "trim": [
+            1805,
+            874
+          ],
+          "spine": 89,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_square",
+      "paper": "pro-medium-gloss-paper",
+      "cover": "hardcover",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 33,
+          "flap": 284
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 41,
+          "flap": 280
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 54,
+          "flap": 273
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            2376,
+            882
+          ],
+          "trim": [
+            2358,
+            864
+          ],
+          "spine": 66,
+          "flap": 267
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 79,
+          "flap": 261
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            2377,
+            882
+          ],
+          "trim": [
+            2359,
+            864
+          ],
+          "spine": 89,
+          "flap": 256
+        }
+      ]
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1800,
+            918
+          ],
+          "trim": [
+            1756,
+            874
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1800,
+            918
+          ],
+          "trim": [
+            1756,
+            874
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 30,
+          "pdf": [
+            1800,
+            918
+          ],
+          "trim": [
+            1756,
+            874
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 32,
+          "pdf": [
+            1800,
+            918
+          ],
+          "trim": [
+            1756,
+            874
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 36,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 46,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 48,
+          "pdf": [
+            1814,
+            918
+          ],
+          "trim": [
+            1770,
+            874
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 52,
+          "pdf": [
+            1831,
+            918
+          ],
+          "trim": [
+            1787,
+            874
+          ],
+          "spine": 71,
+          "flap": null
+        },
+        {
+          "pages": 58,
+          "pdf": [
+            1831,
+            918
+          ],
+          "trim": [
+            1787,
+            874
+          ],
+          "spine": 71,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1831,
+            918
+          ],
+          "trim": [
+            1787,
+            874
+          ],
+          "spine": 71,
+          "flap": null
+        },
+        {
+          "pages": 64,
+          "pdf": [
+            1841,
+            918
+          ],
+          "trim": [
+            1797,
+            874
+          ],
+          "spine": 81,
+          "flap": null
+        },
+        {
+          "pages": 68,
+          "pdf": [
+            1841,
+            918
+          ],
+          "trim": [
+            1797,
+            874
+          ],
+          "spine": 81,
+          "flap": null
+        },
+        {
+          "pages": 70,
+          "pdf": [
+            1854,
+            918
+          ],
+          "trim": [
+            1810,
+            874
+          ],
+          "spine": 94,
+          "flap": null
+        },
+        {
+          "pages": 74,
+          "pdf": [
+            1854,
+            918
+          ],
+          "trim": [
+            1810,
+            874
+          ],
+          "spine": 94,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1854,
+            918
+          ],
+          "trim": [
+            1810,
+            874
+          ],
+          "spine": 94,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1854,
+            918
+          ],
+          "trim": [
+            1810,
+            874
+          ],
+          "spine": 94,
+          "flap": null
+        },
+        {
+          "pages": 86,
+          "pdf": [
+            1870,
+            918
+          ],
+          "trim": [
+            1826,
+            874
+          ],
+          "spine": 110,
+          "flap": null
+        },
+        {
+          "pages": 92,
+          "pdf": [
+            1870,
+            918
+          ],
+          "trim": [
+            1826,
+            874
+          ],
+          "spine": 110,
+          "flap": null
+        },
+        {
+          "pages": 94,
+          "pdf": [
+            1870,
+            918
+          ],
+          "trim": [
+            1826,
+            874
+          ],
+          "spine": 110,
+          "flap": null
+        },
+        {
+          "pages": 98,
+          "pdf": [
+            1897,
+            918
+          ],
+          "trim": [
+            1853,
+            874
+          ],
+          "spine": 137,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            1897,
+            918
+          ],
+          "trim": [
+            1853,
+            874
+          ],
+          "spine": 137,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            1897,
+            918
+          ],
+          "trim": [
+            1853,
+            874
+          ],
+          "spine": 137,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1800,
+            918
+          ],
+          "trim": [
+            1756,
+            874
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1800,
+            918
+          ],
+          "trim": [
+            1756,
+            874
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 30,
+          "pdf": [
+            1800,
+            918
+          ],
+          "trim": [
+            1756,
+            874
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 32,
+          "pdf": [
+            1800,
+            918
+          ],
+          "trim": [
+            1756,
+            874
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 36,
+          "pdf": [
+            1813,
+            918
+          ],
+          "trim": [
+            1769,
+            874
+          ],
+          "spine": 53,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1813,
+            918
+          ],
+          "trim": [
+            1769,
+            874
+          ],
+          "spine": 53,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1813,
+            918
+          ],
+          "trim": [
+            1769,
+            874
+          ],
+          "spine": 53,
+          "flap": null
+        },
+        {
+          "pages": 46,
+          "pdf": [
+            1823,
+            918
+          ],
+          "trim": [
+            1779,
+            874
+          ],
+          "spine": 63,
+          "flap": null
+        },
+        {
+          "pages": 52,
+          "pdf": [
+            1823,
+            918
+          ],
+          "trim": [
+            1779,
+            874
+          ],
+          "spine": 63,
+          "flap": null
+        },
+        {
+          "pages": 54,
+          "pdf": [
+            1841,
+            918
+          ],
+          "trim": [
+            1797,
+            874
+          ],
+          "spine": 81,
+          "flap": null
+        },
+        {
+          "pages": 58,
+          "pdf": [
+            1841,
+            918
+          ],
+          "trim": [
+            1797,
+            874
+          ],
+          "spine": 81,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1841,
+            918
+          ],
+          "trim": [
+            1797,
+            874
+          ],
+          "spine": 81,
+          "flap": null
+        },
+        {
+          "pages": 64,
+          "pdf": [
+            1864,
+            918
+          ],
+          "trim": [
+            1820,
+            874
+          ],
+          "spine": 104,
+          "flap": null
+        },
+        {
+          "pages": 74,
+          "pdf": [
+            1864,
+            918
+          ],
+          "trim": [
+            1820,
+            874
+          ],
+          "spine": 104,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1864,
+            918
+          ],
+          "trim": [
+            1820,
+            874
+          ],
+          "spine": 104,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1870,
+            918
+          ],
+          "trim": [
+            1826,
+            874
+          ],
+          "spine": 110,
+          "flap": null
+        },
+        {
+          "pages": 86,
+          "pdf": [
+            1870,
+            918
+          ],
+          "trim": [
+            1826,
+            874
+          ],
+          "spine": 110,
+          "flap": null
+        },
+        {
+          "pages": 92,
+          "pdf": [
+            1870,
+            918
+          ],
+          "trim": [
+            1826,
+            874
+          ],
+          "spine": 110,
+          "flap": null
+        },
+        {
+          "pages": 94,
+          "pdf": [
+            1882,
+            918
+          ],
+          "trim": [
+            1838,
+            874
+          ],
+          "spine": 122,
+          "flap": null
+        },
+        {
+          "pages": 98,
+          "pdf": [
+            1882,
+            918
+          ],
+          "trim": [
+            1838,
+            874
+          ],
+          "spine": 122,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            1904,
+            918
+          ],
+          "trim": [
+            1860,
+            874
+          ],
+          "spine": 144,
+          "flap": null
+        },
+        {
+          "pages": 104,
+          "pdf": [
+            1904,
+            918
+          ],
+          "trim": [
+            1860,
+            874
+          ],
+          "spine": 144,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            1904,
+            918
+          ],
+          "trim": [
+            1860,
+            874
+          ],
+          "spine": 144,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            1946,
+            837
+          ],
+          "trim": [
+            1902,
+            793
+          ],
+          "spine": 66,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "paper": "standard",
+      "cover": "hardcover",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 66,
+          "flap": 287
+        }
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "paper": "premium-matte",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            1946,
+            837
+          ],
+          "trim": [
+            1902,
+            793
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            1959,
+            837
+          ],
+          "trim": [
+            1915,
+            793
+          ],
+          "spine": 79,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "paper": "premium-matte",
+      "cover": "hardcover",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 66,
+          "flap": 287
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 79,
+          "flap": 280
+        }
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "paper": "pro-uncoated-paper",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            1946,
+            837
+          ],
+          "trim": [
+            1902,
+            793
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            1959,
+            837
+          ],
+          "trim": [
+            1915,
+            793
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            1969,
+            837
+          ],
+          "trim": [
+            1925,
+            793
+          ],
+          "spine": 89,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "paper": "pro-uncoated-paper",
+      "cover": "hardcover",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 66,
+          "flap": 287
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 79,
+          "flap": 280
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 89,
+          "flap": 275
+        }
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "paper": "pro-medium-gloss-paper",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1913,
+            837
+          ],
+          "trim": [
+            1869,
+            793
+          ],
+          "spine": 33,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1921,
+            837
+          ],
+          "trim": [
+            1877,
+            793
+          ],
+          "spine": 41,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            1946,
+            837
+          ],
+          "trim": [
+            1902,
+            793
+          ],
+          "spine": 66,
+          "flap": null
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            1959,
+            837
+          ],
+          "trim": [
+            1915,
+            793
+          ],
+          "spine": 79,
+          "flap": null
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            1969,
+            837
+          ],
+          "trim": [
+            1925,
+            793
+          ],
+          "spine": 89,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "paper": "pro-medium-gloss-paper",
+      "cover": "hardcover",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 33,
+          "flap": 303
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 41,
+          "flap": 299
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 112,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 120,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 54,
+          "flap": 293
+        },
+        {
+          "pages": 160,
+          "pdf": [
+            2520,
+            801
+          ],
+          "trim": [
+            2502,
+            783
+          ],
+          "spine": 66,
+          "flap": 287
+        },
+        {
+          "pages": 200,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 79,
+          "flap": 280
+        },
+        {
+          "pages": 240,
+          "pdf": [
+            2519,
+            801
+          ],
+          "trim": [
+            2501,
+            783
+          ],
+          "spine": 89,
+          "flap": 275
+        }
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1920,
+            837
+          ],
+          "trim": [
+            1876,
+            793
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1920,
+            837
+          ],
+          "trim": [
+            1876,
+            793
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1934,
+            837
+          ],
+          "trim": [
+            1890,
+            793
+          ],
+          "spine": 54,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1951,
+            837
+          ],
+          "trim": [
+            1907,
+            793
+          ],
+          "spine": 71,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1974,
+            837
+          ],
+          "trim": [
+            1930,
+            793
+          ],
+          "spine": 94,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1974,
+            837
+          ],
+          "trim": [
+            1930,
+            793
+          ],
+          "spine": 94,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            2017,
+            837
+          ],
+          "trim": [
+            1973,
+            793
+          ],
+          "spine": 137,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            2017,
+            837
+          ],
+          "trim": [
+            1973,
+            793
+          ],
+          "spine": 137,
+          "flap": null
+        }
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "samples": [
+        {
+          "pages": 20,
+          "pdf": [
+            1920,
+            837
+          ],
+          "trim": [
+            1876,
+            793
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 28,
+          "pdf": [
+            1920,
+            837
+          ],
+          "trim": [
+            1876,
+            793
+          ],
+          "spine": 40,
+          "flap": null
+        },
+        {
+          "pages": 40,
+          "pdf": [
+            1933,
+            837
+          ],
+          "trim": [
+            1889,
+            793
+          ],
+          "spine": 53,
+          "flap": null
+        },
+        {
+          "pages": 42,
+          "pdf": [
+            1933,
+            837
+          ],
+          "trim": [
+            1889,
+            793
+          ],
+          "spine": 53,
+          "flap": null
+        },
+        {
+          "pages": 60,
+          "pdf": [
+            1961,
+            837
+          ],
+          "trim": [
+            1917,
+            793
+          ],
+          "spine": 81,
+          "flap": null
+        },
+        {
+          "pages": 80,
+          "pdf": [
+            1984,
+            837
+          ],
+          "trim": [
+            1940,
+            793
+          ],
+          "spine": 104,
+          "flap": null
+        },
+        {
+          "pages": 82,
+          "pdf": [
+            1990,
+            837
+          ],
+          "trim": [
+            1946,
+            793
+          ],
+          "spine": 110,
+          "flap": null
+        },
+        {
+          "pages": 100,
+          "pdf": [
+            2024,
+            837
+          ],
+          "trim": [
+            1980,
+            793
+          ],
+          "spine": 144,
+          "flap": null
+        },
+        {
+          "pages": 110,
+          "pdf": [
+            2024,
+            837
+          ],
+          "trim": [
+            1980,
+            793
+          ],
+          "spine": 144,
+          "flap": null
+        }
+      ]
+    }
+  ],
+  "blurbValidation": {
+    "failures": [],
+    "bandsAvailable": [
+      "pro_uncoated_layflat",
+      "pro-medium-gloss-paper",
+      "pro_photo_layflat",
+      "standard",
+      "pro-uncoated-paper",
+      "premium-matte"
+    ]
+  }
+}
