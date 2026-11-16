@@ -233,3 +233,46 @@ test('code editors keep the SDK’s mappings and reach type-only package subpath
   await rebuildDependencies(root, modules);
   assert.deepEqual(JSON.parse(await readFile(join(root, 'tsconfig.json'), 'utf8')), tsconfig);
 });
+
+test('a linked package in template/packages bundles and type-checks from its TypeScript source, without a build', async (t) => {
+  const { folder, root } = await fixture(t);
+  const linked = join(root, 'packages/geo');
+  await mkdir(join(linked, 'src'), { recursive: true });
+  await writeFile(join(linked, 'package.json'), JSON.stringify({ name: 'geo', version: '1.0.0', type: 'module', main: 'src/index.ts', types: 'src/index.ts' }));
+  await writeFile(join(linked, 'src/index.ts'), "import { scale } from './scale';\nexport const project = (n: number): string => String(scale(n));\n");
+  await writeFile(join(linked, 'src/scale.ts'), 'export const scale = (n: number): number => n * 3;\n');
+  await writeFile(join(root, 'package.json'), JSON.stringify({ dependencies: { geo: 'file:packages/geo' } }));
+  const modules = join(root, 'node_modules');
+  await symlink(linked, join(modules, 'geo'));
+  const source = `import { defineTemplate } from 'imageflow';
+import { project } from 'geo';
+export const label: string = project(2);
+export default defineTemplate({ id: 'deps', version: '1', contract: 1, spreads: {} } as never);
+`;
+  await writeFile(join(root, 'index.tsx'), source);
+  const manifest = await rebuildDependencies(root, modules);
+  assert.ok(manifest);
+  assert.deepEqual(manifest.untyped, []);
+  assert.deepEqual(manifest.types, { geo: 'types/packages/geo/src/index.ts' });
+  assert.match(await readFile(join(root, 'vendor', manifest.modules.geo.js!), 'utf8'), /\*\s*3/);
+  await rm(modules, { recursive: true });
+  const check = await typeChecker(t, folder);
+  assert.deepEqual((await check()).diagnostics, []);
+  await writeFile(join(root, 'index.tsx'), source.replace('project(2)', "project('2')"));
+  const result = await check();
+  assert.equal(result.diagnostics.length, 1, JSON.stringify(result.diagnostics));
+  assert.equal(result.diagnostics[0].location?.path, 'template/index.tsx');
+});
+
+test('a linked package whose entry was never built fails the rebuild with what to do', async (t) => {
+  const { root } = await fixture(t);
+  const linked = join(root, 'packages/geo');
+  await mkdir(join(linked, 'src'), { recursive: true });
+  await writeFile(join(linked, 'package.json'), JSON.stringify({ name: 'geo', version: '1.0.0', main: 'dist/index.js', types: 'dist/index.d.ts' }));
+  await writeFile(join(linked, 'src/index.ts'), 'export const project = 1;\n');
+  await writeFile(join(root, 'package.json'), JSON.stringify({ dependencies: { geo: 'file:packages/geo' } }));
+  await symlink(linked, join(root, 'node_modules/geo'));
+  await writeFile(join(root, 'index.tsx'), "import { project } from 'geo';\nexport const value = project;\n");
+  await assert.rejects(rebuildDependencies(root, join(root, 'node_modules')),
+    /geo \(packages\/geo\) names dist\/index\.js, which does not exist\. Rebuilds do not run package scripts/);
+});

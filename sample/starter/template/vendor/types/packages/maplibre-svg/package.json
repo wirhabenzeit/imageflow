@@ -2,16 +2,16 @@
   "name": "maplibre-svg",
   "version": "1.0.0",
   "private": true,
-  "description": "A MapLibre map as SVG for print: paths in the style's colours, labels in the page's fonts. After changing src/, run npm run build (the ImageFlow checkout's TypeScript) and commit dist/: rebuilds use it as it is.",
+  "description": "A MapLibre map as SVG for print: paths in the style's colours, labels in the page's fonts. Rebuilds bundle its TypeScript source directly, so it has no build step; npm run check type-checks it (the ImageFlow checkout's TypeScript).",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
   "sideEffects": false,
   "license": "MIT",
   "peerDependencies": {
     "maplibre-gl": ">=5"
   },
   "scripts": {
-    "build": "tsc -p ."
+    "check": "tsc -p ."
   }
 }

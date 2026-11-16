@@ -43,6 +43,6 @@
   "types": {
     "maplibre-contour": "types/packages/maplibre-contour/dist/index.d.ts",
     "maplibre-gl": "types/packages/maplibre-gl/dist/maplibre-gl.d.ts",
-    "maplibre-svg": "types/packages/maplibre-svg/dist/index.d.ts"
+    "maplibre-svg": "types/packages/maplibre-svg/src/index.ts"
   }
 }

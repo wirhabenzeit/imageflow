@@ -47,7 +47,7 @@
         "./vendor/types/packages/maplibre-gl/dist/maplibre-gl.d.ts"
       ],
       "maplibre-svg": [
-        "./vendor/types/packages/maplibre-svg/dist/index.d.ts"
+        "./vendor/types/packages/maplibre-svg/src/index.ts"
       ],
       "potpack": [
         "./vendor/types/packages/potpack/index.d.ts"
