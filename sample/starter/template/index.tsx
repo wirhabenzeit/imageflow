@@ -629,7 +629,8 @@ export default defineTemplate({
         editor: { label: 'Edit map', parameters: [...mapEditorParameters], component: MapEditor, presentation: 'inline' },
       } },
       anchors: ({ params }) => [{ id: 'section', title: oneLine(params.heading), side: 'left' }],
-      credits: ({ elements }) => mapCredits(elements.map.params.style),
+      // The map is on the right page only.
+      credits: ({ elements }) => mapCredits(elements.map.params.style).map((credit) => ({ ...credit, side: 'right' as const })),
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         const { trackWidth, ...values } = ctx.elements.map.params;
