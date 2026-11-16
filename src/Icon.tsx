@@ -33,8 +33,8 @@ const icons = {
 };
 export const Icon = ({ name, size = 14, activeSide }: { name: keyof typeof icons; size?: number; activeSide?: 'left' | 'right' }) => <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">
   {name === 'pageLayouts' ? <>
-    <rect data-page-side="left" x="1.5" y="3" width="5.25" height="10" rx=".5" fill={activeSide === 'left' ? 'var(--accent)' : 'var(--muted)'} />
-    <rect data-page-side="right" x="9.25" y="3" width="5.25" height="10" rx=".5" fill={activeSide === 'right' ? 'var(--accent)' : 'var(--muted)'} />
-  </> : <path d={icons[name]} fill={name === 'spreadLayout' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />}
+    <rect data-page-side="left" x="1.5" y="3" width="5.25" height="10" rx=".5" fill="none" stroke={activeSide === 'left' ? 'var(--accent)' : 'var(--muted)'} strokeWidth="1.4" />
+    <rect data-page-side="right" x="9.25" y="3" width="5.25" height="10" rx=".5" fill="none" stroke={activeSide === 'right' ? 'var(--accent)' : 'var(--muted)'} strokeWidth="1.4" />
+  </> : <path d={icons[name]} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />}
 </svg>;
 
