@@ -907,7 +907,8 @@ export function App() {
   // so a list you scrolled elsewhere stays where you left it.
   const revealedThumb = useRef('');
   useEffect(() => {
-    if (!spreadId || revealedThumb.current === spreadId || !thumbs) return;
+    // A newly inserted button exists before its preview supplies a position; revealing it then scrolls to the top.
+    if (!spreadId || revealedThumb.current === spreadId || !thumbs?.sheets.some(sheet => sheet.spread === spreadId)) return;
     const button = thumbList.current?.querySelector<HTMLElement>('[data-spread="' + CSS.escape(spreadId) + '"]');
     const list = thumbList.current?.parentElement;
     if (!button || !list) return;
