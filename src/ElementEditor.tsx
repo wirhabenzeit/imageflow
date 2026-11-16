@@ -52,6 +52,7 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   const inline = presentation === 'inline';
   const panel = useRef<HTMLDivElement>(null);
   const inlineBox = useRef<HTMLDivElement>(null);
+  const loadingBox = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const draft = useRef<Values>({});
   const spreadDraft = useRef<Values>({});
@@ -135,6 +136,13 @@ export function ElementEditorDialog({ project, template, spread, params, target,
   useEffect(() => {
     const outside = (event: MouseEvent) => {
       if (replaying.current || panel.current?.contains(event.target as Node) || inlineBox.current?.contains(event.target as Node)) return;
+      // A click on the element while its inline editor is still loading belongs to that editor: it must neither close
+      // it nor, through the page, open it again from the start.
+      if (loadingBox.current?.contains(event.target as Node)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
       const target = event.target;
       if (!(target instanceof Element)) return;
       // Complete the active field and its save first, then perform this same click once. Pointer gestures and
@@ -317,6 +325,12 @@ export function ElementEditorDialog({ project, template, spread, params, target,
         style={{ left: at.x, top: at.y, width: at.width / at.zoom, height: at.height / at.zoom, transform: 'scale(' + at.zoom + ')',
           '--inline-zoom': at.zoom } as React.CSSProperties}>
         {prepared && <iframe ref={frame} className="element-editor-frame inline-editor-frame" inert={!!blocked || saveRejected || !showing} title={title} src={source} />}
+      </div>, stage)}
+      {/* Until the editor shows, the element says it is loading and keeps the pointer: pressing or dragging on it
+          meanwhile does nothing rather than reaching the page underneath. */}
+      {stage && at && !showing && !failed && createPortal(<div ref={loadingBox} className="inline-editor-loading" {...contain}
+        style={{ left: at.x, top: at.y, width: at.width, height: at.height }}>
+        <span className="inline-editor-loading-label" role="status"><span className="status-spinner" aria-hidden="true" />Loading {subject}…</span>
       </div>, stage)}
       {host && createPortal(<div ref={panel} className="item-controls crop-toolbar inline-editor-bar" role="toolbar" aria-label={title} {...contain}>
         {problem && <p className={'inline-editor-status' + (error || stale || saveRejected ? ' error-text' : '')} role={error || stale || saveRejected ? 'alert' : 'status'}

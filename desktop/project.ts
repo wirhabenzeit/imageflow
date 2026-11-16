@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { access, copyFile, mkdir, readFile, readdir, realpath, rm, rmdir, stat, utimes } from 'node:fs/promises';
 import * as ReactExports from 'react';
 import { dependencyWarning, isBareImport, missingDependency, readDependencyManifest, vendoredModule } from './dependencies';
+import { bundledFontCoverage } from './fonts';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BuildFailure, Loader } from 'esbuild';
 import type { AuthoringDiagnostic } from '../src/authoring';
@@ -444,6 +445,8 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
       css: book.assets.files.has('template.css') ? base + '/template/template.css' : undefined,
       assets: Object.fromEntries(Object.entries(book.assets.urls).map(([path, name]) => [path, base + '/template/' + name])),
       ...(book.assets.warnings ? { warnings: book.assets.warnings } : {}),
+      // What each bundled font can set, for `fonts` and the Book check's font coverage.
+      fonts: bundledFontCoverage(book.assets.files),
     },
   };
 }

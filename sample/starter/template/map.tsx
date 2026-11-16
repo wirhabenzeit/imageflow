@@ -1,19 +1,20 @@
-// A real map page (ADR 0006). The page draws the map live with MapLibre GL and OpenFreeMap styles through
-// <RenderedImage>: at screen resolution in the editor, and again at the format's target resolution when the book is
-// exported. The GPX tracks lie on top as vector lines, with the map's attribution. Only the map's settings are saved
-// in the book; the editor frames the view by dragging and zooming. Export needs the internet, and a later export may
+// A real map page (ADR 0006). The page draws the map with MapLibre GL from OpenFreeMap tiles through <RenderedImage>,
+// as vectors (the maplibre-svg package in packages/): paths, and labels in the book's fonts, so the PDF is sharp at any
+// zoom. The styles are in map-styles.ts. What the book adds, the GPX tracks, lies on top as vector lines drawn with
+// the same projection. The map's data is credited on the book's last page (the layouts' `credits`). Only the map's
+// settings are saved in the book; the editor frames the view by dragging and zooming. Export needs the internet, and a later export may
 // look different if the map provider changes its maps or styles.
 import React from 'react';
-import { file, geometry, issue, p, RenderedImage } from 'imageflow';
-import type { ElementEditorProps, ImageFlowNode, Rect, RenderTarget, ResolvedFormat } from 'imageflow';
+import { file, fonts, geometry, issue, p, RenderedImage } from 'imageflow';
+import type { ElementEditorProps, ImageFlowNode, Rect, ResolvedFormat } from 'imageflow';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { drawMapSvg, projector } from 'maplibre-svg';
+import type { MapView as View } from 'maplibre-svg';
+import { mapColor, mapOrigin, mapStyle, mapStyles, mapThemeColors, prepareMapLibre } from './map-styles';
+import type { ColourTheme, MapStyle } from './map-styles';
 
-export const mapOrigin = 'https://tiles.openfreemap.org';
-const styles = { liberty: 'Liberty', bright: 'Bright', positron: 'Positron' } as const;
-type MapStyle = keyof typeof styles;
-const styleUrl = (style: MapStyle) => mapOrigin + '/styles/' + style;
-export const mapAttribution = '© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors';
+export { mapOrigin };
 
 export const mapParameters = {
   // Each track is drawn in its own colour; the label names it in the list.
@@ -26,13 +27,15 @@ export const mapParameters = {
     },
     max: 12,
   }),
-  style: p.enum({ label: 'Map style', default: 'liberty', options: styles }),
+  style: p.enum({ label: 'Map style', default: 'book', options: mapStyles }),
   longitude: p.number({ label: 'Longitude', default: 17.75, min: -180, max: 180, step: .00001 }),
   latitude: p.number({ label: 'Latitude', default: 69.35, min: -85, max: 85, step: .00001 }),
   // The MapLibre zoom of the printed map: its width in CSS pixels is the element's width at 96 per inch.
   zoom: p.number({ label: 'Zoom', default: 8.5, min: 0, max: 18, step: .01 }),
   trackWidth: p.number({ label: 'Track width', default: 1, min: .3, max: 3, step: .1, unit: 'mm' }),
 };
+// A map inside the page, such as beside a story: the same settings, drawn in the page's own colours by default.
+export const insetMapParameters = { ...mapParameters, style: p.enum({ label: 'Map style', default: 'lines', options: mapStyles }) };
 // The editor owns the view; the tracks, style and line width are the element's generated controls.
 export const mapEditorParameters = ['longitude', 'latitude', 'zoom'] as const;
 type Track = { id: string; track: string; colour: string; label: string };
@@ -43,12 +46,6 @@ const cssPerMm = 96 / 25.4;
 // The map's area: the whole spread with its bleed.
 export const mapRect = (format: ResolvedFormat) => geometry.spread(format, 'bleed');
 
-// Web Mercator, as MapLibre uses it: x and y in 0–1 across the world, and 512 CSS pixels per world at zoom 0.
-const mercator = ([longitude, latitude]: number[]) => {
-  const sin = Math.sin(Math.max(-85.05113, Math.min(85.05113, latitude)) * Math.PI / 180);
-  return [(longitude + 180) / 360, .5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)];
-};
-
 // Track points of a GPX file as [longitude, latitude].
 export function trackPoints(text: string) {
   const xml = new DOMParser().parseFromString(text, 'application/xml');
@@ -58,15 +55,9 @@ export function trackPoints(text: string) {
   return points;
 }
 
-/** The track in the element's CSS pixels, for the same view the map shows. */
-function projectTrack(points: number[][], values: Pick<MapValues, 'longitude' | 'latitude' | 'zoom'>, width: number, height: number) {
-  const world = 512 * 2 ** values.zoom;
-  const [cx, cy] = mercator([values.longitude, values.latitude]);
-  return points.map((point) => {
-    const [x, y] = mercator(point);
-    return ((x - cx) * world + width / 2).toFixed(1) + ',' + ((y - cy) * world + height / 2).toFixed(1);
-  }).join(' ');
-}
+/** The track in the element's CSS pixels, projected as the drawn map is. */
+const projectTrack = (points: number[][], project: ReturnType<typeof projector>) =>
+  points.map((point) => project(point).map((value) => value.toFixed(1)).join(',')).join(' ');
 
 function readTrack(id: string) {
   const source = file(id);
@@ -87,52 +78,65 @@ function trackBounds(tracks: ReturnType<typeof readTracks>): [[number, number], 
 type MapLibre = typeof import('maplibre-gl');
 // MapLibre is evaluated only when a map is drawn, so other pages never load it. Its package is CommonJS, so the
 // bundle exposes it as the default export.
-const loadMapLibre = () => import('maplibre-gl').then((module) => ((module as { default?: MapLibre }).default ?? module) as MapLibre);
+const loadMapLibre = () => import('maplibre-gl').then((module) => {
+  const maplibre = ((module as { default?: MapLibre }).default ?? module) as MapLibre;
+  // Contour tiles come from a protocol of maplibre-contour (map-styles.ts).
+  prepareMapLibre(maplibre as unknown as Parameters<typeof prepareMapLibre>[0]);
+  return maplibre;
+});
+
+// The map's labels in the book's fonts. Each role of the styles' font stacks gets a class the stylesheet sets
+// (.map-label-place and so on, in styles.css), and the font that class names, so labels keep only what it can set.
+const labelFonts = {
+  place: { className: 'map-label-place', font: { family: 'Field Serif', weight: 600, style: 'normal' } },
+  water: { className: 'map-label-water', font: { family: 'Field Serif', weight: 400, style: 'italic' } },
+  plain: { className: 'map-label', font: { family: 'Field Sans', weight: 500, style: 'normal' } },
+} as const;
+const labelRole = (stack: string[]) => {
+  const name = stack.join(' ');
+  return labelFonts[/italic/i.test(name) ? 'water' : /bold/i.test(name) ? 'place' : 'plain'];
+};
 
 /**
- * Draws the view off screen at the element's size and the target's resolution, once every tile and the style have
- * loaded. A style or tile that fails to load fails the whole map, so a print never has holes in it.
+ * The map as SVG markup (`output="vector"`), drawn off screen once every tile and the style have loaded. A style or
+ * tile that fails to load fails the whole map, so a print never has holes in it. Labels keep what the book's fonts can
+ * set (fonts.settable): the fonts cover Latin and Cyrillic, letters lose marks the fonts lack (ş → s), and characters
+ * they have no glyphs for, such as a Chinese or Arabic line of a name, are left out.
  */
-async function drawMap(view: { style: MapStyle; longitude: number; latitude: number; zoom: number }, target: RenderTarget) {
-  const maplibregl = await loadMapLibre();
-  target.signal.throwIfAborted();
-  const holder = document.createElement('div');
-  holder.style.cssText = 'position:fixed;left:-20000px;top:0;width:' + target.width + 'px;height:' + target.height + 'px;';
-  document.body.append(holder);
-  const map = new maplibregl.Map({
-    container: holder, style: styleUrl(view.style), center: [view.longitude, view.latitude], zoom: view.zoom,
-    interactive: false, attributionControl: false, fadeDuration: 0, pixelRatio: target.pixelRatio, maxCanvasSize: [16384, 16384],
-    canvasContextAttributes: { preserveDrawingBuffer: true },
-  });
+async function drawMap(style: MapStyle, view: View, signal: AbortSignal) {
   try {
-    await new Promise<void>((resolve, reject) => {
-      const abort = () => reject(new Error('stopped'));
-      target.signal.addEventListener('abort', abort, { once: true });
-      map.on('error', (event) => reject(new Error((event.error?.message ?? 'a map resource did not load') + ' (' + mapOrigin + ')')));
-      map.once('idle', () => { target.signal.removeEventListener('abort', abort); resolve(); });
-    });
-    return map.getCanvas();
-  } finally {
-    // The canvas is encoded before the map goes; removing it after a tick keeps the drawing buffer until then.
-    setTimeout(() => { map.remove(); holder.remove(); }, 0);
+    return await drawMapSvg({ maplibre: await loadMapLibre(), style: mapStyle(style), view, signal,
+      // The Book style's colours as CSS variables, which the map element sets from the colour theme.
+      color: mapColor(style),
+      font: (stack) => ({ className: labelRole(stack).className }),
+      text: (label, stack) => fonts.settable(label, labelRole(stack).font) });
+  } catch (error) {
+    throw new Error((error instanceof Error ? error.message : String(error)) + ' (' + mapOrigin + ')');
   }
 }
 
-/** The map as the page draws it: the map picture, the tracks over it in list order, and the attribution. */
-export function MapView({ values, trackWidth, rect, Element }: {
+/** The map as the page draws it: the map picture and the tracks over it in list order. */
+export function MapView({ values, trackWidth, rect, theme, className, Element }: {
   values: MapValues; trackWidth: number; rect: Rect;
+  // `map-inset` for a map inside the page's margins.
+  className?: string;
+  // The book's colour theme, which the Book style follows.
+  theme: ColourTheme;
   Element: (props: { id: 'map'; rect: Rect; className?: string; children?: ImageFlowNode }) => ImageFlowNode;
 }) {
   const width = rect.width * cssPerMm, height = rect.height * cssPerMm;
   const tracks = readTracks(values.tracks);
-  const view = { style: values.style, longitude: values.longitude, latitude: values.latitude, zoom: values.zoom };
-  return <Element id="map" className="map" rect={rect}>
-    <RenderedImage className="map-image" label="Map" inputs={{ ...view, width: rect.width, height: rect.height }} draw={(target) => drawMap(view, target)} />
+  const view = { longitude: values.longitude, latitude: values.latitude, zoom: values.zoom };
+  // The drawn map and the tracks share one projection of the element's printed size.
+  const project = projector({ ...view, width, height });
+  return <Element id="map" className={'map' + (className ? ' ' + className : '')} rect={rect}>
+    {/* The theme reaches the drawn map only through these CSS variables, so a theme change does not draw it again. */}
+    <RenderedImage className="map-image" label="Map" output="vector" style={mapThemeColors(values.style, theme)} inputs={{ style: values.style, ...view, width: rect.width, height: rect.height }}
+      draw={(target) => drawMap(values.style, { ...view, width: target.width, height: target.height }, target.signal)} />
     {tracks.some(({ points }) => points) && <svg className="map-track" viewBox={'0 0 ' + width.toFixed(1) + ' ' + height.toFixed(1)} preserveAspectRatio="none" aria-label="Route">
-      {tracks.map(({ id, points, colour, label }) => points && <polyline key={id} points={projectTrack(points, values, width, height)}
+      {tracks.map(({ id, points, colour, label }) => points && <polyline key={id} points={projectTrack(points, project)}
         style={{ stroke: colour, strokeWidth: trackWidth * cssPerMm }}>{label && <title>{label}</title>}</polyline>)}
     </svg>}
-    <span className="map-attribution">{mapAttribution}</span>
     {tracks.map(({ id, problem, track, label }, index) => problem && <span key={id} hidden {...issue({ code: 'gpx-invalid',
       message: 'Track ' + (index + 1) + (label ? ' (' + label + ')' : '') + ': ' + problem + ' The track is left out.',
       element: 'map', parameter: 'tracks', file: track,
@@ -141,11 +145,13 @@ export function MapView({ values, trackWidth, rect, Element }: {
 }
 
 // The map's editor frames the view on the page itself (`presentation: 'inline'`): it is the element, at its printed
-// size, so dragging and zooming show the composition as printed, with the track and attribution where the page draws
+// size, so dragging and zooming show the composition as printed, with the track and title where the page draws
 // them. It owns only the view; the tracks, style and line width are generated controls in the editor's toolbar, where
 // the list of tracks is a "Tracks (n)" button opening the list. In the
 // panel (the fallback, or when moved there) the same map is shown at the page's aspect ratio.
-export function MapEditor({ values, set, readOnly, context, presentation, waitUntil, children }: MapEditorProps & { children?: ImageFlowNode }) {
+export function MapEditor({ values, set, readOnly, context, document, presentation, waitUntil, children }: MapEditorProps & { children?: ImageFlowNode }) {
+  // The live map shows the Book style in the book's colour theme.
+  const theme: ColourTheme = (document as { theme?: string }).theme === 'dark' ? 'dark' : 'light';
   const holder = React.useRef<HTMLDivElement>(null);
   const map = React.useRef<MapLibreMap>(undefined);
   const latest = React.useRef(values);
@@ -213,7 +219,7 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
       let created: MapLibreMap;
       try {
         created = new maplibregl.Map({
-          container: holder.current, style: styleUrl(view.style), center: [view.longitude, view.latitude], zoom: editorZoom(view.zoom),
+          container: holder.current, style: mapStyle(view.style, theme), center: [view.longitude, view.latitude], zoom: editorZoom(view.zoom),
           interactive: !readOnly, attributionControl: inline ? false : { compact: true }, dragRotate: false, pitchWithRotate: false, touchPitch: false,
         });
       } catch (failure) {
@@ -234,7 +240,10 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
         input = false;
         set(savedView(created));
       });
+      // Shown once every tile has drawn, or soon after the style and the first tiles, whichever comes first: on a
+      // dense map the last tiles may take seconds, and they fill in while the user is already framing the view.
       created.once('idle', drawn);
+      created.once('load', () => setTimeout(drawn, 600));
       created.on('error', (event) => {
         drawn();
         if (!created.isStyleLoaded()) setError('The map could not load (' + (event.error?.message ?? 'no connection') + '). It needs ' + mapOrigin + '.');
@@ -251,7 +260,7 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
     current.jumpTo({ center: [latest.current.longitude, latest.current.latitude], zoom: editorZoom(latest.current.zoom) });
   }, [rect?.width, rect?.height]);
   React.useEffect(() => { if (map.current?.isStyleLoaded()) drawTrack(map.current); }, [JSON.stringify(values.tracks), values.trackWidth]);
-  React.useEffect(() => { map.current?.setStyle(styleUrl(values.style)); }, [values.style]);
+  React.useEffect(() => { map.current?.setStyle(mapStyle(values.style, theme)); }, [values.style, theme]);
   React.useEffect(() => {
     const button = holder.current?.querySelector<HTMLButtonElement>('.map-fit-track');
     if (button) button.disabled = !drawable;
@@ -263,7 +272,7 @@ export function MapEditor({ values, set, readOnly, context, presentation, waitUn
     <div ref={holder} className="map-editor-map" role="application" aria-label="Map view"
       data-output-x={measured?.x} data-output-y={measured?.y} data-output-width={measured?.width} data-output-height={measured?.height}
       style={!inline && rect ? { aspectRatio: (rect.width / rect.height).toFixed(4) } : undefined} />
-    {inline && <>{children}<span className="map-attribution">{mapAttribution}</span></>}
+    {inline && children}
     {message && <p className="map-editor-problem" role="alert">{message}</p>}
   </div>;
 }

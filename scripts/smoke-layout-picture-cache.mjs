@@ -49,7 +49,7 @@ try {
     const body = drawing + `
       const original = window.ImageFlowRuntime.RenderedImage;
       window.ImageFlowRuntime.RenderedImage = (props) => window.ImageFlowReact.createElement(original,
-        { ...props, draw: (target) => drawMap(props.inputs, target) });
+        { ...props, output: 'raster', draw: (target) => drawMap(props.inputs, target) });
       const template = await import(${JSON.stringify(originalUrl)});
       export default template.default;
     `;
@@ -61,7 +61,7 @@ try {
     pictures.push({ method: response.request().method(), status: response.status(), url: response.url() });
   });
   const startup = (await page.evaluate(() => window.imageflow.currentProject())).value;
-  assert.deepEqual(startup.network, ['https://tiles.openfreemap.org'], 'The book starts with approved network access');
+  assert.deepEqual(startup.network, ['https://tiles.openfreemap.org', 'https://tiles.mapterhorn.com'], 'The book starts with approved network access');
   const layouts = () => page.frameLocator('iframe.book-frame-layouts[data-current]');
   const ready = async (spread) => {
     await page.waitForFunction((spread) => {
@@ -69,11 +69,15 @@ try {
       return frame && new URL(frame.src).searchParams.get('spread') === spread;
     }, spread);
     await layouts().locator('[data-spread="map"] [data-rendered="ready"]').waitFor();
+    // Every map layout's preview has drawn (and so is cached) before the next step moves on.
+    await layouts().locator('.if-rendered-image[data-rendered="pending"]').first().waitFor({ state: 'detached' });
   };
   const draws = () => layouts().locator('body').evaluate(() => window.__mapDraws ?? 0);
+  // The starter's map layouts (Map, and Map and story): the layout previews draw each spread's map once in each.
+  const mapLayouts = 2;
   await page.locator('.spread-thumb[data-spread="arriving"]').click();
   await ready('arriving');
-  assert.equal(await draws(), 1, 'The initial thumbnail is drawn once');
+  assert.equal(await draws(), mapLayouts, 'The initial thumbnails are drawn once per map layout');
   for (const spread of ['settlements', 'last-notes', 'arriving', 'settlements']) {
     await page.locator('.spread-thumb[data-spread="' + spread + '"]').click();
     await ready(spread);
@@ -88,7 +92,7 @@ try {
   await writeFile(manifest, JSON.stringify(project));
   await page.waitForFunction((old) => document.querySelector('iframe.book-frame-layouts[data-current][data-ready]')?.getAttribute('src') !== old, old);
   await ready('settlements');
-  assert.equal(await draws(), 1, 'Changed map settings draw a fresh thumbnail');
+  assert.equal(await draws(), mapLayouts, 'Changed map settings draw fresh thumbnails');
   const color = await layouts().locator('[data-spread="map"] .if-rendered-image img').evaluate((image) => {
     const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
     const ctx = canvas.getContext('2d'); ctx.drawImage(image, 0, 0, 1, 1);
@@ -103,7 +107,7 @@ try {
   await writeFile(mapFile, await readFile(mapFile, 'utf8') + '\n// Template changed\n');
   await page.waitForFunction((old) => document.querySelector('iframe.book-frame-layouts[data-current][data-ready]')?.getAttribute('src') !== old, previous);
   await ready('settlements');
-  assert.equal(await draws(), 1, 'Changed template code invalidates cached pictures');
+  assert.equal(await draws(), mapLayouts, 'Changed template code invalidates cached pictures');
 
   // An actual map on page Y must survive editing a different page X in the sidebar's whole-book frame.
   const thumbnails = () => page.frameLocator('iframe.book-frame-thumbs[data-current]');

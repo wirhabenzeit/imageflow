@@ -148,7 +148,8 @@ export type RenderProject = {
   files: Record<string, ProjectFile>;
   problems: string[];
   sources?: Record<string, SourceStatus>;
-  template: { script: string; css?: string; assets: Record<string, string>; warnings?: string[] };
+  // `fonts`: the code points each bundled font file covers, as [first, last] ranges, by its file name under template/.
+  template: { script: string; css?: string; assets: Record<string, string>; warnings?: string[]; fonts?: Record<string, [number, number][]> };
   mode: 'edit' | 'export';
   // Where this render is shown, set by the render frame from its URL before rendering (never saved or sent).
   view?: RenderView;

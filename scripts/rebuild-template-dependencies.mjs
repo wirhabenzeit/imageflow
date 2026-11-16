@@ -13,7 +13,10 @@ await mkdir(join(root, '.build'), { recursive: true });
 await build({ entryPoints: [join(root, 'desktop/dependency-install.ts')], outfile: out, bundle: true, platform: 'node', format: 'esm',
   packages: 'external', logLevel: 'error' });
 const { rebuildTemplateDependencies } = await import(pathToFileURL(out).href);
-const result = await rebuildTemplateDependencies(template, join(root, '.build', 'template-dependencies'));
+const result = await rebuildTemplateDependencies(template, join(root, '.build', 'template-dependencies')).catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});
 const packages = Object.entries(result.packages).map(([name, version]) => name + '@' + version);
 console.log(packages.length ? 'Saved ' + packages.join(', ') + ' into ' + join(template, 'vendor') + (result.reused ? ' (reused the install)' : '')
   : 'The template imports no packages; removed its vendor folder.');

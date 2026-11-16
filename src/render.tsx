@@ -2,10 +2,11 @@ import type { PresentationView } from './presentation-model';
 import { presentationPhotoSource } from './presentation-model';
 import { sourceFileName, sourcePath } from './source-locations';
 import { renameIds } from './svg-ids';
+import { bundlesFamily, familiesOf, missingCharacters, setTemplateFonts } from './fonts';
 import { parseSentinel, sentinelStrip, sentinelWidth } from './capture-sentinel';
 import type { Sentinel } from './capture-sentinel';
 import { impureMessage, impureSuggestion, installPurityGuards, unlocatedImpureSuggestion } from './purity';
-import { activateRenderedImageSpreads, configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
+import { activateRenderedImageSpreads, configureRenderedImages, renderedImageNotes, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
 import React from 'react';
@@ -284,6 +285,45 @@ function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: nu
     }
   }
   return { small, outside };
+}
+
+/**
+ * Text the bundled fonts cannot set, and stroked text, per box or element, including text inside SVG such as the
+ * labels of a vector map. A character no bundled font has falls back to a system font, and stroked glyphs print as a
+ * Type 3 font; PDF preflight rejects both, so the Book check names where they are before export does.
+ */
+function checkFonts(sheet: HTMLElement) {
+  const walker = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT);
+  const missing = new Map<string, { owner: ReturnType<typeof ownerOf>; family: string; chars: Set<string> }>();
+  let stroked: { owner: ReturnType<typeof ownerOf>; text: string } | undefined;
+  const styles = new Map<Element, CSSStyleDeclaration>();
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const parent = node.parentElement;
+    const text = node.textContent ?? '';
+    if (!text.trim() || !parent || parent.closest('.if-placeholder, [data-decorative], style, script, title, desc')) continue;
+    let style = styles.get(parent);
+    if (!style) styles.set(parent, style = getComputedStyle(parent));
+    if (style.display === 'none' || style.visibility === 'hidden') continue;
+    // The bundled families of the stack set the text, each passing what it lacks to the next; without one, PDF
+    // preflight already names the system font.
+    const bundled = familiesOf(style.fontFamily).filter(bundlesFamily);
+    const family = bundled.join(', ');
+    if (bundled.length) {
+      const chars = missingCharacters(text, { family: bundled, weight: Number(style.fontWeight) || 400, style: /italic|oblique/.test(style.fontStyle) ? 'italic' : 'normal' });
+      if (chars.length) {
+        const owner = ownerOf(parent);
+        const key = JSON.stringify(owner) + family;
+        const entry = missing.get(key) ?? missing.set(key, { owner, family, chars: new Set() }).get(key)!;
+        for (const char of chars) entry.chars.add(char);
+      }
+    }
+    const strokeWidth = parseFloat(style.strokeWidth);
+    const textStroke = parseFloat(style.getPropertyValue('-webkit-text-stroke-width'));
+    if (!stroked && ((parent instanceof SVGElement && style.stroke !== 'none' && strokeWidth > 0) || textStroke > 0)) {
+      stroked = { owner: ownerOf(parent), text: text.trim().slice(0, 40) };
+    }
+  }
+  return { missing: [...missing.values()], stroked };
 }
 
 // A short description of a text block for findings: its box/element, its edited parameter, its tag and text.
@@ -1497,6 +1537,7 @@ export async function startRender(root: HTMLElement) {
     base.href = new URL('./', book.template.script).href;
     document.head.append(base);
     setTemplateAssets(book.template.assets);
+    setTemplateFonts(book.template.fonts);
     setTemplateFiles(book.files);
     Object.assign(globalThis, { ImageFlowRuntime: runtime, ImageFlowReact: React, ImageFlowJSX: jsx });
     // Book check, export and artwork frames record impure calls from template code, including at module load.
@@ -1564,9 +1605,12 @@ export async function startRender(root: HTMLElement) {
     // in the Book check, and at the format's target resolution for export (ADR 0006).
     const target = template.format.output.resolution?.target ?? 300;
     configureRenderedImages(present ? { mode: 'preview', pixelRatio: window.devicePixelRatio || 1, concurrency: 3, timeoutMs: pictureTimeoutMs.preview,
-      activeSpreads: new Set([presentationStart]) } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
+      activeSpreads: new Set([presentationStart]),
+      // The editor's cached pictures: a map drawn in the book view shows in the presentation at once (vector
+      // pictures are shared across pixel ratios).
+      previewCache: location.pathname + '/picture/' } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
       concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
-      previewCache: view !== 'book' ? location.pathname + '/picture/' : undefined }
+      previewCache: location.pathname + '/picture/' }
       : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
         : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
           : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
@@ -1612,7 +1656,8 @@ export async function startRender(root: HTMLElement) {
     // A check or export is final only once every asynchronous picture is drawn or has failed; the editor shows
     // them as they arrive.
     const pictureFailures = present || lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
-    if (edit && view === 'thumbs') await settleRestoredImages();
+    // A replacement frame shows unchanged pictures from the cache at once, not a placeholder that redraws them.
+    if ((edit && (view === 'thumbs' || view === 'book')) || present) await settleRestoredImages();
     // Presentation waits for the visible crop's photos below. SVG photos elsewhere in the book use detached
     // decode proxies that Chromium may never resolve while the candidate frame is hidden.
     const images = present ? [] : decodable(root);
@@ -1661,6 +1706,13 @@ export async function startRender(root: HTMLElement) {
         : failed.timedOut ? 'Check the internet connection, then check or export again.'
         : 'Check that the template’s network sites are allowed for this book and reachable, then check or export again.' }));
     errors.push(...pictureIssues(pictureFailures));
+    if (!present && !lazy && !(edit && view !== 'book')) for (const note of renderedImageNotes()) {
+      warnings.push({ ...(note.spread ? located(note.spread, note.message) : message(note.message)), code: note.code,
+        ...(note.element ? { element: note.element } : {}), details: { label: note.label, ...note.details },
+        suggestion: note.code === 'rendered-image-raster'
+          ? 'Return SVG from draw and declare output="vector" on the <RenderedImage>, or declare output="raster" if the picture is imagery such as a satellite photo.'
+          : 'Draw the picture at target.width × target.pixelRatio by target.height × target.pixelRatio pixels.' });
+    }
     const photoRenderIssues = (failures: PhotoRenderFailure[]): Issue[] => failures.map(({ spread, box, message: text }) => ({
       ...located(spread, 'Photo box ' + box + ': its render callback failed: ' + text), code: 'photo-render-failed', box,
       suggestion: 'Fix the PhotoBox render callback so it returns markup for every crop and parameter value.' }));
@@ -1711,6 +1763,30 @@ export async function startRender(root: HTMLElement) {
         suggestion: 'Insert a spread whose layout declares anchor ' + anchor + ', or change the referenced anchor ID.',
       });
     }
+    for (const { id, spread, text, url, kept } of index.creditConflicts ?? []) {
+      warnings.push({ ...located(spread, 'This spread declares credit ' + id + ' as ' + JSON.stringify(text) + (url ? ' (' + url + ')' : '') +
+        ', but an earlier spread declares it as ' + JSON.stringify(kept.text) + (kept.url ? ' (' + kept.url + ')' : '') + '; the book prints the first.'),
+        code: 'credit-conflict', details: { credit: id, text, kept: kept.text },
+        suggestion: 'Give credits with different text or URLs their own IDs in the layouts\' credits().' });
+    }
+    // A credit the book uses must be printed somewhere: a page marks what it prints with data-credits. Only a render of
+    // the whole book can tell.
+    if (visible.length === spreads.length) {
+      const printed = new Set([...root.querySelectorAll<HTMLElement>('[data-credits]')].flatMap((node) => (node.dataset.credits ?? '').split(/\s+/)));
+      for (const credit of index.credits ?? []) {
+        if (printed.has(credit.id)) continue;
+        // Pages as runs, such as 2–5, 8.
+        const runs = credit.pages.reduce<[number, number][]>((list, page) => {
+          const last = list[list.length - 1];
+          if (last && page === last[1] + 1) last[1] = page; else list.push([page, page]);
+          return list;
+        }, []).map(([first, last]) => first === last ? String(first) : first + '–' + last).join(', ');
+        warnings.push({ ...located(credit.spreads[0], 'The book uses ' + credit.text + ' (' + (credit.pages.length > 1 ? 'pages ' : 'page ') +
+          runs + '), but no page prints this credit.'), code: 'credit-unprinted',
+          details: { credit: credit.id, text: credit.text, pages: credit.pages.join(' ') },
+          suggestion: 'Add a spread whose layout prints the book\'s credits (ctx.book.credits, marked with data-credits), or remove what needs the credit.' });
+      }
+    }
     for (const family of fontFailures()) {
       errors.push({ ...message('Font ' + family + ' could not be loaded; text using it renders with a fallback font.'), code: 'font-load-failed',
         details: { family }, suggestion: 'Check the @font-face src path in the template CSS and that the font file exists inside template/.' });
@@ -1749,6 +1825,19 @@ export async function startRender(root: HTMLElement) {
     for (const [spread, { sheet }] of present ? [] : validated) {
       const minimumMm = minimum && toMillimeters(minimum);
       const typography = checkTypography(sheet, format, minimumMm);
+      const fontUse = checkFonts(sheet);
+      for (const { owner, family, chars } of fontUse.missing) {
+        const shown = [...chars].slice(0, 12);
+        warnings.push({ ...located(spread, 'The template’s font ' + family + ' cannot set ' + shown.join(' ') + (chars.size > shown.length ? ' …' : '') +
+          '; these characters print in a system font.'), code: 'font-coverage', ...owner,
+          details: { family, characters: [...chars].join('') },
+          suggestion: 'Bundle a font that contains these characters (its @font-face in the template CSS), or leave them out of the text; fonts.settable() does that for text the template draws.' });
+      }
+      if (fontUse.stroked) {
+        warnings.push({ ...located(spread, 'Stroked text (“' + fontUse.stroked.text + '”) prints as a Type 3 font, which PDF preflight rejects.'),
+          code: 'text-stroked', ...fontUse.stroked.owner,
+          suggestion: 'Draw an outline or halo as filled copies of the text shifted around it, or as a shadow, instead of an SVG stroke or -webkit-text-stroke.' });
+      }
       if (typography.small && minimumMm) {
         warnings.push({ ...located(spread, 'Text is smaller than the format minimum.'), code: 'text-too-small', ...typography.small.owner,
           details: { sizePt: Math.round(typography.small.sizeMm * ptPerMm * 10) / 10, minimumPt: Math.round(minimumMm * ptPerMm * 10) / 10 },

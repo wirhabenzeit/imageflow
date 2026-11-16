@@ -36,6 +36,98 @@
   src: url("./fonts/inter-latin-500-normal.woff2") format("woff2");
   font-weight: 500;
 }
+/* Cyrillic, including the letters of Kazakh and Kyrgyz (cyrillic-ext), for map labels and text. Each subset sets only
+   the characters of its unicode-range; the Latin faces above set the rest. */
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-600-normal.woff2") format("woff2");
+  font-weight: 600;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-600-italic.woff2") format("woff2");
+  font-weight: 600;
+  font-style: italic;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-800-normal.woff2") format("woff2");
+  font-weight: 800;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-800-italic.woff2") format("woff2");
+  font-weight: 800;
+  font-style: italic;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Field Sans";
+  src: url("./fonts/inter-cyrillic-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-ext-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-ext-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-ext-600-normal.woff2") format("woff2");
+  font-weight: 600;
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-ext-600-italic.woff2") format("woff2");
+  font-weight: 600;
+  font-style: italic;
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-ext-800-normal.woff2") format("woff2");
+  font-weight: 800;
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Field Serif";
+  src: url("./fonts/source-serif-4-cyrillic-ext-800-italic.woff2") format("woff2");
+  font-weight: 800;
+  font-style: italic;
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Field Sans";
+  src: url("./fonts/inter-cyrillic-ext-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
 
 /* Colour themes. Every colour of the book comes from these variables, so a page never chooses its own. */
 .field-book.theme-light {
@@ -109,23 +201,29 @@
 /* Wraps to the number of lines the template worked out for it (`--lines`, set per entry). */
 .field-book .picture-detail { font: 500 8pt/3.7mm "Field Sans"; color: var(--muted); font-variant-numeric: tabular-nums;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--lines, 1); overflow: hidden; overflow-wrap: anywhere; }
+.field-book .book-credits { margin: 0; font: 500 8pt/1.4 "Field Sans"; color: var(--muted); }
 .field-book .colophon { font: 500 8.5pt/1.45 "Field Sans"; color: var(--muted); white-space: pre-line; }
 
-/* Map layout: the saved print image fills the spread; the track and attribution are drawn over it. */
+/* Map layout: the drawn map fills the spread, with the track over it; its data is credited on the last page. */
 .map { overflow: hidden; background: #e8ebe4; }
 .map-image, .map-track { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .map-image img { object-fit: cover; }
 .map-track polyline { fill: none; stroke-linejoin: round; stroke-linecap: round; }
-.map-attribution { position: absolute; right: 8mm; bottom: 7mm; padding: .6mm 1.4mm; background: #ffffffd0; color: #333;
-  font: 500 8pt/1.2 "Field Sans"; }
+/* The map's labels (maplibre-svg), in the book's fonts: places in the semibold serif, water in the serif italic, the
+   rest in the sans. The size comes from the map style. */
+.map-image .map-label { font-family: "Field Sans"; font-weight: 500; }
+.map-image .map-label-place { font-family: "Field Serif"; font-weight: 600; }
+.map-image .map-label-water { font-family: "Field Serif"; font-weight: 400; font-style: italic; }
+/* A map inside the page sits on the paper: no ground of its own while it draws. */
+.map.map-inset { background: var(--paper); }
 .map-title { margin: 0; padding: 3mm 5mm; background: var(--chip, #fffffff0); color: var(--ink); font: var(--heading-weight, 600) 20pt/1.15 var(--heading-font, "Field Serif"); width: fit-content; }
 .map-editor { position: relative; color: var(--if-editor-text); font-family: "Field Sans", system-ui, sans-serif; }
 .map-editor-map { width: 100%; border: 1px solid var(--if-editor-border); border-radius: 6px; overflow: hidden; }
-/* On the page, the editor is the map element at its printed size: no border, the page's attribution and title on top.
+/* On the page, the editor is the map element at its printed size: no border, the page's title on top.
    Its buttons and messages keep their screen size, whatever the page's zoom (--if-inline-scale). */
 .map-editor-inline { position: absolute; inset: 0; overflow: hidden; background: #e8ebe4; }
 .map-editor-inline .map-editor-map { position: absolute; inset: 0; height: 100%; border: 0; border-radius: 0; }
-.map-editor-inline :is(.map-attribution, .map-title-layer) { pointer-events: none; }
+.map-editor-inline .map-title-layer { pointer-events: none; }
 .map-editor-inline .map-title-layer { position: absolute; inset: 0; background: none; }
 .map-editor-inline :is(.maplibregl-ctrl-top-right, .map-editor-problem) { zoom: calc(1 / var(--if-inline-scale, 1)); }
 .map-editor-problem { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 80px); margin: 0; padding: 4px 8px; border-radius: 6px;
