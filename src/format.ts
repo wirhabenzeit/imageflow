@@ -107,7 +107,7 @@ export function printFormat(options: PrintFormatOptions): PrintFormat {
     output,
   };
 }
-// `page` is the span of a layout for formats without facing pages; the others belong to formats with facing pages.
+// Page layouts draw in local coordinates, on either side of facing pages or as the unit without facing pages.
 export type Span = 'spread' | 'left' | 'right' | 'page';
 export type PrintSide = Span;
 
@@ -237,11 +237,10 @@ export function trimBox(format: ResolvedFormat, side: PrintSide) {
 export const hasSingleEnds = (format: Pick<PrintFormat, 'structure'>) =>
   hasFacingPages(format) && format.structure.delivery === 'pages' && format.structure.ends === 'single-pages';
 
-// Whether a layout of this span fits the format anywhere in a book. Formats without facing pages take only single
-// pages; formats with facing pages take spreads, and single left and right pages only when they have single ends.
+// Whether a layout fits the format anywhere: page layouts work with either kind; legacy left/right layouts need single ends.
 export function spanFits(span: Span, format: Pick<PrintFormat, 'structure'>) {
   if (!hasFacingPages(format)) return span === 'page';
-  return span === 'spread' || ((span === 'left' || span === 'right') && hasSingleEnds(format));
+  return span === 'page' || span === 'spread' || ((span === 'left' || span === 'right') && hasSingleEnds(format));
 }
 // The span a position requires, or undefined when any fitting span is allowed there. With single ends, the format
 // requires the first spread to be a single right page and the last a single left page, with full spreads between
@@ -251,8 +250,10 @@ export function spanRequiredAt(index: number, count: number, format: Pick<PrintF
   if (!hasSingleEnds(format)) return 'spread';
   return index === 0 ? 'right' : index === count - 1 ? 'left' : 'spread';
 }
-export function spanAllowedAt(span: Span, index: number, count: number, format: Pick<PrintFormat, 'structure'>) {
-  return span === spanRequiredAt(index, count, format);
+export function spanAllowedAt(span: Span, index: number, count: number, format: Pick<PrintFormat, 'structure'>, sides?: readonly ('left' | 'right')[]) {
+  const required = spanRequiredAt(index, count, format);
+  if (span === 'page' && hasFacingPages(format)) return required !== 'spread' && (!sides || sides.includes(required as 'left' | 'right'));
+  return span === required;
 }
 
 // Page numbers of one unit: `left`/`right` on a spread, `number` on a page of a format without facing pages.
@@ -279,11 +280,12 @@ function endIssue(span: Span, index: number, count: number, format: Pick<PrintFo
     : ', but ' + format.label + ' has no single pages at the book ends. Switch it to a full spread layout.');
 }
 
-export function pageSequence(spans: Span[], format: Pick<PrintFormat, 'label' | 'structure'>) {
+export function pageSequence(spans: (Span | { span: Span; sides?: readonly ('left' | 'right')[] })[], format: Pick<PrintFormat, 'label' | 'structure'>) {
   let count = 0;
   const issues: string[] = [];
   const facing = hasFacingPages(format);
-  const spreads = spans.map((span, index) => {
+  const spreads = spans.map((entry, index) => {
+    const { span, sides: allowedSides } = typeof entry === 'string' ? { span: entry } : entry;
     if (!facing) {
       // A layout for facing pages in a format without them is still drawn, on one page, and reported.
       if (span !== 'page') {
@@ -293,22 +295,24 @@ export function pageSequence(spans: Span[], format: Pick<PrintFormat, 'label' | 
       const page: UnitPages = { number: ++count };
       return { span, page, sides: ['page'] as PrintSide[] };
     }
-    if (span === 'page') {
-      issues.push('Spread ' + (index + 1) + ' uses a single-page layout, but ' + format.label + ' has facing pages. Switch it to a spread layout.');
-    } else if (!spanAllowedAt(span, index, spans.length, format)) {
-      issues.push(endIssue(span, index, spans.length, format));
+    const required = spanRequiredAt(index, spans.length, format);
+    const shown = span === 'page' ? required : span;
+    if (!spanAllowedAt(span, index, spans.length, format, allowedSides)) {
+      issues.push(span === 'page' && required !== 'spread' && allowedSides && !allowedSides.includes(required as 'left' | 'right')
+        ? 'Spread ' + (index + 1) + ' requires a single ' + required + ' page, but this layout allows only the ' + allowedSides.join(' and ') + ' side. Choose a page layout that allows ' + required + '.'
+        : span === 'page' && required === 'spread'
+          ? 'Spread ' + (index + 1) + ' uses a single-page layout without being shown as pages. Choose a spread layout or split it into page layouts.'
+          : endIssue(shown, index, spans.length, format));
     }
-    // A single-page layout in a facing format is drawn as a spread.
-    const shown = span === 'page' ? 'spread' : span;
     const left = shown === 'right' ? undefined : ++count;
     const right = shown === 'left' ? undefined : ++count;
     const sides: PrintSide[] = format.structure.delivery === 'spreads' ? ['spread'] :
       shown === 'spread' ? ['left', 'right'] : [shown];
     const page: UnitPages = { left, right };
-    return { span, page, sides };
+    return { span: shown, page, sides };
   });
   // A book of one spread may open correctly, but it cannot close on a single left page too.
-  if (facing && hasSingleEnds(format) && spans.length === 1 && spans[0] === 'right') {
+  if (facing && hasSingleEnds(format) && spans.length === 1 && spreads[0].span === 'right') {
     issues.push('The book has only its opening page, but ' + format.label + " requires it to close on a single left page. Add a layout with span: 'left' at the end.");
   }
   const { min, max, step } = format.structure.pageCount;

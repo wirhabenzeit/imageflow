@@ -1,5 +1,5 @@
-import { storedBoxes } from './project';
-import type { Project, SpreadState, Values } from './project';
+import { scopeSpread, storedBoxes } from './project';
+import type { PageSide, Project, SpreadState, Values } from './project';
 import { resolveValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import { shownBoxes } from './layouts';
@@ -19,7 +19,7 @@ export function openingSpreadStates(template: { openingSpreads?: readonly { layo
 /** The layouts that can be the first spread of an empty book: facing pages, or a single right page where the format allows one. */
 export function firstSpreadLayouts(layouts: Layouts, format: PrintFormat) {
   // Counted as the first of several, so a closing left page is not offered as the start of a book.
-  return Object.entries(layouts).filter(([, layout]) => spanAllowedAt(layout.span ?? 'spread', 0, 2, format)).map(([id]) => id);
+  return Object.entries(layouts).filter(([, layout]) => spanAllowedAt(layout.span ?? 'spread', 0, 2, format, layout.sides)).map(([id]) => id);
 }
 
 // The boxes a spread shows: its own layout's, or its pages' when it is shown as pages. Without the template (still
@@ -59,33 +59,35 @@ type EditableTemplate = {
     elements: Record<string, { parameters: Parameters; editor?: { parameters: readonly string[]; spread?: readonly string[] } }>;
   }>;
 };
-export type EditTarget = { path: string; scope: 'spread' | 'document' | 'element' | 'box'; owner?: string; key: string; param: Parameter };
+export type EditTarget = { page?: PageSide; path: string; scope: 'spread' | 'document' | 'element' | 'box'; owner?: string; key: string; param: Parameter };
 
 const own = <T,>(record: Record<string, T> | undefined, key: string) => record && Object.hasOwn(record, key) ? record[key] : undefined;
 
-export function resolveEditPath(template: EditableTemplate, definition: string, path: string): EditTarget | undefined {
+export function resolveEditPath(template: EditableTemplate, definition: string, path: string, page?: PageSide): EditTarget | undefined {
   const spread = own(template.spreads, definition);
   if (!spread) return;
   const parts = path.split('.');
   if (parts.length === 1) {
     const param = own(spread.parameters, parts[0]);
-    return param && { path, scope: 'spread', key: parts[0], param };
+    return param && { ...(page ? { page } : {}), path, scope: 'spread', key: parts[0], param };
   }
   if (parts.length === 2 && parts[0] === 'document') {
     const param = own(template.parameters, parts[1]);
-    return param && { path, scope: 'document', key: parts[1], param };
+    return param && { ...(page ? { page } : {}), path, scope: 'document', key: parts[1], param };
   }
   if (parts.length === 3 && (parts[0] === 'elements' || parts[0] === 'boxes')) {
     const owner = own<{ parameters: Parameters }>(parts[0] === 'elements' ? spread.elements : spread.boxes, parts[1]);
     const param = own(owner?.parameters, parts[2]);
-    return param && { path, scope: parts[0] === 'elements' ? 'element' : 'box', owner: parts[1], key: parts[2], param };
+    return param && { ...(page ? { page } : {}), path, scope: parts[0] === 'elements' ? 'element' : 'box', owner: parts[1], key: parts[2], param };
   }
 }
 
 function editValues(project: Project, spread: SpreadState, target: EditTarget, create = false) {
   if (target.scope === 'document') return project.params;
-  if (target.scope === 'spread') return spread.params;
-  const group = target.scope === 'element' ? spread.elements : spread.boxes;
+  const state = scopeSpread(spread, target.page);
+  if (!state) return;
+  if (target.scope === 'spread') return state.params;
+  const group = target.scope === 'element' ? state.elements : state.boxes;
   if (create) group[target.owner!] ??= { params: {} };
   return group[target.owner!]?.params;
 }
@@ -99,5 +101,5 @@ export function readEdit(project: Project, spread: SpreadState, target: EditTarg
 export function writeEdit(project: Project, spreadId: string | undefined, target: EditTarget, value: Values[string]) {
   if (target.scope === 'document') { project.params[target.key] = value; return; }
   const spread = project.spreads.find(({ id }) => id === spreadId);
-  if (spread) editValues(project, spread, target, true)![target.key] = value;
+  if (spread) { const values = editValues(project, spread, target, true); if (values) values[target.key] = value; }
 }

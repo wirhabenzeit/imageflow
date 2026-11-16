@@ -3,6 +3,7 @@ import { isParameterValue } from './parameters';
 import type { Parameter } from './parameters';
 import { readEdit, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
+import { scopeSpread } from './project';
 import type { Project } from './project';
 
 // Text needs less screen area than a map, but still needs a usable caret and line: 64 px along the line and 18 px
@@ -46,8 +47,8 @@ export function textProblem(param: Parameter, value: string) {
 export function saveInlineText(project: Project, template: Parameters<typeof resolveEditPath>[0], spreadId: string,
   layout: string, field: EditTarget, before: string, value: string) {
   const spread = project.spreads.find(({ id }) => id === spreadId);
-  const current = resolveEditPath(template, layout, field.path);
-  if (!spread || spread.definition !== layout || !current || JSON.stringify(current) !== JSON.stringify(field) ||
+  const current = resolveEditPath(template, layout, field.path, field.page);
+  if (!spread || (field.page && !spread.split) || scopeSpread(spread, field.page)?.definition !== layout || !current || JSON.stringify(current) !== JSON.stringify(field) ||
       readEdit(project, spread, current) !== before || textProblem(current.param, value) || textEditorOwner(template, layout, field.path)) return false;
   writeEdit(project, spreadId, current, value);
   return true;

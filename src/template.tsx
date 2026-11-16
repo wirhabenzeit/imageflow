@@ -1,3 +1,4 @@
+import { layoutFootprint, shownLayoutStates } from './layouts';
 import { Component, createContext, Fragment, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import { RenderedImage } from './rendered-image';
@@ -6,9 +7,9 @@ import { parseFormatted, plainFormatted } from './formatted-text';
 import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
-import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanFits } from './format';
+import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanAllowedAt, spanFits } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
-import { identifier, renderView, values } from './project';
+import { identifier, pageSides, renderView, scopeSpread, values } from './project';
 import type { PageSide, Photo, ProjectFile, RenderProject, RenderView, SpreadState, Values } from './project';
 import { getCrop, placementIn } from './spread';
 import type { Crop, Placement as CropPlacement } from './spread';
@@ -37,6 +38,7 @@ export type RenderContext = {
   elements: Record<string, { params: Values }>;
   // Page numbers: `left` and `right` on a spread, `number` on a page of a format without facing pages.
   page: UnitPages;
+  side?: 'left' | 'right' | 'page';
   format: ResolvedFormat;
   // The chosen named format, or 'default' for a template with a single format.
   formatId: string;
@@ -94,6 +96,7 @@ export type CreditConflict = { id: string; spread: string; text: string; url?: s
 // One spread of the book as the index lists it: derived from the saved book and the template's declarations before
 // any spread renders, so every spread reads the same index whatever the render order.
 export type BookPhotoPlacement = {
+  page?: PageSide;
   box: string;
   // The assigned photo's ID, or null for an empty box.
   photoId: string | null;
@@ -102,7 +105,8 @@ export type BookPhotoPlacement = {
 };
 export type BookSpread = {
   id: string;
-  layout: string;
+  layout?: string;
+  pages?: Partial<Record<PageSide, { layout?: string; photos: BookPhotoPlacement[] }>>;
   page: UnitPages;
   // The active layout's photo boxes, in declaration order. Content kept from other layouts is not listed.
   photos: BookPhotoPlacement[];
@@ -140,7 +144,7 @@ export type BookIndex = { pages: number; anchors: Anchor[]; credits?: readonly C
 
 export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: UnitPages }[] }): BookIndex {
   const document = resolveParams(template.parameters, book.project.params);
-  const anchors = book.project.spreads.flatMap((spread, i) => {
+  const anchors = book.project.spreads.flatMap((sheet, i) => shownLayoutStates(sheet).flatMap(({ page: scope, state: spread }) => {
     const definition = template.spreads[spread.definition];
     if (!definition?.anchors) return [];
     let returned: unknown;
@@ -156,10 +160,10 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
       const named = title !== undefined ? { title } : {};
       if (number !== undefined) return { id, ...named, spread: spread.id, page: number, side: 'page' };
       // A single-page spread has only one page, whichever side the declaration names.
-      const resolved = !left ? 'right' : !right ? 'left' : side ?? 'left';
+      const resolved = !left ? 'right' : !right ? 'left' : scope ?? side ?? 'left';
       return { id, ...named, spread: spread.id, page: (resolved === 'left' ? left : right)!, side: resolved };
     });
-  });
+  }));
   // A spread may declare its right-page anchor before its left-page one. The sort is stable within a page.
   const { credits, conflicts } = bookCredits(book, template, sequence, document);
   return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page), credits, creditConflicts: conflicts,
@@ -169,7 +173,7 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
 function bookCredits(book: RenderProject, template: Template, sequence: { spreads: { page: UnitPages }[] }, document: Values) {
   const credits = new Map<string, Credit>();
   const conflicts: CreditConflict[] = [];
-  book.project.spreads.forEach((spread, i) => {
+  book.project.spreads.forEach((sheet, i) => shownLayoutStates(sheet).forEach(({ page: scope, state: spread }) => {
     const definition = Object.hasOwn(template.spreads, spread.definition) ? template.spreads[spread.definition] : undefined;
     if (!definition?.credits) return;
     const elements = Object.fromEntries(Object.entries(definition.elements ?? {}).map(([id, element]) =>
@@ -194,7 +198,7 @@ function bookCredits(book: RenderProject, template: Template, sequence: { spread
     const { left, right, number } = sequence.spreads[i].page;
     for (const { id, text, url, side } of declared.data) {
       // A single page, or a spread with only one of its pages, has that page whichever side the declaration names.
-      const pages = number !== undefined ? [number] : side && left !== undefined && right !== undefined ? [side === 'left' ? left : right]
+      const pages = number !== undefined ? [number] : scope ? [sequence.spreads[i].page[scope]!] : side && left !== undefined && right !== undefined ? [side === 'left' ? left : right]
         : [left, right].filter((page): page is number => page !== undefined);
       const known = credits.get(id);
       if (known && (known.text !== text || known.url !== url) && !conflicts.some((conflict) => conflict.id === id && conflict.spread === spread.id)) {
@@ -205,7 +209,7 @@ function bookCredits(book: RenderProject, template: Template, sequence: { spread
       credit.pages.sort((a, b) => a - b);
       if (!credit.spreads.includes(spread.id)) credit.spreads.push(spread.id);
     }
-  });
+  }));
   return { credits: deepFreeze([...credits.values()]), conflicts: deepFreeze(conflicts) };
 }
 
@@ -220,16 +224,24 @@ const deepFreeze = <T,>(value: T): T => {
 // render cannot change what another reads. A spread whose layout the template no longer declares has no photos.
 export function spreadIndex(book: RenderProject, template: Template, sequence: { spreads: { page: UnitPages }[] }): readonly BookSpread[] {
   return deepFreeze(book.project.spreads.map((spread, i): BookSpread => {
-    const definition = Object.hasOwn(template.spreads, spread.definition) ? template.spreads[spread.definition] : undefined;
-    const photos = Object.entries(definition?.boxes ?? {}).filter(([, box]) => box.type === 'photo').map(([id]): BookPhotoPlacement => {
-      const photoId = spread.boxes[id]?.photo ?? null;
-      const found = photoId && Object.hasOwn(book.photos, photoId) ? book.photos[photoId] : undefined;
-      if (!found) return { box: id, photoId, photo: null };
-      // A deep copy, so freezing the index leaves nested metadata (such as `captured`) in the render input alone.
-      const { src: _src, ...photo } = structuredClone(found);
-      return { box: id, photoId, photo };
-    });
-    return { id: spread.id, layout: spread.definition, page: Object.fromEntries(Object.entries(sequence.spreads[i].page).filter(([, value]) => value !== undefined)), photos };
+    const placements = (spread: SpreadState): BookPhotoPlacement[] => {
+      const definition = Object.hasOwn(template.spreads, spread.definition) ? template.spreads[spread.definition] : undefined;
+      return Object.entries(definition?.boxes ?? {}).filter(([, box]) => box.type === 'photo').map(([id]): BookPhotoPlacement => {
+        const photoId = spread.boxes[id]?.photo ?? null;
+        const found = photoId && Object.hasOwn(book.photos, photoId) ? book.photos[photoId] : undefined;
+        if (!found) return { box: id, photoId, photo: null };
+        // A deep copy, so freezing the index leaves nested metadata (such as `captured`) in the render input alone.
+        const { src: _src, ...photo } = structuredClone(found);
+        return { box: id, photoId, photo };
+      });
+    };
+    const pages = spread.split ? Object.fromEntries(pageSides.map((side) => {
+      const state = scopeSpread(spread, side);
+      return [side, { ...(state?.definition ? { layout: state.definition } : {}), photos: state ? placements(state) : [] }];
+    })) : undefined;
+    const photos = pages ? pageSides.flatMap((side) => pages[side].photos.map((photo: BookPhotoPlacement) => ({ ...photo, page: side }))) : placements(spread);
+    return { id: spread.id, ...(pages ? { pages } : { layout: spread.definition }),
+      page: Object.fromEntries(Object.entries(sequence.spreads[i].page).filter(([, value]) => value !== undefined)), photos };
   }));
 }
 
@@ -285,7 +297,7 @@ export type ElementEditorProps = {
 // components. It follows the book while the editor is open (a reorder, another photo, a document setting), so a
 // helper such as the calendar's month can serve `render` and the editor alike. Markdown flow positions are not known
 // outside the book render, so `boxes[id].text` is null.
-export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book' | 'spread' | 'layout'> & {
+export type EditorContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book' | 'spread' | 'layout' | 'side'> & {
   // Measured bounds in trim coordinates (mm), null before the current page is ready or when not rendered.
   elements: Record<string, { params: Values; rect: Rect | null }>;
 };
@@ -351,6 +363,7 @@ const definition = z.object({
   label: z.string().min(1),
   // Defaults to 'page' when no format of the template has facing pages, else to 'spread' (see withSpans).
   span: z.enum(['spread', 'left', 'right', 'page']).default('spread'),
+  sides: z.array(z.enum(['left', 'right'])).min(1).max(2).refine((sides) => new Set(sides).size === sides.length, 'Page sides must be unique.').optional(),
   parameters: parametersSchema,
   boxes: z.record(identifier, boxSchema).default({}),
   elements,
@@ -361,7 +374,8 @@ const definition = z.object({
   // The layout family this layout is a variant of, and free-form tags a family's picker reads to tell variants apart.
   family: identifier.optional(),
   variant: z.record(identifier, z.union([z.string().max(200), z.number(), z.boolean()])).optional(),
-}).superRefine(({ parameters, controls, elements }, context) => {
+}).superRefine(({ span, sides, parameters, controls, elements }, context) => {
+  if (sides && span !== 'page') context.addIssue({ code: 'custom', path: ['sides'], message: 'Only page layouts can restrict their sides.' });
   // Layout parameters an element editor edits: declared here, edited by one editor only, and without a generated
   // control of their own, like the element parameters an editor owns.
   const owners = new Map<string, string>();
@@ -464,7 +478,7 @@ type OpeningSpread = z.infer<typeof openingSpread>;
 // sequence every declared format of the default format's kind accepts: single pages only at the book ends the format
 // allows, and only page layouts without facing pages. A template offering both kinds starts books in the default one.
 function openingSpreadProblems({ spreads, openingSpreads, format, formats, defaultFormat }: {
-  spreads: Record<string, { span: Span; parameters: Parameters }>; openingSpreads?: OpeningSpread[];
+  spreads: Record<string, { span: Span; sides?: PageSide[]; parameters: Parameters }>; openingSpreads?: OpeningSpread[];
   format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
 }) {
   const problems: { path: (string | number)[]; message: string }[] = [];
@@ -494,6 +508,10 @@ function openingSpreadProblems({ spreads, openingSpreads, format, formats, defau
       // Opening spreads may be only part of a book, so full spreads may sit anywhere; the Book check reports a
       // missing opening or closing page. Single pages must still be at their own end.
       const { span } = definition!;
+      if (span === 'page' && hasFacingPages(choice)) {
+        if (!spanAllowedAt(span, index, declared.length, choice, definition!.sides)) problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Page layout ' + openingSpreads[index].layout + ' is not allowed at this book position.' });
+        return;
+      }
       if (spanFits(span, choice) && (span === 'right' ? index === 0 : span === 'left' ? index === declared.length - 1 : true)) return;
       const where = formats ? 'format ' + id : 'the format';
       if ((span === 'page') === hasFacingPages(choice)) {
@@ -533,12 +551,13 @@ type DeclaredSpread = Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | '
 // The builder `spreads: ({ spread }) => ...` receives. It only exists for TypeScript, so at runtime it returns the
 // definition unchanged.
 const spreadBuilder = <T,>(definition: T) => definition;
+const pageBuilder = <T extends object>(definition: T) => ({ ...definition, span: 'page' as const });
 export type TemplateDeclaration = {
   id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: string[]; network?: string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string;
   parameters?: Parameters;
   controls?: ControlItem[];
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
-  spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder }) => Record<string, DeclaredSpread>);
+  spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder; page: typeof pageBuilder }) => Record<string, DeclaredSpread>);
   openingSpreads?: { layout: string; params?: Values }[];
   editors?: Record<string, { label?: string; parameters: string[]; component: (props: DocumentEditorProps) => ReactNode; presentation?: EditorPresentation }>;
 };
@@ -546,8 +565,8 @@ export type TemplateDeclaration = {
 // Applied by defineTemplate and again when the template loads, for templates exported without defineTemplate.
 export function normalizeTemplate(template: unknown) {
   if (!template || typeof template !== 'object' || typeof (template as { spreads?: unknown }).spreads !== 'function') return template;
-  const declared = template as { spreads: (tools: { spread: typeof spreadBuilder }) => unknown };
-  return { ...declared, spreads: declared.spreads({ spread: spreadBuilder }) };
+  const declared = template as { spreads: (tools: { spread: typeof spreadBuilder; page: typeof pageBuilder }) => unknown };
+  return { ...declared, spreads: declared.spreads({ spread: spreadBuilder, page: pageBuilder }) };
 }
 export const defineTemplate = (template: TemplateDeclaration) => normalizeTemplate(template);
 
@@ -582,6 +601,7 @@ const SpreadData = createContext<{
   book: RenderProject; spread: SpreadState; format: ResolvedFormat; renderPhotos: boolean;
   // The page this layout draws, for a spread shown as page layouts (ADR 0009); undefined for the spread's own layout.
   page?: PageSide;
+  side?: 'left' | 'right' | 'page';
   definition: Template['spreads'][string]; documentParameters: Parameters; values: SpreadValues; lazyPhotos: boolean;
 } | null>(null);
 
@@ -596,8 +616,7 @@ type Styling = { className?: string; style?: CSSProperties };
 type Placement = { rect?: Rect };
 const place = (rect: Rect | undefined, style: CSSProperties | undefined) => rect ? { ...geometry.css(rect), ...style } : style;
 
-export function Spread({ className, style, children, ...marker }: Styling & IssueMarker & { children?: ReactNode }) {
-  const { format } = useSpread();
+function Sheet({ format, className, style, children, ...marker }: Styling & IssueMarker & { format: ResolvedFormat; children?: ReactNode }) {
   const { trim } = format;
   // Inset variables follow the format's own side names: outside and binding with facing pages, left and right without.
   const sides = format.facingPages
@@ -696,7 +715,7 @@ export function photoRender(photo: Photo & { src: string }, placement: CropPlace
 // The editor's book view draws callback boxes after its first render (when their spread comes near) and again during
 // crop gestures, outside the render pass that reports errors. A callback that throws there is caught per box: the box
 // shows that it failed and the failure reaches the live Book check, instead of the whole book view unmounting.
-export type PhotoRenderFailure = { spread: string; box: string; message: string };
+export type PhotoRenderFailure = { spread: string; page?: PageSide; box: string; message: string };
 const photoRenderFailures = new Map<string, PhotoRenderFailure>();
 const failureListeners = new Set<() => void>();
 export const currentPhotoRenderFailures = () => [...photoRenderFailures.values()];
@@ -706,18 +725,18 @@ function setPhotoRenderFailure(key: string, failure: PhotoRenderFailure | undefi
   else if (!photoRenderFailures.delete(key)) return;
   for (const listener of failureListeners) listener();
 }
-type BoundaryProps = { spread: string; box: string; reset: string; children: ReactNode };
+type BoundaryProps = { spread: string; page?: PageSide; box: string; reset: string; children: ReactNode };
 export class PhotoRenderBoundary extends Component<BoundaryProps, { failed: boolean }> {
   state = { failed: false };
-  private get key() { return this.props.spread + '\u0000' + this.props.box; }
+  private get key() { return this.props.spread + '\u0000' + (this.props.page ?? '') + '\u0000' + this.props.box; }
   static getDerivedStateFromError() { return { failed: true }; }
   componentDidCatch(error: unknown) {
-    setPhotoRenderFailure(this.key, { spread: this.props.spread, box: this.props.box, message: error instanceof Error ? error.message : String(error) });
+    setPhotoRenderFailure(this.key, { spread: this.props.spread, ...(this.props.page ? { page: this.props.page } : {}), box: this.props.box, message: error instanceof Error ? error.message : String(error) });
   }
   // A new crop, size or parameter value draws again.
   componentDidUpdate(previous: BoundaryProps) {
     if (previous.reset === this.props.reset) return;
-    if (previous.spread !== this.props.spread || previous.box !== this.props.box) setPhotoRenderFailure(previous.spread + '\u0000' + previous.box, undefined);
+    if (previous.spread !== this.props.spread || previous.box !== this.props.box || previous.page !== this.props.page) setPhotoRenderFailure(previous.spread + '\u0000' + (previous.page ?? '') + '\u0000' + previous.box, undefined);
     if (this.state.failed) { setPhotoRenderFailure(this.key, undefined); this.setState({ failed: false }); }
   }
   componentWillUnmount() { setPhotoRenderFailure(this.key, undefined); }
@@ -804,7 +823,7 @@ export function PhotoBox({ id, className, style, rect, children, decorative, 'da
     content = <PhotoRenderCall render={render} photo={shown} state={state} spread={spread.id} />;
     // Outside the editor's book view a throw fails the render as for any other template code.
     if (deferred) {
-      content = <PhotoRenderBoundary spread={spread.id} box={id}
+      content = <PhotoRenderBoundary spread={spread.id} page={page} box={id}
         reset={JSON.stringify([shown.src, shown.placement, shown.box, state.params, state.photo])}>{content}</PhotoRenderBoundary>;
     }
   }
@@ -986,13 +1005,38 @@ export function issue(found: TemplateIssue): Required<IssueMarker> {
   return { 'data-issue': found.message, 'data-issue-info': JSON.stringify(found) };
 }
 
+export function Spread(props: Styling & IssueMarker & { children?: ReactNode }) {
+  const { format, page } = useSpread();
+  if (page) throw new Error('A page layout must render <Page>, not <Spread>.');
+  return <Sheet {...props} format={format} />;
+}
+
+/** Page-local artwork. The platform supplies its sheet and clips the two halves at the fold. */
+export function Page({ className, style, children, ...marker }: Styling & IssueMarker & { children?: ReactNode }) {
+  const { format, page, side } = useSpread();
+  if (!side) throw new Error('<Page> requires a page layout. Declare it with page().');
+  const facing = format.facingPages;
+  const vars = {
+    '--trim-width': cssMM(format.trim.width), '--trim-height': cssMM(format.trim.height),
+    '--bleed-top': cssMM(format.bleed.top), '--bleed-bottom': cssMM(format.bleed.bottom),
+    '--safe-top': cssMM(format.safe.top), '--safe-bottom': cssMM(format.safe.bottom),
+    ...(facing ? { '--bleed-outside': cssMM(format.bleed.outside), '--safe-outside': cssMM(format.safe.outside),
+      '--safe-binding': cssMM(format.safe.binding), '--safe-left': cssMM(side === 'left' ? format.safe.outside : format.safe.binding),
+      '--safe-right': cssMM(side === 'left' ? format.safe.binding : format.safe.outside) } : {}),
+  } as CSSProperties;
+  const content = <div className={['if-page', className].filter(Boolean).join(' ')} data-side={side}
+    style={{ position: 'relative', width: cssMM(format.trim.width), height: cssMM(format.trim.height), ...style, ...vars }} {...issueOn(marker)}>{children}</div>;
+  if (page) return content;
+  return <Sheet format={format}><div style={{ position: 'absolute', left: cssMM(facing && side === 'right' ? format.trim.width : 0) }}>{content}</div></Sheet>;
+}
+
 export const runtime = {
-  defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
+  defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, Page, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
   RenderedImage, FormattedText, plainText, Choice, fonts,
 } satisfies Record<typeof runtimeExports[number], unknown>;
 
 // The values `render` reads for one spread: its parameters, the document's, and its boxes and elements.
-function spreadValues(book: RenderProject, template: Template, spread: SpreadState, positions: Record<string, FlowPosition>): SpreadValues {
+function spreadValues(book: RenderProject, template: Template, spread: SpreadState, positions: Record<string, FlowPosition>, page?: PageSide): SpreadValues {
   const definition = template.spreads[spread.definition];
   const boxes = Object.fromEntries(Object.entries(definition.boxes).map(([id, box]) => {
     const assigned = spread.boxes[id];
@@ -1003,7 +1047,7 @@ function spreadValues(book: RenderProject, template: Template, spread: SpreadSta
       const { src: _src, ...metadata } = photo;
       return [id, { params, photo: metadata }];
     }
-    return [id, { params, text: positions[spread.id + ':' + id] ?? null }];
+    return [id, { params, text: positions[spread.id + ':' + (page ? page + ':' : '') + id] ?? null }];
   }));
   const elements = Object.fromEntries(Object.entries(definition.elements).map(([id, element]) => [
     id, { params: resolveParams(element.parameters, spread.elements[id]?.params ?? {}) },
@@ -1016,28 +1060,29 @@ function spreadValues(book: RenderProject, template: Template, spread: SpreadSta
  * same way. Undefined when the spread no longer exists or its layout is unknown. `key` is a serializable summary,
  * so a caller can tell whether a newer book changed anything the editor sees.
  */
-export function editorContext(book: RenderProject, template: Template, spreadId: string): { context: EditorContext; key: string } | undefined {
+export function editorContext(book: RenderProject, template: Template, spreadId: string, side?: PageSide): { context: EditorContext; key: string } | undefined {
   const { spreads } = book.project;
   const index = spreads.findIndex(({ id }) => id === spreadId);
-  const spread = spreads[index];
+  const spread = scopeSpread(spreads[index], side);
   const definition = spread && template.spreads[spread.definition];
   if (!definition) return undefined;
-  const sequence = pageSequence(spreads.map((state) => template.spreads[state.definition]?.span ?? 'spread'), template.format);
+  const sequence = pageSequence(spreads.map((state) => layoutFootprint(state, template.spreads)), template.format);
   const index_ = bookIndex(book, template, sequence);
   const format = resolveFormat(template.format);
   const values = spreadValues(book, template, spread, {});
-  const page = sequence.spreads[index].page;
+  const allPages = sequence.spreads[index].page;
+  const page = side ? { [side]: allPages[side] } : allPages;
   const context: EditorContext = {
-    ...values, page, format: spanFits(definition.span, template.format) ? format : lenientFormat(format), formatId: template.formatId,
+    ...values, page, side: definition.span === 'page' ? side ?? (format.facingPages ? (page.left !== undefined ? 'left' : 'right') : 'page') : undefined, format: spanFits(definition.span, template.format) ? format : lenientFormat(format), formatId: template.formatId,
     elements: Object.fromEntries(Object.entries(values.elements).map(([id, element]) => [id, { ...element, rect: null }])),
     book: bookContext(index_, spread.id), spread: spread.id, layout: spread.definition,
   };
-  return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, index_.credits, index_.spreads, values, template.formatId]) };
+  return { context, key: JSON.stringify([spread.id, side, spread.definition, page, index_.pages, index_.anchors, index_.credits, index_.spreads, values, template.formatId]) };
 }
 
 /** The editor context from a newer book, with the format that book chose, as the book render chooses it. */
-export const refreshedEditorContext = (book: RenderProject, template: Template, spreadId: string) =>
-  editorContext(book, chooseFormat(template, book.project.format), spreadId);
+export const refreshedEditorContext = (book: RenderProject, template: Template, spreadId: string, page?: PageSide) =>
+  editorContext(book, chooseFormat(template, book.project.format), spreadId, page);
 
 /** Page measurements are separate from saved values, so a pending or hidden element has no guessed geometry. */
 export function withEditorGeometry(context: EditorContext, measurements: unknown): EditorContext {
@@ -1062,30 +1107,53 @@ export function withEditorDraft(context: EditorContext, draft: { document: Value
 }
 
 // `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
-export function SpreadView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false, bookSpread = spread.id }: {
+export function SpreadView(props: {
   book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState; bookSpread?: string;
   page: RenderContext['page']; index: BookIndex; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
 }) {
+  const { spread, format, template } = props;
+  if (!spread.split) return <LayoutView {...props} />;
+  // Even a mismatched split spread remains a two-page sheet in the editor; export checks report the mismatch.
+  return <Sheet format={format}>{pageSides.map((side) => {
+    const state = spread.pages?.[side];
+    const outside = format.facingPages ? format.bleed.outside : format.bleed.left;
+    return <div key={side} data-if-page={side} className="if-page-clip" style={{ position: 'absolute', overflow: 'hidden',
+      left: cssMM(side === 'left' ? -outside : format.trim.width), top: cssMM(-format.bleed.top),
+      width: cssMM(format.trim.width + outside), height: cssMM(format.height) }}>
+      <div style={{ position: 'absolute', left: cssMM(side === 'left' ? outside : 0), top: cssMM(format.bleed.top) }}>
+        {state?.definition && <LayoutView {...props} spread={{ ...state, id: spread.id, definition: state.definition }}
+          side={side} scopePage={side} page={{ [side]: props.page[side] }} />}
+      </div>
+    </div>;
+  })}</Sheet>;
+}
+
+function LayoutView({ book, template, format, spread, page, index, positions, renderPhotos, lazyPhotos = false, bookSpread = spread.id,
+  side: selected, scopePage }: {
+  book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState; bookSpread?: string;
+  page: RenderContext['page']; index: BookIndex; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
+  side?: PageSide; scopePage?: PageSide;
+}) {
   const definition = template.spreads[spread.definition];
   if (!definition) throw new Error('Spread ' + spread.id + ' uses an unknown definition: ' + spread.definition + '.');
-  const values = spreadValues(book, template, spread, positions);
-  // A layout drawn in a format it does not fit gets lenient geometry, through ctx.geometry and ctx.format alike.
-  const fits = spanFits(definition.span, template.format);
-  // Purity guards (Book check and export only) attribute impure calls to the layout rendering now.
+  if (scopePage && definition.span !== 'page') throw new Error('The ' + scopePage + ' page requires a page layout.');
+  const side = definition.span === 'page' ? selected ?? (format.facingPages ? (page.left !== undefined ? 'left' : 'right') : 'page') : undefined;
+  if (side && side !== 'page' && definition.sides && !definition.sides.includes(side)) throw new Error('Layout ' + spread.definition + ' is not allowed on the ' + side + ' page.');
+  const values = spreadValues(book, template, spread, positions, scopePage);
+  const fits = spanFits(definition.span, template.format) && (!scopePage || format.facingPages);
   renderingSpread(spread.id);
   let content: ReturnType<typeof definition.render>;
   try {
     content = definition.render({
-      ...values, page, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode, view: renderView(book),
+      ...values, page: side && side !== 'page' ? { [side]: page[side] } : page, side, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode, view: renderView(book),
       spread: bookSpread, layout: spread.definition,
-      // Exported artwork keeps the invisible marker too, so checks can name the parameter a text block shows.
       edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
-      book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits }),
+      book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits, side }),
       PhotoBox, MarkdownBox, Element, Text,
     });
   } finally {
     renderingSpread(undefined);
   }
-  return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, documentParameters: template.parameters, values, lazyPhotos }}>
-    {content}</SpreadData.Provider>;
+  return <SpreadData.Provider value={{ book, spread, format, renderPhotos, definition, documentParameters: template.parameters,
+    values, lazyPhotos, page: scopePage, side }}>{content}</SpreadData.Provider>;
 }

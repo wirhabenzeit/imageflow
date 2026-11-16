@@ -83,7 +83,7 @@ export type ProjectChange = Result<ProjectSummary> | { building: true };
 // `file` imports into the files/ registry for file parameters, offering the parameter's `accept` extensions. Without a
 // kind, `accept` lists the extensions of the template's file parameters: files of those types import as files.
 export type ImportRequest = {
-  kind?: 'photo' | 'markdown' | 'file'; mode?: ImportMode; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string };
+  kind?: 'photo' | 'markdown' | 'file'; mode?: ImportMode; paths?: string[]; folder?: boolean; accept?: string[]; target?: { spread: string; box: string; page?: PageSide };
 };
 
 export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string };
@@ -193,6 +193,7 @@ export type ElementDefinition = {
 export type BoxDefinition = { type: 'photo' | 'markdown'; label: string; parameters: Parameters; flowOrder?: number; controls?: ControlItem[] };
 // `family` names the layout family this layout is a variant of; `variant` holds the template's tags for it.
 export type SpreadDefinition = {
+  sides?: PageSide[];
   label: string; span: Span; parameters: Parameters; controls?: ControlItem[];
   boxes: Record<string, BoxDefinition>; elements: Record<string, ElementDefinition>;
   declaresAnchors?: boolean;

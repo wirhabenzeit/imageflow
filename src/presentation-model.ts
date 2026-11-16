@@ -1,3 +1,4 @@
+import { layoutFootprint } from './layouts';
 import { hasFacingPages, pageLabel, pageNumbers, pageSequence } from './format';
 import type { PrintSide } from './format';
 import type { SpreadState } from './project';
@@ -13,7 +14,7 @@ export function presentationPhotoSource(source: string, pixels: number, overview
 }
 // Keep reading order independent of PDF delivery: a spread stays together unless single pages were requested.
 export function presentationUnits(spreads: SpreadState[], template: Pick<TemplateInfo, 'spreads' | 'format'>, single = false): PresentationUnit[] {
-  const sequence = pageSequence(spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
+  const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
   return sequence.spreads.flatMap(({ page, span }, i) => {
     const sides: PrintSide[] = !hasFacingPages(template.format) ? ['page'] : single
       ? [page.left && 'left', page.right && 'right'].filter((side): side is 'left' | 'right' => !!side)

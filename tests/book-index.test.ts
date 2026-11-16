@@ -196,3 +196,22 @@ test('credits read box parameters and photos, credit one page by side, reject sp
   const spaced = chooseFormat(templateSchema.parse({ ...template, format: format(), spreads: { ...template.spreads, photo: { ...template.spreads.photo, credits: () => [{ id: 'two words', text: 'x' }] } } }));
   assert.throws(() => bookIndex(book, spaced, sequence), /id must not contain whitespace/);
 });
+
+test('the flat photo index includes both shown pages, with page identity and without hidden spread photos', () => {
+  const { index } = setup([
+    { id: 'opening', definition: 'opening' },
+    { id: 'split', definition: 'pair', split: true, boxes: { hero: { photo: 'hidden' } }, pages: {
+      left: { definition: 'single', boxes: { hero: { photo: 'a' } } },
+      right: { definition: 'single', boxes: { hero: { photo: 'b' } } },
+    } },
+    { id: 'closing', definition: 'closing' },
+  ]);
+  const spread = index.spreads![1];
+  assert.equal(spread.layout, undefined);
+  assert.deepEqual(spread.photos.map(({ box, page, photoId, photo }) => [box, page, photoId, photo?.credit]),
+    [['hero', 'left', 'a', 'Ann'], ['hero', 'right', 'b', 'Ben']]);
+  assert.deepEqual(spread.photos.map(({ page }) => spread.page[page!]), [2, 3]);
+  assert.equal(spread.pages?.left?.photos[0].photoId, 'a');
+  assert.equal(spread.pages?.right?.photos[0].photoId, 'b');
+  assert.ok(Object.isFrozen(spread.photos));
+});

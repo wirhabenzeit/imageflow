@@ -92,11 +92,11 @@ test('layouts of the other kind are drawn and reported as page-sequence problems
   assert.deepEqual(single.spreads.map(({ page }) => page.number), [1, 2, 3]);
   assert.deepEqual(single.issues, ['Page 2 uses a spread layout, but Wall calendar · A4 portrait has no facing pages. Switch it to a single-page layout.']);
   const facing = pageSequence(['spread', 'page'], { ...book, structure: { ...book.structure, ends: 'inside-covers' } });
-  assert.deepEqual(facing.spreads[1], { span: 'page', page: { left: 3, right: 4 }, sides: ['left', 'right'] });
-  assert.deepEqual(facing.issues, ['Spread 2 uses a single-page layout, but Square has facing pages. Switch it to a spread layout.']);
+  assert.deepEqual(facing.spreads[1], { span: 'spread', page: { left: 3, right: 4 }, sides: ['left', 'right'] });
+  assert.ok(facing.issues.some((message) => message.includes('without being shown as pages')));
   assert.equal(spanAllowedAt('page', 0, 1, calendar), true);
   assert.equal(spanAllowedAt('spread', 0, 1, calendar), false);
-  assert.equal(spanAllowedAt('page', 0, 1, book), false);
+  assert.equal(spanAllowedAt('page', 0, 1, book), true);
 });
 
 test('geometry helpers describe one page without facing pages', () => {
@@ -152,7 +152,7 @@ test('a layout no format fits is a declaration warning', () => {
   const warned = (declared: Record<string, unknown>) =>
     declarationWarnings(declared, templateSchema as unknown as Schema).filter(({ code }) => code === 'declaration-span-unused').map(({ path }) => path);
   assert.deepEqual(warned(declare({ format: calendar, spreads: { month: layout(), wide: layout('spread') } })), ['spreads.wide.span']);
-  assert.deepEqual(warned(declare({ format: book, spreads: { month: layout('page'), body: layout() } })), ['spreads.month.span']);
+  assert.deepEqual(warned(declare({ format: book, spreads: { month: layout('page'), body: layout() } })), []);
   assert.deepEqual(warned(declare({ formats: { calendar, book }, spreads: { month: layout('page'), body: layout() } })), []);
 });
 
@@ -185,13 +185,13 @@ test('layout choices follow the chosen format, and a mismatched layout may switc
 test('fixtures render each layout only in the formats it fits', () => {
   const template = info('calendar');
   assert.equal(fixtureFits(template, 'month', 'calendar'), true);
-  assert.equal(fixtureFits(template, 'month', 'book'), false);
+  assert.equal(fixtureFits(template, 'month', 'book'), true);
   const plan = planFixtures(template, fixtureRequestSchema.parse({ layouts: ['month', 'body'], cases: ['typical'] }));
   assert.deepEqual(plan.layouts, ['month']);
   assert.match(plan.skipped.find(({ layout }) => layout === 'body')!.reason, /needs a format with facing pages/);
   const all = planFixtures(template, fixtureRequestSchema.parse({ layouts: ['month', 'body'], cases: ['typical'], formats: 'all' }));
   assert.deepEqual(all.layouts, ['month', 'body']);
-  assert.deepEqual(all.skipped.filter(({ format }) => format).map(({ layout, format }) => [layout, format]), [['month', 'book'], ['body', 'calendar']]);
+  assert.deepEqual(all.skipped.filter(({ format }) => format).map(({ layout, format }) => [layout, format]), [['body', 'calendar']]);
 });
 
 test('MCP commands insert and switch only layouts that fit the book’s format', () => {
@@ -213,8 +213,8 @@ test('MCP commands insert and switch only layouts that fit the book’s format',
   // There, the first spread must become a single right page.
   assert.throws(() => applyProjectCommands(files(), template, [{ op: 'select_format', format: 'book' }, { op: 'switch_layout', spread: 'jan', definition: 'body' }]),
     (error) => error instanceof ProjectCommandError && /requires a layout with span: 'right' in Square/.test(error.message));
-  assert.throws(() => applyProjectCommands(files(), template, [{ op: 'select_format', format: 'book' }, { op: 'insert_spread', definition: 'year' }]),
-    (error) => error instanceof ProjectCommandError && /which has facing pages\. Insert a spread layout/.test(error.message));
+  const closing = applyProjectCommands(files(), template, [{ op: 'select_format', format: 'book' }, { op: 'insert_spread', definition: 'year' }]);
+  assert.equal(closing.files.project.spreads.at(-1)?.definition, 'year');
 });
 
 test('a fixture preview in a format shows the layouts that fit it, however many others come first', () => {
@@ -227,3 +227,13 @@ test('a fixture preview in a format shows the layouts that fit it, however many 
 
 // Keep the narrowed types in use, so a change to the union shows up here at compile time.
 export const kinds: [SinglePageFormat['structure']['facingPages'], ResolvedFormat['facingPages']] = [false, true];
+
+
+test('an unsplit page layout in the middle retains the full-spread footprint until repaired', () => {
+  const sequence = pageSequence(['right', 'page', 'spread', 'left'], book);
+  assert.deepEqual(sequence.spreads.map(({ page }) => page), [
+    { left: undefined, right: 1 }, { left: 2, right: 3 }, { left: 4, right: 5 }, { left: 6, right: undefined },
+  ]);
+  assert.equal(sequence.count, 6);
+  assert.ok(sequence.issues.some((message) => /Spread 2.*without being shown as pages/.test(message)));
+});

@@ -46,11 +46,11 @@ function LayoutPicker({ summary, spread, template, choose }: {
         const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
         const family = familyOf(id);
         const grouped = !family && item.family !== undefined && Object.hasOwn(families, item.family) ? families[item.family].label : undefined;
-        return <button key={id} type="button" role="radio" disabled={pending} aria-checked={id === spread.definition} aria-label={name(id)}
+        return <button key={id} type="button" role="radio" disabled={pending} aria-checked={!spread.split && id === spread.definition} aria-label={name(id)}
           aria-description={family ? 'Layout variants available' : grouped}
           className={'layout-option' + (family ? ' layout-family' : '')}
           style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
-          onClick={() => { if (id !== spread.definition) choose(id); }}>
+          onClick={() => { if (spread.split || id !== spread.definition) choose(id); }}>
           <span className="layout-option-label">
             <span className="layout-option-name">{name(id)}</span>
             {family && <span className="layout-option-variants" title="Layout variants available" aria-hidden="true"><Icon name="cog" size={11} /></span>}
@@ -155,10 +155,10 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     return () => clearTimeout(timer);
   }, [focus, source]);
   const definition = template?.spreads[spread.definition];
-  function changeSpread(update: (spread: SpreadState) => void, notice?: string | (() => string)) {
+  function changeSpread(update: (spread: SpreadState) => void, notice?: string | (() => string), allowPages = false) {
     edit(({ project }) => {
       const current = project.spreads.find(({ id }) => id === spread.id);
-      if (current) update(current);
+      if (current && (!current.split || allowPages)) update(current);
     }, notice);
   }
   // Content the spread keeps for other layouts; switching back, or to another layout with these boxes, shows it.
@@ -215,10 +215,11 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
         event.preventDefault(); event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
       } }} onContextMenu={async (event) => {
         event.preventDefault();
-        if (!definition || !Object.keys(definition.parameters).length) return;
+        if (spread.split || !definition || !Object.keys(definition.parameters).length) return;
         const result = await window.imageflow?.showContextMenu(['reset-defaults'], assetMenuState(false));
         if (result?.command === 'reset-defaults') changeSpread((item) => { for (const id of Object.keys(definition.parameters)) delete item.params[id]; }, 'Spread settings reset');
       }}>Spread</summary>
+        {spread.split && <p className="muted" role="note">This spread is shown as pages. Edit content on the canvas, or choose a spread layout to merge the pages. Spread settings are unavailable while pages are shown.</p>}
         <p className="field-label">Layout</p>
         {!definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
         <LayoutPicker summary={summary} spread={spread} template={template} choose={(next) => {
@@ -226,14 +227,16 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
           let consequence = '';
           changeSpread((item) => {
             consequence = describeLayoutChange(switchLayout(item, next, template.spreads));
-          }, () => consequence ? template.spreads[next].label + ' · ' + consequence : '');
+          }, () => consequence ? template.spreads[next].label + ' · ' + consequence : '', true);
         }} />
         {familyPicker}
         {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
-        {definition && <Fields key={spread.id} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
-          values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />}
+        <fieldset disabled={!!spread.split}>
+          {definition && <Fields key={spread.id} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
+            values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />}
+        </fieldset>
       </details>}
-      {template && (contents.length > 0 || marked.length > 0) && <section className="spread-contents" aria-label="On this spread">
+      {!spread.split && template && (contents.length > 0 || marked.length > 0) && <section className="spread-contents" aria-label="On this spread">
         <p className="field-label">On this spread</p>
         <ul className="content-list">
           {marked.map(({ target, label, value }) => <li key={spread.id + ':' + target.edits.join(' ')}>
@@ -264,7 +267,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
           })}
         </ul>
       </section>}
-      {template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={spread} template={template}
+      {!spread.split && template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={spread} template={template}
         expanded={keptOpen} setExpanded={setKeptOpen} kept={kept} label={keptLabel} settings={keptSettings} writable={writable} place={place}
         discard={(box, name) => changeSpread((item) => discardContent(item, box), name + ' removed from this spread')} />}
     </fieldset>

@@ -14,7 +14,7 @@ type Insets = { top: Length; bottom: Length; outside: Length; binding: Length };
 type PageInsets = { top: Length; bottom: Length; left: Length; right: Length };
 /**
  * The pages a layout occupies. `'spread'` (two facing pages), `'left'` and `'right'` (a single page at a book end)
- * fit formats with facing pages; `'page'` fits formats without them (`facingPages: false`).
+ * fit formats with facing pages. `'page'` uses local page coordinates on either side, or without facing pages.
  */
 export type Span = 'spread' | 'left' | 'right' | 'page';
 export type Resolution = { minimum: number; target: number; maximum: number };
@@ -359,7 +359,7 @@ export type EditorPresentation = 'dialog' | 'inline';
  * `Pick<RenderContext, 'page' | 'book' | 'document'>` serve `render` and editors alike.
  */
 export type EditorContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> =
-  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book' | 'spread' | 'layout'> & {
+  Pick<RenderContext<S, D>, 'params' | 'document' | 'boxes' | 'page' | 'format' | 'formatId' | 'book' | 'spread' | 'layout' | 'side'> & {
     /** Actual rendered bounds in trim coordinates (mm). Null while the current page is pending or the element is hidden. */
     elements: SpreadDeclaration extends S ? Record<string, { params: Values; rect: Rect | null }>
       : { [K in keyof RenderContext<S, D>['elements']]: RenderContext<S, D>['elements'][K] & { rect: Rect | null } };
@@ -413,6 +413,7 @@ export type SpreadDeclaration = {
   label: string;
   /** `left` or `right` for a single page at the start or end of the book. Default `spread`. */
   span?: Span;
+  sides?: readonly ('left' | 'right')[];
   parameters?: Parameters;
   controls?: Controls;
   boxes?: Record<string, BoxDeclaration>;
@@ -481,6 +482,8 @@ export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'r
 export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
 /** A photo box of a spread's current layout, in `BookContext.spreads`. */
 export type BookPhotoPlacement = {
+  /** The shown page this placement belongs to, when the spread is shown as pages. */
+  readonly page?: 'left' | 'right';
   /** The box ID in the spread's current layout. */
   readonly box: string;
   /** The assigned photo's ID, or `null` for an empty box. The same photo placed twice appears in both placements. */
@@ -492,8 +495,9 @@ export type BookPhotoPlacement = {
 export type BookSpread = {
   /** The spread's stable instance ID; it stays the same when spreads move or switch layouts. */
   readonly id: string;
-  /** The spread's current layout ID. */
-  readonly layout: string;
+  /** The spread's current layout ID; absent while its pages are shown. */
+  readonly layout?: string;
+  pages?: Partial<Record<'left' | 'right', { layout?: string; photos: BookPhotoPlacement[] }>>;
   /** Book page numbers: `left` and `right`, only one of them for a single page at a book end, or `number` without facing pages. */
   readonly page: Readonly<{ left?: number; right?: number; number?: number }>;
   /** The current layout's photo boxes in declaration order. Content kept from other layouts is not listed. */
@@ -599,7 +603,7 @@ export type IssueMarker = { 'data-issue'?: string; 'data-issue-info'?: string };
  */
 export type Decorative = { decorative?: boolean };
 /**
- * Places a platform component at a rectangle (millimetres, spread coordinates) with absolute positioning. Properties
+ * Places a platform component at a rectangle in millimetres with absolute positioning: page-local coordinates in page layouts, sheet coordinates in spread layouts. Properties
  * in `style` win over the ones `rect` sets, so `style={{ height: 'auto' }}` lets a heading grow.
  */
 type Placement = { rect?: Rect };
@@ -615,13 +619,13 @@ export type TextTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'span' | '
  */
 export type TextProps<Path extends string = string> = Styling & Placement & IssueMarker & Decorative & { parameter: Path; as?: TextTag; presentation?: EditorPresentation; placeholder?: string; fallback?: string; fallbackLabel?: string; hidden?: boolean };
 
-/** The geometry helpers with the spread's format already applied: `ctx.geometry.page('left', 'bleed')`. */
+/** In page layouts, page() is local to ctx.side and spread() throws. Otherwise the format is applied: `ctx.geometry.page('left', 'bleed')`. */
 export type BoundGeometry = {
-  /** One page of the spread. Works for single first and last pages too. */
+  /** In spread layouts, one page in sheet coordinates. In page layouts, only ctx.side is allowed and coordinates are local to that page. */
   page(side: 'left' | 'right', area?: Area): Rect;
-  /** The page, in a format without facing pages: `ctx.geometry.page('safe')`. */
+  /** The current page in a page layout (including facing formats), or the page of a format without facing pages: `ctx.geometry.page('safe')`. */
   page(area?: Area): Rect;
-  /** Both pages. Its `safe` area keeps only the outer, top and bottom insets. Throws without facing pages. */
+  /** Both pages in a spread layout. Its `safe` area keeps only the outer, top and bottom insets. Throws in page layouts and without facing pages. */
   spread(area?: Area): Rect;
   /** Design coordinates on a fixed canvas scaled to this format's trim; see `geometry.design`. */
   design(canvas: { width: number; height: number }): DesignCanvas;
@@ -641,6 +645,7 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
   elements: { [K in keyof S['elements']]: { params: ValuesOf<S['elements'][K]> } };
   /** Book page numbers of this spread's pages: `left` and `right`, or `number` for a page without facing pages. */
   page: { left?: number; right?: number; number?: number };
+  side?: 'left' | 'right' | 'page';
   format: ResolvedFormat;
   /** The chosen key of `formats`, or `'default'` for a template with a single `format`. */
   formatId: string;
@@ -701,6 +706,7 @@ export type UntypedRenderContext = {
   boxes: Record<string, { params: Values; photo?: Photo | null; text?: FlowPosition | null }>;
   elements: Record<string, { params: Values }>;
   page: { left?: number; right?: number; number?: number };
+  side?: 'left' | 'right' | 'page';
   format: ResolvedFormat;
   formatId: string;
   spread: string;
@@ -774,7 +780,7 @@ export type TemplateDeclaration = {
 export type OpeningSpread<L extends string = string> = { layout: L; params?: Values };
 
 /** Declares one spread with a render context typed from its own declarations and the template's document parameters. */
-export type SpreadBuilder<D extends Parameters> = <
+export type SpreadBuilder<D extends Parameters, IsPage extends boolean = false> = <
   const P extends Parameters = {},
   const B extends Record<string, BoxDeclaration> = {},
   const E extends Record<string, ElementDeclaration> = {},
@@ -782,13 +788,14 @@ export type SpreadBuilder<D extends Parameters> = <
 >(definition: {
   label: string;
   /** `left` or `right` for a single page at the start or end of the book. Default `spread`. */
-  span?: Span;
+  span?: IsPage extends true ? never : Span;
+  sides?: readonly ('left' | 'right')[];
   parameters?: P & ParametersChecked<P>;
   /** Arranges the controls of this layout's own parameters in the sidebar. */
   controls?: Controls<keyof P & string>;
   boxes?: B & BoxesChecked<B>;
   elements?: E & ElementsChecked<E, D, P>;
-  render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D>): ImageFlowNode;
+  render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D> & (IsPage extends true ? { side: 'left' | 'right' | 'page' } : {})): ImageFlowNode;
   /** Places other spreads can refer to through `ctx.book`, declared from this spread's values. */
   anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[];
   /**
@@ -803,7 +810,7 @@ export type SpreadBuilder<D extends Parameters> = <
   variant?: VariantTags;
 }) => SpreadDefinition<D, F>;
 /** What `spreads` receives when it is a function. */
-export type TemplateTools<D extends Parameters> = { spread: SpreadBuilder<D> };
+export type TemplateTools<D extends Parameters> = { spread: SpreadBuilder<D>; page: SpreadBuilder<D, true> };
 
 type TemplateBase<D extends Parameters, L extends string = string> = {
   /** Stable template ID; `project.json` refers to it, and the template library keeps one entry per ID. */
@@ -939,6 +946,8 @@ export type ImageFlowNode = ImageFlowElement | string | number | bigint | boolea
 type Styling = { className?: string; style?: CSSProperties };
 
 /** The root of every spread. Sets `--trim-width`, `--trim-height`, `--bleed-*`, and `--safe-*` CSS variables. */
+/** Page-local artwork, rendered into a sheet and clipped at the fold by ImageFlow. */
+export function Page(props: Styling & IssueMarker & { children?: ImageFlowNode }): ImageFlowElement;
 export function Spread(props: Styling & IssueMarker & { children?: ImageFlowNode }): ImageFlowElement;
 /**
  * What a PhotoBox render callback receives about its photo. Lengths are CSS pixels (96 per inch) of the printed page,
@@ -1025,7 +1034,7 @@ export type Area = 'trim' | 'safe' | 'bleed';
 export type DesignCanvas = {
   left(x: number, y: number, width: number, height: number): Rect;
   right(x: number, y: number, width: number, height: number): Rect;
-  /** The page of a format without facing pages. `left` and `right` throw there, and `page` throws with facing pages. */
+  /** With ctx.geometry in a page layout, local coordinates on ctx.side. With standalone geometry.design, the page of a format without facing pages; it requires left/right for facing formats. */
   page(x: number, y: number, width: number, height: number): Rect;
   width(value: number): number;
   height(value: number): number;
@@ -1035,11 +1044,11 @@ export type DesignCanvas = {
   length(value: number, unit: 'mm' | 'pt' | 'px', axis: 'x' | 'y' | 'min' | 'max'): string;
 };
 export const geometry: {
-  /** One page of the spread. Works for single first and last pages too. */
+  /** In spread layouts, one page in sheet coordinates. In page layouts, only ctx.side is allowed and coordinates are local to that page. */
   page(format: ResolvedFormat, side: 'left' | 'right', area?: Area): Rect;
   /** The page, in a format without facing pages. */
   page(format: ResolvedFormat, area?: Area): Rect;
-  /** Both pages. Its `safe` area keeps only the outer, top and bottom insets. Throws without facing pages. */
+  /** Both pages in a spread layout. Its `safe` area keeps only the outer, top and bottom insets. Throws in page layouts and without facing pages. */
   spread(format: ResolvedFormat, area?: Area): Rect;
   /** Shrinks a rectangle by millimetres on every side, or on the named sides. */
   inset(rect: Rect, by: number | { top?: number; right?: number; bottom?: number; left?: number }): Rect;

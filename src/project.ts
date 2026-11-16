@@ -39,10 +39,9 @@ export const newerBookMessage = (version: number) => 'This book was saved by a n
 // it is refused with a request to update rather than opened with parts the app does not yet see:
 // - Stored page states and replaced content (`pages`, `displaced`) hold references to photos, texts and files. Every
 //   reference consumer reads them through `storedStates` and `storedBoxes` (phase 2), so this gate is lifted.
-// - A spread shown as pages (`split`) would be drawn and exported as the spread layout it remembers. Phase 3 lifts
-//   this gate once pages are drawn.
+// - Split spreads render as two page layouts in one sheet (phase 3), so this gate is lifted too.
 export const pageStatesSupported = true;
-export const pageLayoutsShown = false;
+export const pageLayoutsShown = true;
 export const pagesUnsupportedMessage = 'This book uses page layouts, which this version of ImageFlow does not support yet. ' +
   'Update ImageFlow to open it. The book was not changed.';
 type GatedSpread = { pages?: unknown; displaced?: unknown; split?: unknown };
@@ -196,4 +195,13 @@ export function parseDocument<T>(schema: z.ZodType<T>, input: unknown, label: st
   const issue = result.error.issues[0];
   const path = issue.path.length ? ' → ' + issue.path.join(' → ') : '';
   throw new Error(label + path + ': ' + issue.message);
+}
+
+/** A view of one layout state with its sheet ID, for existing box/editor helpers. Nested state is shared;
+ * writes to its parameter, box and element records write to the selected page. */
+export function scopeSpread(spread: SpreadState | undefined, page?: PageSide): SpreadState | undefined {
+  if (!spread) return undefined;
+  if (!page) return spread;
+  const state = spread.pages?.[page];
+  return state && { ...state, id: spread.id, definition: state.definition ?? '' };
 }

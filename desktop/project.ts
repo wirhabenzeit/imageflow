@@ -1,3 +1,4 @@
+import { scopeSpread } from '../src/project';
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { access, copyFile, mkdir, readFile, readdir, realpath, rm, rmdir, stat, utimes } from 'node:fs/promises';
@@ -392,7 +393,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
     await approveSources(book.folder, approvals, request.accept);
     if (!imported.length) return { book, imported, copied, createdDirectories, counts };
     if (request.target && request.kind && request.kind !== 'file') {
-      const spread = project.spreads.find(({ id }) => id === request.target?.spread);
+      const spread = scopeSpread(project.spreads.find(({ id }) => id === request.target?.spread), request.target.page);
       if (!spread) throw new Error('The selected spread no longer exists.');
       const id = request.target.box;
       spread.boxes[id] = {

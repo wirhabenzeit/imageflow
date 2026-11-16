@@ -1,3 +1,5 @@
+import { textAssignments } from './text-assignments';
+import { layoutFootprint, shownLayoutStates, planLayoutChange } from './layouts';
 import type { PresentationView } from './presentation-model';
 import { presentationPhotoSource } from './presentation-model';
 import { sourceFileName, sourcePath } from './source-locations';
@@ -20,7 +22,7 @@ import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, s
 import { animateReorder } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat } from './format';
-import { frameView, scopeState } from './project';
+import { frameView, scopeSpread, scopeState } from './project';
 import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
 import { isParameterValue, parameterWarnings, resolveParams, resolveValue } from './parameters';
@@ -79,31 +81,6 @@ function loadStyles(url?: string) {
   });
 }
 
-type Target = { spread: string; box: string; source: string };
-function textAssignments(book: RenderProject, template: Template) {
-  const chains = new Map<string, Target[]>();
-  const positions: Record<string, FlowPosition> = {};
-  for (const spread of book.project.spreads) {
-    const definition = template.spreads[spread.definition];
-    if (!definition) continue;
-    const boxes = Object.entries(definition.boxes).filter(([, box]) => box.type === 'markdown')
-      .sort(([, a], [, b]) => (a.flowOrder ?? 1) - (b.flowOrder ?? 1));
-    for (const [box] of boxes) {
-      const source = spread.boxes[box]?.text;
-      if (!source) continue;
-      if (!chains.has(source)) chains.set(source, []);
-      chains.get(source)!.push({ spread: spread.id, box, source });
-    }
-  }
-  for (const [source, chain] of chains) {
-    const title = book.project.texts[source] ? sourceFileName(book.project.texts[source]) : undefined;
-    chain.forEach(({ spread, box }, index) => {
-      positions[spread + ':' + box] = { part: index + 1, parts: chain.length, title };
-    });
-  }
-  return { chains, positions };
-}
-
 // Converts a measured CSS pixel distance to millimetres, rounded for reporting.
 const reportedMm = (pixels: number, mmPerPixel: number) => Math.round(pixels * mmPerPixel * 10) / 10;
 const ptPerMm = 72 / 25.4;
@@ -122,8 +99,9 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
   const scopes = new Map((drawnPages.length ? drawnPages : [undefined]).map((page) => {
     const id = page ? scopeState(spread, page)?.definition : spread.definition;
     const layout = id !== undefined && Object.hasOwn(template.spreads, id) ? template.spreads[id] : undefined;
-    if (!layout) throw new Error(where + ' draws the ' + page + ' page without a known layout.');
-    return [page, { layout, boxes: new Set(Object.keys(layout.boxes)), elements: new Set(Object.keys(layout.elements)) }] as const;
+    const shown: Pick<Template['spreads'][string], 'boxes' | 'elements' | 'parameters'> | undefined = layout ?? (page && id === undefined ? { boxes: {}, elements: {}, parameters: {} } : undefined);
+    if (!shown) throw new Error(where + ' draws the ' + page + ' page without a known layout.');
+    return [page, { layout: shown, boxes: new Set(Object.keys(shown.boxes)), elements: new Set(Object.keys(shown.elements)) }] as const;
   }));
   const bounds = sheet.getBoundingClientRect();
   const mmPerPixel = format.spreadWidth / bounds.width;
@@ -137,32 +115,35 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
   const undeclared = (scope: string, parameters: Parameters, values: Values) =>
     Object.fromEntries(Object.entries(values).filter(([id]) => Object.hasOwn(parameters, id) || !declared.param(scope, id)));
   const parameterFix = 'Use set_parameter with a value the declaration allows, or reset_parameter to restore the default.';
-  warn(parameterWarnings(definition.parameters, undeclared('', definition.parameters, spread.params), 'Layout'),
-    { code: 'parameter-invalid', suggestion: parameterFix });
-  for (const [id, state] of Object.entries(spread.boxes)) {
-    const box = Object.hasOwn(definition.boxes, id) ? definition.boxes[id] : undefined;
-    const kind = state.photo ? 'photo' : state.text ? 'text' : undefined;
-    if (kind && !declared.box(id, kind)) {
-      warn(['Content saved for box ' + id + ' fits no box of this template.'], { code: 'content-undeclared', box: id,
-        source: state.photo ?? state.text, suggestion: 'Declare a ' + (kind === 'photo' ? 'photo' : 'markdown') + ' box ' + id +
-          ' in a layout, or discard the saved assignment with clear_box (spread ' + spread.id + ', box ' + id + ').' });
-      continue;
+  for (const [page, { layout: definition }] of scopes) {
+    const saved = scopeState(spread, page) ?? { params: {}, boxes: {}, elements: {} };
+    warn(parameterWarnings(definition.parameters, undeclared('', definition.parameters, saved.params), 'Layout'),
+      { code: 'parameter-invalid', ...onPage(page), suggestion: parameterFix });
+    for (const [id, state] of Object.entries(saved.boxes)) {
+      const box = Object.hasOwn(definition.boxes, id) ? definition.boxes[id] : undefined;
+      const kind = state.photo ? 'photo' : state.text ? 'text' : undefined;
+      if (kind && !declared.box(id, kind)) {
+        warn(['Content saved for box ' + id + ' fits no box of this template.'], { code: 'content-undeclared', ...onPage(page), box: id,
+          source: state.photo ?? state.text, suggestion: 'Declare a ' + (kind === 'photo' ? 'photo' : 'markdown') + ' box ' + id +
+            ' in a layout, or discard the saved assignment with clear_box (spread ' + spread.id + ', box ' + id + ').' });
+        continue;
+      }
+      if (box && kind && (kind === 'photo') !== (box.type === 'photo')) continue;
+      const parameters = box?.parameters ?? {};
+      warn(parameterWarnings(parameters, undeclared('box ' + id, parameters, state.params), box?.label ?? 'Box ' + id),
+        { code: 'parameter-invalid', ...onPage(page), box: id, suggestion: parameterFix });
     }
-    if (box && kind && (kind === 'photo') !== (box.type === 'photo')) continue;
-    const parameters = box?.parameters ?? {};
-    warn(parameterWarnings(parameters, undeclared('box ' + id, parameters, state.params), box?.label ?? 'Box ' + id),
-      { code: 'parameter-invalid', box: id, suggestion: parameterFix });
-  }
-  for (const [id, state] of Object.entries(spread.elements)) {
-    const element = Object.hasOwn(definition.elements, id) ? definition.elements[id] : undefined;
-    if (!element && !declared.element(id)) {
-      warn(['Settings saved for element ' + id + ' fit no element of this template.'], { code: 'element-undeclared', element: id,
-        suggestion: 'Declare element ' + id + ' in a layout, or reset its saved parameters.' });
-      continue;
+    for (const [id, state] of Object.entries(saved.elements)) {
+      const element = Object.hasOwn(definition.elements, id) ? definition.elements[id] : undefined;
+      if (!element && !declared.element(id)) {
+        warn(['Settings saved for element ' + id + ' fit no element of this template.'], { code: 'element-undeclared', ...onPage(page), element: id,
+          suggestion: 'Declare element ' + id + ' in a layout, or reset its saved parameters.' });
+        continue;
+      }
+      const parameters = element?.parameters ?? {};
+      warn(parameterWarnings(parameters, undeclared('element ' + id, parameters, state.params), element?.label ?? id),
+        { code: 'parameter-invalid', ...onPage(page), element: id, suggestion: parameterFix });
     }
-    const parameters = element?.parameters ?? {};
-    warn(parameterWarnings(parameters, undeclared('element ' + id, parameters, state.params), element?.label ?? id),
-      { code: 'parameter-invalid', element: id, suggestion: parameterFix });
   }
   // Templates report problems with their input, such as a file they cannot parse, on the node concerned.
   // Structured findings (`issue(...)`) carry their own code and location; repeated identical nodes report once.
@@ -191,9 +172,8 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     reported.add(key);
     (severity === 'error' ? errors : warnings).push(finding);
   }
-  const unknown = new Set([...sheet.querySelectorAll<HTMLElement>('[data-edit]')]
-    .flatMap((node) => node.dataset.edit!.split(' ').filter(Boolean))
-    .filter((path) => !resolveEditPath(template, spread.definition, path)));
+  const unknown = new Set([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].flatMap((node) =>
+    node.dataset.edit!.split(' ').filter(Boolean).filter((path) => !resolveEditPath(template, scopeSpread(spread, pageOf(node))?.definition ?? '', path))));
   if (unknown.size) {
     warn(['The layout marks unknown parameters as editable: ' + [...unknown].join(', ') + '.'], { code: 'edit-path-unknown',
       details: { paths: [...unknown].join(' ') }, suggestion: 'Declare these parameters in the layout, or remove them from ctx.edit(...).' });
@@ -509,7 +489,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
           const sized = Math.abs(rect.width - box.offsetWidth * scale) < 1.5 && Math.abs(rect.height - box.offsetHeight * scale) < 1.5;
           return {
             spread, id, ...onPage(page), upright: sized && upright(box, sheet),
-            rect: { ...measured, x: measured.x - origin.x, y: measured.y - origin.y },
+            rect: { ...measured, x: measured.x - origin.x - (box.closest('.if-page[data-side="right"]') && format.facingPages ? format.trim.width : 0), y: measured.y - origin.y },
             type: (boxType ?? 'element') as BookGeometry['boxes'][number]['type'], ...rect,
             ...(box.dataset.photoRender === 'custom' ? { custom: true } : {}),
           };
@@ -1046,11 +1026,12 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   const index = spreads.findIndex(({ id }) => id === spreadId);
   if (index < 0) throw new Error('Spread does not exist.');
   const format = resolveFormat(template.format);
-  const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
+  const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
   // A preview is the spread itself in another layout: switching only changes which of its content is shown.
   // A family with its own picker shows one preview, which stands for the family.
   const previews = layoutPreviews(template.spreads, spreads[index].definition, template.layoutFamilies, template.format, { index, count: spreads.length }).map((definition) => ({
-    definition, span: template.spreads[definition].span, spread: { ...spreads[index], definition, id: definition },
+    definition, span: template.spreads[definition].span === 'page' && format.facingPages ? sequence.spreads[index].span : template.spreads[definition].span,
+    spread: { ...planLayoutChange(spreads[index], definition, template.spreads).spread, id: definition },
   }));
   // Previews read the anchors of the book as saved, so a contents layout shows the real pages.
   const anchors = bookIndex(book, template, sequence);
@@ -1141,14 +1122,14 @@ function filesKey(book: RenderProject) {
 }
 
 function renderEditor(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, target: { element: string } | { editor: string }, readOnly: boolean,
-  presentation: EditorPresentation) {
-  const spread = book.project.spreads.find(({ id }) => id === spreadId);
+  presentation: EditorPresentation, page?: import('./project').PageSide) {
+  const spread = scopeSpread(book.project.spreads.find(({ id }) => id === spreadId), page);
   const layout = spread && template.spreads[spread.definition];
   const documentEditor = 'editor' in target && Object.hasOwn(template.editors ?? {}, target.editor) ? template.editors![target.editor] : undefined;
   const element = 'element' in target ? layout?.elements[target.element] : undefined;
   const elementId = 'element' in target ? target.element : '';
   const editor = documentEditor ?? element?.editor;
-  const opened = editorContext(book, template, spreadId);
+  const opened = editorContext(book, template, spreadId, page);
   if (!spread || !layout || !editor || !opened || (!documentEditor && !element)) throw new Error('This element has no editor.');
   // The editor's own scope: the element's parameters, or the document's for a document editor.
   const declared = documentEditor ? template.parameters : element!.parameters;
@@ -1233,7 +1214,7 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
     void fetch('/render/' + session + '/data').then((response) => response.json()).then((latest: RenderProject) => {
       if (request !== contextRequests || failed) return;
       // The latest book may have chosen another format; the context follows it like the book render does.
-      const next = refreshedEditorContext(latest, template, spreadId);
+      const next = refreshedEditorContext(latest, template, spreadId, page);
       if (!next) return;
       const measured = withEditorGeometry(next.context, measurements);
       // The project's files count too: an editor reading `file(id)` shows the file's current content.
@@ -1423,7 +1404,7 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   let document = resolveParams(template.parameters, book.project.params);
   const format = resolveFormat(template.format);
   root.className = 'if-editor if-layout-settings';
-  let saved = spread.definition;
+  let saved = spread.split ? '' : spread.definition;
   let disabled = readOnly;
 
   // The draft lives outside React so choose() followed directly by commit() sends the newest choice.
@@ -1461,7 +1442,7 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   window.addEventListener('message', (event) => {
     if (event.source !== parent || event.origin !== editorURL.slice(0, -1)) return;
     if (event.data?.type === 'layout-picker-state') {
-      if (typeof event.data.saved !== 'string' || !Object.hasOwn(template.spreads, event.data.saved) || typeof event.data.readOnly !== 'boolean') return;
+      if (typeof event.data.saved !== 'string' || (event.data.saved !== '' && !Object.hasOwn(template.spreads, event.data.saved)) || typeof event.data.readOnly !== 'boolean') return;
       saved = event.data.saved;
       draft = saved;
       document = resolveParams(template.parameters, event.data.document ?? {});
@@ -1577,7 +1558,7 @@ export async function startRender(root: HTMLElement) {
     }
     if (book.mode === 'edit' && query.get('view') === 'editor') {
       renderEditor(root, book, template, query.get('spread') ?? '', query.has('editor') ? { editor: query.get('editor')! } : { element: query.get('element') ?? '' },
-        query.has('readonly'), query.get('presentation') === 'inline' ? 'inline' : 'dialog');
+        query.has('readonly'), query.get('presentation') === 'inline' ? 'inline' : 'dialog', query.get('page') === 'left' ? 'left' : query.get('page') === 'right' ? 'right' : undefined);
       return;
     }
     if (book.mode === 'edit' && query.get('view') === 'layout-picker') {
@@ -1585,7 +1566,7 @@ export async function startRender(root: HTMLElement) {
       return;
     }
     const { spreads } = book.project;
-    const sequence = pageSequence(spreads.map((spread) => template.spreads[spread.definition]?.span ?? 'spread'), template.format);
+    const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
     const { chains, positions } = textAssignments(book, template);
     const present = query.get('view') === 'present';
     const presentationStart = spreads.find(({ id }) => id === query.get('spread'))?.id ?? spreads[0]?.id ?? '';
@@ -1645,10 +1626,12 @@ export async function startRender(root: HTMLElement) {
       await document.fonts.ready;
       const spread = visible[0]?.spread;
       const path = query.get('parameter') ?? '';
-      const field = spread && resolveEditPath(info!, spread.definition, path);
-      const nodes = [...root.querySelectorAll<HTMLElement>('[data-edit]')].filter((node) => node.dataset.edit === path);
+      const side = query.get('page') === 'left' ? 'left' : query.get('page') === 'right' ? 'right' : undefined;
+      const state = scopeSpread(spread, side);
+      const field = state && resolveEditPath(info!, state.definition, path, side);
+      const nodes = [...root.querySelectorAll<HTMLElement>('[data-edit]')].filter((node) => node.dataset.edit === path && pageOf(node) === side);
       const node = nodes[Number(query.get('occurrence')) || 0];
-      if (!spread || !node?.hasAttribute('data-inline-text') || field?.param.type !== 'string' || query.has('readonly') || textEditorOwner(info!, spread.definition, path)) {
+      if (!spread || !node?.hasAttribute('data-inline-text') || field?.param.type !== 'string' || query.has('readonly') || textEditorOwner(info!, state?.definition ?? '', path)) {
         throw new Error('This text is not available for inline editing. Use its parameter control.');
       }
       inlineTextFrame(root, node, field.param, String(readEdit(book.project, spread, field)), post, editorURL.slice(0, -1));
@@ -1714,14 +1697,14 @@ export async function startRender(root: HTMLElement) {
           ? 'Return SVG from draw and declare output="vector" on the <RenderedImage>, or declare output="raster" if the picture is imagery such as a satellite photo.'
           : 'Draw the picture at target.width × target.pixelRatio by target.height × target.pixelRatio pixels.' });
     }
-    const photoRenderIssues = (failures: PhotoRenderFailure[]): Issue[] => failures.map(({ spread, box, message: text }) => ({
-      ...located(spread, 'Photo box ' + box + ': its render callback failed: ' + text), code: 'photo-render-failed', box,
+    const photoRenderIssues = (failures: PhotoRenderFailure[]): Issue[] => failures.map(({ spread, page, box, message: text }) => ({
+      ...located(spread, 'Photo box ' + box + ': its render callback failed: ' + text), code: 'photo-render-failed', ...onPage(page), box,
       suggestion: 'Fix the PhotoBox render callback so it returns markup for every crop and parameter value.' }));
     for (const { api, spread } of guards?.calls ?? []) {
       errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api, false))), code: 'render-impure',
         details: { api }, suggestion: spread ? impureSuggestion : unlocatedImpureSuggestion });
     }
-    for (const spread of spreads) {
+    for (const sheet of spreads) for (const { page, state: spread } of shownLayoutStates(sheet)) {
       const definition = template.spreads[spread.definition];
       if (!definition) continue;
       const scoped = [
@@ -1731,7 +1714,7 @@ export async function startRender(root: HTMLElement) {
         ...Object.entries(definition.elements).flatMap(([id, element]) =>
           fileErrors(book, element.parameters, spread.elements[id]?.params ?? {}, element.label).map((finding) => ({ ...finding, element: id }))),
       ];
-      errors.push(...scoped.map((finding) => ({ ...located(spread.id, finding.message), ...finding })));
+      errors.push(...scoped.map((finding) => ({ ...located(spread.id, finding.message), ...finding, ...onPage(page) })));
       for (const [box, declaration] of Object.entries(definition.boxes)) {
         const assignment = spread.boxes[box];
         const id = declaration.type === 'photo' ? assignment?.photo : assignment?.text;
@@ -1739,7 +1722,7 @@ export async function startRender(root: HTMLElement) {
         const state = id && book.sources?.[kind + ':' + id];
         if (state && state.state !== 'available' && state.cached) errors.push({
           ...located(spread.id, state.problem + '. Showing a cached preview; the original is required for print.'),
-          code: 'source-unavailable', box, source: id || undefined, suggestion: 'Locate the original or retry after reconnecting its location.',
+          code: 'source-unavailable', ...onPage(page), box, source: id || undefined, suggestion: 'Locate the original or retry after reconnecting its location.',
         });
       }
     }
@@ -1806,17 +1789,17 @@ export async function startRender(root: HTMLElement) {
     for (const [source, chain] of activeChains) {
       const first = chain[0];
       if (book.texts[source] === undefined) {
-        errors.push({ ...located(first.spread, 'Missing Markdown source ' + source + '.'), code: 'text-source-missing', box: first.box, source,
+        errors.push({ ...located(first.spread, 'Missing Markdown source ' + source + '.'), code: 'text-source-missing', ...onPage(first.page), box: first.box, source,
           suggestion: 'Restore ' + (book.project.texts[source] ? sourcePath(book.project.texts[source]) : 'the Markdown file') + ', or assign another text to box ' + first.box + '.' });
         continue;
       }
-      const boxes = chain.map(({ spread, box }) => validated.get(spread)!.boxes.get(box)!);
+      const boxes = chain.map(({ spread, page, box }) => validated.get(spread)!.boxes.get((page ? page + ':' : '') + box)!);
       const result = flow.run(markdownToHtml(book.texts[source]), boxes, 'columns');
       const overflow = result.overflowText.trim();
       if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
         const last = chain.at(-1)!;
         errors.push({ ...located(last.spread, 'Text from ' + (book.project.texts[source] ? sourcePath(book.project.texts[source]) : source) + ' does not fit; add a spread that continues it.'),
-          code: 'text-overflow', box: last.box, source,
+          code: 'text-overflow', ...onPage(last.page), box: last.box, source,
           details: { overflowCharacters: overflow.length, boxes: chain.length, path: book.project.texts[source] ? sourcePath(book.project.texts[source]) : '' },
           suggestion: 'Insert a spread after ' + last.spread + ' with a markdown box and assign text ' + source +
             ' to it so the flow continues, or enlarge the boxes, reduce the text size or shorten the text.' });

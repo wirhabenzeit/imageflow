@@ -4,7 +4,7 @@ import type { TemplateInfo } from './desktop';
 import type { PrintFormat } from './format';
 import { newSpread, resolveEditPath, writeEdit } from './editing';
 import type { EditTarget } from './editing';
-import { describeLayoutChange, discardContent, layoutChoices, swapContent, switchLayout } from './layouts';
+import { describeLayoutChange, discardContent, layoutChoices, layoutFootprint, swapContent, switchLayout } from './layouts';
 import { hasFacingPages, spanFits, spanRequiredAt } from './format';
 import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
 import type { ListItem, Parameter, Parameters } from './parameters';
@@ -118,7 +118,7 @@ export type ProjectOperations = z.input<typeof projectOperationsSchema>;
 export type ProjectCommandResult = {
   files: ProjectFiles; changes: string[]; affectedSpreads: string[]; references: Record<string, string>; reflow: boolean;
 };
-export type ProjectCommandErrorCode = 'INVALID_OPERATION' | 'SPREAD_NOT_FOUND' | 'LAYOUT_NOT_FOUND' | 'BOX_NOT_FOUND' |
+export type ProjectCommandErrorCode = 'INVALID_OPERATION' | 'SPREAD_SHOWN_AS_PAGES' | 'SPREAD_NOT_FOUND' | 'LAYOUT_NOT_FOUND' | 'BOX_NOT_FOUND' |
   'ELEMENT_NOT_FOUND' | 'PARAMETER_NOT_FOUND' | 'INVALID_PARAMETER_VALUE' | 'SOURCE_NOT_FOUND' | 'BOX_TYPE_MISMATCH' | 'INCOMPATIBLE_LAYOUT' |
   'REFERENCE_NOT_FOUND' | 'DUPLICATE_REFERENCE' | 'INVALID_SPREAD_ID' | 'FORMAT_NOT_FOUND' | 'EMPTY_BOX' | 'INVALID_POSITION' |
   'NOT_A_LIST' | 'ITEM_NOT_FOUND';
@@ -242,7 +242,7 @@ export function applyProjectCommands(
   }
   function checkInsertion(spread: SpreadState, after: string | null | undefined) {
     const position = after === undefined ? project.spreads.length : after === null ? 0 : project.spreads.indexOf(findSpread(after)) + 1;
-    const problem = insertionProblem(project.spreads, position, template.spreads[spread.definition]?.span ?? 'spread', { spreads: template.spreads, format });
+    const problem = insertionProblem(project.spreads, position, layoutFootprint(spread, template.spreads).span, { spreads: template.spreads, format }, layoutFootprint(spread, template.spreads).sides);
     if (problem) fail('INVALID_POSITION', problem);
   }
   function insertAfter(spread: SpreadState, after: string | null | undefined) {
@@ -264,6 +264,16 @@ export function applyProjectCommands(
   }
 
   for (const operation of parsed.data) {
+    // Until commands accept page addressing (ADR 0009 phase 6), never report success after editing a hidden
+    // remembered layout. A layout switch is the explicit way to merge the visible pages back into the unit.
+    if (operation.op !== 'switch_layout') {
+      const targets = operation.op === 'swap_content' ? [operation.from.spread, operation.to.spread]
+        : 'spread' in operation && operation.spread ? [operation.spread] : [];
+      for (const reference of targets) {
+        const spread = findSpread(reference);
+        if (spread.split) fail('SPREAD_SHOWN_AS_PAGES', 'Spread ' + spread.id + ' is shown as pages. This command cannot address a page yet. Use switch_layout to merge it before editing it with commands.');
+      }
+    }
     switch (operation.op) {
       case 'set_title':
         if (project.title !== operation.title) {
@@ -407,7 +417,7 @@ export function applyProjectCommands(
             : 'Layout ' + operation.definition + ' does not fit the book\'s format ' + format.label + (hasFacingPages(format)
               ? ', which has facing pages. Choose a spread layout.' : ', which has no facing pages. Choose a single-page layout.'));
         }
-        if (spread.definition === operation.definition) break;
+        if (!spread.split && spread.definition === operation.definition) break;
         const plan = switchLayout(spread, operation.definition, template.spreads);
         changed('Changed layout of ' + spread.id + '. ' + describeLayoutChange(plan), [spread.id], plan.reflow);
         break;

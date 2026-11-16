@@ -1,3 +1,4 @@
+import { scopeSpread } from '../src/project';
 import { hidden } from './background-mode';
 import { AppUpdater } from './updates';
 import { copySample } from './sample-book.mjs';
@@ -1774,7 +1775,7 @@ void app.whenReady().then(async () => {
         const path = await originalPath(document.book.folder, source).catch(() => undefined);
         if (!path || path !== request.paths[0]) continue;
         const files = structuredClone({ project: document.book.project, photoIndex: document.book.photoIndex });
-        const spread = files.project.spreads.find(({ id }) => id === request.target!.spread);
+        const spread = scopeSpread(files.project.spreads.find(({ id }) => id === request.target!.spread), request.target.page);
         if (!spread) throw new Error('The spread changed.');
         spread.boxes[request.target.box] = { params: spread.boxes[request.target.box]?.params ?? {},
           ...(request.kind === 'photo' ? { photo: source.id } : { text: source.id }) };

@@ -1,6 +1,7 @@
 import type { TemplateInfo } from './desktop';
 import { resolveParams, sameValue } from './parameters';
-import type { SpreadState, Values } from './project';
+import { scopeSpread } from './project';
+import type { PageSide, SpreadState, Values } from './project';
 
 // What an open custom editor works on, and the rules that keep its saves safe while the book changes around it.
 //
@@ -13,9 +14,9 @@ import type { SpreadState, Values } from './project';
 // The spread it was opened from being deleted (or, for a document editor, switching layout, which removes the node
 // it was opened from) closes it.
 
-export type EditorTarget =
+export type EditorTarget = { page?: PageSide } & (
   | { kind: 'element'; spread: string; element: string }
-  | { kind: 'document'; spread: string; layout: string; editor: string };
+  | { kind: 'document'; spread: string; layout: string; editor: string });
 
 // The saved values an editor reads: its spread, and the document's parameters.
 export type EditorState = { spread: SpreadState; params: Values };
@@ -57,7 +58,8 @@ export function editingContext(template: TemplateInfo, state: EditorState, targe
     const resolved = resolveParams(template.parameters, state.params);
     return JSON.stringify(['document', target.editor, editor?.parameters ?? [], owned.map((key) => [key, template.parameters[key], resolved[key]])]);
   }
-  const { spread } = state;
+  const spread = scopeSpread(state.spread, target.page);
+  if (!spread) return 'missing page';
   const layout = template.spreads[spread.definition];
   const definition = layout?.elements[target.element];
   const parameters = definition?.parameters ?? {};
@@ -72,8 +74,9 @@ export function editingContext(template: TemplateInfo, state: EditorState, targe
 
 /** Whether what the editor was opened from is gone, so the editor closes instead of reporting a conflict. */
 export function editorTargetGone(spreads: readonly SpreadState[], target: EditorTarget) {
-  const spread = spreads.find(({ id }) => id === target.spread);
-  return !spread || (target.kind === 'document' && spread.definition !== target.layout);
+  const sheet = spreads.find(({ id }) => id === target.spread);
+  const spread = scopeSpread(sheet, target.page);
+  return (!!target.page && !sheet?.split) || !spread || (target.kind === 'document' && spread.definition !== target.layout);
 }
 
 /** The changes of a draft that differ from the saved state, or undefined when there are none. */
@@ -83,10 +86,12 @@ export function changedValues(template: TemplateInfo, state: EditorState, target
     const values = differ(resolveParams(template.parameters, state.params), draft.values);
     return Object.keys(values).length ? { values, spread: {} } : undefined;
   }
-  const layout = template.spreads[state.spread.definition];
+  const scoped = scopeSpread(state.spread, target.page);
+  if (!scoped) return;
+  const layout = template.spreads[scoped.definition];
   const definition = layout?.elements[target.element];
-  const values = differ(resolveParams(definition?.parameters ?? {}, state.spread.elements[target.element]?.params ?? {}), draft.values);
-  const spread = differ(resolveParams(layout?.parameters ?? {}, state.spread.params), draft.spread);
+  const values = differ(resolveParams(definition?.parameters ?? {}, scoped.elements[target.element]?.params ?? {}), draft.values);
+  const spread = differ(resolveParams(layout?.parameters ?? {}, scoped.params), draft.spread);
   return Object.keys(values).length || Object.keys(spread).length ? { values, spread } : undefined;
 }
 
@@ -96,11 +101,13 @@ export function applyEditorChanges(state: EditorState, target: EditorTarget, cha
     Object.assign(state.params, changes.values);
     return;
   }
+  const scoped = scopeSpread(state.spread, target.page);
+  if (!scoped) return;
   if (Object.keys(changes.values).length) {
-    state.spread.elements[target.element] ??= { params: {} };
-    Object.assign(state.spread.elements[target.element].params, changes.values);
+    scoped.elements[target.element] ??= { params: {} };
+    Object.assign(scoped.elements[target.element].params, changes.values);
   }
-  Object.assign(state.spread.params, changes.spread);
+  Object.assign(scoped.params, changes.spread);
 }
 
 /**
