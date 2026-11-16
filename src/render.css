@@ -103,6 +103,8 @@ html:has(.if-artwork) { overflow: hidden; }
   color: #61594b;
   font: 25px system-ui, sans-serif;
 }
+.if-layout-glyph { color: #b9b2a3; }
+.if-layout-glyph svg { width: 56%; height: 56%; }
 .if-markdown { orphans: 2; widows: 2; }
 .if-markdown :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
 .if-markdown .cont { text-indent: 0; }

@@ -45,7 +45,7 @@ type RenderContext = {
 {!chapters.length && ctx.view === 'canvas' && <p className="hint">Story spreads appear here.</p>}
 ```
 
-ImageFlow's own placeholders follow the same rule: empty `PhotoBox` and `MarkdownBox` placeholders, the `ctx.Text` empty state and the inherited-text underline appear only on the canvas. Thumbnails and layout previews render empty content as export does. One difference to know when styling `[data-empty]`: `ctx.Text` carries `data-empty` only on the canvas, so in thumbnails and layout previews an empty text renders as in export, while empty `PhotoBox` and `MarkdownBox` boxes carry `data-empty` in every view.
+ImageFlow's own placeholders follow the same rule: empty `PhotoBox` and `MarkdownBox` placeholders, the `ctx.Text` empty state and the inherited-text underline appear only on the canvas. Thumbnails render empty content as export does; layout previews do too, except that an empty `PhotoBox` or `MarkdownBox` shows a small photo or text glyph so the layouts can be told apart before any content is placed. One difference to know when styling `[data-empty]`: `ctx.Text` carries `data-empty` only on the canvas, so in thumbnails and layout previews an empty text renders as in export, while empty `PhotoBox` and `MarkdownBox` boxes carry `data-empty` in every view.
 
 ## Photo metadata
 

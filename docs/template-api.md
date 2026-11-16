@@ -570,7 +570,7 @@ type RenderContext = {
 {!chapters.length && ctx.view === 'canvas' && <p className="hint">Story spreads appear here.</p>}
 ```
 
-ImageFlow's own placeholders follow the same rule: empty `PhotoBox` and `MarkdownBox` placeholders, the `ctx.Text` empty state and the inherited-text underline appear only on the canvas. Thumbnails and layout previews render empty content as export does. One difference to know when styling `[data-empty]`: `ctx.Text` carries `data-empty` only on the canvas, so in thumbnails and layout previews an empty text renders as in export, while empty `PhotoBox` and `MarkdownBox` boxes carry `data-empty` in every view.
+ImageFlow's own placeholders follow the same rule: empty `PhotoBox` and `MarkdownBox` placeholders, the `ctx.Text` empty state and the inherited-text underline appear only on the canvas. Thumbnails render empty content as export does; layout previews do too, except that an empty `PhotoBox` or `MarkdownBox` shows a small photo or text glyph so the layouts can be told apart before any content is placed. One difference to know when styling `[data-empty]`: `ctx.Text` carries `data-empty` only on the canvas, so in thumbnails and layout previews an empty text renders as in export, while empty `PhotoBox` and `MarkdownBox` boxes carry `data-empty` in every view.
 
 ### Photo metadata
 
@@ -903,7 +903,7 @@ Rules:
 - Each declared box is rendered exactly once through its component; each declared element at most once.
 - Boxes and elements are positioned and sized by template CSS on the component's element (`className`, `style`), or by `rect` (see Geometry helpers).
 - `decorative` marks a component's text as ornament, so the Book check does not report it for the safe area, size or overlap (see [CSS contract](#fonts-and-output)).
-- An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted, as it is in thumbnails and layout previews; templates can style `[data-empty]`.
+- An empty box keeps its area in edit mode so it can receive drops. In export, its wrapper remains but the edit placeholder is omitted, as it is in thumbnails; templates can style `[data-empty]`. Layout previews mark each empty box with a small photo or text glyph instead, so a spread without content still shows which boxes take photos and which take text.
 
 ### PhotoBox render callbacks
 
