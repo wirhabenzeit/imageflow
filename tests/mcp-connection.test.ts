@@ -152,7 +152,7 @@ test('tool contracts require revisions for page numbers and restrict source path
 
 const imageMetadata = { width: 10, height: 10, widthMm: 100, heightMm: 100, bounds: 'trim', spread: 'later', side: 'spread', page: { left: 2, right: 3 } };
 
-test('official MCP client lists six tools and receives image content without duplicated image data', async (t) => {
+test('official MCP client lists every tool and receives image content without duplicated image data', async (t) => {
   const { descriptorPath, work } = await fixture(t, async (name) => name === 'check_book'
     ? { state: 'ready', revision: hash, diagnostics: [], checks: { bundle: 'passed', declarations: 'passed', layout: 'completed', typescript: 'not-run', fixtures: 'not-run', print: 'not-run' },
       image: { data: 'aW1hZ2U=', mimeType: 'image/png', ...imageMetadata } }
@@ -178,4 +178,32 @@ test('official MCP client lists six tools and receives image content without dup
   assert.equal(failed.isError, true);
   assert.equal(((failed.structuredContent as Record<string, unknown>)?.error as { code: string }).code, 'TEST_FAILURE');
   assert.equal(errors, '');
+});
+
+test('a bridge older than the app serves the app’s tools and arguments, and tells the client they changed', async (t) => {
+  const { descriptorPath, work } = await fixture(t, async (name, args) => ({ state: 'ready', project: args.project, name }));
+  // A bridge built before rebuild_dependencies existed: its own copy of the tools lacks it, as a bridge process that
+  // outlived an app update does.
+  const bridge = join(work, 'old-bridge.cjs');
+  const contract = resolve('src/mcp-contract.ts');
+  await build({ entryPoints: [resolve('desktop/mcp-bridge.ts')], outfile: bridge, bundle: true, platform: 'node', format: 'cjs', target: 'node22', logLevel: 'silent',
+    plugins: [{ name: 'older-contract', setup(builder) {
+      builder.onLoad({ filter: /mcp-contract\.ts$/ }, async (loaded) => loaded.path !== contract ? undefined : ({ loader: 'ts',
+        contents: (await readFile(loaded.path, 'utf8')).replace('return mcpTools.map(', "return mcpTools.filter((tool) => tool.name !== 'rebuild_dependencies').map(") }));
+    } }] });
+  const transport = new StdioClientTransport({ command: process.execPath, args: [bridge, '--connection', descriptorPath], stderr: 'pipe' });
+  let changed = 0;
+  const client = new Client({ name: 'Outdated bridge test', version: '1' }, { listChanged: { tools: { autoRefresh: false, onChanged: () => { changed++; } } } });
+  t.after(() => client.close());
+  await client.connect(transport);
+  let names: string[] = [];
+  for (let attempt = 0; attempt < 100 && !names.includes('rebuild_dependencies'); attempt++) {
+    names = (await client.listTools()).tools.map(({ name }) => name);
+    if (!names.includes('rebuild_dependencies')) await delay(20);
+  }
+  assert.deepEqual(names.sort(), mcpTools.map(({ name }) => name).sort(), 'the app’s tools replace the bridge’s own copy');
+  await eventually(() => changed > 0);
+  const result = await client.callTool({ name: 'rebuild_dependencies', arguments: { project: 'book' } });
+  assert.equal(result.isError, undefined, JSON.stringify(result));
+  assert.equal((result.structuredContent as Record<string, unknown>)?.name, 'rebuild_dependencies');
 });

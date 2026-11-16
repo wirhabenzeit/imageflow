@@ -5,8 +5,8 @@ import { createConnection, createServer } from 'node:net';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { mcpCallSchema, mcpCancelSchema, mcpDescriptorSchema, mcpHelloSchema, mcpLimits, mcpReplySchema, parseMcpArguments } from '../src/mcp-contract';
-import type { McpDescriptor, McpToolName } from '../src/mcp-contract';
+import { mcpCallSchema, mcpCancelSchema, mcpCatalog, mcpCatalogCall, mcpDescriptorSchema, mcpHelloSchema, mcpLimits, mcpReplySchema, parseMcpArguments } from '../src/mcp-contract';
+import type { McpCatalogTool, McpDescriptor, McpToolName } from '../src/mcp-contract';
 
 type WireError = { code: string; message: string };
 type Client = { name: string };
@@ -148,6 +148,11 @@ export async function createMcpConnection(options: {
       const { id } = call.data;
       if (pending.has(id)) { replyError({ code: 'duplicate-request', message: 'This request is already running.' }, id); return; }
       if (pending.size >= mcpLimits.callsPerClient) { replyError({ code: 'connection-busy', message: 'Too many ImageFlow requests are running. Wait for an earlier request to finish.' }, id); return; }
+      if (call.data.name === mcpCatalogCall) {
+        try { send(socket, { type: 'result', id, result: { tools: mcpCatalog() } }, mcpLimits.responseBytes); }
+        catch (error) { replyError(wireError(error), id); }
+        return;
+      }
       let parsed;
       try { parsed = parseMcpArguments(call.data.name, call.data.args); }
       catch (error) { replyError({ code: 'invalid-tool-arguments', message: error instanceof Error ? error.message : 'Invalid tool arguments.' }, id); return; }
@@ -235,7 +240,8 @@ export class McpAppClient {
   private connecting?: Promise<void>;
   private pending = new Map<string, Awaiting>();
 
-  constructor(private readonly descriptorPath: string, private readonly clientName: () => string) {}
+  /** `connected` runs after each new connection is ready, such as after ImageFlow restarted or updated. */
+  constructor(private readonly descriptorPath: string, private readonly clientName: () => string, private readonly connected?: () => void) {}
 
   async connect() {
     const descriptor = await readDescriptor(this.descriptorPath);
@@ -283,6 +289,18 @@ export class McpAppClient {
     });
     this.connecting = connecting;
     await connecting;
+    this.connected?.();
+  }
+
+  /** The tools the app serves now, or undefined from an app that predates the catalog. */
+  async catalog(signal?: AbortSignal): Promise<McpCatalogTool[] | undefined> {
+    try {
+      const result = await this.call(mcpCatalogCall as McpToolName, {}, signal);
+      return Array.isArray(result.tools) ? result.tools as McpCatalogTool[] : undefined;
+    } catch (error) {
+      if (error instanceof McpConnectionError && error.code === 'invalid-tool-arguments') return undefined;
+      throw error;
+    }
   }
 
   async call(name: McpToolName, args: Record<string, unknown>, signal?: AbortSignal) {

@@ -130,6 +130,15 @@ export function advertisedSchemas(name: McpToolName) {
   };
 }
 
+// The tools a running app serves, with their schemas. The bridge an agent started can outlive an app update; it asks
+// the app for this on every new connection and serves these instead of the copy it was built with, so new tools and
+// arguments work without restarting the agent. Older apps answer this name with an unknown-tool error.
+export const mcpCatalogCall = '__imageflow_tool_catalog';
+export type McpCatalogTool = { name: string; title: string; description: string; readOnly: boolean; input: Record<string, unknown>; output: Record<string, unknown> };
+export function mcpCatalog(): McpCatalogTool[] {
+  return mcpTools.map((tool) => ({ ...tool, ...advertisedSchemas(tool.name) }));
+}
+
 export function parseMcpArguments(name: string, args: unknown): { name: McpToolName; args: Record<string, unknown> } {
   if (!Object.hasOwn(mcpToolSchemas, name)) throw new Error('Unknown ImageFlow tool ' + name + '.');
   const tool = name as McpToolName;
