@@ -1,0 +1,287 @@
+{
+  "paper": "pro_uncoated_layflat",
+  "bands": [
+    {
+      "min": 20,
+      "max": 34,
+      "spine": 40
+    },
+    {
+      "min": 36,
+      "max": 50,
+      "spine": 54
+    },
+    {
+      "min": 52,
+      "max": 62,
+      "spine": 71
+    },
+    {
+      "min": 64,
+      "max": 68,
+      "spine": 81
+    },
+    {
+      "min": 70,
+      "max": 82,
+      "spine": 94
+    },
+    {
+      "min": 84,
+      "max": 94,
+      "spine": 110
+    },
+    {
+      "min": 96,
+      "max": 110,
+      "spine": 137
+    }
+  ],
+  "samples": [
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 20,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 20 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1800 x 918 Total Page size / trim line (w x h) 1756 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 40 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 28,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 28 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1800 x 918 Total Page size / trim line (w x h) 1756 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 40 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 30,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 30 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1800 x 918 Total Page size / trim line (w x h) 1756 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 40 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 32,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 32 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1800 x 918 Total Page size / trim line (w x h) 1756 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 40 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 34,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 34 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1800 x 918 Total Page size / trim line (w x h) 1756 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 40 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 36,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 36 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 40,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 40 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 42,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 42 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 46,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 46 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 48,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 48 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 50,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 50 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 52,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 52 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1831 x 918 Total Page size / trim line (w x h) 1787 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 71 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 58,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 58 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1831 x 918 Total Page size / trim line (w x h) 1787 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 71 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 60,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 60 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1831 x 918 Total Page size / trim line (w x h) 1787 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 71 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 62,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 62 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1831 x 918 Total Page size / trim line (w x h) 1787 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 71 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 64,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 64 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1841 x 918 Total Page size / trim line (w x h) 1797 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 81 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 68,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 68 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1841 x 918 Total Page size / trim line (w x h) 1797 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 81 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 70,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 70 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1854 x 918 Total Page size / trim line (w x h) 1810 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 94 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 74,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 74 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1854 x 918 Total Page size / trim line (w x h) 1810 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 94 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 80,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 80 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1854 x 918 Total Page size / trim line (w x h) 1810 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 94 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 82,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 82 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1854 x 918 Total Page size / trim line (w x h) 1810 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 94 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 84,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 84 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1870 x 918 Total Page size / trim line (w x h) 1826 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 110 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 86,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 86 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1870 x 918 Total Page size / trim line (w x h) 1826 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 110 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 92,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 92 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1870 x 918 Total Page size / trim line (w x h) 1826 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 110 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 94,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 94 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1870 x 918 Total Page size / trim line (w x h) 1826 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 110 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 96,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 96 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1897 x 918 Total Page size / trim line (w x h) 1853 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 137 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 98,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 98 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1897 x 918 Total Page size / trim line (w x h) 1853 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 137 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 100,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 100 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1897 x 918 Total Page size / trim line (w x h) 1853 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 137 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_uncoated_layflat",
+      "cover": "lithowrap",
+      "pages": 110,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Superfine Eggshell - Layflat 110 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1897 x 918 Total Page size / trim line (w x h) 1853 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 137 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    }
+  ],
+  "boundaryVerification": [
+    {
+      "size": "large_square",
+      "cover": "lithowrap",
+      "counts": [
+        20,
+        34,
+        36,
+        50,
+        52,
+        62,
+        64,
+        68,
+        70,
+        82,
+        84,
+        94,
+        96,
+        110
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "cover": "lithowrap",
+      "counts": [
+        20,
+        34,
+        36,
+        50,
+        52,
+        62,
+        64,
+        68,
+        70,
+        82,
+        84,
+        94,
+        96,
+        110
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1172 @@
+[
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-glossy_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3square_paper-fujiCrystal-glossy_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 30,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 40,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 70,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 80,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-velvet_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3square_paper-fujiCrystal-velvet_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 110,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 120,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3square_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 150,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3portrait_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 160,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3landscape_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 170,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3square_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 200,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3portrait_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 210,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3landscape_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 220,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3square_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 250,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3portrait_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 260,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-white",
+    "displayName": "A3landscape_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-white",
+    "position": 270,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-glossy_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3square_paper-fujiCrystal-glossy_cover-hardcover-matt_bookEndPaper-white",
+    "position": 300,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-matt_bookEndPaper-white",
+    "position": 310,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-matt_bookEndPaper-white",
+    "position": 340,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-matt_bookEndPaper-white",
+    "position": 350,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-velvet_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3square_paper-fujiCrystal-velvet_cover-hardcover-matt_bookEndPaper-white",
+    "position": 380,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-matt_bookEndPaper-white",
+    "position": 390,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3square_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-white",
+    "position": 420,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3portrait_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-white",
+    "position": 430,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3landscape_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-white",
+    "position": 440,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3square_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-white",
+    "position": 470,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3portrait_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-white",
+    "position": 480,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3landscape_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-white",
+    "position": 490,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-matte_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3square_paper-digital-matte_cover-hardcover-matt_bookEndPaper-white",
+    "position": 520,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-matte_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3portrait_paper-digital-matte_cover-hardcover-matt_bookEndPaper-white",
+    "position": 530,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-matte_cover-hardcover-matt_bookEndPaper-white",
+    "displayName": "A3landscape_paper-digital-matte_cover-hardcover-matt_bookEndPaper-white",
+    "position": 540,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-glossy_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3square_paper-fujiCrystal-glossy_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 570,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 580,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 610,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 620,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-velvet_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3square_paper-fujiCrystal-velvet_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 650,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 660,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3square_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 690,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3portrait_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 700,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3landscape_paper-digital-glossy_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 710,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3square_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 740,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3portrait_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 750,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3landscape_paper-digital-highgloss_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 760,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3square_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 790,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3portrait_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 800,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-black",
+    "displayName": "A3landscape_paper-digital-matte_cover-hardcover-glossy_bookEndPaper-black",
+    "position": 810,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-glossy_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3square_paper-fujiCrystal-glossy_cover-hardcover-matt_bookEndPaper-black",
+    "position": 840,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-matt_bookEndPaper-black",
+    "position": 850,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-matt_bookEndPaper-black",
+    "position": 880,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-matt_bookEndPaper-black",
+    "position": 890,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-velvet_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3square_paper-fujiCrystal-velvet_cover-hardcover-matt_bookEndPaper-black",
+    "position": 920,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-matt_bookEndPaper-black",
+    "position": 930,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3square_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-black",
+    "position": 960,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3portrait_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-black",
+    "position": 970,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3landscape_paper-digital-glossy_cover-hardcover-matt_bookEndPaper-black",
+    "position": 980,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3square_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-black",
+    "position": 1010,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3portrait_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-black",
+    "position": 1020,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3landscape_paper-digital-highgloss_cover-hardcover-matt_bookEndPaper-black",
+    "position": 1030,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-matte_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3square_paper-digital-matte_cover-hardcover-matt_bookEndPaper-black",
+    "position": 1060,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-matte_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3portrait_paper-digital-matte_cover-hardcover-matt_bookEndPaper-black",
+    "position": 1070,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-matte_cover-hardcover-matt_bookEndPaper-black",
+    "displayName": "A3landscape_paper-digital-matte_cover-hardcover-matt_bookEndPaper-black",
+    "position": 1080,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-glossy_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3square_paper-fujiCrystal-glossy_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2020,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2030,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2060,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2070,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-velvet_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3square_paper-fujiCrystal-velvet_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2100,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2110,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3square_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2140,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3portrait_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2150,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3landscape_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2160,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3square_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2190,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3portrait_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2200,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3landscape_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2210,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-matte_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3square_paper-digital-matte_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2240,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-matte_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3portrait_paper-digital-matte_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2250,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-matte_cover-hardcover-linen_bookEndPaper-white",
+    "displayName": "A3landscape_paper-digital-matte_cover-hardcover-linen_bookEndPaper-white",
+    "position": 2260,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-glossy_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3square_paper-fujiCrystal-glossy_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2290,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3landscape_paper-fujiCrystal-glossy_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2300,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3square_paper-fujiCrystal-semi-matte_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2330,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3landscape_paper-fujiCrystal-semi-matte_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2340,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-fujiCrystal-velvet_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3square_paper-fujiCrystal-velvet_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2370,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-112"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3landscape_paper-fujiCrystal-velvet_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2380,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-100"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3square_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2410,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3portrait_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2420,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3landscape_paper-digital-glossy_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2430,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3square_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2460,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3portrait_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2470,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3landscape_paper-digital-highgloss_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2480,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3square_paper-digital-matte_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3square_paper-digital-matte_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2510,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3portrait_paper-digital-matte_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3portrait_paper-digital-matte_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2520,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  },
+  {
+    "__type": "BaseValue",
+    "id": "A3landscape_paper-digital-matte_cover-hardcover-linen_bookEndPaper-black",
+    "displayName": "A3landscape_paper-digital-matte_cover-hardcover-linen_bookEndPaper-black",
+    "position": 2530,
+    "additionalFields": [
+      {
+        "__type": "AdditionalFieldData",
+        "id": "pageRange",
+        "value": "28-200"
+      }
+    ]
+  }
+]
