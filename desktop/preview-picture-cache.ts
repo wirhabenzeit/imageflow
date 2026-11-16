@@ -1,9 +1,10 @@
-// A book window's temporary thumbnail pictures. Render frames can come and go without redrawing the same map.
+// A book window's temporary pictures for the book view and its thumbnails. Render frames come and go with every edit
+// without redrawing the same map. Room for a few large vector maps (an SVG map is a few MB) in each view.
 // Nothing is written to the book or disk; checks and exports never use this cache.
 export class PreviewPictureCache {
   private entries = new Map<string, { bytes: Uint8Array; type: string }>();
   private bytes = 0;
-  constructor(private limit = 16 * 1024 * 1024, private maxPicture = 4 * 1024 * 1024, private maxEntries = 128) {}
+  constructor(private limit = 64 * 1024 * 1024, private maxPicture = 8 * 1024 * 1024, private maxEntries = 128) {}
 
   clear() { this.entries.clear(); this.bytes = 0; }
 

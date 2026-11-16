@@ -1,3 +1,65 @@
 {
-  "extends": "./.imageflow-sdk/tsconfig.json"
+  "extends": "./.imageflow-sdk/tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "imageflow": [
+        "./.imageflow-sdk/imageflow.d.ts"
+      ],
+      "react": [
+        "./.imageflow-sdk/react.d.ts"
+      ],
+      "react/jsx-runtime": [
+        "./.imageflow-sdk/jsx-runtime.d.ts"
+      ],
+      "*": [
+        "./.imageflow-sdk/*",
+        "./vendor/types/packages/*",
+        "./vendor/types/packages/@types/*"
+      ],
+      "@mapbox/point-geometry": [
+        "./vendor/types/packages/@mapbox/point-geometry/index.d.ts"
+      ],
+      "@mapbox/tiny-sdf": [
+        "./vendor/types/packages/@mapbox/tiny-sdf/index.d.ts"
+      ],
+      "@maplibre/geojson-vt": [
+        "./vendor/types/packages/@maplibre/geojson-vt/dist/index.d.ts"
+      ],
+      "@maplibre/maplibre-gl-style-spec": [
+        "./vendor/types/packages/@maplibre/maplibre-gl-style-spec/dist/index.d.ts"
+      ],
+      "@maplibre/vt-pbf": [
+        "./vendor/types/packages/@maplibre/vt-pbf/dist/index.d.ts"
+      ],
+      "@types/geojson": [
+        "./vendor/types/packages/@types/geojson/index.d.ts"
+      ],
+      "gl-matrix": [
+        "./vendor/types/packages/gl-matrix/index.d.ts"
+      ],
+      "kdbush": [
+        "./vendor/types/packages/kdbush/index.d.ts"
+      ],
+      "maplibre-contour": [
+        "./vendor/types/packages/maplibre-contour/dist/index.d.ts"
+      ],
+      "maplibre-gl": [
+        "./vendor/types/packages/maplibre-gl/dist/maplibre-gl.d.ts"
+      ],
+      "maplibre-svg": [
+        "./vendor/types/packages/maplibre-svg/src/index.ts"
+      ],
+      "potpack": [
+        "./vendor/types/packages/potpack/index.d.ts"
+      ]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "vendor"
+  ],
+  "files": [
+    "./.imageflow-sdk/assets.d.ts",
+    "./vendor/types/globals.d.ts"
+  ]
 }

@@ -1,26 +1,48 @@
 {
   "version": 1,
-  "lockfile": "e3762910f09bb328207dfdfa63a510de28dcd74bbe8d4b25ba573c154c9c6718",
+  "lockfile": "e9d1da61f38391da9a216298e27a7726404e09a334f2ae6a9274776672306d00",
   "packages": {
+    "maplibre-contour": "0.1.1",
     "maplibre-gl": "5.24.1"
   },
   "modules": {
-    "maplibre-gl": {
+    "maplibre-contour": {
       "js": "modules/m0.js",
       "exports": [
         "default"
       ]
     },
+    "maplibre-gl": {
+      "js": "modules/m1.js",
+      "exports": [
+        "default"
+      ]
+    },
     "maplibre-gl/dist/maplibre-gl.css": {
-      "css": "modules/m1.css",
+      "css": "modules/m2.css",
       "exports": []
+    },
+    "maplibre-svg": {
+      "js": "modules/m3.js",
+      "exports": [
+        "drawMapSvg",
+        "mapToSvg",
+        "projector"
+      ]
     }
   },
   "untyped": [],
   "licenses": {
+    "maplibre-contour": "LICENSES/maplibre-contour.txt",
     "maplibre-gl": "LICENSES/maplibre-gl.txt"
   },
   "licenseNames": {
+    "maplibre-contour": "BSD-3-Clause",
     "maplibre-gl": "BSD-3-Clause"
+  },
+  "types": {
+    "maplibre-contour": "types/packages/maplibre-contour/dist/index.d.ts",
+    "maplibre-gl": "types/packages/maplibre-gl/dist/maplibre-gl.d.ts",
+    "maplibre-svg": "types/packages/maplibre-svg/src/index.ts"
   }
 }

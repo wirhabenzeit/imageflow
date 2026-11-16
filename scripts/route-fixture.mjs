@@ -18,7 +18,7 @@ export async function createRouteFixture(folder) {
   // This fixture exercises an offline editor. Its changed template hash must not introduce a native network
   // permission prompt for the unused Map layout while a smoke check opens the route controls.
   source = "import { RouteEditor, RouteMap, routeParameters } from './route';\n" + source
-    .replace('  network: [mapOrigin],\n', '')
+    .replace('  network: [mapOrigin, elevationOrigin],\n', '')
     .replace(panorama, panorama + `
       elements: { route: {
         label: 'Route map', parameters: routeParameters,

@@ -54,3 +54,25 @@ for (const spread of ctx.book.spreads)
 - **Pages.** `page` is the spread's own `ctx.page`: `left` and `right`, one of them for a single page at a book end, or `number` in a format without facing pages. Which page a box is on is the layout's business, since only the layout knows where it draws its boxes.
 - **Photos.** `photos` lists the photo boxes of the spread's current layout, in declaration order, including empty ones. `photoId` is `null` for an empty box. `photo` is the photo's metadata, the same object shape as `ctx.boxes[id].photo`, or `null` when the box is empty or its photo is missing from the book. A photo placed in several boxes appears once per placement. Content a spread keeps from a layout it no longer uses is not listed, and a spread whose layout the template no longer declares lists no photos. Markdown boxes are not listed.
 - **No images.** The index has metadata and assignments only, no photo URLs or rendered thumbnails.
+
+## Credits
+
+A layout declares what its spreads use that needs a credit, such as the data behind a map, with `credits`. Like `anchors`, it is a pure function of the spread's saved values, here with its boxes' and elements' values too (`boxes[id].params`, and a photo box's `boxes[id].photo` metadata or null), called for every spread before any spread renders:
+
+```tsx
+map: spread({
+  elements: { map: { label: 'Map', parameters: mapParameters } },
+  credits: ({ elements }) => [
+    { id: 'openstreetmap', text: 'Map data © OpenStreetMap contributors', url: 'https://www.openstreetmap.org/copyright' },
+    ...(elements.map.params.style === 'lines' ? [{ id: 'mapterhorn', text: 'Elevation © Mapterhorn' }] : []),
+  ],
+  render: …,
+}),
+```
+
+`ctx.book.credits` lists them for the whole book: each `id` once, with the `text` and `url` of its first declaration, the `pages` of every spread that declares it (sorted, without repeats) and those `spreads`, in the order the book first uses them. It is frozen and the same on every spread, so a credits page prints exactly what the book uses, and nothing it does not.
+
+IDs are whitespace-free tokens; a declaration with spaces in its ID is rejected. `side: 'left' | 'right'` credits only that page of a two-page spread, such as an inset map on the right page (`{ id: 'openstreetmap', text: '…', side: 'right' }`); without it, the credit covers both pages. When a later spread declares an ID with other `text` or `url` than the first, the book keeps the first and the Book check warns `credit-conflict` on that spread, so give different credits their own IDs, such as `'photo-' + photo.credit`.
+
+Mark the node that prints credits with `data-credits` and their IDs, space-separated, such as `data-credits={ctx.book.credits.map(({ id }) => id).join(' ')}`. When the whole book renders, the Book check warns `credit-unprinted` for each credit the book uses that no page marks, on the first spread that uses it, so moving credits off the maps onto a credits page never loses them. The starter prints its map credits at the foot of its last page, the Picture list, which is the only layout it offers there.
+

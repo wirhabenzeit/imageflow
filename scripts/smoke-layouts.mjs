@@ -119,7 +119,7 @@ try {
   });
   await layoutReady('last-notes');
   assert.equal(await pickerHasNoOverlap(), true);
-  assert.equal(await picker.getByRole('radio').count(), 12);
+  assert.equal(await picker.getByRole('radio').count(), 13);
   await w.locator('.inspector').screenshot({ path: join(root, '.build', 'layout-picker-ready.png') });
   // Revisit cached URLs across single-page and full-spread choice sets.
   for (const spread of ['closing', 'last-notes', 'title', 'last-notes', 'closing', 'last-notes']) {
@@ -134,7 +134,7 @@ try {
   // family has its own picker, so its 2×2 and 3×3 variants are one preview, named after the family.
   assert.deepEqual(await picker.getByRole('radio').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label'))),
     ['Contents', 'Chapter opener', 'Photo and story', 'Text spread', 'Quote and photo', 'Photo and note', 'Panorama', 'Two photos', 'Photo grid',
-      'Feature and details', 'Map', 'Picture list spread']);
+      'Feature and details', 'Map', 'Map and story', 'Picture list spread']);
 
   // A new book revision with unchanged preview inputs reuses the same iframe, including its map drawing.
   await w.locator('iframe.book-frame-layouts[data-current][data-ready]').waitFor();
@@ -260,7 +260,7 @@ try {
   assert.equal((await settlements()).definition, 'grid9');
   assert.equal(await frame.locator('[data-spread="settlements"] [data-box]').count(), 9);
   assert.equal(await layout('Photo grid').getAttribute('aria-checked'), 'true');
-  assert.equal(await picker.getByRole('radio').count(), 12);
+  assert.equal(await picker.getByRole('radio').count(), 13);
   assert.deepEqual((await status()).warnings, []);
   await rerendered(() => button('Undo').click());
   assert.deepEqual(await settlements(), state);

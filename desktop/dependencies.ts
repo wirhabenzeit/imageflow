@@ -140,9 +140,12 @@ async function vendorTypes(modules: string, specifiers: string[], target: string
   const untyped: string[] = [];
   const entries: string[] = [];
   const types: Record<string, string> = {};
+  // Declarations, or TypeScript source: a linked `file:` package, such as one in template/packages/, can name its
+  // source as `types`, since rebuilds bundle it without running a build. The type check reports nothing inside vendor/.
+  const typed = (extension: string) => extension.startsWith('.d.') || ['.ts', '.tsx', '.mts', '.cts'].includes(extension);
   const declaration = (name: string) => {
     const resolved = ts.resolveModuleName(name, containing, options, host).resolvedModule;
-    return resolved?.extension.startsWith('.d.') && inside(modules, resolved.resolvedFileName) ? resolved.resolvedFileName : undefined;
+    return resolved && typed(resolved.extension) && inside(modules, resolved.resolvedFileName) ? resolved.resolvedFileName : undefined;
   };
   for (const specifier of specifiers) {
     const name = packageName(specifier);
@@ -241,6 +244,7 @@ export async function rebuildDependencies(root: string, modules: string): Promis
   const own = (name: string) => ['react', 'react-dom', 'imageflow'].includes(name);
   const conflicting = specifiers.filter((specifier) => own(packageName(specifier)));
   if (conflicting.length) throw new Error('ImageFlow provides React and imageflow; import them directly, not ' + conflicting.join(', ') + '.');
+  await checkLinkedEntries(root);
   const { build } = await import('esbuild');
   try {
     await mkdir(staging, { recursive: true });
@@ -303,6 +307,29 @@ export async function rebuildDependencies(root: string, modules: string): Promis
     return manifest;
   } finally {
     await rm(staging, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Fails clearly when a linked `file:` package names an entry that does not exist, such as a dist/ folder that was never
+ * built: rebuilds install packages without running their scripts, so nothing would build it, and esbuild's own error
+ * would not say why.
+ */
+async function checkLinkedEntries(root: string) {
+  const info = JSON.parse(await readFile(join(root, 'package.json'), 'utf8').catch(() => '{}'));
+  const entries = (value: unknown): string[] => typeof value === 'string' ? [value]
+    : value && typeof value === 'object' ? Object.values(value).flatMap(entries) : [];
+  for (const [name, spec] of Object.entries({ ...info.dependencies, ...info.optionalDependencies } as Record<string, unknown>)) {
+    if (typeof spec !== 'string' || !spec.startsWith('file:')) continue;
+    const folder = resolve(root, spec.slice('file:'.length));
+    const linked = JSON.parse(await readFile(join(folder, 'package.json'), 'utf8').catch(() => '{}'));
+    const declared = [...new Set([linked.main, linked.module, linked.types, linked.typings, ...entries(linked.exports)]
+      .filter((entry): entry is string => typeof entry === 'string' && !entry.includes('*')))];
+    for (const entry of declared) {
+      if (await stat(resolve(folder, entry)).then(() => true, () => false)) continue;
+      throw new Error(name + ' (' + slash(relative(root, folder)) + ') names ' + entry + ', which does not exist. Rebuilds do not run ' +
+        'package scripts, so build the package and keep its output, or point its main and types at its TypeScript source.');
+    }
   }
 }
 

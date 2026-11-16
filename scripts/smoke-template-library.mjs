@@ -104,7 +104,7 @@ try {
   await travelEntry.click();
   const detail = settings.getByRole('region', { name: 'Template details' });
   await detail.getByText('maplibre-gl 5.24.1 · BSD-3-Clause').waitFor();
-  await detail.getByText('https://tiles.openfreemap.org', { exact: true }).waitFor();
+  await detail.getByText(/https:\/\/tiles\.openfreemap\.org/).first().waitFor();
   const trust = detail.getByRole('checkbox', { name: 'Allow network access' });
   assert.equal(await trust.isChecked(), false);
   await trust.check();

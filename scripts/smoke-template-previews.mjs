@@ -64,7 +64,7 @@ try {
   await cp(join(root, 'sample/starter/template'), travel, { recursive: true });
   const source = await readFile(join(travel, 'index.tsx'), 'utf8');
   const plain = source.replace("id: 'imageflow-starter',", "id: 'travel-book',").replace("label: 'Photobook',", "label: 'Travel book',")
-    .replace("  preview: './preview.jpg',\n", '').replace('  network: [mapOrigin],\n', '');
+    .replace("  preview: './preview.jpg',\n", '').replace('  network: [mapOrigin, elevationOrigin],\n', '');
   assert.ok(!plain.includes('preview:') && !plain.includes('network:'));
   await writeFile(join(travel, 'index.tsx'), plain);
   await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false }); });

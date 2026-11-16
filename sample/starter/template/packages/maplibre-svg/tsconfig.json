@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": [],
+    "paths": {
+      "maplibre-gl": [
+        "../../vendor/types/packages/maplibre-gl"
+      ]
+    }
+  },
+  "include": [
+    "src"
+  ]
+}

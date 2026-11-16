@@ -374,9 +374,16 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .crop-toolbar input[type="range"] { width: 110px; accent-color: var(--accent); }
 .crop-params { display: flex; align-items: center; gap: 10px; padding-left: 4px; border-left: 1px solid var(--control-border); }
 /* An inline element editor: its frame on the page at the element's printed size, scaled like the sheet, above the
-   artwork and below toolbars. It stays invisible (with the artwork showing) until the editor is ready. */
-.inline-editor { position: absolute; z-index: 5; transform-origin: 0 0; visibility: hidden; }
-.inline-editor.showing { visibility: visible; box-shadow: 0 0 0 calc(2px / var(--inline-zoom, 1)) var(--accent); }
+   artwork and below toolbars. Until the editor is ready it is transparent (with the artwork showing), not
+   visibility: hidden: Chromium stops rendering a hidden cross-origin frame, so an editor waiting for its first frame
+   (such as a map's first tiles) would never draw it. inert keeps it out of reach; the loading layer takes the pointer. */
+.inline-editor { position: absolute; z-index: 5; transform-origin: 0 0; opacity: 0; pointer-events: none; }
+.inline-editor.showing { opacity: 1; pointer-events: auto; box-shadow: 0 0 0 calc(2px / var(--inline-zoom, 1)) var(--accent); }
+.inline-editor-loading { position: absolute; z-index: 6; display: grid; place-items: center; cursor: progress;
+  background: #ffffff38; }
+.inline-editor-loading-label { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+  background: var(--popup-surface); color: var(--text); font-size: 12px; box-shadow: 0 1px 4px #0003; }
+.inline-editor-loading .status-spinner { display: inline-block; }
 .studio .inline-editor-frame { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
 /* Its toolbar: the element's other parameters and the way to the panel, in one row like the crop toolbar. */
 .studio .inline-editor-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; width: max-content; }

@@ -13,7 +13,7 @@ template/
 
 The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided by the host and must not be bundled. Relative imports, CSS imports, and asset imports inside `template/` are allowed. Other packages come from npm through the template's saved dependency bundle ([Dependencies](dependencies.md#dependencies)). Templates must render deterministically without fetching data, timers, state, or effects. This is an authoring requirement, not a guarantee that arbitrary template JavaScript is safe; open only projects you trust.
 
-`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `printFormat`, `Spread`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue`, `capabilities`, `RenderedImage`, `FormattedText` and `plainText`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
+`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `printFormat`, `Spread`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue`, `capabilities`, `RenderedImage`, `FormattedText`, `plainText`, `Choice` and `fonts`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
 
 ## Examples
 
@@ -66,6 +66,9 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `document-editors` | `editors`: editors of document parameters, opened from nodes marked with them. |
 | `editor-network` | Declared HTTPS origins for editors and rendering, subject to user approval. |
 | `rendered-images` | `<RenderedImage>` for host-managed asynchronous pictures in preview, check and export. |
+| `rendered-vectors` | SVG pictures from `<RenderedImage>` (markup, an `<svg>` element or an `image/svg+xml` Blob) placed in the page as vectors with the template's fonts, and `output="vector" \| "raster"` ([Rendered images](rendered-images.md#rendered-images)). |
+| `book-credits` | `credits` on layouts and `ctx.book.credits`: what the book uses that needs a credit, collected for a credits page ([Credits](anchors-and-index.md#credits)). |
+| `font-coverage` | `fonts`: the bundled faces and the characters they can set, for text the template draws itself ([Fonts and output](css-contract.md#fonts-and-output)). |
 | `inline-editors` | `presentation: 'inline'` on element and document editors: editing on the page, in the frame of what the editor was opened from ([Editing on the page](editing-on-the-page.md#editing-on-the-page)). |
 | `inline-text` | `ctx.Text presentation="inline"` for plain-string typing in template typography, with existing parameter scopes and Undo. |
 | `list-parameters` | `p.list` of flat items with stable IDs, the generated list control, `Control` for one item's field, and item-level project commands ([List parameters](list-parameters.md#list-parameters)). |
