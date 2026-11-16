@@ -165,11 +165,16 @@ test('render view tells the canvas apart from thumbnails and layout previews, an
   assert.match(canvas, /if-text-placeholder/);
   assert.match(canvas, /Drop a photo/);
   assert.match(canvas, /Drop a Markdown file/);
-  for (const html of [render('edit', 'thumbnail'), render('edit', 'layout-preview'), render('export'), render('export', 'canvas')]) {
-    assert.doesNotMatch(html, /if-text-placeholder|if-placeholder/);
+  const views = { thumbnail: render('edit', 'thumbnail'), preview: render('edit', 'layout-preview'), export: render('export'), exportCanvas: render('export', 'canvas') };
+  for (const html of Object.values(views)) {
+    assert.doesNotMatch(html, /Drop a photo|Drop a Markdown file|if-text-placeholder/);
+    if (html !== views.preview) assert.doesNotMatch(html, /if-placeholder/);
     // Edit markers stay, so checks and the canvas can still name what each node shows.
     assert.match(html, /data-edit="place"/);
   }
+  // Layout previews of empty boxes show a glyph for the kind of content each takes, not the canvas's drop hints.
+  assert.match(views.preview, /data-glyph="photo"/);
+  assert.match(views.preview, /data-glyph="text"/);
   assert.deepEqual(seen, ['edit:canvas', 'edit:thumbnail', 'edit:layout-preview', 'export:export', 'export:export']);
 });
 

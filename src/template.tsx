@@ -741,8 +741,21 @@ export function PhotoBox({ id, className, style, rect, children, decorative, 'da
           data-src={lazyPhotos ? photo.src : undefined} alt={photo.altText ?? photo.title ?? ''} />}
       {content}
       {!photo && renderView(book) === 'canvas' && <span className="if-placeholder">{box?.photo ? 'Missing photo' : 'Drop a photo'}</span>}
+      {!photo && renderView(book) === 'layout-preview' && <LayoutGlyph kind="photo" />}
     </div>
   );
+}
+
+// A layout preview of a spread without content would otherwise show only dashed outlines. These glyphs say what each
+// empty box takes, in a size that survives the preview's scale.
+function LayoutGlyph({ kind }: { kind: 'photo' | 'text' }) {
+  return <span className="if-placeholder if-layout-glyph" data-glyph={kind} aria-hidden="true">
+    <svg viewBox={kind === 'photo' ? '6 10 36 28' : '8 10 32 26'} preserveAspectRatio="xMidYMid meet" fill="currentColor">
+      {kind === 'photo'
+        ? <path d="M6 10h36v28H6zM10 34h28l-9-12-7 9-4-5zM17 20a3 3 0 1 0 0-.01z" fillRule="evenodd" />
+        : <path d="M8 10h32v4H8zM8 19h32v3H8zM8 26h32v3H8zM8 33h20v3H8z" />}
+    </svg>
+  </span>;
 }
 
 // `columns` splits the box into that many columns; text flows down each column before moving to the next box.
@@ -758,6 +771,7 @@ export function MarkdownBox({ id, className, style, rect, columns = 1, decorativ
       className={['if-markdown', className].filter(Boolean).join(' ')} style={place(rect, style)} {...decorativeOn(decorative)} {...issueOn(marker)}>
       {renderView(book) === 'canvas' && (!text || book.texts[text] === undefined) &&
         <span className="if-placeholder">{text ? 'Missing Markdown' : 'Drop a Markdown file'}</span>}
+      {renderView(book) === 'layout-preview' && (!text || book.texts[text] === undefined) && <LayoutGlyph kind="text" />}
     </div>
   );
 }
