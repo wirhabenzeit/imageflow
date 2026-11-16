@@ -28,11 +28,11 @@ The six vertical template guides occur at P−2, P, P+2, P+S−2, P+S, P+S+2, wh
 
 The configuration offers glossy, silk-matt and printed-linen hardcover finishes. All three finishes, and both black and white endpapers, link to the same cover template for a given size, paper and page count. These options therefore do not alter the template geometry in the current configuration. There are no dust-jacket flap options in this configuration.
 
-`whitewall-options.json` preserves the available combinations and page ranges. `whitewall-samples.json` preserves each template URL, extracted trim dimensions, bleed and guides. `analysis.json` contains the derived export dimensions and validation result. The 519 unique templates cover every linked valid page count for all three sizes and all available papers; all match the formulas and guides within 0.00001 mm. This validates consistency with official templates, not successful acceptance by the live PDF uploader.
+`whitewall-options.json` preserves the available combinations and page ranges. `whitewall-samples.json` preserves each template URL, extracted trim dimensions, bleed and guides. `analysis.json` is generated output: `analyze.py` regenerates its derived export dimensions, validation result and Blurb boundary coverage. The 519 unique templates cover every linked valid page count for all three sizes and all available papers; all match the formulas and guides within 0.00001 mm. This validates consistency with official templates, not successful acceptance by the live PDF uploader.
 
 ## Blurb
 
-Source: [official specification calculator](https://www.blurb.com/make/pdf_to_book/booksize_calculator). `probe_blurb.py` submits read-only measurement requests for both sizes, six paper choices and available hardcover constructions. `blurb_bands.py` locates spine changes on even page counts by bisection; this assumes nondecreasing spine width within each paper profile. Its output includes exact observations on both sides of each discovered change.
+Source: [official specification calculator](https://www.blurb.com/make/pdf_to_book/booksize_calculator). `probe_blurb.py` submits read-only measurement requests for both sizes, six paper choices and available hardcover constructions. `blurb_bands.py` locates spine changes on even page counts by bisection; this assumes nondecreasing spine width within each paper profile. It measures both endpoints before stopping recursion, then explicitly verifies both sides of every discovered change and the minimum/maximum counts across every supported size/binding combination. These boundary observations are required by the offline validator, independently of the probe's verification metadata.
 
 Large Square and Large Landscape offer ImageWrap and dust-jacket hardcovers. Softcover is explicitly unavailable at these sizes. Layflat uses ImageWrap. Standard, Premium, Superfine Eggshell, proPhoto Pearl, and the two layflat papers must be treated as distinct inputs even where their tables coincide.
 
@@ -47,18 +47,20 @@ Dust-jacket flaps shrink as the spine grows, keeping the total jacket width almo
 
 ImageWrap has 22 pt bleed/wrap on each outer edge; dust jackets have 9 pt. Both specify an 18 pt safe inset. ImageWrap trim dimensions follow by subtracting 44 pt from each PDF dimension; jacket trim dimensions subtract 18 pt. Treat the calculator's dimensions as authoritative, including its rounding, rather than deriving the wrap from nominal book size.
 
-The recovered sheet, flap and spine rules match 372 distinct calculator configurations with zero mismatches: 260 samples across both sizes and constructions, supplemented by boundary probes on Large Square ImageWrap. Boundary discovery assumes monotonic spine width; intermediate equal-width intervals were not exhaustively queried. PDF upload acceptance has not been tested.
+The recovered sheet, trim, flap and spine rules match 474 distinct calculator configurations with zero mismatches. The same per-paper transition tables were verified at both sides of every change across all 20 supported paper/size/binding combinations: four combinations per non-layflat paper, and both ImageWrap sizes per layflat paper. Boundary discovery still assumes nondecreasing spine width; intermediate equal-width intervals were not exhaustively queried. PDF upload acceptance has not been tested.
+
+The original bisection probe stopped before measuring adjacent endpoints, allowing an unmeasured midpoint to shift a transition by two pages. The corrected tables move Standard transitions to 148 and 370 pages; the last Premium, Superfine Eggshell and proPhoto Pearl transitions to 202; Superfine Eggshell Layflat transitions to 84 and 96; and a proPhoto Pearl Layflat transition to 44. The validator now fails if endpoint evidence is absent, rather than accepting agreement only on the samples that happen to exist.
 
 The spine observations are in `blurb-samples.json`, grouped in `analysis.json`. The additional `blurb-bands-*.json` files contain the recovered intervals and their supporting calculator responses, up to 440 pages for Standard, 240 for other bound papers and 110 for layflat. A profile must reject counts outside its range. The two layflat papers differ substantially; a generic layflat coefficient is insufficient.
 
 | Paper | Even page intervals → spine width in pt |
 | --- | --- |
-| Standard | 20–72 → 33; 74–148 → 41; 150–220 → 54; 222–294 → 66; 296–370 → 79; 372–440 → 89 |
-| Premium lustre or matte | 20–50 → 33; 52–100 → 41; 102–160 → 54; 162–202 → 66; 204–240 → 79 |
-| Superfine Eggshell | 20–40 → 33; 42–80 → 41; 82–120 → 54; 122–160 → 66; 162–202 → 79; 204–240 → 89 |
-| proPhoto Pearl | 20–40 → 33; 42–80 → 41; 82–120 → 54; 122–160 → 66; 162–202 → 79; 204–240 → 89 |
-| Superfine Eggshell Layflat | 20–34 → 40; 36–50 → 54; 52–62 → 71; 64–68 → 81; 70–84 → 94; 86–96 → 110; 98–110 → 137 |
-| proPhoto Pearl Layflat | 20–34 → 40; 36–44 → 53; 46–52 → 63; 54–62 → 81; 64–80 → 104; 82–92 → 110; 94–98 → 122; 100–110 → 144 |
+| Standard | 20–72 → 33; 74–146 → 41; 148–220 → 54; 222–294 → 66; 296–368 → 79; 370–440 → 89 |
+| Premium lustre or matte | 20–50 → 33; 52–100 → 41; 102–160 → 54; 162–200 → 66; 202–240 → 79 |
+| Superfine Eggshell | 20–40 → 33; 42–80 → 41; 82–120 → 54; 122–160 → 66; 162–200 → 79; 202–240 → 89 |
+| proPhoto Pearl | 20–40 → 33; 42–80 → 41; 82–120 → 54; 122–160 → 66; 162–200 → 79; 202–240 → 89 |
+| Superfine Eggshell Layflat | 20–34 → 40; 36–50 → 54; 52–62 → 71; 64–68 → 81; 70–82 → 94; 84–94 → 110; 96–110 → 137 |
+| proPhoto Pearl Layflat | 20–34 → 40; 36–42 → 53; 44–52 → 63; 54–62 → 81; 64–80 → 104; 82–92 → 110; 94–98 → 122; 100–110 → 144 |
 
 See the [draft template data model](data-model.md) for a concrete declaration proposal, types and examples.
 
@@ -74,4 +76,16 @@ Use versioned, offline geometry profiles and retain the source measurements as r
 
 ## Reproducing the research
 
-Run `python3 spikes/cover-sizing/probe_whitewall.py`, `python3 spikes/cover-sizing/probe_blurb.py`, `python3 spikes/cover-sizing/blurb_bands.py`, then `python3 spikes/cover-sizing/analyze.py`. The probes use Python's standard library. Cached measurements are reused. These are research utilities, not application integration or a live printer API dependency.
+Run `python3 spikes/cover-sizing/probe_whitewall.py`, `python3 spikes/cover-sizing/probe_blurb.py`, `python3 spikes/cover-sizing/blurb_bands.py`, then `python3 spikes/cover-sizing/analyze.py`. The probes use Python's standard library. Cached measurements are reused in `blurb-samples.json`; `blurb_probe.py` supplies the shared calculator client and writes each successful observation atomically. Request or parse failures stop the probe with an error instead of silently producing partial success. The band files retain the baseline observations plus a verification manifest for each size/binding pair. These are research utilities, not application integration or a live printer API dependency.
+
+
+For offline verification without querying either printer:
+
+```sh
+python3 spikes/cover-sizing/probe_blurb.py --offline
+python3 spikes/cover-sizing/blurb_bands.py --offline
+python3 spikes/cover-sizing/test_blurb_bands.py
+python3 spikes/cover-sizing/analyze.py
+```
+
+The regression tests cover a change at the only midpoint of a four-page interval, every possible even transition in a test domain, adjacent changes, constant ranges, and rejection of missing or incorrect boundary evidence. Offline band verification must find both endpoints of every recovered band for every supported size/binding pair in the cache. `analyze.py` also checks PDF-to-trim differences and reports missing or overlapping spine bands explicitly.

@@ -8,11 +8,11 @@
     },
     {
       "min": 74,
-      "max": 148,
+      "max": 146,
       "spine": 41
     },
     {
-      "min": 150,
+      "min": 148,
       "max": 220,
       "spine": 54
     },
@@ -23,11 +23,11 @@
     },
     {
       "min": 296,
-      "max": 370,
+      "max": 368,
       "spine": 79
     },
     {
-      "min": 372,
+      "min": 370,
       "max": 440,
       "spine": 89
     }
@@ -72,6 +72,27 @@
       "size": "large_square",
       "paper": "standard",
       "cover": "lithowrap",
+      "pages": 72,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 72 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1793 x 918 Total Page size / trim line (w x h) 1749 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 33 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 74,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 74 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 78,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 78 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
       "pages": 80,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 80 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
@@ -81,6 +102,20 @@
       "cover": "lithowrap",
       "pages": 82,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 82 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 84,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 84 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 98,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 98 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
     {
       "size": "large_square",
@@ -114,92 +149,8 @@
       "size": "large_square",
       "paper": "standard",
       "cover": "lithowrap",
-      "pages": 160,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 160 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 200,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 200 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 240,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 240 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1826 x 918 Total Page size / trim line (w x h) 1782 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 66 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 440,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 440 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1849 x 918 Total Page size / trim line (w x h) 1805 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 89 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 230,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 230 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1826 x 918 Total Page size / trim line (w x h) 1782 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 66 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
       "pages": 124,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 124 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 72,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 72 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1793 x 918 Total Page size / trim line (w x h) 1749 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 33 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 98,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 98 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 84,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 84 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 78,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 78 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 74,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 74 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1801 x 918 Total Page size / trim line (w x h) 1757 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 41 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 176,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 176 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 150,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 150 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
     {
       "size": "large_square",
@@ -226,6 +177,41 @@
       "size": "large_square",
       "paper": "standard",
       "cover": "lithowrap",
+      "pages": 148,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 148 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 150,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 150 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 160,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 160 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 176,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 176 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 200,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 200 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
       "pages": 202,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 202 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
@@ -240,13 +226,6 @@
       "size": "large_square",
       "paper": "standard",
       "cover": "lithowrap",
-      "pages": 222,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 222 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1826 x 918 Total Page size / trim line (w x h) 1782 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 66 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
       "pages": 218,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 218 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
@@ -254,8 +233,29 @@
       "size": "large_square",
       "paper": "standard",
       "cover": "lithowrap",
-      "pages": 334,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 334 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1839 x 918 Total Page size / trim line (w x h) 1795 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 79 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+      "pages": 220,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 220 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1814 x 918 Total Page size / trim line (w x h) 1770 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 54 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 222,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 222 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1826 x 918 Total Page size / trim line (w x h) 1782 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 66 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 230,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 230 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1826 x 918 Total Page size / trim line (w x h) 1782 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 66 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 240,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 240 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1826 x 918 Total Page size / trim line (w x h) 1782 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 66 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
     {
       "size": "large_square",
@@ -268,22 +268,8 @@
       "size": "large_square",
       "paper": "standard",
       "cover": "lithowrap",
-      "pages": 308,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 308 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1839 x 918 Total Page size / trim line (w x h) 1795 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 79 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
       "pages": 294,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 294 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1826 x 918 Total Page size / trim line (w x h) 1782 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 66 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 300,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 300 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1839 x 918 Total Page size / trim line (w x h) 1795 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 79 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
     {
       "size": "large_square",
@@ -296,8 +282,22 @@
       "size": "large_square",
       "paper": "standard",
       "cover": "lithowrap",
-      "pages": 386,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 386 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1849 x 918 Total Page size / trim line (w x h) 1805 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 89 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+      "pages": 300,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 300 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1839 x 918 Total Page size / trim line (w x h) 1795 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 79 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 308,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 308 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1839 x 918 Total Page size / trim line (w x h) 1795 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 79 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 334,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 334 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1839 x 918 Total Page size / trim line (w x h) 1795 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 79 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
     {
       "size": "large_square",
@@ -305,13 +305,6 @@
       "cover": "lithowrap",
       "pages": 360,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 360 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1839 x 918 Total Page size / trim line (w x h) 1795 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 79 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "standard",
-      "cover": "lithowrap",
-      "pages": 372,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 372 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1849 x 918 Total Page size / trim line (w x h) 1805 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 89 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
     {
       "size": "large_square",
@@ -326,6 +319,108 @@
       "cover": "lithowrap",
       "pages": 368,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 368 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1839 x 918 Total Page size / trim line (w x h) 1795 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 79 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 370,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 370 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1849 x 918 Total Page size / trim line (w x h) 1805 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 89 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 372,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 372 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1849 x 918 Total Page size / trim line (w x h) 1805 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 89 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 386,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 386 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1849 x 918 Total Page size / trim line (w x h) 1805 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 89 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "standard",
+      "cover": "lithowrap",
+      "pages": 440,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Standard Paper 440 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 36 Cover Specifications Points Final, exported PDF should measure (w x h) 1849 x 918 Total Page size / trim line (w x h) 1805 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 89 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    }
+  ],
+  "boundaryVerification": [
+    {
+      "size": "large_square",
+      "cover": "lithowrap",
+      "counts": [
+        20,
+        72,
+        74,
+        146,
+        148,
+        220,
+        222,
+        294,
+        296,
+        368,
+        370,
+        440
+      ]
+    },
+    {
+      "size": "large_square",
+      "cover": "hardcover",
+      "counts": [
+        20,
+        72,
+        74,
+        146,
+        148,
+        220,
+        222,
+        294,
+        296,
+        368,
+        370,
+        440
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "cover": "lithowrap",
+      "counts": [
+        20,
+        72,
+        74,
+        146,
+        148,
+        220,
+        222,
+        294,
+        296,
+        368,
+        370,
+        440
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "cover": "hardcover",
+      "counts": [
+        20,
+        72,
+        74,
+        146,
+        148,
+        220,
+        222,
+        294,
+        296,
+        368,
+        370,
+        440
+      ]
     }
   ]
 }

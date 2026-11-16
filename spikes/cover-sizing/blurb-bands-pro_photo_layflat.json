@@ -8,11 +8,11 @@
     },
     {
       "min": 36,
-      "max": 44,
+      "max": 42,
       "spine": 53
     },
     {
-      "min": 46,
+      "min": 44,
       "max": 52,
       "spine": 63
     },
@@ -61,6 +61,34 @@
       "size": "large_square",
       "paper": "pro_photo_layflat",
       "cover": "lithowrap",
+      "pages": 30,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 30 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1800 x 918 Total Page size / trim line (w x h) 1756 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 40 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 32,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 32 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1800 x 918 Total Page size / trim line (w x h) 1756 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 40 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 34,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 34 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1800 x 918 Total Page size / trim line (w x h) 1756 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 40 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 36,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 36 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1813 x 918 Total Page size / trim line (w x h) 1769 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 53 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
       "pages": 40,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 40 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1813 x 918 Total Page size / trim line (w x h) 1769 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 53 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
@@ -75,8 +103,64 @@
       "size": "large_square",
       "paper": "pro_photo_layflat",
       "cover": "lithowrap",
+      "pages": 44,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 44 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1823 x 918 Total Page size / trim line (w x h) 1779 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 63 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 46,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 46 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1823 x 918 Total Page size / trim line (w x h) 1779 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 63 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 52,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 52 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1823 x 918 Total Page size / trim line (w x h) 1779 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 63 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 54,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 54 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1841 x 918 Total Page size / trim line (w x h) 1797 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 81 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 58,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 58 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1841 x 918 Total Page size / trim line (w x h) 1797 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 81 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
       "pages": 60,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 60 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1841 x 918 Total Page size / trim line (w x h) 1797 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 81 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 62,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 62 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1841 x 918 Total Page size / trim line (w x h) 1797 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 81 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 64,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 64 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1864 x 918 Total Page size / trim line (w x h) 1820 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 104 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 74,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 74 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1864 x 918 Total Page size / trim line (w x h) 1820 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 104 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
     {
       "size": "large_square",
@@ -96,92 +180,8 @@
       "size": "large_square",
       "paper": "pro_photo_layflat",
       "cover": "lithowrap",
-      "pages": 100,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 100 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1904 x 918 Total Page size / trim line (w x h) 1860 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 144 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 110,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 110 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1904 x 918 Total Page size / trim line (w x h) 1860 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 144 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 64,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 64 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1864 x 918 Total Page size / trim line (w x h) 1820 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 104 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 30,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 30 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1800 x 918 Total Page size / trim line (w x h) 1756 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 40 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 36,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 36 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1813 x 918 Total Page size / trim line (w x h) 1769 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 53 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 32,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 32 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1800 x 918 Total Page size / trim line (w x h) 1756 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 40 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 52,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 52 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1823 x 918 Total Page size / trim line (w x h) 1779 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 63 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 46,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 46 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1823 x 918 Total Page size / trim line (w x h) 1779 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 63 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 58,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 58 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1841 x 918 Total Page size / trim line (w x h) 1797 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 81 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 54,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 54 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1841 x 918 Total Page size / trim line (w x h) 1797 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 81 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
       "pages": 86,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 86 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1870 x 918 Total Page size / trim line (w x h) 1826 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 110 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 74,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 74 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1864 x 918 Total Page size / trim line (w x h) 1820 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 104 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
-    },
-    {
-      "size": "large_square",
-      "paper": "pro_photo_layflat",
-      "cover": "lithowrap",
-      "pages": 98,
-      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 98 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1882 x 918 Total Page size / trim line (w x h) 1838 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 122 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
     },
     {
       "size": "large_square",
@@ -201,8 +201,75 @@
       "size": "large_square",
       "paper": "pro_photo_layflat",
       "cover": "lithowrap",
+      "pages": 98,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 98 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1882 x 918 Total Page size / trim line (w x h) 1838 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 122 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 100,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 100 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1904 x 918 Total Page size / trim line (w x h) 1860 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 144 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
       "pages": 104,
       "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 104 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1904 x 918 Total Page size / trim line (w x h) 1860 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 144 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    },
+    {
+      "size": "large_square",
+      "paper": "pro_photo_layflat",
+      "cover": "lithowrap",
+      "pages": 110,
+      "specification": "Your Book Specifications Large Square Hardcover, ImageWrap Mohawk Prophoto Pearl - Layflat 110 pages Page Specifications Points Final, exported PDF should measure (w x h) 855 x 864 Page size / trim line (w x h) 846 x 846 Bleed (top, bottom, and outside edges) 9 Inset for Margins / Safe boundary (Top, Bottom, Outside Edge) 18 Inset for Margins / Safe boundary (Binding Edge) 0 Cover Specifications Points Final, exported PDF should measure (w x h) 1904 x 918 Total Page size / trim line (w x h) 1860 x 874 Bleed (all edges) 22 Flaps (w x h, measured from trim edge to fold) none Gutter / Spine (w x h) 144 x 918 Inset for Margins / Safe boundary (from edge of trim) 18 "
+    }
+  ],
+  "boundaryVerification": [
+    {
+      "size": "large_square",
+      "cover": "lithowrap",
+      "counts": [
+        20,
+        34,
+        36,
+        42,
+        44,
+        52,
+        54,
+        62,
+        64,
+        80,
+        82,
+        92,
+        94,
+        98,
+        100,
+        110
+      ]
+    },
+    {
+      "size": "large_format_landscape",
+      "cover": "lithowrap",
+      "counts": [
+        20,
+        34,
+        36,
+        42,
+        44,
+        52,
+        54,
+        62,
+        64,
+        80,
+        82,
+        92,
+        94,
+        98,
+        100,
+        110
+      ]
     }
   ]
 }

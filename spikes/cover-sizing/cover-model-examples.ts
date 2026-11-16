@@ -48,8 +48,8 @@ const premium: { from: number; to: number; spine: number }[] = [
   { from: 20, to: 50, spine: 33 },
   { from: 52, to: 100, spine: 41 },
   { from: 102, to: 160, spine: 54 },
-  { from: 162, to: 202, spine: 66 },
-  { from: 204, to: 240, spine: 79 },
+  { from: 162, to: 200, spine: 66 },
+  { from: 202, to: 240, spine: 79 },
 ];
 
 export function blurbPremiumCover(

@@ -1,5 +1,7 @@
 """Validate recovered WhiteWall rules against every downloaded template."""
 import json,pathlib,re,collections,math
+from blurb_probe import PAPERS, Samples, maximum_pages
+from blurb_bands import validate_boundaries
 ROOT=pathlib.Path(__file__).parent
 rows=json.loads((ROOT/'whitewall-samples.json').read_text());errors=[]
 summary=[]
@@ -18,9 +20,7 @@ for r in rows:
 result={'whitewall':{'samples':len(rows),'failures':errors,'dimensions':summary}}
 if (ROOT/'blurb-samples.json').exists():
  groups=collections.defaultdict(list)
- observations=json.loads((ROOT/'blurb-samples.json').read_text())
- for path in ROOT.glob('blurb-bands-*.json'):observations.extend(json.loads(path.read_text())['samples'])
- observations=list({(r['size'],r['paper'],r['cover'],r['pages']):r for r in observations}.values())
+ observations=list(Samples(offline=True).rows.values())
  for r in observations:
   s=r['specification'].split('Cover Specifications')[1]
   dims=[tuple(map(int,m)) for m in re.findall(r'(\d+) x (\d+)',s)]
@@ -36,11 +36,29 @@ for group in result.get('blurb',[]):
    flap=(math.floor if square else math.ceil)(((601 if square else 639)-sample['spine'])/2)
    if sample['flap']!=flap:checks.append((group['size'],group['paper'],sample['pages'],'flap'))
    base+=2*flap
-  if sample['pdf']!= (base+sample['spine'],height) and list(sample['pdf'])!=[base+sample['spine'],height]:checks.append((group['size'],group['paper'],group['cover'],sample['pages'],'sheet'))
+  if sample['pdf']!=(base+sample['spine'],height):checks.append((group['size'],group['paper'],group['cover'],sample['pages'],'sheet'))
+  inset=44 if wrap else 18
+  if sample['trim']!=tuple(v-inset for v in sample['pdf']):checks.append((group['size'],group['paper'],group['cover'],sample['pages'],'trim'))
   if group['paper'] in bands:
-   band=next(b for b in bands[group['paper']]['bands'] if b['min']<=sample['pages']<=b['max'])
-   if sample['spine']!=band['spine']:checks.append((group['size'],group['paper'],group['cover'],sample['pages'],'spine'))
-result['blurbValidation']={'failures':checks,'bandsAvailable':list(bands)}
+   matching=[b for b in bands[group['paper']]['bands'] if b['min']<=sample['pages']<=b['max']]
+   if len(matching)!=1:checks.append((group['size'],group['paper'],group['cover'],sample['pages'],'expected exactly one spine band',len(matching)))
+   elif sample['spine']!=matching[0]['spine']:checks.append((group['size'],group['paper'],group['cover'],sample['pages'],'spine'))
+# Verify raw evidence rather than trusting the probe's verification metadata.
+# Missing both sides of a boundary must fail even when every sampled width fits.
+observed={(g['size'],g['paper'],g['cover'],r['pages']):r['spine']
+          for g in result.get('blurb',[]) for r in g['samples']}
+boundaries=[]
+for paper in PAPERS:
+ if paper not in bands:
+  checks.append((paper,'missing spine table'))
+  continue
+ table=bands[paper]['bands']
+ for n in range(20,maximum_pages(paper)+1,2):
+  if sum(b['min']<=n<=b['max'] for b in table)!=1:checks.append((paper,n,'incomplete or overlapping table'))
+ failures,coverage=validate_boundaries(paper,table,observed)
+ checks.extend(failures)
+ boundaries.extend(coverage)
+result['blurbValidation']={'failures':checks,'bandsAvailable':sorted(bands),'boundaries':boundaries}
 (ROOT/'analysis.json').write_text(json.dumps(result,indent=2)+'\n')
 print('WhiteWall:',len(rows),'templates;',len(errors),'rule mismatches')
 print('Blurb:',sum(len(g['samples']) for g in result.get('blurb',[])),'samples')
