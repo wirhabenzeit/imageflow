@@ -7,7 +7,7 @@ import { _electron } from 'playwright-core';
 import { testBook } from './ui-actions.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'panel-hover-'));
-const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+const env = { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' }; delete env.ELECTRON_RUN_AS_NODE;
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env });
 try {
   const page = await testBook(app, join(work, 'Panels.imageflow'), true);

@@ -13,6 +13,7 @@ import { copySample } from '../desktop/sample-book.mjs';
 // saving, closing and Undo. The map server is replaced by a local style, so this runs offline.
 // `--screenshots <folder>` also saves screenshots there.
 const root = fileURLToPath(new URL('../', import.meta.url));
+if (!process.argv.includes('--visible')) throw new Error('This test needs a visible desktop. Run with --visible in CI or a VM.');
 const build = join(root, '.build');
 await mkdir(build, { recursive: true });
 const flag = process.argv.indexOf('--screenshots');
@@ -51,7 +52,7 @@ try {
   app = await _electron.launch({ executablePath: electron, args: [join(build, 'desktop'), '--user-data-dir=' + join(work, 'profile'), ...(process.platform === 'linux' ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] : [])],
     // The window stays shown: clicks into a scaled editor frame are hit-tested by the compositor, which a hidden
     // window does not run, so they would miss the calendar's day buttons.
-    env: process.env, timeout: 15000 });
+    env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '' }, timeout: 15000 });
   // OpenFreeMap, offline: every style is a plain coloured background, which MapLibre draws without tiles.
   await app.evaluate(({ dialog, net, session }) => {
     dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });

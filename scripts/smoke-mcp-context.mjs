@@ -13,6 +13,7 @@ import { testBook, undoBook, waitForProject } from './ui-actions.mjs';
 // #81: SDK-client coverage of empty books, single pages, inline drafts and explicit multi-book routing.
 // This automated scenario also runs against a packaged candidate; real-client signed-update acceptance is #79.
 const root = fileURLToPath(new URL('../', import.meta.url));
+if (!process.argv.includes('--visible')) throw new Error('This test needs a visible desktop. Run with --visible in CI or a VM.');
 const packaged = process.argv.includes('--packaged');
 const work = await mkdtemp(join(root, '.build', 'mcp-context-'));
 const source = `import { defineTemplate, mm, p, printFormat, Spread } from 'imageflow';

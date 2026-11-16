@@ -1,3 +1,4 @@
+import { hidden } from './background-mode';
 import { AppUpdater } from './updates';
 import { copySample } from './sample-book.mjs';
 import { updateUnavailable } from './update-environment';
@@ -66,6 +67,7 @@ import { decodes, readTemplatePreview } from './template-preview-file';
 import { previewTypes } from '../src/template-preview';
 
 const presentationWindows = new PresentationWindows({
+  hidden: () => hidden,
   window: () => ({ webPreferences: windowOptions() }), secure: secureWindow, focus,
   focused: (document) => { lastDocument = document; updateMenus(); },
   closed: (document, spread) => {
@@ -111,7 +113,6 @@ const pickers = new Map<number, { window: BrowserWindow }>();
 const pendingOpenFiles: string[] = [];
 let ready = false;
 let lastDocument: DocumentSession | undefined;
-const hidden = !!process.env.IMAGEFLOW_HIDE_WINDOW;
 const devServer = app.isPackaged ? undefined : process.env.IMAGEFLOW_DEV_SERVER;
 const devState = devServer ? process.env.IMAGEFLOW_DEV_STATE : undefined;
 const devSample = devServer ? process.env.IMAGEFLOW_DEV_SAMPLE : undefined;
@@ -229,9 +230,9 @@ async function serve(request: Request) {
 
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 function focus(owner: BrowserWindow) {
-  if (owner.isDestroyed()) return;
+  if (owner.isDestroyed() || hidden) return;
   if (owner.isMinimized()) owner.restore();
-  if (!hidden) owner.show();
+  owner.show();
   owner.focus();
 }
 type RendererEvent = Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>;
