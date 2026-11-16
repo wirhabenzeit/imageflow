@@ -1,3 +1,37 @@
 {
-  "extends": "./.imageflow-sdk/tsconfig.json"
+  "extends": "./.imageflow-sdk/tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "imageflow": [
+        "./.imageflow-sdk/imageflow.d.ts"
+      ],
+      "react": [
+        "./.imageflow-sdk/react.d.ts"
+      ],
+      "react/jsx-runtime": [
+        "./.imageflow-sdk/jsx-runtime.d.ts"
+      ],
+      "*": [
+        "./.imageflow-sdk/*",
+        "./vendor/types/packages/*",
+        "./vendor/types/packages/@types/*"
+      ],
+      "maplibre-contour": [
+        "./vendor/types/packages/maplibre-contour/dist/index.d.ts"
+      ],
+      "maplibre-gl": [
+        "./vendor/types/packages/maplibre-gl/dist/maplibre-gl.d.ts"
+      ],
+      "maplibre-svg": [
+        "./vendor/types/packages/maplibre-svg/dist/index.d.ts"
+      ]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "vendor"
+  ],
+  "files": [
+    "vendor/types/globals.d.ts"
+  ]
 }

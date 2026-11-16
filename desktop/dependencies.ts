@@ -281,18 +281,32 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
   }
 }
 
+/** The `paths` of the config a template's tsconfig.json extends, as paths relative to the template folder. */
+async function extendedPaths(root: string, extended: unknown) {
+  if (typeof extended !== 'string' || !extended.startsWith('.')) return {};
+  const file = resolve(root, extended.endsWith('.json') ? extended : extended + '.json');
+  let base: { compilerOptions?: { paths?: Record<string, string[]>; baseUrl?: string } };
+  try { base = JSON.parse(await readFile(file, 'utf8')); } catch { return {}; }
+  const from = resolve(dirname(file), base.compilerOptions?.baseUrl ?? '.');
+  return Object.fromEntries(Object.entries(base.compilerOptions?.paths ?? {}).map(([name, targets]) =>
+    [name, targets.map((target) => { const path = slash(relative(root, resolve(from, target))); return /^\.\.?\//.test(path) ? path : './' + path; })]));
+}
+
 /** Points code editors at the vendored declarations, as the book's type check does, when tsconfig.json is plain JSON. */
 async function updateTsconfig(root: string, manifest: DependencyManifest) {
   const path = join(root, 'tsconfig.json');
   let config: { compilerOptions?: { paths?: Record<string, string[]> }; exclude?: string[]; files?: string[] };
   try { config = JSON.parse(await readFile(path, 'utf8')); } catch { return; }
   config.compilerOptions ??= {};
+  // `paths` replaces, not merges with, the paths of a config it extends, such as the SDK's mapping of `imageflow` and
+  // `react`: those are carried over, relative to the template folder, unless the template maps them itself.
+  const inherited = await extendedPaths(root, (config as { extends?: unknown }).extends);
   // Each typed import maps to its exact entry: editors resolve `paths` targets without package.json `exports`.
   const previous = Object.fromEntries(Object.entries(config.compilerOptions.paths ?? {})
     .filter(([, targets]) => !targets.every((target) => target.startsWith('./vendor/types/'))));
-  config.compilerOptions.paths = { ...previous,
+  config.compilerOptions.paths = { ...Object.fromEntries(Object.entries(inherited).filter(([name]) => name !== '*')), ...previous,
     ...Object.fromEntries(Object.entries(manifest.types ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([specifier, entry]) => [specifier, ['./vendor/' + entry]])),
-    '*': ['./vendor/types/packages/*', './vendor/types/packages/@types/*'] };
+    '*': [...new Set([...(inherited['*'] ?? []), './vendor/types/packages/*', './vendor/types/packages/@types/*'])] };
   config.exclude = [...new Set([...(config.exclude ?? []), 'node_modules', 'vendor'])];
   const globals = await stat(join(root, vendorFolder, 'types', 'globals.d.ts')).then(() => true, () => false);
   const files = (config as { files?: string[] }).files?.filter((name) => name !== 'vendor/types/globals.d.ts') ?? [];

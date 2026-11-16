@@ -1,7 +1,8 @@
 import { box, Choice, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Spread } from 'imageflow';
 import type { BookSpread, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
-import { MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
+import { insetMapParameters, MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
+import { elevationOrigin, mapCredits } from './map-styles';
 import type { MapEditorProps } from './map';
 
 // Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page.
@@ -184,6 +185,16 @@ const story = (photo: 'left' | 'right') => (ctx: RenderContext<StoryLayout, type
   </Paper>;
 };
 
+// The credits of everything the book uses (ctx.book.credits), each with the pages it is on. The node is marked with
+// their IDs (data-credits), so the Book check knows they are printed.
+function Credits({ context, rect }: { context: Context; rect: Rect }) {
+  const credits = context.book.credits;
+  if (!credits.length) return null;
+  return <p className="book-credits" data-credits={credits.map(({ id }) => id).join(' ')} style={context.geometry.css(rect)}>
+    {credits.map(({ text, pages }) => text + (pages.length ? ' (' + pageRanges([...pages]).toLowerCase() + ')' : '')).join(' · ')}
+  </p>;
+}
+
 // Which pages each photo box covers, for the picture list. Boxes not listed are on the left page; `both` is a photo
 // across the spread.
 const boxPages: Record<string, Record<string, 'left' | 'right' | 'both'>> = {
@@ -234,7 +245,7 @@ const detailCharWidth = 1.7;
 function pictureColumns(layout: string, at: ReturnType<Context['geometry']['design']>): Rect[] {
   const sides = layout === 'pictures' ? (['left', 'right'] as const) : (['left'] as const);
   return sides.flatMap((side) => {
-    const area = at[side](margin, 58, page - 2 * margin, layout === 'pictures' ? 202 : 172);
+    const area = at[side](margin, 58, page - 2 * margin, layout === 'pictures' ? 202 : 160);
     const width = (area.width - pictureColumnGap) / 2;
     return [{ ...area, width }, { ...area, x: area.x + width + pictureColumnGap, width }];
   });
@@ -351,8 +362,9 @@ export default defineTemplate({
   description: 'A travel journal with full-bleed photographs, stories, grids, maps and a picture list, in a light or a dark theme.',
   preview: './preview.jpg',
   contract: 1,
-  // The Map layout loads OpenFreeMap styles and tiles once the user allows it, in its editor, the page and export.
-  network: [mapOrigin],
+  // The map layouts load OpenFreeMap styles and tiles, and Mapterhorn elevation for contour lines, once the user allows
+  // it, in their editor, the page and export.
+  network: [mapOrigin, elevationOrigin],
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
     landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
@@ -403,18 +415,8 @@ export default defineTemplate({
         </Paper>;
       },
     }),
-    closing: spread({
-      label: 'Closing page', span: 'left',
-      // Not `heading`: an ID means the same thing in every layout, and a closing line is not a spread heading.
-      parameters: { closingLine: p.string({ label: 'Closing line', default: 'Until next time', markdown: 'inline' }) },
-      render: (ctx) => {
-        const at = ctx.geometry.design(canvas);
-        return <Paper context={ctx}>
-          <ctx.Text presentation="inline" parameter="closingLine" as="h2" className="closing" rect={at.left(margin, 120, page - 2 * margin, 60)} />
-          <div className="compass small" style={ctx.geometry.css(at.left(page / 2 - 5, 200, 10, 10))}>{compass}</div>
-        </Paper>;
-      },
-    }),
+    // The book's last page, and the only layout offered for it: the picture list, the colophon, and at its foot the
+    // credits of what the book uses (such as the data of its maps), collected from every spread's `credits`.
     credits: spread({
       label: 'Picture list', span: 'left',
       parameters: {
@@ -429,7 +431,8 @@ export default defineTemplate({
           {listsSomething(ctx) &&
             <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.left(margin, 36, page - 2 * margin, 14)} />}
           <PictureList context={ctx} columns={pictureColumns('credits', at)} />
-          <ctx.Text presentation="inline" parameter="colophon" className="colophon" rect={at.left(margin, 244, page - 2 * margin, 22)} />
+          <ctx.Text presentation="inline" parameter="colophon" className="colophon" rect={at.left(margin, 226, page - 2 * margin, 18)} />
+          <Credits context={ctx} rect={at.left(margin, 246, page - 2 * margin, 14)} />
         </Paper>;
       },
     }),
@@ -597,6 +600,8 @@ export default defineTemplate({
     map: spread({
       label: 'Map',
       parameters: { mapTitle: p.string({ label: 'Map title', default: '', maxLength: 80, placeholder: 'Shown on the map', markdown: 'inline' }) },
+      // The map's data is credited on the last page.
+      credits: ({ elements }) => mapCredits(elements.map.params.style),
       elements: { map: {
         label: 'Map',
         parameters: mapParameters,
@@ -606,8 +611,35 @@ export default defineTemplate({
       render: (ctx) => {
         const { trackWidth, ...values } = ctx.elements.map.params;
         return <Paper context={ctx} bled={{ left: true, right: true }}>
-          <MapView values={values} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} Element={ctx.Element} />
+          <MapView values={values} trackWidth={trackWidth} rect={ctx.geometry.spread('bleed')} theme={ctx.document.theme} Element={ctx.Element} />
           {ctx.params.mapTitle && <h2 className="map-title" style={ctx.geometry.css(mapTitleRect(ctx.format))}><FormattedText value={ctx.params.mapTitle} /></h2>}
+        </Paper>;
+      },
+    }),
+
+    // A map beside a story: the text on the left page, the map inside the margins of the right one, on the paper, in the
+    // Lines style by default (the page's own colours, so it suits either colour theme), with a caption under it.
+    mapStory: spread({
+      label: 'Map and story',
+      parameters: { heading, mapCaption: p.string({ label: 'Map caption', default: '', maxLength: 160, placeholder: 'Where the story goes', markdown: 'inline' }) },
+      boxes: { body: body('Story') },
+      elements: { map: {
+        label: 'Map',
+        parameters: insetMapParameters,
+        editor: { label: 'Edit map', parameters: [...mapEditorParameters], component: MapEditor, presentation: 'inline' },
+      } },
+      anchors: ({ params }) => [{ id: 'section', title: oneLine(params.heading), side: 'left' }],
+      credits: ({ elements }) => mapCredits(elements.map.params.style),
+      render: (ctx) => {
+        const at = ctx.geometry.design(canvas);
+        const { trackWidth, ...values } = ctx.elements.map.params;
+        return <Paper context={ctx}>
+          <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.left(margin, 40, page - 2 * margin, 44)} />
+          <ctx.MarkdownBox id="body" {...ctx.edit('document.textSize')} className="reading" columns={ctx.boxes.body.params.columns}
+            rect={at.left(margin, 100, 165, 160)} />
+          <MapView values={values} trackWidth={trackWidth} rect={at.right(margin, margin, page - 2 * margin, page - 2 * margin - 22)}
+            theme={ctx.document.theme} className="map-inset" Element={ctx.Element} />
+          <ctx.Text presentation="inline" parameter="mapCaption" className="caption" rect={at.right(margin, page - margin - 12, page - 2 * margin, 10)} />
         </Paper>;
       },
     }),

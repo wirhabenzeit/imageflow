@@ -515,7 +515,20 @@ export type BookContext = {
   anchor(id: string): Anchor | undefined;
   /** All anchors with this ID, or all anchors, in page order. */
   anchors(id?: string): Anchor[];
+  /**
+   * The credits the book's spreads declare (`credits` on a layout), each once, with the pages of the spreads that
+   * declare it, in the order the book first uses them; for a credits page. Mark the node that prints them with
+   * `data-credits` and their IDs, space-separated: the Book check warns (`credit-unprinted`) about a credit the book
+   * uses that no page marks.
+   */
+  credits: readonly Credit[];
 };
+/** A credit a layout declares, such as the data behind a map. The same `id` from several spreads is one credit. */
+export type CreditDeclaration = { id: string; text: string; url?: string };
+/** A credit as the book collects it: once, with the pages and spreads that use it. */
+export type Credit = { readonly id: string; readonly text: string; readonly url?: string; readonly pages: readonly number[]; readonly spreads: readonly string[] };
+/** What a layout's `credits` sees: the spread's saved values, its elements' included, and the document's. */
+export type CreditContext<P = Values, D = Values, E = Record<string, { params: Values }>> = { params: P; document: D; elements: E };
 
 // Render context
 
@@ -707,6 +720,7 @@ declare const typedFamily: unique symbol;
 export type SpreadDefinition<D extends Parameters = Parameters, F extends string = string> = SpreadDeclaration & {
   render(context: UntypedRenderContext): ImageFlowNode;
   anchors?(context: AnchorContext): readonly AnchorDeclaration[];
+  credits?(context: CreditContext): readonly CreditDeclaration[];
   readonly [typedDocument]?: D;
   readonly [typedFamily]?: F;
 };
@@ -717,7 +731,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
-  'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
+  'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
   'formatted-text' | 'app-controls';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
@@ -768,6 +782,11 @@ export type SpreadBuilder<D extends Parameters> = <
   render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D>): ImageFlowNode;
   /** Places other spreads can refer to through `ctx.book`, declared from this spread's values. */
   anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[];
+  /**
+   * What this spread uses that needs a credit, such as a map's data, declared from its values like `anchors`; the
+   * book collects them in `ctx.book.credits`.
+   */
+  credits?(context: CreditContext<ParameterValues<P>, ParameterValues<D>, { [K in keyof E]: { params: ValuesOf<E[K]> } }>): readonly CreditDeclaration[];
   /** The layout family this layout is a variant of: a key of the template's `layoutFamilies`. */
   family?: F;
   /** Tags that tell this variant apart from the others in its family, such as `{ size: '3x3' }`. Pickers read them. */
@@ -1055,6 +1074,24 @@ export function asset(path: string): string;
  */
 export function file(id: string): { name: string; extension: string; text: string } | undefined;
 
+/** A bundled font face, as the template's `@font-face` rules declare it. */
+export type BundledFont = { family: string; weight: number | [number, number]; style: 'normal' | 'italic' };
+/** A font as text asks for it; weight defaults to 400 and style to `'normal'`, matched as the browser matches them. */
+export type FontQuery = { family: string; weight?: number; style?: 'normal' | 'italic' };
+/**
+ * The template's bundled fonts (capability `font-coverage`): the faces of its `@font-face` rules and the characters
+ * their font files contain. For text the template draws itself, such as map labels in a vector picture: text the
+ * bundled fonts cannot set falls back to a system font, which PDF preflight rejects.
+ */
+export const fonts: {
+  /** The bundled faces. */
+  list(): BundledFont[];
+  /** The characters of `text` the fonts cannot set, each once; empty when they can set all of it. */
+  missing(text: string, font: FontQuery): string[];
+  /** `text` without the characters the fonts cannot set; a letter with marks falls back to its base letter (ş → s). */
+  settable(text: string, font: FontQuery): string;
+};
+
 /** Where and how big a `<RenderedImage>` draws. */
 export type RenderTarget = {
   /** The element's size in CSS pixels (96 per inch), as laid out on the page. */
@@ -1066,8 +1103,18 @@ export type RenderTarget = {
   signal: AbortSignal;
 };
 export type RenderedImageProps = {
-  /** Draws the picture for the target: a PNG or JPEG `Blob`, or a canvas. Reject to report a failure. */
-  draw: (target: RenderTarget) => Promise<Blob | HTMLCanvasElement | OffscreenCanvas>;
+  /**
+   * Draws the picture for the target. Vectors: SVG markup, an `<svg>` element or an `image/svg+xml` `Blob`, with a
+   * `viewBox`; it is placed in the page, prints as paths and text, and its text uses the template's fonts (capability
+   * `rendered-vectors`). Pixels: a canvas, or a PNG or JPEG `Blob`. Reject to report a failure.
+   */
+  draw: (target: RenderTarget) => Promise<Blob | HTMLCanvasElement | OffscreenCanvas | SVGSVGElement | string>;
+  /**
+   * What `draw` makes. `'vector'`: SVG, drawn once for every view at a `pixelRatio` of 1; pixels are an error. `'raster'`:
+   * pixels by intent, such as satellite imagery. Undeclared, either works, and pixels are a Book check warning
+   * (`rendered-image-raster`): a drawn picture prints better as vectors.
+   */
+  output?: 'vector' | 'raster';
   /** Everything `draw` depends on, as JSON-like data; the picture is drawn again when it changes. */
   inputs: unknown;
   /** Names the picture in messages, such as `'Map'`. */
@@ -1081,7 +1128,7 @@ export type RenderedImageProps = {
  * (part of the contract-1 baseline). ImageFlow gives `draw` the element's size, the output resolution and a cancellation
  * signal, runs a few at a time, and waits for all of them, with a timeout, before a Book check or export is final.
  * Inside `draw`, timers, WebGL, workers and requests to the template's `network` origins are allowed. The picture
- * is never saved in the book. Page and layout thumbnails may reuse a picture with identical inputs and output size within
+ * is never saved in the book. The book view and its thumbnails may reuse a picture with identical inputs and output size within
  * the book window; checks and exports always draw afresh. A failure
  * or timeout is a `rendered-image-failed` error, so export never prints a page without it.
  */

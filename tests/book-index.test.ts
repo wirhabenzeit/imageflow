@@ -131,3 +131,35 @@ test('render reads its own spread ID and layout, to find itself in the book inde
     page: sequence.spreads[0].page, index, positions: {}, renderPhotos: false, bookSpread: 'one' }));
   assert.deepEqual(ids, ['one:pair:1', 'two:pair:1', 'one:pair:1']);
 });
+
+test('credits are collected once per ID from every spread, with their pages, from saved values including elements', () => {
+  const render = () => createElement(runtime.Spread, {});
+  const mapCredits = ({ elements }: { elements: Record<string, { params: Record<string, unknown> }> }) => [
+    { id: 'osm', text: '© OpenStreetMap contributors' },
+    ...(elements.map.params.style === 'contours' ? [{ id: 'terrain', text: 'Elevation © Mapterhorn' }] : []),
+  ];
+  const template = chooseFormat(templateSchema.parse({
+    id: 'credits', version: '1', contract: 1, format: format(), parameters: {},
+    spreads: {
+      opening: { label: 'Opening', span: 'right', render },
+      map: { label: 'Map', elements: { map: { label: 'Map', parameters: { style: { type: 'enum', label: 'Style', default: 'plain', options: ['plain', 'contours'] } } } },
+        credits: mapCredits, render },
+      closing: { label: 'Closing', span: 'left', render },
+    },
+  }));
+  const project = projectSchema.parse({ schemaVersion: 1, title: 'Credits', template: { id: 'credits', version: '1' }, spreads: [
+    { id: 'o', definition: 'opening' }, { id: 'm1', definition: 'map' },
+    { id: 'm2', definition: 'map', elements: { map: { params: { style: 'contours' } } } }, { id: 'c', definition: 'closing' }] });
+  const book = { project, photos: {}, texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+  const sequence = pageSequence(project.spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
+  const index = bookIndex(book, template, sequence);
+  assert.deepEqual(index.credits, [
+    { id: 'osm', text: '© OpenStreetMap contributors', pages: [2, 3, 4, 5], spreads: ['m1', 'm2'] },
+    { id: 'terrain', text: 'Elevation © Mapterhorn', pages: [4, 5], spreads: ['m2'] },
+  ]);
+  assert.equal(bookContext(index, 'c').credits, index.credits, 'every spread reads the same credits');
+  assert.ok(Object.isFrozen(index.credits) && Object.isFrozen(index.credits![0].pages));
+  // A declaration that is not a list of credits names the layout and the spread.
+  const broken = chooseFormat(templateSchema.parse({ ...template, format: format(), spreads: { ...template.spreads, map: { ...template.spreads.map, credits: () => [{ id: '' }] } } }));
+  assert.throws(() => bookIndex(book, broken, sequence), /Map declares invalid credits/);
+});

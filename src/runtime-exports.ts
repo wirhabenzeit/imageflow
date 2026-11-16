@@ -2,7 +2,7 @@
 // bundler exposes exactly these names, and the shipped declarations must declare the same set (src/template-types.ts).
 export const runtimeExports = [
   'defineTemplate', 'spreadFor', 'p', 'mm', 'pt', 'inch', 'printFormat', 'Spread', 'PhotoBox', 'MarkdownBox', 'Element', 'asset', 'file',
-  'geometry', 'box', 'issue', 'capabilities', 'RenderedImage', 'FormattedText', 'plainText', 'Choice',
+  'geometry', 'box', 'issue', 'capabilities', 'RenderedImage', 'FormattedText', 'plainText', 'Choice', 'fonts',
 ] as const;
 
 // Contract-1 baseline, open until the first public release (ADR 0008). Templates need no `requires` entries
@@ -30,6 +30,13 @@ export const contract1Capabilities = [
   // `<RenderedImage>`: host-managed asynchronous pictures, which may use the `network` origins in previews, checks
   // and export (ADR 0006).
   'rendered-images',
+  // `image/svg+xml` pictures from <RenderedImage>, placed in the page as vectors with the template's fonts.
+  'rendered-vectors',
+  // `fonts`: the template's bundled faces and the characters they can set, for text drawn outside the page's own
+  // text, such as map labels in a vector picture.
+  'font-coverage',
+  // `credits` on layouts, collected for the book in `ctx.book.credits`, with a warning for credits printed nowhere.
+  'book-credits',
   // `presentation: 'inline'` on element and document editors: editing on the page, in the frame it was opened from.
   'inline-editors',
   // Plain string ctx.Text parameters edited in the template's typography.

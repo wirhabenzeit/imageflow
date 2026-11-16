@@ -24,6 +24,7 @@ import { capabilities, runtimeExports } from './runtime-exports';
 import { controlProblems, controlsSchema } from './controls';
 import type { ControlItem } from './controls';
 import { previewPath } from './template-preview';
+import { fonts } from './fonts';
 
 export { inch, mm, p, printFormat, pt };
 export type { PrintFormat, ResolvedFormat, Span } from './format';
@@ -74,6 +75,12 @@ export type AnchorContext = { params: Values; document: Values };
 export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
 // `side` is 'page' in a format without facing pages, where a unit has one page and a declared side is ignored.
 export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
+// Credits, such as the data behind a map, are declared like anchors from a spread's saved values, its elements'
+// included, and collected for the whole book before any spread renders, so a credits page lists what the book uses.
+export type CreditContext = { params: Values; document: Values; elements: Record<string, { params: Values }> };
+export type CreditDeclaration = { id: string; text: string; url?: string };
+// A credit once, however many spreads declare it, with the pages of the spreads that do, in book order.
+export type Credit = { id: string; text: string; url?: string; pages: number[]; spreads: string[] };
 // One spread of the book as the index lists it: derived from the saved book and the template's declarations before
 // any spread renders, so every spread reads the same index whatever the render order.
 export type BookPhotoPlacement = {
@@ -98,7 +105,13 @@ export type BookContext = {
   anchor(id: string): Anchor | undefined;
   // All anchors with this ID, or all anchors, in page order.
   anchors(id?: string): Anchor[];
+  // The credits the book's spreads declare, each once, in the order the book first uses them. A page that prints them
+  // marks its node with `data-credits` and their IDs, so the Book check can tell when a used credit is printed nowhere.
+  credits: readonly Credit[];
 };
+const creditDeclarations = z.array(z.strictObject({
+  id: z.string().min(1).max(256), text: z.string().min(1).max(1000), url: z.string().url().max(2000).optional(),
+})).max(50);
 const anchorDeclarations = z.array(z.strictObject({
   id: z.string().min(1).max(256), title: z.string().max(1000).optional(), side: z.enum(['left', 'right']).optional(),
 })).max(100);
@@ -112,7 +125,7 @@ export class SpreadError extends Error {
 
 // Lookups that found no anchor, or several, keyed so repeated renders report each once.
 export type AnchorLookup = { spread: string; anchor: string; found: number };
-export type BookIndex = { pages: number; anchors: Anchor[]; spreads?: readonly BookSpread[]; lookups?: Map<string, AnchorLookup> };
+export type BookIndex = { pages: number; anchors: Anchor[]; credits?: readonly Credit[]; spreads?: readonly BookSpread[]; lookups?: Map<string, AnchorLookup> };
 
 export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: UnitPages }[] }): BookIndex {
   const document = resolveParams(template.parameters, book.project.params);
@@ -137,7 +150,34 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
     });
   });
   // A spread may declare its right-page anchor before its left-page one. The sort is stable within a page.
-  return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page), spreads: spreadIndex(book, template, sequence) };
+  return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page), credits: bookCredits(book, template, sequence, document),
+    spreads: spreadIndex(book, template, sequence) };
+}
+
+function bookCredits(book: RenderProject, template: Template, sequence: { spreads: { page: UnitPages }[] }, document: Values): readonly Credit[] {
+  const credits = new Map<string, Credit>();
+  book.project.spreads.forEach((spread, i) => {
+    const definition = Object.hasOwn(template.spreads, spread.definition) ? template.spreads[spread.definition] : undefined;
+    if (!definition?.credits) return;
+    const elements = Object.fromEntries(Object.entries(definition.elements ?? {}).map(([id, element]) =>
+      [id, { params: resolveParams(element.parameters ?? {}, spread.elements?.[id]?.params ?? {}) }]));
+    let returned: unknown;
+    try { returned = definition.credits({ params: resolveParams(definition.parameters, spread.params), document, elements }); }
+    catch (error) { throw new SpreadError(definition.label + ' could not declare its credits: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error }); }
+    const declared = creditDeclarations.safeParse(returned);
+    if (!declared.success) {
+      throw new SpreadError(definition.label + ' declares invalid credits: ' +
+        declared.error.issues.map((issue) => (issue.path.join('.') || 'credits') + ' ' + issue.message).join('; ') + '.', spread.id);
+    }
+    const { left, right, number } = sequence.spreads[i].page;
+    const pages = [left, right, number].filter((page): page is number => page !== undefined);
+    for (const { id, text, url } of declared.data) {
+      const credit = credits.get(id) ?? credits.set(id, { id, text, ...(url ? { url } : {}), pages: [], spreads: [] }).get(id)!;
+      credit.pages.push(...pages.filter((page) => !credit.pages.includes(page)));
+      if (!credit.spreads.includes(spread.id)) credit.spreads.push(spread.id);
+    }
+  });
+  return deepFreeze([...credits.values()]);
 }
 
 const deepFreeze = <T,>(value: T): T => {
@@ -176,6 +216,7 @@ export function bookContext(index: BookIndex, spread: string): BookContext {
       return found[0] && copy(found[0]);
     },
     anchors: (id) => (id === undefined ? index.anchors : matching(id)).map(copy),
+    credits: index.credits ?? [],
   };
 }
 
@@ -287,6 +328,7 @@ const definition = z.object({
   controls: controlsSchema,
   render: z.custom<(context: RenderContext) => ReactNode>((value) => typeof value === 'function', 'Expected a render function.'),
   anchors: z.custom<(context: AnchorContext) => unknown>((value) => typeof value === 'function', 'Expected an anchors function.').optional(),
+  credits: z.custom<(context: CreditContext) => unknown>((value) => typeof value === 'function', 'Expected a credits function.').optional(),
   // The layout family this layout is a variant of, and free-form tags a family's picker reads to tell variants apart.
   family: identifier.optional(),
   variant: z.record(identifier, z.union([z.string().max(200), z.number(), z.boolean()])).optional(),
@@ -457,6 +499,7 @@ type DeclaredSpread = Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | '
   elements?: Record<string, { label: string; parameters?: Parameters }>;
   render(context: RenderContext): ReactNode;
   anchors?(context: AnchorContext): AnchorDeclaration[];
+  credits?(context: CreditContext): CreditDeclaration[];
 };
 // The builder `spreads: ({ spread }) => ...` receives. It only exists for TypeScript, so at runtime it returns the
 // definition unchanged.
@@ -495,7 +538,7 @@ export function templateInfo(template: Template): TemplateInfo {
       label, ...(picker ? { picker: { ...(picker.label ? { label: picker.label } : {}) } } : {}),
     }])),
     // Functions (render, editor components) stay in the render frame; the editor gets plain declarations.
-    spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, anchors: _anchors, elements, ...info }]) => [id, {
+    spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, anchors: _anchors, credits: _credits, elements, ...info }]) => [id, {
       ...info, declaresAnchors: !!_anchors,
       elements: Object.fromEntries(Object.entries(elements).map(([key, { editor, ...element }]) => [key, {
         ...element, ...(editor ? { editor: { label: editor.label, parameters: editor.parameters,
@@ -896,7 +939,7 @@ export function issue(found: TemplateIssue): Required<IssueMarker> {
 
 export const runtime = {
   defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
-  RenderedImage, FormattedText, plainText, Choice,
+  RenderedImage, FormattedText, plainText, Choice, fonts,
 } satisfies Record<typeof runtimeExports[number], unknown>;
 
 // The values `render` reads for one spread: its parameters, the document's, and its boxes and elements.
@@ -940,7 +983,7 @@ export function editorContext(book: RenderProject, template: Template, spreadId:
     elements: Object.fromEntries(Object.entries(values.elements).map(([id, element]) => [id, { ...element, rect: null }])),
     book: bookContext(index_, spread.id), spread: spread.id, layout: spread.definition,
   };
-  return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, index_.spreads, values, template.formatId]) };
+  return { context, key: JSON.stringify([spread.id, spread.definition, page, index_.pages, index_.anchors, index_.credits, index_.spreads, values, template.formatId]) };
 }
 
 /** The editor context from a newer book, with the format that book chose, as the book render chooses it. */

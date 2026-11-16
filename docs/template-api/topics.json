@@ -13,7 +13,7 @@
   {"id":"render-function","title":"Render function","summary":"The pure render(ctx) contract, the render context fields, and photo capture metadata."},
   {"id":"rendered-images","title":"Rendered images","summary":"<RenderedImage> for pictures that draw asynchronously, such as WebGL maps, and how check and export wait for them."},
   {"id":"click-to-edit","title":"Click-to-edit","summary":"ctx.edit(...paths) to make rendered nodes open parameter popovers when clicked."},
-  {"id":"anchors-and-index","title":"Anchors","summary":"Anchors that other spreads refer to (tables of contents, map captions) and the book index of anchors and pages."},
+  {"id":"anchors-and-index","title":"Anchors","summary":"Anchors that other spreads refer to (tables of contents, map captions) and the book index of anchors, pages and credits."},
   {"id":"editing-ui","title":"Editing UI","summary":"Choosing between generated controls, arranged controls and custom editors, and where each kind of editing happens."},
   {"id":"element-editors","title":"Element editors","summary":"Custom React editors for element parameters: props, Control, spread parameters, network access and sandboxing."},
   {"id":"document-editors","title":"Document editors","summary":"Custom editors for book-wide document parameters, opened where the book shows them."},

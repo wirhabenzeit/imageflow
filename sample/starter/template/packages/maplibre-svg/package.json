@@ -1,0 +1,17 @@
+{
+  "name": "maplibre-svg",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A MapLibre map as SVG for print: paths in the style's colours, labels in the page's fonts. Build: npm run build (from the ImageFlow checkout's TypeScript).",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "license": "MIT",
+  "peerDependencies": {
+    "maplibre-gl": ">=5"
+  },
+  "scripts": {
+    "build": "tsc -p ."
+  }
+}

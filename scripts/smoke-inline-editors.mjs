@@ -38,7 +38,7 @@ await copySample(join(root, 'sample', 'starter'), book);
 const projectFile = join(book, 'project.json');
 const project = JSON.parse(await readFile(projectFile, 'utf8'));
 project.spreads.splice(1, 0, { id: 'route', definition: 'map', params: { mapTitle: 'Senja' }, boxes: {},
-  elements: { map: { params: { tracks: [{ id: 'senja', track: 'senja-road' }], longitude: 17.4, latitude: 69.3, zoom: 9 } } } });
+  elements: { map: { params: { tracks: [{ id: 'senja', track: 'senja-road' }], style: 'liberty', longitude: 17.4, latitude: 69.3, zoom: 9 } } } });
 await writeFile(projectFile, JSON.stringify(project, null, 2) + '\n');
 const saved = async () => JSON.parse(await readFile(projectFile, 'utf8')).spreads.find(({ id }) => id === 'route').elements.map.params;
 
@@ -157,7 +157,7 @@ try {
   assert.ok(camera);
   // The page's other map settings are in the toolbar; changing one keeps the same editor and its view.
   const toolbar = w.getByRole('toolbar', { name: 'Edit map' });
-  await toolbar.getByRole('radiogroup', { name: 'Map style' }).getByRole('radio', { name: 'Bright' }).click();
+  await toolbar.getByRole('combobox', { name: 'Map style' }).selectOption('bright');
   for (let i = 0; i < 50 && (await saved()).style !== 'bright'; i++) await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal((await saved()).style, 'bright');
   assert.equal(await instance(), 'first', 'a toolbar control keeps the editor');
