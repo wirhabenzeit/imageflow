@@ -35,7 +35,7 @@ export async function authoringSnapshot(typesRoot: string, template?: string): P
   return new Map([...entries].map(([path, bytes]) => [authoringSnapshotFolder + '/' + path, bytes]));
 }
 
-/** Writes only into a newly created book or a build fixture, never when opening a book. */
+/** Writes into a newly created book, a build fixture, or a template whose dependencies are explicitly rebuilt; never when opening a book. */
 export async function writeAuthoringSnapshot(template: string, typesRoot: string) {
   const entries = await authoringSnapshot(typesRoot, template);
   await rm(join(template, authoringSnapshotFolder), { recursive: true, force: true });

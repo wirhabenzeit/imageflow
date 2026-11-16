@@ -35,7 +35,7 @@ This opens a temporary copy of the Photobook starter with hot reloading. Edits t
 ```sh
 npm run build          # build and type-check the app, templates and API examples
 npm run test:unit      # unit tests
-npm run test:desktop   # build, unit tests and full desktop suite
+npm run test:desktop   # build, unit tests and hidden desktop suite
 npm run package:mac    # package an ad-hoc-signed Mac app
 ```
 

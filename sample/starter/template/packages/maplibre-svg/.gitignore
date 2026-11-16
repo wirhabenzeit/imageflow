@@ -1,0 +1,2 @@
+# Committed: template dependency rebuilds install this package as it is, without running its build.
+!dist/

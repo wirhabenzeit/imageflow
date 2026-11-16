@@ -59,20 +59,25 @@ async function lockfileHash(root: string) {
   return lock ? createHash('sha256').update(lock).digest('hex') : '';
 }
 
-/** A warning when installed packages no longer match the saved bundle; books keep using the saved bundle. */
+// How a template's packages are rebuilt, for messages: by the agent tool or the menu command.
+const rebuildHint = 'Rebuild the dependencies with the rebuild_dependencies agent tool or Templates → Rebuild Template Dependencies.';
+
+/** A warning when the saved bundle no longer matches package.json and its lockfile; books keep using the saved bundle. */
 export async function dependencyWarning(root: string, manifest: DependencyManifest | undefined) {
   const hasPackage = await stat(join(root, 'package.json')).then(() => true, () => false);
-  if (!hasPackage) return undefined;
-  if (!manifest) {
-    return 'The template has a package.json but no saved dependency bundle. Run the template dependency rebuild script after npm install.';
-  }
+  // Packages are installed outside the book; a node_modules folder left in the template only makes the book larger.
+  const leftover = await stat(join(root, 'node_modules')).then((info) => info.isDirectory(), () => false)
+    ? 'template/node_modules is not used: the book renders the saved bundle in template/vendor/, and ImageFlow installs packages outside the book when it rebuilds them. Delete the folder to make the book smaller.'
+    : undefined;
+  const joined = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(' ') || undefined;
+  if (!hasPackage) return leftover;
+  if (!manifest) return joined('The template has a package.json but no saved dependency bundle. ' + rebuildHint, leftover);
   const lock = await lockfileHash(root);
   if (lock && lock !== manifest.lockfile) {
-    return 'template/package-lock.json changed since the dependency bundle was saved; the book still uses the saved bundle. ' +
-      'Run the template dependency rebuild script to use the installed packages.';
+    return joined('template/package-lock.json changed since the dependency bundle was saved; the book still uses the saved bundle. ' + rebuildHint, leftover);
   }
-  return manifest.untyped.length ? 'These template dependencies have no type declarations, so the type check treats them as any: ' +
-    manifest.untyped.join(', ') + '. Install their @types packages and rebuild the dependencies.' : undefined;
+  return joined(manifest.untyped.length ? 'These template dependencies have no type declarations, so the type check treats them as any: ' +
+    manifest.untyped.join(', ') + '. Add their @types packages to package.json and rebuild the dependencies.' : undefined, leftover);
 }
 
 /** The module a bare import resolves to: its saved JS and CSS, as source for the bundler's virtual module. */
@@ -90,7 +95,7 @@ export function vendoredModule(_root: string, manifest: DependencyManifest | und
 }
 
 export const missingDependency = (specifier: string) => 'The template imports ' + specifier + ', which is not in its saved dependency bundle ' +
-  '(template/vendor/manifest.json). Install it in template/ with npm install, then run the template dependency rebuild script.';
+  '(template/vendor/manifest.json). Add it to template/package.json, then ' + rebuildHint.charAt(0).toLowerCase() + rebuildHint.slice(1);
 
 const assetLoaders: Record<string, Loader> = Object.fromEntries(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.woff', '.woff2', '.ttf', '.otf']
   .map((extension) => [extension, 'dataurl' as const]));
@@ -125,13 +130,13 @@ async function licenseFiles(directory: string) {
  * `file:` dependencies) are copied as they appear in node_modules. Returns the declaration entry of each typed import,
  * relative to `vendor/`, and the imports without declarations.
  */
-async function vendorTypes(root: string, specifiers: string[], target: string) {
+async function vendorTypes(modules: string, specifiers: string[], target: string) {
   const ts = (await import('typescript')).default;
   const options = { moduleResolution: ts.ModuleResolutionKind.Bundler, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022,
     types: [], noEmit: true, skipLibCheck: true, preserveSymlinks: true };
   const host = ts.createCompilerHost(options);
-  const containing = join(root, 'index.ts');
-  const modules = join(root, 'node_modules');
+  // Resolved as from a file beside node_modules, so a node_modules elsewhere (such as one in the template) is never used.
+  const containing = join(dirname(modules), 'index.ts');
   const untyped: string[] = [];
   const entries: string[] = [];
   const types: Record<string, string> = {};
@@ -187,14 +192,33 @@ async function vendorTypes(root: string, specifiers: string[], target: string) {
       return entry ? '/// <reference path="./packages/' + slash(relative(modules, entry)) + '" />' : '';
     }).filter(Boolean).join('\n') + '\n');
   }
-  return { types, untyped };
+  // Code editors map bare imports through tsconfig `paths`, whose targets ignore package.json `exports`. Beyond the
+  // template's own imports, every subpath a copied package exports with declarations gets an entry, so imports used only
+  // for types, or by other packages' declarations (such as react-map-gl/mapbox), resolve there as in the book's check.
+  const editorPaths: Record<string, string> = { ...types };
+  for (const owner of copied) {
+    if (owner.split(sep).includes('node_modules')) continue;
+    const info = JSON.parse(await readFile(join(modules, owner, 'package.json'), 'utf8').catch(() => '{}'));
+    const name = typeof info.name === 'string' ? info.name : slash(owner);
+    const subpaths = info.exports && typeof info.exports === 'object' && !Array.isArray(info.exports) && Object.keys(info.exports).some((key) => key.startsWith('.'))
+      ? Object.keys(info.exports).filter((key) => key.startsWith('.') && !key.includes('*') && !/\.(json|css)$/.test(key)) : ['.'];
+    for (const subpath of subpaths) {
+      const specifier = subpath === '.' ? name : name + subpath.slice(1);
+      if (editorPaths[specifier]) continue;
+      const entry = declaration(specifier);
+      if (!entry || !await stat(join(target, relative(modules, entry))).then(() => true, () => false)) continue;
+      editorPaths[specifier] = slash(join('types', 'packages', relative(modules, entry)));
+    }
+  }
+  return { types, untyped, editorPaths };
 }
 
 /**
- * Bundles the packages the template imports from `template/node_modules` into `template/vendor/`, replacing it
- * atomically. Without bare imports, `vendor/` is removed. Returns the new manifest.
+ * Bundles the packages the template imports from `modules`, the node_modules of an install outside the book
+ * (dependency-install.ts), into `template/vendor/`, replacing it atomically. Without bare imports, `vendor/` is
+ * removed. Returns the new manifest.
  */
-export async function rebuildDependencies(root: string): Promise<DependencyManifest | undefined> {
+export async function rebuildDependencies(root: string, modules: string): Promise<DependencyManifest | undefined> {
   const specifiers = await templateImports(root);
   const vendor = join(root, vendorFolder);
   const staging = join(root, '.vendor-' + process.pid + '-' + Date.now());
@@ -209,10 +233,11 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
     await rm(vendor, { recursive: true, force: true });
     return undefined;
   }
-  const modules = join(root, 'node_modules');
   if (!await stat(modules).then((info) => info.isDirectory(), () => false)) {
-    throw new Error('The template imports ' + specifiers.join(', ') + ' but template/node_modules is missing. Run npm install in template/ first.');
+    throw new Error('The template imports ' + specifiers.join(', ') + ' but its packages are not installed.');
   }
+  // Packages resolve from the install, never from a node_modules folder the template may still contain.
+  const base = dirname(modules);
   const own = (name: string) => ['react', 'react-dom', 'imageflow'].includes(name);
   const conflicting = specifiers.filter((specifier) => own(packageName(specifier)));
   if (conflicting.length) throw new Error('ImageFlow provides React and imageflow; import them directly, not ' + conflicting.join(', ') + '.');
@@ -222,7 +247,7 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
     const outdir = join(staging, 'modules');
     const result = await build({
       entryPoints: specifiers.map((specifier, i) => ({ in: specifier, out: 'm' + i })),
-      absWorkingDir: root, outdir, bundle: true, splitting: true, format: 'esm', platform: 'browser', target: 'es2022',
+      absWorkingDir: base, outdir, bundle: true, splitting: true, format: 'esm', platform: 'browser', target: 'es2022',
       minify: true, legalComments: 'none', metafile: true, write: true, logLevel: 'silent', chunkNames: 'chunk-[hash]',
       external: [...hostModuleNames], loader: assetLoaders, define: { 'process.env.NODE_ENV': '"production"' },
       nodePaths: [modules],
@@ -233,15 +258,15 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
       const js = outputs.find(([path]) => basename(path) === 'm' + i + '.js');
       const css = outputs.find(([path]) => basename(path) === 'm' + i + '.css');
       manifest.modules[specifier] = {
-        ...(js ? { js: slash(relative(staging, resolve(root, js[0]))) } : {}),
-        ...(css ? { css: slash(relative(staging, resolve(root, css[0]))) } : {}),
+        ...(js ? { js: slash(relative(staging, resolve(base, js[0]))) } : {}),
+        ...(css ? { css: slash(relative(staging, resolve(base, css[0]))) } : {}),
         exports: js ? [...js[1].exports].sort() : [],
       };
     });
     // Every package that contributed code, with its version and licence.
     const directories = new Set<string>();
     for (const input of Object.keys(result.metafile.inputs)) {
-      const path = resolve(root, input);
+      const path = resolve(base, input);
       if (!inside(modules, path)) continue;
       const parts = relative(modules, path).split(sep);
       // Nested node_modules belong to the innermost package.
@@ -263,7 +288,7 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
       } else manifest.licenses[name] = typeof info.license === 'string' ? info.license : '';
       manifest.licenseNames![name] = typeof info.license === 'string' ? info.license : '';
     }
-    const declarations = await vendorTypes(root, specifiers.filter((specifier) => extname(specifier) !== '.css'), join(staging, 'types', 'packages'));
+    const declarations = await vendorTypes(modules, specifiers.filter((specifier) => extname(specifier) !== '.css'), join(staging, 'types', 'packages'));
     manifest.untyped = declarations.untyped;
     manifest.types = declarations.types;
     if (manifest.untyped.length) {
@@ -274,43 +299,49 @@ export async function rebuildDependencies(root: string): Promise<DependencyManif
     await writeFile(join(staging, '.gitignore'), '# The saved dependency bundle of this template (ImageFlow ADR 0006). Keep every file.\n!*\n');
     await writeFile(join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await replace();
-    await updateTsconfig(root, manifest);
+    await updateTsconfig(root, manifest, declarations.editorPaths);
     return manifest;
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
 }
 
-/** The `paths` of the config a template's tsconfig.json extends, as paths relative to the template folder. */
-async function extendedPaths(root: string, extended: unknown) {
-  if (typeof extended !== 'string' || !extended.startsWith('.')) return {};
-  const file = resolve(root, extended.endsWith('.json') ? extended : extended + '.json');
-  let base: { compilerOptions?: { paths?: Record<string, string[]>; baseUrl?: string } };
-  try { base = JSON.parse(await readFile(file, 'utf8')); } catch { return {}; }
-  const from = resolve(dirname(file), base.compilerOptions?.baseUrl ?? '.');
-  return Object.fromEntries(Object.entries(base.compilerOptions?.paths ?? {}).map(([name, targets]) =>
-    [name, targets.map((target) => { const path = slash(relative(root, resolve(from, target))); return /^\.\.?\//.test(path) ? path : './' + path; })]));
-}
-
-/** Points code editors at the vendored declarations, as the book's type check does, when tsconfig.json is plain JSON. */
-async function updateTsconfig(root: string, manifest: DependencyManifest) {
+/**
+ * Points code editors at the vendored declarations, as the book's type check does, when tsconfig.json is plain JSON.
+ * A template tsconfig that extends another (normally the generated .imageflow-sdk/tsconfig.json) would replace its
+ * `paths` and `files` by writing its own, so the extended ones are carried over first: the host's imageflow and react
+ * mappings stay, with the package entries added.
+ */
+async function updateTsconfig(root: string, manifest: DependencyManifest, editorPaths: Record<string, string> = manifest.types ?? {}) {
   const path = join(root, 'tsconfig.json');
-  let config: { compilerOptions?: { paths?: Record<string, string[]> }; exclude?: string[]; files?: string[] };
+  type Config = { extends?: string; compilerOptions?: { paths?: Record<string, string[]> }; exclude?: string[]; files?: string[] };
+  let config: Config;
   try { config = JSON.parse(await readFile(path, 'utf8')); } catch { return; }
+  let inherited: { paths: Record<string, string[]>; files: string[] } = { paths: {}, files: [] };
+  if (typeof config.extends === 'string' && config.extends.startsWith('.')) {
+    const basePath = resolve(root, config.extends.endsWith('.json') ? config.extends : config.extends + '.json');
+    const base = await readFile(basePath, 'utf8').then((text) => JSON.parse(text) as Config, () => undefined);
+    // Targets in the extended file are relative to it; rewritten relative to the template.
+    const rebase = (target: string) => { const next = slash(relative(root, resolve(dirname(basePath), target))); return next.startsWith('./') || next.startsWith('../') ? next : './' + next; };
+    if (base) inherited = {
+      paths: Object.fromEntries(Object.entries(base.compilerOptions?.paths ?? {}).map(([key, targets]) => [key, targets.map(rebase)])),
+      files: (base.files ?? []).map(rebase),
+    };
+  }
   config.compilerOptions ??= {};
-  // `paths` replaces, not merges with, the paths of a config it extends, such as the SDK's mapping of `imageflow` and
-  // `react`: those are carried over, relative to the template folder, unless the template maps them itself.
-  const inherited = await extendedPaths(root, (config as { extends?: unknown }).extends);
-  // Each typed import maps to its exact entry: editors resolve `paths` targets without package.json `exports`.
-  const previous = Object.fromEntries(Object.entries(config.compilerOptions.paths ?? {})
-    .filter(([, targets]) => !targets.every((target) => target.startsWith('./vendor/types/'))));
-  config.compilerOptions.paths = { ...Object.fromEntries(Object.entries(inherited).filter(([name]) => name !== '*')), ...previous,
-    ...Object.fromEntries(Object.entries(manifest.types ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([specifier, entry]) => [specifier, ['./vendor/' + entry]])),
-    '*': [...new Set([...(inherited['*'] ?? []), './vendor/types/packages/*', './vendor/types/packages/@types/*'])] };
+  const own = (target: string) => target.startsWith('./vendor/types/');
+  // Entries the user wrote stay; earlier generated package entries are replaced.
+  const previous = Object.fromEntries(Object.entries(config.compilerOptions.paths ?? {}).filter(([, targets]) => !targets.every(own)));
+  const wildcard = [...new Set([...(inherited.paths['*'] ?? []), ...(previous['*'] ?? []).filter((target) => !own(target)),
+    './vendor/types/packages/*', './vendor/types/packages/@types/*'])];
+  config.compilerOptions.paths = { ...inherited.paths, ...previous,
+    // Each typed import maps to its exact entry: editors resolve `paths` targets without package.json `exports`.
+    ...Object.fromEntries(Object.entries(editorPaths).sort(([a], [b]) => a.localeCompare(b)).map(([specifier, entry]) => [specifier, ['./vendor/' + entry]])),
+    '*': wildcard };
   config.exclude = [...new Set([...(config.exclude ?? []), 'node_modules', 'vendor'])];
   const globals = await stat(join(root, vendorFolder, 'types', 'globals.d.ts')).then(() => true, () => false);
-  const files = (config as { files?: string[] }).files?.filter((name) => name !== 'vendor/types/globals.d.ts') ?? [];
-  if (globals) (config as { files?: string[] }).files = [...files, 'vendor/types/globals.d.ts'];
-  else if ((config as { files?: string[] }).files) (config as { files?: string[] }).files = files;
+  const files = [...new Set([...inherited.files, ...(config.files ?? [])])].filter((name) => name !== 'vendor/types/globals.d.ts' && name !== './vendor/types/globals.d.ts');
+  if (globals) config.files = [...files, './vendor/types/globals.d.ts'];
+  else if (files.length || config.files) config.files = files;
   await writeFile(path, JSON.stringify(config, null, 2) + '\n');
 }

@@ -1,6 +1,7 @@
 // Runs desktop smoke scripts one after another, each with a time limit, and reports every failure at the end.
 //
-//   node scripts/run-smokes.mjs smoke-desktop smoke-files …
+//   node scripts/run-smokes.mjs [--visible] smoke-desktop smoke-files …
+// Hidden by default. --visible also runs compositor/native-focus checks which need an isolated desktop.
 //
 // A script that hangs (for example a Playwright call that never returns) is killed after SMOKE_TIMEOUT_MINUTES
 // (default 6) together with the Electron app it started, so a hang costs minutes and names itself instead of running
@@ -10,13 +11,18 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const names = process.argv.slice(2);
+const visible = process.argv.includes('--visible');
+const names = process.argv.slice(2).filter((arg) => arg !== '--visible');
+const needsDesktop = new Set(['smoke-inline-editors', 'smoke-mcp-context']);
+const acceptsVisible = new Set([...needsDesktop, 'smoke-presentation-startup', 'smoke-presentation-window']);
 if (!names.length) {
-  console.error('Usage: node scripts/run-smokes.mjs <smoke-script> …');
+  console.error('Usage: node scripts/run-smokes.mjs [--visible] <smoke-script> …');
   process.exit(2);
 }
 const limit = Number(process.env.SMOKE_TIMEOUT_MINUTES || 6) * 60_000;
 const annotate = !!process.env.GITHUB_ACTIONS;
+const env = { ...process.env, IMAGEFLOW_HIDE_WINDOW: visible ? '' : '1' };
+delete env.ELECTRON_RUN_AS_NODE;
 let current;
 
 // Playwright starts Electron in its own process group, so also stop any app still running from this checkout's build.
@@ -32,7 +38,11 @@ for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { if (curre
 function run(name) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [join(root, 'scripts', name + '.mjs')], { cwd: root, stdio: 'inherit', detached: true });
+    const child = spawn(process.execPath, [join(root, 'scripts', name + '.mjs'),
+      ...(visible && acceptsVisible.has(name) ? ['--visible'] : [])], {
+      cwd: root, stdio: 'inherit', detached: true,
+      env,
+    });
     current = child;
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; stop(child); }, limit);
@@ -47,7 +57,13 @@ function run(name) {
 }
 
 const results = [];
+const skipped = [];
 for (const name of names) {
+  if (!visible && needsDesktop.has(name)) {
+    skipped.push(name);
+    console.log(`↷ ${name} skipped: requires a visible desktop; rerun with --visible in CI or a VM.`);
+    continue;
+  }
   console.log(`\n▶ ${name}`);
   const result = await run(name);
   results.push(result);
@@ -61,5 +77,6 @@ for (const name of names) {
 const failed = results.filter(({ ok }) => !ok);
 console.log('\nSmoke scripts:');
 for (const { name, ok, seconds, reason } of results) console.log(`  ${ok ? '✓' : '✖'} ${name} (${seconds} s)${ok ? '' : ' — ' + reason}`);
-console.log(failed.length ? `\n${failed.length} of ${results.length} failed.` : `\nAll ${results.length} passed.`);
+console.log((failed.length ? `\n${failed.length} of ${results.length} failed.` : `\nAll ${results.length} passed.`)
+  + (skipped.length ? ` ${skipped.length} skipped (require --visible).` : ''));
 process.exit(failed.length ? 1 : 0);

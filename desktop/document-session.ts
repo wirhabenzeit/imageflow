@@ -31,6 +31,8 @@ import { AuthoringQueue } from './authoring-queue';
 import { authoringErrorResult } from './authoring-errors';
 import { ImportReceipts } from './import-receipts';
 import { saveDocumentCopy } from './source-actions';
+import { rebuildTemplateDependencies } from './dependency-install';
+import type { DependencyRebuild } from './dependency-install';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
 import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
@@ -152,6 +154,7 @@ export class DocumentSession {
       check: (...args) => this.checkOpenBook(...args),
       changed: (next) => this.notify({ value: this.activate(next) }),
       recovery: (message) => this.notify({ error: message }),
+      dependencies: (signal) => this.rebuildDependencies(signal),
       import: async (request, paths, base) => {
         const result = await this.importFiles(this.window, this.active.id, { ...request, paths }, base);
         if (!result) throw new AuthoringError('PROJECT_CLOSED', 'The book closed before import completed.');
@@ -249,6 +252,42 @@ export class DocumentSession {
   replyLease(id: string, allowed: boolean) { this.agentLeases.get(id)?.(allowed === true); }
   cancelExport() { this.exportJob?.abort(); }
   cancelCheck() { this.checkJob?.abort(); }
+  /** Where template packages are installed, outside every book; set by the app. */
+  dependencyCache?: string;
+  /** The installed app's authoring SDK, refreshed into the template's .imageflow-sdk when dependencies are rebuilt. */
+  authoringTypes?: string;
+  private dependencyTask?: Promise<DependencyRebuild>;
+  /**
+   * Installs the template's packages outside the book and rebuilds template/vendor/ (ADR 0006); the folder watcher then
+   * renders the book with the new bundle. One rebuild runs at a time. A caller that stops waiting (an agent call
+   * nearing its time limit) leaves it running, and the next call waits for the same one.
+   */
+  async rebuildDependencies(signal?: AbortSignal, waitMs = 100_000): Promise<Record<string, unknown>> {
+    if (this.book.readOnly) throw new Error('Create an editable book before rebuilding its template dependencies.');
+    if (!this.dependencyCache) throw new Error('Template dependencies are not available.');
+    const cache = this.dependencyCache;
+    this.dependencyTask ??= rebuildTemplateDependencies(join(this.book.folder, 'template'), cache, { authoringTypes: this.authoringTypes })
+      .finally(() => { this.dependencyTask = undefined; });
+    const task = this.dependencyTask;
+    let stopWaiting = () => {};
+    const waited = await Promise.race([
+      task.then((result) => ({ result })),
+      new Promise<undefined>((done) => {
+        // Node runs a timer longer than about 24 days at once, so waiting without limit sets none.
+        if (Number.isFinite(waitMs)) {
+          const timer = setTimeout(() => done(undefined), waitMs);
+          stopWaiting = () => clearTimeout(timer);
+        }
+        signal?.addEventListener('abort', () => done(undefined), { once: true });
+      }),
+    ]).finally(() => stopWaiting());
+    signal?.throwIfAborted();
+    if (!waited) return { state: 'installing', notice: 'npm is still installing the template packages. Call rebuild_dependencies again to wait for it.' };
+    const { packages, imports, untyped, reused, lockfileUpdated, leftoverNodeModules } = waited.result;
+    return { state: 'ready', packages, imports, untyped, reused, lockfileUpdated, leftoverNodeModules,
+      notice: 'Saved the bundle in template/vendor/; the book renders it now. Run check_book.' +
+        (leftoverNodeModules ? ' template/node_modules is no longer used; ask the user before deleting it.' : '') };
+  }
   async agentCall(name: McpToolName, args: Record<string, unknown>, signal: AbortSignal) {
     let requestSignal = signal;
     try {

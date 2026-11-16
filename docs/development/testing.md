@@ -3,12 +3,15 @@
 ```sh
 npm run test:unit       # unit tests
 npm run test:desktop    # build, unit tests and desktop suite
+npm run test:desktop -- --visible  # include native desktop checks (CI or VM)
 npm run test:packaged   # package and test the app
 ```
 
 Desktop checks require [Poppler](https://poppler.freedesktop.org) (`brew install poppler`). They cover rendering, PDF geometry, text flow, preflight, imports, autosave and live reload.
 
-Packaged checks cover document registration, Finder open events, proof and print export, linked sources and the MCP bridge. Use `npm run test:packaged:existing` to test an existing build.
+The smoke runner defaults to invisible windows: no native focus, fullscreen, Dock icon or interactive dialogs. Unexpected native prompts and uncaught exceptions fail with a terminal error; tests exercising confirmations mock their answers explicitly. `smoke-inline-editors` and `smoke-mcp-context` require compositor hit testing in shown windows and are reported as skipped. Use `node scripts/run-smokes.mjs --visible <scripts…>` or the full-suite command above on an isolated desktop to include them and the native presentation focus/fullscreen checks. Direct invocation of those two scripts also requires `--visible`. Build and staging must finish before running smoke scripts. An already-running staged app must be restarted to pick up these changes.
+
+Packaged checks cover document registration, Finder open events, proof and print export, linked sources and the MCP bridge. Use `npm run test:packaged:existing` to test an existing build. Packaged checks include Finder integration and the visible MCP context test, so run them on an isolated desktop too.
 
 ## Continuous integration
 

@@ -1,8 +1,9 @@
 import { fromJsonSchema, McpServer } from '@modelcontextprotocol/server';
-import type { CallToolResult, JSONObject } from '@modelcontextprotocol/server';
+import type { CallToolResult, JSONObject, RegisteredTool } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { resolve } from 'node:path';
-import { advertisedSchemas, mcpLimits, mcpTools } from '../src/mcp-contract';
+import { mcpCatalog, mcpLimits } from '../src/mcp-contract';
+import type { McpCatalogTool, McpToolName } from '../src/mcp-contract';
 import { McpAppClient, McpConnectionError } from './mcp-connection';
 
 function toolResult(result: Record<string, unknown>): CallToolResult {
@@ -46,22 +47,42 @@ function start() {
         'its topics list the template API reference, and docs: ["authoring-workflow"] explains the order of work. Edit template files with ' +
         'workspace tools, save project data with apply_project_changes, and verify every edit with check_book.',
     });
-    const app = new McpAppClient(descriptorPath, () => server.server.getClientVersion()?.name ?? 'MCP client');
-    server.server.oninitialized = () => { void app.connect().catch(() => {}); };
-    server.server.onclose = () => app.close();
-    for (const tool of mcpTools) {
-      const { input: schema, output } = advertisedSchemas(tool.name);
-      server.registerTool(tool.name, {
+    // Tools are served as the running app describes them (mcpCatalog), falling back to this bridge's own copy: a
+    // bridge started before an app update keeps running old code, and would otherwise reject new tools and arguments.
+    const registered = new Map<string, { tool: RegisteredTool; schema: string }>();
+    const register = (tool: McpCatalogTool) => {
+      const schema = JSON.stringify([tool.title, tool.description, tool.readOnly, tool.input, tool.output]);
+      const existing = registered.get(tool.name);
+      if (existing?.schema === schema) return false;
+      existing?.tool.remove();
+      registered.set(tool.name, { schema, tool: server.registerTool(tool.name, {
         title: tool.title,
         description: tool.description,
-        inputSchema: fromJsonSchema<Record<string, unknown>>(schema as Parameters<typeof fromJsonSchema>[0]),
-        outputSchema: fromJsonSchema<Record<string, unknown>>(output as Parameters<typeof fromJsonSchema>[0]),
+        inputSchema: fromJsonSchema<Record<string, unknown>>(tool.input as Parameters<typeof fromJsonSchema>[0]),
+        outputSchema: fromJsonSchema<Record<string, unknown>>(tool.output as Parameters<typeof fromJsonSchema>[0]),
         annotations: { title: tool.title, readOnlyHint: tool.readOnly, destructiveHint: !tool.readOnly, idempotentHint: true, openWorldHint: false },
       }, async (args, context) => {
-        try { return toolResult(await app.call(tool.name, args, context.mcpReq.signal)); }
+        try { return toolResult(await app.call(tool.name as McpToolName, args, context.mcpReq.signal)); }
         catch (error) { return errorResult(error); }
-      });
-    }
+      }) });
+      return true;
+    };
+    const adopt = (tools: McpCatalogTool[]) => {
+      let changed = false;
+      for (const tool of tools) changed = register(tool) || changed;
+      for (const [name, entry] of registered) {
+        if (tools.some((tool) => tool.name === name)) continue;
+        entry.tool.remove();
+        registered.delete(name);
+        changed = true;
+      }
+      if (changed && server.isConnected()) server.sendToolListChanged();
+    };
+    const refresh = () => { void app.catalog().then((tools) => { if (tools) adopt(tools); }, () => {}); };
+    const app = new McpAppClient(descriptorPath, () => server.server.getClientVersion()?.name ?? 'MCP client', refresh);
+    server.server.oninitialized = () => { void app.connect().catch(() => {}); };
+    server.server.onclose = () => app.close();
+    adopt(mcpCatalog());
     return server;
   }, {
     transport: new StdioServerTransport(process.stdin, process.stdout, { maxBufferSize: mcpLimits.requestBytes }),

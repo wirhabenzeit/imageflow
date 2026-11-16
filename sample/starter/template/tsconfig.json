@@ -16,6 +16,30 @@
         "./vendor/types/packages/*",
         "./vendor/types/packages/@types/*"
       ],
+      "@mapbox/point-geometry": [
+        "./vendor/types/packages/@mapbox/point-geometry/index.d.ts"
+      ],
+      "@mapbox/tiny-sdf": [
+        "./vendor/types/packages/@mapbox/tiny-sdf/index.d.ts"
+      ],
+      "@maplibre/geojson-vt": [
+        "./vendor/types/packages/@maplibre/geojson-vt/dist/index.d.ts"
+      ],
+      "@maplibre/maplibre-gl-style-spec": [
+        "./vendor/types/packages/@maplibre/maplibre-gl-style-spec/dist/index.d.ts"
+      ],
+      "@maplibre/vt-pbf": [
+        "./vendor/types/packages/@maplibre/vt-pbf/dist/index.d.ts"
+      ],
+      "@types/geojson": [
+        "./vendor/types/packages/@types/geojson/index.d.ts"
+      ],
+      "gl-matrix": [
+        "./vendor/types/packages/gl-matrix/index.d.ts"
+      ],
+      "kdbush": [
+        "./vendor/types/packages/kdbush/index.d.ts"
+      ],
       "maplibre-contour": [
         "./vendor/types/packages/maplibre-contour/dist/index.d.ts"
       ],
@@ -24,6 +48,9 @@
       ],
       "maplibre-svg": [
         "./vendor/types/packages/maplibre-svg/dist/index.d.ts"
+      ],
+      "potpack": [
+        "./vendor/types/packages/potpack/index.d.ts"
       ]
     }
   },
@@ -32,6 +59,7 @@
     "vendor"
   ],
   "files": [
-    "vendor/types/globals.d.ts"
+    "./.imageflow-sdk/assets.d.ts",
+    "./vendor/types/globals.d.ts"
   ]
 }

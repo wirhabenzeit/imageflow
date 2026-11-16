@@ -40,7 +40,7 @@ await writeFile(join(folder, 'photos.json'), JSON.stringify(photos));
 await writeFile(join(folder, 'project.json'), JSON.stringify({schemaVersion:1,title:'Startup',template:{id:'startup',version:'1'},spreads:
   Array.from({length:40},(_,i)=>({id:'s'+i,definition:i===15?'shaped':'story',params:{index:i},boxes:{hero:{photo:photos['p'+i]?'p'+i:'p0'}}}))}));
 const visible = process.argv.includes('--visible');
-const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: {...process.env, ...(visible ? {} : {IMAGEFLOW_HIDE_WINDOW:'1'})} });
+const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: {...process.env, IMAGEFLOW_HIDE_WINDOW: visible ? '' : '1'} });
 try {
   if (!process.argv.includes('--measure')) await app.context().addInitScript(() => {
     if (location.hostname !== 'render' || new URLSearchParams(location.search).get('view') !== 'present') return;
