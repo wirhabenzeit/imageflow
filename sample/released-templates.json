@@ -12,6 +12,10 @@
     "099a9cae7d4793aedcc737fb35fe80309378e8aee865ae8297417be3a8d820c7": {
       "template": "typography",
       "app": "1.0.0-beta.1"
+    },
+    "c39963e7c7817b092e704861afdad2046259fd357636b5473d354fdac503f4e4": {
+      "template": "starter",
+      "app": "1.0.0-beta.4"
     }
   }
 }
