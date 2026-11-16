@@ -48,7 +48,7 @@ The flap names refer to the panels they fold into. These flaps are printed on th
 
 For a wrap, total trim width is the sum of the named region widths. The total sheet adds its outer insets. A `front-panel` cover instead specifies just a width, height, safe insets and outer insets; it has no back, spine or flaps. That accommodates a printed front insert without inventing a zero-width wrap.
 
-`foldAvoidance` optionally describes bands inside the front and back panels next to the spine. It does not increase the sheet size. These bands support guides and warnings independently from the outer safety insets. No exact WhiteWall hinge width is entered in the examples because the source gives a range of 10–12 mm.
+`foldAvoidance` optionally describes bands inside the front and back panels next to the spine. It does not increase the sheet size. These bands support guides and warnings independently from the outer safety insets. The WhiteWall example uses a conservative 12 mm warning band, the upper end of the documented 10–12 mm range. This is an avoidance policy, not an assertion of exact physical hinge width.
 
 ## Encode exact sizes as data
 

@@ -45,26 +45,66 @@ def write_json(path, value):
 
 
 class Client:
-    def __init__(self):
-        self.opener = urllib.request.build_opener(
+    def __init__(self, opener=None):
+        self.opener = opener if opener is not None else urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self.refresh_token()
+
+    def refresh_token(self):
         text = self.request().decode()
-        self.token = re.search(r'name="authenticity_token"[^>]*value="([^"]+)', text)[1]
+        token = self.read_token(text)
+        if token is None:
+            raise ValueError('Calculator form has no authenticity token')
+        self.token = token
+
+    @staticmethod
+    def read_token(text):
+        match = re.search(r'name="authenticity_token"[^>]*value="([^"]+)', text)
+        return match[1] if match else None
+
+    @staticmethod
+    def expired_token(text):
+        return bool(re.search(
+            r'InvalidAuthenticityToken|(?:invalid|expired) (?:CSRF|authenticity) token'
+            r'|(?:CSRF|authenticity) token (?:is )?(?:invalid|expired)', text, re.IGNORECASE))
 
     def request(self, data=None):
         for attempt in range(3):
             try:
                 with self.opener.open(URL, data, timeout=40) as response:
                     return response.read()
+            except urllib.error.HTTPError as error:
+                # HTTPError is also a URLError: don't retry permanent 4xx here.
+                if error.code not in (408, 429, 500, 502, 503, 504) or attempt == 2:
+                    raise
+                error.close()
+                time.sleep(attempt + 1)
             except (urllib.error.URLError, TimeoutError):
                 if attempt == 2:
                     raise
                 time.sleep(attempt + 1)
 
     def fetch(self, size, paper, cover, pages):
-        data = dict(authenticity_token=self.token, book_type=size, paper_type=paper,
-                    page_count=pages, cover_type=cover, unit_measurement='points')
-        text = self.request(urllib.parse.urlencode(data).encode()).decode()
+        for attempt in range(2):
+            data = dict(authenticity_token=self.token, book_type=size, paper_type=paper,
+                        page_count=pages, cover_type=cover, unit_measurement='points')
+            try:
+                text = self.request(urllib.parse.urlencode(data).encode()).decode()
+            except urllib.error.HTTPError as error:
+                if error.code not in (403, 422) or attempt:
+                    raise
+                if not self.expired_token(error.read().decode(errors='replace')):
+                    raise
+                error.close()
+                self.refresh_token()
+                continue
+            if 'Your Book Specifications' not in text and self.expired_token(text):
+                if attempt:
+                    raise ValueError('Calculator rejected the refreshed authenticity token')
+                self.refresh_token()
+                continue
+            self.token = self.read_token(text) or self.token
+            break
         text = re.sub(r'\s+', ' ', re.sub('<[^>]+>', ' ', text))
         start = text.find('Your Book Specifications')
         end = text.find('If you have Adobe', start)

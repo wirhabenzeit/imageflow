@@ -1,15 +1,14 @@
-"""Validate recovered WhiteWall rules against every downloaded template."""
+"""Validate WhiteWall templates and Blurb calculator outputs and boundary evidence."""
 import json,pathlib,re,collections,math
 from blurb_probe import PAPERS, Samples, maximum_pages
 from blurb_bands import validate_boundaries
+from whitewall_rules import spine_width_mm
 ROOT=pathlib.Path(__file__).parent
 rows=json.loads((ROOT/'whitewall-samples.json').read_text());errors=[]
 summary=[]
 for r in rows:
  size,paper,n=r['url'].rsplit('/',1)[1][6:-5].split('_');n=int(n)
- if paper.startswith('paper-fuji'): spine=11+1.5*math.floor((n-28)/8)
- elif paper=='paper-digital-matte':spine=8.4+1.5*math.floor((n-28)/16)
- else:spine=8.2+1.1*math.floor((n-28)/16)
+ spine=spine_width_mm(paper,n)
  panel,height,bleedx={'A3square':(296,296,10),'A3portrait':(276,362,10),'A3landscape':(389,296,15)}[size]
  expected={'trimWidth':2*panel+spine,'trimHeight':height,'guides':[panel-2,panel,panel+2,panel+spine-2,panel+spine,panel+spine+2]}
  for key,v in expected.items():

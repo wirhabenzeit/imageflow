@@ -27,17 +27,22 @@ export function whitewallCover(
       panels: { back: mm(panel), front: mm(panel) },
       widths: coverWidths({
         pageCount,
-        sizeAt: (n) => ({ spine: mm(paper === 'fuji'
+        sizeAt: (n) => {
+          const spine = paper === 'fuji'
           ? 11 + 1.5 * Math.floor((n - 28) / 8)
           : paper === 'sappi'
             ? 8.4 + 1.5 * Math.floor((n - 28) / 16)
-            : 8.2 + 1.1 * Math.floor((n - 28) / 16)) }),
+            : 8.2 + 1.1 * Math.floor((n - 28) / 16);
+          return { spine: mm(Number(spine.toFixed(3))) };
+        },
       }),
       outer: { kind: 'wrap', insets: {
         top: mm(10), bottom: mm(10), left: mm(size === 'landscape' ? 15 : 10), right: mm(size === 'landscape' ? 15 : 10),
       } },
       safe: { back: edges(mm(5)), front: edges(mm(5)), spine: edges(mm(2)) },
-      // No exact hinge width claimed: the published guidance gives 10–12 mm.
+      // Conservative warning band for the published 10–12 mm fold zone.
+      // It does not alter sheet size or claim an exact physical hinge width.
+      foldAvoidance: { back: mm(12), front: mm(12) },
       output: { ...output, maximumFileSize: 250_000_000 },
     },
   };

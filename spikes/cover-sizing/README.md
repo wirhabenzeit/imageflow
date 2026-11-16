@@ -26,6 +26,10 @@ Cover trim width = 2 × panel width + S. Export width adds both horizontal bleed
 
 The six vertical template guides occur at P−2, P, P+2, P+S−2, P+S, P+S+2, where P is the panel width. The middle line in each group is a spine boundary, with 2 mm guides on either side. Coordinates are relative to the cover trim's left edge. Other hinge/fold avoidance regions require separate treatment: WhiteWall describes the fold as extending 10–12 mm onto the covers in its [design instructions](https://www.whitewall.com/us/coffee-table-book/pdf-upload).
 
+WhiteWall's [design guidance](https://service.whitewall.com/hc/en-us/articles/4411236486929-04-Notes-on-design) specifies a 5 mm safety margin inside page or cover edges and at least 2 mm from spine edges for text. The example applies that spine inset on all four edges. The [upload instructions](https://service.whitewall.com/hc/en-us/articles/4411222671249-06-Uploading-the-PDF-files) limit the cover PDF to 250 MB; the example uses a conservative decimal cap of 250,000,000 bytes. These requirements come from the documentation rather than the IDML dimension extraction.
+
+The example declares a 12 mm `foldAvoidance` band on each panel next to the spine, using the upper end of WhiteWall's published 10–12 mm range as a conservative content warning. It does not add to the sheet dimensions or assert that every physical hinge is exactly 12 mm wide.
+
 The configuration offers glossy, silk-matt and printed-linen hardcover finishes. All three finishes, and both black and white endpapers, link to the same cover template for a given size, paper and page count. These options therefore do not alter the template geometry in the current configuration. There are no dust-jacket flap options in this configuration.
 
 `whitewall-options.json` preserves the available combinations and page ranges. `whitewall-samples.json` preserves each template URL, extracted trim dimensions, bleed and guides. `analysis.json` is generated output: `analyze.py` regenerates its derived export dimensions, validation result and Blurb boundary coverage. The 519 unique templates cover every linked valid page count for all three sizes and all available papers; all match the formulas and guides within 0.00001 mm. This validates consistency with official templates, not successful acceptance by the live PDF uploader.
@@ -33,6 +37,8 @@ The configuration offers glossy, silk-matt and printed-linen hardcover finishes.
 ## Blurb
 
 Source: [official specification calculator](https://www.blurb.com/make/pdf_to_book/booksize_calculator). `probe_blurb.py` submits read-only measurement requests for both sizes, six paper choices and available hardcover constructions. `blurb_bands.py` locates spine changes on even page counts by bisection; this assumes nondecreasing spine width within each paper profile. It measures both endpoints before stopping recursion, then explicitly verifies both sides of every discovered change and the minimum/maximum counts across every supported size/binding combination. These boundary observations are required by the offline validator, independently of the probe's verification metadata.
+
+Blurb's [published page-count limits](https://support.blurb.com/hc/en-us/articles/7607055286541-How-many-pages-can-my-book-have) separately confirm 20–440 pages for Standard photo-book paper, 20–240 for Premium and non-layflat Mohawk papers, and 20–110 for both layflat papers. The exception for Mini photo books does not apply to these two large formats. These are documented product limits, not limits inferred solely from calculator responses.
 
 Large Square and Large Landscape offer ImageWrap and dust-jacket hardcovers. Softcover is explicitly unavailable at these sizes. Layflat uses ImageWrap. Standard, Premium, Superfine Eggshell, proPhoto Pearl, and the two layflat papers must be treated as distinct inputs even where their tables coincide.
 
@@ -84,8 +90,12 @@ For offline verification without querying either printer:
 ```sh
 python3 spikes/cover-sizing/probe_blurb.py --offline
 python3 spikes/cover-sizing/blurb_bands.py --offline
-python3 spikes/cover-sizing/test_blurb_bands.py
+python3 -m unittest discover -s spikes/cover-sizing -p 'test_*.py'
 python3 spikes/cover-sizing/analyze.py
 ```
 
 The regression tests cover a change at the only midpoint of a four-page interval, every possible even transition in a test domain, adjacent changes, constant ranges, and rejection of missing or incorrect boundary evidence. Offline band verification must find both endpoints of every recovered band for every supported size/binding pair in the cache. `analyze.py` also checks PDF-to-trim differences and reports missing or overlapping spine bands explicitly.
+
+The probe retries transient HTTP statuses (408, 429, 500, 502, 503 and 504) and transport failures up to three attempts. Permanent HTTP errors fail immediately. A response explicitly reporting an invalid or expired CSRF/authenticity token triggers one form/token refresh and one resubmission; unrelated 403/422 errors are not retried. Tokens rotated in successful responses are carried forward. `test_probe_client.py` verifies these paths with mocked responses without contacting Blurb.
+
+`whitewall_rules.py` names all six supported papers explicitly and rounds the recovered millimetre values to three decimal places. Unknown papers raise an error. The TypeScript example applies the same normalization after its formula; printer-specific point rounding remains in the Blurb example before conversion to millimetres. `spine-chart.html` includes fallback colors and fonts and works as a standalone HTML file.
