@@ -254,6 +254,8 @@ export class DocumentSession {
   cancelCheck() { this.checkJob?.abort(); }
   /** Where template packages are installed, outside every book; set by the app. */
   dependencyCache?: string;
+  /** The installed app's authoring SDK, refreshed into the template's .imageflow-sdk when dependencies are rebuilt. */
+  authoringTypes?: string;
   private dependencyTask?: Promise<DependencyRebuild>;
   /**
    * Installs the template's packages outside the book and rebuilds template/vendor/ (ADR 0006); the folder watcher then
@@ -264,7 +266,7 @@ export class DocumentSession {
     if (this.book.readOnly) throw new Error('Create an editable book before rebuilding its template dependencies.');
     if (!this.dependencyCache) throw new Error('Template dependencies are not available.');
     const cache = this.dependencyCache;
-    this.dependencyTask ??= rebuildTemplateDependencies(join(this.book.folder, 'template'), cache)
+    this.dependencyTask ??= rebuildTemplateDependencies(join(this.book.folder, 'template'), cache, { authoringTypes: this.authoringTypes })
       .finally(() => { this.dependencyTask = undefined; });
     const task = this.dependencyTask;
     let stopWaiting = () => {};

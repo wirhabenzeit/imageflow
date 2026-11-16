@@ -13,7 +13,7 @@ Open **ImageFlow → Settings…** and choose **Agents**. **Help → Connect an 
 - **Save Template Skill** saves `imageflow-templates.zip` to Downloads: the [agent skill](../skills/imageflow-templates/SKILL.md) with the template API reference and the example templates. Upload it in Claude under **Settings → Capabilities → Skills**, or unzip it into `~/.claude/skills/` for Claude Code. The skill also helps agents that edit `template/` with file tools, without the MCP server. New books already carry it in `.claude/skills/imageflow-templates/`, so Claude Code started in a book folder finds it without an install.
 - **Claude Code and other agents** shows a `claude mcp add` command, the commands that install the ImageFlow Claude Code plugin from this repository (`.claude-plugin/`: the MCP server for an app in `/Applications` or `~/Applications`, plus the skill), and a generic `mcpServers.imageflow` stdio configuration.
 
-Agents need no separate Node.js installation. Every configuration starts the bridge with ImageFlow’s own executable in Node mode (`ELECTRON_RUN_AS_NODE=1`), so the bridge always matches the installed app. The configuration has this form:
+Agents need no separate Node.js installation. Every configuration starts the bridge with ImageFlow’s own executable in Node mode (`ELECTRON_RUN_AS_NODE=1`), so the bridge always matches the installed app. A bridge an agent started before ImageFlow updated keeps running its old code, so it serves the tools and argument schemas the running app reports on every new connection, rather than its own copy, and tells the agent with `notifications/tools/list_changed` when they differ: new tools and arguments work without restarting the agent. The configuration has this form:
 
 ```json
 {

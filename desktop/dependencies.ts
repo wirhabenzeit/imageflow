@@ -192,7 +192,25 @@ async function vendorTypes(modules: string, specifiers: string[], target: string
       return entry ? '/// <reference path="./packages/' + slash(relative(modules, entry)) + '" />' : '';
     }).filter(Boolean).join('\n') + '\n');
   }
-  return { types, untyped };
+  // Code editors map bare imports through tsconfig `paths`, whose targets ignore package.json `exports`. Beyond the
+  // template's own imports, every subpath a copied package exports with declarations gets an entry, so imports used only
+  // for types, or by other packages' declarations (such as react-map-gl/mapbox), resolve there as in the book's check.
+  const editorPaths: Record<string, string> = { ...types };
+  for (const owner of copied) {
+    if (owner.split(sep).includes('node_modules')) continue;
+    const info = JSON.parse(await readFile(join(modules, owner, 'package.json'), 'utf8').catch(() => '{}'));
+    const name = typeof info.name === 'string' ? info.name : slash(owner);
+    const subpaths = info.exports && typeof info.exports === 'object' && !Array.isArray(info.exports) && Object.keys(info.exports).some((key) => key.startsWith('.'))
+      ? Object.keys(info.exports).filter((key) => key.startsWith('.') && !key.includes('*') && !/\.(json|css)$/.test(key)) : ['.'];
+    for (const subpath of subpaths) {
+      const specifier = subpath === '.' ? name : name + subpath.slice(1);
+      if (editorPaths[specifier]) continue;
+      const entry = declaration(specifier);
+      if (!entry || !await stat(join(target, relative(modules, entry))).then(() => true, () => false)) continue;
+      editorPaths[specifier] = slash(join('types', 'packages', relative(modules, entry)));
+    }
+  }
+  return { types, untyped, editorPaths };
 }
 
 /**
@@ -281,29 +299,49 @@ export async function rebuildDependencies(root: string, modules: string): Promis
     await writeFile(join(staging, '.gitignore'), '# The saved dependency bundle of this template (ImageFlow ADR 0006). Keep every file.\n!*\n');
     await writeFile(join(staging, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
     await replace();
-    await updateTsconfig(root, manifest);
+    await updateTsconfig(root, manifest, declarations.editorPaths);
     return manifest;
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
 }
 
-/** Points code editors at the vendored declarations, as the book's type check does, when tsconfig.json is plain JSON. */
-async function updateTsconfig(root: string, manifest: DependencyManifest) {
+/**
+ * Points code editors at the vendored declarations, as the book's type check does, when tsconfig.json is plain JSON.
+ * A template tsconfig that extends another (normally the generated .imageflow-sdk/tsconfig.json) would replace its
+ * `paths` and `files` by writing its own, so the extended ones are carried over first: the host's imageflow and react
+ * mappings stay, with the package entries added.
+ */
+async function updateTsconfig(root: string, manifest: DependencyManifest, editorPaths: Record<string, string> = manifest.types ?? {}) {
   const path = join(root, 'tsconfig.json');
-  let config: { compilerOptions?: { paths?: Record<string, string[]> }; exclude?: string[]; files?: string[] };
+  type Config = { extends?: string; compilerOptions?: { paths?: Record<string, string[]> }; exclude?: string[]; files?: string[] };
+  let config: Config;
   try { config = JSON.parse(await readFile(path, 'utf8')); } catch { return; }
+  let inherited: { paths: Record<string, string[]>; files: string[] } = { paths: {}, files: [] };
+  if (typeof config.extends === 'string' && config.extends.startsWith('.')) {
+    const basePath = resolve(root, config.extends.endsWith('.json') ? config.extends : config.extends + '.json');
+    const base = await readFile(basePath, 'utf8').then((text) => JSON.parse(text) as Config, () => undefined);
+    // Targets in the extended file are relative to it; rewritten relative to the template.
+    const rebase = (target: string) => { const next = slash(relative(root, resolve(dirname(basePath), target))); return next.startsWith('./') || next.startsWith('../') ? next : './' + next; };
+    if (base) inherited = {
+      paths: Object.fromEntries(Object.entries(base.compilerOptions?.paths ?? {}).map(([key, targets]) => [key, targets.map(rebase)])),
+      files: (base.files ?? []).map(rebase),
+    };
+  }
   config.compilerOptions ??= {};
-  // Each typed import maps to its exact entry: editors resolve `paths` targets without package.json `exports`.
-  const previous = Object.fromEntries(Object.entries(config.compilerOptions.paths ?? {})
-    .filter(([, targets]) => !targets.every((target) => target.startsWith('./vendor/types/'))));
-  config.compilerOptions.paths = { ...previous,
-    ...Object.fromEntries(Object.entries(manifest.types ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([specifier, entry]) => [specifier, ['./vendor/' + entry]])),
-    '*': ['./vendor/types/packages/*', './vendor/types/packages/@types/*'] };
+  const own = (target: string) => target.startsWith('./vendor/types/');
+  // Entries the user wrote stay; earlier generated package entries are replaced.
+  const previous = Object.fromEntries(Object.entries(config.compilerOptions.paths ?? {}).filter(([, targets]) => !targets.every(own)));
+  const wildcard = [...new Set([...(inherited.paths['*'] ?? []), ...(previous['*'] ?? []).filter((target) => !own(target)),
+    './vendor/types/packages/*', './vendor/types/packages/@types/*'])];
+  config.compilerOptions.paths = { ...inherited.paths, ...previous,
+    // Each typed import maps to its exact entry: editors resolve `paths` targets without package.json `exports`.
+    ...Object.fromEntries(Object.entries(editorPaths).sort(([a], [b]) => a.localeCompare(b)).map(([specifier, entry]) => [specifier, ['./vendor/' + entry]])),
+    '*': wildcard };
   config.exclude = [...new Set([...(config.exclude ?? []), 'node_modules', 'vendor'])];
   const globals = await stat(join(root, vendorFolder, 'types', 'globals.d.ts')).then(() => true, () => false);
-  const files = (config as { files?: string[] }).files?.filter((name) => name !== 'vendor/types/globals.d.ts') ?? [];
-  if (globals) (config as { files?: string[] }).files = [...files, 'vendor/types/globals.d.ts'];
-  else if ((config as { files?: string[] }).files) (config as { files?: string[] }).files = files;
+  const files = [...new Set([...inherited.files, ...(config.files ?? [])])].filter((name) => name !== 'vendor/types/globals.d.ts' && name !== './vendor/types/globals.d.ts');
+  if (globals) config.files = [...files, './vendor/types/globals.d.ts'];
+  else if (files.length || config.files) config.files = files;
   await writeFile(path, JSON.stringify(config, null, 2) + '\n');
 }

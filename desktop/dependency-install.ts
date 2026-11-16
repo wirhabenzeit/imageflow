@@ -110,6 +110,8 @@ const running = new Map<string, Promise<InstalledDependencies>>();
  * installs and removes older ones.
  */
 export async function installTemplateDependencies(template: string, cache: string, options: { npm?: Npm; keep?: number } = {}) {
+  cache = resolve(cache);
+  template = resolve(template);
   const { info, linked, folder } = await relocatedPackage(template);
   const lock = await readFile(join(template, 'package-lock.json')).catch(() => undefined);
   const packageText = JSON.stringify(info, null, 2) + '\n';
@@ -192,7 +194,8 @@ export type DependencyRebuild = {
  * Installs the template's packages outside the book, writes npm's updated lockfile back, and bundles them into
  * template/vendor/. Without a package.json, nothing is installed and the bundle covers no packages.
  */
-export async function rebuildTemplateDependencies(template: string, cache: string, options: { npm?: Npm; keep?: number } = {}): Promise<DependencyRebuild> {
+export async function rebuildTemplateDependencies(template: string, cache: string,
+  options: { npm?: Npm; keep?: number; authoringTypes?: string } = {}): Promise<DependencyRebuild> {
   const { rebuildDependencies, templateImports } = await import('./dependencies');
   const hasPackage = await stat(join(template, 'package.json')).then((info) => info.isFile(), () => false);
   const imports = await templateImports(template);
@@ -201,6 +204,12 @@ export async function rebuildTemplateDependencies(template: string, cache: strin
       'Add template/package.json with these packages under "dependencies", then rebuild.');
   }
   const install = hasPackage && imports.length ? await installTemplateDependencies(template, cache, options) : undefined;
+  // The generated SDK snapshot for code editors is refreshed from the installed app first, so the tsconfig written next
+  // extends current host declarations; a book otherwise keeps the snapshot of the app that created it.
+  if (options.authoringTypes) {
+    const { writeAuthoringSnapshot } = await import('./authoring-sdk');
+    await writeAuthoringSnapshot(template, options.authoringTypes);
+  }
   if (install?.lockfile) await writeFile(join(template, 'package-lock.json'), install.lockfile);
   const manifest = await rebuildDependencies(template, install?.modules ?? join(cache, 'none', 'node_modules'));
   return { packages: manifest?.packages ?? {}, imports: Object.keys(manifest?.modules ?? {}).sort(), untyped: manifest?.untyped ?? [], reused: install?.reused ?? true,

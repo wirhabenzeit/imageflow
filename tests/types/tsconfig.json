@@ -9,8 +9,8 @@
     "noEmit": true,
     "types": [],
     "paths": {
-      "imageflow": ["../../authoring/imageflow.d.ts"],
-      "react/jsx-runtime": ["../../authoring/jsx-runtime.d.ts"]
+      "imageflow": ["../../sample/starter/template/.imageflow-sdk/imageflow.d.ts"],
+      "react/jsx-runtime": ["../../sample/starter/template/.imageflow-sdk/jsx-runtime.d.ts"]
     }
   },
   "include": ["*.tsx"]
