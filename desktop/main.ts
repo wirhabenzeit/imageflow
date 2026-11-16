@@ -451,6 +451,7 @@ async function openDocument(path: string): Promise<DocumentSession> {
       });
       document.networkTrust = bookNetworkTrust;
       document.dependencyCache = dependencyCache();
+      document.authoringTypes = join(__dirname, 'authoring-types');
       // Frames may reach what is already allowed from the first render on, without a question (ADR 0006).
       await document.prepareNetwork().catch((error) => console.warn('ImageFlow could not read network approvals', error));
       const current = document;

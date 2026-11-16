@@ -199,3 +199,37 @@ export default defineTemplate({ id: 'deps', version: '1', contract: 1, spreads: 
   assert.equal(result.diagnostics.length, 1, JSON.stringify(result.diagnostics));
   assert.equal(result.diagnostics[0].location?.path, 'template/index.tsx');
 });
+
+test('code editors keep the SDK’s mappings and reach type-only package subpaths after a rebuild', async (t) => {
+  const { folder, root } = await fixture(t);
+  const modules = join(root, 'node_modules');
+  // A package whose subpath is imported only by another package's declarations, as react-map-gl/mapbox is.
+  await mkdir(join(modules, '@scope/maps/dist'), { recursive: true });
+  await writeFile(join(modules, '@scope/maps/package.json'), JSON.stringify({ name: '@scope/maps', version: '1.0.0', type: 'module',
+    exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' }, './mapbox': { types: './dist/mapbox.d.ts', import: './dist/mapbox.js' }, './*': './dist/*' } }));
+  await writeFile(join(modules, '@scope/maps/dist/index.d.ts'), 'export declare const version: string;\n');
+  await writeFile(join(modules, '@scope/maps/dist/mapbox.d.ts'), 'export type MapRef = { zoom: number };\n');
+  const linked = join(folder, 'editor');
+  await mkdir(linked, { recursive: true });
+  await writeFile(join(linked, 'package.json'), JSON.stringify({ name: 'editor', version: '0.1.0', type: 'module', exports: { '.': { types: './index.d.ts', default: './index.js' } } }));
+  await writeFile(join(linked, 'index.js'), 'export const zoomOf = (map) => map.zoom;\n');
+  await writeFile(join(linked, 'index.d.ts'), "import type { MapRef } from '@scope/maps/mapbox';\nexport declare const zoomOf: (map: MapRef) => number;\n");
+  await symlink(linked, join(modules, 'editor'));
+  await writeFile(join(root, 'index.tsx'), "import { zoomOf } from 'editor';\nexport const zoom = zoomOf({ zoom: 2 });\n");
+  // The generated SDK config the template extends, with host mappings and files relative to itself.
+  await mkdir(join(root, '.imageflow-sdk'), { recursive: true });
+  await writeFile(join(root, '.imageflow-sdk', 'tsconfig.json'), JSON.stringify({ compilerOptions: { paths: {
+    imageflow: ['./imageflow.d.ts'], react: ['./react.d.ts'], '*': ['./*', '../vendor/types/packages/*'] } }, files: ['./assets.d.ts'] }));
+  await writeFile(join(root, 'tsconfig.json'), JSON.stringify({ extends: './.imageflow-sdk/tsconfig.json' }));
+  await rebuildDependencies(root, modules);
+  const tsconfig = JSON.parse(await readFile(join(root, 'tsconfig.json'), 'utf8'));
+  const paths = tsconfig.compilerOptions.paths;
+  assert.deepEqual(paths.imageflow, ['./.imageflow-sdk/imageflow.d.ts'], 'host mappings of the extended config stay');
+  assert.deepEqual(paths.react, ['./.imageflow-sdk/react.d.ts']);
+  assert.deepEqual(paths['@scope/maps/mapbox'], ['./vendor/types/packages/@scope/maps/dist/mapbox.d.ts'], 'type-only subpaths resolve in editors');
+  assert.deepEqual(paths['*'], ['./.imageflow-sdk/*', './vendor/types/packages/*', './vendor/types/packages/@types/*']);
+  assert.deepEqual(tsconfig.files, ['./.imageflow-sdk/assets.d.ts'], 'files of the extended config stay');
+  // A second rebuild leaves the result unchanged.
+  await rebuildDependencies(root, modules);
+  assert.deepEqual(JSON.parse(await readFile(join(root, 'tsconfig.json'), 'utf8')), tsconfig);
+});
