@@ -346,3 +346,39 @@ test('fixture isolation starts no render after the time budget runs out', async 
   assert.ok(report.cells.every(({ state, message }) => state === 'not-isolated' && /budget ran out: Anchors could not be declared/.test(message ?? '')));
   assert.equal(result.checks.fixtures, 'failed');
 });
+
+test('facing-page fixtures exercise every allowed side with independent text and blank disallowed sides', () => {
+  const pages: TemplateInfo = { ...template, spreads: {
+    either: { ...template.spreads.main, span: 'page' },
+    left: { ...template.spreads.main, span: 'page', sides: ['left'] },
+    right: { ...template.spreads.main, span: 'page', sides: ['right'] },
+  } };
+  const cells = planFixtures(pages, fixtureRequestSchema.parse({ cases: ['typical'] })).cells;
+  assert.deepEqual(cells.map(({ layout }) => layout), ['either', 'left', 'right']);
+  const saved: Project = { schemaVersion: 1, title: 'Book', template: { id: 't', version: '1' },
+    params: {}, texts: {}, files: {}, spreads: [] };
+  const { project, markdown } = fixtureProject(saved, pages, 'square', cells, ids);
+  assert.equal(project.schemaVersion, 2);
+  assert.ok(project.spreads.every(({ split, boxes }) => split && !Object.keys(boxes).length));
+  const [either, left, right] = project.spreads;
+  assert.deepEqual(Object.keys(either.pages!), ['left', 'right']);
+  assert.deepEqual(Object.keys(left.pages!), ['left']);
+  assert.deepEqual(Object.keys(right.pages!), ['right']);
+  assert.equal(either.pages!.left!.boxes.hero.photo, 'land');
+  assert.equal(either.pages!.right!.boxes.hero.photo, 'land');
+  const leftText = either.pages!.left!.boxes.story.text!;
+  const rightText = either.pages!.right!.boxes.story.text!;
+  assert.notEqual(leftText, rightText);
+  assert.equal(markdown[leftText], fixtureMarkdown.typical);
+  assert.equal(markdown[rightText], fixtureMarkdown.typical);
+  // Independent state objects keep a fixture's page edits from mutating its facing fixture.
+  either.pages!.left!.params.heading = 'Edited';
+  assert.equal(either.pages!.right!.params.heading, 'North');
+  assert.equal(saved.schemaVersion, 1);
+  assert.deepEqual(saved.spreads, []);
+
+  const calendar: TemplateInfo = { ...pages, structures: { calendar: { facingPages: false, pageCount: { min: 1, max: 20, step: 1 } } } };
+  const standalone = fixtureProject(saved, calendar, 'calendar', cells, ids);
+  assert.equal(standalone.project.schemaVersion, 1);
+  assert.ok(standalone.project.spreads.every(({ split, pages, boxes }) => !split && !pages && boxes.story.text));
+});

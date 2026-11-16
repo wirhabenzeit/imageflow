@@ -52,13 +52,13 @@ test('single pages in opening spreads must sit at a book end every format allows
 
 test('a new book gets the opening spreads with fresh IDs, and an empty book is a valid project', () => {
   const opening = [{ layout: 'title' }, { layout: 'story', params: { heading: 'Day one' } }];
-  const first = openingSpreadStates({ openingSpreads: opening });
-  const second = openingSpreadStates({ openingSpreads: opening });
+  const first = openingSpreadStates({ openingSpreads: opening, spreads: {} });
+  const second = openingSpreadStates({ openingSpreads: opening, spreads: {} });
   assert.deepEqual(first.map(({ definition, params }) => ({ definition, params })), [
     { definition: 'title', params: {} }, { definition: 'story', params: { heading: 'Day one' } }]);
   assert.notEqual(first[0].id, second[0].id);
   assert.notEqual(first[0].id, first[1].id);
-  assert.deepEqual(openingSpreadStates({}), []);
+  assert.deepEqual(openingSpreadStates({ spreads: {} }), []);
   const project = { schemaVersion: 1, title: 'New', template: { id: 't', version: '1' }, spreads: [] };
   assert.ok(projectSchema.safeParse(project).success);
   assert.ok(projectSchema.safeParse({ ...project, spreads: first }).success);
@@ -68,4 +68,34 @@ test('an empty book starts with a single right page where the format requires on
   const layouts = { title: { span: 'right' }, story: { span: 'spread' }, closing: { span: 'left' } } as never;
   assert.deepEqual(firstSpreadLayouts(layouts, pages('single-pages')), ['title']);
   assert.deepEqual(firstSpreadLayouts(layouts, pages('inside-covers')), ['story']);
+});
+
+test('opening page pairs validate sides and materialize independent format-2 states', () => {
+  const layouts = { page: { label: 'Page', span: 'page', parameters: { heading: p.string({ label: 'Heading', default: '' }) }, render },
+    right: { label: 'Right only', span: 'page', sides: ['right'], render } };
+  const parsed = templateSchema.parse({ id: 'pages', version: '1', contract: 1, format: pages('inside-covers'), spreads: layouts,
+    openingSpreads: [{ pages: { left: { layout: 'page', params: { heading: 'Left' } }, right: { layout: 'right' } } }, { pages: { left: {} } }] });
+  const info = templateInfo(chooseFormat(parsed));
+  const states = openingSpreadStates(info);
+  assert.equal(states[0].split, true);
+  assert.equal(states[0].pages!.left!.params.heading, 'Left');
+  assert.equal(states[0].pages!.right!.definition, 'right');
+  assert.equal(states[1].pages!.left!.definition, undefined);
+  // A sheet of blank pages still names a declared layout, never an ID the template does not have.
+  assert.ok(Object.hasOwn(info.spreads, states[1].definition), states[1].definition);
+  assert.equal(projectSchema.parse({ schemaVersion: 1, title: 'Pages', template: { id: 'pages', version: '1' }, spreads: states }).schemaVersion, 2);
+  states[0].pages!.left!.params.heading = 'Edited';
+  assert.equal(openingSpreadStates(info)[0].pages!.left!.params.heading, 'Left');
+});
+
+test('opening page pairs reject spread layouts, side restrictions, invalid parameters and end positions', () => {
+  const declaration = (entry: unknown, format = pages('inside-covers')) => templateSchema.safeParse({ id: 'pages', version: '1', contract: 1, format,
+    spreads: { spread: { label: 'Spread', render }, right: { label: 'Right', span: 'page', sides: ['right'], render } }, openingSpreads: [entry] });
+  for (const entry of [{ pages: { left: { layout: 'spread' } } }, { pages: { left: { layout: 'right' } } },
+    { pages: { right: { layout: 'missing' } } }, { pages: { right: { layout: 'right', params: { unknown: true } } } }, { pages: {} }]) {
+    assert.equal(declaration(entry).success, false, JSON.stringify(entry));
+  }
+  assert.equal(declaration({ pages: { right: { layout: 'right' } } }, pages('single-pages')).success, false);
+  assert.equal(declaration({ pages: { right: { layout: 'right' } } }, printFormat({ facingPages: false, label: 'Calendar',
+    trim: { width: mm(100), height: mm(100) }, bleed: mm(3), safe: mm(5), pageCount: { min: 1, max: 20, step: 1 } }) as never).success, false);
 });

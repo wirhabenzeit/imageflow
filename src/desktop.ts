@@ -51,9 +51,9 @@ export type LayoutCommand = 'layout-vertical' | 'layout-grid' | `grid-columns-${
 export const spreadCommands = ['add-spread', 'duplicate-spread', 'move-spread-up', 'move-spread-down', 'delete-spread'] as const;
 export type SpreadCommand = typeof spreadCommands[number];
 export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
-  writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean;
+  writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canSwapPages?: boolean;
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView; selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string> };
-export type Command = PhotoViewCommand | SpreadCommand | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
+export type Command = PhotoViewCommand | SpreadCommand | 'swap-pages' | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string;
   handle?: string; history?: HistoryState; viewKey?: string;
@@ -197,6 +197,7 @@ export type SpreadDefinition = {
   label: string; span: Span; parameters: Parameters; controls?: ControlItem[];
   boxes: Record<string, BoxDefinition>; elements: Record<string, ElementDefinition>;
   declaresAnchors?: boolean;
+  declaresCredits?: boolean;
   family?: string; variant?: Record<string, string | number | boolean>;
 };
 export type TemplateInfo = {
@@ -211,7 +212,7 @@ export type TemplateInfo = {
   // render frame).
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string } }>;
   // The spreads a new book from this template starts with; empty when it starts without spreads.
-  openingSpreads?: { layout: string; params: Values }[];
+  openingSpreads?: import('./editing').OpeningSpreadInput[];
   // Editors of document parameters, by ID, with the parameters each owns (the components stay in the render frame).
   editors?: Record<string, { label?: string; parameters: string[]; presentation?: 'dialog' | 'inline' }>;
   // HTTPS origins the template's element editors may reach once the user allows them (ADR 0006).
@@ -235,7 +236,7 @@ export const bookLayout: Record<BookView, { pad: number; gap: number; columns?: 
   present: { pad: 0, gap: 0 },
   book: { pad: 32, gap: 40 },
   thumbs: { pad: 12, gap: 34 },
-  layouts: { pad: 6, gap: 26, columns: 2, columnGap: 12 },
+  layouts: { pad: 6, gap: 26, columns: 4, columnGap: 10 },
 };
 export type Rect = { x: number; y: number; width: number; height: number };
 // Posted by a book frame after layout. Coordinates are relative to the frame document. `columns` is set when the
@@ -268,7 +269,7 @@ export type Issue = {
   page?: PageSide;
   details?: Record<string, string | number>; suggestion?: string;
 };
-export const issueText = ({ message, where }: Issue) => where ? where + ' · ' + message : message;
+export const issueText = ({ message, where, page }: Issue) => [where, page ? page + ' page' : undefined, message].filter(Boolean).join(' · ');
 export type RenderStatus = {
   state: 'ready'; template: TemplateInfo; pages: number;
   units: { side: PrintSide; spread: string; where: string }[];
@@ -286,7 +287,7 @@ export type RenderStatus = {
   // Stack of any other failure, such as template module code that throws when imported.
   stack?: string;
 };
-export type LayoutFailure = { spread: string; message: string; stack?: string };
+export type LayoutFailure = { spread: string; page?: PageSide; message: string; stack?: string };
 
 declare global {
   interface Window {

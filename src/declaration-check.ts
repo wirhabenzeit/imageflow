@@ -1,3 +1,4 @@
+import type { PageSide } from './project';
 import { controlCycles, controlsSchema } from './controls';
 import type { Parameters } from './parameters';
 
@@ -210,8 +211,8 @@ function controlCycleWarnings(declared: Record<string, unknown>, found: Declarat
 // conditions in a marked node's popover, so marking them opens no way back: those warnings, and warnings about
 // layouts no spread uses, stay as they are. A cycle among document parameters is dropped when any spread marks one of
 // them as `document.<id>`, since that node's popover shows it from any page.
-export type RenderedSpread = { spread: string; layout: string; marked: ReadonlySet<string> };
-export function placeControlWarnings(warnings: DeclarationWarning[], rendered: RenderedSpread[]): (DeclarationWarning & { spread?: string })[] {
+export type RenderedSpread = { spread: string; page?: PageSide; layout: string; marked: ReadonlySet<string> };
+export function placeControlWarnings(warnings: DeclarationWarning[], rendered: RenderedSpread[]): (DeclarationWarning & { spread?: string; page?: PageSide })[] {
   return warnings.flatMap((warning) => {
     const { code, details } = warning;
     if (code === 'declaration-control-cycle' && details.edit === 'document.') {
@@ -222,6 +223,6 @@ export function placeControlWarnings(warnings: DeclarationWarning[], rendered: R
     const instances = rendered.filter(({ layout }) => layout === details.layout);
     if (!instances.length) return [warning];
     const keys = details.controls.split(', ');
-    return instances.filter(({ marked }) => !keys.some((key) => marked.has(key))).map(({ spread }) => ({ ...warning, spread }));
+    return instances.filter(({ marked }) => !keys.some((key) => marked.has(key))).map(({ spread, page }) => ({ ...warning, spread, ...(page ? { page } : {}) }));
   });
 }

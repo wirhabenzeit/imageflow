@@ -75,9 +75,9 @@ export default defineTemplate({
 });
 ```
 
-## Declaring spreads
+## Declaring layouts
 
-Declare `spreads` as a function of `{ spread }`. Its `spread` builder types each layout's `ctx.params`, `ctx.boxes`, `ctx.elements` and edit paths from the layout's own declarations, and `ctx.document` from the template's `parameters`, so the document settings are declared once. `defineTemplate` calls the function and validates the resulting record; the builder itself only exists for TypeScript and returns each definition unchanged.
+Declare `spreads` as a function of `{ spread, page }`. Use `spread()` for a full spread and `page()` for a reusable single page; see [Page layouts](page-layouts.md). Its `spread` builder types each layout's `ctx.params`, `ctx.boxes`, `ctx.elements` and edit paths from the layout's own declarations, and `ctx.document` from the template's `parameters`, so the document settings are declared once. `defineTemplate` calls the function and validates the resulting record; the builder itself only exists for TypeScript and returns the declaration (`page()` also sets `span: 'page'`).
 
 `spreads` can also be a plain record. Its spreads are then typed only broadly (`UntypedRenderContext`), unless they come from `spreadFor(documentParameters)`, which returns the same builder for spreads declared outside `defineTemplate`, such as in their own files. Pass it the same object as the template's `parameters`: a spread typed with document parameters the template does not declare, or declares with values the spread could not accept (a number for a string, an enum with more options), fails type checking, whether `spreads` is a record or a function that returns it, and the Book check warns about it (`declaration-document-mismatch`), because `ctx.document` would lack those values at runtime.
 

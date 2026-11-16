@@ -31,3 +31,12 @@ test('duplicate occurrences and box-owned targets preserve the existing marked-c
     .sort((a, b) => a.order - b.order);
   assert.deepEqual(actual.map(t => [t.edits, t.occurrence]), expected.map(t => [t.edits, t.occurrence]));
 });
+
+test('page Inspector keeps same-ID targets separate and preserves their addresses', () => {
+  const both: BookGeometry['targets'] = ['left', 'right'].map((page, i) => ({ ...targets[0], page: page as 'left' | 'right', x: i * 100 }));
+  const right = inspectorTargets(both, 'a', 'right');
+  assert.equal(right.length, 1);
+  assert.equal(right[0].page, 'right');
+  assert.deepEqual(right[0].edits, ['title']);
+  assert.deepEqual(inspectorTargets(both, 'a'), []);
+});

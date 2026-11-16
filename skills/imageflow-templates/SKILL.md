@@ -15,7 +15,7 @@ Books created by ImageFlow carry a copy of this skill in `.claude/skills/imagefl
 2. **Read only the topics you need** from the table below. Start a new template or layout from the closest example in `examples/` rather than from scratch.
 3. **Edit template files** (`template/*.tsx`, `styles.css`, assets) with your file tools. Never edit `project.json` or `photos.json` while the book is open in ImageFlow; use `apply_project_changes` instead.
 4. **Verify with `check_book`** after every edit: request a spread `preview` to see the result, `typescript: true` for type errors, `draft.operations` to preview a new layout before saving it, and `fixtures` to stress-test layouts with long, empty and malformed content. Fix every error diagnostic before you finish.
-5. **Save project data** (spreads, layouts, parameter values, photo assignments) with one `apply_project_changes` batch, passing the revision from the last check as `expectedRevision`.
+5. **Save supported project data** (spread layouts, parameter values, photo assignments) with one `apply_project_changes` batch, passing the revision from the last check as `expectedRevision`. Page-addressed mutations are still pending: use the editor for individual page changes; current commands reject split-spread edits except merging with `switch_layout`.
 
 Without the MCP server, type-check with the template's generated `.imageflow-sdk/tsconfig.json` (`npx tsc -p template`) and open the book in ImageFlow to see it; see [compatibility](references/compatibility.md).
 
@@ -24,7 +24,7 @@ Without the MCP server, type-check with the template's generated `.imageflow-sdk
 ## Rules that matter most
 
 - `render(ctx)` is a pure function of its input: no state, effects, timers, randomness or fetching. Asynchronous drawing goes through `<RenderedImage>`.
-- Every spread renders inside `<Spread>`. Position with millimetres: `geometry` rectangles and the `rect` prop, or `geometry.css(rect)`.
+- A spread layout renders inside `<Spread>`; a `page()` layout renders inside `<Page>` in page-local coordinates. Position with millimetres: `geometry` rectangles and the `rect` prop, or `geometry.css(rect)`.
 - IDs are identity: a box, element or parameter ID means the same thing in every layout, so content carries over when a spread switches layout. Rename an ID only with intent.
 - Choose the smallest editing level that does what was asked: a parameter with generated controls before arranged controls, and those before a custom editor.
 - Give a parameter a `description` when its meaning, unit or direction is not obvious from its label.
@@ -35,7 +35,8 @@ Without the MCP server, type-check with the template's generated `.imageflow-sdk
 | To do this | Use | Reference |
 | --- | --- | --- |
 | Lay out the template folder, find an example to start from | `template/index.tsx`, `styles.css`, `examples/` | [package](references/package.md) |
-| Declare the template, its layouts and parameter scopes | `defineTemplate`, `spread()`, `spreadFor` | [declaration](references/declaration.md) |
+| Declare the template, its layouts and parameter scopes | `defineTemplate`, `spread()`, `page()`, `spreadFor` | [declaration](references/declaration.md) |
+| Compose independent facing pages | `page()`, `<Page>`, `ctx.side`, page-local geometry | [page-layouts](references/page-layouts.md) |
 | Add a setting: text, number, choice, colour, date, switch | `p.string`, `p.number`, `p.enum`, `p.color`, `p.date`, `p.boolean` | [parameters](references/parameters.md) |
 | Let the user add a variable number of items | `p.list` | [list-parameters](references/list-parameters.md) |
 | Hold photos and Markdown text, flow text across spreads | `boxes`, `type: 'photo' \| 'markdown'`, `flowOrder` | [boxes-and-elements](references/boxes-and-elements.md) |

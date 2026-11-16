@@ -57,3 +57,66 @@ test('layout previews invalidate for content, file bytes, anchors, format, templ
     const data = fixture(); const before = data.key(); change(data); assert.notEqual(data.key(), before);
   }
 });
+
+const splitFixture = () => {
+  const data = fixture();
+  data.template.spreads.page = { label: 'Page', span: 'page', declaresAnchors: true, declaresCredits: true,
+    parameters: {}, boxes: {}, elements: {} };
+  data.summary.project.spreads[1] = {
+    id: 'two', definition: 'plain', params: {}, boxes: {}, elements: {}, split: true,
+    pages: { left: { definition: 'page', params: { title: 'Left' }, boxes: { photo: { params: {}, photo: 'other' } }, elements: {} },
+      right: { definition: 'page', params: { title: 'Right' }, boxes: {}, elements: {} } },
+  };
+  return data;
+};
+
+test('layout previews invalidate for shown page layouts, photos, anchors and credits', () => {
+  const changes: ((data: ReturnType<typeof splitFixture>) => void)[] = [
+    ({ summary }) => { summary.project.spreads[1].pages!.left!.definition = 'plain'; },
+    ({ summary }) => { summary.project.spreads[1].pages!.left!.params.title = 'New anchor'; },
+    ({ summary }) => { summary.project.spreads[1].pages!.right!.elements.route = { params: { credit: 'Map source' } }; },
+    ({ summary }) => { summary.project.spreads[1].pages!.left!.boxes.photo.params.credit = 'Photographer'; },
+    ({ summary }) => { summary.photoIndex.other.caption = 'New caption'; },
+    ({ summary }) => { summary.project.spreads[1].pages!.left!.boxes.photo.photo = 'coast'; },
+    ({ summary }) => { delete summary.project.spreads[1].pages!.right; },
+    ({ summary }) => { delete summary.project.spreads[1].split; },
+  ];
+  for (const change of changes) {
+    const data = splitFixture(), before = data.key();
+    change(data);
+    assert.notEqual(data.key(), before);
+  }
+});
+
+test('hidden spread memory and remembered pages do not invalidate other layouts previews', () => {
+  const data = splitFixture(), before = data.key();
+  const hidden = data.summary.project.spreads[1];
+  hidden.definition = 'chapter';
+  hidden.params.title = 'Hidden anchor';
+  hidden.boxes.photo = { photo: 'hidden', params: {} };
+  assert.equal(data.key(), before);
+  const unsplit = fixture(), original = unsplit.key();
+  unsplit.summary.project.spreads[1].pages = hidden.pages;
+  assert.equal(unsplit.key(), original);
+});
+
+test('selected page Markdown content changes invalidate previews', () => {
+  const data = splitFixture();
+  const selected = data.summary.project.spreads[0];
+  selected.split = true;
+  selected.pages = { left: { definition: 'page', params: {}, boxes: { story: { params: {}, text: 'story' } }, elements: {} } };
+  data.summary.texts.story = 'Before';
+  const before = data.key();
+  data.summary.texts.story = 'After';
+  assert.notEqual(data.key(), before);
+});
+
+test('candidate layouts also invalidate when selected sheet remembered source content changes', () => {
+  const data = splitFixture();
+  const selected = data.summary.project.spreads[0];
+  selected.pages = { left: { definition: 'page', params: {}, boxes: { story: { params: {}, text: 'remembered' } }, elements: {} } };
+  data.summary.texts.remembered = 'Before';
+  const before = data.key();
+  data.summary.texts.remembered = 'After';
+  assert.notEqual(data.key(), before);
+});

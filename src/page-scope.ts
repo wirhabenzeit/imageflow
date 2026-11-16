@@ -44,7 +44,7 @@ export function findDeclared(root: ParentNode, target: DeclaredTarget): Declared
 export function ownerOf(node: Element): { box?: string; element?: string; page?: PageSide } {
   const owner = node.closest<HTMLElement>(declaredSelector);
   const found = owner && declaredNode(owner);
-  if (!found) return {};
+  if (!found) return onPage(pageOf(node));
   return { [found.kind]: found.id, ...onPage(found.page) };
 }
 

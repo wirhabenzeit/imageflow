@@ -1,8 +1,8 @@
 # Render function
 
-`render(context)` is called per spread instance and must be a pure function of its input: no state, effects, timers, randomness, or data fetching. Rendering never changes the book's saved content. Work that loads declared external resources or finishes later, such as drawing a map, goes through [`<RenderedImage>`](rendered-images.md#rendered-images), which the host runs, waits for and checks.
+`render(context)` is called per shown layout instance (the spread or one page) and must be a pure function of its input: no state, effects, timers, randomness, or data fetching. Rendering never changes the book's saved content. Work that loads declared external resources or finishes later, such as drawing a map, goes through [`<RenderedImage>`](rendered-images.md#rendered-images), which the host runs, waits for and checks.
 
-Book check and export enforce the parts of this that would make a printed page depend on something outside the book. While they render, a call from template code (including bundled libraries and module setup) to `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Worker`, `SharedWorker`, `importScripts`, a GPU canvas context (`webgl`, `webgl2`, `webgpu`, `bitmaprenderer`, on `HTMLCanvasElement` or `OffscreenCanvas`), `navigator.gpu`, `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` is a `render-impure` error naming the API and, when it happened while a layout rendered, its spread. PDF export reports such errors and asks for confirmation before saving. A 2D canvas is allowed. While a `<RenderedImage>` is drawing, these calls are its declared work and are not recorded. The editor's own previews and element editors are not checked, so an element editor may use these APIs (see [ADR 0006](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0006-template-capabilities.md)). The check reports mistakes; it is not a sandbox, and the render frames' content security policy blocks other origins regardless.
+Book check and export enforce the parts of this that would make a printed page depend on something outside the book. While they render, a call from template code (including bundled libraries and module setup) to `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Worker`, `SharedWorker`, `importScripts`, a GPU canvas context (`webgl`, `webgl2`, `webgpu`, `bitmaprenderer`, on `HTMLCanvasElement` or `OffscreenCanvas`), `navigator.gpu`, `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` is a `render-impure` error naming the API and, when it happened while a layout rendered, its spread and page when applicable. Calls made in anchor and credit declarations are attributed the same way. PDF export reports such errors and asks for confirmation before saving. A 2D canvas is allowed. While a `<RenderedImage>` is drawing, these calls are its declared work and are not recorded. The editor's own previews and element editors are not checked, so an element editor may use these APIs (see [ADR 0006](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0006-template-capabilities.md)). The check reports mistakes; it is not a sandbox, and the render frames' content security policy blocks other origins regardless.
 
 ```ts
 type RenderContext = {
@@ -20,6 +20,7 @@ type RenderContext = {
   }>;
   elements: Record<ElementId, { params: ElementParams }>;
   page: { left?: number; right?: number; number?: number };  // page numbers: left/right, or number without facing pages
+  side?: 'left' | 'right' | 'page';          // definite for a page() layout; see Page layouts
   format: ResolvedFormat;                   // trim, bleed, safe area in mm, for the chosen format
   formatId: string;                         // the chosen key of `formats`, or 'default'
   spread: string;                           // this spread's ID, its entry in book.spreads (the selected spread in a layout preview)
@@ -38,6 +39,8 @@ type RenderContext = {
   };
 };
 ```
+
+A page layout receives only its own state and page number. Render it in `<Page>` and use page-local geometry; [Page layouts](page-layouts.md) describes the side and composition rules.
 
 `mode` and `view` are fixed for the whole render. `mode` is `'edit'` for every render in the editor and `'export'` for PDF export, presentation, the Book check and MCP artwork (the Book check is `'export'` here, while `RenderedImage`'s own `mode` tells it apart as `'check'`). `view` says where an edit-mode render is shown: `'canvas'` is the interactive book, the only place anyone clicks; `'thumbnail'` is the sidebar and `'layout-preview'` the Inspector's layout previews, which show what the page will look like. `view === 'export'` exactly when `mode === 'export'`. Later versions may add views, so test only `view === 'canvas'` and never treat the list as complete. Show editing scaffolding, such as a placeholder that invites a click, only on the canvas:
 

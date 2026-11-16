@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "title": "Along the coast",
   "template": {
     "id": "imageflow-starter",
-    "version": "0.9.0"
+    "version": "0.11.0"
   },
   "params": {},
   "texts": {
@@ -30,18 +30,34 @@
     },
     {
       "id": "contents",
-      "definition": "contents",
+      "definition": "photo",
       "params": {},
-      "boxes": {
-        "hero": {
-          "photo": "peaks",
-          "crops": {
-            "contents": {
-              "centerX": 0.82,
-              "centerY": 0.4,
-              "zoom": 1.6
+      "boxes": {},
+      "split": true,
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "photo",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "peaks",
+              "crops": {
+                "photo": {
+                  "centerX": 0.82,
+                  "centerY": 0.4,
+                  "zoom": 1.6
+                }
+              }
             }
-          }
+          },
+          "elements": {}
+        },
+        "right": {
+          "definition": "contents",
+          "params": {},
+          "boxes": {},
+          "elements": {}
         }
       }
     },
@@ -59,19 +75,36 @@
     },
     {
       "id": "arriving",
-      "definition": "story",
-      "params": {
-        "heading": "Arriving"
-      },
-      "boxes": {
-        "hero": {
-          "photo": "segla",
-          "params": {
-            "caption": true
-          }
+      "definition": "photo",
+      "split": true,
+      "params": {},
+      "boxes": {},
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "photo",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "segla",
+              "params": {
+                "caption": true
+              }
+            }
+          },
+          "elements": {}
         },
-        "body": {
-          "text": "arrival"
+        "right": {
+          "definition": "textPage",
+          "params": {
+            "heading": "Arriving"
+          },
+          "boxes": {
+            "body": {
+              "text": "arrival"
+            }
+          },
+          "elements": {}
         }
       }
     },
@@ -90,99 +123,184 @@
     },
     {
       "id": "settlements",
-      "definition": "grid",
-      "params": {
-        "heading": "Settlements",
-        "note": "Four views along the outer road, from the ridge to the last boathouses before the ferry."
-      },
-      "boxes": {
-        "hero": {
-          "photo": "segla"
+      "definition": "notePage",
+      "split": true,
+      "params": {},
+      "boxes": {},
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "notePage",
+          "params": {
+            "heading": "Settlements",
+            "note": "Four views along the outer road, from the ridge to the last boathouses before the ferry."
+          },
+          "boxes": {},
+          "elements": {}
         },
-        "second": {
-          "photo": "shore"
-        },
-        "third": {
-          "photo": "cottage"
-        },
-        "fourth": {
-          "photo": "light"
+        "right": {
+          "definition": "gridPage",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "segla"
+            },
+            "second": {
+              "photo": "shore"
+            },
+            "third": {
+              "photo": "cottage"
+            },
+            "fourth": {
+              "photo": "light"
+            }
+          },
+          "elements": {}
         }
       }
     },
     {
       "id": "still",
-      "definition": "statement",
-      "params": {
-        "quote": "Each turn opened a different view of the same water.",
-        "attribution": "From the notebook"
-      },
-      "boxes": {
-        "hero": {
-          "photo": "island"
+      "definition": "quotePage",
+      "split": true,
+      "params": {},
+      "boxes": {},
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "quotePage",
+          "params": {
+            "quote": "Each turn opened a different view of the same water.",
+            "attribution": "From the notebook"
+          },
+          "boxes": {},
+          "elements": {}
+        },
+        "right": {
+          "definition": "photo",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "island"
+            }
+          },
+          "elements": {}
         }
       }
     },
     {
       "id": "turning",
-      "definition": "storyRight",
-      "params": {
-        "heading": "A turn in the path"
-      },
-      "boxes": {
-        "hero": {
-          "photo": "hiker"
+      "definition": "textPage",
+      "split": true,
+      "params": {},
+      "boxes": {},
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "textPage",
+          "params": {
+            "heading": "A turn in the path"
+          },
+          "boxes": {
+            "body": {
+              "text": "arrival"
+            }
+          },
+          "elements": {}
         },
-        "body": {
-          "text": "arrival"
+        "right": {
+          "definition": "photo",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "hiker"
+            }
+          },
+          "elements": {}
         }
       }
     },
     {
       "id": "details",
-      "definition": "feature3",
+      "definition": "photo",
+      "split": true,
       "params": {},
-      "boxes": {
-        "hero": {
-          "photo": "peaks",
-          "params": {
-            "caption": true
-          }
-        },
-        "second": {
-          "photo": "sunset",
-          "crops": {
-            "feature3": {
-              "centerX": 0.8,
-              "centerY": 0.45,
-              "zoom": 2.2
+      "boxes": {},
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "photo",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "peaks",
+              "params": {
+                "caption": true
+              }
             }
-          }
+          },
+          "elements": {}
         },
-        "third": {
-          "photo": "cottage",
-          "crops": {
-            "feature3": {
-              "centerX": 0.75,
-              "centerY": 0.62,
-              "zoom": 2.4
+        "right": {
+          "definition": "gridPage",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "sunset",
+              "crops": {
+                "gridPage": {
+                  "centerX": 0.8,
+                  "centerY": 0.45,
+                  "zoom": 2.2
+                }
+              }
+            },
+            "second": {
+              "photo": "cottage",
+              "crops": {
+                "gridPage": {
+                  "centerX": 0.75,
+                  "centerY": 0.62,
+                  "zoom": 2.4
+                }
+              }
             }
-          }
+          },
+          "elements": {}
         }
       }
     },
     {
       "id": "notebook",
-      "definition": "text",
-      "params": {
-        "heading": "From the notebook"
-      },
-      "boxes": {
-        "body": {
-          "text": "notebook"
+      "definition": "textPage",
+      "split": true,
+      "params": {},
+      "boxes": {},
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "textPage",
+          "params": {
+            "heading": "From the notebook"
+          },
+          "boxes": {
+            "body": {
+              "text": "notebook"
+            }
+          },
+          "elements": {}
         },
-        "continuation": {
-          "text": "notebook"
+        "right": {
+          "definition": "textPage",
+          "params": {
+            "heading": ""
+          },
+          "boxes": {
+            "body": {
+              "text": "notebook"
+            }
+          },
+          "elements": {}
         }
       }
     },
@@ -200,38 +318,70 @@
     },
     {
       "id": "water",
-      "definition": "pair",
-      "params": {
-        "framed": false
-      },
-      "boxes": {
-        "hero": {
-          "photo": "shore",
-          "params": {
-            "caption": false
-          }
+      "definition": "photo",
+      "split": true,
+      "params": {},
+      "boxes": {},
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "photo",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "shore",
+              "params": {
+                "caption": false
+              }
+            }
+          },
+          "elements": {}
         },
-        "second": {
-          "photo": "island",
-          "params": {
-            "caption": false
-          }
+        "right": {
+          "definition": "photo",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "island",
+              "params": {
+                "caption": false
+              }
+            }
+          },
+          "elements": {}
         }
       }
     },
     {
       "id": "cottage",
-      "definition": "single",
-      "params": {
-        "note": "The red boathouses looked small against the mountains. From the road they felt like the only lights for miles."
-      },
-      "boxes": {
-        "hero": {
-          "photo": "cottage",
+      "definition": "notePage",
+      "split": true,
+      "params": {},
+      "boxes": {},
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "notePage",
           "params": {
-            "shape": "arch",
-            "caption": true
-          }
+            "heading": "Small lights",
+            "note": "The red boathouses looked small against the mountains. From the road they felt like the only lights for miles."
+          },
+          "boxes": {},
+          "elements": {}
+        },
+        "right": {
+          "definition": "photoShaped",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "cottage",
+              "params": {
+                "shape": "arch",
+                "caption": true
+              }
+            }
+          },
+          "elements": {}
         }
       }
     },
@@ -250,116 +400,151 @@
     },
     {
       "id": "frames",
-      "definition": "grid9",
-      "params": {
-        "heading": "Details",
-        "note": ""
-      },
-      "boxes": {
-        "hero": {
-          "photo": "segla",
-          "crops": {
-            "grid9": {
-              "centerX": 0.62,
-              "centerY": 0.28,
-              "zoom": 2.2
+      "definition": "gridPage9",
+      "split": true,
+      "params": {},
+      "boxes": {},
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "gridPage9",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "segla",
+              "crops": {
+                "gridPage9": {
+                  "centerX": 0.62,
+                  "centerY": 0.28,
+                  "zoom": 2.2
+                }
+              }
+            },
+            "second": {
+              "photo": "shore",
+              "crops": {
+                "gridPage9": {
+                  "centerX": 0.72,
+                  "centerY": 0.5,
+                  "zoom": 2.3
+                }
+              }
+            },
+            "fifth": {
+              "photo": "cottage",
+              "crops": {
+                "gridPage9": {
+                  "centerX": 0.75,
+                  "centerY": 0.62,
+                  "zoom": 3
+                }
+              }
+            },
+            "third": {
+              "photo": "light",
+              "crops": {
+                "gridPage9": {
+                  "centerX": 0.3,
+                  "centerY": 0.7,
+                  "zoom": 2
+                }
+              }
+            },
+            "fourth": {
+              "photo": "aurora",
+              "crops": {
+                "gridPage9": {
+                  "centerX": 0.7,
+                  "centerY": 0.22,
+                  "zoom": 2
+                }
+              }
+            },
+            "sixth": {
+              "photo": "island",
+              "crops": {
+                "gridPage9": {
+                  "centerX": 0.6,
+                  "centerY": 0.8,
+                  "zoom": 2.2
+                }
+              }
+            },
+            "seventh": {
+              "photo": "peaks",
+              "crops": {
+                "gridPage9": {
+                  "centerX": 0.85,
+                  "centerY": 0.35,
+                  "zoom": 2
+                }
+              }
+            },
+            "eighth": {
+              "photo": "hiker",
+              "crops": {
+                "gridPage9": {
+                  "centerX": 0.33,
+                  "centerY": 0.4,
+                  "zoom": 2.8
+                }
+              }
+            },
+            "ninth": {
+              "photo": "sunset",
+              "crops": {
+                "gridPage9": {
+                  "centerX": 0.8,
+                  "centerY": 0.45,
+                  "zoom": 2.2
+                }
+              }
             }
-          }
+          },
+          "elements": {}
         },
-        "second": {
-          "photo": "shore",
-          "crops": {
-            "grid9": {
-              "centerX": 0.72,
-              "centerY": 0.5,
-              "zoom": 2.3
-            }
-          }
-        },
-        "fifth": {
-          "photo": "cottage",
-          "crops": {
-            "grid9": {
-              "centerX": 0.75,
-              "centerY": 0.62,
-              "zoom": 3
-            }
-          }
-        },
-        "third": {
-          "photo": "light",
-          "crops": {
-            "grid9": {
-              "centerX": 0.3,
-              "centerY": 0.7,
-              "zoom": 2
-            }
-          }
-        },
-        "fourth": {
-          "photo": "aurora",
-          "crops": {
-            "grid9": {
-              "centerX": 0.7,
-              "centerY": 0.22,
-              "zoom": 2
-            }
-          }
-        },
-        "sixth": {
-          "photo": "island",
-          "crops": {
-            "grid9": {
-              "centerX": 0.6,
-              "centerY": 0.8,
-              "zoom": 2.2
-            }
-          }
-        },
-        "seventh": {
-          "photo": "peaks",
-          "crops": {
-            "grid9": {
-              "centerX": 0.85,
-              "centerY": 0.35,
-              "zoom": 2
-            }
-          }
-        },
-        "eighth": {
-          "photo": "hiker",
-          "crops": {
-            "grid9": {
-              "centerX": 0.33,
-              "centerY": 0.4,
-              "zoom": 2.8
-            }
-          }
-        },
-        "ninth": {
-          "photo": "sunset",
-          "crops": {
-            "grid9": {
-              "centerX": 0.8,
-              "centerY": 0.45,
-              "zoom": 2.2
-            }
-          }
+        "right": {
+          "definition": "notePage",
+          "params": {
+            "heading": "Details",
+            "note": ""
+          },
+          "boxes": {},
+          "elements": {}
         }
       }
     },
     {
       "id": "last-notes",
-      "definition": "text",
-      "params": {
-        "heading": "The last notes"
-      },
-      "boxes": {
-        "body": {
-          "text": "return"
+      "definition": "textPage",
+      "split": true,
+      "params": {},
+      "boxes": {},
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "textPage",
+          "params": {
+            "heading": "The last notes"
+          },
+          "boxes": {
+            "body": {
+              "text": "return"
+            }
+          },
+          "elements": {}
         },
-        "continuation": {
-          "text": "return"
+        "right": {
+          "definition": "textPage",
+          "params": {
+            "heading": ""
+          },
+          "boxes": {
+            "body": {
+              "text": "return"
+            }
+          },
+          "elements": {}
         }
       }
     },

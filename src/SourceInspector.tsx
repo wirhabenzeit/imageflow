@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
 import type { SourceUsage } from './editing';
+import { sheetLayoutLabel } from './layouts';
 import { Field } from './Fields';
 import type { Edit } from './Inspector';
 import { markdownToHtml } from './markdown';
@@ -22,7 +23,7 @@ function Placements({ summary, template, usage, render, source, select }: {
   return <ul className="si-placements">
     {placed.map(({ spread: id, pages }) => {
       const spread = summary.project.spreads.find((item) => item.id === id);
-      const layout = spread && (template?.spreads[spread.definition]?.label ?? spread.definition);
+      const layout = spread && (sheetLayoutLabel(template?.spreads, spread) ?? spread.definition);
       const parts = source.kind === 'text' && spread && render?.state === 'ready'
         ? Object.entries(spread.boxes).filter(([, box]) => box.text === source.id)
           .map(([box]) => render.flow[id + ':' + box]).filter(Boolean) : [];

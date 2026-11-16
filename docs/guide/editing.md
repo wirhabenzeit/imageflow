@@ -6,6 +6,28 @@ Add, duplicate, move or delete spreads from the left sidebar or the **Book** men
 
 Select a spread to choose its layout and settings in the Inspector. **On this spread** lists its content. **Set aside** holds content from previous layouts, ready to restore when you switch back.
 
+## Independent pages
+
+The Photobook starter uses spread templates only for a photo across the fold (Panorama and Chapter opener) or a full-spread Map. Contents, stories, notes, quotes, grids, inset maps and picture lists are reusable page templates that you can pair freely.
+
+The layout picker shows all designs together: double-page designs span two slots, and single-page designs take one, with four page slots across. The patterned blank tile represents an intentionally empty page. Every starter page design works on either side. Picture list is one reusable design with optional closing text; additional occurrences continue the list.
+
+Click the left or right half of a sheet to select that side. Choose a single-page design in the layout picker to split a spread into independent pages. The other side keeps its remembered page or starts blank. The Inspector’s **Templates** section edits the selected page; **On this page** lists its content. Left/right arrows move between pages. The filmstrip, duplicate, delete and reorder continue to act on whole sheets.
+
+- Choose another page layout to change only the selected page, or drag a layout onto either half to apply it there.
+- Choose **Blank page** to leave a full-sheet side blank while keeping its content stored.
+- Choose a double-page design to merge the pages. When both pages have content for the same box, the selected side wins.
+- Use **Book → Swap Pages** to exchange both complete page designs and their content. It is disabled when a design is restricted to its current side.
+- **Set aside** and **Replaced** identify where content came from. **Place in…** moves it into a compatible shown box, including a box on the facing page; an occupied box swaps its content back. **Discard** removes the assignment. Sources remain available, and Undo restores the change.
+
+Single opening and closing pages accept designs allowed on their side and remain single units. The blank-page choice is available for full-sheet positions.
+
+### A quick beta test
+
+Use a fresh copy of the Photobook starter. Pair a photo page with a story, quote or grid page, then try the same design on both sides. Edit the right page and confirm the left is unchanged. Crop a photo, switch layouts and return, merge and split, swap, place/discard set-aside content and Undo. Save, close and reopen the book, then export a PDF and check page order, text continuation, photo crops and folios in each offered format.
+
+These flows can be tested in the editor now. Page-level MCP mutation commands are still pending; use the editor for individual page edits rather than passing undocumented page arguments to commands.
+
 ## Photos
 
 - **Import:** use **File → Import…**, the Sources strip's **Import** menu, or drop JPEG, PNG or WebP files onto the strip or a photo box.
@@ -26,6 +48,6 @@ External changes reload automatically unless you have pending edits; then the ed
 
 ## Settings and on-page editing
 
-Book settings are in the left sidebar. Spread, box and element settings are in the Inspector. Click an item on the page, or select it under **On this spread**, to open its controls. Templates can provide a popover, an on-page editor (such as the Photobook map) or direct text editing.
+Book settings are in the left sidebar. Spread or page, box and element settings are in the Inspector. Click an item on the page, or select it under **On this spread** / **On this page**, to open its controls. Templates can provide a popover, an on-page editor (such as the Photobook map) or direct text editing.
 
 Typed settings apply on Enter or when you leave the field; Escape discards pending text. Choices apply immediately. Changes can be undone.

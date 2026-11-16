@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { execFileSync } from 'node:child_process';
 import { _electron } from 'playwright-core';
-import { closeApp, testBook, clickPage } from './ui-actions.mjs';
+import { closeApp, copySpreadStarter, testBook, clickPage } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
 
 // A real desktop session: editing typography/occurrences, pending typing, composition, plain paste, fallback,
@@ -14,7 +14,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 await mkdir(join(root, '.build'), { recursive: true });
 const work = await mkdtemp(join(root, '.build', 'inline-text-'));
 const book = join(work, 'Text.imageflow');
-await copySample(join(root, 'sample', 'starter'), book);
+await copySpreadStarter(book);
 const templateFile = join(book, 'template/index.tsx');
 let source = await readFile(templateFile, 'utf8');
 const heading = '<ctx.Text presentation="inline" parameter="heading" as="h1" rect={at.right(margin, 120, page - 2 * margin, 110)} />';

@@ -296,3 +296,16 @@ test('commands refuse split-spread targets until page addressing is supported; m
   assert.equal(merged.files.project.spreads[0].boxes.hero.photo, 'p2');
   assert.equal(merged.files.project.spreads[0].params.heading, 'Visible');
 });
+
+test('switch_layout refuses page layouts on a split sheet whatever its hidden definition is', () => {
+  const info: TemplateInfo = { ...template, spreads: { ...template.spreads, page: { ...template.spreads.main, span: 'page' } } };
+  for (const definition of ['page', 'undeclared']) {
+    const original = files();
+    const spread = original.project.spreads[0];
+    spread.definition = definition;
+    spread.split = true;
+    spread.pages = { left: { definition: 'page', params: {}, boxes: {}, elements: {} } };
+    assert.throws(() => applyProjectCommands(original, info, [{ op: 'switch_layout', spread: 'one', definition: 'page' }]),
+      (error) => error instanceof ProjectCommandError && error.code === 'INCOMPATIBLE_LAYOUT' && /shown as pages/.test(error.message), definition);
+  }
+});

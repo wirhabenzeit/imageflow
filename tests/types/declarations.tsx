@@ -487,3 +487,11 @@ defineTemplate({ id: 'page-builder', version: '1', contract: 1, format,
     },
   }) }),
 });
+
+defineTemplate({ id: 'page-opening', version: '1', contract: 1, format,
+  spreads: ({ page }) => ({ photo: page({ label: 'Photo', render: () => null }) }),
+  openingSpreads: [{ pages: { left: { layout: 'photo' }, right: {} } }] });
+// @ts-expect-error Opening page layouts must be declared.
+defineTemplate({ id: 'page-opening', version: '1', contract: 1, format,
+  spreads: ({ page }) => ({ photo: page({ label: 'Photo', render: () => null }) }),
+  openingSpreads: [{ pages: { left: { layout: 'missing' } } }] });

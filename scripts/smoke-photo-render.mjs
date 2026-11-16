@@ -1,4 +1,4 @@
-import { exportAction, nextPresentation, testBook } from './ui-actions.mjs';
+import { copySpreadStarter, exportAction, nextPresentation, testBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -6,14 +6,13 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { decodePDFRawStream, PDFArray, PDFDict, PDFDocument, PDFName } from 'pdf-lib';
 import { _electron } from 'playwright-core';
-import { copySample } from '../desktop/sample-book.mjs';
 
 // #104: a PhotoBox render callback draws the photo through the template's SVG mask in the book view, follows a crop
 // gesture before it is saved, saves the crop as an ordinary crop, and exports with its image loaded.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'photo-render-'));
 const project = join(work, 'Book.imageflow');
-await copySample(join(root, 'sample', 'starter'), project);
+await copySpreadStarter(project);
 // The starter's story layout (photo on the left) draws its main photo through a circular SVG mask.
 const source = join(project, 'template', 'index.tsx');
 const template = await readFile(source, 'utf8');
@@ -31,6 +30,11 @@ let app;
 try {
   app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' }, timeout: 15000 });
+  await app.evaluate(({ dialog }) => {
+    const show = dialog.showMessageBox.bind(dialog);
+    dialog.showMessageBox = (...args) => args.at(-1)?.message === 'Trust this book’s template?'
+      ? Promise.resolve({ response: 0, checkboxChecked: false }) : show(...args);
+  });
   const w = await testBook(app, project, false);
   w.setDefaultTimeout(30000);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1400, 900));

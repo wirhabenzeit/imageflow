@@ -3,7 +3,7 @@ import type { PageSide, Project, SpreadState, Values } from './project';
 import { resolveValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
 import { shownBoxes } from './layouts';
-import { spanAllowedAt } from './format';
+import { hasFacingPages, spanAllowedAt, spanRequiredAt } from './format';
 import type { PrintFormat } from './format';
 import type { Layouts } from './layouts';
 
@@ -11,15 +11,56 @@ export function newSpread(definition: string): SpreadState {
   return { id: crypto.randomUUID(), definition, params: {}, boxes: {}, elements: {} };
 }
 
-/** The spreads a new book starts with: the template's opening spreads with new IDs, or none. */
-export function openingSpreadStates(template: { openingSpreads?: readonly { layout: string; params?: Values }[] }): SpreadState[] {
-  return (template.openingSpreads ?? []).map(({ layout, params }) => ({ ...newSpread(layout), params: { ...params } }));
+export type OpeningPageInput = { layout?: string; params?: Values };
+export type OpeningSpreadInput = { layout: string; params?: Values } | { pages: Partial<Record<PageSide, OpeningPageInput>> };
+/** Materialize the template's starting units, with independent records and fresh sheet IDs. */
+export function openingSpreadStates(template: { openingSpreads?: readonly OpeningSpreadInput[]; spreads: Layouts }): SpreadState[] {
+  return (template.openingSpreads ?? []).map((entry) => {
+    if ('layout' in entry) return { ...newSpread(entry.layout), params: structuredClone(entry.params ?? {}) };
+    // A sheet shown as pages still needs a declared layout as its own `definition`, as `newEditorSpread` gives it.
+    // It is not shown; it only names the state a later merge starts from, so a sheet of two blank pages takes the
+    // template's first layout rather than an ID the template may not declare (or may declare for something else).
+    const definition = entry.pages.left?.layout ?? entry.pages.right?.layout ?? Object.keys(template.spreads)[0];
+    const pages = Object.fromEntries(Object.entries(entry.pages).map(([side, page]) => [side, {
+      ...(page.layout ? { definition: page.layout } : {}), params: structuredClone(page.params ?? {}), boxes: {}, elements: {},
+    }]));
+    return { ...newSpread(definition), split: true, pages };
+  });
 }
 
 /** The layouts that can be the first spread of an empty book: facing pages, or a single right page where the format allows one. */
 export function firstSpreadLayouts(layouts: Layouts, format: PrintFormat) {
   // Counted as the first of several, so a closing left page is not offered as the start of a book.
   return Object.entries(layouts).filter(([, layout]) => spanAllowedAt(layout.span ?? 'spread', 0, 2, format, layout.sides)).map(([id]) => id);
+}
+
+// Editor insertion can compose two page designs into a sheet, so a facing template needs no dummy spread
+// layout just to create a book. Commands keep their narrower `firstSpreadLayouts`/insert_spread contract.
+export function editorLayoutsAt(layouts: Layouts, format: PrintFormat, position: { index: number; count: number }) {
+  const required = spanRequiredAt(position.index, position.count, format);
+  return Object.keys(layouts).filter((id) => {
+    const layout = layouts[id];
+    if (hasFacingPages(format) && required === 'spread' && layout.span === 'page') {
+      return !layout.sides || layout.sides.includes('left') || layout.sides.includes('right');
+    }
+    return spanAllowedAt(layout.span, position.index, position.count, format, layout.sides);
+  });
+}
+
+export const firstEditorLayouts = (layouts: Layouts, format: PrintFormat) => editorLayoutsAt(layouts, format, { index: 0, count: 2 });
+
+/** A fresh editor unit at this position. Page designs on full sheets start on their first allowed side, facing a
+ * blank page; end pages and formats without facing pages keep the ordinary, unsplit single-page representation. */
+export function newEditorSpread(definition: string, layouts: Layouts, format: PrintFormat,
+  position: { index: number; count: number }): SpreadState | undefined {
+  if (!Object.hasOwn(layouts, definition) || !editorLayoutsAt(layouts, format, position).includes(definition)) return;
+  const sheet = newSpread(definition);
+  if (hasFacingPages(format) && spanRequiredAt(position.index, position.count, format) === 'spread' && layouts[definition].span === 'page') {
+    const side = !layouts[definition].sides || layouts[definition].sides.includes('left') ? 'left' : 'right';
+    sheet.split = true;
+    sheet.pages = { [side]: { definition, params: {}, boxes: {}, elements: {} } };
+  }
+  return sheet;
 }
 
 // The boxes a spread shows: its own layout's, or its pages' when it is shown as pages. Without the template (still

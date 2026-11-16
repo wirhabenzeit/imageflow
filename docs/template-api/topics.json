@@ -1,7 +1,8 @@
 [
   {"id":"authoring-workflow","title":"Authoring workflow","summary":"Order of work for agents: which MCP tool reads, edits, previews and verifies what, and how revisions and drafts fit together."},
   {"id":"package","title":"Package","summary":"The template/ folder, host-provided imports, the shipped example templates and the contract-1 baseline features."},
-  {"id":"declaration","title":"Declaration","summary":"defineTemplate fields, the three parameter scopes, declaring spreads with spread()/spreadFor and typed reusable declarations."},
+  {"id":"declaration","title":"Declaration","summary":"defineTemplate fields, parameter scopes, spread()/page() builders and typed reusable declarations."},
+  {"id":"page-layouts","title":"Page layouts","summary":"Reusable page() layouts, Page roots, local geometry, independent facing pages, editor controls and beta automation limits."},
   {"id":"parameters","title":"Parameters","summary":"p.* parameter helpers, their value types and options (ranges, units, enums, dates, multiline, descriptions)."},
   {"id":"list-parameters","title":"List parameters","summary":"p.list for a variable number of flat items, item IDs, list controls and the list item commands."},
   {"id":"boxes-and-elements","title":"Boxes and elements","summary":"Photo and Markdown boxes, flowOrder for text continuation, and generated elements with parameters."},

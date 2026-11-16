@@ -24,6 +24,7 @@ export const commandRegistry = {
   'move-spread-end': { label: 'Move to End', enabled: spread('move-spread-down') },
   'move-spread-up': { label: 'Move Up', accelerator: 'Alt+CmdOrCtrl+Up', enabled: spread('move-spread-up') },
   'move-spread-down': { label: 'Move Down', accelerator: 'Alt+CmdOrCtrl+Down', enabled: spread('move-spread-down') },
+  'swap-pages': { label: 'Swap Pages', enabled: s => writable(s) && !s.editing && !!s.canSwapPages && (s.selectionCount ?? 1) <= 1 },
   'book-check': { label: 'Check Book', accelerator: 'CmdOrCtrl+Shift+K', enabled: s => s.document },
   reload: { label: 'Reload from Disk', enabled: book },
   sidebar: { label: s => s.sidebar ? 'Hide Sidebar' : 'Show Sidebar', accelerator: 'Ctrl+Command+S', enabled: s => s.document },

@@ -44,7 +44,7 @@ export type RenderedImageFailure = { label: string; message: string; spread?: st
 // Something worth changing about a picture that was drawn: it is pixels without saying so, or has far more of them
 // than the output asks for.
 export type RenderedImageNote = { label: string; code: 'rendered-image-raster' | 'rendered-image-oversized'; message: string;
-  spread?: string; element?: string; details?: Record<string, number> };
+  spread?: string; element?: string; page?: PageSide; details?: Record<string, number> };
 
 let settings: Settings = { mode: 'preview', pixelRatio: 1, concurrency: 2, timeoutMs: 60_000 };
 let running = 0;
@@ -213,7 +213,7 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
     node.dataset.rendered = 'pending';
     failures.delete(node);
     notes.delete(node);
-    const where = () => ({ spread: node.closest<HTMLElement>('[data-spread]')?.dataset.spread, element: node.closest<HTMLElement>('[data-element]')?.dataset.element });
+    const where = () => ({ ...onPage(pageOf(node)), spread: node.closest<HTMLElement>('[data-spread]')?.dataset.spread, element: node.closest<HTMLElement>('[data-element]')?.dataset.element });
     const found: RenderedImageNote[] = [];
     // In a check or export, a raster picture with far more pixels than the output asks for is scaled down to what it
     // asks for, so it cannot bloat the PDF, and the check says so.

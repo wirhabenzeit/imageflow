@@ -1,8 +1,10 @@
+import type { PageSide } from './project';
+
 // Render purity guards (ADR 0006). In Book check, export and artwork frames, calls that make a page depend on the
 // network, the GPU or time are recorded when they come from template code, and reported as `render-impure`.
 // The guards report mistakes; they are not a security boundary. The render CSP still blocks the network.
 
-export type ImpureCall = { api: string; spread?: string };
+export type ImpureCall = { api: string; spread?: string; page?: PageSide };
 
 type Target = Record<string, unknown>;
 
@@ -12,15 +14,16 @@ const gpuContexts = new Set(['webgl', 'webgl2', 'experimental-webgl', 'webgpu', 
 export type PurityGuards = {
   readonly calls: readonly ImpureCall[];
   // The spread whose layout is rendering, so a call can be located; undefined between layouts.
-  rendering(spread: string | undefined): void;
+  rendering(spread: string | undefined, page?: PageSide): void;
 };
 
 let active: PurityGuards | undefined;
 let current: string | undefined;
+let currentPage: PageSide | undefined;
 
 // Called around each layout's render; does nothing unless guards are installed.
-export function renderingSpread(spread: string | undefined) {
-  if (active) active.rendering(spread);
+export function renderingSpread(spread: string | undefined, page?: PageSide) {
+  if (active) active.rendering(spread, page);
 }
 
 /**
@@ -55,10 +58,10 @@ export function installPurityGuards(target: Target, scriptPath: string, stack: (
   };
   const record = (api: string) => {
     if (declared() || !stack().includes(scriptPath)) return;
-    const key = api + '\u0000' + (current ?? '');
+    const key = api + '\u0000' + (current ?? '') + '\u0000' + (currentPage ?? '');
     if (seen.has(key)) return;
     seen.add(key);
-    calls.push({ api, ...(current ? { spread: current } : {}) });
+    calls.push({ api, ...(current ? { spread: current } : {}), ...(currentPage ? { page: currentPage } : {}) });
   };
   const wrapFunction = (name: string, kind: 'call' | 'schedule' | 'request') => {
     const original = target[name];
@@ -120,7 +123,7 @@ export function installPurityGuards(target: Target, scriptPath: string, stack: (
       return request.apply(gpu, args);
     };
   }
-  const guards: PurityGuards = { calls, rendering(spread) { current = spread; } };
+  const guards: PurityGuards = { calls, rendering(spread, page) { current = spread; currentPage = page; } };
   active = guards;
   return guards;
 }

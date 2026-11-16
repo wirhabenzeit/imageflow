@@ -159,10 +159,10 @@ export async function checkProject(
       if (failure?.layoutFailures) {
         // Each layout that failed is named with its spread and, when the source map has it, the template line that threw.
         // A fixture book uses this to render its other fixtures without the failing ones.
-        result.diagnostics = failure.layoutFailures.map(({ spread, message, stack }) => {
+        result.diagnostics = failure.layoutFailures.map(({ spread, page, message, stack }) => {
           const at = templateLocation(stack, loaded);
           return { code: 'layout-render-failed', stage: 'render' as const, severity: 'error' as const, message,
-            location: { spread, ...at },
+            location: { spread, ...(page ? { page } : {}), ...at },
             suggestion: 'Fix the layout code' + (at ? ' at ' + at.path + ':' + at.line : '') + ' so it renders one <Spread> for this content; ' +
               'guard empty, long or malformed inputs, or change the spread\'s parameters or layout.' };
         });

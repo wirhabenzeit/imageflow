@@ -1,13 +1,15 @@
 # Geometry helpers
 
-`geometry` computes rectangles in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the trim width), y from the top trim edge. In a format without facing pages the sheet is one page, and x starts at its left trim edge. Pass a rectangle to a platform component's `rect` prop (`PhotoBox`, `MarkdownBox`, `Element`, `Text`), or `geometry.css(rect)` to any node's `style`, to position it absolutely inside `<Spread>`. Properties in `style` win over the ones `rect` sets, so `rect={area} style={{ height: 'auto' }}` lets a block grow.
+`geometry` computes rectangles in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the trim width), y from the top trim edge. In a format without facing pages the sheet is one page, and x starts at its left trim edge. Pass a rectangle to a platform component's `rect` prop (`PhotoBox`, `MarkdownBox`, `Element`, `Text`), or `geometry.css(rect)` to any node's `style`, to position it absolutely inside `<Spread>` or `<Page>` as appropriate. Properties in `style` win over the ones `rect` sets, so `rect={area} style={{ height: 'auto' }}` lets a block grow.
 
-`ctx.geometry` holds the same helpers with the spread's format already applied: `ctx.geometry.page(side, area?)` (`ctx.geometry.page(area?)` without facing pages), `ctx.geometry.spread(area?)` and `ctx.geometry.design(canvas)`, plus `inset`, `grid` and `css`. The functions below remain available for helpers outside `render`. The helpers return plain numbers, so ordinary CSS and inline styles stay available, and nothing scales type.
+A `page()` layout uses **page-local coordinates**, starting at its own left trim edge on either side. In that context, `ctx.geometry.page(area?)` takes no side, `ctx.geometry.design(canvas).page(...)` maps design coordinates to the current page, and `ctx.geometry.spread()` or a request for the facing page throws. Safe and bleed insets mirror from `ctx.side`. `<Page>` exposes that side as `data-side`. See [Page layouts](page-layouts.md).
+
+For a spread layout, `ctx.geometry` holds the same helpers with the spread's format already applied: `ctx.geometry.page(side, area?)` (`ctx.geometry.page(area?)` without facing pages), `ctx.geometry.spread(area?)` and `ctx.geometry.design(canvas)`, plus `inset`, `grid` and `css`. The functions below remain available for helpers outside `render`. The helpers return plain numbers, so ordinary CSS and inline styles stay available, and nothing scales type.
 
 | Helper | Returns |
 | --- | --- |
 | `page(format, side, area?)` | One page. `area` is `trim` (default), `safe` (the format's safe insets, with the binding inset next to the fold) or `bleed` (outer edges extended into the bleed; the fold edge stays at the fold, because a page's binding bleed shows the facing page). Works for single first and last pages. |
-| `page(format, area?)` | The page of a format without facing pages: `trim`, `safe` (left and right insets) or `bleed` (all four edges). With facing pages a side is required. |
+| `page(format, area?)` | The page of a format without facing pages: `trim`, `safe` (left and right insets) or `bleed` (all four edges). For the top-level helper with facing pages a side is required; the bound helper in a `page()` layout already knows its side. |
 | `spread(format, area?)` | Both pages. Its `safe` area keeps only the outer, top and bottom insets. Throws without facing pages. |
 | `inset(rect, mm \| { top, right, bottom, left })` | A smaller rectangle. |
 | `grid(rect, { columns, rows?, gap?, columnGap?, rowGap? })` | Equal cells in reading order, with gaps between cells only. |
@@ -25,4 +27,4 @@ render: (ctx) => {
 }
 ```
 
-Use `page` and `spread` for physical layouts that keep margins in millimetres on every format. Use `design` to scale a composition drawn on a fixed canvas, as the starter does. These numbers are physical lengths for CSS, unlike the structured `mm()`, `pt()` and `inch()` values used in print-format declarations. The starter's layouts use these helpers.
+Use `page` and `spread` for physical layouts that keep margins in millimetres on every format. Use `design` to scale a composition drawn on a fixed canvas, as the starter does. These numbers are physical lengths for CSS, unlike the structured `mm()`, `pt()` and `inch()` values used in print-format declarations. The starter's layouts use these helpers. Do not reuse a spread helper that reads both `left()` and `right()` inside a page layout; give the page helper local `page()` rectangles instead.

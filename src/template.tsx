@@ -7,7 +7,7 @@ import { parseFormatted, plainFormatted } from './formatted-text';
 import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
-import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanAllowedAt, spanFits } from './format';
+import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
 import { identifier, pageSides, renderView, scopeSpread, values } from './project';
 import type { PageSide, Photo, ProjectFile, RenderProject, RenderView, SpreadState, Values } from './project';
@@ -92,7 +92,7 @@ export type CreditDeclaration = { id: string; text: string; url?: string; side?:
 export type Credit = { id: string; text: string; url?: string; pages: number[]; spreads: string[] };
 // A spread declaring a credit ID with other text or URL than the book's first declaration of it. The book keeps the
 // first; the Book check warns.
-export type CreditConflict = { id: string; spread: string; text: string; url?: string; kept: { text: string; url?: string } };
+export type CreditConflict = { id: string; spread: string; page?: PageSide; text: string; url?: string; kept: { text: string; url?: string } };
 // One spread of the book as the index lists it: derived from the saved book and the template's declarations before
 // any spread renders, so every spread reads the same index whatever the render order.
 export type BookPhotoPlacement = {
@@ -132,28 +132,32 @@ const anchorDeclarations = z.array(z.strictObject({
 })).max(100);
 /** A failure that belongs to one spread of the book, such as a layout whose anchors() throws. */
 export class SpreadError extends Error {
-  constructor(message: string, readonly spread: string, options?: ErrorOptions) {
+  readonly page?: PageSide;
+  constructor(message: string, readonly spread: string, options?: ErrorOptions & { page?: PageSide }) {
     super(message, options);
     this.name = 'SpreadError';
+    this.page = options?.page;
   }
 }
 
 // Lookups that found no anchor, or several, keyed so repeated renders report each once.
-export type AnchorLookup = { spread: string; anchor: string; found: number };
+export type AnchorLookup = { spread: string; page?: PageSide; anchor: string; found: number };
 export type BookIndex = { pages: number; anchors: Anchor[]; credits?: readonly Credit[]; creditConflicts?: readonly CreditConflict[]; spreads?: readonly BookSpread[]; lookups?: Map<string, AnchorLookup> };
 
 export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: UnitPages }[] }): BookIndex {
   const document = resolveParams(template.parameters, book.project.params);
   const anchors = book.project.spreads.flatMap((sheet, i) => shownLayoutStates(sheet).flatMap(({ page: scope, state: spread }) => {
-    const definition = template.spreads[spread.definition];
+    const definition = Object.hasOwn(template.spreads, spread.definition) ? template.spreads[spread.definition] : undefined;
     if (!definition?.anchors) return [];
     let returned: unknown;
+    renderingSpread(spread.id, scope);
     try { returned = definition.anchors({ params: resolveParams(definition.parameters, spread.params), document }); }
-    catch (error) { throw new SpreadError(definition.label + ' could not declare its anchors: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error }); }
+    catch (error) { throw new SpreadError(definition.label + ' could not declare its anchors: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error, page: scope }); }
+    finally { renderingSpread(undefined); }
     const declared = anchorDeclarations.safeParse(returned);
     if (!declared.success) {
       throw new SpreadError(definition.label + ' declares invalid anchors: ' +
-        declared.error.issues.map((issue) => (issue.path.join('.') || 'anchors') + ' ' + issue.message).join('; ') + '.', spread.id);
+        declared.error.issues.map((issue) => (issue.path.join('.') || 'anchors') + ' ' + issue.message).join('; ') + '.', spread.id, { page: scope });
     }
     const { left, right, number } = sequence.spreads[i].page;
     return declared.data.map(({ id, title, side }): Anchor => {
@@ -188,12 +192,14 @@ function bookCredits(book: RenderProject, template: Template, sequence: { spread
       return [id, { params, photo }];
     }));
     let returned: unknown;
+    renderingSpread(spread.id, scope);
     try { returned = definition.credits({ params: resolveParams(definition.parameters, spread.params), document, elements, boxes: deepFreeze(boxes) }); }
-    catch (error) { throw new SpreadError(definition.label + ' could not declare its credits: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error }); }
+    catch (error) { throw new SpreadError(definition.label + ' could not declare its credits: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error, page: scope }); }
+    finally { renderingSpread(undefined); }
     const declared = creditDeclarations.safeParse(returned);
     if (!declared.success) {
       throw new SpreadError(definition.label + ' declares invalid credits: ' +
-        declared.error.issues.map((issue) => (issue.path.join('.') || 'credits') + ' ' + issue.message).join('; ') + '.', spread.id);
+        declared.error.issues.map((issue) => (issue.path.join('.') || 'credits') + ' ' + issue.message).join('; ') + '.', spread.id, { page: scope });
     }
     const { left, right, number } = sequence.spreads[i].page;
     for (const { id, text, url, side } of declared.data) {
@@ -201,8 +207,8 @@ function bookCredits(book: RenderProject, template: Template, sequence: { spread
       const pages = number !== undefined ? [number] : scope ? [sequence.spreads[i].page[scope]!] : side && left !== undefined && right !== undefined ? [side === 'left' ? left : right]
         : [left, right].filter((page): page is number => page !== undefined);
       const known = credits.get(id);
-      if (known && (known.text !== text || known.url !== url) && !conflicts.some((conflict) => conflict.id === id && conflict.spread === spread.id)) {
-        conflicts.push({ id, spread: spread.id, text, ...(url ? { url } : {}), kept: { text: known.text, ...(known.url ? { url: known.url } : {}) } });
+      if (known && (known.text !== text || known.url !== url) && !conflicts.some((conflict) => conflict.id === id && conflict.spread === spread.id && conflict.page === scope)) {
+        conflicts.push({ id, spread: spread.id, ...(scope ? { page: scope } : {}), text, ...(url ? { url } : {}), kept: { text: known.text, ...(known.url ? { url: known.url } : {}) } });
       }
       const credit = known ?? credits.set(id, { id, text, ...(url ? { url } : {}), pages: [], spreads: [] }).get(id)!;
       credit.pages.push(...pages.filter((page) => !credit.pages.includes(page)));
@@ -245,7 +251,7 @@ export function spreadIndex(book: RenderProject, template: Template, sequence: {
   }));
 }
 
-export function bookContext(index: BookIndex, spread: string): BookContext {
+export function bookContext(index: BookIndex, spread: string, page?: PageSide): BookContext {
   const copy = (anchor: Anchor) => ({ ...anchor });
   const matching = (id: string) => index.anchors.filter((anchor) => anchor.id === id);
   return {
@@ -253,7 +259,7 @@ export function bookContext(index: BookIndex, spread: string): BookContext {
     spreads: index.spreads ?? [],
     anchor(id) {
       const found = matching(id);
-      if (found.length !== 1) index.lookups?.set(spread + '\u0000' + id, { spread, anchor: id, found: found.length });
+      if (found.length !== 1) index.lookups?.set(spread + '\u0000' + (page ?? '') + '\u0000' + id, { spread, ...(page ? { page } : {}), anchor: id, found: found.length });
       return found[0] && copy(found[0]);
     },
     anchors: (id) => (id === undefined ? index.anchors : matching(id)).map(copy),
@@ -396,7 +402,10 @@ const definition = z.object({
 }, 'Markdown boxes need unique flowOrder values.');
 
 // The spreads a new book starts with, in order. Each names a layout and may set some of its own parameters.
-const openingSpread = z.strictObject({ layout: identifier, params: values });
+const openingLayout = z.strictObject({ layout: identifier, params: values });
+const openingPage = z.strictObject({ layout: identifier.optional(), params: values });
+const openingSpread = z.union([openingLayout, z.strictObject({ pages: z.strictObject({ left: openingPage.optional(), right: openingPage.optional() })
+  .refine(pages => !!pages.left || !!pages.right, 'Declare at least one page; use an empty object for a blank page.') })]);
 
 // A layout's span defaults to 'page' when every declared format lacks facing pages, so a calendar template does not
 // repeat it on every layout, and to 'spread' otherwise. Applied before validation, so every rule sees the span.
@@ -483,45 +492,62 @@ function openingSpreadProblems({ spreads, openingSpreads, format, formats, defau
 }) {
   const problems: { path: (string | number)[]; message: string }[] = [];
   if (!openingSpreads) return problems;
-  openingSpreads.forEach(({ layout, params }, index) => {
-    const path = ['openingSpreads', index];
-    const definition = Object.hasOwn(spreads, layout) ? spreads[layout] : undefined;
-    if (!definition) {
-      problems.push({ path: [...path, 'layout'], message: 'Layout ' + layout + ' is not declared in spreads. Declared layouts: ' +
-        Object.keys(spreads).join(', ') + '.' });
+  const validate = (layout: string | undefined, params: Values, path: (string | number)[], page = false) => {
+    const definition = layout !== undefined && Object.hasOwn(spreads, layout) ? spreads[layout] : undefined;
+    if (!definition && layout !== undefined) {
+      problems.push({ path: [...path, 'layout'], message: 'Layout ' + layout + ' is not declared in spreads. Declared layouts: ' + Object.keys(spreads).join(', ') + '.' });
       return;
     }
+    if (page && definition && definition.span !== 'page') problems.push({ path: [...path, 'layout'], message: 'A page requires a page layout.' });
     for (const [key, value] of Object.entries(params)) {
-      const parameter = Object.hasOwn(definition.parameters, key) ? definition.parameters[key] : undefined;
-      if (!parameter) problems.push({ path: [...path, 'params', key], message: 'Layout ' + layout + ' has no parameter ' + key + '.' });
-      else if (!isParameterValue(parameter, value)) problems.push({ path: [...path, 'params', key],
-        message: JSON.stringify(value) + ' is not an allowed value for ' + parameter.label + ' in layout ' + layout + '.' });
+      const parameter = definition && Object.hasOwn(definition.parameters, key) ? definition.parameters[key] : undefined;
+      if (!parameter) problems.push({ path: [...path, 'params', key], message: 'Layout ' + (layout ?? 'blank page') + ' has no parameter ' + key + '.' });
+      else if (!isParameterValue(parameter, value)) problems.push({ path: [...path, 'params', key], message: JSON.stringify(value) + ' is not an allowed value for ' + parameter.label + ' in layout ' + layout + '.' });
+    }
+  };
+  openingSpreads.forEach((entry, index) => {
+    if ('layout' in entry) validate(entry.layout, entry.params, ['openingSpreads', index]);
+    else for (const side of pageSides) {
+      const page = entry.pages[side];
+      if (page) validate(page.layout, page.params, ['openingSpreads', index, 'pages', side], true);
     }
   });
-  const declared = openingSpreads.map(({ layout }) => Object.hasOwn(spreads, layout) ? spreads[layout] : undefined);
-  if (declared.some((definition) => !definition)) return problems;
+  const declared = openingSpreads.map(entry => 'pages' in entry ? { span: 'spread' as const, parameters: {} } : Object.hasOwn(spreads, entry.layout) ? spreads[entry.layout] : undefined);
+  if (declared.some(definition => !definition)) return problems;
   const all = formats ? Object.entries(formats) : format ? [['default', format] as const] : [];
   const first = formats && defaultFormat && Object.hasOwn(formats, defaultFormat) ? formats[defaultFormat] : all[0]?.[1];
   const choices = all.filter(([, choice]) => !first || hasFacingPages(choice) === hasFacingPages(first));
   for (const [id, choice] of choices) {
     declared.forEach((definition, index) => {
+      const entry = openingSpreads[index];
+      if ('pages' in entry) {
+        if (!hasFacingPages(choice) || spanRequiredAt(index, declared.length, choice) !== 'spread') {
+          problems.push({ path: ['openingSpreads', index, 'pages'], message: 'A pair of page layouts requires a full spread position in a format with facing pages.' });
+        }
+        for (const side of pageSides) {
+          const layout = entry.pages[side]?.layout;
+          const page = layout && Object.hasOwn(spreads, layout) ? spreads[layout] : undefined;
+          if (page?.sides && !page.sides.includes(side)) problems.push({ path: ['openingSpreads', index, 'pages', side, 'layout'], message: 'Layout ' + layout + ' is not allowed on the ' + side + ' page.' });
+        }
+        return;
+      }
       // Opening spreads may be only part of a book, so full spreads may sit anywhere; the Book check reports a
       // missing opening or closing page. Single pages must still be at their own end.
       const { span } = definition!;
       if (span === 'page' && hasFacingPages(choice)) {
-        if (!spanAllowedAt(span, index, declared.length, choice, definition!.sides)) problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Page layout ' + openingSpreads[index].layout + ' is not allowed at this book position.' });
+        if (!spanAllowedAt(span, index, declared.length, choice, definition!.sides)) problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Page layout ' + entry.layout + ' is not allowed at this book position.' });
         return;
       }
       if (spanFits(span, choice) && (span === 'right' ? index === 0 : span === 'left' ? index === declared.length - 1 : true)) return;
       const where = formats ? 'format ' + id : 'the format';
       if ((span === 'page') === hasFacingPages(choice)) {
-        problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Layout ' + openingSpreads[index].layout + (hasFacingPages(choice)
+        problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Layout ' + entry.layout + (hasFacingPages(choice)
           ? " is a single page (span: 'page'), but " + where + ' has facing pages.'
           : ' is for facing pages, but ' + where + " has none. Use a layout with span: 'page'.") });
         return;
       }
       const ends = hasSingleEnds(choice);
-      problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Layout ' + openingSpreads[index].layout + ' is a single ' +
+      problems.push({ path: ['openingSpreads', index, 'layout'], message: 'Layout ' + entry.layout + ' is a single ' +
         definition!.span + ' page. ' + (ends ? 'In ' + where + ' it can only be the ' + (definition!.span === 'right' ? 'first' : 'last') +
           ' opening spread.' : where[0].toUpperCase() + where.slice(1) + ' has no single pages at the book ends.') });
     });
@@ -558,7 +584,7 @@ export type TemplateDeclaration = {
   controls?: ControlItem[];
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder; page: typeof pageBuilder }) => Record<string, DeclaredSpread>);
-  openingSpreads?: { layout: string; params?: Values }[];
+  openingSpreads?: import('./editing').OpeningSpreadInput[];
   editors?: Record<string, { label?: string; parameters: string[]; component: (props: DocumentEditorProps) => ReactNode; presentation?: EditorPresentation }>;
 };
 // `spreads` may be a function of the builder; the declaration ImageFlow validates always has the built record.
@@ -587,7 +613,7 @@ export function templateInfo(template: Template): TemplateInfo {
     }])),
     // Functions (render, editor components) stay in the render frame; the editor gets plain declarations.
     spreads: Object.fromEntries(Object.entries(template.spreads).map(([id, { render: _render, anchors: _anchors, credits: _credits, elements, ...info }]) => [id, {
-      ...info, declaresAnchors: !!_anchors,
+      ...info, declaresAnchors: !!_anchors, declaresCredits: !!_credits,
       elements: Object.fromEntries(Object.entries(elements).map(([key, { editor, ...element }]) => [key, {
         ...element, ...(editor ? { editor: { label: editor.label, parameters: editor.parameters,
           ...(editor.spread?.length ? { spread: editor.spread } : {}), presentation: editor.presentation } } : {}),
@@ -1075,7 +1101,7 @@ export function editorContext(book: RenderProject, template: Template, spreadId:
   const context: EditorContext = {
     ...values, page, side: definition.span === 'page' ? side ?? (format.facingPages ? (page.left !== undefined ? 'left' : 'right') : 'page') : undefined, format: spanFits(definition.span, template.format) ? format : lenientFormat(format), formatId: template.formatId,
     elements: Object.fromEntries(Object.entries(values.elements).map(([id, element]) => [id, { ...element, rect: null }])),
-    book: bookContext(index_, spread.id), spread: spread.id, layout: spread.definition,
+    book: bookContext(index_, spread.id, side), spread: spread.id, layout: spread.definition,
   };
   return { context, key: JSON.stringify([spread.id, side, spread.definition, page, index_.pages, index_.anchors, index_.credits, index_.spreads, values, template.formatId]) };
 }
@@ -1141,16 +1167,18 @@ function LayoutView({ book, template, format, spread, page, index, positions, re
   if (side && side !== 'page' && definition.sides && !definition.sides.includes(side)) throw new Error('Layout ' + spread.definition + ' is not allowed on the ' + side + ' page.');
   const values = spreadValues(book, template, spread, positions, scopePage);
   const fits = spanFits(definition.span, template.format) && (!scopePage || format.facingPages);
-  renderingSpread(spread.id);
+  renderingSpread(spread.id, scopePage);
   let content: ReturnType<typeof definition.render>;
   try {
     content = definition.render({
       ...values, page: side && side !== 'page' ? { [side]: page[side] } : page, side, format: fits ? format : lenientFormat(format), formatId: template.formatId, mode: book.mode, view: renderView(book),
       spread: bookSpread, layout: spread.definition,
       edit: (...paths) => paths.length ? { 'data-edit': paths.join(' ') } : {},
-      book: bookContext(index, spread.id), geometry: boundGeometry(format, { lenient: !fits, side }),
+      book: bookContext(index, spread.id, scopePage), geometry: boundGeometry(format, { lenient: !fits, side }),
       PhotoBox, MarkdownBox, Element, Text,
     });
+  } catch (error) {
+    throw new SpreadError(definition.label + ' could not render: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error, page: scopePage });
   } finally {
     renderingSpread(undefined);
   }

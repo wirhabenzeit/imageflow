@@ -31,3 +31,12 @@ test('typing, busy and read-only states protect spread operations', () => {
   assert.equal(commandState('grid-columns', book).enabled, false);
   assert.equal(commandState('grid-columns', { ...book, layout: { mode: 'grid', columns: 2 } }).enabled, true);
 });
+
+
+test('Swap Pages requires one eligible page pair and protects editing states', () => {
+  const pair = { ...book, canSwapPages: true };
+  assert.equal(commandState('swap-pages', pair).enabled, true);
+  for (const patch of [{ canSwapPages: false }, { selectionCount: 2 }, { editing: true }, { busy: true }, { writable: false }]) {
+    assert.equal(commandState('swap-pages', { ...pair, ...patch }).enabled, false);
+  }
+});

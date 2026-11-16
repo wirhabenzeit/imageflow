@@ -121,12 +121,16 @@ body { margin: 0; }
 /* Canvas: the whole book in one scrolling column */
 .canvas-wrap { position: relative; min-height: 0; }
 .canvas { position: absolute; inset: 0; overflow: auto; background: var(--canvas-surface); container-type: size; }
+/* Page outlines carry selection; the pane only needs a quiet keyboard-focus edge. */
+.canvas { outline: none; }
+.canvas:focus-visible:not([data-pointer-focus]) { outline: 1px solid var(--edge); outline-offset: -1px; }
 .canvas:not(:has(.stage)) { display: grid; place-items: center; }
 .stage { position: relative; margin: 0 auto; width: min(100%, calc((100cqh - 64px) * var(--aspect, 100) + 64px)); cursor: default; }
 .sheet-label { position: absolute; display: flex; align-items: center; height: 20px; font-size: 12px; color: var(--muted); pointer-events: none; white-space: nowrap; overflow: hidden; }
 .sheet-label.selected { color: var(--accent); font-weight: 500; }
-.sheet-selection, .sheet-hover, .guides, .box-highlight { position: absolute; pointer-events: none; }
+.sheet-selection, .sheet-hover, .guides, .box-highlight, .active-spread-page { position: absolute; pointer-events: none; }
 .sheet-selection { outline: 2.5px solid var(--accent); outline-offset: 5px; border-radius: 1px; }
+.active-spread-page { box-shadow: inset 0 0 0 2px var(--accent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .sheet-hover { outline: 1.5px solid var(--in-view); outline-offset: 5px; }
 .guides > div { position: absolute; }
 .trim-guide { border: 1px solid #e35563; }
@@ -237,12 +241,14 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 /* Layout picker: the template renders the spread in each layout; buttons sit under a transparent frame. */
 .field-label { font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
 .layout-picker { position: relative; margin: 0 -6px; }
-.layout-picker:not(.placed) { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 0 6px; }
+.layout-picker:not(.placed) { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 0 6px; }
 .layout-picker .book-frame { z-index: 1; }
 .layout-picker .book-frame-pending { opacity: 0; }
 .studio .layout-option:disabled { opacity: 1; }
+.studio .layout-option.layout-unavailable { z-index: 2; color: var(--muted); }
+.layout-option.layout-unavailable::before { content: ""; position: absolute; inset: 4px 4px 21px; background: var(--panel-surface); opacity: .65; pointer-events: none; }
 .studio .layout-option {
-  display: flex; align-items: flex-end; padding: 0 4px 3px; min-height: 0; border: 0; border-radius: 6px;
+  position: relative; display: flex; align-items: flex-end; padding: 0 4px 3px; min-height: 0; border: 0; border-radius: 6px;
   background: transparent; font-size: 11px; font-weight: 500; text-align: left;
 }
 .studio .layout-picker:not(.placed) .layout-option { min-height: 30px; border: 1px solid var(--control-border); }
@@ -252,7 +258,9 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .studio .layout-option:focus-visible { outline-offset: 0; }
 .layout-option-label { display: flex; align-items: center; gap: 4px; width: 100%; height: 18px; }
 .layout-option-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.layout-option-variants { display: flex; flex: none; color: var(--muted); }
+.layout-option-variants { position: absolute; top: 8px; right: 8px; z-index: 2; display: grid; place-items: center; width: 20px; height: 20px; color: #222; filter: none; opacity: .6; transition: opacity 120ms; pointer-events: none; }
+.layout-option-variants path { fill: currentColor; fill-rule: evenodd; stroke: none; }
+.layout-option:hover .layout-option-variants, .layout-option:focus-visible .layout-option-variants, .layout-option[aria-checked="true"] .layout-option-variants { opacity: 1; }
 
 /* Click-to-edit: nodes a template marks with ctx.edit() */
 .edit-target { position: absolute; pointer-events: none; border: 1.5px dashed #c48a1c; border-radius: 3px; background: #f3c56a14; }
@@ -995,3 +1003,11 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .studio .action-menu-trigger svg:last-child:not(:first-child) { width: 10px; height: 10px; margin-right: -3px; color: var(--button-chevron); }
 .studio .action-menu-trigger svg:last-child:not(:first-child) path { stroke-width: 1.8; }
 .studio .start-actions > button { min-height: 28px; font-size: 13px; }
+
+
+
+/* Keep the sheet structure visible even when facing pages happen to share a design. */
+.sheet-label-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sheet-layout-mode { display: inline-flex; align-items: center; gap: 5px; flex: none; font-size: 11px; font-weight: 500; }
+.sheet-label .sheet-layout-mode { margin-left: auto; padding-left: 10px; }
+.facing-page-selection { position: absolute; pointer-events: none; outline: 1px dashed var(--accent); outline-offset: 5px; opacity: .5; }

@@ -13,7 +13,7 @@ template/
 
 The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided by the host and must not be bundled. Relative imports, CSS imports, and asset imports inside `template/` are allowed. Other packages come from npm through the template's saved dependency bundle ([Dependencies](dependencies.md#dependencies)). Templates must render deterministically without fetching data, timers, state, or effects. This is an authoring requirement, not a guarantee that arbitrary template JavaScript is safe; open only projects you trust.
 
-`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `printFormat`, `Spread`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue`, `capabilities`, `RenderedImage`, `FormattedText`, `plainText`, `Choice` and `fonts`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
+`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `printFormat`, `Spread`, `Page`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue`, `capabilities`, `RenderedImage`, `FormattedText`, `plainText`, `Choice` and `fonts`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
 
 ## Examples
 
@@ -61,6 +61,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `layout-families` | `layoutFamilies`, `family` and `variant` on layouts, and a family's own layout picker. |
 | `editor-spread-parameters` | `spread` on an element editor: layout parameters edited together with the element's, with `setSpread` and `<Control scope="spread">`. |
 | `opening-spreads` | `openingSpreads`, the spreads a new book starts with. |
+| `page-layouts` | `page()` declarations, `<Page>`, page-local geometry, side-aware contexts and independent facing pages ([Page layouts](page-layouts.md)). |
 | `single-pages` | Formats without facing pages (`facingPages: false`) and `span: 'page'` layouts. |
 | `editor-context` | `context` in element and document editors: the spread they were opened from, as `render` sees it, kept current. |
 | `document-editors` | `editors`: editors of document parameters, opened from nodes marked with them. |

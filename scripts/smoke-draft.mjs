@@ -1,5 +1,5 @@
 import { packagedMacExecutable } from './mac-paths.mjs';
-import { testBook, menuAction, exportAction } from './ui-actions.mjs';
+import { copySpreadStarter, testBook, menuAction, exportAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -22,7 +22,13 @@ try {
     args: [...(packaged ? [] : [join(root, '.build/desktop')]), '--user-data-dir=' + join(work, 'profile')],
     env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' },
   });
-  const window = await testBook(app, project, true);
+  await copySpreadStarter(project);
+  await app.evaluate(({ dialog }) => {
+    const show = dialog.showMessageBox.bind(dialog);
+    dialog.showMessageBox = (...args) => args.at(-1)?.message === 'Trust this book’s template?'
+      ? Promise.resolve({ response: 0, checkboxChecked: false }) : show(...args);
+  });
+  const window = await testBook(app, project);
   window.setDefaultTimeout(15000);
   const button = (name) => window.getByRole('button', { name, exact: true });
   const frame = 'iframe.book-frame-book[data-current]';
@@ -35,7 +41,8 @@ try {
     // A render can take longer than the default 15 s on a hosted Mac, most of all the first one, which prepares
     // previews of the full-size sample photos (the packaged release check timed out here).
     await window.waitForFunction((frame) => document.querySelector(frame + '[data-ready]') || document.querySelector('.status-error'), frame, { timeout: 60000 });
-    const value = await preview().locator('body').evaluate(() => window.imageflowRenderStatus);
+    // Trust approval can replace the current frame between the readiness message and this read.
+    const value = await window.frameLocator(frame + '[data-ready]').locator('body').evaluate(() => window.imageflowRenderStatus);
     assert.equal(value?.state, 'ready', value?.message ?? await status());
     return value;
   }

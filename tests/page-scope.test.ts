@@ -73,3 +73,9 @@ test('findings and edit targets name the page of their box or element', () => {
   assert.equal(declaredName({ kind: 'box', id: 'hero', page: 'left' }), 'left page · box hero');
   assert.equal(declaredName({ kind: 'element', id: 'grid' }), 'element grid');
 });
+
+test('ordinary page artwork retains page attribution without a box or element', () => {
+  const text = el({ 'data-edit': 'heading' });
+  el({ 'data-if-page': 'right' }, text);
+  assert.deepEqual(ownerOf(asDom<Element>(text)), { page: 'right' });
+});

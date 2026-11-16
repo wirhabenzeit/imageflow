@@ -209,7 +209,7 @@ try {
   const starterContext = await good('get_authoring_context', { project: starter });
   const contextBytes = JSON.stringify(starterContext).length;
   assert.ok(contextBytes <= 30_000, 'The starter book context grew to ' + contextBytes + ' bytes; the budget is 30,000 (about 8k tokens).');
-  assert.ok(starterContext.template.spreads.story && starterContext.topics.length > 20);
+  assert.ok(starterContext.template.spreads.textPage && starterContext.topics.length > 20);
   console.log('ImageFlow MCP context, empty-book, single-page, inline drafts and multi-book workflows passed' + (packaged ? ' (packaged).' : '.'));
 } catch (error) {
   if (one && !one.isClosed()) await one.screenshot({ path: join(root, '.build/mcp-context-failure.png') }).catch(() => {});

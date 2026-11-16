@@ -20,7 +20,7 @@ const retitled = (version) => source.replace("id: 'imageflow-starter',", "id: 't
   .replace("label: 'Photobook',", "label: 'Travel journal',");
 await writeFile(join(travel, 'index.tsx'), retitled('1.0.0'));
 await cp(join(root, 'sample/starter/template'), broken, { recursive: true });
-await writeFile(join(broken, 'index.tsx'), source.replace('spreads: ({ spread }) => ({', 'spreads: ({ spread }) => ({ broken: 1,'));
+await writeFile(join(broken, 'index.tsx'), source.replace('spreads: ({ spread, page: pageLayout }) => ({', 'spreads: ({ spread, page: pageLayout }) => ({ broken: 1,'));
 
 const settingsURL = 'imageflow://editor/templates';
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
@@ -145,7 +145,8 @@ try {
   await travelEntry.click();
   await picker.getByRole('option', { name: /Travel journal/ }).click();
   // A copy of the starter's template, so it starts with the same layout tour by default.
-  const tour = JSON.parse(await readFile(join(root, 'sample/starter/project.json'), 'utf8')).spreads.map(({ definition }) => definition);
+  const shape = sheet => sheet.split ? { pages: Object.fromEntries(Object.entries(sheet.pages).map(([side, page]) => [side, page.definition ?? null])) } : { layout: sheet.definition };
+  const tour = JSON.parse(await readFile(join(root, 'sample/starter/project.json'), 'utf8')).spreads.map(shape);
   assert.equal(await picker.getByRole('group', { name: 'Start with' }).getByRole('radio', { name: tour.length + ' starting spreads' }).isChecked(), true);
   const book = join(work, 'Journey.imageflow');
   await saveAs(book);
@@ -154,11 +155,13 @@ try {
   const project = JSON.parse(await readFile(join(book, 'project.json'), 'utf8'));
   assert.equal(project.title, 'Journey');
   assert.equal(project.template.id, 'travel');
+  assert.equal(project.schemaVersion, 2);
+  assert.equal(project.spreads.filter(sheet => sheet.split).length, 11);
   assert.equal(project.template.version, '1.0.0');
   assert.match(project.template.hash, /^[a-f0-9]{64}$/);
   // Agents started in or above a new book find the template API reference as a project skill.
   assert.match(await readFile(join(book, '.claude/skills/imageflow-templates/SKILL.md'), 'utf8'), /^---\nname: imageflow-templates\n/);
-  assert.deepEqual(project.spreads.map(({ definition }) => definition), tour);
+  assert.deepEqual(project.spreads.map(shape), tour);
   assert.deepEqual(JSON.parse(await readFile(join(book, 'photos.json'), 'utf8')), {});
   for (const folder of ['photos', 'texts', 'files']) assert.ok((await stat(join(book, folder))).isDirectory());
   await assert.rejects(stat(join(book, 'template', 'library.json')));
@@ -182,7 +185,7 @@ try {
   const mapElement = editor.frameLocator('iframe.book-frame-book[data-current]').locator('[data-spread="map-spread"] [data-element="map"]');
   await mapElement.scrollIntoViewIfNeeded();
   const mapBox = await mapElement.boundingBox();
-  await clickPage(editor, mapBox.x + mapBox.width / 2, mapBox.y + mapBox.height / 2);
+  await clickPage(editor, mapBox.x + mapBox.width * .4, mapBox.y + mapBox.height / 2);
   // The map is framed on the page; its toolbar is the editor's chrome.
   await editor.getByRole('toolbar', { name: 'Edit map' }).waitFor();
   // Whether the open map editor's frame may reach the map server: a request its policy blocks reports a violation.
@@ -265,7 +268,7 @@ try {
     assert.deepEqual([project.texts, project.files], [{}, {}]);
     assert.deepEqual(JSON.parse(await readFile(join(folder, 'photos.json'), 'utf8')), {});
     for (const name of ['photos', 'texts', 'files']) assert.deepEqual(await readdir(join(folder, name)), [], name + ' stays empty');
-    for (const spread of project.spreads) assert.deepEqual(Object.values(spread.boxes).filter((box) => box.photo || box.text), []);
+    for (const spread of project.spreads) for (const state of [spread, ...Object.values(spread.pages ?? {})]) assert.deepEqual(Object.values(state.boxes ?? {}).filter(box => box.photo || box.text), []);
     return project;
   };
   const newStarter = async (name, option) => {
@@ -285,7 +288,7 @@ try {
     return folder;
   };
   const started = await noContent(await newStarter('Started.imageflow'));
-  assert.deepEqual(started.spreads.map(({ definition }) => definition), tour, 'the layout tour, in the sample order');
+  assert.deepEqual(started.spreads.map(shape), tour, 'the layout tour, in the sample order');
   assert.ok(!/Senja|Along the coast/.test(JSON.stringify(started)), 'no sample text');
   const empty = await noContent(await newStarter('Empty.imageflow', 'Empty book'));
   assert.deepEqual(empty.spreads, []);

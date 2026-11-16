@@ -73,7 +73,7 @@ try {
     await layouts().locator('.if-rendered-image[data-rendered="pending"]').first().waitFor({ state: 'detached' });
   };
   const draws = () => layouts().locator('body').evaluate(() => window.__mapDraws ?? 0);
-  // The starter's map layouts (Map, and Map and story): the layout previews draw each spread's map once in each.
+  // The starter's full-spread and single-page maps each produce their own cached picture.
   const mapLayouts = 2;
   await page.locator('.spread-thumb[data-spread="arriving"]').click();
   await ready('arriving');
@@ -118,9 +118,11 @@ try {
   }, old);
   const mapPage = '[data-spread="water"] [data-rendered]';
   const mapBook = JSON.parse(await readFile(manifest, 'utf8'));
-  mapBook.spreads.find(({ id }) => id === 'water').definition = 'map';
-  // The selected page shows Two photos, so the sidebar has a setting to edit on it.
-  mapBook.spreads.find(({ id }) => id === 'settlements').definition = 'pair';
+  const water = mapBook.spreads.find(({ id }) => id === 'water');
+  water.definition = 'map';
+  delete water.split;
+  const settings = page.locator('.document-settings');
+  if (!await settings.getAttribute('open')) await settings.locator('summary').click();
   const beforeMap = await thumbUrl();
   await writeFile(manifest, JSON.stringify(mapBook));
   await nextThumbs(beforeMap);
@@ -133,7 +135,7 @@ try {
     window.__thumbMessages = [];
   });
   const beforeEdit = await thumbUrl();
-  await page.getByRole('checkbox', { name: 'White frame', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'Page numbers', exact: true }).uncheck();
   await page.waitForFunction(() => window.__thumbMessages.some(({ data }) => data.state === 'ready'));
   assert.notEqual(await thumbUrl(), beforeEdit, 'Inspect the replacement frame, not the previous sidebar');
   assert.equal(await page.locator('iframe.book-frame-thumbs[data-current]').getAttribute('data-ready'), null,
