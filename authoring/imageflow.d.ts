@@ -523,12 +523,21 @@ export type BookContext = {
    */
   credits: readonly Credit[];
 };
-/** A credit a layout declares, such as the data behind a map. The same `id` from several spreads is one credit. */
-export type CreditDeclaration = { id: string; text: string; url?: string };
+/**
+ * A credit a layout declares, such as the data behind a map. The same `id` from several spreads is one credit; IDs
+ * contain no whitespace, as `data-credits` lists them space-separated. `side` credits only that page of a two-page
+ * spread, such as an inset map on the right page; without it, both pages. A later declaration of an ID with other
+ * `text` or `url` is reported (`credit-conflict`); the book keeps the first.
+ */
+export type CreditDeclaration = { id: string; text: string; url?: string; side?: 'left' | 'right' };
 /** A credit as the book collects it: once, with the pages and spreads that use it. */
 export type Credit = { readonly id: string; readonly text: string; readonly url?: string; readonly pages: readonly number[]; readonly spreads: readonly string[] };
-/** What a layout's `credits` sees: the spread's saved values, its elements' included, and the document's. */
-export type CreditContext<P = Values, D = Values, E = Record<string, { params: Values }>> = { params: P; document: D; elements: E };
+/**
+ * What a layout's `credits` sees: the spread's saved values, its boxes' and elements' included, and the document's.
+ * A photo box has its photo's metadata, such as `credit`, or null when empty.
+ */
+export type CreditContext<P = Values, D = Values, E = Record<string, { params: Values }>, B = Record<string, { params: Values; photo?: Photo | null }>> =
+  { params: P; document: D; elements: E; boxes: B };
 
 // Render context
 
@@ -786,7 +795,8 @@ export type SpreadBuilder<D extends Parameters> = <
    * What this spread uses that needs a credit, such as a map's data, declared from its values like `anchors`; the
    * book collects them in `ctx.book.credits`.
    */
-  credits?(context: CreditContext<ParameterValues<P>, ParameterValues<D>, { [K in keyof E]: { params: ValuesOf<E[K]> } }>): readonly CreditDeclaration[];
+  credits?(context: CreditContext<ParameterValues<P>, ParameterValues<D>, { [K in keyof E]: { params: ValuesOf<E[K]> } },
+    { [K in keyof B]: B[K] extends { type: 'photo' } ? { params: ValuesOf<B[K]>; photo: Photo | null } : { params: ValuesOf<B[K]> } }>): readonly CreditDeclaration[];
   /** The layout family this layout is a variant of: a key of the template's `layoutFamilies`. */
   family?: F;
   /** Tags that tell this variant apart from the others in its family, such as `{ size: '3x3' }`. Pickers read them. */
@@ -1076,8 +1086,12 @@ export function file(id: string): { name: string; extension: string; text: strin
 
 /** A bundled font face, as the template's `@font-face` rules declare it. */
 export type BundledFont = { family: string; weight: number | [number, number]; style: 'normal' | 'italic' };
-/** A font as text asks for it; weight defaults to 400 and style to `'normal'`, matched as the browser matches them. */
-export type FontQuery = { family: string; weight?: number; style?: 'normal' | 'italic' };
+/**
+ * A font as text asks for it; weight defaults to 400 and style to `'normal'`, matched as the browser matches them
+ * (CSS font matching). `family` may be a stack, as a CSS string (`'Field Sans, Field Cyrillic'`) or a list: each
+ * character is set by the first bundled family that has it, and families the template does not bundle are passed over.
+ */
+export type FontQuery = { family: string | readonly string[]; weight?: number; style?: 'normal' | 'italic' };
 /**
  * The template's bundled fonts (capability `font-coverage`): the faces of its `@font-face` rules and the characters
  * their font files contain. For text the template draws itself, such as map labels in a vector picture: text the

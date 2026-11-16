@@ -100,8 +100,8 @@ const labelRole = (stack: string[]) => {
 /**
  * The map as SVG markup (`output="vector"`), drawn off screen once every tile and the style have loaded. A style or
  * tile that fails to load fails the whole map, so a print never has holes in it. Labels keep what the book's fonts can
- * set (fonts.settable): letters lose marks the fonts lack (ş → s), and characters they have no glyphs for, such as the
- * Cyrillic line of a name, are left out.
+ * set (fonts.settable): the fonts cover Latin and Cyrillic, letters lose marks the fonts lack (ş → s), and characters
+ * they have no glyphs for, such as a Chinese or Arabic line of a name, are left out.
  */
 async function drawMap(style: MapStyle, view: View, signal: AbortSignal) {
   try {

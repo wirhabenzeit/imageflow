@@ -2,7 +2,7 @@ import type { PresentationView } from './presentation-model';
 import { presentationPhotoSource } from './presentation-model';
 import { sourceFileName, sourcePath } from './source-locations';
 import { renameIds } from './svg-ids';
-import { bundlesFamily, missingCharacters, setTemplateFonts } from './fonts';
+import { bundlesFamily, familiesOf, missingCharacters, setTemplateFonts } from './fonts';
 import { parseSentinel, sentinelStrip, sentinelWidth } from './capture-sentinel';
 import type { Sentinel } from './capture-sentinel';
 import { impureMessage, impureSuggestion, installPurityGuards, unlocatedImpureSuggestion } from './purity';
@@ -293,11 +293,12 @@ function checkFonts(sheet: HTMLElement) {
     let style = styles.get(parent);
     if (!style) styles.set(parent, style = getComputedStyle(parent));
     if (style.display === 'none' || style.visibility === 'hidden') continue;
-    // The first family of the stack that the template bundles sets the text; without one, PDF preflight already names
-    // the system font.
-    const family = style.fontFamily.split(',').map((name) => name.trim().replace(/^(['"])(.*)\1$/, '$2')).find(bundlesFamily);
-    if (family) {
-      const chars = missingCharacters(text, { family, weight: Number(style.fontWeight) || 400, style: /italic|oblique/.test(style.fontStyle) ? 'italic' : 'normal' });
+    // The bundled families of the stack set the text, each passing what it lacks to the next; without one, PDF
+    // preflight already names the system font.
+    const bundled = familiesOf(style.fontFamily).filter(bundlesFamily);
+    const family = bundled.join(', ');
+    if (bundled.length) {
+      const chars = missingCharacters(text, { family: bundled, weight: Number(style.fontWeight) || 400, style: /italic|oblique/.test(style.fontStyle) ? 'italic' : 'normal' });
       if (chars.length) {
         const owner = ownerOf(parent);
         const key = JSON.stringify(owner) + family;
@@ -1747,6 +1748,12 @@ export async function startRender(root: HTMLElement) {
         ...located(spread, 'No spread declares anchor ' + anchor + '.'), code: 'anchor-missing', details: { anchor },
         suggestion: 'Insert a spread whose layout declares anchor ' + anchor + ', or change the referenced anchor ID.',
       });
+    }
+    for (const { id, spread, text, url, kept } of index.creditConflicts ?? []) {
+      warnings.push({ ...located(spread, 'This spread declares credit ' + id + ' as ' + JSON.stringify(text) + (url ? ' (' + url + ')' : '') +
+        ', but an earlier spread declares it as ' + JSON.stringify(kept.text) + (kept.url ? ' (' + kept.url + ')' : '') + '; the book prints the first.'),
+        code: 'credit-conflict', details: { credit: id, text, kept: kept.text },
+        suggestion: 'Give credits with different text or URLs their own IDs in the layouts\' credits().' });
     }
     // A credit the book uses must be printed somewhere: a page marks what it prints with data-credits. Only a render of
     // the whole book can tell.

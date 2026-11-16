@@ -220,6 +220,7 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | `text-too-small` | Box or element containing the smallest text; `sizePt`, `minimumPt`. |
 | `text-outside-safe-area` | Box or element with the largest overshoot; `overshootMm`. |
 | `credit-unprinted` | A credit the book uses (from a layout's `credits`) that no page prints: no rendered node marks its ID with `data-credits`. On the first spread that uses it; `credit`, `text` and `pages`. |
+| `credit-conflict` | A spread declares a credit ID with other text or URL than the book's first declaration of it; the book prints the first. On the later spread; `credit`, `text` and `kept`. |
 | `font-coverage` | Box or element with text that the template's bundled font (`family`, the first bundled family of its font stack) has no glyphs for, including text inside SVG such as vector map labels; `characters` lists them. They print in a system font, which PDF preflight rejects. |
 | `text-stroked` | Box or element with stroked text (an SVG `stroke` on text, or `-webkit-text-stroke`), which prints as a Type 3 font that PDF preflight rejects. |
 | `file-missing`, `file-unreadable`, `file-type` | Parameter and file source, with the box or element when it owns the parameter. |

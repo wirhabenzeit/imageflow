@@ -3,7 +3,9 @@
 // file's character map, read by the app (desktop/fonts.ts), narrowed by the rule's unicode-range when it has one.
 
 export type FontStyle = 'normal' | 'italic';
-export type FontQuery = { family: string; weight?: number; style?: FontStyle };
+// `family` is one family, a CSS stack ("Field Sans, Field Cyrillic") or a list of families, as the browser falls back
+// through them character by character. Families the template does not bundle are passed over.
+export type FontQuery = { family: string | readonly string[]; weight?: number; style?: FontStyle };
 type Face = { family: string; weights: [number, number]; style: FontStyle; ranges?: [number, number][]; unicodeRange?: [number, number][] };
 
 let coverage: Record<string, [number, number][]> = {};
@@ -53,15 +55,39 @@ function loadFaces() {
 }
 const allFaces = () => faces ??= loadFaces();
 
-/** The faces that would set `query`, as the browser matches them: its style if there is one, then the closest weight. */
-function facesFor({ family, weight = 400, style = 'normal' }: FontQuery) {
+/** The families of a query, in fallback order. */
+export const familiesOf = (family: FontQuery['family']) =>
+  (typeof family === 'string' ? family.split(',') : family).map(unquote).filter(Boolean);
+
+/**
+ * How well a face's weight serves a requested weight, lower is better, by the CSS font matching rules: a weight from
+ * 400 to 500 tries heavier weights up to 500, then lighter ones, then heavier ones; a lighter request tries lighter
+ * weights first, a heavier one heavier weights first. A face with a weight range serves the weight in it nearest
+ * the request.
+ */
+export function weightRank(weight: number, [low, high]: [number, number]) {
+  const served = Math.min(Math.max(weight, low), high);
+  if (served === weight) return { served, rank: 0 };
+  const heavier = served > weight;
+  const gap = Math.abs(served - weight);
+  if (weight >= 400 && weight <= 500) return { served, rank: heavier && served <= 500 ? gap : !heavier ? 1e4 + gap : 2e4 + gap };
+  return { served, rank: heavier === weight > 500 ? gap : 1e4 + gap };
+}
+
+/** The faces of one family that would set `query`, as the browser matches them: its style if there is one, then weight. */
+function familyFaces(family: string, weight: number, style: FontStyle) {
   const named = allFaces().filter((face) => face.family.toLowerCase() === family.toLowerCase());
   if (!named.length) return undefined;
   const styled = named.some((face) => face.style === style) ? named.filter((face) => face.style === style) : named;
-  const distance = (face: Face) => weight < face.weights[0] ? face.weights[0] - weight : weight > face.weights[1] ? weight - face.weights[1] : 0;
-  const best = Math.min(...styled.map(distance));
+  const ranked = styled.map((face) => ({ face, ...weightRank(weight, face.weights) }));
+  const best = ranked.reduce((first, next) => next.rank < first.rank ? next : first);
   // Faces of one weight split by unicode-range together make up the font.
-  return styled.filter((face) => distance(face) === best);
+  return ranked.filter(({ served }) => served === best.served).map(({ face }) => face);
+}
+
+/** The bundled faces of each family of `query`'s stack that the template bundles, in fallback order. */
+function facesFor({ family, weight = 400, style = 'normal' }: FontQuery) {
+  return familiesOf(family).flatMap((name) => familyFaces(name, weight, style) ?? []);
 }
 
 const inRanges = (code: number, ranges: [number, number][]) => {
@@ -83,6 +109,7 @@ const invisible = /[\s\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufe00-\ufe0f\ufeff
  */
 export function missingCharacters(text: string, query: FontQuery): string[] {
   const matching = facesFor(query);
+  // A face that leaves a character out passes it to the next family of the stack, as the browser does.
   const missing = new Set<string>();
   for (const char of text) {
     if (missing.has(char) || invisible.test(char)) continue;
@@ -95,7 +122,7 @@ export function missingCharacters(text: string, query: FontQuery): string[] {
 }
 
 /** Whether the template bundles `family` at all. */
-export const bundlesFamily = (family: string) => !!facesFor({ family });
+export const bundlesFamily = (family: string) => facesFor({ family }).length > 0;
 
 /** The bundled faces, one entry per family, weight range and style. */
 export function fontList() {

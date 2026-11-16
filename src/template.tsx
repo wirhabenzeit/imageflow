@@ -77,10 +77,20 @@ export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'r
 export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
 // Credits, such as the data behind a map, are declared like anchors from a spread's saved values, its elements'
 // included, and collected for the whole book before any spread renders, so a credits page lists what the book uses.
-export type CreditContext = { params: Values; document: Values; elements: Record<string, { params: Values }> };
-export type CreditDeclaration = { id: string; text: string; url?: string };
+// `boxes` has every box of the layout with its parameters, and a photo box's photo metadata (null when empty), so a
+// layout can credit a photographer or what a box shows.
+export type CreditContext = {
+  params: Values; document: Values; elements: Record<string, { params: Values }>;
+  boxes: Record<string, { params: Values; photo?: Photo | null }>;
+};
+// `side` credits only that page of a two-page spread, such as an inset map on the right page; without it, both pages.
+// IDs are whitespace-free tokens, as `data-credits` lists them separated by spaces.
+export type CreditDeclaration = { id: string; text: string; url?: string; side?: 'left' | 'right' };
 // A credit once, however many spreads declare it, with the pages of the spreads that do, in book order.
 export type Credit = { id: string; text: string; url?: string; pages: number[]; spreads: string[] };
+// A spread declaring a credit ID with other text or URL than the book's first declaration of it. The book keeps the
+// first; the Book check warns.
+export type CreditConflict = { id: string; spread: string; text: string; url?: string; kept: { text: string; url?: string } };
 // One spread of the book as the index lists it: derived from the saved book and the template's declarations before
 // any spread renders, so every spread reads the same index whatever the render order.
 export type BookPhotoPlacement = {
@@ -110,7 +120,8 @@ export type BookContext = {
   credits: readonly Credit[];
 };
 const creditDeclarations = z.array(z.strictObject({
-  id: z.string().min(1).max(256), text: z.string().min(1).max(1000), url: z.string().url().max(2000).optional(),
+  id: z.string().min(1).max(256).regex(/^\S+$/, 'must not contain whitespace'), text: z.string().min(1).max(1000),
+  url: z.string().url().max(2000).optional(), side: z.enum(['left', 'right']).optional(),
 })).max(50);
 const anchorDeclarations = z.array(z.strictObject({
   id: z.string().min(1).max(256), title: z.string().max(1000).optional(), side: z.enum(['left', 'right']).optional(),
@@ -125,7 +136,7 @@ export class SpreadError extends Error {
 
 // Lookups that found no anchor, or several, keyed so repeated renders report each once.
 export type AnchorLookup = { spread: string; anchor: string; found: number };
-export type BookIndex = { pages: number; anchors: Anchor[]; credits?: readonly Credit[]; spreads?: readonly BookSpread[]; lookups?: Map<string, AnchorLookup> };
+export type BookIndex = { pages: number; anchors: Anchor[]; credits?: readonly Credit[]; creditConflicts?: readonly CreditConflict[]; spreads?: readonly BookSpread[]; lookups?: Map<string, AnchorLookup> };
 
 export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: UnitPages }[] }): BookIndex {
   const document = resolveParams(template.parameters, book.project.params);
@@ -150,19 +161,30 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
     });
   });
   // A spread may declare its right-page anchor before its left-page one. The sort is stable within a page.
-  return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page), credits: bookCredits(book, template, sequence, document),
+  const { credits, conflicts } = bookCredits(book, template, sequence, document);
+  return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page), credits, creditConflicts: conflicts,
     spreads: spreadIndex(book, template, sequence) };
 }
 
-function bookCredits(book: RenderProject, template: Template, sequence: { spreads: { page: UnitPages }[] }, document: Values): readonly Credit[] {
+function bookCredits(book: RenderProject, template: Template, sequence: { spreads: { page: UnitPages }[] }, document: Values) {
   const credits = new Map<string, Credit>();
+  const conflicts: CreditConflict[] = [];
   book.project.spreads.forEach((spread, i) => {
     const definition = Object.hasOwn(template.spreads, spread.definition) ? template.spreads[spread.definition] : undefined;
     if (!definition?.credits) return;
     const elements = Object.fromEntries(Object.entries(definition.elements ?? {}).map(([id, element]) =>
       [id, { params: resolveParams(element.parameters ?? {}, spread.elements?.[id]?.params ?? {}) }]));
+    const boxes = Object.fromEntries(Object.entries(definition.boxes ?? {}).map(([id, box]) => {
+      const params = resolveParams(box.parameters ?? {}, spread.boxes?.[id]?.params ?? {});
+      if (box.type !== 'photo') return [id, { params }];
+      const photoId = spread.boxes?.[id]?.photo;
+      const found = photoId && Object.hasOwn(book.photos, photoId) ? book.photos[photoId] : undefined;
+      if (!found) return [id, { params, photo: null }];
+      const { src: _src, ...photo } = structuredClone(found);
+      return [id, { params, photo }];
+    }));
     let returned: unknown;
-    try { returned = definition.credits({ params: resolveParams(definition.parameters, spread.params), document, elements }); }
+    try { returned = definition.credits({ params: resolveParams(definition.parameters, spread.params), document, elements, boxes: deepFreeze(boxes) }); }
     catch (error) { throw new SpreadError(definition.label + ' could not declare its credits: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error }); }
     const declared = creditDeclarations.safeParse(returned);
     if (!declared.success) {
@@ -170,14 +192,21 @@ function bookCredits(book: RenderProject, template: Template, sequence: { spread
         declared.error.issues.map((issue) => (issue.path.join('.') || 'credits') + ' ' + issue.message).join('; ') + '.', spread.id);
     }
     const { left, right, number } = sequence.spreads[i].page;
-    const pages = [left, right, number].filter((page): page is number => page !== undefined);
-    for (const { id, text, url } of declared.data) {
-      const credit = credits.get(id) ?? credits.set(id, { id, text, ...(url ? { url } : {}), pages: [], spreads: [] }).get(id)!;
+    for (const { id, text, url, side } of declared.data) {
+      // A single page, or a spread with only one of its pages, has that page whichever side the declaration names.
+      const pages = number !== undefined ? [number] : side && left !== undefined && right !== undefined ? [side === 'left' ? left : right]
+        : [left, right].filter((page): page is number => page !== undefined);
+      const known = credits.get(id);
+      if (known && (known.text !== text || known.url !== url) && !conflicts.some((conflict) => conflict.id === id && conflict.spread === spread.id)) {
+        conflicts.push({ id, spread: spread.id, text, ...(url ? { url } : {}), kept: { text: known.text, ...(known.url ? { url: known.url } : {}) } });
+      }
+      const credit = known ?? credits.set(id, { id, text, ...(url ? { url } : {}), pages: [], spreads: [] }).get(id)!;
       credit.pages.push(...pages.filter((page) => !credit.pages.includes(page)));
+      credit.pages.sort((a, b) => a - b);
       if (!credit.spreads.includes(spread.id)) credit.spreads.push(spread.id);
     }
   });
-  return deepFreeze([...credits.values()]);
+  return { credits: deepFreeze([...credits.values()]), conflicts: deepFreeze(conflicts) };
 }
 
 const deepFreeze = <T,>(value: T): T => {

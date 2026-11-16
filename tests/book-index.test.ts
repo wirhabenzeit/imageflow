@@ -163,3 +163,36 @@ test('credits are collected once per ID from every spread, with their pages, fro
   const broken = chooseFormat(templateSchema.parse({ ...template, format: format(), spreads: { ...template.spreads, map: { ...template.spreads.map, credits: () => [{ id: '' }] } } }));
   assert.throws(() => bookIndex(book, broken, sequence), /Map declares invalid credits/);
 });
+
+test('credits read box parameters and photos, credit one page by side, reject spaced IDs and report conflicts', () => {
+  const render = () => createElement(runtime.Spread, {});
+  type Context = { boxes: Record<string, { params: Record<string, unknown>; photo?: { credit?: string } | null }> };
+  const template = chooseFormat(templateSchema.parse({
+    id: 'credits', version: '1', contract: 1, format: format(), parameters: {},
+    spreads: {
+      opening: { label: 'Opening', span: 'right', render },
+      photo: { label: 'Photo', boxes: { hero: photo('Hero'), note: { type: 'markdown', label: 'Note', flowOrder: 1,
+        parameters: { source: { type: 'string', label: 'Source', default: '' } } } },
+        credits: ({ boxes }: Context) => [
+          ...(boxes.hero.photo?.credit ? [{ id: 'photo-' + boxes.hero.photo.credit, text: 'Photo ' + boxes.hero.photo.credit, side: 'right' }] : []),
+          ...(boxes.note.params.source ? [{ id: 'source', text: String(boxes.note.params.source) }] : []),
+        ], render },
+    },
+  }));
+  const project = projectSchema.parse({ schemaVersion: 1, title: 'Credits', template: { id: 'credits', version: '1' }, spreads: [
+    { id: 'o', definition: 'opening' },
+    { id: 'p1', definition: 'photo', boxes: { hero: { photo: 'a' }, note: { params: { source: 'Atlas' } } } },
+    { id: 'p2', definition: 'photo', boxes: { hero: { photo: 'b' }, note: { params: { source: 'Other atlas' } } } },
+    { id: 'p3', definition: 'photo' }] });
+  const book = { project, photos: structuredClone(photos), texts: {}, files: {}, problems: [], mode: 'export', template: { script: '', assets: {} } } as RenderProject;
+  const sequence = pageSequence(project.spreads.map(({ definition }) => template.spreads[definition]?.span ?? 'spread'), template.format);
+  const index = bookIndex(book, template, sequence);
+  assert.deepEqual(index.credits, [
+    { id: 'photo-Ann', text: 'Photo Ann', pages: [3], spreads: ['p1'] },
+    { id: 'source', text: 'Atlas', pages: [2, 3, 4, 5], spreads: ['p1', 'p2'] },
+    { id: 'photo-Ben', text: 'Photo Ben', pages: [5], spreads: ['p2'] },
+  ]);
+  assert.deepEqual(index.creditConflicts, [{ id: 'source', spread: 'p2', text: 'Other atlas', kept: { text: 'Atlas' } }]);
+  const spaced = chooseFormat(templateSchema.parse({ ...template, format: format(), spreads: { ...template.spreads, photo: { ...template.spreads.photo, credits: () => [{ id: 'two words', text: 'x' }] } } }));
+  assert.throws(() => bookIndex(book, spaced, sequence), /id must not contain whitespace/);
+});

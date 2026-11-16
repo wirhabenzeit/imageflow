@@ -26,3 +26,20 @@ test('bundled coverage is keyed by file and skips files that are not fonts or ca
   // The name table reader still works after sharing the table lookup.
   assert.ok(bundledFontNames(files).some((name) => /Inter/.test(name)));
 });
+
+test('font weights match as CSS matches them, not by distance', async () => {
+  const { weightRank } = await import('../src/fonts');
+  const pick = (weight: number, available: [number, number][]) =>
+    available.map((range) => weightRank(weight, range)).reduce((first, next) => next.rank < first.rank ? next : first).served;
+  // 400 to 500 tries heavier weights up to 500 first, then lighter ones, then heavier ones past 500.
+  assert.equal(pick(400, [[300, 300], [500, 500]]), 500);
+  assert.equal(pick(400, [[300, 300], [600, 600]]), 300);
+  assert.equal(pick(450, [[400, 400], [600, 600]]), 400);
+  // Lighter requests try lighter weights first, heavier ones heavier weights first.
+  assert.equal(pick(300, [[200, 200], [400, 400]]), 200);
+  assert.equal(pick(600, [[500, 500], [700, 700]]), 700);
+  assert.equal(pick(600, [[400, 400], [500, 500]]), 500);
+  // A variable range serves the weight inside it nearest the request.
+  assert.equal(pick(400, [[100, 900]]), 400);
+  assert.equal(pick(800, [[300, 600], [900, 900]]), 900);
+});
