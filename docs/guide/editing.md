@@ -10,7 +10,7 @@ Select a spread to choose its layout and settings in the Inspector. **On this sp
 
 The Photobook starter uses spread templates only for a photo across the fold (Panorama and Chapter opener) or a full-spread Map. Contents, stories, notes, quotes, grids, inset maps and picture lists are reusable page templates that you can pair freely.
 
-The layout picker shows all designs together: double-page designs span two slots, and single-page designs take one, with four page slots across. The patterned blank tile represents an intentionally empty page.
+The layout picker shows all designs together: double-page designs span two slots, and single-page designs take one, with four page slots across. The patterned blank tile represents an intentionally empty page. Every starter page design works on either side. Picture list is one reusable design with optional closing text; additional occurrences continue the list.
 
 Click the left or right half of a sheet to select that side. Choose a single-page design in the layout picker to split a spread into independent pages. The other side keeps its remembered page or starts blank. The Inspector’s **Templates** section edits the selected page; **On this page** lists its content. Left/right arrows move between pages. The filmstrip, duplicate, delete and reorder continue to act on whole sheets.
 

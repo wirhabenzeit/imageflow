@@ -45,7 +45,7 @@ try {
   assert.equal(initial.pages, 32);
   assert.deepEqual(Object.entries(initial.template.spreads).filter(([, layout]) => layout.span === 'spread').map(([id]) => id).sort(),
     ['map', 'opener', 'panorama'], 'Only designs that cross the fold remain spread templates');
-  for (const id of ['contents', 'mapPage', 'pictures']) {
+  for (const id of ['contents', 'mapPage', 'credits']) {
     assert.equal(initial.template.spreads[id].span, 'page', id + ' is independently reusable on either page');
   }
   const contentsPagePair = original.spreads.find(sheet => sheet.id === 'contents');
@@ -53,6 +53,10 @@ try {
   assert.equal(contentsPagePair.pages.right.definition, 'contents');
   assert.ok(await frame.locator('[data-spread="contents"] [data-if-page="right"] .contents li').count() > 0,
     'The page-local contents design still lists the book anchors');
+  assert.equal(initial.template.spreads.pictures, undefined, 'One picture-list design covers ordinary and closing uses');
+  assert.equal(Object.values(initial.template.spreads).filter(layout => layout.label === 'Picture list').length, 1);
+  assert.ok(Object.values(initial.template.spreads).every(layout => !layout.sides?.length), 'Starter designs work on either side');
+  assert.ok(Object.values(initial.template.spreads).every(layout => !/\bpage\b/i.test(layout.label)), 'Names describe designs without a page suffix');
   for (const sheet of original.spreads) {
     assert.ok(initial.template.spreads[sheet.definition], 'The sheet has a declared remembered layout: ' + sheet.id);
     for (const state of Object.values(sheet.pages ?? {})) if (state.definition) {

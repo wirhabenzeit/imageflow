@@ -177,12 +177,10 @@ function pictureList(spreads: readonly BookSpread[]) {
   return [...pictures.values()];
 }
 
-// The picture list runs over every Picture list page in book order: the closing page holds what fits, and
-// additional list pages before it hold more. Nothing is cut off silently: an entry's height is worked out from its
+// The picture list continues across every occurrence in book order. Nothing is cut off silently: an entry's height is worked out from its
 // text before anything renders (one line for the title, then as many lines as its pages and its credit need), so
 // where each entry goes is known in advance, and the Book check warns about photos that do not fit and about a credit
 // or page list too long to show in full.
-const pictureLayouts = ['pictures', 'credits'];
 const pictureColumnGap = 8; // mm
 // Line heights in millimetres, matching styles.css: a 9 pt title line, 8 pt detail lines, and the space between.
 const pictureLine = { title: 4.2, detail: 3.7, gap: .4, after: 2.2 };
@@ -190,8 +188,8 @@ const maxDetailLines = 3;
 // Generous average width of an 8 pt sans character, in millimetres, so the estimate errs towards an extra line.
 const detailCharWidth = 1.7;
 
-function pictureColumns(layout: string, place: (x: number, y: number, width: number, height: number) => Rect): Rect[] {
-  const area = place(margin, 58, page - 2 * margin, layout === 'pictures' ? 202 : 160);
+function pictureColumns(place: (x: number, y: number, width: number, height: number) => Rect): Rect[] {
+  const area = place(margin, 58, page - 2 * margin, 160);
   const width = (area.width - pictureColumnGap) / 2;
   return [{ ...area, width }, { ...area, x: area.x + width + pictureColumnGap, width }];
 }
@@ -225,11 +223,11 @@ function picturePage(ctx: PictureContext) {
     if (pages) return (['left', 'right'] as const).map(side => ({ id, side,
       layout: id === ctx.spread && side === ctx.side ? ctx.layout : pages[side]?.layout ?? '' }));
     return [{ id, layout: id === ctx.spread ? ctx.layout : layout ?? '' }];
-  }).filter(({ layout }) => pictureLayouts.includes(layout));
+  }).filter(({ layout }) => layout === 'credits');
   const own: PictureEntry[] = [];
   let next = 0;
   for (const list of lists) {
-    for (const column of pictureColumns(list.layout, at.left)) {
+    for (const column of pictureColumns(at.left)) {
       const perLine = Math.max(10, Math.floor(column.width / detailCharWidth));
       const linesFor = (text: string) => text ? Math.ceil(text.length / perLine) : 0;
       let y = column.y;
@@ -251,7 +249,7 @@ function picturePage(ctx: PictureContext) {
   }
   const lastList = lists.at(-1);
   const last = lastList?.id === ctx.spread && (!('side' in lastList) || lastList.side === ctx.side);
-  return { pictures, entries: own, listed: next, missing: last ? pictures.length - next : 0 };
+  return { pictures, entries: own, listed: next, missing: last ? pictures.length - next : 0, last };
 }
 
 const listsSomething = (ctx: PictureContext) => {
@@ -328,14 +326,14 @@ export default defineTemplate({
   ],
   // Layouts that are variants of one design. The sidebar shows each family once, and its picker chooses the variant.
   layoutFamilies: {
-    pagePhoto: { label: 'Photo page', picker: { label: 'Photo style', component: variantPicker('style', 'Photo style', { bleed: 'Full bleed', framed: 'Framed', shaped: 'Shaped' }) } },
-    pageGrid: { label: 'Photo grid page', picker: { label: 'Grid size', component: variantPicker('size', 'Grid size', { '2x2': '2 × 2', '3x3': '3 × 3' }) } },
+    pagePhoto: { label: 'Photo', picker: { label: 'Photo style', component: variantPicker('style', 'Photo style', { bleed: 'Full bleed', framed: 'Framed', shaped: 'Shaped' }) } },
+    pageGrid: { label: 'Photo grid', picker: { label: 'Grid size', component: variantPicker('size', 'Grid size', { '2x2': '2 × 2', '3x3': '3 × 3' }) } },
   },
   // The builders type each layout's context from its own declarations and the document parameters above.
   spreads: ({ spread, page: pageLayout }) => ({
-    // Book ends: a first right page and a last left page.
+    // Title designs can be used on either side, as well as at the book ends.
     title: pageLayout({
-      label: 'Title page', sides: ['right'],
+      label: 'Title',
       parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow', markdown: 'inline' }) },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
@@ -348,7 +346,7 @@ export default defineTemplate({
       },
     }),
     cover: pageLayout({
-      label: 'Title photo', sides: ['right'],
+      label: 'Photo title',
       parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow', markdown: 'inline' }) },
       boxes: { hero: box.photo('Title photo') },
       render: (ctx) => {
@@ -365,12 +363,12 @@ export default defineTemplate({
         </PagePaper>;
       },
     }),
-    // The closing page adds a colophon and the book's collected credits below its picture list.
+    // One reusable picture list, with optional closing text. Collected credits print below the final list.
     credits: pageLayout({
-      label: 'Picture list', sides: ['left'],
+      label: 'Picture list',
       parameters: {
         listHeading: p.string({ label: 'Heading', default: 'Pictures', markdown: 'inline' }),
-        colophon: p.string({ label: 'Colophon', default: 'Made with ImageFlow.', multiline: true, maxLength: 300, markdown: 'inline',
+        colophon: p.string({ label: 'Colophon', default: '', multiline: true, maxLength: 300, markdown: 'inline',
           description: 'A few closing lines under the list: who made the book, when, or a dedication.' }),
       },
       render: (ctx) => {
@@ -379,9 +377,9 @@ export default defineTemplate({
           {/* No heading over an empty list when earlier Picture list pages already hold every photo. */}
           {listsSomething(ctx) &&
             <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.page(margin, 36, page - 2 * margin, 14)} />}
-          <PictureList context={ctx} columns={pictureColumns('credits', at.page)} />
-          <ctx.Text presentation="inline" parameter="colophon" className="colophon" rect={at.page(margin, 226, page - 2 * margin, 18)} />
-          <Credits context={ctx} rect={at.page(margin, 246, page - 2 * margin, 14)} />
+          <PictureList context={ctx} columns={pictureColumns(at.page)} />
+          {ctx.params.colophon && <ctx.Text presentation="inline" parameter="colophon" className="colophon" rect={at.page(margin, 226, page - 2 * margin, 18)} />}
+          {picturePage(ctx).last && <Credits context={ctx} rect={at.page(margin, 246, page - 2 * margin, 14)} />}
         </PagePaper>;
       },
     }),
@@ -418,7 +416,7 @@ export default defineTemplate({
       },
     }),
     textPage: pageLayout({
-      label: 'Story page', parameters: { heading }, boxes: { body: body('Story') },
+      label: 'Story', parameters: { heading }, boxes: { body: body('Story') },
       anchors: ({ params }) => oneLine(params.heading) ? [{ id: 'section', title: oneLine(params.heading) }] : [],
       render: ctx => {
         const at = ctx.geometry.design(canvas);
@@ -431,7 +429,7 @@ export default defineTemplate({
       },
     }),
     notePage: pageLayout({
-      label: 'Notes page', parameters: { heading, note },
+      label: 'Notes', parameters: { heading, note },
       render: ctx => {
         const at = ctx.geometry.design(canvas);
         return <PagePaper context={ctx}>
@@ -441,7 +439,7 @@ export default defineTemplate({
       },
     }),
     quotePage: pageLayout({
-      label: 'Quote page', parameters: {
+      label: 'Quote', parameters: {
         quote: p.string({ label: 'Quote', default: 'Each turn opened a different view of the same water.', multiline: true, maxLength: 240, markdown: 'inline',
           description: 'One or two sentences, set large. Longer passages belong in a story.' }),
         attribution: p.string({ label: 'Attribution', default: '', maxLength: 80, placeholder: 'Who said it, or where', markdown: 'inline' }),
@@ -457,14 +455,14 @@ export default defineTemplate({
         </PagePaper>;
       },
     }),
-    gridPage: pageLayout({ label: 'Photo grid page 2×2', family: 'pageGrid', variant: { size: '2x2' }, boxes: gridBoxes('2x2'),
+    gridPage: pageLayout({ label: 'Photo grid 2×2', family: 'pageGrid', variant: { size: '2x2' }, boxes: gridBoxes('2x2'),
       render: ctx => {
         const at = ctx.geometry.design(canvas);
         const cells = ctx.geometry.grid(at.page(24, 24, 242, 242), { columns: 2, rows: 2, gap: at.width(gaps[ctx.document.spacing]) });
         return <PagePaper context={ctx}>{gridSizes['2x2'].ids.map((id, i) => <ctx.PhotoBox key={id} id={id} rect={cells[i]} />)}</PagePaper>;
       },
     }),
-    gridPage9: pageLayout({ label: 'Photo grid page 3×3', family: 'pageGrid', variant: { size: '3x3' }, boxes: gridBoxes('3x3'),
+    gridPage9: pageLayout({ label: 'Photo grid 3×3', family: 'pageGrid', variant: { size: '3x3' }, boxes: gridBoxes('3x3'),
       render: ctx => {
         const at = ctx.geometry.design(canvas);
         const cells = ctx.geometry.grid(at.page(24, 24, 242, 242), { columns: 3, rows: 3, gap: at.width(gaps[ctx.document.spacing]) });
@@ -548,7 +546,7 @@ export default defineTemplate({
 
     // A map page pairs freely with stories, photos, notes or another map.
     mapPage: pageLayout({
-      label: 'Map page',
+      label: 'Inset map',
       parameters: { mapCaption: p.string({ label: 'Map caption', default: '', maxLength: 160, placeholder: 'Where the story goes', markdown: 'inline' }) },
       elements: { map: {
         label: 'Map',
@@ -567,19 +565,6 @@ export default defineTemplate({
       },
     }),
 
-    // Overflow picture lists are pages too; each takes the next entries in book order.
-    pictures: pageLayout({
-      label: 'Picture list page',
-      parameters: { listHeading: p.string({ label: 'Heading', default: 'Pictures', markdown: 'inline' }) },
-      render: (ctx) => {
-        const at = ctx.geometry.design(canvas);
-        return <PagePaper context={ctx}>
-          {listsSomething(ctx) &&
-            <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.page(margin, 36, page - 2 * margin, 14)} />}
-          <PictureList context={ctx} columns={pictureColumns('pictures', at.page)} />
-        </PagePaper>;
-      },
-    }),
   }),
   // A new book starts with a tour of the layouts, in the sample book's order, ready for photos and text. New Book can
   // also start an empty book.
