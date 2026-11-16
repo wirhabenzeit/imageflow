@@ -103,3 +103,39 @@ export async function approveNetwork(folder: string, origins: readonly string[],
   book.writes = task.catch(() => {});
   await task;
 }
+
+// Whether this book is the user's own (ADR 0006): made with New Book on this Mac from a template whose sites were
+// already trusted, saved as a copy of such a book, or trusted once when it came from elsewhere. Its template may then
+// reach every site it declares without asking, including sites added later by the user or their agent. The mark is
+// app-owned and bound to the book's filesystem identity, so a book received from someone else cannot claim it. A book
+// that already had sites allowed before the mark existed counts as trusted: the user decided for it then.
+const trustKey = 'trust:book';
+export async function bookTrusted(folder: string) {
+  const { book } = await accessFor(folder);
+  return !!book.grants[trustKey] || Object.keys(book.grants).some((key) => key.startsWith('network:'));
+}
+async function changeGrants(folder: string, change: (grants: Grants) => Grants) {
+  const { key, book } = await accessFor(folder);
+  const task = book.writes.then(async () => {
+    const grants = change({ ...book.grants });
+    await saveGrants(key, grants);
+    book.grants = grants;
+  });
+  book.writes = task.catch(() => {});
+  await task;
+}
+/** Called when the user made this book here, or chose to trust it. */
+export async function trustBook(folder: string) {
+  if ((await accessFor(folder)).book.grants[trustKey]) return;
+  await changeGrants(folder, (grants) => ({ ...grants, [trustKey]: { path: 'trusted' } }));
+}
+/** Withdraws the mark and every site allowed for the book; its template asks again. */
+export async function distrustBook(folder: string) {
+  await changeGrants(folder, (grants) => Object.fromEntries(Object.entries(grants).filter(([key]) => key !== trustKey && !key.startsWith('network:'))));
+}
+/** A saved copy of the user's own book is theirs too, with the sites already allowed for it. */
+export async function transferBookTrust(from: string, to: string) {
+  if (!await bookTrusted(from)) return;
+  await approveNetwork(to, await approvedNetwork(from));
+  await trustBook(to);
+}

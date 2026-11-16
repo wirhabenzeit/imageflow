@@ -17,7 +17,7 @@ import type { SourceEntry } from '../src/source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
-import { configureSourceAccess } from './source-access';
+import { bookTrusted, configureSourceAccess, distrustBook, trustBook } from './source-access';
 import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
@@ -560,6 +560,12 @@ async function createNewBook(owner: BrowserWindow, selected: NewBookChoice, clos
   if (choice.canceled || !choice.filePath || owner.isDestroyed()) return false;
   const folder = await createDocument(documentPath(choice.filePath),
     (stage) => library.withTemplate(selected.id, (current) => createBook(stage, current, selected.start)));
+  // A book made here is the user's own, and its template may reach its sites without asking, now and after edits
+  // (ADR 0006) — when the template it starts from was trusted for them: a built-in, a template with no sites, or one
+  // whose sites the user allowed when importing it. Otherwise the book asks once, like a book from elsewhere.
+  const declared = template.entry.network ?? [];
+  const trusted = declared.length ? await bookNetworkTrust(template.entry.hash, declared).catch(() => []) : [];
+  if (declared.every((origin) => trusted.includes(origin))) await trustBook(folder).catch((error) => console.warn('ImageFlow could not record the new book as yours', error));
   await openDocument(folder);
   if (closeOwner) owner.close();
   return true;
@@ -781,6 +787,24 @@ async function bookNetworkTrust(hash: string, declared?: readonly string[]) {
   return declared ? trustedOrigins(declared, { builtIn: builtIn !== undefined, allowed }) : allowed;
 }
 
+/** Withdraws the user's trust in the focused book (ADR 0006): its template asks again before reaching any site. */
+async function stopTrustingBook(owner: BaseWindow | undefined) {
+  const document = focusedDocument(owner);
+  if (!document || document.closing) return;
+  const window = document.window;
+  if (!await bookTrusted(document.book.folder)) {
+    await dialog.showMessageBox(window, { type: 'info', message: 'This book is not trusted.',
+      detail: 'Its template asks before it connects to the internet.' });
+    return;
+  }
+  const { response } = await dialog.showMessageBox(window, { type: 'warning', buttons: ['Stop Trusting', 'Cancel'], defaultId: 1, cancelId: 1,
+    message: 'Stop trusting this book’s template?',
+    detail: 'Maps and other pictures that load from the internet stop drawing until you trust the book again.' });
+  if (response !== 0) return;
+  await distrustBook(document.book.folder);
+  await document.updateNetwork();
+}
+
 /** Library entries with why their network access needs no question, for Manage Templates and New Book. */
 async function libraryWithTrust() {
   return Promise.all((await library.list()).map(async (entry) => {
@@ -928,7 +952,8 @@ function installMenu() {
       { type: 'separator' }, registered('manage-sources'), registered('copy-assets', 'copy-assets', 'checkbox'),
       { type: 'separator' }, registered('book-check'),
     ] },
-    { label: 'Templates', submenu: [{ label: 'Manage Templates…', click: () => showTemplates() }] },
+    { label: 'Templates', submenu: [{ label: 'Manage Templates…', click: () => showTemplates() },
+      { type: 'separator' }, { id: 'stop-trusting-book', label: 'Stop Trusting This Book’s Template…', enabled: false, click: (_item, owner) => void stopTrustingBook(owner) }] },
     { label: 'View', submenu: [
       registered('sidebar', 'toggle-project'), registered('inspector', 'toggle-inspector'), registered('sources', 'toggle-sources'),
       { type: 'separator' }, registered('layout-vertical', 'layout-vertical', 'radio'), registered('layout-grid', 'layout-grid', 'radio'),
@@ -976,6 +1001,8 @@ function updateMenus() {
   }
   const inAssets = !!document && owner === assetsWindows.get(document)?.window;
   const native = (!inBook && !inAssets) || (inBook && state.textEditing);
+  const stopTrusting = menu?.getMenuItemById('stop-trusting-book');
+  if (stopTrusting) stopTrusting.enabled = state.document;
   const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
   if (zoomAlias) zoomAlias.enabled = commandState('zoom-in', state).enabled;
   for (const direction of ['undo', 'redo']) {

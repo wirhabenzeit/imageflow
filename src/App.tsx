@@ -719,18 +719,19 @@ export function App() {
     // with a spinner that never stops and Quit refused.
     const progress = api.onProgress((stage) => { if (pendingTasks.current) setBusy(stage); });
     const appError = api.onAppError(setError);
+    const appNotice = api.onAppNotice(setNotice);
     let mounted = true;
     void api.currentProject().then((result) => {
       if (!mounted || current.current) return;
       if ('error' in result) setError(result.error);
       else adopt(result.value, true);
     });
-    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); };
+    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); appNotice(); };
   }, [api]);
 
   // Network origins the template declares (ADR 0006): checked once per book and template version (its hash) when it
-  // first renders, and again whenever an element editor opens. The app asks only about origins the book has not
-  // allowed for any version of its template. Newly allowed origins reload the frames so they may reach them.
+  // first renders, and again whenever an element editor opens. The user's own books never ask; a book from elsewhere
+  // asks once whether to trust it. Newly allowed origins reload the frames so they may reach them.
   const networkAsked = useRef(new Set<string>());
   // Resolves to the project ID to render from now on.
   function decideNetwork(declared: TemplateInfo | undefined, always = false): Promise<string | void> {

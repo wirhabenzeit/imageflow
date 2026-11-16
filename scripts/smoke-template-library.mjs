@@ -198,34 +198,47 @@ try {
   assert.equal(await editorReach(), 'allowed');
   const editorBefore = await editor.locator('iframe.element-editor-frame').getAttribute('src');
 
-  // Stop Allowing in Templates reaches the open book at once: its frames, and the open editor, load again without the
-  // sites, and editors ask.
-  const frameBefore = await editor.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
+  // A book made here is the user's own (ADR 0006): stopping the library's trust in the template and editing the book's
+  // template change nothing for it, and nothing asks.
+  await answer(1);
   await travelEntry.click();
   await trust.and(settings.locator(':enabled')).waitFor();
   assert.equal(await trust.isChecked(), true);
   await trust.uncheck();
-  await editor.waitForFunction((src) => {
-    const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-    return frame && frame.getAttribute('src') !== src;
-  }, frameBefore);
-  await editor.waitForFunction((src) => document.querySelector('iframe.element-editor-frame')?.getAttribute('src') !== src, editorBefore);
-  assert.equal(await editorReach(), 'blocked', 'the open editor lost its network access');
+  await settings.waitForFunction(() => !globalThis.document.querySelector('.template-settings input[type="checkbox"]:checked'));
+  assert.equal(await editorReach(), 'allowed', 'the open editor keeps the sites of a book made here');
   await editor.getByRole('toolbar', { name: 'Edit map' }).getByRole('button', { name: 'Done', exact: true }).click();
-  assert.deepEqual(await editorNetwork(editor), []);
-  assert.equal((await messages())[0].message, 'Allow this book’s template to connect to the internet?');
-
-  // Changing the book's template ends the trust: its editors ask again, and declining keeps them offline.
-  await answer(1);
   const unchanged = await editor.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
   await writeFile(join(book, 'template', 'index.tsx'), retitled('1.1.0'));
   await editor.waitForFunction((src) => {
     const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
     return frame && frame.getAttribute('src') !== src;
   }, unchanged);
-  // The book asks for the changed template when it renders, and its editors ask again after Not Now.
-  await shown('Allow this book’s template to connect to the internet?');
+  assert.deepEqual(await editorNetwork(editor), ['https://tiles.openfreemap.org']);
+  assert.deepEqual(await messages(), [], 'editing the template of a book made here never asks');
+
+  // Stop Trusting This Book's Template takes the sites away: the book then asks like a book from elsewhere, and Not Now
+  // keeps it offline. The first answer confirms stopping, every later one is Not Now.
+  await app.evaluate(({ dialog }) => {
+    globalThis.messages = [];
+    const responses = [0];
+    dialog.showMessageBox = async (...args) => { globalThis.messages.push(args.at(-1)); return { response: responses.shift() ?? 1, checkboxChecked: false }; };
+  });
+  const trusted = await editor.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
+  await app.evaluate(({ BrowserWindow, Menu }) => {
+    const owner = BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === 'imageflow://editor/');
+    Menu.getApplicationMenu().getMenuItemById('stop-trusting-book').click(undefined, owner);
+  });
+  await shown('Stop trusting this book’s template?');
+  await editor.waitForFunction((src) => {
+    const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return frame && frame.getAttribute('src') !== src;
+  }, trusted);
+  // Opening an editor asks, as for a book from elsewhere.
   assert.deepEqual(await editorNetwork(editor), []);
+  const question = await shown('Trust this book’s template?');
+  assert.deepEqual(question.buttons, ['Trust This Book', 'Not Now']);
+  assert.match(question.detail, /tiles\.openfreemap\.org/);
   // New template versions are imported through Templates, without book-authoring menus.
   await writeFile(join(travel, 'index.tsx'), retitled('1.1.0'));
   await answer(0);

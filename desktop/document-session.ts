@@ -13,7 +13,7 @@ import type { BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, 
 import { identifier } from '../src/project';
 import type { RenderProject } from '../src/project';
 import { printBook, savePdf } from './export';
-import { approveNetwork, approvedNetwork } from './source-access';
+import { approveNetwork, approvedNetwork, bookTrusted, trustBook } from './source-access';
 import { importIntoProject, loadProject, projectSummary, readProjectManifest } from './project';
 import type { ImportProgress } from './project';
 import type { OpenProject } from './project';
@@ -586,18 +586,33 @@ export class DocumentSession {
     if (!origins.length || !hash) { this.network = { hash, origins: [] }; return { origins: [] as string[] }; }
     while (this.askingNetwork) await this.askingNetwork.catch(() => {});
     const ask = (async () => {
+      const known = await approvedNetwork(book.folder);
+      // The user's own book (made here, or trusted once): every declared site, without asking. A site its template
+      // newly declares is recorded and named in a quiet notice instead of a question.
+      if (await bookTrusted(book.folder)) {
+        const added = origins.filter((origin) => !known.includes(origin));
+        if (added.length) {
+          await approveNetwork(book.folder, added, hash);
+          if (known.length && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice,
+            'This book’s template now also loads maps or data from ' + added.join(', ') + '.');
+        }
+        return origins;
+      }
       const trusted = await this.networkTrust?.(hash, origins).catch(() => []) ?? [];
-      const approved = new Set([...await approvedNetwork(book.folder), ...trusted]);
+      const approved = new Set([...known, ...trusted]);
       const pending = origins.filter((origin) => !approved.has(origin));
+      // A book from elsewhere, or made from a template whose sites were not allowed: the one question, for the book.
       if (pending.length && !this.window.isDestroyed()) {
         const { response } = await dialog.showMessageBox(this.window, {
-          type: 'question', buttons: ['Allow', 'Not Now'], defaultId: 0, cancelId: 1,
-          message: 'Allow this book’s template to connect to the internet?',
-          detail: 'This template loads maps or data from:\n' + pending.join('\n') + '\n\nAllow only templates you trust.',
+          type: 'question', buttons: ['Trust This Book', 'Not Now'], defaultId: 0, cancelId: 1,
+          message: 'Trust this book’s template?',
+          detail: 'Its template contains code that loads maps or data from:\n' + pending.join('\n') +
+            '\n\nTrust only books you made or got from someone you trust. A trusted book does not ask again, even when its template changes.',
         });
         if (response === 0) {
-          await approveNetwork(book.folder, pending, hash);
-          for (const origin of pending) approved.add(origin);
+          await approveNetwork(book.folder, origins, hash);
+          await trustBook(book.folder);
+          return origins;
         }
       }
       return origins.filter((origin) => approved.has(origin));

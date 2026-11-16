@@ -12,7 +12,7 @@ import type { OpenProject } from './project';
 import { CommittedProjectSaveError } from './persistence';
 import { captureProjectInputs } from './revisions';
 import { digestBytes, SourceStore, within } from './source-store';
-import { approveSource, approvedExtensions, transferSourceAccess } from './source-access';
+import { approveSource, approvedExtensions, transferSourceAccess, transferBookTrust } from './source-access';
 
 const filesOf = (book: OpenProject): ProjectFiles => structuredClone({ project: book.project, photoIndex: book.photoIndex });
 function reference(files: ProjectFiles, source: SourceEntry, path: string, linked: boolean) {
@@ -154,6 +154,8 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
     if (before.revision !== after.revision || before.observation !== after.observation) throw new Error('Sources changed while preparing the saved copy. Retry after the external save finishes.');
   });
   if (!includeAssets) await transferSourceAccess(book.folder, result, sourceEntries(book));
+  // A copy of the user's own book is theirs too (ADR 0006).
+  await transferBookTrust(book.folder, result);
   return result;
 }
 
