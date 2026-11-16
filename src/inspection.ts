@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { identifier } from './project';
+import type { PageSide } from './project';
 
 const id = identifier.refine((value) => value.length <= 256);
 export const makeInspectionSchema = (spread: z.ZodType<string, string>) => z.strictObject({
@@ -12,6 +13,8 @@ export const inspectionSchema = makeInspectionSchema(id);
 export type InspectionRequest = z.input<typeof inspectionSchema>;
 export type ElementMeasurement = {
   spread: string; id: string; kind: 'photo' | 'markdown' | 'element';
+  // The page the box or element is on, when the spread is shown as page layouts (ADR 0009).
+  page?: PageSide;
   // Axis-aligned bounds relative to the full sheet's outer bleed corner; not inferred CSS source positions.
   boundsMm: { x: number; y: number; width: number; height: number }; upright: boolean;
   typography: { fontFamily: string; fontSizePt: number; lineHeightPt: number | null; fontWeight: string; color: string };

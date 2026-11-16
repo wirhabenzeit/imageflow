@@ -61,5 +61,5 @@ export function inlinePlacement(geometry: BookGeometry | undefined, open: OpenEd
 export function hiddenOccurrence(open: OpenEditor, target?: Target): InlineEditing | undefined {
   if (open.presentation !== 'inline') return undefined;
   if (open.kind === 'element') return { spread: open.spread, element: open.element };
-  return target && { spread: open.spread, edits: target.edits.join(' '), occurrence: target.occurrence };
+  return target && { spread: open.spread, ...(target.page ? { page: target.page } : {}), edits: target.edits.join(' '), occurrence: target.occurrence };
 }

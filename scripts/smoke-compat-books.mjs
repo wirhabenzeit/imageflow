@@ -80,7 +80,8 @@ try {
   const first = Object.keys(expected)[0];
   await cp(join(books, first), newer, { recursive: true });
   const project = JSON.parse(await readFile(join(newer, 'project.json'), 'utf8'));
-  await writeFile(join(newer, 'project.json'), JSON.stringify({ ...project, schemaVersion: project.schemaVersion + 1 }, null, 2) + '\n');
+  // The compatibility books are format 1, which is not the newest format this app reads, so use one far beyond it.
+  await writeFile(join(newer, 'project.json'), JSON.stringify({ ...project, schemaVersion: 99 }, null, 2) + '\n');
   const before = await contents(newer);
   await assert.rejects(testBook(app, newer), /newer version of ImageFlow.*Update ImageFlow/s);
   assert.deepEqual(await contents(newer), before);

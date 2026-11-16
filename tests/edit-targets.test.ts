@@ -47,3 +47,17 @@ test('resizing or scrolling the canvas does not move an open editor to another o
   const after = numberOccurrences([scaled(10), scaled(300)]);
   assert.equal(resolveTarget(after, targetKey(before[1]), anchor, { x: 200, y: 300, width: 300, height: 300 }), after[1]);
 });
+
+test('the same field on two pages is two targets, each numbered on its own page', () => {
+  // A spread shown as pages (ADR 0009): each page's ctx.edit('heading') edits its own page's value.
+  const left = { ...node(10), page: 'left' as const }, right = { ...node(10), x: 400, page: 'right' as const };
+  const targets = numberOccurrences([left, { ...left, y: 300 }, right]);
+  assert.deepEqual(targets.map(({ occurrence }) => occurrence), [0, 1, 0]);
+  assert.notEqual(targetKey(targets[0]), targetKey(targets[2]));
+  assert.equal(resolveTarget(targets, targetKey(targets[2])), targets[2]);
+  // An open editor on the right page never follows a nearer node on the left page.
+  const anchor = targetAnchor(targets[2], sheet);
+  assert.equal(anchor.page, 'right');
+  assert.equal(resolveTarget([targets[0], { ...targets[2], x: 420 }], targetKey(targets[2]), { ...anchor, x: 0.1 }, sheet)?.page, 'right');
+  assert.equal(resolveTarget([targets[0]], targetKey(targets[2]), anchor, sheet), undefined);
+});

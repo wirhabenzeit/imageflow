@@ -54,7 +54,8 @@ for (const name of names) {
     const { folder, cache } = await copy(t, name);
     const before = await contents(folder);
     const book = await loadProject(folder, cache);
-    assert.equal(book.project.schemaVersion, bookFormatVersion);
+    // Books without page states stay in format 1, which every released version reads.
+    assert.equal(book.project.schemaVersion, 1);
     assert.deepEqual(book.problems, []);
     assert.ok(book.project.spreads.length > 0);
     // Every registered source resolved.

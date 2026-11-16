@@ -2,7 +2,7 @@ import type { PhotoView, PhotoViewCommand } from './photo-view';
 import type { PrintFormat, PrintSide, Span } from './format';
 import type { Parameters } from './parameters';
 import type { ControlItem } from './controls';
-import type { ProjectFiles, Values } from './project';
+import type { PageSide, ProjectFiles, Values } from './project';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-check';
 import type { ImportMode, SourceStatus } from './source-locations';
 import type { AppSettings, SettingsPane } from './settings';
@@ -245,12 +245,14 @@ export type BookGeometry = {
   sheets: (Rect & { spread: string; zoom?: number })[];
   // `upright` is false when template CSS rotates or skews the box, so its rectangle is only a bounding box.
   // `custom` marks a photo box the template draws with a render callback; the crop editor then lets its artwork show.
-  boxes: (Rect & { spread: string; id: string; type: BoxLocation['type'] | 'element'; upright: boolean; rect?: Rect; custom?: boolean })[];
+  // `page` is the page a box or element is on when the spread is shown as page layouts (ADR 0009); IDs repeat across pages.
+  boxes: (Rect & { spread: string; id: string; page?: PageSide; type: BoxLocation['type'] | 'element'; upright: boolean; rect?: Rect; custom?: boolean })[];
   // Nodes a template marked with `ctx.edit(...)`, and boxes and elements with parameters. `owner` is the box or
   // element the node is, so targets that share a rectangle stay apart; standalone marked nodes have none.
   // `occurrence` counts the earlier nodes on the sheet that edit the same fields, so repeated uses of a field, such
   // as a heading shown twice, are separate targets that edit the same saved value.
-  targets: (Rect & { spread: string; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string }; upright?: boolean;
+  // `page` is the page the node is on, for every target: occurrences are counted per page.
+  targets: (Rect & { spread: string; page?: PageSide; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string }; upright?: boolean;
     inlineText?: boolean;
     // True for text in a vertical writing mode, whose lines run down the rectangle.
     vertical?: boolean;
@@ -261,6 +263,8 @@ export type BookGeometry = {
 export type Issue = {
   message: string; spread?: string; where?: string;
   code?: string; box?: string; element?: string; source?: string; parameter?: string;
+  // The page of a spread shown as page layouts that the box or element is on.
+  page?: PageSide;
   details?: Record<string, string | number>; suggestion?: string;
 };
 export const issueText = ({ message, where }: Issue) => where ? where + ' · ' + message : message;

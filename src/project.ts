@@ -28,14 +28,73 @@ const box = z.object({
   'A box holds one assignment, and only photos have a crop.');
 
 
-// The book format this app reads and writes (`project.json` → `schemaVersion`). A book saved by a newer app with a
-// higher number is refused with a request to update ImageFlow, and is left as it is.
-export const bookFormatVersion = 1;
+// The book formats this app reads and writes (`project.json` → `schemaVersion`). A book saved by a newer app with a
+// higher number is refused with a request to update ImageFlow, and is left as it is. Format 2 adds page states (ADR
+// 0009). A book is always written in the lowest format that holds it: only a book with page states is format 2, so
+// every other book stays readable by apps that know format 1, which would drop the page states they do not know.
+export const bookFormatVersion = 2;
 export const newerBookMessage = (version: number) => 'This book was saved by a newer version of ImageFlow (book format ' +
-  version + '; this version reads format ' + bookFormatVersion + '). Update ImageFlow to open it. The book was not changed.';
-const schemaVersion = z.literal(bookFormatVersion, {
+  version + '; this version reads formats up to ' + bookFormatVersion + '). Update ImageFlow to open it. The book was not changed.';
+// Release gates (ADR 0009). Format 2 is defined before this version can handle what it stores, so a book that uses
+// it is refused with a request to update rather than opened with parts the app does not yet see:
+// - Stored page states and replaced content (`pages`, `displaced`) hold references to photos, texts and files that
+//   asset usage, source removal and saving a copy do not enumerate yet; they would report such sources as unused or
+//   leave dangling references. Phase 2 lifts this gate once every reference consumer reads every state.
+// - A spread shown as pages (`split`) would be drawn and exported as the spread layout it remembers. Phase 3 lifts
+//   this gate once pages are drawn.
+export const pageStatesSupported = false;
+export const pageLayoutsShown = false;
+export const pagesUnsupportedMessage = 'This book uses page layouts, which this version of ImageFlow does not support yet. ' +
+  'Update ImageFlow to open it. The book was not changed.';
+type GatedSpread = { pages?: unknown; displaced?: unknown; split?: unknown };
+// Whether this version refuses a spread because of what it stores.
+const gated = (spread: GatedSpread | null | undefined) => !!spread && ((!pageStatesSupported && (spread.pages !== undefined || spread.displaced !== undefined)) ||
+  (!pageLayoutsShown && spread.split !== undefined));
+/** Why this app cannot open a `project.json` at all, before validation, so the message is only the request to update. */
+export function unsupportedBookMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const { schemaVersion: version, spreads } = value as { schemaVersion?: unknown; spreads?: unknown };
+  if (typeof version === 'number' && Number.isInteger(version) && version > bookFormatVersion) return newerBookMessage(version);
+  if (Array.isArray(spreads) && spreads.some((spread) => gated(spread as GatedSpread | null))) return pagesUnsupportedMessage;
+  return undefined;
+}
+const schemaVersion = z.literal([1, bookFormatVersion], {
   error: ({ input }) => typeof input === 'number' && Number.isInteger(input) && input > bookFormatVersion ? newerBookMessage(input) : undefined,
 });
+
+// The state a spread or one of its pages keeps for all its layouts: `definition` is the layout it shows, or showed
+// last, and picks which of the boxes, elements and parameters are shown.
+const layoutState = {
+  definition: identifier,
+  params: values,
+  boxes: z.record(identifier, box).default({}),
+  elements: z.record(identifier, z.object({ params: values })).default({}),
+};
+const pageState = z.object(layoutState);
+export const pageSides = ['left', 'right'] as const;
+
+// A spread as format 2 defines it. The release gates above apply to whole books (`projectSchema`), so this schema
+// stays testable and ready for the phases that lift them.
+export const spreadSchema = z.object({
+  id: identifier,
+  ...layoutState,
+  // Each page's own state, once the spread was shown as page layouts (ADR 0009). A page keeps it, and its layout,
+  // while the spread shows a spread layout, so showing pages again restores them.
+  pages: z.object({ left: pageState.optional(), right: pageState.optional() }).optional(),
+  // The spread shows its pages' layouts rather than `definition`.
+  split: z.literal(true).optional(),
+  // Content a layout change replaced (ADR 0009 §3), with the state it came from. Unlike content a layout has no box
+  // for, it never shows again by itself: only *Place in…* returns it, and *Discard* removes it.
+  displaced: z.array(z.object({
+    from: z.enum(['spread', ...pageSides]),
+    box: identifier,
+    state: box.refine(({ photo, text }) => !!(photo || text), 'Only content is set aside: a photo or a text.'),
+  })).optional(),
+}).refine(({ pages, split }) => !split || !!(pages?.left || pages?.right), { message: 'A spread shown as pages needs the state of at least one page.', path: ['split'] });
+
+// The lowest book format that holds a project.
+export const bookFormatOf = (project: { spreads: readonly { pages?: unknown; split?: unknown; displaced?: unknown }[] }) =>
+  project.spreads.some(({ pages, split, displaced }) => pages !== undefined || split !== undefined || displaced !== undefined) ? 2 : 1;
 
 export const projectSchema = z.object({
   schemaVersion,
@@ -51,14 +110,10 @@ export const projectSchema = z.object({
   // File parameter sources (such as GPX tracks), by ID: owned relative paths or explicit external links.
   files: z.record(identifier, sourceReferenceSchema).default({}),
   // Each spread keeps one state for all its layouts: `definition` picks which boxes and elements are shown.
-  spreads: z.array(z.object({
-    id: identifier,
-    definition: identifier,
-    params: values,
-    boxes: z.record(identifier, box).default({}),
-    elements: z.record(identifier, z.object({ params: values })).default({}),
-  })).refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
-});
+  spreads: z.array(spreadSchema.refine((spread) => !gated(spread), pagesUnsupportedMessage))
+    .refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
+  // Every parsed book carries the format that holds it, so saving it writes that format.
+}).transform((project) => ({ ...project, schemaVersion: bookFormatOf(project) as 1 | 2 }));
 
 export const photoIndexSchema = z.record(identifier, z.object({
   path: z.string(),
@@ -74,6 +129,10 @@ export const photoIndexSchema = z.record(identifier, z.object({
 
 export type Project = z.infer<typeof projectSchema>;
 export type SpreadState = Project['spreads'][number];
+export type PageSide = typeof pageSides[number];
+export type PageState = NonNullable<NonNullable<SpreadState['pages']>[PageSide]>;
+/** The state a box, element or parameter of a spread lives in: one of its pages', or the spread's own without a page. */
+export const scopeState = (spread: SpreadState, page?: PageSide): SpreadState | PageState | undefined => page ? spread.pages?.[page] : spread;
 export type BoxState = z.infer<typeof box>;
 export type Values = z.infer<typeof values>;
 export type PhotoIndex = z.infer<typeof photoIndexSchema>;

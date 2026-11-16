@@ -30,8 +30,8 @@ export type CheckDraft = (book: OpenProject) => {
 };
 
 function diagnostic(issue: Issue, severity: 'error' | 'warning'): AuthoringDiagnostic {
-  const { message, code, spread, where, box, element, source, parameter, details, suggestion } = issue;
-  const location = Object.fromEntries(Object.entries({ spread, box, element, source, parameter, where })
+  const { message, code, spread, where, box, element, page, source, parameter, details, suggestion } = issue;
+  const location = Object.fromEntries(Object.entries({ spread, box, element, page, source, parameter, where })
     .filter(([, value]) => value !== undefined && value !== ''));
   return {
     code: code ?? (severity === 'error' ? 'layout-error' : 'layout-warning'), stage: 'render', severity, message,

@@ -5,16 +5,18 @@ import type { PresentationView } from './presentation-model';
 import { reorderOffsets, reorderTiming } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { Issue } from './desktop';
+import type { PageSide } from './project';
 export type PictureStatus = { type: 'pictures'; pending: number; errors: Issue[] };
 
 type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
   reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number; hiding?: boolean; start?: number };
 
 // The occurrence an inline editor is drawn over, whose artwork the book view hides while it edits.
-export type InlineEditing = { spread: string; element: string } | { spread: string; edits: string; occurrence: number };
+// `page` names the page of a spread shown as pages (ADR 0009); without it, the spread's own layout.
+export type InlineEditing = ({ spread: string; element: string } | { spread: string; edits: string; occurrence: number }) & { page?: PageSide };
 
 // The unsaved placement of a crop gesture on a photo box with a render callback.
-export type CropPreview = { spread: string; box: string; placement: { centerX: number; centerY: number; zoom: number } };
+export type CropPreview = { spread: string; box: string; page?: PageSide; placement: { centerX: number; centerY: number; zoom: number } };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
 export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, release }: {
