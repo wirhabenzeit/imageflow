@@ -66,7 +66,9 @@ test('findings and edit targets name the page of their box or element', () => {
   assert.deepEqual(ownerOf(asDom<Element>(leftHero.children[0])), { box: 'hero', page: 'left' });
   assert.deepEqual(ownerOf(asDom<Element>(spreadHero)), { box: 'hero' });
   assert.deepEqual(ownerOf(asDom<Element>(split)), {});
-  assert.deepEqual(ownTarget(asDom<HTMLElement>(rightGrid)), { owner: { type: 'element', id: 'grid', page: 'right' } });
+  // Edit targets carry their page themselves (render.tsx uses pageOf for every target), so the owner only names the node.
+  assert.deepEqual(ownTarget(asDom<HTMLElement>(rightGrid)), { owner: { type: 'element', id: 'grid' } });
+  assert.equal(pageOf(asDom<Element>(rightGrid)), 'right');
   assert.deepEqual(ownTarget(asDom<HTMLElement>(spreadHero)), { owner: { type: 'box', id: 'hero' } });
   assert.equal(declaredName({ kind: 'box', id: 'hero', page: 'left' }), 'left page · box hero');
   assert.equal(declaredName({ kind: 'element', id: 'grid' }), 'element grid');

@@ -36,7 +36,7 @@ import { resolveEditPath } from './editing';
 import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
 import type { VariantTags } from './layouts';
 import { numberOccurrences } from './edit-targets';
-import { declaredName, declaredNode, declaredNodes, findDeclared, onPage, ownerOf, ownTarget, pageAttribute } from './page-scope';
+import { declaredName, declaredNode, declaredNodes, findDeclared, onPage, ownerOf, ownTarget, pageAttribute, pageOf } from './page-scope';
 import { textEditorOwner } from './inline-text';
 import { inlineTextFrame } from './inline-text-frame';
 import { readEdit } from './editing';
@@ -475,9 +475,11 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
           };
         });
       }),
-      // Nodes that edit the same fields on a sheet, such as a heading shown twice, are told apart by occurrence.
+      // Nodes that edit the same fields on a sheet, such as a heading shown twice, are told apart by occurrence. Every
+      // target names its page, whether or not it is a box or element: two pages' `ctx.edit('heading')` are different
+      // targets that edit different saved values.
       targets: sheets.flatMap(({ spread, sheet }) => numberOccurrences([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].map((node) => ({
-        spread, edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node), upright: upright(node, sheet),
+        spread, ...onPage(pageOf(node)), edits: node.dataset.edit!.split(' ').filter(Boolean), ...relative(node), upright: upright(node, sheet),
         ...(node.hasAttribute('data-inline-text') ? { inlineText: true } : {}),
         ...(/^(vertical|sideways)/.test(getComputedStyle(node).writingMode) ? { vertical: true } : {}),
         ...(node.dataset.textFallback ? { textFallback: { parameter: node.dataset.edit!, text: node.dataset.textFallback,
@@ -504,7 +506,9 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
       if (typeof element === 'string') {
         hidden = findDeclared(sheet, { element, page: page === 'left' || page === 'right' ? page : undefined }).map(({ node }) => node);
       } else if (typeof edits === 'string') {
+        // Occurrences are counted per page, as the geometry numbers them.
         const marked = [...sheet.querySelectorAll<HTMLElement>('[data-edit]')]
+          .filter((node) => pageOf(node) === (page === 'left' || page === 'right' ? page : undefined))
           .filter((node) => node.dataset.edit!.split(' ').filter(Boolean).join(' ') === edits)[Number(occurrence) || 0];
         if (marked) hidden = [marked];
       }
@@ -514,11 +518,11 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     // its mask or artwork follows the crop before it is saved. Without a placement the saved crop shows again.
     window.addEventListener('message', (event: MessageEvent) => {
       if (event.source !== parent || event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'crop-preview') return;
-      const { spread, box, placement } = event.data;
+      const { spread, box, page, placement } = event.data;
       const valid = placement && [placement.centerX, placement.centerY, placement.zoom].every(Number.isFinite);
       if (typeof spread === 'string' && typeof box === 'string' && valid) {
         setLivePlacement(spread, box, { centerX: Math.min(1, Math.max(0, placement.centerX)), centerY: Math.min(1, Math.max(0, placement.centerY)),
-          zoom: Math.min(20, Math.max(1, placement.zoom)) });
+          zoom: Math.min(20, Math.max(1, placement.zoom)) }, page === 'left' || page === 'right' ? page : undefined);
       } else setLivePlacement('', '', undefined);
     });
   }

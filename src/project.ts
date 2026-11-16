@@ -35,6 +35,21 @@ const box = z.object({
 export const bookFormatVersion = 2;
 export const newerBookMessage = (version: number) => 'This book was saved by a newer version of ImageFlow (book format ' +
   version + '; this version reads formats up to ' + bookFormatVersion + '). Update ImageFlow to open it. The book was not changed.';
+// Release gate: this version stores page states but cannot draw a spread shown as pages yet, so it refuses such a
+// book rather than show and export the spread layout it remembers. Drawing pages (ADR 0009, phase 3) lifts it.
+export const pageLayoutsShown = false;
+export const pagesUnsupportedMessage = 'This book shows spreads as separate pages, which this version of ImageFlow cannot show yet. ' +
+  'Update ImageFlow to open it. The book was not changed.';
+/** Why this app cannot open a `project.json` at all, before validation, so the message is only the request to update. */
+export function unsupportedBookMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const { schemaVersion: version, spreads } = value as { schemaVersion?: unknown; spreads?: unknown };
+  if (typeof version === 'number' && Number.isInteger(version) && version > bookFormatVersion) return newerBookMessage(version);
+  if (!pageLayoutsShown && Array.isArray(spreads) && spreads.some((spread) => (spread as { split?: unknown } | null)?.split !== undefined)) {
+    return pagesUnsupportedMessage;
+  }
+  return undefined;
+}
 const schemaVersion = z.literal([1, bookFormatVersion], {
   error: ({ input }) => typeof input === 'number' && Number.isInteger(input) && input > bookFormatVersion ? newerBookMessage(input) : undefined,
 });
@@ -58,11 +73,19 @@ const spreadSchema = z.object({
   pages: z.object({ left: pageState.optional(), right: pageState.optional() }).optional(),
   // The spread shows its pages' layouts rather than `definition`.
   split: z.literal(true).optional(),
-}).refine(({ pages, split }) => !split || !!(pages?.left || pages?.right), { message: 'A spread shown as pages needs the state of at least one page.', path: ['split'] });
+  // Content a layout change replaced (ADR 0009 §3), with the state it came from. Unlike content a layout has no box
+  // for, it never shows again by itself: only *Place in…* returns it, and *Discard* removes it.
+  displaced: z.array(z.object({
+    from: z.enum(['spread', ...pageSides]),
+    box: identifier,
+    state: box.refine(({ photo, text }) => !!(photo || text), 'Only content is set aside: a photo or a text.'),
+  })).optional(),
+}).refine(({ pages, split }) => !split || !!(pages?.left || pages?.right), { message: 'A spread shown as pages needs the state of at least one page.', path: ['split'] })
+  .refine(({ split }) => pageLayoutsShown || !split, { message: pagesUnsupportedMessage, path: ['split'] });
 
 // The lowest book format that holds a project.
-export const bookFormatOf = (project: { spreads: readonly { pages?: unknown; split?: unknown }[] }) =>
-  project.spreads.some(({ pages, split }) => pages !== undefined || split !== undefined) ? 2 : 1;
+export const bookFormatOf = (project: { spreads: readonly { pages?: unknown; split?: unknown; displaced?: unknown }[] }) =>
+  project.spreads.some(({ pages, split, displaced }) => pages !== undefined || split !== undefined || displaced !== undefined) ? 2 : 1;
 
 export const projectSchema = z.object({
   schemaVersion,

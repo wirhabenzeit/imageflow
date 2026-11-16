@@ -9,7 +9,7 @@ import { z } from 'zod';
 import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanFits } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
 import { identifier, renderView, values } from './project';
-import type { Photo, ProjectFile, RenderProject, RenderView, SpreadState, Values } from './project';
+import type { PageSide, Photo, ProjectFile, RenderProject, RenderView, SpreadState, Values } from './project';
 import { getCrop, placementIn } from './spread';
 import type { Crop, Placement as CropPlacement } from './spread';
 import { declarationConflicts, familyProblems } from './layouts';
@@ -508,6 +508,8 @@ export function templateInfo(template: Template): TemplateInfo {
 type SpreadValues = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'elements'>;
 const SpreadData = createContext<{
   book: RenderProject; spread: SpreadState; format: ResolvedFormat; renderPhotos: boolean;
+  // The page this layout draws, for a spread shown as page layouts (ADR 0009); undefined for the spread's own layout.
+  page?: PageSide;
   definition: Template['spreads'][string]; documentParameters: Parameters; values: SpreadValues; lazyPhotos: boolean;
 } | null>(null);
 
@@ -572,17 +574,21 @@ export type PhotoRender = {
 // `uid` is unique in the book (spread and box), for SVG ids such as a clipPath's. Ids may contain hyphens, so the
 // spread id's length keeps pairs such as one-x/hero and one/x-hero apart. Identifiers never contain '.', so a
 // callback derives further ids as uid + '.mask', and export suffixes its copies with '.p1' (see svg-ids.ts).
-export const photoBoxUid = (spread: string, box: string) => 'if-' + spread.length + '-' + spread + '-' + box;
+// Boxes on a page get their own prefix (`ifl-`, `ifr-`): the two pages of a spread can both have a `hero`, and no
+// identifier can turn one prefix into the other.
+export const photoBoxUid = (spread: string, box: string, page?: PageSide) =>
+  (page ? 'if' + page[0] : 'if') + '-' + spread.length + '-' + spread + '-' + box;
+const liveKey = (spread: string, box: string, page?: PageSide) => spread + '\u0000' + (page ?? '') + '\u0000' + box;
 export type PhotoBoxState = { id: string; uid: string; params: Values; photo: Photo | null };
 export type PhotoBoxRender = (photo: PhotoRender, box: PhotoBoxState) => ReactNode;
 
-// The placement a crop gesture shows before it is saved, by spread and box. The app sends it to the book frame while
+// The placement a crop gesture shows before it is saved, by spread, page and box. The app sends it to the book frame while
 // a photo of a box with a render callback is selected, so the template's artwork follows the gesture.
 const livePlacements = new Map<string, CropPlacement>();
 const liveListeners = new Set<() => void>();
-export function setLivePlacement(spread: string, box: string, placement: CropPlacement | undefined) {
+export function setLivePlacement(spread: string, box: string, placement: CropPlacement | undefined, page?: PageSide) {
   // One gesture at a time: a new placement replaces any other, and none clears them all.
-  const key = spread + '\u0000' + box;
+  const key = liveKey(spread, box, page);
   const current = livePlacements.get(key);
   if (!placement) {
     if (!livePlacements.size) return;
@@ -658,7 +664,7 @@ function PhotoRenderCall({ render, photo, state, spread }: { render: PhotoBoxRen
 
 export function PhotoBox({ id, className, style, rect, children, decorative, 'data-edit': marked, ...marker }: Styling & Placement & EditMarker & IssueMarker & DecorativeMarker &
   { id: string; children?: PhotoBoxRender }) {
-  const { spread, book, format, renderPhotos, definition, lazyPhotos, values } = useSpread();
+  const { spread, book, format, renderPhotos, definition, lazyPhotos, values, page } = useSpread();
   if (children !== undefined && typeof children !== 'function') {
     throw new Error('PhotoBox ' + id + ': children must be a render function, such as {(photo, box) => <img src={photo.src} style={photo.style} />}.');
   }
@@ -675,7 +681,7 @@ export function PhotoBox({ id, className, style, rect, children, decorative, 'da
   // spreads from a hidden render, so their callback boxes draw at once there.
   const deferred = lazyPhotos && book.mode === 'edit';
   const [near, setNear] = useState(!deferred);
-  const liveOf = () => render && book.mode === 'edit' ? livePlacements.get(spread.id + '\u0000' + id) : undefined;
+  const liveOf = () => render && book.mode === 'edit' ? livePlacements.get(liveKey(spread.id, id, page)) : undefined;
   const live = useSyncExternalStore(subscribeLive, liveOf, liveOf);
   const placement = live ?? saved;
 
@@ -722,7 +728,7 @@ export function PhotoBox({ id, className, style, rect, children, decorative, 'da
     // Export loads a rendition sized for the saved crop at print resolution; the editor its preview or thumbnail.
     shown.src = book.mode === 'edit' ? photo.src : exportSource(photo, size.width / getCrop(photo, saved, size.width / size.height).width, format);
     const resolved = values.boxes[id];
-    const state = { id, uid: photoBoxUid(spread.id, id), params: resolved?.params ?? {}, photo: resolved?.photo ?? null };
+    const state = { id, uid: photoBoxUid(spread.id, id, page), params: resolved?.params ?? {}, photo: resolved?.photo ?? null };
     content = <PhotoRenderCall render={render} photo={shown} state={state} spread={spread.id} />;
     // Outside the editor's book view a throw fails the render as for any other template code.
     if (deferred) {

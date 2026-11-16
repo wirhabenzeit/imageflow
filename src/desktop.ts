@@ -251,7 +251,8 @@ export type BookGeometry = {
   // element the node is, so targets that share a rectangle stay apart; standalone marked nodes have none.
   // `occurrence` counts the earlier nodes on the sheet that edit the same fields, so repeated uses of a field, such
   // as a heading shown twice, are separate targets that edit the same saved value.
-  targets: (Rect & { spread: string; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string; page?: PageSide }; upright?: boolean;
+  // `page` is the page the node is on, for every target: occurrences are counted per page.
+  targets: (Rect & { spread: string; page?: PageSide; edits: string[]; occurrence: number; owner?: { type: 'box' | 'element'; id: string }; upright?: boolean;
     inlineText?: boolean;
     // True for text in a vertical writing mode, whose lines run down the rectangle.
     vertical?: boolean;

@@ -48,10 +48,10 @@ export function ownerOf(node: Element): { box?: string; element?: string; page?:
   return { [found.kind]: found.id, ...onPage(found.page) };
 }
 
-/** `{ owner }` for an edit target that is itself a box or element, as the app's geometry message describes it. */
-export function ownTarget(node: HTMLElement): { owner?: { type: DeclaredKind; id: string; page?: PageSide } } {
+/** `{ owner }` for an edit target that is itself a box or element. The target carries its page itself (see pageOf). */
+export function ownTarget(node: HTMLElement): { owner?: { type: DeclaredKind; id: string } } {
   const found = declaredNode(node);
-  return found && found.id ? { owner: { type: found.kind, id: found.id, ...onPage(found.page) } } : {};
+  return found && found.id ? { owner: { type: found.kind, id: found.id } } : {};
 }
 
 /** A key that tells boxes and elements apart across both pages, such as `left:box:hero`. */
