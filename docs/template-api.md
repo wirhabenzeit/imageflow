@@ -8,7 +8,8 @@ This page is generated from the topic files in [`template-api/`](template-api), 
 
 - [Authoring workflow](#authoring-workflow): Order of work for agents: which MCP tool reads, edits, previews and verifies what, and how revisions and drafts fit together.
 - [Package](#package): The template/ folder, host-provided imports, the shipped example templates and the contract-1 baseline features.
-- [Declaration](#declaration): defineTemplate fields, the three parameter scopes, declaring spreads with spread()/spreadFor and typed reusable declarations.
+- [Declaration](#declaration): defineTemplate fields, parameter scopes, spread()/page() builders and typed reusable declarations.
+- [Page layouts](#page-layouts): Reusable page() layouts, Page roots, local geometry, independent facing pages, editor controls and beta automation limits.
 - [Parameters](#parameters): p.* parameter helpers, their value types and options (ranges, units, enums, dates, multiline, descriptions).
 - [List parameters](#list-parameters): p.list for a variable number of flat items, item IDs, list controls and the list item commands.
 - [Boxes and elements](#boxes-and-elements): Photo and Markdown boxes, flowOrder for text continuation, and generated elements with parameters.
@@ -50,7 +51,7 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 
 - Edit `template/` TSX, CSS and assets directly with your workspace tools.
 - Edit registered Markdown at its source location; linked Markdown stays outside the package.
-- Use `apply_project_changes` for `project.json` and `photos.json`. Never edit these manifests while the app is open.
+- Use `apply_project_changes` for supported spread-level `project.json` and `photos.json` changes. Never edit these manifests while the app is open. Page-addressed mutations are pending: split spreads reject unaddressed commands with `SPREAD_SHOWN_AS_PAGES`, except layout merging through `switch_layout`. Use the editor for individual page edits; see [Page layouts](#page-layouts).
 - Copy new content into `inbox/` and call `import_sources`. Then assign the returned IDs with a command batch.
 - Parameter commands use saved scopes: `document`, `spread`, `box` or `element`. An element editor can also own spread parameters; use `scope: 'spread'` for those fields, not `scope: 'element'`.
 - To find the parameter a request means, read each parameter's description with its unit, range and options. Give new parameters a description when their meaning or direction is not obvious from the label.
@@ -85,7 +86,7 @@ template/
 
 The app bundles `index.tsx` with esbuild. `react` and `imageflow` are provided by the host and must not be bundled. Relative imports, CSS imports, and asset imports inside `template/` are allowed. Other packages come from npm through the template's saved dependency bundle ([Dependencies](#dependencies)). Templates must render deterministically without fetching data, timers, state, or effects. This is an authoring requirement, not a guarantee that arbitrary template JavaScript is safe; open only projects you trust.
 
-`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `printFormat`, `Spread`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue`, `capabilities`, `RenderedImage`, `FormattedText`, `plainText`, `Choice` and `fonts`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
+`imageflow` exports `defineTemplate`, `spreadFor`, `p`, `mm`, `pt`, `inch`, `printFormat`, `Spread`, `Page`, `PhotoBox`, `MarkdownBox`, `Element`, `asset`, `file`, `geometry`, `box`, `issue`, `capabilities`, `RenderedImage`, `FormattedText`, `plainText`, `Choice` and `fonts`. A build fails with a hint to update ImageFlow when a template uses an export the installed app does not have.
 
 ### Examples
 
@@ -133,6 +134,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `layout-families` | `layoutFamilies`, `family` and `variant` on layouts, and a family's own layout picker. |
 | `editor-spread-parameters` | `spread` on an element editor: layout parameters edited together with the element's, with `setSpread` and `<Control scope="spread">`. |
 | `opening-spreads` | `openingSpreads`, the spreads a new book starts with. |
+| `page-layouts` | `page()` declarations, `<Page>`, page-local geometry, side-aware contexts and independent facing pages ([Page layouts](#page-layouts)). |
 | `single-pages` | Formats without facing pages (`facingPages: false`) and `span: 'page'` layouts. |
 | `editor-context` | `context` in element and document editors: the spread they were opened from, as `render` sees it, kept current. |
 | `document-editors` | `editors`: editors of document parameters, opened from nodes marked with them. |
@@ -233,9 +235,9 @@ export default defineTemplate({
 });
 ```
 
-### Declaring spreads
+### Declaring layouts
 
-Declare `spreads` as a function of `{ spread }`. Its `spread` builder types each layout's `ctx.params`, `ctx.boxes`, `ctx.elements` and edit paths from the layout's own declarations, and `ctx.document` from the template's `parameters`, so the document settings are declared once. `defineTemplate` calls the function and validates the resulting record; the builder itself only exists for TypeScript and returns each definition unchanged.
+Declare `spreads` as a function of `{ spread, page }`. Use `spread()` for a full spread and `page()` for a reusable single page; see [Page layouts](#page-layouts). Its `spread` builder types each layout's `ctx.params`, `ctx.boxes`, `ctx.elements` and edit paths from the layout's own declarations, and `ctx.document` from the template's `parameters`, so the document settings are declared once. `defineTemplate` calls the function and validates the resulting record; the builder itself only exists for TypeScript and returns the declaration (`page()` also sets `span: 'page'`).
 
 `spreads` can also be a plain record. Its spreads are then typed only broadly (`UntypedRenderContext`), unless they come from `spreadFor(documentParameters)`, which returns the same builder for spreads declared outside `defineTemplate`, such as in their own files. Pass it the same object as the template's `parameters`: a spread typed with document parameters the template does not declare, or declares with values the spread could not accept (a number for a string, an enum with more options), fails type checking, whether `spreads` is a record or a function that returns it, and the Book check warns about it (`declaration-document-mismatch`), because `ctx.document` would lack those values at runtime.
 
@@ -257,6 +259,68 @@ spread({ label: 'Story', boxes: { hero: box.photo('Main photo', { caption }), st
 ```
 
 With the `spread` builder, the render context types every parameter, box and element of its layout. `ctx.PhotoBox`, `ctx.MarkdownBox` and `ctx.Element` are the platform components restricted to that layout's IDs, so `<ctx.PhotoBox id="heor" />` fails type checking. The top-level components accept any ID for extracted helpers. `MarkdownBox` takes `columns` as a number or a numeric string, so an enum value such as `'2'` needs no cast. Runtime validation still checks every rendered box and element, for code that is not type-checked.
+
+## Page layouts
+
+Included in the contract-1 baseline as `page-layouts`; no `requires` entry is needed.
+
+A facing spread can show one spread layout or two independently chosen page layouts. Declare reusable pages with `page()` and render them inside `<Page>`. The same page design can be used on the left, the right, at a book end, or in a format without facing pages.
+
+```tsx
+import { box, defineTemplate, mm, p, Page, printFormat } from 'imageflow';
+
+export default defineTemplate({
+  id: 'page-book', version: '1', contract: 1,
+  format: printFormat({
+    label: 'Square', trim: { width: mm(200), height: mm(200) },
+    bleed: mm(3), safe: mm(10), ends: 'inside-covers',
+    pageCount: { min: 2, max: 100, step: 2 },
+  }),
+  spreads: ({ page }) => ({
+    photo: page({
+      label: 'Photo page', boxes: { hero: box.photo('Photo') },
+      render: ctx => <Page>
+        <ctx.PhotoBox id="hero" rect={ctx.geometry.page('bleed')} />
+      </Page>,
+    }),
+    story: page({
+      label: 'Story page', parameters: { heading: p.string({ label: 'Heading', default: '' }) },
+      boxes: { body: box.markdown('Story') },
+      render: ctx => {
+        const at = ctx.geometry.design({ width: 200, height: 200 });
+        return <Page>
+          <ctx.Text parameter="heading" rect={at.page(15, 15, 170, 25)} />
+          <ctx.MarkdownBox id="body" rect={at.page(15, 45, 170, 140)} />
+        </Page>;
+      },
+    }),
+  }),
+});
+```
+
+### Declaring and rendering a page
+
+`page()` sets `span: 'page'` and types the layout's parameters, boxes, elements, edit paths and document parameters like `spread()`. Page and spread layouts share the `spreads` record, so every layout ID must be unique. A page can declare the same parameters, controls, boxes, elements, anchors, credits, family and variant tags as a spread. Optional `sides: ['left']` or `sides: ['right']` restricts a facing page's placement; omit it to allow both sides.
+
+Page coordinates start at that page's left trim edge. `ctx.geometry.page(area?)` returns its trim, safe or bleed rectangle; `ctx.geometry.design(canvas).page(x, y, width, height)` scales a design into those local coordinates. `ctx.geometry.spread()` and requests for the facing page's geometry throw. Use `ctx.side` (`'left'`, `'right'`, or `'page'` without facing pages) to mirror artwork when needed. `<Page>` exposes the same value as `data-side` and supplies the side's outside/binding safe and bleed variables.
+
+`ctx.page` contains only this page's number: `{ left }`, `{ right }`, or `{ number }` without facing pages. A page reads only its own parameters, boxes and elements. The whole-book index remains available through `ctx.book`; anchors and credits declared by a page belong to that page, regardless of a declaration's `side`. Text flow visits the left page first, then the right, using each page's own `flowOrder`. Identical box IDs on the two pages are independent boxes.
+
+### Choosing pages in the editor
+
+Click either half of a sheet to select that side. The Inspector shows **Left page** or **Right page** once a spread is split, with that page's settings and content. Left/right arrows move through pages; thumbnails, reorder, duplicate and delete still operate on whole sheets.
+
+The layout browser shows all designs in one grid: two double-page designs or four single-page designs fit across, with equal gaps. A patterned blank-page tile sits in the same grid. Choosing a page design splits a full spread: the selected side gets the chosen design, and the facing side restores its remembered page or starts blank. With a whole sheet selected, the target is the left page. Dragging a layout onto a half uses the drop position. Page designs keep the same positions when the selected side changes. Designs with a side restriction remain visible but disabled on the other side. A page preview shows one page; assistive descriptions explain content moves and replacements without hover tooltips.
+
+Choosing a spread layout merges the two pages into one layout. **Blank page** clears the selected full-sheet side's layout while keeping its stored content. **Book → Swap Pages** exchanges the complete page states; it is enabled only when each layout permits the opposite side. Each action is one Undo step. See [Switching layouts](#switching-layouts) for content transfer rules.
+
+Opening and closing units in a `single-pages` format use ordinary page layouts that allow the required side, without creating a split sheet. A template with only page designs can start a facing book and add sheets: a full sheet begins with a design on an allowed side and a blank facing page. The platform blank-page choice is currently offered for full-sheet positions.
+
+### Beta testing and automation
+
+The editor supports page selection, page settings and source assignment, cropping, inline text and element editors, layout changes, content recovery, Undo, saving/reopening and PDF export. To test a reusable design, place it on both sides, edit just one page, switch or merge layouts, Undo, save/reopen, and export. Test each allowed side in every offered format; synthetic layout fixtures also render page designs on their allowed sides.
+
+MCP page addressing is still pending. Current spread-targeted edit commands reject spreads shown as pages with `SPREAD_SHOWN_AS_PAGES`; `switch_layout` can merge one back into a spread layout. Do not pass an undocumented `page` field to mutation commands. Read-only book context, Book check and rendering can inspect split books, and page findings carry their side. Use the editor for page-level mutations until command support lands. `openingSpreads` can already declare page pairs for new books; see [Template library](#template-library).
 
 ## Parameters
 
@@ -384,26 +448,28 @@ The Wall calendar starter, `sample/calendar/template/index.tsx`, is a complete e
 |---|---|---|
 | `'spread'` | formats with facing pages | two facing pages |
 | `'right'`, `'left'` | formats with facing pages, `ends: 'single-pages'` and `delivery: 'pages'` | a single first page (`right`) or last page (`left`); the inactive half is shown as an inside cover and not exported |
-| `'page'` | formats without facing pages (`facingPages: false`) | one page |
+| `'page'` | any format, subject to `sides` | one page; one half of a facing sheet, a single book end, or a non-facing unit |
 
 `span` defaults to `'page'` when no format of the template has facing pages, and to `'spread'` otherwise, so a calendar template does not repeat it on every layout. A layout whose `span` fits none of the template's formats loads with a `declaration-span-unused` warning.
 
+Page designs should use `page()` and `<Page>` with page-local coordinates, with optional `sides` restrictions. `span: 'left'/'right'` remains supported for older end-page layouts drawn in spread coordinates. See [Page layouts](#page-layouts).
+
 ### Book ends
 
-The template and the format each have one job. The template offers layouts with a `span`: a `right` layout for the opening, a `left` layout for the closing, and full spreads in between. The format states what the printer expects, and export follows the format alone. `ends` is therefore a requirement, not a permission:
+The template and the format each have one job. The template offers layouts with a `span`: a page layout allowing the right side for the opening, a page layout allowing the left side for the closing, and spread layouts or two composed page layouts in between. Legacy `right`/`left` layouts still work. The format states what the printer expects, and export follows the format alone. `ends` is therefore a requirement, not a permission:
 
 | `ends` | First spread | Last spread | In between |
 |---|---|---|---|
-| `'single-pages'` (e.g. Blurb) | must be `span: 'right'` | must be `span: 'left'` | full spreads |
+| `'single-pages'` (e.g. Blurb) | a page layout allowing right, or legacy `span: 'right'` | a page layout allowing left, or legacy `span: 'left'` | full sheets: one spread layout or two page layouts |
 | `'inside-covers'` (e.g. Saal) | full spread; left half printed on the inside cover | full spread; right half printed on the inside cover | full spreads |
 
 - **Page sequence.** A book that breaks the rule gets a `page-sequence` error naming the first or last spread, with the span to switch it to. Export asks for confirmation before saving a PDF with these errors. A book of only its opening page is reported as missing its closing page.
 - **`delivery` and `ends`.** Single end pages need page delivery: `delivery: 'spreads'` with `ends: 'single-pages'` is a schema error, because a PDF of whole spreads cannot open on a single right page. `printFormat` defaults `ends` to `'inside-covers'` when `delivery` is `'spreads'`, else to `'single-pages'`. `right` and `left` layouts fit only formats with `ends: 'single-pages'` and `delivery: 'pages'`; in other formats they are filtered and reported like `span: 'page'` layouts.
-- **Editor.** With `'single-pages'`, nothing is inserted before the opening page or after the closing page, spreads do not move into or out of the end positions, and the end pages are not duplicated. The layout picker at the first and last positions offers the `right` and `left` layouts (and, for a misplaced full spread, other full spreads). An empty book starts with a `right` layout. Removing an end spread stays possible and is reported by the page sequence. The MCP commands `insert_spread`, `duplicate_spread` and `move_spread` follow the same rules and fail with `INVALID_POSITION`; `switch_layout` fails with `INCOMPATIBLE_LAYOUT` naming the span the position requires.
-- **Declaration check.** A template with a `'single-pages'` format but no `right` or no `left` layout loads with a `declaration-ends-missing` warning.
+- **Editor.** With `'single-pages'`, nothing is inserted before the opening page or after the closing page, spreads do not move into or out of the end positions, and the end pages are not duplicated. The layout picker at the first and last positions offers page layouts allowed on that side and compatible legacy `right`/`left` layouts. An empty book starts with a layout allowed on the right. Removing an end spread stays possible and is reported by the page sequence. MCP page addressing and page-pair insertion remain pending; existing spread-based commands `insert_spread`, `duplicate_spread` and `move_spread` follow the same rules and fail with `INVALID_POSITION`; `switch_layout` fails with `INCOMPATIBLE_LAYOUT` naming the span the position requires.
+- **Declaration check.** A template with a `'single-pages'` format but no layout allowed on the right or no layout allowed on the left loads with a `declaration-ends-missing` warning.
 - **Opening spreads** may be only the start of a book, so full spreads may come first or last among them; single pages must still be at their own end.
 
-A template may offer formats of both kinds side by side. The layout picker, new spreads and fixtures use only the layouts that fit the chosen format. A book that switches to a format its layouts do not fit still previews (a page layout is drawn on a spread, a spread layout on one page), but the Book check reports a `page-sequence` error naming each such spread or page, and export asks for confirmation until its layouts are switched. The picker of a mismatched spread offers the layouts that fit the new format. Switching back to the earlier format restores the book; assignments, crops and text sources are kept, as with any format change. Opening spreads are checked against the formats of the default format's kind, because a new book starts in the default format.
+A template may offer formats of both kinds side by side. The layout picker, new spreads and fixtures use only the layouts that fit the chosen format. A format change never restructures saved sheets. A split sheet in a format without facing pages remains split and reports a page-sequence problem; choose a page layout to merge it into one unit, or switch back. A book that switches to a format its layouts do not fit still previews (a page layout is drawn on a spread, a spread layout on one page), but the Book check reports a `page-sequence` error naming each such spread or page, and export asks for confirmation until its layouts are switched. The picker of a mismatched spread offers the layouts that fit the new format. Switching back to the earlier format restores the book; assignments, crops and text sources are kept, as with any format change. Opening spreads are checked against the formats of the default format's kind, because a new book starts in the default format.
 
 ## Template library
 
@@ -419,32 +485,47 @@ To share a template, export it as an `.imageflow-template` file: **Export…** i
 
 ### Opening spreads
 
-`openingSpreads` lists the spreads a new book starts with, in order. Creating a book from a library template applies these defaults; the editor also offers them in an empty book. Each entry names a layout and may set some of that layout's own parameters:
+`openingSpreads` lists the units a new book starts with, in order. Creating a book from a library template applies these defaults; the editor also offers them in an empty book. An entry either names one layout with optional layout parameters, or supplies independent page states for a full facing sheet:
 
 ```ts
 defineTemplate({
   …,
-  spreads: ({ spread }) => ({ title: spread({ span: 'right', … }), story: spread({ … }), closing: spread({ span: 'left', … }) }),
-  openingSpreads: [{ layout: 'title' }, { layout: 'story', params: { heading: 'Day one' } }, { layout: 'closing' }],
+  spreads: ({ spread, page }) => ({
+    title: page({ label: 'Title', sides: ['right'], … }),
+    photo: page({ label: 'Photo', … }),
+    story: page({ label: 'Story', parameters: { heading }, … }),
+    panorama: spread({ label: 'Panorama', … }),
+    closing: page({ label: 'Closing', sides: ['left'], … }),
+  }),
+  openingSpreads: [
+    { layout: 'title' },
+    { pages: { left: { layout: 'photo' }, right: { layout: 'story', params: { heading: 'Day one' } } } },
+    { layout: 'panorama' },
+    { layout: 'closing' },
+  ],
 });
 ```
 
-- The template fails to load if an entry names a layout that `spreads` does not declare, sets a parameter the layout does not have, or sets a value the parameter does not allow. TypeScript reports an undeclared layout as a property missing from `spreads`.
-- Single pages must sit at a book end that every declared format allows: a `right` page only first and a `left` page only last, in formats with `ends: 'single-pages'`.
-- The opening spreads don't need to meet the format's page count. Books are built up from them.
-- Without `openingSpreads`, a new book starts with no spreads. A book with no spreads is valid: the editor shows an empty state that offers the opening spreads, if the template has any, and every layout that can start a book. The Book check reports `book-empty` as an error, so PDF export is unavailable until a spread is added. Deleting the last spread also leaves an empty book.
+- A `{ layout, params? }` entry creates one ordinary layout state: a spread, a single end page, or a unit without facing pages, according to the layout and format. A `{ pages }` entry creates a sheet shown as independent pages, with page parameters stored separately. It is available only for facing formats and full-sheet positions.
+- Each `pages.left`/`pages.right` state can name a page layout and its own `params`. Omit a side, or use `{}` for that side, to leave it blank. Layout IDs must name page designs, and side restrictions must allow their placement.
+- The template fails to load if an entry names an undeclared layout, sets a parameter the layout does not have, or sets a value the parameter does not allow. Parameter checks are per page for a page pair. TypeScript also checks declared layout IDs.
+- Single opening and closing pages use ordinary page layouts allowed on the required side, or compatible legacy `right`/`left` layouts. They are not page pairs.
+- The opening sequence need not meet the format's page-count rule; books can be built up from it. Validation checks its layouts and page composition against the formats of the default format's kind.
+- Without `openingSpreads`, a new book starts with no spreads. An empty book offers every layout that can start it, including reusable page designs. In a facing full-sheet position, a page design starts on an allowed side with the other side blank. The Book check reports `book-empty` until a unit is added.
 
-The starter declares a title page, one *Photo and story* spread and the closing page.
+The starter includes ordinary opening and closing pages and composed photo/story pages in its new-book defaults. Template files are copied into each new book; changing the built-in starter never rewrites an existing book's template.
 
 ## Switching layouts
 
-A spread can switch to any layout of the template with the same page footprint: a full spread to another full spread, a single left or right page to another of the same side. Changing between a spread and a single page changes the book's pagination and is not offered as a layout switch.
+The editor can switch a full sheet between one spread layout and two page layouts without changing its pagination. Choosing a page layout applies to the selected side, and choosing a spread layout merges both pages. Ordinary opening and closing pages stay single units. See [Page layouts](#page-layouts) for the editor controls and current automation limits.
 
-**An ID is the identity.** A box, element or parameter ID means the same thing in every layout that declares it, within its scope: spread parameters, the boxes of a spread and each box's parameters, the elements of a spread and each element's parameters. The spread keeps one state for all its layouts, keyed by these IDs; the layout decides which of it is shown. Templates need no extra declarations, roles or migration code for this.
+Within a spread or page state, switching layouts keeps the ID-based state below. A sheet also remembers its spread state and each page state independently.
+
+**An ID is the identity.** A box, element or parameter ID means the same thing in every layout that declares it, within its scope: spread parameters, the boxes of a spread and each box's parameters, the elements of a spread and each element's parameters. Each spread or page state keeps values keyed by these IDs; its layout decides which are shown. The same box ID on two facing page states names two independent assignments. Templates need no extra declarations, roles or migration code for this.
 
 - **Same ID, same type.** A box ID has the same box type (photo or Markdown) in every layout, and a parameter ID has the same parameter type in every layout within its scope. A template that breaks this fails to load with an error naming both layouts. Labels, defaults and constraints (`min`/`max`, `step`, `maxLength`, `multiline`, enum `options`, date `precision`, file `accept`) may differ, so a layout can offer fewer columns or a shorter title than another.
 - **Different meaning, different ID.** Reusing an ID shares its value. A closing page would declare `closingLine` rather than `heading`, because a closing line is not the spread heading. Differently named boxes are never matched automatically, and box order plays no part: a two-photo layout shows the boxes whose IDs it declares.
-- **Content.** Photo and Markdown assignments show in every layout with a box of that ID. Content a layout has no box for stays on the spread, is listed in the Inspector as *Saved outside this layout*, and shows again in any layout that has the box. Switching never deletes content, and sources stay in the project.
+- **Content.** Photo and Markdown assignments show in every layout with a box of that ID. Content a layout has no box for stays in its spread or page state, is listed in the Inspector under *Set aside*, and shows again in any layout that has the box. Switching never deletes content, and sources stay in the project.
 - **Placing kept content.** *Place in…* (or dragging the item onto a box of the same spread) moves kept content into a box of the current layout. If the box shows something, the two swap, so that content is kept instead of lost. A move is not a copy: the item is no longer kept, so it cannot appear twice when you switch back. Its crop focus moves with it; its per-layout crops were made for the old box's frames and do not. Box parameters belong to the box ID and stay. Dragging a kept item onto another spread, or a source from the strip onto any box, places another use of the source instead. *Discard* removes kept content from the spread; the source stays in the project, and Undo brings it back. Element settings kept for other layouts are listed by element name.
 - **Latest edit wins.** There is one value per ID, so an edit made in any layout is what every later layout sees. Replacing a photo in one layout replaces it for all of them; an older assignment cannot come back by switching. Removing a photo or text is a real edit; visiting a layout without that box is not.
 - **Parameters.** Spread, box and element parameter values follow the same rule. A value the current layout does not declare stays stored and returns with a layout that does. Values are stored only once set, so a layout whose parameter was never set shows its own default.
@@ -452,6 +533,22 @@ A spread can switch to any layout of the template with the same page footprint: 
 - **Crops.** A crop belongs to the layout it was set in, because frames differ. Returning to a layout restores its crop. A layout without its own crop fills its frame around the centre of the crop set last (the *focus*), clamped to the frame. Assigning another photo to a box starts over: no crop of the previous photo applies to it. Resetting a crop, or setting a centred fill, clears the focus.
 - **Text flow.** Continuation is recomputed for the whole book after a switch, from the Markdown boxes each spread now shows.
 - **Element editors.** Custom element editors never store their own state; their parameters follow the rules above.
+
+### Between spreads and pages
+
+A layout change reads only the layouts it replaces. Changing one page never takes content from, or changes, the page that stays visible. Splitting replaces the spread layout; merging replaces both shown page layouts.
+
+For each ID the new layout declares, the value comes from:
+
+1. A replaced layout that shows the ID, **including an empty box or a default parameter**. When merging, a stored value beats an empty/default; between two values the selected side wins, or the left side without a selection. A value moves to only one target; when splitting, the chosen side takes first.
+2. The target state's own memory, when the replaced layouts did not show that ID.
+3. For a page, the spread's stored memory that no shown layout uses.
+
+Moving a box transfers its complete state: assignment, box parameters, focus and per-layout crops. It leaves its source state. Content the target stored for that ID moves to **Replaced**, with its original location, rather than silently returning on a later switch. Parameter values are overwritten like ordinary edits. Cleared boxes and reset/default parameters carry over as empty/default, so an older stored value cannot reappear by switching.
+
+Content no target takes stays stored where it was. **Set aside** lists it by location: on the spread, on the left page or on the right page. **Replaced** lists overwritten content separately. **Place in…** explicitly returns either kind of content to a compatible shown box, including the facing page; an occupied destination swaps its assignment back. **Discard** removes that item, and Undo restores it.
+
+For example, splitting a spread whose `hero` holds photo A into a left photo page moves A to the left. The right is blank until a layout is chosen or its remembered page returns. Giving the right a text layout never changes the left photo. Merging two pages with different `hero` photos uses the selected page's photo, while preserving the other content for later. Every change is one Undo step, restoring all stored states and replaced content exactly.
 
 Selecting a layout is one edit: Undo restores the previous layout with everything it showed. Pointing at a layout in the picker shows what switching would do, for example *2 photos carried over · 2 photos kept outside this layout · text will reflow*. A selected photo or open edit popover on the spread closes when its layout changes, and an open element editor reports that its values changed, so nothing is saved into a layout it was not opened for.
 
@@ -480,13 +577,14 @@ defineTemplate({
 ```
 
 - **Declaring:** `layoutFamilies` declares each family by ID with a `label` and an optional `picker`. A layout joins one with `family`. `variant` holds free-form tags (strings, numbers or booleans) that tell the variants apart; ImageFlow gives them no meaning and passes them to the picker.
-- **Rules, checked when the template loads:** the family is declared (TypeScript also rejects an unknown family); a family has at least two variants; its variants have the same `span`; tags are on every variant of a family or on none, and no two variants have the same tags; a layout with tags belongs to a family.
+- **Rules, checked when the template loads:** the family is declared (TypeScript also rejects an unknown family); a family has at least two variants; its variants have the same `span` and `sides` restrictions; tags are on every variant of a family or on none, and no two variants have the same tags; a layout with tags belongs to a family.
 - **Box IDs carry the content.** Choose the variants' box IDs so shared content lands where it belongs. The starter's 3×3 grid declares the 2×2 grid's four boxes in its upper-left cells, so growing the grid keeps those photos in place, and shrinking it keeps the other five outside the layout until the spread returns to 3×3.
 - **Sidebar:** a family with a picker is one layout preview, named after the family and showing the spread's current variant (or the first one). Clicking it selects that layout, like any other preview. While the spread uses the family, its controls appear automatically beside the spread's other settings, below the complete layout browser. A family without a picker shows a preview per variant, next to each other.
 - **The picker** runs in a sandboxed frame with the template's CSS, as a labelled settings field. Prefer compact controls, such as a segmented choice for two grid sizes, over preview illustrations; build them from [`<Choice>`](#app-controls) so they match the settings around them. Each `choose(id)` immediately switches layouts as one Undo step; `commit()` applies the current choice and `cancel()` leaves the controls. Undo reverts an applied choice. It receives `variants` (each with `id`, `label` and its `variant` tags), `current` (the variant chosen in the draft), `saved` (the spread's layout), `choose(id)`, `find(tags)` (the first variant whose tags include all the given ones, or `undefined`), `document`, `format`, `readOnly`, `commit()` and `cancel()`.
 - **Only declared variants:** `choose` with anything other than a variant ID of the family changes nothing and the inline picker reports the invalid choice. A picker with several independent choices decides itself what a combination without a variant does, for example by disabling that option or choosing the nearest variant: `find({ size: '3x3', text: true }) ?? find({ size: '3x3' })`. Prefer tags over hard-coded IDs, so a new variant needs only a new layout.
 - **Changes from elsewhere:** the controls keep their frame and measured height while their saved layout and document context follow the book. While the book reloads or cannot be edited, the controls are disabled; messages from stale declarations cannot change the book.
-- **Agents and commands** keep switching layouts by ID with `switch_layout`. `get_authoring_context` reports `layoutFamilies`, and `family` and `variant` on each layout, so agents see the same grouping.
+- **Agents and commands** keep switching spread layouts by ID with `switch_layout`; page-addressed mutations are still pending, so use the editor for page family changes. `get_authoring_context` reports `layoutFamilies`, and `family` and `variant` on each layout, so agents see the same grouping.
+- **Page families:** page designs can form families too. The picker shows the selected page's variant and changes only that page. Families contain only spread layouts or only page layouts; every page variant allows the same sides.
 - **Scope today:** a finite list of explicitly declared variants, controlled from the sidebar's spread settings. The set of boxes is never derived from parameters, and unbounded counts (rows 1 to n) are not supported.
 
 ### App controls
@@ -528,9 +626,9 @@ A book never contains installed packages, so it stays small: a `template/node_mo
 
 ## Render function
 
-`render(context)` is called per spread instance and must be a pure function of its input: no state, effects, timers, randomness, or data fetching. Rendering never changes the book's saved content. Work that loads declared external resources or finishes later, such as drawing a map, goes through [`<RenderedImage>`](#rendered-images), which the host runs, waits for and checks.
+`render(context)` is called per shown layout instance (the spread or one page) and must be a pure function of its input: no state, effects, timers, randomness, or data fetching. Rendering never changes the book's saved content. Work that loads declared external resources or finishes later, such as drawing a map, goes through [`<RenderedImage>`](#rendered-images), which the host runs, waits for and checks.
 
-Book check and export enforce the parts of this that would make a printed page depend on something outside the book. While they render, a call from template code (including bundled libraries and module setup) to `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Worker`, `SharedWorker`, `importScripts`, a GPU canvas context (`webgl`, `webgl2`, `webgpu`, `bitmaprenderer`, on `HTMLCanvasElement` or `OffscreenCanvas`), `navigator.gpu`, `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` is a `render-impure` error naming the API and, when it happened while a layout rendered, its spread. PDF export reports such errors and asks for confirmation before saving. A 2D canvas is allowed. While a `<RenderedImage>` is drawing, these calls are its declared work and are not recorded. The editor's own previews and element editors are not checked, so an element editor may use these APIs (see [ADR 0006](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0006-template-capabilities.md)). The check reports mistakes; it is not a sandbox, and the render frames' content security policy blocks other origins regardless.
+Book check and export enforce the parts of this that would make a printed page depend on something outside the book. While they render, a call from template code (including bundled libraries and module setup) to `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `Worker`, `SharedWorker`, `importScripts`, a GPU canvas context (`webgl`, `webgl2`, `webgpu`, `bitmaprenderer`, on `HTMLCanvasElement` or `OffscreenCanvas`), `navigator.gpu`, `setTimeout`, `setInterval`, `requestAnimationFrame` or `requestIdleCallback` is a `render-impure` error naming the API and, when it happened while a layout rendered, its spread and page when applicable. Calls made in anchor and credit declarations are attributed the same way. PDF export reports such errors and asks for confirmation before saving. A 2D canvas is allowed. While a `<RenderedImage>` is drawing, these calls are its declared work and are not recorded. The editor's own previews and element editors are not checked, so an element editor may use these APIs (see [ADR 0006](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0006-template-capabilities.md)). The check reports mistakes; it is not a sandbox, and the render frames' content security policy blocks other origins regardless.
 
 ```ts
 type RenderContext = {
@@ -548,6 +646,7 @@ type RenderContext = {
   }>;
   elements: Record<ElementId, { params: ElementParams }>;
   page: { left?: number; right?: number; number?: number };  // page numbers: left/right, or number without facing pages
+  side?: 'left' | 'right' | 'page';          // definite for a page() layout; see Page layouts
   format: ResolvedFormat;                   // trim, bleed, safe area in mm, for the chosen format
   formatId: string;                         // the chosen key of `formats`, or 'default'
   spread: string;                           // this spread's ID, its entry in book.spreads (the selected spread in a layout preview)
@@ -566,6 +665,8 @@ type RenderContext = {
   };
 };
 ```
+
+A page layout receives only its own state and page number. Render it in `<Page>` and use page-local geometry; [Page layouts](#page-layouts) describes the side and composition rules.
 
 `mode` and `view` are fixed for the whole render. `mode` is `'edit'` for every render in the editor and `'export'` for PDF export, presentation, the Book check and MCP artwork (the Book check is `'export'` here, while `RenderedImage`'s own `mode` tells it apart as `'check'`). `view` says where an edit-mode render is shown: `'canvas'` is the interactive book, the only place anyone clicks; `'thumbnail'` is the sidebar and `'layout-preview'` the Inspector's layout previews, which show what the page will look like. `view === 'export'` exactly when `mode === 'export'`. Later versions may add views, so test only `view === 'canvas'` and never treat the list as complete. Show editing scaffolding, such as a placeholder that invites a click, only on the canvas:
 
@@ -673,11 +774,13 @@ An anchor marks a whole page, not a point found by measuring the render. Text fl
 `ctx.book.spreads` lists every spread of the book in order, with its pages and the photos placed on it, for photo credits, picture indexes and contents pages. No anchors are needed for it:
 
 ```ts
+type BookPhotoPlacement = { page?: 'left' | 'right'; box: string; photoId: string | null; photo: Photo | null };
 type BookSpread = {
   id: string;                                  // the spread's stable instance ID
-  layout: string;                              // its current layout
+  layout?: string;                             // the shown spread layout; absent when split
+  pages?: Partial<Record<'left' | 'right', { layout?: string; photos: BookPhotoPlacement[] }>>;
   page: { left?: number; right?: number; number?: number };  // as ctx.page
-  photos: { box: string; photoId: string | null; photo: Photo | null }[];
+  photos: { page?: 'left' | 'right'; box: string; photoId: string | null; photo: Photo | null }[];
 };
 ```
 
@@ -689,9 +792,11 @@ for (const spread of ctx.book.spreads)
 [`photo-story.tsx`](examples/photo-story.tsx) has a complete credits layout; the photobook starter's *Picture list* page lists every photo once with its pages and credit. It works out each entry's height from its text before rendering, so it knows where every entry goes: the list continues across every *Picture list spread* in book order, the last one reports `template:picture-list-full` in the Book check when photos are left over, and `template:picture-credit-cut` names a photo whose credit or page list is too long to show in full. To find or leave out the current spread, compare with `ctx.spread`: `ctx.book.spreads.filter(({ id }) => id !== ctx.spread)`.
 
 - **From saved data, before render.** Like anchors, the index is built from the saved book and the template's declarations before any spread renders. It never looks at another spread's rendered output, so every spread, the editor's context, MCP artwork and export read the same index, and the same book always gives the same index. It is frozen; changing it throws. The Inspector's layout previews redraw when it changes, such as when a photo is placed or its credit edited on another spread.
-- **Pages.** `page` is the spread's own `ctx.page`: `left` and `right`, one of them for a single page at a book end, or `number` in a format without facing pages. Which page a box is on is the layout's business, since only the layout knows where it draws its boxes.
+- **Pages.** `page` is the spread's own `ctx.page`: `left` and `right`, one of them for a single page at a book end, or `number` in a format without facing pages. For a spread layout, which page a box is on is the layout's business. On a split sheet each placement carries `page`, and `pages.left`/`pages.right` expose the shown page layout and photos independently.
 - **Photos.** `photos` lists the photo boxes of the spread's current layout, in declaration order, including empty ones. `photoId` is `null` for an empty box. `photo` is the photo's metadata, the same object shape as `ctx.boxes[id].photo`, or `null` when the box is empty or its photo is missing from the book. A photo placed in several boxes appears once per placement. Content a spread keeps from a layout it no longer uses is not listed, and a spread whose layout the template no longer declares lists no photos. Markdown boxes are not listed.
 - **No images.** The index has metadata and assignments only, no photo URLs or rendered thumbnails.
+
+Page layouts declare anchors for their own page, whatever `side` their declaration names. Two page layouts on one sheet may therefore declare two anchors with the same ID. Use `anchors(id)` when that is intentional; `anchor(id)` warns about ambiguity per asking page. Only shown page layouts contribute anchors and credits; remembered hidden layouts do not.
 
 ### Credits
 
@@ -710,7 +815,7 @@ map: spread({
 
 `ctx.book.credits` lists them for the whole book: each `id` once, with the `text` and `url` of its first declaration, the `pages` of every spread that declares it (sorted, without repeats) and those `spreads`, in the order the book first uses them. It is frozen and the same on every spread, so a credits page prints exactly what the book uses, and nothing it does not.
 
-IDs are whitespace-free tokens; a declaration with spaces in its ID is rejected. `side: 'left' | 'right'` credits only that page of a two-page spread, such as an inset map on the right page (`{ id: 'openstreetmap', text: '…', side: 'right' }`); without it, the credit covers both pages. When a later spread declares an ID with other `text` or `url` than the first, the book keeps the first and the Book check warns `credit-conflict` on that spread, so give different credits their own IDs, such as `'photo-' + photo.credit`.
+IDs are whitespace-free tokens; a declaration with spaces in its ID is rejected. `side: 'left' | 'right'` credits only that page of a two-page spread, such as an inset map on the right page (`{ id: 'openstreetmap', text: '…', side: 'right' }`); without it, the credit covers both pages. When a later spread declares an ID with other `text` or `url` than the first, the book keeps the first and the Book check warns `credit-conflict` on that spread and page when applicable, so give different credits their own IDs, such as `'photo-' + photo.credit`.
 
 Mark the node that prints credits with `data-credits` and their IDs, space-separated, such as `data-credits={ctx.book.credits.map(({ id }) => id).join(' ')}`. When the whole book renders, the Book check warns `credit-unprinted` for each credit the book uses that no page marks, on the first spread that uses it, so moving credits off the maps onto a credits page never loses them. The starter prints its map credits at the foot of its last page, the Picture list, which is the only layout it offers there.
 
@@ -887,14 +992,16 @@ A plain `data-issue="…"` attribute still works. It reports a `template-issue` 
 
 ## Geometry helpers
 
-`geometry` computes rectangles in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the trim width), y from the top trim edge. In a format without facing pages the sheet is one page, and x starts at its left trim edge. Pass a rectangle to a platform component's `rect` prop (`PhotoBox`, `MarkdownBox`, `Element`, `Text`), or `geometry.css(rect)` to any node's `style`, to position it absolutely inside `<Spread>`. Properties in `style` win over the ones `rect` sets, so `rect={area} style={{ height: 'auto' }}` lets a block grow.
+`geometry` computes rectangles in millimetres in spread coordinates: x from the left page's trim edge (the right page starts at the trim width), y from the top trim edge. In a format without facing pages the sheet is one page, and x starts at its left trim edge. Pass a rectangle to a platform component's `rect` prop (`PhotoBox`, `MarkdownBox`, `Element`, `Text`), or `geometry.css(rect)` to any node's `style`, to position it absolutely inside `<Spread>` or `<Page>` as appropriate. Properties in `style` win over the ones `rect` sets, so `rect={area} style={{ height: 'auto' }}` lets a block grow.
 
-`ctx.geometry` holds the same helpers with the spread's format already applied: `ctx.geometry.page(side, area?)` (`ctx.geometry.page(area?)` without facing pages), `ctx.geometry.spread(area?)` and `ctx.geometry.design(canvas)`, plus `inset`, `grid` and `css`. The functions below remain available for helpers outside `render`. The helpers return plain numbers, so ordinary CSS and inline styles stay available, and nothing scales type.
+A `page()` layout uses **page-local coordinates**, starting at its own left trim edge on either side. In that context, `ctx.geometry.page(area?)` takes no side, `ctx.geometry.design(canvas).page(...)` maps design coordinates to the current page, and `ctx.geometry.spread()` or a request for the facing page throws. Safe and bleed insets mirror from `ctx.side`. `<Page>` exposes that side as `data-side`. See [Page layouts](#page-layouts).
+
+For a spread layout, `ctx.geometry` holds the same helpers with the spread's format already applied: `ctx.geometry.page(side, area?)` (`ctx.geometry.page(area?)` without facing pages), `ctx.geometry.spread(area?)` and `ctx.geometry.design(canvas)`, plus `inset`, `grid` and `css`. The functions below remain available for helpers outside `render`. The helpers return plain numbers, so ordinary CSS and inline styles stay available, and nothing scales type.
 
 | Helper | Returns |
 | --- | --- |
 | `page(format, side, area?)` | One page. `area` is `trim` (default), `safe` (the format's safe insets, with the binding inset next to the fold) or `bleed` (outer edges extended into the bleed; the fold edge stays at the fold, because a page's binding bleed shows the facing page). Works for single first and last pages. |
-| `page(format, area?)` | The page of a format without facing pages: `trim`, `safe` (left and right insets) or `bleed` (all four edges). With facing pages a side is required. |
+| `page(format, area?)` | The page of a format without facing pages: `trim`, `safe` (left and right insets) or `bleed` (all four edges). For the top-level helper with facing pages a side is required; the bound helper in a `page()` layout already knows its side. |
 | `spread(format, area?)` | Both pages. Its `safe` area keeps only the outer, top and bottom insets. Throws without facing pages. |
 | `inset(rect, mm \| { top, right, bottom, left })` | A smaller rectangle. |
 | `grid(rect, { columns, rows?, gap?, columnGap?, rowGap? })` | Equal cells in reading order, with gaps between cells only. |
@@ -912,13 +1019,14 @@ render: (ctx) => {
 }
 ```
 
-Use `page` and `spread` for physical layouts that keep margins in millimetres on every format. Use `design` to scale a composition drawn on a fixed canvas, as the starter does. These numbers are physical lengths for CSS, unlike the structured `mm()`, `pt()` and `inch()` values used in print-format declarations. The starter's layouts use these helpers.
+Use `page` and `spread` for physical layouts that keep margins in millimetres on every format. Use `design` to scale a composition drawn on a fixed canvas, as the starter does. These numbers are physical lengths for CSS, unlike the structured `mm()`, `pt()` and `inch()` values used in print-format declarations. The starter's layouts use these helpers. Do not reuse a spread helper that reads both `left()` and `right()` inside a page layout; give the page helper local `page()` rectangles instead.
 
 ## Platform components
 
 | Component | Purpose |
 | --- | --- |
-| `<Spread>` | Root of every spread. Sizes the spread to two trims plus bleed, sets geometry CSS variables, and handles page halves. |
+| `<Spread>` | Root of a spread layout. Sizes the spread to two trims plus bleed, sets geometry CSS variables, and handles page halves. |
+| `<Page>` | Root of a `page()` layout. Uses page-local coordinates, exposes `data-side`, and supplies mirrored safe/bleed variables; the host composes it with its facing page. See [Page layouts](#page-layouts). |
 | `<PhotoBox id>` | Renders the assigned photo with its crop (the photo always covers the box; the saved crop picks the visible region), using a preview-size image in the editor and a rendition capped at the format maximum resolution in export (300 ppi when omitted). Its element is the box's geometry and drop zone. Users select the photo in the editor and drag and pinch it; templates do not handle the crop. A render callback as its child draws the photo with the template's own markup (see PhotoBox render callbacks). |
 | `<MarkdownBox id>` | Receives the flowed fragment of the assigned Markdown source. Its element is the box's geometry and drop zone. |
 | `<Element id>` | Wraps generated artwork so the editor can highlight it, and opens its parameters when clicked; an element can supply its own editor (see Element editors). |
@@ -927,6 +1035,7 @@ Use `page` and `spread` for physical layouts that keep margins in millimetres on
 
 Rules:
 
+- Each shown layout renders one root: `<Spread>` for a spread layout, `<Page>` for a page layout.
 - Each declared box is rendered exactly once through its component; each declared element at most once.
 - Boxes and elements are positioned and sized by template CSS on the component's element (`className`, `style`), or by `rect` (see Geometry helpers).
 - `decorative` marks a component's text as ornament, so the Book check does not report it for the safe area, size or overlap (see [CSS contract](#fonts-and-output)).
@@ -995,7 +1104,7 @@ The platform validates the rendered result (computed styles and the exported PDF
 
 ### Geometry variables
 
-`<Spread>` sets, in physical units from the resolved format:
+`<Spread>` and `<Page>` set, in physical units from the resolved format:
 
 ```css
 --trim-width; --trim-height;          /* one page */
@@ -1004,6 +1113,8 @@ The platform validates the rendered result (computed styles and the exported PDF
 /* without facing pages, instead of the outside and binding variables: */
 --bleed-left; --bleed-right; --safe-left; --safe-right;
 ```
+
+For `<Page>` the content box is always one trim. Its `data-side="left" | "right" | "page"` distinguishes the placement; outside/binding variables use that side's resolved insets. Position artwork locally rather than using spread-wide `.left-page` or `.right-page` classes.
 
 Without facing pages the content box is one trim (`--trim-width` by `--trim-height`) and there is no gutter.
 
@@ -1079,6 +1190,16 @@ A spread instance in `project.json`:
 `second` is content a `grid` layout showed; the `story` layout has no `second` box, so it is kept for the next layout that has one. `crops` holds one crop per layout ID; `focus` is the centre of the crop set last.
 
 The project also stores the document parameter values, the template `id` and `version` it was last opened with, the text id → path mapping, and the file id → path mapping for file parameters (`files`). Photo metadata lives in `photos.json`.
+
+### Page states
+
+A spread shown as two pages stores `split: true` and `pages.left`/`pages.right`, each with `definition`, `params`, `boxes` and `elements`. A page without a definition is blank. The spread's own `definition`, `params`, `boxes` and `elements` remain its remembered spread state while the pages are shown. When merged, `split` is removed and the page states remain remembered. Replaced content is stored in `displaced`: entries have `from: 'spread' | 'left' | 'right'`, `box` and the saved box `state`.
+
+The same `hero` ID on the left and right is two assignments, addressed by page. A layout switch can move a whole box state, including focus, box parameters and per-layout crops, between these states. See [Switching layouts](#switching-layouts) for matching, memory and replacement rules.
+
+Any stored page state, split sheet or displaced content requires book `schemaVersion: 2`. Books without them remain format 1. Older apps refuse format 2 rather than dropping page data. Never edit manifests directly while the book is open; current MCP mutation commands do not yet address page states, so use the editor for these edits.
+
+Template `openingSpreads` may also declare page pairs for new books. Those declarations use `layout` and optional `params` per side; the created project stores them as `pages` with `definition`, alongside `split: true`. See [Template library](#template-library).
 
 ## Authoring and compatibility details
 

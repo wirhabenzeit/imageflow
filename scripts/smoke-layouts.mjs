@@ -1,3 +1,4 @@
+import { copySample } from '../desktop/sample-book.mjs';
 import { testBook, menuAction, popupAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -15,7 +16,12 @@ const settlements = async () => (await read()).spreads.find(({ id }) => id === '
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
-  const w = await testBook(app, project, true);
+  // Keep this regression focused on full-spread switching; the current starter demonstrates split pages.
+  await copySample(join(root, 'sample/starter'), project);
+  const book = await read();
+  book.spreads = JSON.parse(await readFile(join(root, 'tests/compat/books/starter/project.json'), 'utf8')).spreads;
+  await writeFile(join(project, 'project.json'), JSON.stringify(book, null, 2));
+  const w = await testBook(app, project);
   w.setDefaultTimeout(20000);
   // Register before the app's message listener so a preview can be held deterministically.
   await w.addInitScript(() => {
@@ -48,7 +54,7 @@ try {
     }, old, { timeout: 30000 });
   };
   const button = (name) => w.getByRole('button', { name, exact: true });
-  const picker = w.getByRole('radiogroup', { name: 'Layout' });
+  const picker = w.getByRole('radiogroup', { name: 'Layout', exact: true });
   const layout = (name) => picker.getByRole('radio', { name, exact: true });
   // The sidebar lists the spread's boxes; each opens its editor on the page. A placed photo is selected, with its
   // photo choice, Remove and crop values in the crop toolbar.
@@ -119,7 +125,7 @@ try {
   });
   await layoutReady('last-notes');
   assert.equal(await pickerHasNoOverlap(), true);
-  assert.equal(await picker.getByRole('radio').count(), 13);
+  assert.equal(await picker.getByRole('radio').count(), 22);
   await w.locator('.inspector').screenshot({ path: join(root, '.build', 'layout-picker-ready.png') });
   // Revisit cached URLs across single-page and full-spread choice sets.
   for (const spread of ['closing', 'last-notes', 'title', 'last-notes', 'closing', 'last-notes']) {
@@ -130,11 +136,12 @@ try {
   await button('Pages 10–11 · Photo grid 2×2').click();
   await w.locator('[data-spread="settlements"][aria-current="page"]').waitFor();
 
-  // Only layouts with the same footprint are offered: no single title or closing page for a full spread. The grid
-  // family has its own picker, so its 2×2 and 3×3 variants are one preview, named after the family.
+  // The unified browser keeps spread and page designs together. Families with custom pickers use one tile,
+  // and side-restricted pages stay visible but disabled where they cannot be applied.
   assert.deepEqual(await picker.getByRole('radio').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label'))),
     ['Contents', 'Chapter opener', 'Photo and story', 'Text spread', 'Quote and photo', 'Photo and note', 'Panorama', 'Two photos', 'Photo grid',
-      'Feature and details', 'Map', 'Map and story', 'Picture list spread']);
+      'Feature and details', 'Map', 'Map and story', 'Picture list spread', 'Title page', 'Title photo', 'Picture list',
+      'Photo page', 'Story page', 'Notes page', 'Quote page', 'Photo grid page', 'Blank page']);
 
   // A new book revision with unchanged preview inputs reuses the same iframe, including its map drawing.
   await w.locator('iframe.book-frame-layouts[data-current][data-ready]').waitFor();
@@ -152,7 +159,7 @@ try {
   assert.deepEqual((await settlements()).boxes.hero.crops, { grid: { centerX: 0.3, centerY: 0.5, zoom: 2 } });
   assert.deepEqual((await settlements()).boxes.hero.focus, { centerX: 0.3, centerY: 0.5 });
 
-  // Hovering and focusing layouts do not add floating captions or change the spread.
+  // Hovering shows no tooltip; neither hover nor focus changes the spread.
   const before = await read();
   await layout('Two photos').hover();
   assert.equal(await w.locator('#layout-consequence').count(), 0);
@@ -213,7 +220,7 @@ try {
   assert.equal(await button('Grid size…').count(), 0);
   assert.equal(await button('Add').isEnabled(), true);
   await gridSize('2 × 2').click();
-  assert.equal(await statusLine(), '');
+  assert.equal(await statusLine(), 'Photo grid 2×2');
   state = await settlements();
   assert.deepEqual(Object.fromEntries(Object.entries(state.boxes).map(([id, box]) => [id, box.photo])),
     { hero: replacement, second: undefined, third: 'cottage', fourth: 'light' });
@@ -256,11 +263,11 @@ try {
   });
   assert.ok(position.pickerTop >= position.browserBottom, 'Grid size follows the complete layout browser');
   assert.ok(position.height < 60, 'The grid-size field is compact');
-  assert.equal(await statusLine(), '');
+  assert.equal(await statusLine(), 'Photo grid 3×3');
   assert.equal((await settlements()).definition, 'grid9');
   assert.equal(await frame.locator('[data-spread="settlements"] [data-box]').count(), 9);
   assert.equal(await layout('Photo grid').getAttribute('aria-checked'), 'true');
-  assert.equal(await picker.getByRole('radio').count(), 13);
+  assert.equal(await picker.getByRole('radio').count(), 22);
   assert.deepEqual((await status()).warnings, []);
   await rerendered(() => button('Undo').click());
   assert.deepEqual(await settlements(), state);
@@ -282,7 +289,7 @@ try {
   await w.locator('.kept-content > summary').click();
   const keptNames = () => w.locator('.kept-content .kept-name').allTextContents();
   assert.deepEqual(await keptNames(), ['Boathouses in the snow', 'Last light on the ridge']);
-  await rerendered(() => w.getByRole('combobox', { name: 'Place Boathouses in the snow in' }).selectOption('second'));
+  await rerendered(() => w.getByRole('combobox', { name: 'Place Boathouses in the snow in' }).selectOption({ index: 2 }));
   assert.equal(await statusLine(), 'Boathouses in the snow placed in Right photo');
   state = await settlements();
   assert.deepEqual(state.boxes.second, { params: {}, photo: 'cottage', focus: { centerX: 0.5, centerY: 0.5 } });
@@ -291,8 +298,8 @@ try {
   const swap = w.getByRole('combobox', { name: 'Place Last light on the ridge in' });
   assert.deepEqual(await swap.locator('option').allTextContents(),
     ['Place in…', 'Left photo · swap with ' + replacedTitle, 'Right photo · swap with Boathouses in the snow']);
-  await rerendered(() => swap.selectOption('hero'));
-  assert.equal(await statusLine(), 'Last light on the ridge placed in Left photo; ' + replacedTitle + ' is saved outside this layout');
+  await rerendered(() => swap.selectOption({ index: 1 }));
+  assert.equal(await statusLine(), 'Last light on the ridge placed in Left photo; ' + replacedTitle + ' is set aside');
   assert.deepEqual(await keptNames(), [replacedTitle]);
 
   // Dragging a kept item onto a box of its spread moves it the same way.
@@ -302,7 +309,7 @@ try {
     document.querySelector('.kept-item').dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: data }));
     document.querySelector('main').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: data }));
   }, { x: target.x + target.width / 2, y: target.y + target.height / 2 }));
-  assert.equal(await statusLine(), replacedTitle + ' placed in Right photo; Boathouses in the snow is saved outside this layout');
+  assert.equal(await statusLine(), replacedTitle + ' placed in Right photo; Boathouses in the snow is set aside');
   assert.equal((await settlements()).boxes.second.photo, replacement);
   assert.deepEqual(await keptNames(), ['Boathouses in the snow']);
 

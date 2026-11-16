@@ -22,7 +22,7 @@ The platform validates the rendered result (computed styles and the exported PDF
 
 ## Geometry variables
 
-`<Spread>` sets, in physical units from the resolved format:
+`<Spread>` and `<Page>` set, in physical units from the resolved format:
 
 ```css
 --trim-width; --trim-height;          /* one page */
@@ -31,6 +31,8 @@ The platform validates the rendered result (computed styles and the exported PDF
 /* without facing pages, instead of the outside and binding variables: */
 --bleed-left; --bleed-right; --safe-left; --safe-right;
 ```
+
+For `<Page>` the content box is always one trim. Its `data-side="left" | "right" | "page"` distinguishes the placement; outside/binding variables use that side's resolved insets. Position artwork locally rather than using spread-wide `.left-page` or `.right-page` classes.
 
 Without facing pages the content box is one trim (`--trim-width` by `--trim-height`) and there is no gutter.
 

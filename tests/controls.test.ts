@@ -198,3 +198,17 @@ test('document controls arrange Book settings, are checked like other scopes and
   assert.deepEqual(placeControlWarnings(warnings, [{ spread: 'a', layout: 'main', marked: new Set(['show']) }]), warnings);
   assert.deepEqual(placeControlWarnings(warnings, [{ spread: 'a', layout: 'main', marked: new Set(['document.show']) }]), []);
 });
+
+test('control cycles are attributed independently on pages sharing a layout', () => {
+  const cyclic = { id: 't', version: '1', contract: 1, format, parameters,
+    controls: [{ group: 'Options', when: { show: true }, controls: ['show', 'tilt'] }],
+    spreads: { main: { label: 'Main', render: () => null } } };
+  const warnings = declarationWarnings(cyclic, templateSchema as unknown as Schema);
+  // Use a layout-scoped warning to model the same page layout on either side.
+  const warning = { ...warnings[0], details: { controls: 'show', layout: 'page', edit: '' } };
+  const placed = placeControlWarnings([warning], [
+    { spread: 'pair', page: 'left', layout: 'page', marked: new Set(['show']) },
+    { spread: 'pair', page: 'right', layout: 'page', marked: new Set() },
+  ]);
+  assert.deepEqual(placed, [{ ...warning, spread: 'pair', page: 'right' }]);
+});

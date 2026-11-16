@@ -12,19 +12,32 @@ To share a template, export it as an `.imageflow-template` file: **Export…** i
 
 ## Opening spreads
 
-`openingSpreads` lists the spreads a new book starts with, in order. Creating a book from a library template applies these defaults; the editor also offers them in an empty book. Each entry names a layout and may set some of that layout's own parameters:
+`openingSpreads` lists the units a new book starts with, in order. Creating a book from a library template applies these defaults; the editor also offers them in an empty book. An entry either names one layout with optional layout parameters, or supplies independent page states for a full facing sheet:
 
 ```ts
 defineTemplate({
   …,
-  spreads: ({ spread }) => ({ title: spread({ span: 'right', … }), story: spread({ … }), closing: spread({ span: 'left', … }) }),
-  openingSpreads: [{ layout: 'title' }, { layout: 'story', params: { heading: 'Day one' } }, { layout: 'closing' }],
+  spreads: ({ spread, page }) => ({
+    title: page({ label: 'Title', sides: ['right'], … }),
+    photo: page({ label: 'Photo', … }),
+    story: page({ label: 'Story', parameters: { heading }, … }),
+    panorama: spread({ label: 'Panorama', … }),
+    closing: page({ label: 'Closing', sides: ['left'], … }),
+  }),
+  openingSpreads: [
+    { layout: 'title' },
+    { pages: { left: { layout: 'photo' }, right: { layout: 'story', params: { heading: 'Day one' } } } },
+    { layout: 'panorama' },
+    { layout: 'closing' },
+  ],
 });
 ```
 
-- The template fails to load if an entry names a layout that `spreads` does not declare, sets a parameter the layout does not have, or sets a value the parameter does not allow. TypeScript reports an undeclared layout as a property missing from `spreads`.
-- Single pages must sit at a book end that every declared format allows: a `right` page only first and a `left` page only last, in formats with `ends: 'single-pages'`.
-- The opening spreads don't need to meet the format's page count. Books are built up from them.
-- Without `openingSpreads`, a new book starts with no spreads. A book with no spreads is valid: the editor shows an empty state that offers the opening spreads, if the template has any, and every layout that can start a book. The Book check reports `book-empty` as an error, so PDF export is unavailable until a spread is added. Deleting the last spread also leaves an empty book.
+- A `{ layout, params? }` entry creates one ordinary layout state: a spread, a single end page, or a unit without facing pages, according to the layout and format. A `{ pages }` entry creates a sheet shown as independent pages, with page parameters stored separately. It is available only for facing formats and full-sheet positions.
+- Each `pages.left`/`pages.right` state can name a page layout and its own `params`. Omit a side, or use `{}` for that side, to leave it blank. Layout IDs must name page designs, and side restrictions must allow their placement.
+- The template fails to load if an entry names an undeclared layout, sets a parameter the layout does not have, or sets a value the parameter does not allow. Parameter checks are per page for a page pair. TypeScript also checks declared layout IDs.
+- Single opening and closing pages use ordinary page layouts allowed on the required side, or compatible legacy `right`/`left` layouts. They are not page pairs.
+- The opening sequence need not meet the format's page-count rule; books can be built up from it. Validation checks its layouts and page composition against the formats of the default format's kind.
+- Without `openingSpreads`, a new book starts with no spreads. An empty book offers every layout that can start it, including reusable page designs. In a facing full-sheet position, a page design starts on an allowed side with the other side blank. The Book check reports `book-empty` until a unit is added.
 
-The starter declares a title page, one *Photo and story* spread and the closing page.
+The starter includes ordinary opening and closing pages and composed photo/story pages in its new-book defaults. Template files are copied into each new book; changing the built-in starter never rewrites an existing book's template.

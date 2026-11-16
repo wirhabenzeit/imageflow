@@ -18,12 +18,12 @@ import { createRoot } from 'react-dom/client';
 import { editorURL } from './desktop';
 import { bookLayout } from './desktop';
 import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
-import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, toMillimeters } from './format';
+import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, spanRequiredAt, toMillimeters } from './format';
 import { animateReorder } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat } from './format';
 import { frameView, scopeSpread, scopeState } from './project';
-import type { FixtureMarking, RenderProject, SpreadState, Values } from './project';
+import type { FixtureMarking, PageSide, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
 import { isParameterValue, parameterWarnings, resolveParams, resolveValue } from './parameters';
 import type { ListItem } from './parameters';
@@ -36,7 +36,7 @@ import { bookIndex, chooseFormat, currentPhotoRenderFailures, watchPhotoRenderFa
 import type { AnchorLookup, PhotoRenderFailure, EditorContext, EditorPresentation } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
-import { declaredInTemplate, familyLayouts, layoutPreviews } from './layouts';
+import { declaredInTemplate, editorLayoutPreviews, editorLayoutTarget, familyLayouts } from './layouts';
 import type { VariantTags } from './layouts';
 import { numberOccurrences } from './edit-targets';
 import { declaredName, declaredNode, declaredNodes, findDeclared, onPage, ownerOf, ownTarget, pageAttribute, pageOf } from './page-scope';
@@ -100,7 +100,7 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     const id = page ? scopeState(spread, page)?.definition : spread.definition;
     const layout = id !== undefined && Object.hasOwn(template.spreads, id) ? template.spreads[id] : undefined;
     const shown: Pick<Template['spreads'][string], 'boxes' | 'elements' | 'parameters'> | undefined = layout ?? (page && id === undefined ? { boxes: {}, elements: {}, parameters: {} } : undefined);
-    if (!shown) throw new Error(where + ' draws the ' + page + ' page without a known layout.');
+    if (!shown) throw new SpreadError(where + ' draws the ' + page + ' page without a known layout.', spread.id, { page });
     return [page, { layout: shown, boxes: new Set(Object.keys(shown.boxes)), elements: new Set(Object.keys(shown.elements)) }] as const;
   }));
   const bounds = sheet.getBoundingClientRect();
@@ -162,7 +162,7 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
       } else {
         const { code, message, box, element, parameter, file, details, suggestion } = parsed.data;
         severity = parsed.data.severity;
-        const owner = box ? { box } : element ? { element } : ownerOf(node);
+        const owner = { ...onPage(pageOf(node)), ...(box ? { box } : element ? { element } : ownerOf(node)) };
         finding = issue(message, { code: 'template:' + code, ...owner, ...(parameter ? { parameter } : {}), ...(file ? { source: file } : {}),
           ...(details ? { details } : {}), ...(suggestion ? { suggestion } : {}) });
       }
@@ -172,11 +172,13 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     reported.add(key);
     (severity === 'error' ? errors : warnings).push(finding);
   }
-  const unknown = new Set([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].flatMap((node) =>
-    node.dataset.edit!.split(' ').filter(Boolean).filter((path) => !resolveEditPath(template, scopeSpread(spread, pageOf(node))?.definition ?? '', path))));
-  if (unknown.size) {
-    warn(['The layout marks unknown parameters as editable: ' + [...unknown].join(', ') + '.'], { code: 'edit-path-unknown',
-      details: { paths: [...unknown].join(' ') }, suggestion: 'Declare these parameters in the layout, or remove them from ctx.edit(...).' });
+  for (const page of scopes.keys()) {
+    const unknown = new Set([...sheet.querySelectorAll<HTMLElement>('[data-edit]')].filter((node) => pageOf(node) === page).flatMap((node) =>
+      node.dataset.edit!.split(' ').filter(Boolean).filter((path) => !resolveEditPath(template, scopeSpread(spread, page)?.definition ?? '', path))));
+    if (unknown.size) {
+      warn(['The layout marks unknown parameters as editable: ' + [...unknown].join(', ') + '.'], { code: 'edit-path-unknown', ...onPage(page),
+        details: { paths: [...unknown].join(' ') }, suggestion: 'Declare these parameters in the layout, or remove them from ctx.edit(...).' });
+    }
   }
   // Boxes by ID, prefixed with their page on a page (`left:hero`), so text flow finds each page's own box.
   const boxes = new Map<string, HTMLElement>();
@@ -185,15 +187,15 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     const scope = scopes.get(page);
     const name = page ? declaredName(found) : id;
     const at = onPage(page);
-    if (!scope) throw new Error(where + ' renders ' + declaredName(found) + ' outside the layouts it draws.');
+    if (!scope) throw new SpreadError(where + ' renders ' + declaredName(found) + ' outside the layouts it draws.', spread.id, { page });
     const { layout } = scope;
     if (found.kind === 'element') {
-      if (!scope.elements.delete(id)) throw new Error(where + ' renders an unknown or duplicate element: ' + name + '.');
+      if (!scope.elements.delete(id)) throw new SpreadError(where + ' renders an unknown or duplicate element: ' + name + '.', spread.id, { page });
     } else {
       if (!scope.boxes.delete(id) || layout.boxes[id].type !== found.boxType) {
-        throw new Error(where + ' renders an unknown, duplicate, or incompatible box: ' + name + '.');
+        throw new SpreadError(where + ' renders an unknown, duplicate, or incompatible box: ' + name + '.', spread.id, { page });
       }
-      if (!box.clientWidth || !box.clientHeight) throw new Error(where + ' · ' + name + ' has no area.');
+      if (!box.clientWidth || !box.clientHeight) throw new SpreadError(where + ' · ' + name + ' has no area.', spread.id, { page });
       boxes.set(page ? page + ':' + id : id, box);
       const assignment = scopeState(spread, page)?.boxes[id];
       const ppi = Number(box.dataset.ppi);
@@ -229,7 +231,7 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     }
   }
   for (const [page, scope] of scopes) {
-    if (scope.boxes.size) throw new Error(where + (page ? ' · ' + page + ' page' : '') + ' is missing boxes: ' + [...scope.boxes].join(', ') + '.');
+    if (scope.boxes.size) throw new SpreadError(where + (page ? ' · ' + page + ' page' : '') + ' is missing boxes: ' + [...scope.boxes].join(', ') + '.', spread.id, { page });
   }
   return { sheet, boxes };
 }
@@ -469,7 +471,10 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     root.style.setProperty('--if-columns', String(count));
     const column = (width - pad * 2 - (gridColumns ? gap : columnGap) * (count - 1)) / count;
     for (const { sheet } of sheets) {
-      const fitted = column / sheet.offsetWidth;
+      const units = view === 'layouts' ? Number(sheet.parentElement?.dataset.layoutUnits) || 1 : 1;
+      const available = column * units + columnGap * (units - 1);
+      const fitted = available / sheet.offsetWidth;
+      if (view === 'layouts') sheet.parentElement!.style.gridColumn = 'span ' + units;
       const scale = Math.max(0.01, Math.min(fitted, 1));
       const slot = sheet.parentElement!;
       slot.style.width = sheet.offsetWidth * scale + 'px';
@@ -571,13 +576,13 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
   };
 }
 
-type Failure = { message: string; stack?: string };
+type Failure = { message: string; stack?: string; page?: PageSide };
 // The message of an error, and the stack of its innermost cause, where template code threw.
 function failure(error: unknown): Failure {
   let deepest = error;
   while (deepest instanceof Error && deepest.cause instanceof Error) deepest = deepest.cause;
   const stack = deepest instanceof Error ? deepest.stack : undefined;
-  return { message: error instanceof Error ? error.message : String(error), ...(stack ? { stack: stack.slice(0, 4000) } : {}) };
+  return { ...(error instanceof SpreadError ? onPage(error.page) : {}), message: error instanceof Error ? error.message : String(error), ...(stack ? { stack: stack.slice(0, 4000) } : {}) };
 }
 
 class LayoutRenderError extends Error {
@@ -1021,7 +1026,7 @@ async function settle(images: HTMLImageElement[]) {
 
 // Renders one spread in every layout of the template, carrying its content over the way switching layouts does.
 // Markdown boxes show their source from the beginning; the previews are for choosing a layout, not for proofing.
-async function renderLayouts(root: HTMLElement, book: RenderProject, template: Template, info: TemplateInfo, spreadId: string) {
+async function renderLayouts(root: HTMLElement, book: RenderProject, template: Template, info: TemplateInfo, spreadId: string, side?: PageSide, group?: string) {
   const { spreads } = book.project;
   const index = spreads.findIndex(({ id }) => id === spreadId);
   if (index < 0) throw new Error('Spread does not exist.');
@@ -1029,25 +1034,46 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
   // A preview is the spread itself in another layout: switching only changes which of its content is shown.
   // A family with its own picker shows one preview, which stands for the family.
-  const previews = layoutPreviews(template.spreads, spreads[index].definition, template.layoutFamilies, template.format, { index, count: spreads.length }).map((definition) => ({
-    definition, span: template.spreads[definition].span === 'page' && format.facingPages ? sequence.spreads[index].span : template.spreads[definition].span,
-    spread: { ...planLayoutChange(spreads[index], definition, template.spreads).spread, id: definition },
-  }));
+  const position = { index, count: spreads.length };
+  const previews = editorLayoutPreviews(template.spreads, spreads[index], template.layoutFamilies, template.format, position, side, true)
+    .sort((a, b) => Number(template.spreads[b].span === 'spread') - Number(template.spreads[a].span === 'spread'))
+    .map((definition) => {
+      const layout = template.spreads[definition];
+      const required = spanRequiredAt(index, spreads.length, template.format);
+      const wantedSide = required === 'left' || required === 'right' ? required : side ?? 'left';
+      const previewSide = layout.span === 'page' && layout.sides && !layout.sides.includes(wantedSide) ? layout.sides[0] : wantedSide;
+      const target = editorLayoutTarget(template.spreads, definition, template.format, position, previewSide);
+      const planned = planLayoutChange(spreads[index], target, template.spreads).spread;
+      const pageLayout = template.spreads[definition].span === 'page';
+      const selected = target.page ?? (layout.sides && !layout.sides.includes(wantedSide) ? layout.sides[0] : required === 'left' || required === 'right' ? required : side ?? 'left');
+      // A page candidate is shown alone, with its side's values after the actual change planner has run. The facing
+      // page remains in the planned sheet for switching, but has no place in this single-page thumbnail.
+      const state = target.page ? scopeSpread(planned, target.page)! : planned;
+      const spread = { ...state, id: definition };
+      const page = pageLayout && format.facingPages ? { [selected]: sequence.spreads[index].page[selected] ?? sequence.spreads[index].page.left ?? sequence.spreads[index].page.right } : sequence.spreads[index].page;
+      return { definition, span: pageLayout ? 'page' : template.spreads[definition].span, spread, page,
+        crop: format.facingPages ? pageLayout ? selected : template.spreads[definition].span === 'left' ? 'left' : template.spreads[definition].span === 'right' ? 'right' : undefined : undefined };
+    });
   // Previews read the anchors of the book as saved, so a contents layout shows the real pages.
   const anchors = bookIndex(book, template, sequence);
+  const offerBlank = format.facingPages && spanRequiredAt(index, spreads.length, template.format) === 'spread';
   root.className = 'if-preview';
   let renderError: unknown;
   const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
-  flushSync(() => react.render(previews.map(({ definition, span, spread }) => (
-    <div className="if-spread-container" data-span={span} data-spread={definition} data-layout={definition} key={definition}>
+  flushSync(() => react.render(<>{previews.map(({ definition, span, spread, page }) => (
+    <div className="if-spread-container" data-layout-units={span === 'spread' ? 2 : 1} data-span={span} data-spread={definition} data-layout={definition} key={definition}>
       <SpreadView book={book} spread={spread} template={template} format={format} positions={{}}
-        page={sequence.spreads[index].page} index={anchors} renderPhotos bookSpread={spreads[index].id} />
+        page={page} index={anchors} renderPhotos bookSpread={spreads[index].id} />
     </div>
-  ))));
+  ))}{offerBlank && <div className="if-spread-container" data-layout-units="1" data-spread="__blank__">
+    <div className="if-sheet if-blank-layout" style={{ width: cssMM(format.trim.width + (format.facingPages ? format.bleed.outside : 0)), height: cssMM(format.height) }}>
+      <div className="if-spread" style={{ left: 0, top: 0, width: '100%', height: '100%' }} />
+    </div>
+  </div>}</>));
   if (renderError) throw renderError;
   await settle(decodable(root));
   const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
-  const sheets = previews.map(({ definition, spread }, n) => {
+  const sheets = previews.map(({ definition, spread, crop }, n) => {
     const { sheet, boxes } = validateSpread(containers[n], spread, template, format, definition, [], []);
     const sources = new Map<string, HTMLElement[]>();
     const order = Object.entries(template.spreads[definition].boxes).sort(([, a], [, b]) => (a.flowOrder ?? 1) - (b.flowOrder ?? 1));
@@ -1056,8 +1082,16 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
       if (source && book.texts[source] !== undefined && boxes.has(box)) sources.set(source, [...sources.get(source) ?? [], boxes.get(box)!]);
     }
     for (const [source, targets] of sources) flow.run(markdownToHtml(book.texts[source]), targets, 'columns');
+    if (crop) {
+      const page = sheetPages(format).find(({ side }) => side === crop)!;
+      const artwork = sheet.querySelector<HTMLElement>('.if-spread')!;
+      // Keep page-local rendering and mirrored insets from the original format, while displaying only one page.
+      sheet.style.width = cssMM(page.bleedWidth);
+      artwork.style.left = cssMM(sheetBleed(format).left - page.bleedX);
+    }
     return { spread: definition, sheet };
   });
+  if (offerBlank) sheets.push({ spread: '__blank__', sheet: containers[containers.length - 1].querySelector<HTMLElement>('.if-sheet')! });
   layoutBook(root, sheets, 'layouts', format);
   await settleRestoredImages();
   publish({ state: 'ready', template: info, pages: sequence.count, units: [], errors: [], warnings: [], flow: {}, anchors: anchors.anchors });
@@ -1394,8 +1428,9 @@ function renderEditor(root: HTMLElement, book: RenderProject, template: Template
 // Runs a layout family's picker. Its draft is one of the family's layout IDs; the frame reports it, its height, and
 // commit or cancel to the app, which checks the choice and switches the layout. The frame changes nothing itself.
 function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Template, spreadId: string, familyId: string,
-  readOnly: boolean) {
-  const spread = book.project.spreads.find(({ id }) => id === spreadId);
+  readOnly: boolean, page?: PageSide) {
+  const sheet = book.project.spreads.find(({ id }) => id === spreadId);
+  const spread = scopeSpread(sheet, page);
   const family = template.layoutFamilies && Object.hasOwn(template.layoutFamilies, familyId) ? template.layoutFamilies[familyId] : undefined;
   const picker = family?.picker;
   if (!spread || !family || !picker) throw new Error('This layout family has no picker.');
@@ -1404,7 +1439,7 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   let document = resolveParams(template.parameters, book.project.params);
   const format = resolveFormat(template.format);
   root.className = 'if-editor if-layout-settings';
-  let saved = spread.split ? '' : spread.definition;
+  let saved = sheet?.split && !page ? '' : spread.definition;
   let disabled = readOnly;
 
   // The draft lives outside React so choose() followed directly by commit() sends the newest choice.
@@ -1562,7 +1597,8 @@ export async function startRender(root: HTMLElement) {
       return;
     }
     if (book.mode === 'edit' && query.get('view') === 'layout-picker') {
-      renderLayoutPicker(root, book, template, query.get('spread') ?? '', query.get('family') ?? '', query.has('readonly'));
+      renderLayoutPicker(root, book, template, query.get('spread') ?? '', query.get('family') ?? '', query.has('readonly'),
+        query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined);
       return;
     }
     const { spreads } = book.project;
@@ -1597,7 +1633,8 @@ export async function startRender(root: HTMLElement) {
         : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
           : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
     if (edit && view === 'layouts') {
-      await renderLayouts(root, book, template, info, query.get('spread') ?? '');
+      await renderLayouts(root, book, template, info, query.get('spread') ?? '',
+        query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined, query.get('group') ?? undefined);
       return;
     }
     const activeChains = [...chains];
@@ -1652,12 +1689,13 @@ export async function startRender(root: HTMLElement) {
     // the page: the marked node is the way to show it again (placeControlWarnings).
     const rendered = [...root.querySelectorAll<HTMLElement>('.if-spread-container[data-spread]')].flatMap((container) => {
       const spread = spreads.find(({ id }) => id === container.dataset.spread);
-      return spread ? [{ spread: spread.id, layout: spread.definition, marked: new Set([...container.querySelectorAll<HTMLElement>('[data-edit]')]
-        .flatMap((node) => node.dataset.edit!.split(' ').filter(Boolean))) }] : [];
+      return spread ? shownLayoutStates(spread).map(({ page, state }) => ({ spread: spread.id, ...onPage(page), layout: state.definition,
+        marked: new Set([...container.querySelectorAll<HTMLElement>('[data-edit]')].filter((node) => pageOf(node) === page)
+          .flatMap((node) => node.dataset.edit!.split(' ').filter(Boolean))) })) : [];
     });
     const warnings: Issue[] = [
-      ...placeControlWarnings(declaration, rendered).map(({ code, message: text, path, details, suggestion, spread }) =>
-        ({ ...(spread ? located(spread, text) : message(text)), code, details: { ...details, path }, suggestion })),
+      ...placeControlWarnings(declaration, rendered).map(({ code, message: text, path, details, suggestion, spread, page }) =>
+        ({ ...(spread ? located(spread, text) : message(text)), code, ...onPage(page), details: { ...details, path }, suggestion })),
       ...book.problems.map((text) => ({ ...message(text), code: 'project-input' })),
       ...(book.template.warnings ?? []).map((text) => ({ ...message(text), code: 'template-dependencies',
         suggestion: 'Run npm install in template/, then run the template dependency rebuild script.' })),
@@ -1692,7 +1730,7 @@ export async function startRender(root: HTMLElement) {
     errors.push(...pictureIssues(pictureFailures));
     if (!present && !lazy && !(edit && view !== 'book')) for (const note of renderedImageNotes()) {
       warnings.push({ ...(note.spread ? located(note.spread, note.message) : message(note.message)), code: note.code,
-        ...(note.element ? { element: note.element } : {}), details: { label: note.label, ...note.details },
+        ...(note.element ? { element: note.element } : {}), ...onPage(note.page), details: { label: note.label, ...note.details },
         suggestion: note.code === 'rendered-image-raster'
           ? 'Return SVG from draw and declare output="vector" on the <RenderedImage>, or declare output="raster" if the picture is imagery such as a satellite photo.'
           : 'Draw the picture at target.width × target.pixelRatio by target.height × target.pixelRatio pixels.' });
@@ -1700,8 +1738,8 @@ export async function startRender(root: HTMLElement) {
     const photoRenderIssues = (failures: PhotoRenderFailure[]): Issue[] => failures.map(({ spread, page, box, message: text }) => ({
       ...located(spread, 'Photo box ' + box + ': its render callback failed: ' + text), code: 'photo-render-failed', ...onPage(page), box,
       suggestion: 'Fix the PhotoBox render callback so it returns markup for every crop and parameter value.' }));
-    for (const { api, spread } of guards?.calls ?? []) {
-      errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api, false))), code: 'render-impure',
+    for (const { api, spread, page } of guards?.calls ?? []) {
+      errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api, false))), code: 'render-impure', ...onPage(page),
         details: { api }, suggestion: spread ? impureSuggestion : unlocatedImpureSuggestion });
     }
     for (const sheet of spreads) for (const { page, state: spread } of shownLayoutStates(sheet)) {
@@ -1737,20 +1775,20 @@ export async function startRender(root: HTMLElement) {
         code: 'photo-decode-failed', box, ...onPage(page), source: photo,
         suggestion: 'Replace the original with a valid JPEG, PNG or WebP file, or assign another photo.' });
     }
-    for (const { spread, anchor, found } of lookups.values()) {
+    for (const { spread, page, anchor, found } of lookups.values()) {
       warnings.push(found ? {
-        ...located(spread, found + ' spreads declare anchor ' + anchor + '; this spread uses the first.'), code: 'anchor-ambiguous',
+        ...located(spread, found + ' spreads declare anchor ' + anchor + '; this spread uses the first.'), code: 'anchor-ambiguous', ...onPage(page),
         details: { anchor, declared: found },
         suggestion: 'Give each anchor a unique ID in the layouts\' anchors(), or list them with ctx.book.anchors(' + JSON.stringify(anchor) + ').',
       } : {
-        ...located(spread, 'No spread declares anchor ' + anchor + '.'), code: 'anchor-missing', details: { anchor },
+        ...located(spread, 'No spread declares anchor ' + anchor + '.'), code: 'anchor-missing', ...onPage(page), details: { anchor },
         suggestion: 'Insert a spread whose layout declares anchor ' + anchor + ', or change the referenced anchor ID.',
       });
     }
-    for (const { id, spread, text, url, kept } of index.creditConflicts ?? []) {
+    for (const { id, spread, page, text, url, kept } of index.creditConflicts ?? []) {
       warnings.push({ ...located(spread, 'This spread declares credit ' + id + ' as ' + JSON.stringify(text) + (url ? ' (' + url + ')' : '') +
         ', but an earlier spread declares it as ' + JSON.stringify(kept.text) + (kept.url ? ' (' + kept.url + ')' : '') + '; the book prints the first.'),
-        code: 'credit-conflict', details: { credit: id, text, kept: kept.text },
+        code: 'credit-conflict', ...onPage(page), details: { credit: id, text, kept: kept.text },
         suggestion: 'Give credits with different text or URLs their own IDs in the layouts\' credits().' });
     }
     // A credit the book uses must be printed somewhere: a page marks what it prints with data-credits. Only a render of

@@ -21,6 +21,8 @@ export const contract1Capabilities = [
   'opening-spreads',
   // `facingPages: false` formats and `span: 'page'` layouts: one page per unit instead of facing spreads.
   'single-pages',
+  // Page layouts compose either side of a facing sheet, with <Page>, page-local geometry and per-page editing.
+  'page-layouts',
   // `context` in custom editors: the spread they were opened from, as `render` sees it, kept current.
   'editor-context',
   // `editors`: editors of document parameters, opened from nodes marked with them.

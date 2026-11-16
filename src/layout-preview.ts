@@ -1,20 +1,31 @@
 import type { ProjectSummary, TemplateInfo } from './desktop';
+import { storedStates } from './project';
 import type { SpreadState } from './project';
+import { layoutFootprint, shownLayoutStates } from './layouts';
 
 // Layout previews read the selected spread's content, document parameters, pagination, book anchors and the book
-// index (`ctx.book.spreads`: every spread's layout and placed photos with their metadata). Render-session URLs,
-// document metadata and other spreads' texts and parameters (apart from anchors) do not affect their artwork.
+// index (`ctx.book.spreads`: every shown page's layout and placed photos with their metadata), and book credits.
+// Render-session URLs, document metadata and other layouts' content apart from anchors/credits do not affect it.
 export function layoutPreviewKey(summary: ProjectSummary, template: TemplateInfo, spread: SpreadState) {
-  const placed = (item: SpreadState) => Object.entries(item.boxes).flatMap(([box, { photo }]) => photo ? [[box, photo] as const] : []);
-  const photos = [...new Set([spread, ...summary.project.spreads].flatMap((item) => placed(item).map(([, photo]) => photo)))].sort();
-  const texts = [...new Set(Object.values(spread.boxes).flatMap((box) => box.text ? [box.text] : []))].sort();
+  const placed = (item: SpreadState) => shownLayoutStates(item).flatMap(({ page, state }) =>
+    Object.entries(state.boxes).flatMap(([box, { photo }]) => photo ? [[page, box, photo] as const] : []));
+  // A candidate layout can restore the selected sheet's remembered content, including its hidden spread state.
+  const selectedStates = storedStates(spread);
+  const photos = [...new Set([...selectedStates.flatMap(({ state }) => Object.values(state.boxes).flatMap(({ photo }) => photo ? [photo] : [])),
+    ...summary.project.spreads.flatMap((item) => placed(item).map(([, , photo]) => photo))])].sort();
+  const texts = [...new Set(selectedStates.flatMap(({ state }) =>
+    Object.values(state.boxes).flatMap((box) => box.text ? [box.text] : [])))].sort();
   return JSON.stringify([
     summary.folder, summary.templateHash ?? summary.id, summary.network ?? [], template.format,
     spread, summary.project.params,
     summary.project.spreads.map((item) => {
-      const layout = template.spreads[item.definition];
-      // Anchors may depend on any of their layout's parameters. Their functions stay in the render frame.
-      return [item.id, item.definition, layout?.span, layout?.declaresAnchors ? item.params : null, placed(item)];
+      // A hidden spread layout affects neither the index nor anchors/credits. Preserve page identity, including
+      // missing blank pages through `split`, and the sheet footprint that determines every later page number.
+      return [item.id, !!item.split, layoutFootprint(item, template.spreads), shownLayoutStates(item).map(({ page, state }) => {
+        const layout = template.spreads[state.definition];
+        return [page, state.definition, layout?.span, layout?.declaresAnchors || layout?.declaresCredits ? state.params : null,
+          layout?.declaresCredits ? [state.elements, state.boxes] : null];
+      }), placed(item)];
     }),
     photos.map((id) => {
       const photo = summary.photoIndex[id];

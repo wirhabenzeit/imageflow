@@ -12,7 +12,7 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 
 - Edit `template/` TSX, CSS and assets directly with your workspace tools.
 - Edit registered Markdown at its source location; linked Markdown stays outside the package.
-- Use `apply_project_changes` for `project.json` and `photos.json`. Never edit these manifests while the app is open.
+- Use `apply_project_changes` for supported spread-level `project.json` and `photos.json` changes. Never edit these manifests while the app is open. Page-addressed mutations are pending: split spreads reject unaddressed commands with `SPREAD_SHOWN_AS_PAGES`, except layout merging through `switch_layout`. Use the editor for individual page edits; see [Page layouts](page-layouts.md).
 - Copy new content into `inbox/` and call `import_sources`. Then assign the returned IDs with a command batch.
 - Parameter commands use saved scopes: `document`, `spread`, `box` or `element`. An element editor can also own spread parameters; use `scope: 'spread'` for those fields, not `scope: 'element'`.
 - To find the parameter a request means, read each parameter's description with its unit, range and options. Give new parameters a description when their meaning or direction is not obvious from the label.

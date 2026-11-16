@@ -1,4 +1,4 @@
-import { box, Choice, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Spread } from 'imageflow';
+import { box, Choice, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Page, Spread } from 'imageflow';
 import type { BookSpread, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
 import { insetMapParameters, MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
@@ -60,6 +60,19 @@ function Paper({ context, bled = {}, children }: {
     {document.showPageNumbers && page.left && !bled.left && <span className="folio left-folio">{page.left}</span>}
     {document.showPageNumbers && page.right && !bled.right && <span className="folio right-folio">{page.right}</span>}
   </Spread>;
+}
+
+/** Reusable page paper. Its geometry and folio belong only to the side being rendered. */
+function PagePaper({ context, bled = false, children }: {
+  context: Pick<Context, 'document' | 'page' | 'side' | 'geometry'>; bled?: boolean; children?: ImageFlowNode;
+}) {
+  const { document, page } = context;
+  const number = page.left ?? page.right ?? page.number;
+  return <Page className={bookClass(document)} style={{ '--text-size': document.textSize + 'pt' }}>
+    <div className="paper" style={context.geometry.css(context.geometry.page('bleed'))} />
+    {children}
+    {document.showPageNumbers && number && !bled && <span className={'folio ' + (context.side === 'left' ? 'left-folio' : 'right-folio')}>{number}</span>}
+  </Page>;
 }
 
 function Caption({ context, box, rect, className = 'caption' }: {
@@ -266,17 +279,22 @@ function pageRanges(pages: number[]) {
 }
 
 type PictureEntry = { title: string; pages: string; credit: string; lines: { pages: number; credit: number }; clipped: boolean; rect: Rect };
-type PictureContext = Pick<Context, 'book' | 'spread' | 'layout' | 'geometry' | 'view'>;
+type PictureContext = Pick<Context, 'book' | 'spread' | 'layout' | 'geometry' | 'view' | 'format' | 'side'>;
 
 /** Places the whole list across the book's Picture list spreads and returns this spread's part of it. */
 function picturePage(ctx: PictureContext) {
-  const at = ctx.geometry.design(canvas);
+  // List allocation covers all list layouts, even when this render is one local closing page.
+  const at = geometry.design(ctx.format, canvas);
   // Built from the book index before anything renders, so the list follows every photo placed, moved or removed.
   const pictures = pictureList(ctx.book.spreads);
   // The spread being drawn counts with the layout drawn, so a layout preview shows what the spread would hold.
-  const lists = ctx.book.spreads
-    .map(({ id, layout }) => ({ id, layout: id === ctx.spread ? ctx.layout : layout ?? '' }))
-    .filter(({ layout }) => pictureLayouts.includes(layout));
+  const lists = ctx.book.spreads.flatMap(({ id, layout, pages }) => {
+    // A full-spread candidate replaces both pages; a page candidate changes only its own side.
+    if (id === ctx.spread && !ctx.side) return [{ id, layout: ctx.layout }];
+    if (pages) return (['left', 'right'] as const).map(side => ({ id, side,
+      layout: id === ctx.spread && side === ctx.side ? ctx.layout : pages[side]?.layout ?? '' }));
+    return [{ id, layout: id === ctx.spread ? ctx.layout : layout ?? '' }];
+  }).filter(({ layout }) => pictureLayouts.includes(layout));
   const own: PictureEntry[] = [];
   let next = 0;
   for (const list of lists) {
@@ -293,14 +311,15 @@ function picturePage(ctx: PictureContext) {
         if (y + height - pictureLine.after > column.y + column.height) break;
         // Text longer than its lines is shortened here, with the Book check warning below, rather than cut by the box.
         const fit = (text: string, count: number) => text.length > count * perLine ? text.slice(0, count * perLine - 1).trimEnd() + '…' : text;
-        if (list.id === ctx.spread) own.push({ ...entry, pages: fit(entry.pages, lines.pages), credit: fit(entry.credit, lines.credit), lines,
+        if (list.id === ctx.spread && (!('side' in list) || list.side === ctx.side)) own.push({ ...entry, pages: fit(entry.pages, lines.pages), credit: fit(entry.credit, lines.credit), lines,
           clipped: wanted.pages > lines.pages || wanted.credit > lines.credit, rect: { ...column, y, height: height - pictureLine.after } });
         y += height;
         next++;
       }
     }
   }
-  const last = lists.at(-1)?.id === ctx.spread;
+  const lastList = lists.at(-1);
+  const last = lastList?.id === ctx.spread && (!('side' in lastList) || lastList.side === ctx.side);
   return { pictures, entries: own, listed: next, missing: last ? pictures.length - next : 0 };
 }
 
@@ -358,7 +377,7 @@ const compass = <svg viewBox="0 0 100 100" aria-hidden="true">
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.9.0',
+  version: '0.10.0',
   label: 'Photobook',
   description: 'A travel journal with full-bleed photographs, stories, grids, maps and a picture list, in a light or a dark theme.',
   preview: './preview.jpg',
@@ -381,45 +400,47 @@ export default defineTemplate({
     story: { label: 'Photo and story', picker: { label: 'Photo', component: variantPicker('photo', 'Photo side', { left: 'Left', right: 'Right' }) } },
     grid: { label: 'Photo grid', picker: { label: 'Grid size', component: variantPicker('size', 'Grid size', { '2x2': '2 × 2', '3x3': '3 × 3' }) } },
     feature: { label: 'Feature and details', picker: { label: 'Photos', component: variantPicker('photos', 'Number of photos', { 3: '3 photos', 5: '5 photos' }) } },
+    pagePhoto: { label: 'Photo page', picker: { label: 'Photo style', component: variantPicker('style', 'Photo style', { bleed: 'Full bleed', framed: 'Framed', shaped: 'Shaped' }) } },
+    pageGrid: { label: 'Photo grid page', picker: { label: 'Grid size', component: variantPicker('size', 'Grid size', { '2x2': '2 × 2', '3x3': '3 × 3' }) } },
   },
   // `spread` types each layout's context from its own declarations and the document parameters above.
-  spreads: ({ spread }) => ({
+  spreads: ({ spread, page: pageLayout }) => ({
     // Book ends: a first right page and a last left page.
-    title: spread({
-      label: 'Title page', span: 'right',
+    title: pageLayout({
+      label: 'Title page', sides: ['right'],
       parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow', markdown: 'inline' }) },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
-        return <Paper context={ctx}>
-          <div className="compass" style={ctx.geometry.css(at.right(margin, 60, 14, 14))}>{compass}</div>
-          <ctx.Text presentation="inline" parameter="heading" as="h1" rect={at.right(margin, 120, page - 2 * margin, 110)} />
-          <div className="rule" style={ctx.geometry.css(at.right(margin, 232, 24, .6))} />
-          <ctx.Text presentation="inline" parameter="subtitle" className="subtitle" rect={at.right(margin, 240, page - 2 * margin, 20)} />
-        </Paper>;
+        return <PagePaper context={ctx}>
+          <div className="compass" style={ctx.geometry.css(at.page(margin, 60, 14, 14))}>{compass}</div>
+          <ctx.Text presentation="inline" parameter="heading" as="h1" rect={at.page(margin, 120, page - 2 * margin, 110)} />
+          <div className="rule" style={ctx.geometry.css(at.page(margin, 232, 24, .6))} />
+          <ctx.Text presentation="inline" parameter="subtitle" className="subtitle" rect={at.page(margin, 240, page - 2 * margin, 20)} />
+        </PagePaper>;
       },
     }),
-    cover: spread({
-      label: 'Title photo', span: 'right',
+    cover: pageLayout({
+      label: 'Title photo', sides: ['right'],
       parameters: { heading, subtitle: p.string({ label: 'Subtitle', default: 'A book made in ImageFlow', markdown: 'inline' }) },
       boxes: { hero: box.photo('Title photo') },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
-        const right = ctx.geometry.page('right', 'bleed');
-        return <Paper context={ctx} bled={{ right: true }}>
+        const right = ctx.geometry.page('bleed');
+        return <PagePaper context={ctx} bled>
           <ctx.PhotoBox id="hero" rect={right} />
           <Shade context={ctx} rect={{ ...right, y: right.y + right.height * .45, height: right.height * .55 }} />
           {/* The title stands on the subtitle, however many lines it takes. */}
-          <div className="cover-title" style={ctx.geometry.css(at.right(margin, 110, page - 2 * margin, 156))}>
+          <div className="cover-title" style={ctx.geometry.css(at.page(margin, 110, page - 2 * margin, 156))}>
             <ctx.Text presentation="inline" parameter="heading" as="h1" className="on-photo" />
             <ctx.Text presentation="inline" parameter="subtitle" className="subtitle on-photo" />
           </div>
-        </Paper>;
+        </PagePaper>;
       },
     }),
     // The book's last page, and the only layout offered for it: the picture list, the colophon, and at its foot the
     // credits of what the book uses (such as the data of its maps), collected from every spread's `credits`.
-    credits: spread({
-      label: 'Picture list', span: 'left',
+    credits: pageLayout({
+      label: 'Picture list', sides: ['left'],
       parameters: {
         listHeading: p.string({ label: 'Heading', default: 'Pictures', markdown: 'inline' }),
         colophon: p.string({ label: 'Colophon', default: 'Made with ImageFlow.', multiline: true, maxLength: 300, markdown: 'inline',
@@ -427,14 +448,100 @@ export default defineTemplate({
       },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
-        return <Paper context={ctx}>
+        return <PagePaper context={ctx}>
           {/* No heading over an empty list when earlier Picture list spreads already hold every photo. */}
           {listsSomething(ctx) &&
-            <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.left(margin, 36, page - 2 * margin, 14)} />}
-          <PictureList context={ctx} columns={pictureColumns('credits', at)} />
-          <ctx.Text presentation="inline" parameter="colophon" className="colophon" rect={at.left(margin, 226, page - 2 * margin, 18)} />
-          <Credits context={ctx} rect={at.left(margin, 246, page - 2 * margin, 14)} />
-        </Paper>;
+            <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.page(margin, 36, page - 2 * margin, 14)} />}
+          <PictureList context={ctx} columns={pictureColumns('credits', { ...at, left: at.page })} />
+          <ctx.Text presentation="inline" parameter="colophon" className="colophon" rect={at.page(margin, 226, page - 2 * margin, 18)} />
+          <Credits context={ctx} rect={at.page(margin, 246, page - 2 * margin, 14)} />
+        </PagePaper>;
+      },
+    }),
+
+    // Page designs combine freely on either side; their IDs carry content into and out of spread layouts.
+    photo: pageLayout({
+      label: 'Full-bleed photo', family: 'pagePhoto', variant: { style: 'bleed' }, boxes: { hero: captioned('Photo') },
+      render: ctx => {
+        const at = ctx.geometry.design(canvas);
+        return <PagePaper context={ctx} bled>
+          <ctx.PhotoBox id="hero" rect={ctx.geometry.page('bleed')} />
+          <Caption context={ctx} box={ctx.boxes.hero} className="caption overlay" rect={at.page(margin, 266, page - 2 * margin, 10)} />
+        </PagePaper>;
+      },
+    }),
+    photoFramed: pageLayout({
+      label: 'Framed photo', family: 'pagePhoto', variant: { style: 'framed' }, boxes: { hero: captioned('Photo') },
+      render: ctx => {
+        const at = ctx.geometry.design(canvas);
+        return <PagePaper context={ctx}>
+          <ctx.PhotoBox id="hero" rect={at.page(30, 44, 230, 190)} />
+          <Caption context={ctx} box={ctx.boxes.hero} rect={at.page(30, 240, 230, 20)} />
+        </PagePaper>;
+      },
+    }),
+    photoShaped: pageLayout({
+      label: 'Shaped photo', family: 'pagePhoto', variant: { style: 'shaped' }, boxes: { hero: shapedPhoto },
+      render: ctx => {
+        const at = ctx.geometry.design(canvas);
+        return <PagePaper context={ctx}>
+          <ctx.PhotoBox id="hero" rect={at.page(48, 36, 194, 216)}>{ShapedPhoto}</ctx.PhotoBox>
+          <Caption context={ctx} box={ctx.boxes.hero} className="caption centred" rect={at.page(48, 258, 194, 10)} />
+        </PagePaper>;
+      },
+    }),
+    textPage: pageLayout({
+      label: 'Story page', parameters: { heading }, boxes: { body: body('Story') },
+      anchors: ({ params }) => oneLine(params.heading) ? [{ id: 'section', title: oneLine(params.heading) }] : [],
+      render: ctx => {
+        const at = ctx.geometry.design(canvas);
+        const titled = !!oneLine(ctx.params.heading);
+        return <PagePaper context={ctx}>
+          {titled && <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.page(margin, 36, 230, 42)} />}
+          <ctx.MarkdownBox id="body" {...ctx.edit('document.textSize')} className="reading" columns={ctx.boxes.body.params.columns}
+            rect={at.page(margin, titled ? 90 : 36, 230, titled ? 172 : 226)} />
+        </PagePaper>;
+      },
+    }),
+    notePage: pageLayout({
+      label: 'Notes page', parameters: { heading, note },
+      render: ctx => {
+        const at = ctx.geometry.design(canvas);
+        return <PagePaper context={ctx}>
+          <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.page(margin, 150, 230, 58)} />
+          <ctx.Text presentation="inline" parameter="note" className="note" rect={at.page(margin, 220, 220, 42)} />
+        </PagePaper>;
+      },
+    }),
+    quotePage: pageLayout({
+      label: 'Quote page', parameters: {
+        quote: p.string({ label: 'Quote', default: 'Each turn opened a different view of the same water.', multiline: true, maxLength: 240, markdown: 'inline',
+          description: 'One or two sentences, set large. Longer passages belong in a story.' }),
+        attribution: p.string({ label: 'Attribution', default: '', maxLength: 80, placeholder: 'Who said it, or where', markdown: 'inline' }),
+      },
+      render: ctx => {
+        const at = ctx.geometry.design(canvas);
+        return <PagePaper context={ctx}>
+          <div className="statement" style={ctx.geometry.css(at.page(50, 60, 190, 170))}>
+            <div className="rule" />
+            <ctx.Text presentation="inline" parameter="quote" as="blockquote" className="quote" />
+            <ctx.Text presentation="inline" parameter="attribution" className="attribution" />
+          </div>
+        </PagePaper>;
+      },
+    }),
+    gridPage: pageLayout({ label: 'Photo grid page 2×2', family: 'pageGrid', variant: { size: '2x2' }, boxes: gridBoxes('2x2'),
+      render: ctx => {
+        const at = ctx.geometry.design(canvas);
+        const cells = ctx.geometry.grid(at.page(24, 24, 242, 242), { columns: 2, rows: 2, gap: at.width(gaps[ctx.document.spacing]) });
+        return <PagePaper context={ctx}>{gridSizes['2x2'].ids.map((id, i) => <ctx.PhotoBox key={id} id={id} rect={cells[i]} />)}</PagePaper>;
+      },
+    }),
+    gridPage9: pageLayout({ label: 'Photo grid page 3×3', family: 'pageGrid', variant: { size: '3x3' }, boxes: gridBoxes('3x3'),
+      render: ctx => {
+        const at = ctx.geometry.design(canvas);
+        const cells = ctx.geometry.grid(at.page(24, 24, 242, 242), { columns: 3, rows: 3, gap: at.width(gaps[ctx.document.spacing]) });
+        return <PagePaper context={ctx}>{gridSizes['3x3'].ids.map((id, i) => <ctx.PhotoBox key={id} id={id} rect={cells[i]} />)}</PagePaper>;
       },
     }),
 
@@ -665,9 +772,126 @@ export default defineTemplate({
   // A new book starts with a tour of the layouts, in the sample book's order, ready for photos and text. New Book can
   // also start an empty book.
   openingSpreads: [
-    { layout: 'cover' }, { layout: 'contents' }, { layout: 'opener' }, { layout: 'story' }, { layout: 'panorama' },
-    { layout: 'grid' }, { layout: 'statement' }, { layout: 'storyRight' }, { layout: 'feature3' }, { layout: 'text' },
-    { layout: 'opener' }, { layout: 'pair', params: { framed: false } }, { layout: 'single' }, { layout: 'panorama' },
-    { layout: 'grid9' }, { layout: 'text' }, { layout: 'credits' },
+    {
+      "layout": "cover"
+    },
+    {
+      "layout": "contents"
+    },
+    {
+      "layout": "opener"
+    },
+    {
+      "pages": {
+        "left": {
+          "layout": "photo"
+        },
+        "right": {
+          "layout": "textPage"
+        }
+      }
+    },
+    {
+      "layout": "panorama"
+    },
+    {
+      "pages": {
+        "left": {
+          "layout": "notePage"
+        },
+        "right": {
+          "layout": "gridPage"
+        }
+      }
+    },
+    {
+      "pages": {
+        "left": {
+          "layout": "quotePage"
+        },
+        "right": {
+          "layout": "photo"
+        }
+      }
+    },
+    {
+      "pages": {
+        "left": {
+          "layout": "textPage"
+        },
+        "right": {
+          "layout": "photo"
+        }
+      }
+    },
+    {
+      "pages": {
+        "left": {
+          "layout": "photo"
+        },
+        "right": {
+          "layout": "gridPage"
+        }
+      }
+    },
+    {
+      "pages": {
+        "left": {
+          "layout": "textPage"
+        },
+        "right": {
+          "layout": "textPage"
+        }
+      }
+    },
+    {
+      "layout": "opener"
+    },
+    {
+      "pages": {
+        "left": {
+          "layout": "photo"
+        },
+        "right": {
+          "layout": "photo"
+        }
+      }
+    },
+    {
+      "pages": {
+        "left": {
+          "layout": "notePage"
+        },
+        "right": {
+          "layout": "photoShaped"
+        }
+      }
+    },
+    {
+      "layout": "panorama"
+    },
+    {
+      "pages": {
+        "left": {
+          "layout": "gridPage9"
+        },
+        "right": {
+          "layout": "notePage"
+        }
+      }
+    },
+    {
+      "pages": {
+        "left": {
+          "layout": "textPage"
+        },
+        "right": {
+          "layout": "textPage"
+        }
+      }
+    },
+    {
+      "layout": "credits"
+    }
   ],
 });

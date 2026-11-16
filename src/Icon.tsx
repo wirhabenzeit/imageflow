@@ -11,6 +11,8 @@ const icons = {
   next: 'M6 3l5 5-5 5',
   minus: 'M3 8h10',
   plus: 'M8 3v10M3 8h10',
+  spreadLayout: 'M2 3h12v10H2zM8 3v10',
+  pageLayouts: 'M1.5 3h5.25v10H1.5zM9.25 3h5.25v10H9.25z',
   sidebarLeft: 'M3 3h10v10H3zM6 3v10',
   sidebarRight: 'M3 3h10v10H3zM10 3v10',
   // The editor panel under the canvas.

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { SpreadDefinition, TemplateInfo } from './desktop';
 import type { Parameter, Parameters } from './parameters';
-import { identifier } from './project';
+import { bookFormatOf, identifier, pageSides } from './project';
 import type { Project, SpreadState, Values } from './project';
 import { spanFits } from './format';
 
@@ -88,11 +88,14 @@ function inapplicable(fixture: FixtureCase, inputs: Inputs) {
   }
 }
 
-// Whether a layout fits a format of the template: page layouts need a format without facing pages, the others one
-// with them. Fixtures render each layout only in the formats it fits.
+// Fixtures render each layout only in formats it fits; page layouts also work on either half of facing pages.
+function fixtureStructure(template: TemplateInfo, format: string) {
+  return template.structures?.[format] ?? template.printFormats?.[format]?.structure ?? template.format.structure;
+}
+
 export function fixtureFits(template: TemplateInfo, layout: string, format: string) {
-  const structure = template.structures?.[format] ?? (format === template.formatId ? template.format.structure : undefined);
-  return structure ? spanFits(template.spreads[layout].span, { structure }) : template.spreads[layout].span !== 'page';
+  const structure = fixtureStructure(template, format);
+  return spanFits(template.spreads[layout].span, { structure });
 }
 
 export function availableFormats(template: TemplateInfo) {
@@ -146,14 +149,15 @@ export function planFixtures(template: TemplateInfo, request: FixtureRequest): F
   const unfit = layouts.filter((layout) => !formats.some((format) => fixtureFits(template, layout, format)));
   for (const layout of unfit) {
     skipped.push({ layout, reason: template.spreads[layout].span === 'page'
-      ? "A single-page layout (span: 'page') needs a format without facing pages, and no tested format is one."
+      ? "No tested format accepts this page layout."
       : 'A layout for facing pages needs a format with facing pages, and no tested format has them.' });
   }
   layouts = layouts.filter((layout) => !unfit.includes(layout));
   for (const layout of layouts) {
     for (const format of formats) {
       if (!fixtureFits(template, layout, format)) skipped.push({ layout, format, reason: 'The layout does not fit this format: ' +
-        (template.spreads[layout].span === 'page' ? 'it is a single page, and the format has facing pages.' : 'it is for facing pages, and the format has none.') });
+        (template.spreads[layout].span === 'left' || template.spreads[layout].span === 'right'
+          ? 'the format has no single end pages.' : 'it is for facing pages, and the format has none.') });
     }
   }
   const cases = request.cases ? [...new Set(request.cases)] : [...fixtureCases];
@@ -324,17 +328,28 @@ export function fixtureTextId(cell: FixtureCell) {
 export function fixtureProject(project: Project, template: TemplateInfo, format: string, cells: FixtureCell[], ids: FixtureSourceIds) {
   const texts: Record<string, string> = {};
   const markdown: Record<string, string> = {};
-  const spreads = cells.map((cell) => {
-    const text = fixtureTextId(cell);
-    if (cell.case !== 'empty' && Object.values(template.spreads[cell.layout].boxes).some(({ type }) => type === 'markdown')) {
-      texts[text] = 'synthetic/' + cell.case + '.md';
-      markdown[text] = cell.case === 'long-text' ? fixtureMarkdown.long : fixtureMarkdown.typical;
-    }
-    return fixtureSpread(cell, template.spreads[cell.layout], ids, text);
+  const spreads = cells.map((cell): SpreadState => {
+    const definition = template.spreads[cell.layout];
+    const create = (side?: typeof pageSides[number]) => {
+      const text = fixtureTextId(cell) + (side ? '-' + side : '');
+      if (cell.case !== 'empty' && Object.values(definition.boxes).some(({ type }) => type === 'markdown')) {
+        texts[text] = 'synthetic/' + cell.case + (side ? '-' + side : '') + '.md';
+        markdown[text] = cell.case === 'long-text' ? fixtureMarkdown.long : fixtureMarkdown.typical;
+      }
+      return fixtureSpread(cell, definition, ids, text);
+    };
+    if (definition.span !== 'page' || fixtureStructure(template, format).facingPages === false) return create();
+    // Both allowed sides render independently on one sheet. Distinct sources keep synthetic text from flowing
+    // from the left fixture into the right fixture. A restricted layout leaves the other page blank.
+    const pages = Object.fromEntries(pageSides.filter((side) => !definition.sides || definition.sides.includes(side)).map((side) => {
+      const { id: _id, ...state } = create(side);
+      return [side, state];
+    }));
+    return { id: cell.spread, definition: cell.layout, params: {}, boxes: {}, elements: {}, split: true as const, pages };
   });
   return {
     project: {
-      ...project, ...(Object.keys(template.formats).length ? { format } : {}),
+      ...project, schemaVersion: bookFormatOf({ spreads }), ...(Object.keys(template.formats).length ? { format } : {}),
       texts: { ...project.texts, ...texts }, spreads,
     } satisfies Project,
     markdown,

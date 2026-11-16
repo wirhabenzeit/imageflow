@@ -69,3 +69,31 @@ test('an empty book starts with a single right page where the format requires on
   assert.deepEqual(firstSpreadLayouts(layouts, pages('single-pages')), ['title']);
   assert.deepEqual(firstSpreadLayouts(layouts, pages('inside-covers')), ['story']);
 });
+
+test('opening page pairs validate sides and materialize independent format-2 states', () => {
+  const layouts = { page: { label: 'Page', span: 'page', parameters: { heading: p.string({ label: 'Heading', default: '' }) }, render },
+    right: { label: 'Right only', span: 'page', sides: ['right'], render } };
+  const parsed = templateSchema.parse({ id: 'pages', version: '1', contract: 1, format: pages('inside-covers'), spreads: layouts,
+    openingSpreads: [{ pages: { left: { layout: 'page', params: { heading: 'Left' } }, right: { layout: 'right' } } }, { pages: { left: {} } }] });
+  const info = templateInfo(chooseFormat(parsed));
+  const states = openingSpreadStates(info);
+  assert.equal(states[0].split, true);
+  assert.equal(states[0].pages!.left!.params.heading, 'Left');
+  assert.equal(states[0].pages!.right!.definition, 'right');
+  assert.equal(states[1].pages!.left!.definition, undefined);
+  assert.equal(projectSchema.parse({ schemaVersion: 1, title: 'Pages', template: { id: 'pages', version: '1' }, spreads: states }).schemaVersion, 2);
+  states[0].pages!.left!.params.heading = 'Edited';
+  assert.equal(openingSpreadStates(info)[0].pages!.left!.params.heading, 'Left');
+});
+
+test('opening page pairs reject spread layouts, side restrictions, invalid parameters and end positions', () => {
+  const declaration = (entry: unknown, format = pages('inside-covers')) => templateSchema.safeParse({ id: 'pages', version: '1', contract: 1, format,
+    spreads: { spread: { label: 'Spread', render }, right: { label: 'Right', span: 'page', sides: ['right'], render } }, openingSpreads: [entry] });
+  for (const entry of [{ pages: { left: { layout: 'spread' } } }, { pages: { left: { layout: 'right' } } },
+    { pages: { right: { layout: 'missing' } } }, { pages: { right: { layout: 'right', params: { unknown: true } } } }, { pages: {} }]) {
+    assert.equal(declaration(entry).success, false, JSON.stringify(entry));
+  }
+  assert.equal(declaration({ pages: { right: { layout: 'right' } } }, pages('single-pages')).success, false);
+  assert.equal(declaration({ pages: { right: { layout: 'right' } } }, printFormat({ facingPages: false, label: 'Calendar',
+    trim: { width: mm(100), height: mm(100) }, bleed: mm(3), safe: mm(5), pageCount: { min: 1, max: 20, step: 1 } }) as never).success, false);
+});

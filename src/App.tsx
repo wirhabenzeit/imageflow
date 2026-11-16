@@ -1,6 +1,9 @@
+import { pageSelectionRect, pageSelectionSide, pageSideAt, stepPageSelection } from './page-selection';
+import { canSwapPages, editableSpread, keptItems, layoutMime, placeKeptContent, shownContentTargets } from './page-editor';
+import type { ContentTarget, KeptItem } from './page-editor';
 import { scopeSpread } from './project';
 import type { PageSide } from './project';
-import { layoutFootprint } from './layouts';
+import { layoutFootprint, shownLayoutStates } from './layouts';
 import { CanvasHover } from './CanvasHover';
 import { inspectorTargets } from './inspector-targets';
 import type { InspectorTarget } from './inspector-targets';
@@ -41,8 +44,8 @@ import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
-import { firstSpreadLayouts, newSpread, openingSpreadStates, readEdit, resolveEditPath } from './editing';
-import { moveContent, pickerFamily, swapContent, layoutPreviews, switchLayout } from './layouts';
+import { editorLayoutsAt, firstEditorLayouts, newEditorSpread, openingSpreadStates, readEdit, resolveEditPath } from './editing';
+import { describeLayoutChange, editorLayoutChoices, editorLayoutPreviews, editorLayoutTarget, pickerFamily, swapContent, swapPages, switchLayout } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
 import type { Edit } from './Inspector';
@@ -69,7 +72,7 @@ type InlineContext = {
 };
 
 function inlineValues({ project, spread, template, target }: InlineContext) {
-  return JSON.stringify([spread.definition, target.edits.map((path) => {
+  return JSON.stringify([spread.split, scopeSpread(spread, target.page)?.definition, target.edits.map((path) => {
     const field = resolveEditPath(template, scopeSpread(spread, target.page)?.definition ?? '', path, target.page);
     return [field, field && readEdit(project, spread, field)];
   })]);
@@ -105,7 +108,7 @@ function Guides({ sheet, format }: { sheet: Rect & { spread: string }; format: R
 
 // An empty book asks for its first spread: the template's opening spreads, or one layout that can start a book.
 function EmptyBook({ template, writable, start }: { template?: TemplateInfo; writable: boolean; start: (layout?: string) => void }) {
-  const layouts = template ? firstSpreadLayouts(template.spreads, template.format) : [];
+  const layouts = template ? firstEditorLayouts(template.spreads, template.format) : [];
   const opening = template?.openingSpreads ?? [];
   return <section className="empty-book" aria-labelledby="empty-book-title">
     <div className="empty-book-art" aria-hidden="true"><span /><span /></div>
@@ -131,6 +134,7 @@ export function App() {
   const [projectInstance, setProjectInstance] = useState(0);
   const current = useRef<ProjectSummary>(undefined);
   const [spreadId, setSpreadId] = useState('');
+  const [selectedSide, setSelectedSide] = useState<PageSide>();
   useToolbarDrag();
   const [template, setTemplate] = useState<TemplateInfo>();
   const [render, setRender] = useState<RenderStatus>();
@@ -311,8 +315,11 @@ export function App() {
   }, [spreadId, selectedSource, projectInstance]);
   const index = Math.max(0, spreads.findIndex(({ id }) => id === spreadId));
   const spread = spreads[index];
-  const layoutFamily = spread && template && pickerFamily(template.spreads, spread.definition, template.layoutFamilies);
-  const sequence = template && pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
+  const selectedPage = spread?.split ? selectedSide ?? 'left' : undefined;
+  const selectedState = scopeSpread(spread, selectedPage);
+  const layoutFamily = selectedState && template && pickerFamily(template.spreads, selectedState.definition, template.layoutFamilies);
+  const sequence = useMemo(() => template && pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format), [spreads, template]);
+  const selectionSide = pageSelectionSide(sequence?.spreads[index]?.page ?? {}, selectedSide ?? selectedPage);
   const pageLabels = spreads.map((_, i) => pageLabel(sequence?.spreads[i]?.page ?? {}));
   const writable = !!summary && !reload && !agentWorking;
   const canvasReady = render?.state === 'ready' && !reload;
@@ -322,9 +329,17 @@ export function App() {
   const canChangeBook = writable && !busy && !exporting;
   const canReorder = canChangeBook && !!template;
   const canMoveSpread = (id: string, target: number) => !!template && !!spreadOrder(spreads, id, target, template);
-  // An empty book adds its first spread; otherwise a spread-wide layout is needed, or a page layout without facing pages.
-  const canAdd = canChangeBook && !!template && (!spread ? firstSpreadLayouts(template.spreads, template.format).length > 0
-    : Object.values(template.spreads).some(({ span }) => span === (hasFacingPages(template.format) ? 'spread' : 'page')));
+  function insertionAfter(item: SpreadState, list: SpreadState[]) {
+    const position = list.findIndex(entry => entry.id === item.id);
+    const currentItem = list[position];
+    const footprint = template && currentItem && layoutFootprint(currentItem, template.spreads);
+    const closing = template && hasSingleEnds(template.format) && position === list.length - 1 && list.length > 1 &&
+      (footprint?.span === 'left' || footprint?.span === 'page');
+    return closing || footprint?.span === 'left' ? position : position + 1;
+  }
+  const addLayouts = template ? spread ? editorLayoutsAt(template.spreads, template.format,
+    { index: insertionAfter(spread, spreads), count: spreads.length + 1 }) : firstEditorLayouts(template.spreads, template.format) : [];
+  const canAdd = canChangeBook && addLayouts.length > 0;
   // A single opening or closing page cannot be duplicated where the format requires one of each.
   const canDuplicate = canChangeBook && !!template && spreadSelected && !!spread &&
     !selectedSpreads.some((id) => hasSingleEnds(template.format) && ['left', 'right'].includes(sequence?.spreads[spreads.findIndex((spread) => spread.id === id)]?.span ?? ''));
@@ -380,6 +395,7 @@ export function App() {
       inputGeneration.current++;
       reloading.current = false;
       reloadFailed.current = false;
+      setSelectedSide(undefined);
       setTemplate(undefined);
       setSelectedSource(undefined);
       setQuick(undefined);
@@ -401,7 +417,7 @@ export function App() {
     // A book may have no spreads yet; then nothing is selected.
     setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0]?.id :
       next.project.spreads.find(({ id }) => id === previous)?.id ?? next.project.spreads[0]?.id) ?? '');
-    if (selected) pendingReveal.current = selected;
+    if (selected) { pendingReveal.current = selected; if (selected !== spreadId) setSelectedSide(undefined); }
     setRender(undefined);
     setSummary(next);
   }
@@ -539,6 +555,10 @@ export function App() {
       present(command === 'presentation-start' ? summary?.project.spreads[0]?.id ?? '' : spreadId);
       return;
     }
+    if (command === 'swap-pages') {
+      if (!controlFocused && !editing && !cropping && !elementEditor && !quick && selectedSpreads.length <= 1) swapSelectedPages();
+      return;
+    }
     if (command === 'book-check') { setCheckScope(undefined); setCheckRequest((value) => value + 1); return; }
     if ((spreadCommands as readonly string[]).includes(command)) {
       // Native accelerators must never delete/reorder a spread while a field or another editor owns the keyboard.
@@ -671,7 +691,7 @@ export function App() {
     await new Promise((resolve) => setTimeout(resolve, 0)); // React publishes validation and save results.
     return attempt === quitAttempt.current && finishQuit();
   });
-  function placeSources(keys: string[], target = spreadId, firstBox?: string, page?: PageSide) {
+  function placeSources(keys: string[], target = spreadId, firstBox?: string, page: PageSide | undefined = target === spreadId ? selectedPage : undefined) {
     if (!template || !writable || !summary) return;
     const state = scopeSpread(spreads.find(({ id }) => id === target), page);
     const definition = state && template.spreads[state.definition];
@@ -682,9 +702,9 @@ export function App() {
     });
     const assignments = sourcePlacements(definition.boxes, state.boxes, sources, firstBox);
     if (!assignments.length) { setNotice('This spread has no empty matching boxes.'); return; }
-    select(target, false);
+    select(target, false, page);
     edit(({ project }) => {
-      const spread = scopeSpread(project.spreads.find(({ id }) => id === target), page);
+      const spread = editableSpread(project.spreads.find(({ id }) => id === target), page);
       if (spread?.definition !== state.definition) return false;
       for (const { box, source } of assignments) spread.boxes[box] = { params: spread.boxes[box]?.params ?? {}, ...(source.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
     }, 'Placed ' + assignments.length + ' of ' + sources.length + ' assets');
@@ -893,9 +913,10 @@ export function App() {
     revealedThumb.current = spreadId;
   }, [spreadId, thumbs]);
 
-  function select(id: string, scroll = true) {
+  function select(id: string, scroll = true, side?: PageSide) {
     pendingAnchor.current = undefined;
     setSpreadId(id);
+    setSelectedSide(side);
     setSelectedSource(undefined);
     if (scroll) reveal(id);
   }
@@ -930,7 +951,8 @@ export function App() {
   // Starts an empty book: with one layout, or with the template's opening spreads.
   function start(layout?: string) {
     if (!template || spreads.length) return;
-    const added = layout ? [newSpread(layout)] : openingSpreadStates(template);
+    const initial = layout && newEditorSpread(layout, template.spreads, template.format, { index: 0, count: 2 });
+    const added = layout ? initial ? [initial] : [] : openingSpreadStates(template);
     if (!added.length) return;
     edit(({ project }) => {
       if (project.spreads.length) return false;
@@ -941,20 +963,18 @@ export function App() {
   function add(duplicate = false, spread = spreads[index]) {
     if (!template) return;
     if (!spread) {
-      if (!duplicate) start(firstSpreadLayouts(template.spreads, template.format)[0]);
+      if (!duplicate) start(firstEditorLayouts(template.spreads, template.format)[0]);
       return;
     }
-    // A new spread, or a new page without facing pages, uses the first layout of that footprint.
-    const wanted = hasFacingPages(template.format) ? 'spread' : 'page';
-    const entry = Object.entries(template.spreads).find(([, value]) => value.span === wanted);
-    if (!entry && !duplicate) return;
-    const next = duplicate ? { ...structuredClone(spread), id: crypto.randomUUID() } : newSpread(entry![0]);
+    const position = { index: insertionAfter(spread, spreads), count: spreads.length + 1 };
+    const eligible = editorLayoutsAt(template.spreads, template.format, position);
+    const definition = eligible.find(id => template.spreads[id].span === 'spread') ?? eligible[0];
+    const next = duplicate ? { ...structuredClone(spread), id: crypto.randomUUID() }
+      : definition && newEditorSpread(definition, template.spreads, template.format, position);
+    if (!next) return;
     edit(({ project }) => {
-      const position = project.spreads.findIndex(({ id }) => id === spread.id);
-      // Next to the selected spread, but never before a single opening page or after a single closing page.
-      const footprint = layoutFootprint(spread, template.spreads);
-      const closing = hasSingleEnds(template.format) && position === project.spreads.length - 1 && project.spreads.length > 1 && (footprint.span === 'left' || footprint.span === 'page');
-      const insert = closing || footprint.span === 'left' ? position : position + 1;
+      if (!project.spreads.some(item => item.id === spread.id)) return false;
+      const insert = insertionAfter(spread, project.spreads);
       if (insertionProblem(project.spreads, insert, layoutFootprint(next, template.spreads).span, template, layoutFootprint(next, template.spreads).sides)) return false;
       project.spreads.splice(insert, 0, next);
     }, undefined, next.id);
@@ -976,23 +996,23 @@ export function App() {
     if (!canReorder || !template) return;
     edit(({ project }) => { const next = spreadSelectionOrder(project.spreads, ids, direction, template); if (!next) return false; project.spreads = next; }, ids.length + ' spreads moved');
   }
-  async function spreadMenu(id: string, ids = spreadSelection.selected.includes(id) ? spreadSelection.selected : [id]) {
+  async function spreadMenu(id: string, ids = spreadSelection.selected.includes(id) ? spreadSelection.selected : [id], side?: PageSide) {
     const selected = spreads.find((spread) => spread.id === id);
     if (!selected || !api || !template) return;
-    select(id, false);
+    select(id, false, side);
     const at = spreads.indexOf(selected);
     const state: BookMenuState = { ...menuState, editing: false, enabled: {
       'add-spread': canAdd, 'delete-spread': canChangeBook,
       'duplicate-spread': canChangeBook && !ids.some((id) => hasSingleEnds(template.format) && ['left', 'right'].includes(sequence?.spreads[spreads.findIndex((spread) => spread.id === id)]?.span ?? '')),
       'move-spread-up': canReorder && !!spreadSelectionOrder(spreads, ids, 'up', template), 'move-spread-down': canReorder && !!spreadSelectionOrder(spreads, ids, 'down', template),
     } };
-    const choices = layoutPreviews(template.spreads, selected.definition, template.layoutFamilies ?? {}, template.format, { index: at, count: spreads.length });
+    const choices = editorLayoutPreviews(template.spreads, selected, template.layoutFamilies ?? {}, template.format, { index: at, count: spreads.length }, side);
     const result = await api.showContextMenu(['add-spread', { command: 'duplicate-spread', label: ids.length > 1 ? 'Duplicate ' + ids.length + ' Spreads' : undefined }, 'move-spread-up', 'move-spread-down',
-      'move-spread-start', 'move-spread-end', ...(choices.length > 1 && ids.length === 1 ? [{ command: 'change-layout' as const, items: choices.map((value) => ({ command: 'change-layout' as const, value, label: template.spreads[value].label, checked: value === selected.definition })) }] : []),
+      'move-spread-start', 'move-spread-end', ...(choices.length > 1 && ids.length === 1 ? [{ command: 'change-layout' as const, items: choices.map((value) => ({ command: 'change-layout' as const, value, label: template.spreads[value].label, checked: value === (selected.split ? selected.pages?.[side ?? 'left']?.definition : selected.definition) })) }] : []),
       { type: 'separator' }, ...(spreadIssues.has(id) ? [{ command: 'book-check' as const, label: 'Check This Spread' }] : []), { command: 'delete-spread', label: ids.length > 1 ? 'Delete ' + ids.length + ' Spreads' : undefined }], state);
     if (current.current?.id !== summary?.id) return;
     const command = result?.command;
-    if (command === 'change-layout' && result?.value && choices.includes(result.value)) changeSpreadAt(id, (state) => { switchLayout(state, result.value!, template.spreads); }, 'Layout changed');
+    if (command === 'change-layout' && result?.value && choices.includes(result.value)) applyEditorLayout(id, result.value, side);
     else if (command === 'add-spread') add(false, selected);
     else if (command === 'duplicate-spread') { if (ids.length > 1) duplicateSelected(ids); else add(true, selected); }
     else if (command === 'delete-spread') deleteSelected(ids);
@@ -1004,10 +1024,10 @@ export function App() {
   }
   async function canvasMenu(event: Pick<React.MouseEvent, 'clientX' | 'clientY' | 'preventDefault'>) {
     event.preventDefault();
-    const { sheet, top } = locate(event);
+    const { sheet, side, top } = locate(event);
     if (!sheet || !summary || !template || !api) return;
-    if (!top || top.type === 'element') { await spreadMenu(sheet); return; }
-    select(sheet, false);
+    if (!top || top.type === 'element') { await spreadMenu(sheet, [sheet], side); return; }
+    select(sheet, false, side);
     const source = boxSource(sheet, top.id, top.page);
     const photo = top.type === 'photo';
     const items: import('./desktop').ContextMenuItem[] = photo ? ['box-replace-photo',
@@ -1032,30 +1052,65 @@ export function App() {
 
   function assign(spread: string, box: string, source: SourceRef, page?: PageSide) {
     editCanvas(({ project }) => {
-      const state = scopeSpread(project.spreads.find(({ id }) => id === spread), page);
+      const state = editableSpread(project.spreads.find(({ id }) => id === spread), page);
       if (state) state.boxes[box] = { params: state.boxes[box]?.params ?? {}, ...(source.kind === 'photo' ? { photo: source.id } : { text: source.id }) };
     });
   }
 
-  // Moves content a spread keeps outside its layout into one of its boxes; content already there is kept instead.
-  function place(spread: string, from: string, to: string, fromCanvas = false, page?: PageSide) {
+  // Place kept or replaced content into an explicitly addressed shown box.
+  function place(id: string, from: KeptItem, to: ContentTarget, fromCanvas = false) {
     if (!summary || !template) return;
-    const state = spreads.find(({ id }) => id === spread);
-    const moving = state?.boxes[from];
-    const label = state && template.spreads[scopeSpread(state, page)?.definition ?? '']?.boxes[to]?.label;
-    if (!moving || !label) return;
-    const kind = moving.photo ? 'photo' : 'text';
+    const sourceSummary = summary;
+    const sheet = spreads.find(item => item.id === id);
+    const label = sheet && shownContentTargets(sheet, template.spreads, from.kind).find(item => item.box === to.box && item.page === to.page)?.label;
     let swapped: string | undefined;
     const apply = fromCanvas ? editCanvas : edit;
     apply(({ project }) => {
-      const current = project.spreads.find(({ id }) => id === spread);
-      const destination = scopeSpread(current, page);
-      if (current && destination) swapped = page ? swapContent(current, from, destination, to) : moveContent(current, from, to);
-    }, () => sourceTitle(summary, kind, (moving.photo ?? moving.text)!) + ' placed in ' + label +
-      (swapped ? '; ' + sourceTitle(summary, kind, swapped) + ' is saved outside this layout' : ''));
-    // The Inspector scrolls to the box that received it.
-    setFocusBox({ box: to, at: Date.now() });
+      const sheet = project.spreads.find(item => item.id === id);
+      if (!sheet || !keptItems(sheet, template.spreads).some(item => item.id === from.id && item.kind === from.kind && item.source === from.source &&
+            item.location === from.location && item.displaced === from.displaced) ||
+          !shownContentTargets(sheet, template.spreads, from.kind).some(item => item.box === to.box && item.page === to.page)) return false;
+      swapped = placeKeptContent(sheet, from, to);
+    }, () => sourceTitle(sourceSummary, from.kind, from.source) + ' placed in ' + (label ?? to.box) +
+      (swapped ? '; ' + sourceTitle(sourceSummary, from.kind, swapped) + ' is set aside' : ''));
+    select(id, false, to.page ?? selectedSide);
+    setFocusBox({ box: to.box, at: Date.now() });
   }
+
+  function applyEditorLayout(id: string, definition?: string, side?: PageSide) {
+    if (!template || !writable) return;
+    const layouts = template.spreads;
+    let consequence = '';
+    edit(({ project }) => {
+      const at = project.spreads.findIndex(item => item.id === id);
+      const sheet = project.spreads[at];
+      if (!sheet) return false;
+      const position = { index: at, count: project.spreads.length };
+      const target = editorLayoutTarget(layouts, definition, template.format, position, side);
+      if (definition === undefined ? !target.page : !editorLayoutChoices(layouts, sheet, template.format, position, side).includes(definition)) return false;
+      consequence = describeLayoutChange(switchLayout(sheet, target, layouts));
+    }, () => (definition ? layouts[definition].label : 'Blank page') + (consequence ? ' · ' + consequence : ''));
+    clearCanvasEditors();
+    setEditing(undefined);
+    setElementEditor(undefined);
+    const target = editorLayoutTarget(layouts, definition, template.format, { index: spreads.findIndex(item => item.id === id), count: spreads.length }, side);
+    select(id, false, target.page ?? side);
+  }
+
+  const chooseInspectorLayout = useLiveCallback((definition?: string) => {
+    if (spread) applyEditorLayout(spread.id, definition, selectedSide ?? selectedPage);
+  });
+  const swapSelectedPages = useLiveCallback(() => {
+    if (!spread || !template || !writable || !hasFacingPages(template.format) || sequence?.spreads[index]?.span !== 'spread') return;
+    edit(({ project }) => {
+      const sheet = project.spreads.find(item => item.id === spread.id);
+      if (!sheet || !canSwapPages(sheet, template.spreads)) return false;
+      swapPages(sheet);
+    }, 'Pages swapped');
+    clearCanvasEditors();
+    setEditing(undefined);
+    setElementEditor(undefined);
+  });
 
   // Finds the spread and box under a pointer. The label strip above each spread belongs to the spread.
   // A click as a fraction of the node it hit, which the inline editor opened from that node receives (see OpenEditor).
@@ -1070,8 +1125,11 @@ export function App() {
     const x = event.clientX - bounds.left;
     const y = event.clientY - bounds.top;
     const inside = (rect: Rect, above = 0) => x >= rect.x && x <= rect.x + rect.width && y >= rect.y - above && y <= rect.y + rect.height;
-    const sheet = geometry.sheets.find((rect) => inside(rect, bookLayout.book.gap))?.spread;
-    if (readyId.current !== summary?.id) return { sheet };
+    const sheetRect = geometry.sheets.find((rect) => inside(rect, bookLayout.book.gap));
+    const sheet = sheetRect?.spread;
+    const at = spreads.findIndex(item => item.id === sheet);
+    const side = sheetRect && pageSideAt(sheetRect, sequence?.spreads[at]?.page ?? {}, x, y);
+    if (readyId.current !== summary?.id) return { sheet, side };
     const wanted = types?.includes(photoMime) ? 'photo' : types?.includes(textMime) ? 'markdown' : undefined;
     const box = geometry.boxes.findLast((rect) => rect.type !== 'element' && (!wanted || rect.type === wanted) && inside(rect));
     // The smallest edit target under the pointer wins, unless a smaller box sits on top of it. Of equal ones, such
@@ -1083,7 +1141,7 @@ export function App() {
     // The box or element drawn on top: geometry lists them in document order, so a later one covers an earlier
     // one (an inset map over a full-bleed photo). Templates that reorder with z-index are not accounted for.
     const top = wanted ? box : geometry.boxes.findLast((rect) => inside(rect));
-    return { sheet, box, element, top, target: target && (!box || area(target) <= area(box)) ? target : undefined };
+    return { sheet, side, box, element, top, target: target && (!box || area(target) <= area(box)) ? target : undefined };
   }
   const closeEditor = useCallback(() => setEditing(undefined), []);
   // Tab moves between the edit targets of a spread in reading order.
@@ -1110,7 +1168,7 @@ export function App() {
     const layout = template?.spreads[scopeSpread(spreads.find(({ id }) => id === spread), owner.page)?.definition ?? ''];
     const declared = type === 'element' ? layout?.elements[owner.id] : layout?.boxes[owner.id];
     if (!sheet || !declared) return undefined;
-    return { x: sheet.x + 12, y: sheet.y + 12, width: 0, height: 0, spread, occurrence: 0, owner: { type, id: owner.id }, hidden: true,
+    return { x: sheet.x + 12, y: sheet.y + 12, width: 0, height: 0, spread, page: owner.page, occurrence: 0, owner: { type, id: owner.id }, hidden: true,
       edits: Object.keys(declared.parameters).map((key) => (type === 'element' ? 'elements.' : 'boxes.') + owner.id + '.' + key) };
   }
   // Parameters a template marked on a box besides its own, such as a spread setting shown in its caption.
@@ -1153,14 +1211,14 @@ export function App() {
   // Edits one spread, if it still exists when the edit applies.
   function changeSpreadAt(id: string, update: (spread: SpreadState) => void, notice?: string, page?: PageSide) {
     edit(({ project }) => {
-      const state = scopeSpread(project.spreads.find((item) => item.id === id), page);
+      const state = editableSpread(project.spreads.find((item) => item.id === id), page);
       if (state) update(state);
     }, notice);
   }
   // The same for the spread an inline editor is open on, and only while it shows the layout it opened in.
   function changeSpreadInline(update: (spread: SpreadState) => void, notice?: string) {
     editInline(({ project }) => {
-      const state = scopeSpread(project.spreads.find((item) => item.id === liveInline?.spread.id), liveInline?.target.page);
+      const state = editableSpread(project.spreads.find((item) => item.id === liveInline?.spread.id), liveInline?.target.page);
       if (state) update(state);
     }, notice);
   }
@@ -1173,7 +1231,7 @@ export function App() {
     if (!liveInline || (editing?.held && !resumeInline)) return;
     edit((files) => {
       const active = files.project.spreads.find(({ id }) => id === liveInline.spread.id);
-      if ((!liveInline.target.page || active?.split) && scopeSpread(active, liveInline.target.page)?.definition === scopeSpread(liveInline.spread, liveInline.target.page)?.definition) change(files);
+      if (editableSpread(active, liveInline.target.page)?.definition === scopeSpread(liveInline.spread, liveInline.target.page)?.definition) change(files);
     }, notice);
   }
   const editOwner = editTarget && /^boxes\.([^.]+)\./.exec(editTarget.edits[0])?.[1];
@@ -1216,7 +1274,7 @@ export function App() {
     }
     if (owner.type === 'element' && openElementEditor(spread, owner.id, owner.page)) return;
     deselectPhoto();
-    select(spread, false);
+    select(spread, false, owner.page ?? (spread === spreadId ? selectedSide : undefined));
     openEditing({ spread, key: ownerKey(spread, owner.id, owner.page), owner });
   }
   // Opens the popover of a node the template marked, such as a ctx.Text heading, from the sidebar's list.
@@ -1224,7 +1282,7 @@ export function App() {
     if (target.inlineText && openTextOwner(target)) return;
     if (openDocumentEditor(target)) return;
     deselectPhoto();
-    select(target.spread, false);
+    select(target.spread, false, target.page ?? (target.spread === spreadId ? selectedSide : undefined));
     openEditing({ spread: target.spread, key: targetKey(target), panel });
   }
   function openTextOwner(target: Target) {
@@ -1243,7 +1301,7 @@ export function App() {
     if (readyId.current !== summary?.id || !editorOf(spread, element, page)) return false;
     setEditing(undefined);
     deselectPhoto();
-    select(spread, false);
+    select(spread, false, page ?? (spread === spreadId ? selectedSide : undefined));
     // Inline when the editor asks for it and the element is on the page, upright and large enough; else the panel.
     setElementEditor({ kind: 'element', spread, element, page,
       presentation: presentationFor(editorOf(spread, element, page)!.presentation, elementRect(geometry, spread, element, page)) });
@@ -1256,7 +1314,7 @@ export function App() {
     if (!editor || !layout || readyId.current !== summary?.id) return false;
     setEditing(undefined);
     deselectPhoto();
-    select(target.spread, false);
+    select(target.spread, false, target.page ?? (target.spread === spreadId ? selectedSide : undefined));
     const presentation = target.hidden ? 'dialog' : presentationFor(template.editors?.[editor]?.presentation, target);
     setElementEditor({ kind: 'document', spread: target.spread, page: target.page, layout, editor, presentation,
       ...(presentation === 'inline' ? { at: targetKey(target), ...(click ? { click } : {}) } : {}) });
@@ -1292,7 +1350,7 @@ export function App() {
     const layout = scopeSpread(spreads.find(({ id }) => id === spread), page)?.definition;
     if (!layout) return false;
     setEditing(undefined);
-    select(spread, false);
+    select(spread, false, page ?? (spread === spreadId ? selectedSide : undefined));
     setCropping({ spread, box, layout, page });
     return true;
   }
@@ -1307,7 +1365,7 @@ export function App() {
     const fits = normal(placement) === normal(centered);
     const { spread, box, layout, page } = cropping;
     edit(({ project }) => {
-      const state = scopeSpread(project.spreads.find(({ id }) => id === spread), page);
+      const state = editableSpread(project.spreads.find(({ id }) => id === spread), page);
       const target = state?.boxes[box];
       // Repeated crop edits can queue while an earlier crop renders. Check that this is still the same photo and layout.
       if (target?.photo !== cropPhoto || state?.definition !== layout) return;
@@ -1364,12 +1422,12 @@ export function App() {
     const label = template?.spreads[scopeSpread(spreads.find(({ id }) => id === target.spread), target.page)?.definition ?? '']?.boxes[target.box]?.label ?? target.box;
     let swapped: string | undefined;
     editCanvas(({ project }) => {
-      const from = scopeSpread(project.spreads.find(({ id }) => id === start.spread), start.page);
-      const to = scopeSpread(project.spreads.find(({ id }) => id === target.spread), target.page);
+      const from = editableSpread(project.spreads.find(({ id }) => id === start.spread), start.page);
+      const to = editableSpread(project.spreads.find(({ id }) => id === target.spread), target.page);
       if (from?.boxes[start.box]?.photo === start.photo && to) swapped = swapContent(from, start.box, to, target.box);
     }, () => sourceTitle(summary, 'photo', start.photo) + (swapped ? ' and ' + sourceTitle(summary, 'photo', swapped) + ' swapped' :
       ' moved to ' + label));
-    select(target.spread, false);
+    select(target.spread, false, target.page ?? (target.spread === spreadId ? selectedSide : undefined));
     setFocusBox({ box: target.box, at: Date.now() });
   });
   useEffect(() => {
@@ -1394,12 +1452,13 @@ export function App() {
   // neither saves into a layout it was not opened for. Element editors notice through their own stale check.
   const layouts = useRef(new Map<string, string>());
   useEffect(() => {
-    const changed = new Set(spreads.filter(({ id, definition }) => layouts.current.has(id) && layouts.current.get(id) !== definition)
-      .map(({ id }) => id));
-    layouts.current = new Map(spreads.map(({ id, definition }) => [id, definition]));
-    if (!changed.size) return;
-    setCropping((crop) => crop && changed.has(crop.spread) ? undefined : crop);
-    setEditing((open) => open && !open.held && changed.has(open.spread) ? undefined : open);
+    const key = (id: string, page?: PageSide) => id + (page ? '@' + page : '');
+    const next = new Map(spreads.flatMap(sheet => shownLayoutStates(sheet).map(({ page, state }) => [key(sheet.id, page), state.definition] as const)));
+    const previous = layouts.current;
+    const changed = (id: string, page?: PageSide) => previous.has(key(id, page)) && previous.get(key(id, page)) !== next.get(key(id, page));
+    setCropping(crop => crop && changed(crop.spread, crop.page) ? undefined : crop);
+    setEditing(open => open && !open.held && changed(open.spread, open.page) ? undefined : open);
+    layouts.current = next;
   }, [spreads]);
   // An editor whose spread was deleted closes, as does a document editor whose spread switched layout and so lost
   // the node it was opened from. Reordering keeps it open; its context follows.
@@ -1412,6 +1471,12 @@ export function App() {
     setDropTarget(undefined);
     if (event.dataTransfer.types.includes(spreadMime)) return;
     if (!api || !writable || busy || !summary || readyId.current !== summary.id) return;
+    if (event.dataTransfer.types.includes(layoutMime)) {
+      const { sheet, side } = locate(event);
+      const definition = event.dataTransfer.getData(layoutMime);
+      if (sheet && template && (definition === '__blank__' || Object.hasOwn(template.spreads, definition))) applyEditorLayout(sheet, definition === '__blank__' ? undefined : definition, side);
+      return;
+    }
     if (event.dataTransfer.types.includes(photosMime)) {
       const { sheet, box } = locate(event, event.dataTransfer.types);
       try {
@@ -1425,10 +1490,10 @@ export function App() {
     // Kept content dropped on its own spread moves; dropped on another spread it is another use of its source.
     const kept = event.dataTransfer.getData(keptMime);
     if (kept && box && box.type !== 'element') {
-      const origin = JSON.parse(kept) as { spread: string; box: string };
+      const origin = JSON.parse(kept) as KeptItem & { spread: string };
       if (origin.spread === box.spread) {
-        place(origin.spread, origin.box, box.id, true, box.page);
-        select(box.spread, false);
+        const { spread: _spread, box: _box, ...item } = origin as typeof origin & { box?: string };
+        place(origin.spread, item, { box: box.id, page: box.page }, true);
         return;
       }
     }
@@ -1437,13 +1502,13 @@ export function App() {
     if (photoId || textId) {
       if (photoId && box?.type === 'photo' && summary.photoIndex[photoId]) assign(box.spread, box.id, { kind: 'photo', id: photoId }, box.page);
       if (textId && box?.type === 'markdown' && summary.project.texts[textId]) assign(box.spread, box.id, { kind: 'text', id: textId }, box.page);
-      if (box) select(box.spread, false);
+      if (box) select(box.spread, false, box.page);
       return;
     }
     const paths = api.pathsForFiles([...event.dataTransfer.files]);
     if (!paths.length) return;
     const kind = box?.type === 'markdown' ? 'markdown' : box?.type === 'photo' ? 'photo' : undefined;
-    if (box) select(box.spread, false);
+    if (box) select(box.spread, false, box.page);
     importFiles({ kind, paths, target: box && box.type !== 'element' ? { spread: box.spread, box: box.id, page: box.page } : undefined }, summary.id);
   }
 
@@ -1501,14 +1566,19 @@ export function App() {
     deleteSelected(selectedSpreads);
   }
 
-  // With a spread selected on the canvas, arrow keys select the neighbouring spread: up and down in the vertical
-  // layout; in a grid, left and right step one spread and up and down one row.
+  // Left/right follow pages; up/down follow sheets or rows in the grid.
   function canvasArrowKeys(event: KeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey || !spreadSelected || !spread) return;
     if ((event.target as HTMLElement).closest('input, textarea, select, button, [contenteditable], dialog')) return;
     if (editing || cropping || elementEditor || quick) return;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      const next = stepPageSelection(spreads.map((item, i) => ({ id: item.id, page: sequence?.spreads[i]?.page ?? {} })),
+        { spread: spread.id, side: selectedSide }, event.key === 'ArrowLeft' ? -1 : 1);
+      if (next) { event.preventDefault(); select(next.spread, true, next.side); }
+      return;
+    }
     const step = columns
-      ? { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -columns, ArrowDown: columns }[event.key]
+      ? { ArrowUp: -columns, ArrowDown: columns }[event.key]
       : { ArrowUp: -1, ArrowDown: 1 }[event.key];
     const next = step && spreads[index + step];
     if (!next) return;
@@ -1545,8 +1615,15 @@ export function App() {
   const usage = useMemo(() => summary ? assetUsage(summary, pageLabels) : { photo: {}, text: {} },
     [summary, template, pageLabels.join()]);
   const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id, page }) => spread + ':' + (page ? page + ':' : '') + id === dropTarget) :
-    highlight ? geometry?.boxes.find(({ spread: owner, id, page }) => owner === spread?.id && id === highlight && page === undefined) : undefined;
-  const selectedSheet = spreadSelected ? geometry?.sheets.find(({ spread: id }) => id === spread?.id) : undefined;
+    highlight ? geometry?.boxes.find(({ spread: owner, id, page }) => owner === spread?.id && id === highlight && page === selectedPage) : undefined;
+  const selectedSheetRect = spreadSelected ? geometry?.sheets.find(({ spread: id }) => id === spread?.id) : undefined;
+  const selectionPages = sequence?.spreads[index]?.page;
+  const selectedLayoutMode = spread?.split ? 'pages' : selectionPages?.left !== undefined && selectionPages?.right !== undefined ? 'spread' : 'page';
+  const selectedSheet = selectedSheetRect && pageSelectionRect(selectedSheetRect, selectedLayoutMode === 'spread' ? undefined : selectionSide);
+  const activeSpreadPage = selectedSheetRect && selectedLayoutMode === 'spread' && selectionSide
+    ? pageSelectionRect(selectedSheetRect, selectionSide) : undefined;
+  const facingSheet = selectedSheetRect && selectedLayoutMode === 'pages' && selectionSide
+    ? pageSelectionRect(selectedSheetRect, selectionSide === 'left' ? 'right' : 'left') : undefined;
   const previewError = typeof reload === 'object' ? reload.error : render?.state === 'error' ? render.message : '';
   const issue = previewError || error;
   const previewNotice = agentWorking ? 'Agent is updating the book…' : previewError ? (geometry ? 'Showing the last successful preview' : 'Book preview unavailable') : '';
@@ -1558,7 +1635,7 @@ export function App() {
     'move-spread-up': canMoveUp, 'move-spread-down': canMoveDown, 'delete-spread': canDelete && spreadFocused },
     editing: controlFocused || !!editing || !!cropping || !!elementEditor || !!quick, textEditing,
     writable, busy: !!busy || exporting || !!reload || agentWorking, history: summary?.history,
-    canExport,
+    canExport, canSwapPages: !!spread && !!template && hasFacingPages(template.format) && sequence?.spreads[index]?.span === 'spread' && canSwapPages(spread, template.spreads),
     sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom, selectedSpread: spreadId, photoView: photoView.value, selectionCount: selectedSpreads.length,
     saving, pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };
   const menuKey = JSON.stringify(menuState);
@@ -1571,7 +1648,9 @@ export function App() {
   // A template with one fixed format offers no choices and ignores the saved one.
   const missingFormat = !!template && Object.keys(template.formats).length > 0 && !!summary?.project.format &&
     !Object.hasOwn(template.formats, summary.project.format);
-  const label = (definition: string, i: number) => template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
+  const label = (definition: string, i: number) => spreads[i]?.split
+    ? (['left', 'right'] as const).map(side => template?.spreads[spreads[i].pages?.[side]?.definition ?? '']?.label ?? 'Blank page').join(' / ')
+    : template?.spreads[definition]?.label ?? 'Spread ' + (i + 1);
   const pagesLabel = (i: number) => (pageLabels[i].includes('–') ? 'Pages ' : 'Page ') + pageLabels[i];
 
   useLayoutEffect(() => {
@@ -1611,14 +1690,14 @@ export function App() {
   const selectFromPanel = useLiveCallback(select);
   const quickSource = useLiveCallback(() => { if (selectedSource) setQuick(selectedSource); });
   const openInspectorOwner = useLiveCallback((owner: Parameters<typeof openOwner>[1]) => {
-    if (spread) { reveal(spread.id); openOwner(spread.id, owner); }
+    if (spread) { reveal(spread.id); openOwner(spread.id, { ...owner, page: selectedPage }); }
   });
   const openInspectorTarget = useLiveCallback((target: InspectorTarget) => {
     const live = geometry?.targets.find(item => targetKey(item) === targetKey(target));
     if (live) { reveal(live.spread); openTarget(live, true); }
   });
-  const placeInspector = useLiveCallback((from: string, to: string) => { if (spread) place(spread.id, from, to); });
-  const targetsKey = JSON.stringify(inspectorTargets(geometry?.targets ?? [], spread?.id));
+  const placeInspector = useLiveCallback((from: KeptItem, to: ContentTarget) => { if (spread) place(spread.id, from, to); });
+  const targetsKey = JSON.stringify(inspectorTargets(geometry?.targets ?? [], spread?.id, selectedPage));
   const panelTargets: InspectorTarget[] = useMemo(() => JSON.parse(targetsKey), [targetsKey]);
   const sourcesPanel = useMemo(() => (summary && <Sources view={sourcesView} summary={summary} tab={sourceTab} setTab={setSourceTab}
           selected={selectedSource ? { [selectedSource.kind]: selectedSource.id } : {}} choose={chooseSource}
@@ -1626,17 +1705,17 @@ export function App() {
           importPaths={importSourcePaths} fileTypes={fileTypes} importFileRequest={importFileRequest} />),
     [summary, sourcesView, sourceTab, selectedSource, usage, writable, busy, chooseSource, adoptSource, importSources, importSourcePaths, fileTypes, importFileRequest]);
   const inspectorPanel = useMemo(() => (summary && spread && <Inspector summary={summary} writable={writable}
-        spread={spread} source={selectedSource} template={template} render={render ?? lastReady}
+        spread={spread} page={selectedSide ?? selectedPage} source={selectedSource} template={template} render={render ?? lastReady}
         usage={usage} quickLook={quickSource} focus={focusBox}
         targets={panelTargets}
         open={openInspectorOwner}
-        openTarget={openInspectorTarget} place={placeInspector}
+        openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout}
         familyPicker={template && layoutFamily && <LayoutFamilyPicker
-          key={JSON.stringify([summary.handle, spread.id, layoutFamily, summary.templateHash, template.format, summary.network])}
-          project={summary.id} template={template} spread={spread} params={summary.project.params} family={layoutFamily}
-          readOnly={!writable} blocked={previewNotice || undefined} edit={editFromPanel} />}
+          key={JSON.stringify([summary.handle, spread.id, selectedPage, layoutFamily, summary.templateHash, template.format, summary.network])}
+          project={summary.id} template={template} spread={spread} page={selectedPage} chooseLayout={chooseInspectorLayout} params={summary.project.params} family={layoutFamily}
+          readOnly={!writable} blocked={previewNotice || undefined} />}
         edit={editFromPanel} highlight={setHighlight} select={selectFromPanel} />),
-    [summary, spread, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, editFromPanel, selectFromPanel]);
+    [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, editFromPanel, selectFromPanel]);
 
   const nativeDocumentTitle = navigator.platform.includes('Mac');
   return <ProjectFilesContext.Provider value={projectFiles}><div className={nativeDocumentTitle ? 'studio mac-studio' : 'studio'}>
@@ -1744,12 +1823,12 @@ export function App() {
         <div ref={canvasWrap} className="canvas-wrap">
           <main ref={canvas} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" tabIndex={0} onWheel={() => { pendingAnchor.current = undefined; }} onScroll={() => { rememberViewAnchor(); measureView(); }}
             onContextMenu={(event) => void canvasMenu(event)} onKeyDown={(event) => {
-              if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void spreadMenu(spreadId); } else { spreadDeleteKey(event); canvasArrowKeys(event); }
+              if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void spreadMenu(spreadId, [spreadId], selectedSide); } else { spreadDeleteKey(event); canvasArrowKeys(event); }
             }} onPointerDown={(event) => {
               if (!(event.target as HTMLElement).closest('input, textarea, select, button, [contenteditable]')) event.currentTarget.focus({ preventScroll: true });
             }}
             onDragOver={(event) => {
-              if (!writable || !canvasReady || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime)) return;
+              if (!writable || !canvasReady || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime || type === layoutMime)) return;
               event.preventDefault();
               const { box } = locate(event, event.dataTransfer.types);
               setDropTarget(box ? box.spread + ':' + (box.page ? box.page + ':' : '') + box.id : undefined);
@@ -1762,12 +1841,12 @@ export function App() {
               onClick={(event) => {
                 // A click that ended a photo move is not a click.
                 if (moved.current) return;
-                const { sheet, top, target } = locate(event);
+                const { sheet, side, top, target } = locate(event);
                 if (!sheet || !spreads.some(({ id }) => id === sheet)) return;
                 // The first click on a spread selects it; its photos and texts take clicks once it is selected, so a
                 // spread filled by one photo can still be selected.
-                const current = spreadSelected && spreadId === sheet;
-                select(sheet, false);
+                const current = spreadSelected && spreadId === sheet && (!spreads.find(item => item.id === sheet)?.split || (selectedSide ?? 'left') === side);
+                select(sheet, false, side);
                 if (!current || blockedInline) return;
                 if (top) setFocusBox({ box: top.id, at: Date.now() });
                 // What is drawn on top decides: a box or element opens its own editor there (see openOwner). A smaller
@@ -1798,14 +1877,23 @@ export function App() {
                 onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const level = spreadIssues.get(id);
+                const at = spreads.findIndex(sheet => sheet.id === id);
+                const displayedLabel = canvasLabels[id] ?? (at >= 0 ? pagesLabel(at) + ' · ' + label(spreads[at].definition, at) : id);
                 return <div key={id} data-canvas-spread={id} className={'sheet-label' + (spreadSelected && id === spread?.id ? ' selected' : '')} style={{ left: x, top: y - 26, width }}>
-                  {level && <span className={'issue-dot issue-' + level} />}{canvasLabels[id]}
+                  {level && <span className={'issue-dot issue-' + level} />}<span className="sheet-label-name" title={displayedLabel}>{displayedLabel}</span>
+                  {spreadSelected && id === spread?.id && <span className="sheet-layout-mode" data-layout-mode={selectedLayoutMode} aria-label={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'} title={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'}>
+                    <Icon name={selectedLayoutMode === 'pages' ? 'pageLayouts' : selectedLayoutMode === 'spread' ? 'spreadLayout' : 'document'} size={13} />
+                  </span>}
                 </div>;
               })}
               <CanvasHover key={hoverEpoch} stage={stage} geometry={geometry} selected={spreadSelected} spread={spread?.id}
                 editKey={editKey} cropping={!!cropping} locate={locate} motion={canvasMotion} />
-              {selectedSheet && <div data-canvas-spread={selectedSheet.spread} className="sheet-selection" aria-hidden="true" style={{
+              {facingSheet && <div data-canvas-spread={facingSheet.spread} className="facing-page-selection" aria-hidden="true" style={{
+                left: facingSheet.x, top: facingSheet.y, width: facingSheet.width, height: facingSheet.height }} />}
+              {selectedSheet && <div data-canvas-spread={selectedSheet.spread} data-layout-mode={selectedLayoutMode} className="sheet-selection" aria-hidden="true" style={{
                 left: selectedSheet.x, top: selectedSheet.y, width: selectedSheet.width, height: selectedSheet.height }} />}
+              {activeSpreadPage && <div data-canvas-spread={activeSpreadPage.spread} data-page={selectionSide} className="active-spread-page" aria-hidden="true" style={{
+                left: activeSpreadPage.x, top: activeSpreadPage.y, width: activeSpreadPage.width, height: activeSpreadPage.height }} />}
               {showGuides && format && geometry?.sheets.map((sheet) => <Guides key={sheet.spread} sheet={sheet} format={format} />)}
               {activeBox && <div data-canvas-spread={activeBox.spread} className="box-highlight" aria-hidden="true" style={{
                 left: activeBox.x, top: activeBox.y, width: activeBox.width, height: activeBox.height,
@@ -1828,7 +1916,7 @@ export function App() {
                 </div>}
                 {cropBox && Object.keys(cropBox.parameters).length > 0 && <div className="crop-params">
                   <Fields compact schema={cropBox.parameters} controls={cropBox.controls} values={cropState?.params ?? {}} update={(key, value) => edit(({ project }) => {
-                    const state = scopeSpread(project.spreads.find(({ id }) => id === cropping.spread), cropping.page);
+                    const state = editableSpread(project.spreads.find(({ id }) => id === cropping.spread), cropping.page);
                     if (state?.definition !== cropping.layout || state.boxes[cropping.box]?.photo !== cropPhoto) return;
                     state.boxes[cropping.box].params[key] = value;
                   }, cropBox.parameters[key].label + ' updated')} />
@@ -1836,7 +1924,7 @@ export function App() {
                 {cropAttached.length > 0 && <div className="crop-params">
                   <MarkedFields compact project={summary.project} spread={spreads.find(({ id }) => id === cropping.spread)!} page={cropping.page} template={template!}
                     edits={cropAttached} edit={(change, notice) => edit((files) => {
-                      if (scopeSpread(files.project.spreads.find(({ id }) => id === cropping.spread), cropping.page)?.definition === cropping.layout) change(files);
+                      if (editableSpread(files.project.spreads.find(({ id }) => id === cropping.spread), cropping.page)?.definition === cropping.layout) change(files);
                     }, notice)} />
                 </div>}
               </CropEditor>}
@@ -1899,7 +1987,7 @@ export function App() {
         {!issue && busy && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice}
       </span>
       <AgentStatus api={api} />
-      {summary && <BookCheckIndicator requestSpread={checkScope} request={checkRequest} check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}
+      {summary && <BookCheckIndicator requestSpread={checkScope} request={checkRequest} check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={(id, page) => select(id, true, page)} />}
     </footer>
     </div>
   </div></ProjectFilesContext.Provider>;

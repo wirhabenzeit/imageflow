@@ -1,4 +1,4 @@
-import { scopeSpread } from '../src/project';
+import { bookFormatOf, scopeSpread } from '../src/project';
 import { hidden } from './background-mode';
 import { AppUpdater } from './updates';
 import { copySample } from './sample-book.mjs';
@@ -583,9 +583,10 @@ async function createBook(stage: string, template: ResolvedTemplate, start: NewB
   await writeAgentSkill(stage, join(__dirname, 'skills'));
   await Promise.all(['photos', 'texts', 'files'].map((name) => mkdir(join(stage, name))));
   await writeFile(join(stage, 'photos.json'), '{}\n');
+  const spreads = start === 'opening' ? openingSpreadStates(info) : [];
   await writeFile(join(stage, 'project.json'), JSON.stringify({
-    schemaVersion: 1, title: 'Untitled', template: { id: entry.id, version: entry.version, hash: entry.hash },
-    params: {}, texts: {}, files: {}, spreads: start === 'opening' ? openingSpreadStates(info) : [],
+    schemaVersion: bookFormatOf({ spreads }), title: 'Untitled', template: { id: entry.id, version: entry.version, hash: entry.hash },
+    params: {}, texts: {}, files: {}, spreads,
   }, null, 2) + '\n');
 }
 // The library's preview render uses a built-in's complete sample book, photos included, where the sample has them (the
@@ -981,7 +982,7 @@ function installMenu() {
     ] },
     { label: 'Book', submenu: [
       registered('add-spread'), registered('duplicate-spread'), registered('delete-spread'),
-      { type: 'separator' }, registered('move-spread-up'), registered('move-spread-down'),
+      { type: 'separator' }, registered('move-spread-up'), registered('move-spread-down'), registered('swap-pages'),
       { type: 'separator' }, registered('manage-sources'), registered('copy-assets', 'copy-assets', 'checkbox'),
       { type: 'separator' }, registered('book-check'),
     ] },

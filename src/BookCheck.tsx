@@ -1,3 +1,4 @@
+import type { PageSide } from './project';
 import { Icon } from './Icon';
 import { useEffect, useRef, useState } from 'react';
 import { issueText } from './desktop';
@@ -8,7 +9,7 @@ export type BookCheck = { id: string; errors: Issue[]; warnings: Issue[]; pictur
 
 // A labeled book-check status in the footer, with a popover for findings.
 export function BookCheckIndicator({ check, checking, spread, select, request = 0, requestSpread }: {
-  requestSpread?: string; request?: number; check?: BookCheck; checking: boolean; spread: string; select: (spread: string) => void;
+  requestSpread?: string; request?: number; check?: BookCheck; checking: boolean; spread: string; select: (spread: string, page?: PageSide) => void;
 }) {
   const [scope, setScope] = useState<string>();
   const [open, setOpen] = useState(false);
@@ -19,7 +20,7 @@ export function BookCheckIndicator({ check, checking, spread, select, request = 
   ];
   async function menu(issue: Issue) {
     const result = await window.imageflow?.showContextMenu([...(issue.spread ? ['issue-jump' as const] : []), { command: 'issue-copy', value: issueText(issue) }]);
-    if (result?.command === 'issue-jump' && issue.spread) { select(issue.spread); setOpen(false); }
+    if (result?.command === 'issue-jump' && issue.spread) { select(issue.spread, issue.page); setOpen(false); }
   }
   const count = (n: number, word: string) => n + ' ' + word + (n === 1 ? '' : 's');
   const label = !check ? 'Checking book…' : !items.length ? 'No issues' :
@@ -57,9 +58,9 @@ export function BookCheckIndicator({ check, checking, spread, select, request = 
       {!items.length && <p>{checking ? 'Checking book…' : drawing ? 'Rendering…' : 'No issues found.'}</p>}
       <ul>{items.filter(({ issue }) => !scope || issue.spread === scope).map(({ issue, level }, i) => <li key={i} tabIndex={0} onContextMenu={(event) => { event.preventDefault(); void menu(issue); }} onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void menu(issue); } }} className={'issue-' + level + (issue.spread === spread ? ' issue-current' : '')}>
         {issue.spread && issue.where ? <button type="button" className="link" onClick={() => {
-          select(issue.spread!);
+          select(issue.spread!, issue.page);
           setOpen(false);
-        }}>{issue.where}</button> : null}
+        }}>{issue.where}{issue.page ? ' · ' + issue.page + ' page' : ''}</button> : null}
         {issue.spread && issue.where ? ' · ' : ''}{issue.message}
       </li>)}</ul>
     </div>}

@@ -106,3 +106,21 @@ test('calls outside any render are described as such', () => {
   assert.match(impureMessage('fetch', false), /outside any layout render and any <RenderedImage> drawing/);
   assert.doesNotMatch(impureMessage('fetch'), /outside/);
 });
+
+test('the same impure call on both pages is located and deduplicated per page', () => {
+  const { target } = fakeWindow();
+  const guards = installPurityGuards(target, script, () => script);
+  const fetch = target.fetch as (url: string) => unknown;
+  for (const page of ['left', 'right'] as const) {
+    renderingSpread('pair', page);
+    fetch('once');
+    fetch('again');
+  }
+  renderingSpread(undefined);
+  fetch('outside');
+  assert.deepEqual(guards.calls, [
+    { api: 'fetch', spread: 'pair', page: 'left' },
+    { api: 'fetch', spread: 'pair', page: 'right' },
+    { api: 'fetch' },
+  ]);
+});

@@ -745,7 +745,7 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
  */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
-  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
+  'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' |
   'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
   'formatted-text' | 'app-controls';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
@@ -777,7 +777,8 @@ export type TemplateDeclaration = {
  * A spread a new book starts with: one of the template's layouts, optionally with some of that layout's own
  * parameters set. Included in the contract-1 baseline.
  */
-export type OpeningSpread<L extends string = string> = { layout: L; params?: Values };
+export type OpeningPage<L extends string = string> = { layout?: L; params?: Values };
+export type OpeningSpread<L extends string = string> = { layout: L; params?: Values } | { pages: { left?: OpeningPage<L>; right?: OpeningPage<L> } };
 
 /** Declares one spread with a render context typed from its own declarations and the template's document parameters. */
 export type SpreadBuilder<D extends Parameters, IsPage extends boolean = false> = <

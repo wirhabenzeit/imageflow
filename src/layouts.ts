@@ -91,6 +91,30 @@ export function layoutChoices(layouts: Layouts, current: string, format?: Pick<P
   });
 }
 
+// Editor choices may change a full sheet between a spread and independently chosen pages. End pages and
+// non-facing units remain one state; switching those to a page layout must never split their footprint.
+export type LayoutPosition = { index: number; count: number };
+export function editorLayoutChoices(layouts: Layouts, sheet: SpreadState, format: Pick<PrintFormat, 'structure'>,
+  position: LayoutPosition, side?: PageSide) {
+  const required = spanRequiredAt(position.index, position.count, format);
+  if (!hasFacingPages(format)) return Object.keys(layouts).filter((id) => layouts[id].span === 'page');
+  const page = required === 'left' || required === 'right' ? required : side ?? 'left';
+  return Object.keys(layouts).filter((id) => {
+    const layout = layouts[id];
+    if (layout.span === 'page') return !layout.sides || layout.sides.includes(page);
+    return layout.span === required;
+  });
+}
+
+/** The exact planner request a click, drop or preview of an editor layout applies. */
+export function editorLayoutTarget(layouts: Layouts, definition: string | undefined, format: Pick<PrintFormat, 'structure'>,
+  position: LayoutPosition, side?: PageSide): LayoutTarget {
+  const required = spanRequiredAt(position.index, position.count, format);
+  const split = hasFacingPages(format) && required === 'spread' && (definition === undefined || layouts[definition]?.span === 'page');
+  return split ? { ...(definition ? { definition } : {}), page: side ?? 'left' }
+    : { definition, ...(side ? { side } : {}) };
+}
+
 // Layout families. Every variant is an ordinary layout with its own ID and boxes, so switching between variants
 // follows the rules above unchanged; the family only groups them and says how the choice is presented.
 
@@ -165,6 +189,28 @@ export function layoutPreviews(layouts: Layouts, current: string, families: Layo
     done.add(family);
     const variants = choices.filter((choice) => layouts[choice].family === family);
     shown.push(...(families[family].picker ? [variants.includes(current) ? current : variants[0]] : variants));
+  }
+  return shown;
+}
+
+// The editor's layout browser groups the current page's family just as the spread browser does. Filter the
+// ordinary family presentation through the editor's side-aware choices instead of the old footprint restriction.
+export function editorLayoutPreviews(layouts: Layouts, sheet: SpreadState, families: LayoutFamilies = {},
+  format: Pick<PrintFormat, 'structure'>, position: LayoutPosition, side?: PageSide, includeRestricted = false) {
+  const allowed = editorLayoutChoices(layouts, sheet, format, position, side);
+  // Keep page tiles in the same places while selection crosses the fold; applying still uses strict choices.
+  const choices = includeRestricted && hasFacingPages(format)
+    ? Object.keys(layouts).filter(id => layouts[id].span === 'page' || allowed.includes(id)) : allowed;
+  const current = sheet.split ? sheet.pages?.[side ?? 'left']?.definition : sheet.definition;
+  const shown: string[] = [];
+  const done = new Set<string>();
+  for (const id of choices) {
+    const family = layouts[id].family;
+    if (!family || !Object.hasOwn(families, family)) { shown.push(id); continue; }
+    if (done.has(family)) continue;
+    done.add(family);
+    const variants = choices.filter((choice) => layouts[choice].family === family);
+    shown.push(...(families[family].picker ? [current && variants.includes(current) ? current : variants[0]] : variants));
   }
   return shown;
 }

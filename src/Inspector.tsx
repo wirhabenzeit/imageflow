@@ -10,8 +10,12 @@ import type { BookGeometry, ProjectSummary, RenderStatus, TemplateInfo } from '.
 import { layoutPreviewKey } from './layout-preview';
 import { BookFrame } from './BookFrame';
 import { revealIn } from './reveal';
-import type { ProjectFiles, SpreadState } from './project';
-import { boxLabel, describeLayoutChange, discardContent, keptElements, keptOutside, layoutPreviews, pickerFamily, switchLayout } from './layouts';
+import type { PageSide, ProjectFiles, SpreadState } from './project';
+import { scopeSpread } from './project';
+import { hasFacingPages, spanRequiredAt } from './format';
+import { discardKeptContent, keptItems, layoutMime, locationLabel, shownContentTargets } from './page-editor';
+import type { ContentTarget, KeptItem } from './page-editor';
+import { boxLabel, describeLayoutChange, editorLayoutChoices, editorLayoutPreviews, editorLayoutTarget, keptElements, pickerFamily, planLayoutChange, switchLayout } from './layouts';
 import { keptMime, photoMime, sourceTitle, textMime } from './source-items';
 import { readEdit, resolveEditPath } from './editing';
 import type { SourceUsage } from './editing';
@@ -22,91 +26,99 @@ export type Edit = (files: ProjectFiles) => void;
 
 // Shows the spread in each layout it can switch to, rendered by the template itself. A family is one preview, named after
 // the family; its controls appear with the selected spread's parameters below the complete layout browser.
-function LayoutPicker({ summary, spread, template, choose }: {
-  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; choose: (definition: string) => void;
+function LayoutPicker({ summary, spread, template, page, choose }: {
+  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; page?: PageSide; choose: (definition?: string) => void;
 }) {
-  const key = layoutPreviewKey(summary, template, spread);
+  const families = template.layoutFamilies ?? {};
+  const position = { index: summary.project.spreads.findIndex(({ id }) => id === spread.id), count: summary.project.spreads.length };
+  const choices = editorLayoutPreviews(template.spreads, spread, families, template.format, position, page, true);
+  const facing = hasFacingPages(template.format);
+  const required = spanRequiredAt(position.index, position.count, template.format);
+  const current = spread.split ? scopeSpread(spread, page ?? 'left')?.definition : spread.definition;
+  const consequence = (id?: string) => {
+    try { return describeLayoutChange(planLayoutChange(spread, editorLayoutTarget(template.spreads, id, template.format, position, page), template.spreads)); }
+    catch { return ''; }
+  };
+  const blank = facing && required === 'spread';
+  const ordered = [...choices].sort((a, b) => Number(template.spreads[b].span === 'spread') - Number(template.spreads[a].span === 'spread'));
+  return <LayoutGrid summary={summary} spread={spread} template={template} page={page}
+    choices={[...ordered, ...(blank ? ['__blank__'] : [])]} current={current} choose={choose} consequence={consequence} />;
+}
+
+function LayoutGrid({ summary, spread, template, page, choices, current, choose, consequence }: {
+  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; page?: PageSide;
+  choices: string[]; current?: string; choose: (definition?: string) => void; consequence: (id?: string) => string;
+}) {
+  const key = layoutPreviewKey(summary, template, spread) + ':' + (page ?? '');
   const [preview, setPreview] = useState(() => ({ key, project: summary.id }));
   if (preview.key !== key) setPreview({ key, project: summary.id });
   const [geometry, setGeometry] = useState<BookGeometry>();
   const families = template.layoutFamilies ?? {};
-  const { spreads } = summary.project;
-  const choices = layoutPreviews(template.spreads, spread.definition, families, template.format,
-    { index: spreads.findIndex(({ id }) => id === spread.id), count: spreads.length });
+  const allowed = new Set(editorLayoutChoices(template.spreads, spread, template.format,
+    { index: summary.project.spreads.findIndex(item => item.id === spread.id), count: summary.project.spreads.length }, page));
   const familyOf = (id: string) => pickerFamily(template.spreads, id, families);
-  const name = (id: string) => familyOf(id) ? families[familyOf(id)!].label : template.spreads[id].label;
-  // The retained preview and its hit targets must describe the same set of layouts until the next frame is ready.
-  const displayed = geometry ? geometry.sheets.map(({ spread }) => spread).filter((id) => Object.hasOwn(template.spreads, id)) : choices;
+  const name = (id: string) => id === '__blank__' ? 'Blank page' : familyOf(id) ? families[familyOf(id)!].label : template.spreads[id].label;
+  const displayed = geometry ? geometry.sheets.map(({ spread }) => spread).filter(id => id === '__blank__' || Object.hasOwn(template.spreads, id)) : choices;
   const pending = !!geometry && (displayed.length !== choices.length || displayed.some((id, i) => id !== choices[i]));
-  return <div className="layout-picker-shell">
-    <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout" aria-busy={pending || undefined}
-      style={{ height: geometry?.height }}>
-      {displayed.map((id) => {
-        const item = template.spreads[id];
-        const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
-        const family = familyOf(id);
-        const grouped = !family && item.family !== undefined && Object.hasOwn(families, item.family) ? families[item.family].label : undefined;
-        return <button key={id} type="button" role="radio" disabled={pending} aria-checked={!spread.split && id === spread.definition} aria-label={name(id)}
-          aria-description={family ? 'Layout variants available' : grouped}
-          className={'layout-option' + (family ? ' layout-family' : '')}
-          style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 } : undefined}
-          onClick={() => { if (spread.split || id !== spread.definition) choose(id); }}>
-          <span className="layout-option-label">
-            <span className="layout-option-name">{name(id)}</span>
-            {family && <span className="layout-option-variants" title="Layout variants available" aria-hidden="true"><Icon name="cog" size={11} /></span>}
-          </span>
-        </button>;
-      })}
-      <BookFrame project={preview.project} view="layouts" query={'spread=' + encodeURIComponent(spread.id)} title="Layout previews"
-        onGeometry={setGeometry} />
-    </div>
+  return <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout"
+    aria-busy={pending || undefined} style={{ height: geometry?.height }}>
+    {displayed.map((id) => {
+      const blank = id === '__blank__';
+      const item = blank ? undefined : template.spreads[id];
+      const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
+      const family = blank ? undefined : familyOf(id);
+      const checked = blank ? !!spread.split && !current : id === current && (item?.span === 'page' || !spread.split);
+      const unavailable = !blank && !allowed.has(id);
+      const description = unavailable ? 'Available on the ' + item?.sides?.join(' or ') + ' page' : consequence(blank ? undefined : id);
+      return <button key={id} type="button" role="radio" disabled={pending || unavailable} aria-checked={checked} aria-label={name(id)}
+        aria-description={description || undefined}
+        draggable={!pending && !unavailable} onDragStart={(event) => event.dataTransfer.setData(layoutMime, id)}
+        className={'layout-option' + (family ? ' layout-family' : '') + (blank ? ' layout-blank' : '') + (unavailable ? ' layout-unavailable' : '')}
+        style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 }
+          : { gridColumn: item?.span === 'spread' ? 'span 2' : 'span 1' }}
+        onClick={() => { if (!checked) choose(blank ? undefined : id); }}>
+        <span className="layout-option-label"><span className="layout-option-name">{blank ? 'Blank' : name(id)}</span>
+          {family && <span className="layout-option-variants" aria-hidden="true"><Icon name="cog" size={16} /></span>}
+        </span>
+      </button>;
+    })}
+    <BookFrame project={preview.project} view="layouts"
+      query={'spread=' + encodeURIComponent(spread.id) + (page ? '&page=' + page : '')}
+      title="Layout previews" onGeometry={setGeometry} />
   </div>;
 }
 
-// Content the spread keeps for other layouts. Placing an item moves it into a box of this layout (swapping with what
-// is there); dragging it onto a box does the same. Discard removes it from the spread; the source stays.
-function KeptContent({ summary, spread, template, kept, label, settings, writable, place, discard, expanded, setExpanded }: {
-  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; kept: ReturnType<typeof keptOutside>; label: string;
-  expanded: boolean; setExpanded: (open: boolean) => void;
-  settings: string[]; writable: boolean; place: (from: string, to: string) => void; discard: (box: string, name: string) => void;
+function KeptContent({ summary, spread, template, kept, label, settings, writable, place, discard, expanded, setExpanded, replaced = false }: {
+  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; kept: KeptItem[]; label: string;
+  expanded: boolean; setExpanded: (open: boolean) => void; replaced?: boolean;
+  settings: string[]; writable: boolean; place: (from: KeptItem, to: ContentTarget) => void; discard: (item: KeptItem, name: string) => void;
 }) {
-  const layout = template.spreads[spread.definition];
   const elementName = (id: string) => Object.values(template.spreads).find((item) => Object.hasOwn(item.elements, id))?.elements[id].label ?? id;
   return <details open={expanded} className="kept-content" onToggle={(event) => setExpanded(event.currentTarget.open)}>
-    <summary>Set aside{label ? ' · ' + label : ''}</summary>
-    <ul className="kept-list">
-      {kept.map((item) => {
-        const name = sourceTitle(summary, item.kind, item.source);
-        const from = boxLabel(template.spreads, item.id);
-        const targets = Object.entries(layout?.boxes ?? {}).filter(([, box]) => (box.type === 'photo') === (item.kind === 'photo'));
-        const occupant = (id: string) => {
-          const box = spread.boxes[id];
-          const source = item.kind === 'photo' ? box?.photo : box?.text;
-          return source && sourceTitle(summary, item.kind, source);
-        };
-        return <li key={item.id} className="kept-item" draggable={writable} onDragStart={(event) => {
+    <summary>{replaced ? 'Replaced' : 'Set aside'}{label ? ' · ' + label : ''}</summary>
+    <ul className="kept-list">{kept.map((item) => {
+      const name = sourceTitle(summary, item.kind, item.source);
+      const from = boxLabel(template.spreads, item.id);
+      const targets = shownContentTargets(spread, template.spreads, item.kind);
+      return <li key={item.location + ':' + item.id + ':' + (item.displaced ?? '')} className="kept-item" draggable={writable}
+        onDragStart={(event) => {
           event.dataTransfer.setData(item.kind === 'photo' ? photoMime : textMime, item.source);
-          event.dataTransfer.setData(keptMime, JSON.stringify({ spread: spread.id, box: item.id }));
+          event.dataTransfer.setData(keptMime, JSON.stringify({ spread: spread.id, box: item.id, ...item }));
         }}>
-          {item.kind === 'photo' && summary.photos[item.source]
-            ? <img className="kept-thumb" src={summary.photos[item.source]} alt="" draggable={false} />
-            : <span className="kept-thumb kept-thumb-empty">{item.kind === 'photo' ? 'Missing' : 'Text'}</span>}
-          <div className="kept-info">
-            <span className="kept-name">{name}</span>
-            <span className="muted">{from ? from.box + ' · ' + from.layout : 'Box ' + item.id}</span>
-            <div className="kept-actions">
-              <select aria-label={'Place ' + name + ' in'} value="" disabled={!targets.length}
-                onChange={(event) => { if (event.target.value) place(item.id, event.target.value); }}>
-                <option value="">{targets.length ? 'Place in…' : 'No ' + (item.kind === 'photo' ? 'photo' : 'text') + ' box in this layout'}</option>
-                {targets.map(([id, box]) => <option key={id} value={id}>
-                  {box.label + (occupant(id) ? ' · swap with ' + occupant(id) : '')}</option>)}
-              </select>
-              <button type="button" className="link" aria-label={'Discard ' + name} onClick={() => discard(item.id, name)}>Discard</button>
-            </div>
-          </div>
-        </li>;
-      })}
-    </ul>
+        {item.kind === 'photo' && summary.photos[item.source] ? <img className="kept-thumb" src={summary.photos[item.source]} alt="" draggable={false} />
+          : <span className="kept-thumb kept-thumb-empty">{item.kind === 'photo' ? 'Missing' : 'Text'}</span>}
+        <div className="kept-info"><span className="kept-name">{name}</span>
+          <span className="muted">{(from ? from.box : 'Box ' + item.id) + ' · ' + locationLabel(item.location)}</span>
+          <div className="kept-actions"><select aria-label={'Place ' + name + ' in'} value="" disabled={!targets.length}
+            onChange={(event) => { const target = targets[Number(event.target.value)]; if (event.target.value && target) place(item, target); }}>
+            <option value="">{targets.length ? 'Place in…' : 'No ' + (item.kind === 'photo' ? 'photo' : 'text') + ' box in this layout'}</option>
+            {targets.map((target, i) => <option key={(target.page ?? 'spread') + ':' + target.box} value={String(i)}>
+              {(target.page ? target.page + ' page · ' : '') + target.label + (target.source ? ' · swap with ' + sourceTitle(summary, item.kind, target.source) : '')}
+            </option>)}
+          </select><button type="button" className="link" aria-label={'Discard ' + name} onClick={() => discard(item, name)}>Discard</button></div>
+        </div>
+      </li>;
+    })}</ul>
     {settings.length > 0 && <p className="muted">Settings kept for {settings.map(elementName).join(', ')}.</p>}
   </details>;
 }
@@ -130,19 +142,24 @@ function contentState(summary: ProjectSummary, spread: SpreadState, id: string, 
 // elements are edited where they are on the page; the list opens the same editors, also for empty, hidden or
 // overlapping ones, and from the keyboard.
 export function Inspector({ summary, spread, source, template, render, usage, edit, highlight,
-  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable }: {
-  summary: ProjectSummary; writable: boolean; spread: SpreadState; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
+  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable, page, chooseLayout }: {
+  summary: ProjectSummary; writable: boolean; spread: SpreadState; page?: PageSide; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void;
   highlight: (id?: string) => void; select: (spread: string) => void;
   quickLook: () => void; focus?: { box: string; at: number };
   targets?: InspectorTarget[]; open: (owner: { type: 'photo' | 'markdown' | 'element'; id: string }) => void;
   openTarget: (target: InspectorTarget) => void;
-  place: (from: string, to: string) => void;
+  place: (from: KeptItem, to: ContentTarget) => void;
+  chooseLayout?: (definition?: string) => void;
   familyPicker?: ReactNode;
 }) {
   const items = useRef(new Map<string, HTMLElement>());
   const [flash, setFlash] = useState<string>();
   const [keptOpen, setKeptOpen] = useState(false);
+  const [replacedOpen, setReplacedOpen] = useState(false);
+  const sheet = spread;
+  const selectedPage = sheet.split ? page ?? 'left' : undefined;
+  spread = scopeSpread(sheet, selectedPage) ?? { id: sheet.id, definition: '', params: {}, boxes: {}, elements: {} };
   // A click on a box in the book points out its entry here.
   useEffect(() => {
     if (!focus || source) return;
@@ -158,13 +175,15 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   function changeSpread(update: (spread: SpreadState) => void, notice?: string | (() => string), allowPages = false) {
     edit(({ project }) => {
       const current = project.spreads.find(({ id }) => id === spread.id);
-      if (current && (!current.split || allowPages)) update(current);
+      if (!current) return;
+      if (!allowPages && (!!current.split !== !!sheet.split || (scopeSpread(current, selectedPage)?.definition ?? '') !== spread.definition)) return;
+      const selected = allowPages ? current : current.split ? scopeSpread(current, selectedPage) : current;
+      if (selected) update(selected);
     }, notice);
   }
-  // Content the spread keeps for other layouts; switching back, or to another layout with these boxes, shows it.
-  // Content stored on a page or set aside as replaced is listed with its location once pages can be edited (ADR 0009,
-  // phase 5); *Place in…* and *Discard* here act on the spread's own boxes.
-  const kept = template ? keptOutside(spread, template.spreads).filter(({ location, replaced }) => location === 'spread' && !replaced) : [];
+  const allKept = template ? keptItems(sheet, template.spreads) : [];
+  const kept = allKept.filter((item) => !item.replaced);
+  const replaced = allKept.filter((item) => item.replaced);
   const keptLabel = [
     ['photo', 'photo', 'photos'], ['text', 'text', 'texts'],
   ].map(([kind, one, many]) => {
@@ -186,9 +205,9 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     .filter((target, i, all) => all.findIndex((other) => other.edits.join(' ') === target.edits.join(' ')) === i)
     .sort((a, b) => a.order - b.order)
     .flatMap((target) => {
-      const fields = target.edits.map((path) => resolveEditPath(template, spread.definition, path)).filter((field) => !!field);
+      const fields = target.edits.map((path) => resolveEditPath(template, spread.definition, path, selectedPage)).filter((field) => !!field);
       if (!fields.length) return [];
-      const value = readEdit(summary.project, spread, fields[0]);
+      const value = readEdit(summary.project, sheet, fields[0]);
       const text = typeof value === 'string' ? value : String(value ?? '');
       const param = fields[0].param;
       // A formatted string is listed by its visible text, without markers.
@@ -215,29 +234,26 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
         event.preventDefault(); event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
       } }} onContextMenu={async (event) => {
         event.preventDefault();
-        if (spread.split || !definition || !Object.keys(definition.parameters).length) return;
+        if (!definition || !Object.keys(definition.parameters).length) return;
         const result = await window.imageflow?.showContextMenu(['reset-defaults'], assetMenuState(false));
         if (result?.command === 'reset-defaults') changeSpread((item) => { for (const id of Object.keys(definition.parameters)) delete item.params[id]; }, 'Spread settings reset');
-      }}>Spread</summary>
-        {spread.split && <p className="muted" role="note">This spread is shown as pages. Edit content on the canvas, or choose a spread layout to merge the pages. Spread settings are unavailable while pages are shown.</p>}
-        <p className="field-label">Layout</p>
-        {!definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
-        <LayoutPicker summary={summary} spread={spread} template={template} choose={(next) => {
-          // Planned against the project the switch applies to, which may be newer than this render.
+      }}>Templates</summary>
+        {!definition && spread.definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
+        <LayoutPicker summary={summary} spread={sheet} template={template} page={page} choose={chooseLayout ?? ((next) => {
           let consequence = '';
-          changeSpread((item) => {
-            consequence = describeLayoutChange(switchLayout(item, next, template.spreads));
-          }, () => consequence ? template.spreads[next].label + ' · ' + consequence : '', true);
-        }} />
+          changeSpread((item) => { consequence = describeLayoutChange(switchLayout(item,
+            editorLayoutTarget(template.spreads, next, template.format, { index: summary.project.spreads.findIndex(({ id }) => id === item.id), count: summary.project.spreads.length }, page), template.spreads));
+          }, () => consequence, true);
+        })} />
         {familyPicker}
         {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
-        <fieldset disabled={!!spread.split}>
-          {definition && <Fields key={spread.id} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
+        <fieldset>
+          {definition && <Fields key={spread.id + ':' + (selectedPage ?? '') + ':' + spread.definition} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
             values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />}
         </fieldset>
       </details>}
-      {!spread.split && template && (contents.length > 0 || marked.length > 0) && <section className="spread-contents" aria-label="On this spread">
-        <p className="field-label">On this spread</p>
+      {template && (contents.length > 0 || marked.length > 0) && <section className="spread-contents" aria-label={selectedPage ? 'On this page' : 'On this spread'}>
+        <p className="field-label">{selectedPage ? 'On this page' : 'On this spread'}</p>
         <ul className="content-list">
           {marked.map(({ target, label, value }) => <li key={spread.id + ':' + target.edits.join(' ')}>
             <button type="button" className="content-item" aria-label={'Edit ' + label} onClick={() => openTarget(target)}>
@@ -260,16 +276,20 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
                   : <span className="content-thumb content-kind" aria-hidden="true">{kind === 'photo' ? 'Photo' : kind === 'markdown' ? 'Text' : 'Item'}</span>}
                 <span className="content-text">
                   <span className="content-label">{label}</span>
-                  <span className="content-state muted">{contentState(summary, spread, id, kind, template, flow?.[spread.id + ':' + id])}</span>
+                  <span className="content-state muted">{contentState(summary, spread, id, kind, template, flow?.[spread.id + ':' + (selectedPage ? selectedPage + ':' : '') + id])}</span>
                 </span>
               </button>
             </li>;
           })}
         </ul>
       </section>}
-      {!spread.split && template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={spread} template={template}
+      {template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={sheet} template={template}
         expanded={keptOpen} setExpanded={setKeptOpen} kept={kept} label={keptLabel} settings={keptSettings} writable={writable} place={place}
-        discard={(box, name) => changeSpread((item) => discardContent(item, box), name + ' removed from this spread')} />}
+        discard={(item, name) => changeSpread((current) => discardKeptContent(current, item), name + ' removed from this spread', true)} />}
+      {template && replaced.length > 0 && <KeptContent summary={summary} spread={sheet} template={template}
+        expanded={replacedOpen} setExpanded={setReplacedOpen} kept={replaced} label={String(replaced.length)} settings={[]} writable={writable} place={place} replaced
+        discard={(item, name) => changeSpread((current) => discardKeptContent(current, item), name + ' discarded', true)} />}
+
     </fieldset>
   </aside>;
 }
