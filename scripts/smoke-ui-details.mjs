@@ -31,7 +31,24 @@ await writeFile(join(folder, 'photos.json'), JSON.stringify(photoIndex));
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 const until = async (check, message = 'Operation completed') => { for (let i = 0; i < 250; i++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 40)); } assert.ok(await check(), message); };
 const current = async (page) => (await page.evaluate(() => window.imageflow.currentProject())).value;
-const ready = async (page) => page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
+// On a timeout, report what the book view shows instead, so a failure in CI says why the book never became ready.
+const ready = async (page) => {
+  try { await page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor(); }
+  catch (error) {
+    const state = await page.evaluate(() => ({
+      status: document.querySelector('.status')?.textContent,
+      frames: [...document.querySelectorAll('.canvas iframe.book-frame-book')].map((frame) => {
+        let render;
+        try { const status = frame.contentWindow?.imageflowRenderStatus; render = status && { state: status.state, message: status.message, errors: status.errors?.slice(0, 5) }; }
+        catch (failure) { render = String(failure); }
+        return { className: frame.className, current: frame.hasAttribute('data-current'), ready: frame.hasAttribute('data-ready'),
+          src: frame.getAttribute('src'), render };
+      }),
+    })).catch((failure) => ({ unavailable: String(failure) }));
+    console.error('Book view not ready:', JSON.stringify(state, null, 2));
+    throw error;
+  }
+};
 async function popup(command, label) {
   await app.evaluate(({ Menu }, { command, label }) => {
     Menu.prototype.popup = function ({ callback }) {
