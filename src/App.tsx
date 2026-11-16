@@ -1825,10 +1825,12 @@ export function App() {
       <div className="workspace-center">
         <div ref={canvasWrap} className="canvas-wrap">
           <main ref={canvas} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" tabIndex={0} onWheel={() => { pendingAnchor.current = undefined; }} onScroll={() => { rememberViewAnchor(); measureView(); }}
-            onContextMenu={(event) => void canvasMenu(event)} onKeyDown={(event) => {
+            onContextMenu={(event) => void canvasMenu(event)} onBlur={(event) => { delete event.currentTarget.dataset.pointerFocus; }} onKeyDown={(event) => {
+              delete event.currentTarget.dataset.pointerFocus;
               if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void spreadMenu(spreadId, [spreadId], selectedSide); } else { spreadDeleteKey(event); canvasArrowKeys(event); }
             }} onPointerDown={(event) => {
               if (!(event.target as HTMLElement).closest('input, textarea, select, button, [contenteditable]')) event.currentTarget.focus({ preventScroll: true });
+              event.currentTarget.dataset.pointerFocus = '';
             }}
             onDragOver={(event) => {
               if (!writable || !canvasReady || !event.dataTransfer.types.some((type) => type === 'Files' || type === photoMime || type === textMime || type === layoutMime)) return;

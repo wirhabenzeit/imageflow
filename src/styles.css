@@ -121,6 +121,9 @@ body { margin: 0; }
 /* Canvas: the whole book in one scrolling column */
 .canvas-wrap { position: relative; min-height: 0; }
 .canvas { position: absolute; inset: 0; overflow: auto; background: var(--canvas-surface); container-type: size; }
+/* Page outlines carry selection; the pane only needs a quiet keyboard-focus edge. */
+.canvas { outline: none; }
+.canvas:focus-visible:not([data-pointer-focus]) { outline: 1px solid var(--edge); outline-offset: -1px; }
 .canvas:not(:has(.stage)) { display: grid; place-items: center; }
 .stage { position: relative; margin: 0 auto; width: min(100%, calc((100cqh - 64px) * var(--aspect, 100) + 64px)); cursor: default; }
 .sheet-label { position: absolute; display: flex; align-items: center; height: 20px; font-size: 12px; color: var(--muted); pointer-events: none; white-space: nowrap; overflow: hidden; }
