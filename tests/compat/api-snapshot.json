@@ -4274,6 +4274,76 @@
         "additionalProperties": {}
       }
     },
+    "rebuild_dependencies": {
+      "readOnly": false,
+      "input": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "installing"
+            ]
+          },
+          "project": {
+            "type": "string"
+          },
+          "packages": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "imports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "untyped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reused": {
+            "type": "boolean"
+          },
+          "lockfileUpdated": {
+            "type": "boolean"
+          },
+          "leftoverNodeModules": {
+            "type": "boolean"
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "project"
+        ],
+        "additionalProperties": {}
+      }
+    },
     "import_sources": {
       "readOnly": false,
       "input": {

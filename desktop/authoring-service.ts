@@ -1,4 +1,5 @@
 import { sourcePath, sourceLinked } from '../src/source-locations';
+import { DependencyInstallError } from './dependency-install';
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -47,6 +48,8 @@ type Hooks = {
   changed: (book: OpenProject) => void;
   recovery: (message: string) => void;
   import: (request: ImportRequest, paths: string[], base: OpenProject) => Promise<{ imported: string[] }>;
+  // Installs the template's packages outside the book and rebuilds template/vendor/ (ADR 0006).
+  dependencies?: (signal: AbortSignal) => Promise<Record<string, unknown>>;
 };
 
 async function contained(root: string, path: string, allowed: string[]) {
@@ -549,6 +552,15 @@ export function createAuthoringService(hooks: Hooks) {
         cachedTemplateHash = { session, observation: after.inputs.observation, files: observation.key, hash: currentHash };
       } else cachedTemplateHash = undefined;
       return result;
+    }
+    if (name === 'rebuild_dependencies') {
+      if (session.book.readOnly) throw new AuthoringError('READ_ONLY', 'Create an editable project in ImageFlow first.');
+      if (!hooks.dependencies) throw new AuthoringError('UNKNOWN_TOOL', 'Rebuilding dependencies is not available here.');
+      try { return { project: session.handle, ...await hooks.dependencies(signal) }; }
+      catch (error) {
+        if (error instanceof DependencyInstallError) throw new AuthoringError(error.code.toUpperCase().replaceAll('-', '_'), error.message);
+        throw error;
+      }
     }
     if (name !== 'apply_project_changes' && name !== 'import_sources') throw new AuthoringError('UNKNOWN_TOOL', 'Unknown authoring tool.');
     if (session.book.readOnly) throw new AuthoringError('READ_ONLY', 'Create an editable project in ImageFlow first.');

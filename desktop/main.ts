@@ -450,6 +450,7 @@ async function openDocument(path: string): Promise<DocumentSession> {
         }
       });
       document.networkTrust = bookNetworkTrust;
+      document.dependencyCache = dependencyCache();
       // Frames may reach what is already allowed from the first render on, without a question (ADR 0006).
       await document.prepareNetwork().catch((error) => console.warn('ImageFlow could not read network approvals', error));
       const current = document;
@@ -787,6 +788,35 @@ async function bookNetworkTrust(hash: string, declared?: readonly string[]) {
   return declared ? trustedOrigins(declared, { builtIn: builtIn !== undefined, allowed }) : allowed;
 }
 
+/** Where template packages are installed, outside every book (ADR 0006): the user's Caches folder in the app, the profile
+ * otherwise, so development runs and tests never share it. */
+function dependencyCache() {
+  return app.isPackaged && process.platform === 'darwin' ? join(app.getPath('home'), 'Library', 'Caches', 'ImageFlow', 'template-dependencies')
+    : join(app.getPath('userData'), 'template-dependencies');
+}
+
+/** Installs the focused book's template packages outside the book and rebuilds its saved bundle (ADR 0006). */
+async function rebuildBookDependencies(owner: BaseWindow | undefined) {
+  const document = focusedDocument(owner);
+  if (!document || document.closing) return;
+  const window = document.window;
+  window.webContents.send(channels.appNotice, 'Installing and bundling template packages…');
+  try {
+    const result = await document.rebuildDependencies(undefined, Number.POSITIVE_INFINITY);
+    if (window.isDestroyed()) return;
+    const imports = result.imports as string[];
+    window.webContents.send(channels.appNotice, imports.length ? 'Rebuilt the template’s dependencies: ' + imports.length + (imports.length === 1 ? ' import' : ' imports') +
+      ' bundled into template/vendor.' : 'The template imports no packages.');
+    if (result.leftoverNodeModules) {
+      const folder = join(document.book.folder, 'template', 'node_modules');
+      const { response } = await dialog.showMessageBox(window, { type: 'question', buttons: ['Move to Trash', 'Keep'], defaultId: 0, cancelId: 1,
+        message: 'Move the template’s node_modules folder to the Trash?',
+        detail: 'The book doesn’t use it: it renders the saved bundle in template/vendor, and ImageFlow installs packages outside the book. Removing it makes the book smaller.' });
+      if (response === 0) await shell.trashItem(folder);
+    }
+  } catch (error) { report(window, error); }
+}
+
 /** Withdraws the user's trust in the focused book (ADR 0006): its template asks again before reaching any site. */
 async function stopTrustingBook(owner: BaseWindow | undefined) {
   const document = focusedDocument(owner);
@@ -953,7 +983,8 @@ function installMenu() {
       { type: 'separator' }, registered('book-check'),
     ] },
     { label: 'Templates', submenu: [{ label: 'Manage Templates…', click: () => showTemplates() },
-      { type: 'separator' }, { id: 'stop-trusting-book', label: 'Stop Trusting This Book’s Template…', enabled: false, click: (_item, owner) => void stopTrustingBook(owner) }] },
+      { type: 'separator' }, { id: 'rebuild-dependencies', label: 'Rebuild Template Dependencies', enabled: false, click: (_item, owner) => void rebuildBookDependencies(owner) },
+      { id: 'stop-trusting-book', label: 'Stop Trusting This Book’s Template…', enabled: false, click: (_item, owner) => void stopTrustingBook(owner) }] },
     { label: 'View', submenu: [
       registered('sidebar', 'toggle-project'), registered('inspector', 'toggle-inspector'), registered('sources', 'toggle-sources'),
       { type: 'separator' }, registered('layout-vertical', 'layout-vertical', 'radio'), registered('layout-grid', 'layout-grid', 'radio'),
@@ -1003,6 +1034,8 @@ function updateMenus() {
   const native = (!inBook && !inAssets) || (inBook && state.textEditing);
   const stopTrusting = menu?.getMenuItemById('stop-trusting-book');
   if (stopTrusting) stopTrusting.enabled = state.document;
+  const rebuild = menu?.getMenuItemById('rebuild-dependencies');
+  if (rebuild) rebuild.enabled = state.document && state.writable;
   const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
   if (zoomAlias) zoomAlias.enabled = commandState('zoom-in', state).enabled;
   for (const direction of ['undo', 'redo']) {
