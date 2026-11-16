@@ -60,6 +60,18 @@ export function nextPresentation(app) {
   });
 }
 
+// Generic spread-editor regressions use this fixed book rather than depending on the evolving page starter.
+// Its authored template stays byte-identical to the compatibility fixture; only the temporary book title changes.
+export async function copySpreadStarter(path) {
+  await copySample(fileURLToPath(new URL('../tests/compat/books/starter', import.meta.url)), path, {
+    shared: fileURLToPath(new URL('../sample/shared', import.meta.url)),
+  });
+  const file = path + '/project.json';
+  const project = JSON.parse(await readFile(file, 'utf8'));
+  project.title = basename(path, '.imageflow');
+  await writeFile(file, JSON.stringify(project, null, 2) + '\n');
+}
+
 // Fixtures use real document opening; package creation and picker behavior have their own workflow test.
 export async function testBook(app, path, create = false) {
   if (create) await copySample(fileURLToPath(new URL('../sample/starter', import.meta.url)), path);
@@ -193,19 +205,23 @@ export async function waitForPage(page, predicate, argument, { timeout = 30000 }
   throw new Error('Window did not reach the expected state');
 }
 
-// Clicks a point on the book canvas. The first click on a spread only selects it, so a point on another spread is
-// clicked once to select that spread and again to reach the box or element there.
+// Clicks a point on the book canvas. A different page is selected first, including either half of a full-spread
+// image; the next click reaches its box or element.
 export async function clickPage(page, x, y) {
   const other = await page.evaluate(([x, y]) => {
     const hit = document.elementFromPoint(x, y);
     if (!hit?.closest('.canvas .stage') || hit.closest('.inline-editor, .inline-text-editor, .edit-popover, .crop-toolbar, .element-editor')) return false;
-    const selected = document.querySelector('.canvas .sheet-selection')?.getBoundingClientRect();
+    const sheet = document.querySelector('.canvas .sheet-selection');
+    const active = sheet?.dataset.layoutMode === 'spread' ? document.querySelector('.canvas .active-spread-page') : sheet;
+    const selected = active?.getBoundingClientRect();
     return !selected || x < selected.left || x > selected.right || y < selected.top || y > selected.bottom;
   }, [x, y]);
   if (other) {
     await page.mouse.click(x, y);
     await page.waitForFunction(([x, y]) => {
-      const selected = document.querySelector('.canvas .sheet-selection')?.getBoundingClientRect();
+      const sheet = document.querySelector('.canvas .sheet-selection');
+      const active = sheet?.dataset.layoutMode === 'spread' ? document.querySelector('.canvas .active-spread-page') : sheet;
+      const selected = active?.getBoundingClientRect();
       return selected && x >= selected.left && x <= selected.right && y >= selected.top && y <= selected.bottom;
     }, [x, y]);
   }

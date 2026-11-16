@@ -21,7 +21,7 @@ try {
   let original = await readBook();
   assert.equal(original.schemaVersion, 2);
   const split = original.spreads.filter(sheet => sheet.split);
-  assert.ok(split.length >= 4, 'The sample demonstrates several real page pairs');
+  assert.equal(split.length, 11, 'All independent page combinations, including contents, use page pairs');
   let arrival = original.spreads.find(sheet => sheet.id === 'arriving');
   assert.ok(arrival?.split);
   const textSide = ['left', 'right'].find(side => arrival.pages[side]?.boxes?.body?.text);
@@ -43,6 +43,22 @@ try {
   assert.equal(initial.state, 'ready', JSON.stringify(initial));
   assert.deepEqual(initial.errors, [], 'The unedited starter has no Book check errors: ' + JSON.stringify(initial.errors));
   assert.equal(initial.pages, 32);
+  assert.deepEqual(Object.entries(initial.template.spreads).filter(([, layout]) => layout.span === 'spread').map(([id]) => id).sort(),
+    ['map', 'opener', 'panorama'], 'Only designs that cross the fold remain spread templates');
+  for (const id of ['contents', 'mapPage', 'pictures']) {
+    assert.equal(initial.template.spreads[id].span, 'page', id + ' is independently reusable on either page');
+  }
+  const contentsPagePair = original.spreads.find(sheet => sheet.id === 'contents');
+  assert.equal(contentsPagePair.pages.left.definition, 'photo');
+  assert.equal(contentsPagePair.pages.right.definition, 'contents');
+  assert.ok(await frame.locator('[data-spread="contents"] [data-if-page="right"] .contents li').count() > 0,
+    'The page-local contents design still lists the book anchors');
+  for (const sheet of original.spreads) {
+    assert.ok(initial.template.spreads[sheet.definition], 'The sheet has a declared remembered layout: ' + sheet.id);
+    for (const state of Object.values(sheet.pages ?? {})) if (state.definition) {
+      assert.ok(initial.template.spreads[state.definition], 'The page has a declared layout: ' + state.definition);
+    }
+  }
   assert.equal(await frame.locator('[data-if-page]').count(), split.length * 2);
   for (const sheet of split) for (const side of ['left', 'right']) {
     const state = sheet.pages[side];
@@ -58,7 +74,7 @@ try {
 
   console.log('Starter warnings: ' + JSON.stringify(initial.warnings));
   assert.deepEqual(initial.warnings, [], 'The unedited starter has no Book check warnings');
-  console.log('Starter render passed: 32 pages, 10 split sheets, clean findings, anchors and picture list.');
+  console.log('Starter render passed: 32 pages, 11 split sheets, three genuine spread designs, clean findings, anchors and picture list.');
   const rerendered = async action => {
     const before = await w.locator(ready).getAttribute('src');
     await action();

@@ -1,5 +1,4 @@
-import { copySample } from '../desktop/sample-book.mjs';
-import { testBook, menuAction, popupAction } from './ui-actions.mjs';
+import { copySpreadStarter, testBook, menuAction, popupAction } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -16,11 +15,9 @@ const settlements = async () => (await read()).spreads.find(({ id }) => id === '
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
   env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' } });
 try {
-  // Keep this regression focused on full-spread switching; the current starter demonstrates split pages.
-  await copySample(join(root, 'sample/starter'), project);
-  const book = await read();
-  book.spreads = JSON.parse(await readFile(join(root, 'tests/compat/books/starter/project.json'), 'utf8')).spreads;
-  await writeFile(join(project, 'project.json'), JSON.stringify(book, null, 2));
+  // This regression deliberately exercises the original full-spread designs. Copy the complete frozen book,
+  // including its template, so simplifying the shipped starter cannot change this test's layout contract.
+  await copySpreadStarter(project);
   const w = await testBook(app, project);
   w.setDefaultTimeout(20000);
   // Register before the app's message listener so a preview can be held deterministically.
@@ -125,7 +122,7 @@ try {
   });
   await layoutReady('last-notes');
   assert.equal(await pickerHasNoOverlap(), true);
-  assert.equal(await picker.getByRole('radio').count(), 22);
+  assert.equal(await picker.getByRole('radio').count(), 13);
   await w.locator('.inspector').screenshot({ path: join(root, '.build', 'layout-picker-ready.png') });
   // Revisit cached URLs across single-page and full-spread choice sets.
   for (const spread of ['closing', 'last-notes', 'title', 'last-notes', 'closing', 'last-notes']) {
@@ -136,12 +133,11 @@ try {
   await button('Pages 10–11 · Photo grid 2×2').click();
   await w.locator('[data-spread="settlements"][aria-current="page"]').waitFor();
 
-  // The unified browser keeps spread and page designs together. Families with custom pickers use one tile,
-  // and side-restricted pages stay visible but disabled where they cannot be applied.
+  // The frozen spread designs remain switchable, with one tile for each custom-picker family and a blank-page
+  // choice. Its single opening and closing layouts are offered only at their required end positions.
   assert.deepEqual(await picker.getByRole('radio').evaluateAll((items) => items.map((item) => item.getAttribute('aria-label'))),
     ['Contents', 'Chapter opener', 'Photo and story', 'Text spread', 'Quote and photo', 'Photo and note', 'Panorama', 'Two photos', 'Photo grid',
-      'Feature and details', 'Map', 'Map and story', 'Picture list spread', 'Title page', 'Title photo', 'Picture list',
-      'Photo page', 'Story page', 'Notes page', 'Quote page', 'Photo grid page', 'Blank page']);
+      'Feature and details', 'Map', 'Picture list spread', 'Blank page']);
 
   // A new book revision with unchanged preview inputs reuses the same iframe, including its map drawing.
   await w.locator('iframe.book-frame-layouts[data-current][data-ready]').waitFor();
@@ -267,7 +263,7 @@ try {
   assert.equal((await settlements()).definition, 'grid9');
   assert.equal(await frame.locator('[data-spread="settlements"] [data-box]').count(), 9);
   assert.equal(await layout('Photo grid').getAttribute('aria-checked'), 'true');
-  assert.equal(await picker.getByRole('radio').count(), 22);
+  assert.equal(await picker.getByRole('radio').count(), 13);
   assert.deepEqual((await status()).warnings, []);
   await rerendered(() => button('Undo').click());
   assert.deepEqual(await settlements(), state);

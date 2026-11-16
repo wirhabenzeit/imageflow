@@ -1847,7 +1847,7 @@ export function App() {
                 if (!sheet || !spreads.some(({ id }) => id === sheet)) return;
                 // Select the clicked page first, even when one image spans both halves. Only a click on the
                 // already selected page opens its content editor.
-                const current = spreadSelected && spreadId === sheet && selectionSide === side;
+                const current = spreadSelected && spreadId === sheet && (selectedLayoutMode === 'page' || selectionSide === side);
                 select(sheet, false, side);
                 if (!current || blockedInline) return;
                 if (top) setFocusBox({ box: top.id, at: Date.now() });

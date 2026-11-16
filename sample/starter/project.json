@@ -3,7 +3,7 @@
   "title": "Along the coast",
   "template": {
     "id": "imageflow-starter",
-    "version": "0.10.0"
+    "version": "0.11.0"
   },
   "params": {},
   "texts": {
@@ -30,18 +30,34 @@
     },
     {
       "id": "contents",
-      "definition": "contents",
+      "definition": "photo",
       "params": {},
-      "boxes": {
-        "hero": {
-          "photo": "peaks",
-          "crops": {
-            "contents": {
-              "centerX": 0.82,
-              "centerY": 0.4,
-              "zoom": 1.6
+      "boxes": {},
+      "split": true,
+      "elements": {},
+      "pages": {
+        "left": {
+          "definition": "photo",
+          "params": {},
+          "boxes": {
+            "hero": {
+              "photo": "peaks",
+              "crops": {
+                "photo": {
+                  "centerX": 0.82,
+                  "centerY": 0.4,
+                  "zoom": 1.6
+                }
+              }
             }
-          }
+          },
+          "elements": {}
+        },
+        "right": {
+          "definition": "contents",
+          "params": {},
+          "boxes": {},
+          "elements": {}
         }
       }
     },
@@ -59,7 +75,7 @@
     },
     {
       "id": "arriving",
-      "definition": "story",
+      "definition": "photo",
       "split": true,
       "params": {},
       "boxes": {},
@@ -107,7 +123,7 @@
     },
     {
       "id": "settlements",
-      "definition": "grid",
+      "definition": "notePage",
       "split": true,
       "params": {},
       "boxes": {},
@@ -145,7 +161,7 @@
     },
     {
       "id": "still",
-      "definition": "statement",
+      "definition": "quotePage",
       "split": true,
       "params": {},
       "boxes": {},
@@ -174,7 +190,7 @@
     },
     {
       "id": "turning",
-      "definition": "storyRight",
+      "definition": "textPage",
       "split": true,
       "params": {},
       "boxes": {},
@@ -206,7 +222,7 @@
     },
     {
       "id": "details",
-      "definition": "feature3",
+      "definition": "photo",
       "split": true,
       "params": {},
       "boxes": {},
@@ -256,7 +272,7 @@
     },
     {
       "id": "notebook",
-      "definition": "text",
+      "definition": "textPage",
       "split": true,
       "params": {},
       "boxes": {},
@@ -302,7 +318,7 @@
     },
     {
       "id": "water",
-      "definition": "pair",
+      "definition": "photo",
       "split": true,
       "params": {},
       "boxes": {},
@@ -338,7 +354,7 @@
     },
     {
       "id": "cottage",
-      "definition": "single",
+      "definition": "notePage",
       "split": true,
       "params": {},
       "boxes": {},
@@ -384,7 +400,7 @@
     },
     {
       "id": "frames",
-      "definition": "grid9",
+      "definition": "gridPage9",
       "split": true,
       "params": {},
       "boxes": {},
@@ -500,7 +516,7 @@
     },
     {
       "id": "last-notes",
-      "definition": "text",
+      "definition": "textPage",
       "split": true,
       "params": {},
       "boxes": {},

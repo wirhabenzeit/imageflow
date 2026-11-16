@@ -40,4 +40,4 @@ defineTemplate({
 - The opening sequence need not meet the format's page-count rule; books can be built up from it. Validation checks its layouts and page composition against the formats of the default format's kind.
 - Without `openingSpreads`, a new book starts with no spreads. An empty book offers every layout that can start it, including reusable page designs. In a facing full-sheet position, a page design starts on an allowed side with the other side blank. The Book check reports `book-empty` until a unit is added.
 
-The starter includes ordinary opening and closing pages and composed photo/story pages in its new-book defaults. Template files are copied into each new book; changing the built-in starter never rewrites an existing book's template.
+The starter includes ordinary opening and closing pages and composed photo/story pages in its new-book defaults. Only the Panorama, Chapter opener and full-spread Map are spread templates; contents, inset maps, picture lists and the other designs are independent page templates. Template files are copied into each new book; changing the built-in starter never rewrites an existing book's template.

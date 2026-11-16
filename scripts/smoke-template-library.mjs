@@ -156,7 +156,7 @@ try {
   assert.equal(project.title, 'Journey');
   assert.equal(project.template.id, 'travel');
   assert.equal(project.schemaVersion, 2);
-  assert.equal(project.spreads.filter(sheet => sheet.split).length, 10);
+  assert.equal(project.spreads.filter(sheet => sheet.split).length, 11);
   assert.equal(project.template.version, '1.0.0');
   assert.match(project.template.hash, /^[a-f0-9]{64}$/);
   // Agents started in or above a new book find the template API reference as a project skill.

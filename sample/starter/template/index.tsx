@@ -129,9 +129,9 @@ function variantPicker(tag: string, label: string, names: Record<string, string>
   };
 }
 
-// The photo grid comes in two sizes, declared as two ordinary layouts of the `grid` family. Their box IDs are fixed:
+// The photo grid comes in two sizes in the `pageGrid` family. Their box IDs are fixed:
 // the 2×2 boxes stay in the upper left of the 3×3 grid, so switching sizes keeps those photos where they were and
-// keeps the other five outside the 2×2 layout until the spread switches back.
+// keeps the other five outside the 2×2 layout until the page switches back.
 const gridSizes = {
   '2x2': { columns: 2, ids: ['hero', 'second', 'third', 'fourth'] },
   '3x3': { columns: 3, ids: ['hero', 'second', 'fifth', 'third', 'fourth', 'sixth', 'seventh', 'eighth', 'ninth'] },
@@ -142,62 +142,6 @@ const gridBoxes = <const S extends keyof typeof gridSizes>(size: S) => {
   const { columns, ids } = gridSizes[size];
   return box.photos(ids, (_id, i) => cellLabels[columns][i]);
 };
-const gridParameters = { heading, note };
-type GridLayout<S extends keyof typeof gridSizes> = { label: string; parameters: typeof gridParameters; boxes: ReturnType<typeof gridBoxes<S>> };
-// One render function per size, typed like the builder types each layout's own context.
-const photoGrid = <const S extends keyof typeof gridSizes>(size: S) => (ctx: RenderContext<GridLayout<S>, typeof documentParameters>) => {
-  const { columns, ids } = gridSizes[size];
-  const at = ctx.geometry.design(canvas);
-  const gap = gaps[ctx.document.spacing];
-  // The gap is drawn on the design page too, so it scales with the format like the cells.
-  const cells = ctx.geometry.grid(at.right(24, 24, page - 48, page - 48),
-    { columns, rows: columns, columnGap: at.width(gap), rowGap: at.height(gap) });
-  return <Paper context={ctx} bled={{ right: true }}>
-    <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.left(margin, 170, 200, 64)} />
-    <ctx.Text presentation="inline" parameter="note" className="note" rect={at.left(margin, 236, 170, 30)} />
-    {ids.map((id, i) => <ctx.PhotoBox id={id} key={id} rect={cells[i]} />)}
-  </Paper>;
-};
-
-// The feature collage: one full-page photo and two or four smaller ones on the facing page. Same box IDs in both, so
-// switching from five to three keeps the fourth and fifth photos aside for later.
-const featureSizes = { 3: ['second', 'third'], 5: ['second', 'third', 'fourth', 'fifth'] } as const;
-const featureLabels = { second: 'First detail', third: 'Second detail', fourth: 'Third detail', fifth: 'Fourth detail' };
-const featureBoxes = <const N extends keyof typeof featureSizes>(count: N) => ({
-  hero: captioned('Large photo'),
-  ...box.photos(featureSizes[count], (id) => featureLabels[id]),
-});
-type FeatureLayout<N extends keyof typeof featureSizes> = { label: string; parameters: {}; boxes: ReturnType<typeof featureBoxes<N>> };
-const feature = <const N extends keyof typeof featureSizes>(count: N) => (ctx: RenderContext<FeatureLayout<N>, typeof documentParameters>) => {
-  const at = ctx.geometry.design(canvas);
-  const gap = gaps[ctx.document.spacing];
-  const ids = featureSizes[count];
-  const cells = ctx.geometry.grid(at.right(24, 24, page - 48, page - 48),
-    { columns: count === 3 ? 1 : 2, rows: 2, columnGap: at.width(gap), rowGap: at.height(gap) });
-  return <Paper context={ctx} bled={{ left: true, right: true }}>
-    <ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />
-    <Caption context={ctx} box={ctx.boxes.hero} className="caption overlay" rect={at.left(margin, 266, page - 2 * margin, 10)} />
-    {ids.map((id, i) => <ctx.PhotoBox id={id} key={id} rect={cells[i]} />)}
-  </Paper>;
-};
-
-// Photo and story, with the photo on either page. The text page is the same on both sides.
-const storyParameters = { heading };
-const storyBoxes = { hero: captioned('Main photo'), body: body('Story') };
-type StoryLayout = { label: string; parameters: typeof storyParameters; boxes: typeof storyBoxes };
-const story = (photo: 'left' | 'right') => (ctx: RenderContext<StoryLayout, typeof documentParameters>) => {
-  const at = ctx.geometry.design(canvas);
-  const text = photo === 'left' ? 'right' : 'left';
-  const place = (x: number, y: number, width: number, height: number) => at[text](x, y, width, height);
-  return <Paper context={ctx} bled={{ [photo]: true }}>
-    <ctx.PhotoBox id="hero" rect={ctx.geometry.page(photo, 'bleed')} />
-    <ctx.Text presentation="inline" parameter="heading" as="h2" rect={place(margin, 40, page - 2 * margin, 44)} />
-    <ctx.MarkdownBox id="body" {...ctx.edit('document.textSize')} className="reading" columns={ctx.boxes.body.params.columns}
-      rect={place(margin, 100, 165, 150)} />
-    <Caption context={ctx} box={ctx.boxes.hero} rect={place(margin, 262, 165, 10)} />
-  </Paper>;
-};
-
 // The credits of everything the book uses (ctx.book.credits), each with the pages it is on. The node is marked with
 // their IDs (data-credits), so the Book check knows they are printed.
 function Credits({ context, rect }: { context: Context; rect: Rect }) {
@@ -210,25 +154,15 @@ function Credits({ context, rect }: { context: Context; rect: Rect }) {
 
 // Which pages each photo box covers, for the picture list. Boxes not listed are on the left page; `both` is a photo
 // across the spread.
-const boxPages: Record<string, Record<string, 'left' | 'right' | 'both'>> = {
+const boxPages: Record<string, Record<string, 'both'>> = {
   opener: { hero: 'both' },
   panorama: { hero: 'both' },
-  storyRight: { hero: 'right' },
-  statement: { hero: 'right' },
-  single: { hero: 'right' },
-  pair: { second: 'right' },
-  grid: { hero: 'right', second: 'right', third: 'right', fourth: 'right' },
-  grid9: Object.fromEntries(gridSizes['3x3'].ids.map((id) => [id, 'right'])),
-  feature3: { second: 'right', third: 'right' },
-  feature5: { second: 'right', third: 'right', fourth: 'right', fifth: 'right' },
-  cover: { hero: 'right' },
 };
 function pagesOf(spread: BookSpread, box: string, side?: 'left' | 'right'): number[] {
   if (side) { const number = spread.page[side]; return number === undefined ? [] : [number]; }
   const { left, right, number } = spread.page;
   if (number !== undefined) return [number];
-  const boxSide = boxPages[spread.layout ?? '']?.[box] ?? 'left';
-  const pages = boxSide === 'both' ? [left, right] : boxSide === 'right' ? [right ?? left] : [left ?? right];
+  const pages = boxPages[spread.layout ?? '']?.[box] === 'both' ? [left, right] : [left ?? right];
   return pages.filter((at): at is number => at !== undefined);
 }
 
@@ -243,8 +177,8 @@ function pictureList(spreads: readonly BookSpread[]) {
   return [...pictures.values()];
 }
 
-// The picture list runs over every Picture list spread in book order: the closing page holds what fits, and a full
-// Picture list spread before it holds more. Nothing is cut off silently: an entry's height is worked out from its
+// The picture list runs over every Picture list page in book order: the closing page holds what fits, and
+// additional list pages before it hold more. Nothing is cut off silently: an entry's height is worked out from its
 // text before anything renders (one line for the title, then as many lines as its pages and its credit need), so
 // where each entry goes is known in advance, and the Book check warns about photos that do not fit and about a credit
 // or page list too long to show in full.
@@ -256,13 +190,10 @@ const maxDetailLines = 3;
 // Generous average width of an 8 pt sans character, in millimetres, so the estimate errs towards an extra line.
 const detailCharWidth = 1.7;
 
-function pictureColumns(layout: string, at: ReturnType<Context['geometry']['design']>): Rect[] {
-  const sides = layout === 'pictures' ? (['left', 'right'] as const) : (['left'] as const);
-  return sides.flatMap((side) => {
-    const area = at[side](margin, 58, page - 2 * margin, layout === 'pictures' ? 202 : 160);
-    const width = (area.width - pictureColumnGap) / 2;
-    return [{ ...area, width }, { ...area, x: area.x + width + pictureColumnGap, width }];
-  });
+function pictureColumns(layout: string, place: (x: number, y: number, width: number, height: number) => Rect): Rect[] {
+  const area = place(margin, 58, page - 2 * margin, layout === 'pictures' ? 202 : 160);
+  const width = (area.width - pictureColumnGap) / 2;
+  return [{ ...area, width }, { ...area, x: area.x + width + pictureColumnGap, width }];
 }
 
 /** `1, 2, 3, 5` as `1–3, 5`. */
@@ -281,13 +212,13 @@ function pageRanges(pages: number[]) {
 type PictureEntry = { title: string; pages: string; credit: string; lines: { pages: number; credit: number }; clipped: boolean; rect: Rect };
 type PictureContext = Pick<Context, 'book' | 'spread' | 'layout' | 'geometry' | 'view' | 'format' | 'side'>;
 
-/** Places the whole list across the book's Picture list spreads and returns this spread's part of it. */
+/** Allocates the book's picture entries in page order and returns this page's part of the list. */
 function picturePage(ctx: PictureContext) {
   // List allocation covers all list layouts, even when this render is one local closing page.
   const at = geometry.design(ctx.format, canvas);
   // Built from the book index before anything renders, so the list follows every photo placed, moved or removed.
   const pictures = pictureList(ctx.book.spreads);
-  // The spread being drawn counts with the layout drawn, so a layout preview shows what the spread would hold.
+  // The page being drawn counts with its candidate layout, so previews show the entries that would appear there.
   const lists = ctx.book.spreads.flatMap(({ id, layout, pages }) => {
     // A full-spread candidate replaces both pages; a page candidate changes only its own side.
     if (id === ctx.spread && !ctx.side) return [{ id, layout: ctx.layout }];
@@ -298,7 +229,7 @@ function picturePage(ctx: PictureContext) {
   const own: PictureEntry[] = [];
   let next = 0;
   for (const list of lists) {
-    for (const column of pictureColumns(list.layout, at)) {
+    for (const column of pictureColumns(list.layout, at.left)) {
       const perLine = Math.max(10, Math.floor(column.width / detailCharWidth));
       const linesFor = (text: string) => text ? Math.ceil(text.length / perLine) : 0;
       let y = column.y;
@@ -341,7 +272,7 @@ function PictureList(props: { context: PictureContext; columns: Rect[] }) {
     {missing > 0 && <span hidden {...issue({
       code: 'picture-list-full',
       message: `The picture list has room for ${listed} of the book's ${pictures.length} photos; ${missing} are not listed.`,
-      suggestion: 'Add a Picture list spread before this page; the list continues across it.',
+      suggestion: 'Add a Picture list page before this page; the list continues across it.',
     })} />}
     {clipped.length > 0 && <span hidden {...issue({
       code: 'picture-credit-cut',
@@ -377,7 +308,7 @@ const compass = <svg viewBox="0 0 100 100" aria-hidden="true">
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.10.0',
+  version: '0.11.0',
   label: 'Photobook',
   description: 'A travel journal with full-bleed photographs, stories, grids, maps and a picture list, in a light or a dark theme.',
   preview: './preview.jpg',
@@ -397,13 +328,10 @@ export default defineTemplate({
   ],
   // Layouts that are variants of one design. The sidebar shows each family once, and its picker chooses the variant.
   layoutFamilies: {
-    story: { label: 'Photo and story', picker: { label: 'Photo', component: variantPicker('photo', 'Photo side', { left: 'Left', right: 'Right' }) } },
-    grid: { label: 'Photo grid', picker: { label: 'Grid size', component: variantPicker('size', 'Grid size', { '2x2': '2 × 2', '3x3': '3 × 3' }) } },
-    feature: { label: 'Feature and details', picker: { label: 'Photos', component: variantPicker('photos', 'Number of photos', { 3: '3 photos', 5: '5 photos' }) } },
     pagePhoto: { label: 'Photo page', picker: { label: 'Photo style', component: variantPicker('style', 'Photo style', { bleed: 'Full bleed', framed: 'Framed', shaped: 'Shaped' }) } },
     pageGrid: { label: 'Photo grid page', picker: { label: 'Grid size', component: variantPicker('size', 'Grid size', { '2x2': '2 × 2', '3x3': '3 × 3' }) } },
   },
-  // `spread` types each layout's context from its own declarations and the document parameters above.
+  // The builders type each layout's context from its own declarations and the document parameters above.
   spreads: ({ spread, page: pageLayout }) => ({
     // Book ends: a first right page and a last left page.
     title: pageLayout({
@@ -437,8 +365,7 @@ export default defineTemplate({
         </PagePaper>;
       },
     }),
-    // The book's last page, and the only layout offered for it: the picture list, the colophon, and at its foot the
-    // credits of what the book uses (such as the data of its maps), collected from every spread's `credits`.
+    // The closing page adds a colophon and the book's collected credits below its picture list.
     credits: pageLayout({
       label: 'Picture list', sides: ['left'],
       parameters: {
@@ -449,10 +376,10 @@ export default defineTemplate({
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         return <PagePaper context={ctx}>
-          {/* No heading over an empty list when earlier Picture list spreads already hold every photo. */}
+          {/* No heading over an empty list when earlier Picture list pages already hold every photo. */}
           {listsSomething(ctx) &&
             <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.page(margin, 36, page - 2 * margin, 14)} />}
-          <PictureList context={ctx} columns={pictureColumns('credits', { ...at, left: at.page })} />
+          <PictureList context={ctx} columns={pictureColumns('credits', at.page)} />
           <ctx.Text presentation="inline" parameter="colophon" className="colophon" rect={at.page(margin, 226, page - 2 * margin, 18)} />
           <Credits context={ctx} rect={at.page(margin, 246, page - 2 * margin, 14)} />
         </PagePaper>;
@@ -545,29 +472,26 @@ export default defineTemplate({
       },
     }),
 
-    contents: spread({
+    contents: pageLayout({
       label: 'Contents',
       parameters: { contentsHeading: p.string({ label: 'Contents heading', default: 'Contents', markdown: 'inline' }) },
-      boxes: { hero: box.photo('Photo (optional)') },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         // Every spread declares its anchors before any spread renders, so this page follows inserts, moves and
         // layout switches like the folios do. Chapter openers are numbered; stories and texts are listed under them.
         const entries = ctx.book.anchors().filter(({ id }) => id === 'chapter' || id === 'section');
         let chapter = 0;
-        // The photo is optional: without one, the left page stays plain paper, with its page number.
-        return <Paper context={ctx} bled={{ left: !!ctx.boxes.hero.photo }}>
-          <ctx.PhotoBox id="hero" rect={ctx.geometry.page('left', 'bleed')} />
-          <ctx.Text presentation="inline" parameter="contentsHeading" as="h2" rect={at.right(margin, 40, page - 2 * margin, 44)} />
-          <ol className="contents" style={ctx.geometry.css(at.right(margin, 100, page - 2 * margin, 160))}>
+        return <PagePaper context={ctx}>
+          <ctx.Text presentation="inline" parameter="contentsHeading" as="h2" rect={at.page(margin, 40, page - 2 * margin, 44)} />
+          <ol className="contents" style={ctx.geometry.css(at.page(margin, 100, page - 2 * margin, 160))}>
             {entries.map((entry) => <li key={entry.spread + entry.side} className={entry.id}>
               <span>{entry.id === 'chapter' && <span className="chapter-number">{String(++chapter).padStart(2, '0')}</span>}{entry.title}</span>
               <span className="contents-page">{entry.page}</span>
             </li>)}
           </ol>
           {!entries.length && ctx.view === 'canvas' &&
-            <p className="caption" style={ctx.geometry.css(at.right(margin, 100, page - 2 * margin, 10))}>Chapter openers, stories and text spreads appear here.</p>}
-        </Paper>;
+            <p className="caption" style={ctx.geometry.css(at.page(margin, 100, page - 2 * margin, 10))}>Chapter openers and story pages appear here.</p>}
+        </PagePaper>;
       },
     }),
     opener: spread({
@@ -591,70 +515,6 @@ export default defineTemplate({
         </Paper>;
       },
     }),
-    story: spread({
-      label: 'Photo and story', family: 'story', variant: { photo: 'left' },
-      parameters: storyParameters, boxes: storyBoxes,
-      // Listed by the contents layout under its chapter. The heading is on the text page.
-      anchors: ({ params }) => [{ id: 'section', title: oneLine(params.heading), side: 'right' }],
-      render: story('left'),
-    }),
-    storyRight: spread({
-      label: 'Story and photo', family: 'story', variant: { photo: 'right' },
-      parameters: storyParameters, boxes: storyBoxes,
-      anchors: ({ params }) => [{ id: 'section', title: oneLine(params.heading), side: 'left' }],
-      render: story('right'),
-    }),
-    text: spread({
-      label: 'Text spread',
-      parameters: { heading },
-      boxes: { body: body('Left text', 1), continuation: body('Right text', 2) },
-      anchors: ({ params }) => [{ id: 'section', title: oneLine(params.heading), side: 'left' }],
-      render: (ctx) => {
-        const at = ctx.geometry.design(canvas);
-        return <Paper context={ctx}>
-          <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.left(40, 40, 210, 44)} />
-          <ctx.MarkdownBox id="body" {...ctx.edit('document.textSize')} className="reading" columns={ctx.boxes.body.params.columns}
-            rect={at.left(75, 100, 175, 160)} />
-          <ctx.MarkdownBox id="continuation" {...ctx.edit('document.textSize')} className="reading" columns={ctx.boxes.continuation.params.columns}
-            rect={at.right(40, 40, 175, 220)} />
-        </Paper>;
-      },
-    }),
-    statement: spread({
-      label: 'Quote and photo',
-      parameters: {
-        quote: p.string({ label: 'Quote', default: 'Each turn opened a different view of the same water.', multiline: true, maxLength: 240, markdown: 'inline',
-          description: 'One or two sentences, set large. Longer passages belong in a story.' }),
-        attribution: p.string({ label: 'Attribution', default: '', maxLength: 80, placeholder: 'Who said it, or where', markdown: 'inline' }),
-      },
-      boxes: { hero: captioned('Photo') },
-      render: (ctx) => {
-        const at = ctx.geometry.design(canvas);
-        return <Paper context={ctx} bled={{ right: true }}>
-          {/* The attribution follows the quote, however many lines it takes; the pair sits in the middle of the page. */}
-          <div className="statement" style={ctx.geometry.css(at.left(50, 60, 190, 170))}>
-            <div className="rule" />
-            <ctx.Text presentation="inline" parameter="quote" as="blockquote" className="quote" />
-            <ctx.Text presentation="inline" parameter="attribution" className="attribution" />
-          </div>
-          <ctx.PhotoBox id="hero" rect={ctx.geometry.page('right', 'bleed')} />
-          <Caption context={ctx} box={ctx.boxes.hero} className="caption overlay" rect={at.right(margin, 266, page - 2 * margin, 10)} />
-        </Paper>;
-      },
-    }),
-    single: spread({
-      label: 'Photo and note',
-      parameters: { note },
-      boxes: { hero: shapedPhoto },
-      render: (ctx) => {
-        const at = ctx.geometry.design(canvas);
-        return <Paper context={ctx}>
-          <ctx.Text presentation="inline" parameter="note" className="note large" rect={at.left(margin, 196, 160, 60)} />
-          <ctx.PhotoBox id="hero" rect={at.right(48, 36, 194, 216)}>{ShapedPhoto}</ctx.PhotoBox>
-          <Caption context={ctx} box={ctx.boxes.hero} className="caption centred" rect={at.right(48, 258, 194, 10)} />
-        </Paper>;
-      },
-    }),
     panorama: spread({
       label: 'Panorama',
       boxes: { hero: captioned('Panorama photo') },
@@ -665,45 +525,6 @@ export default defineTemplate({
           <Caption context={ctx} box={ctx.boxes.hero} className="caption overlay" rect={at.left(margin, 266, 2 * page - 2 * margin, 10)} />
         </Paper>;
       },
-    }),
-    pair: spread({
-      label: 'Two photos',
-      parameters: { framed: p.boolean({ label: 'White frame', default: false,
-        description: 'Sets both photos inside the page with a margin of paper around them, instead of to the edge. Paper is dark in the dark theme.' }) },
-      boxes: { hero: captioned('Left photo'), second: captioned('Right photo') },
-      render: (ctx) => {
-        const at = ctx.geometry.design(canvas);
-        const framed = ctx.params.framed;
-        return <Paper context={ctx} bled={{ left: !framed, right: !framed }}>
-          <ctx.PhotoBox id="hero" rect={framed ? at.left(36, 56, 234, 156) : ctx.geometry.page('left', 'bleed')} />
-          <ctx.PhotoBox id="second" rect={framed ? at.right(20, 56, 234, 156) : ctx.geometry.page('right', 'bleed')} />
-          <Caption context={ctx} box={ctx.boxes.hero} className={framed ? 'caption' : 'caption overlay'}
-            rect={framed ? at.left(36, 217, 234, 10) : at.left(margin, 266, 200, 10)} />
-          <Caption context={ctx} box={ctx.boxes.second} className={framed ? 'caption' : 'caption overlay'}
-            rect={framed ? at.right(20, 217, 234, 10) : at.right(60, 266, 200, 10)} />
-        </Paper>;
-      },
-    }),
-    // `grid` keeps its ID from before the family existed.
-    grid: spread({
-      label: 'Photo grid 2×2', family: 'grid', variant: { size: '2x2' },
-      parameters: gridParameters, boxes: gridBoxes('2x2'),
-      render: photoGrid('2x2'),
-    }),
-    grid9: spread({
-      label: 'Photo grid 3×3', family: 'grid', variant: { size: '3x3' },
-      parameters: gridParameters, boxes: gridBoxes('3x3'),
-      render: photoGrid('3x3'),
-    }),
-    feature3: spread({
-      label: 'Feature and two details', family: 'feature', variant: { photos: 3 },
-      boxes: featureBoxes(3),
-      render: feature(3),
-    }),
-    feature5: spread({
-      label: 'Feature and four details', family: 'feature', variant: { photos: 5 },
-      boxes: featureBoxes(5),
-      render: feature(5),
     }),
     map: spread({
       label: 'Map',
@@ -725,173 +546,60 @@ export default defineTemplate({
       },
     }),
 
-    // A map beside a story: the text on the left page, the map inside the margins of the right one, on the paper, in the
-    // Lines style by default (the page's own colours, so it suits either colour theme), with a caption under it.
-    mapStory: spread({
-      label: 'Map and story',
-      parameters: { heading, mapCaption: p.string({ label: 'Map caption', default: '', maxLength: 160, placeholder: 'Where the story goes', markdown: 'inline' }) },
-      boxes: { body: body('Story') },
+    // A map page pairs freely with stories, photos, notes or another map.
+    mapPage: pageLayout({
+      label: 'Map page',
+      parameters: { mapCaption: p.string({ label: 'Map caption', default: '', maxLength: 160, placeholder: 'Where the story goes', markdown: 'inline' }) },
       elements: { map: {
         label: 'Map',
         parameters: insetMapParameters,
         editor: { label: 'Edit map', parameters: [...mapEditorParameters], component: MapEditor, presentation: 'inline' },
       } },
-      anchors: ({ params }) => [{ id: 'section', title: oneLine(params.heading), side: 'left' }],
-      // The map is on the right page only.
-      credits: ({ elements }) => mapCredits(elements.map.params.style).map((credit) => ({ ...credit, side: 'right' as const })),
+      credits: ({ elements }) => mapCredits(elements.map.params.style),
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         const { trackWidth, ...values } = ctx.elements.map.params;
-        return <Paper context={ctx}>
-          <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.left(margin, 40, page - 2 * margin, 44)} />
-          <ctx.MarkdownBox id="body" {...ctx.edit('document.textSize')} className="reading" columns={ctx.boxes.body.params.columns}
-            rect={at.left(margin, 100, 165, 160)} />
-          <MapView values={values} trackWidth={trackWidth} rect={at.right(margin, margin, page - 2 * margin, page - 2 * margin - 22)}
+        return <PagePaper context={ctx}>
+          <MapView values={values} trackWidth={trackWidth} rect={at.page(margin, margin, page - 2 * margin, page - 2 * margin - 22)}
             theme={ctx.document.theme} className="map-inset" Element={ctx.Element} />
-          <ctx.Text presentation="inline" parameter="mapCaption" className="caption" rect={at.right(margin, page - margin - 12, page - 2 * margin, 10)} />
-        </Paper>;
+          <ctx.Text presentation="inline" parameter="mapCaption" className="caption" rect={at.page(margin, page - margin - 12, page - 2 * margin, 10)} />
+        </PagePaper>;
       },
     }),
 
-    // More room for the picture list, before the closing page. The list starts on the first Picture list spread in
-    // the book and continues on the next.
-    pictures: spread({
-      label: 'Picture list spread',
+    // Overflow picture lists are pages too; each takes the next entries in book order.
+    pictures: pageLayout({
+      label: 'Picture list page',
       parameters: { listHeading: p.string({ label: 'Heading', default: 'Pictures', markdown: 'inline' }) },
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
-        return <Paper context={ctx}>
-          {/* No heading over an empty list when earlier Picture list spreads already hold every photo. */}
+        return <PagePaper context={ctx}>
           {listsSomething(ctx) &&
-            <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.left(margin, 36, page - 2 * margin, 14)} />}
-          <PictureList context={ctx} columns={pictureColumns('pictures', at)} />
-        </Paper>;
+            <ctx.Text presentation="inline" parameter="listHeading" as="h3" rect={at.page(margin, 36, page - 2 * margin, 14)} />}
+          <PictureList context={ctx} columns={pictureColumns('pictures', at.page)} />
+        </PagePaper>;
       },
     }),
   }),
   // A new book starts with a tour of the layouts, in the sample book's order, ready for photos and text. New Book can
   // also start an empty book.
   openingSpreads: [
-    {
-      "layout": "cover"
-    },
-    {
-      "layout": "contents"
-    },
-    {
-      "layout": "opener"
-    },
-    {
-      "pages": {
-        "left": {
-          "layout": "photo"
-        },
-        "right": {
-          "layout": "textPage"
-        }
-      }
-    },
-    {
-      "layout": "panorama"
-    },
-    {
-      "pages": {
-        "left": {
-          "layout": "notePage"
-        },
-        "right": {
-          "layout": "gridPage"
-        }
-      }
-    },
-    {
-      "pages": {
-        "left": {
-          "layout": "quotePage"
-        },
-        "right": {
-          "layout": "photo"
-        }
-      }
-    },
-    {
-      "pages": {
-        "left": {
-          "layout": "textPage"
-        },
-        "right": {
-          "layout": "photo"
-        }
-      }
-    },
-    {
-      "pages": {
-        "left": {
-          "layout": "photo"
-        },
-        "right": {
-          "layout": "gridPage"
-        }
-      }
-    },
-    {
-      "pages": {
-        "left": {
-          "layout": "textPage"
-        },
-        "right": {
-          "layout": "textPage"
-        }
-      }
-    },
-    {
-      "layout": "opener"
-    },
-    {
-      "pages": {
-        "left": {
-          "layout": "photo"
-        },
-        "right": {
-          "layout": "photo"
-        }
-      }
-    },
-    {
-      "pages": {
-        "left": {
-          "layout": "notePage"
-        },
-        "right": {
-          "layout": "photoShaped"
-        }
-      }
-    },
-    {
-      "layout": "panorama"
-    },
-    {
-      "pages": {
-        "left": {
-          "layout": "gridPage9"
-        },
-        "right": {
-          "layout": "notePage"
-        }
-      }
-    },
-    {
-      "pages": {
-        "left": {
-          "layout": "textPage"
-        },
-        "right": {
-          "layout": "textPage"
-        }
-      }
-    },
-    {
-      "layout": "credits"
-    }
+    { layout: 'cover' },
+    { pages: { left: { layout: 'photo' }, right: { layout: 'contents' } } },
+    { layout: 'opener' },
+    { pages: { left: { layout: 'photo' }, right: { layout: 'textPage' } } },
+    { layout: 'panorama' },
+    { pages: { left: { layout: 'notePage' }, right: { layout: 'gridPage' } } },
+    { pages: { left: { layout: 'quotePage' }, right: { layout: 'photo' } } },
+    { pages: { left: { layout: 'textPage' }, right: { layout: 'photo' } } },
+    { pages: { left: { layout: 'photo' }, right: { layout: 'gridPage' } } },
+    { pages: { left: { layout: 'textPage' }, right: { layout: 'textPage' } } },
+    { layout: 'opener' },
+    { pages: { left: { layout: 'photo' }, right: { layout: 'photo' } } },
+    { pages: { left: { layout: 'notePage' }, right: { layout: 'photoShaped' } } },
+    { layout: 'panorama' },
+    { pages: { left: { layout: 'gridPage9' }, right: { layout: 'notePage' } } },
+    { pages: { left: { layout: 'textPage' }, right: { layout: 'textPage' } } },
+    { layout: 'credits' },
   ],
 });
