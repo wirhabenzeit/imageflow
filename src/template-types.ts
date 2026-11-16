@@ -2,6 +2,7 @@
 // `npm run build` fails here when one side changes without the other. Nothing in this file runs.
 import type * as Declared from '../authoring/imageflow';
 import type { RenderedImageProps, RenderTarget } from './rendered-image';
+import type { ChoiceOption, ChoiceProps } from './choice';
 import type { PrintFormat, printFormat, ResolvedFormat } from './format';
 import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
@@ -34,6 +35,8 @@ export const declaredTypesMatchRuntime: [
   Same<keyof Parameters<typeof Declared.Element>[0], keyof Parameters<typeof Element>[0]>,
   Same<Declared.Capability, Capability>,
   Same<keyof Declared.RenderedImageProps, keyof RenderedImageProps>,
+  Same<keyof Declared.ChoiceProps, keyof ChoiceProps>,
+  Same<Declared.ChoiceOption, ChoiceOption>,
   Same<keyof Declared.RenderTarget, keyof RenderTarget>,
   Same<keyof Declared.TextProps, keyof Parameters<typeof Text>[0]>,
   Same<Declared.TextTag, TextTag>,
@@ -50,4 +53,4 @@ export const declaredTypesMatchRuntime: [
   Same<keyof Declared.EditorContext, keyof EditorContext>,
   Same<keyof Declared.DocumentEditorProps, keyof DocumentEditorProps>,
   Assignable<Declared.OpeningSpread, NonNullable<TemplateDeclaration['openingSpreads']>[number]>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

@@ -21,10 +21,13 @@ test('the Claude Desktop extension is a valid archive whose launcher starts the 
   const folder = await mkdtemp(join(tmpdir(), 'imageflow-mcpb-'));
   t.after(() => rm(folder, { recursive: true, force: true }));
   const file = join(folder, 'ImageFlow.mcpb');
-  await writeFile(file, claudeExtension({ launch, version: '1.2.3', tools: mcpTools }));
+  const icon = await readFile(join(process.cwd(), 'resources', 'extension-icon.png'));
+  await writeFile(file, claudeExtension({ launch, version: '1.2.3', tools: mcpTools, icon }));
   execFileSync('unzip', ['-tq', file]);
   const manifest = JSON.parse(execFileSync('unzip', ['-p', file, 'manifest.json'], { encoding: 'utf8' }));
   assert.equal(manifest.manifest_version, '0.2');
+  assert.equal(manifest.icon, 'icon.png');
+  assert.deepEqual(execFileSync('unzip', ['-p', file, 'icon.png']), icon);
   assert.equal(manifest.version, '1.2.3');
   assert.equal(manifest.server.type, 'binary');
   assert.equal(manifest.server.entry_point, 'server/imageflow-mcp.sh');

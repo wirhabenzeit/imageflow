@@ -1,8 +1,10 @@
 import type { PresentationView } from './presentation-model';
 import { presentationPhotoSource } from './presentation-model';
-import { sourcePath } from './source-locations';
+import { sourceFileName, sourcePath } from './source-locations';
 import { renameIds } from './svg-ids';
-import { impureMessage, impureSuggestion, installPurityGuards } from './purity';
+import { parseSentinel, sentinelStrip, sentinelWidth } from './capture-sentinel';
+import type { Sentinel } from './capture-sentinel';
+import { impureMessage, impureSuggestion, installPurityGuards, unlocatedImpureSuggestion } from './purity';
 import { activateRenderedImageSpreads, configureRenderedImages, renderedImageState, renderingImages, settleRenderedImages, settleRestoredImages, watchRenderedImages } from './rendered-image';
 import type { RenderedImageFailure } from './rendered-image';
 import type { ImportMode, SourceReference } from './source-locations';
@@ -47,6 +49,7 @@ import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import { Field, ProjectFilesContext } from './Fields';
 import { editorChanges, unknownControl } from './editor-changes';
 import { pictureTimeoutMs } from './render-budget';
+import { networkPendingSuggestion, pendingNetwork } from './network-access';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -91,7 +94,7 @@ function textAssignments(book: RenderProject, template: Template) {
     }
   }
   for (const [source, chain] of chains) {
-    const title = (book.project.texts[source] && sourcePath(book.project.texts[source]))?.split('/').pop();
+    const title = book.project.texts[source] ? sourceFileName(book.project.texts[source]) : undefined;
     chain.forEach(({ spread, box }, index) => {
       positions[spread + ':' + box] = { part: index + 1, parts: chain.length, title };
     });
@@ -601,12 +604,23 @@ function sheetCrop(format: ResolvedFormat, side: PrintSide, bounds: PreviewMetad
 // its own ids and its references follow them.
 let printCopies = 0;
 
+// cloneNode copies a canvas element but not its pixels, so a chart drawn on a 2D canvas would print blank.
+function copyCanvases(from: HTMLElement, to: HTMLElement) {
+  const sources = from.querySelectorAll('canvas'), copies = to.querySelectorAll('canvas');
+  sources.forEach((source, i) => {
+    const copy = copies[i];
+    if (!copy || !source.width || !source.height) return;
+    try { copy.getContext('2d')?.drawImage(source, 0, 0); } catch { /* A canvas that cannot be read stays as it is. */ }
+  });
+}
+
 function croppedSheet(sheet: HTMLElement, crop: ReturnType<typeof sheetCrop>, pixels?: { width: number; height: number }) {
   const page = document.createElement('div');
   page.className = 'if-print-page';
   page.style.width = cssMM(crop.widthMm);
   page.style.height = cssMM(crop.heightMm);
   const clone = sheet.cloneNode(true) as HTMLElement;
+  copyCanvases(sheet, clone);
   renameIds(clone, '.p' + ++printCopies);
   let scaleX = 1;
   let scaleY = 1;
@@ -830,6 +844,31 @@ function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, lab
   sheet.append(layer);
 }
 
+// The flowed book stays laid out at its size while the artwork shows its copy. Hiding it with display:none would
+// resize every <RenderedImage> in it to nothing, which starts new drawings and revokes the pictures the copy shows.
+// Paint containment also keeps position:fixed content of the template inside the hidden book.
+function hideArtworkSource(root: HTMLElement) {
+  const width = root.getBoundingClientRect().width;
+  Object.assign(root.style, { position: 'absolute', left: '-100000px', top: '0', width: width + 'px', visibility: 'hidden',
+    contain: 'paint', pointerEvents: 'none' });
+  root.inert = true;
+  root.setAttribute('aria-hidden', 'true');
+}
+
+// Painted just below the artwork in the same frame, so the capture can tell its pixels from an older frame's.
+function paintSentinel(sentinel: Sentinel, top: number) {
+  const strip = document.createElement('div');
+  strip.className = 'if-capture-sentinel';
+  Object.assign(strip.style, { position: 'fixed', left: '0', top: top + 'px', width: sentinelWidth + 'px', height: sentinelStrip.height + 'px',
+    display: 'flex', zIndex: '2147483647' });
+  for (const color of [sentinel.first, sentinel.second, sentinel.first]) {
+    const cell = document.createElement('div');
+    Object.assign(cell.style, { width: sentinelStrip.cellWidth + 'px', height: '100%', background: 'rgb(' + color.join(',') + ')' });
+    strip.append(cell);
+  }
+  document.body.append(strip);
+}
+
 function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>,
   format: ResolvedFormat, artwork: ReturnType<typeof parsePreviewRequest>, fixture?: FixtureMarking) {
   const { bounds, maxEdge, guides, labels } = artwork;
@@ -874,7 +913,7 @@ function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: Spread
       frame.append(image, caption);
       return { x, y, width, height, widthMm: crop.widthMm, heightMm: crop.heightMm, spread, side, page, bounds, label };
     });
-    root.hidden = true;
+    hideArtworkSource(root);
     document.body.append(frame);
     return { frame, metadata: { kind: 'contact-sheet', width: grid.width, height: grid.height, bounds, columns: grid.columns, cells,
       ...(fixture ? { banner: { text: fixture.banner, height: header } } : {}), ...overlays } as PreviewMetadata };
@@ -901,7 +940,7 @@ function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: Spread
   const { widthMm, heightMm } = crop, scale = maxEdge / Math.max(widthMm, heightMm);
   const width = Math.max(1, Math.round(widthMm * scale)), height = Math.max(1, Math.round(heightMm * scale));
   const frame = croppedSheet(sheets[index], crop, { width, height });
-  root.hidden = true;
+  hideArtworkSource(root);
   document.body.append(frame);
   return { frame, metadata: { width, height, widthMm, heightMm, bounds, spread, side, page, ...(detail ? { detail } : {}), ...overlays } as PreviewMetadata };
 }
@@ -1597,18 +1636,24 @@ export async function startRender(root: HTMLElement) {
       suggestion: 'Use select_format with one of the template formats, or declare format ' + book.project.format + ' again in the template.' });
     }
     errors.push(...fileErrors(book, template.parameters, book.project.params, 'Document'));
+    // Declared sites the user has not allowed (yet): a picture that fails to load from them is waiting for permission,
+    // not looking at an unreachable server. Only a failing picture reports them; a book that loads nothing from the
+    // sites has nothing to wait for.
+    const pendingSites = pendingNetwork(declared.data.network, book.network);
     const pictureIssues = (failures: RenderedImageFailure[]): Issue[] => failures.map((failed) => ({
       ...(failed.spread ? located(failed.spread, failed.message) : message(failed.message)), code: 'rendered-image-failed',
-      ...(failed.element ? { element: failed.element } : {}), details: { label: failed.label, timedOut: failed.timedOut ? 1 : 0 },
-      suggestion: failed.timedOut ? 'Check the internet connection, then check or export again.'
+      ...(failed.element ? { element: failed.element } : {}),
+      details: { label: failed.label, timedOut: failed.timedOut ? 1 : 0, ...(pendingSites.length ? { networkPending: pendingSites.join(' ') } : {}) },
+      suggestion: pendingSites.length ? networkPendingSuggestion(pendingSites)
+        : failed.timedOut ? 'Check the internet connection, then check or export again.'
         : 'Check that the template’s network sites are allowed for this book and reachable, then check or export again.' }));
     errors.push(...pictureIssues(pictureFailures));
     const photoRenderIssues = (failures: PhotoRenderFailure[]): Issue[] => failures.map(({ spread, box, message: text }) => ({
       ...located(spread, 'Photo box ' + box + ': its render callback failed: ' + text), code: 'photo-render-failed', box,
       suggestion: 'Fix the PhotoBox render callback so it returns markup for every crop and parameter value.' }));
     for (const { api, spread } of guards?.calls ?? []) {
-      errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api))), code: 'render-impure',
-        details: { api }, suggestion: impureSuggestion });
+      errors.push({ ...(spread ? located(spread, impureMessage(api)) : message(impureMessage(api, false))), code: 'render-impure',
+        details: { api }, suggestion: spread ? impureSuggestion : unlocatedImpureSuggestion });
     }
     for (const spread of spreads) {
       const definition = template.spreads[spread.definition];
@@ -1742,6 +1787,9 @@ export async function startRender(root: HTMLElement) {
     }
     else if (artwork) {
       const { frame, metadata } = renderArtwork(root, sheets, spreads, sequence, format, artwork, book.fixture);
+      const sentinel = parseSentinel(query.get('sentinel'));
+      frame.dataset.previewArtwork = query.get('sentinel') ?? '';
+      if (sentinel) paintSentinel(sentinel, metadata.height);
       await settle(decodable(frame));
       window.imageflowPreview = { state: 'ready', metadata };
     } else if (!check) {

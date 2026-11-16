@@ -74,7 +74,7 @@ async function readDescriptor(path: string): Promise<McpDescriptor> {
     return parsed.data;
   } catch (error) {
     if (error instanceof McpConnectionError) throw error;
-    throw new McpConnectionError('connection-unavailable', 'ImageFlow is not accepting agents. Open a book in ImageFlow, choose Connect an agent… and turn on agent access.');
+    throw new McpConnectionError('connection-unavailable', 'ImageFlow is not accepting agents: it is not running, or agent access is off. Open ImageFlow and a book, then select Allow agents to use open books in Settings → Agents (Help → Connect an Agent…).');
   } finally {
     await file?.close();
   }

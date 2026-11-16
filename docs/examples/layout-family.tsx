@@ -1,5 +1,5 @@
 // A layout family: a photo grid in 2×2 and 3×3, the 2×2 also with a text box, chosen with a picker of two independent controls.
-import { box, defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
+import { box, Choice, defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { LayoutPickerProps, RenderContext } from 'imageflow';
 
 const format = printFormat({
@@ -24,8 +24,9 @@ const cells = (ctx: Pick<RenderContext, 'geometry'> & { params: { gap: number } 
 };
 const story = { font: '10pt/1.45 serif' };
 
-// The picker shows two choices, size and text box, and maps them to a variant by its tags. There is no 3×3 grid with
-// a text box: the picker says so and turns the text box off rather than offering a combination with no layout.
+// The picker shows two choices, size and text box, and maps them to a variant by its tags. `Choice` is ImageFlow's own
+// segmented control, so the picker matches the settings around it. There is no 3×3 grid with a text box: the picker
+// disables that option and turns the text box off rather than offering a combination with no layout.
 function GridPicker({ variants, current, choose, find, readOnly }: LayoutPickerProps) {
   const tags = variants.find(({ id }) => id === current)?.variant ?? {};
   const pick = (size: unknown, text: unknown) => {
@@ -33,19 +34,12 @@ function GridPicker({ variants, current, choose, find, readOnly }: LayoutPickerP
     if (id) choose(id);
   };
   const textAvailable = !!find({ size: String(tags.size), text: true });
-  const control = { padding: '6px 10px', borderRadius: 6, border: '1px solid var(--if-editor-border)', color: 'var(--if-editor-text)' };
-  return <div style={{ display: 'grid', gap: 12, color: 'var(--if-editor-text)', font: '13px system-ui, sans-serif' }}>
-    <div role="radiogroup" aria-label="Grid size" style={{ display: 'flex', gap: 8 }}>
-      {Object.keys(sizes).map((size) => <button key={size} type="button" role="radio" aria-checked={tags.size === size} disabled={readOnly}
-        onClick={() => pick(size, tags.text)}
-        style={{ ...control, background: tags.size === size ? 'var(--if-editor-selection)' : 'var(--if-editor-control)' }}>
-        {size.replace('x', ' × ')}</button>)}
-    </div>
-    <label style={{ display: 'flex', gap: 6, alignItems: 'center', color: textAvailable ? undefined : 'var(--if-editor-muted)' }}>
-      <input type="checkbox" checked={!!tags.text} disabled={readOnly || !textAvailable} onChange={() => pick(tags.size, !tags.text)} />
-      Text box{textAvailable ? '' : ' (only with 2 × 2)'}
-    </label>
-  </div>;
+  return <>
+    <Choice label="Grid size" value={String(tags.size)} disabled={readOnly} onChange={(size) => pick(size, tags.text)}
+      options={Object.keys(sizes).map((size) => ({ value: size, label: size.replace('x', ' × ') }))} />
+    <Choice label="Text box" value={!!tags.text} disabled={readOnly} onChange={(text) => pick(tags.size, text)}
+      options={[{ value: false, label: 'Photos only' }, { value: true, label: 'With text', disabled: !textAvailable }]} />
+  </>;
 }
 
 export default defineTemplate({

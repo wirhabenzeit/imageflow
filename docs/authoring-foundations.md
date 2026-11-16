@@ -13,7 +13,7 @@ This increment supports the first part of the authoring loop: edit project-owned
 - Compiler errors retain file, line, and column. Layouts that throw are reported per spread with the template line where they threw, mapped through the bundle's source map, and invalid declarations by declaration path. Layout findings carry stable codes, their spread, box, element or source, measured values and a suggested fix, including text that runs out of its box or overlaps other text. See [diagnostics](mcp.md#diagnostics) and [check levels](mcp.md#check-levels).
 - Previews can carry opt-in trim/safe-area guides and labelled box/element outlines.
 - MCP checks can render an unsaved command batch on top of the saved book, so a new layout can be previewed in the real text flow before it is inserted. See [draft previews](mcp.md#draft-previews).
-- MCP checks can also render layouts with synthetic long, empty, portrait-photo and malformed-file content in separate fixture books per format. They report tested and skipped coverage and return a bannered fixture contact sheet. See [layout fixtures](mcp.md#layout-fixtures).
+- MCP checks can also render layouts with synthetic long, empty, portrait-photo, valid-GPX and malformed-file content in separate fixture books per format. They report tested and skipped coverage and return a bannered fixture contact sheet. See [layout fixtures](mcp.md#layout-fixtures).
 
 ## Internal app API
 

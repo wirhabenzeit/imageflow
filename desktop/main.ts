@@ -17,7 +17,7 @@ import type { SourceEntry } from '../src/source-locations';
 import { assetPageLabels, assetUsage, usageLabel } from '../src/asset-usage';
 import { importFeedback } from '../src/import-feedback';
 import { configureSourceStore, pruneSourceCache, SourceStore } from './source-store';
-import { configureSourceAccess } from './source-access';
+import { bookTrusted, configureSourceAccess, distrustBook, trustBook } from './source-access';
 import { app, autoUpdater, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, shell } from 'electron';
 import type { BaseWindow, IpcMainInvokeEvent, MenuItemConstructorOptions } from 'electron';
 import { execFile } from 'node:child_process';
@@ -204,7 +204,7 @@ async function serve(request: Request) {
       'Content-Security-Policy': renderPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });
   }
-  if (resource === 'data') return Response.json(renderData(session.book, id, session.mode));
+  if (resource === 'data') return Response.json(renderData(session.book, id, session.mode, session.network?.()));
   if (resource === 'template-preview') {
     // The Book check of the template's own preview image: the frame names the declared path, the app reads the file.
     const { file: _file, ...report } = await readTemplatePreview(join(session.book.folder, 'template'), new URL(request.url).searchParams.get('path') ?? '');
@@ -560,6 +560,12 @@ async function createNewBook(owner: BrowserWindow, selected: NewBookChoice, clos
   if (choice.canceled || !choice.filePath || owner.isDestroyed()) return false;
   const folder = await createDocument(documentPath(choice.filePath),
     (stage) => library.withTemplate(selected.id, (current) => createBook(stage, current, selected.start)));
+  // A book made here is the user's own, and its template may reach its sites without asking, now and after edits
+  // (ADR 0006) — when the template it starts from was trusted for them: a built-in, a template with no sites, or one
+  // whose sites the user allowed when importing it. Otherwise the book asks once, like a book from elsewhere.
+  const declared = template.entry.network ?? [];
+  const trusted = declared.length ? await bookNetworkTrust(template.entry.hash, declared).catch(() => []) : [];
+  if (declared.every((origin) => trusted.includes(origin))) await trustBook(folder).catch((error) => console.warn('ImageFlow could not record the new book as yours', error));
   await openDocument(folder);
   if (closeOwner) owner.close();
   return true;
@@ -781,6 +787,24 @@ async function bookNetworkTrust(hash: string, declared?: readonly string[]) {
   return declared ? trustedOrigins(declared, { builtIn: builtIn !== undefined, allowed }) : allowed;
 }
 
+/** Withdraws the user's trust in the focused book (ADR 0006): its template asks again before reaching any site. */
+async function stopTrustingBook(owner: BaseWindow | undefined) {
+  const document = focusedDocument(owner);
+  if (!document || document.closing) return;
+  const window = document.window;
+  if (!await bookTrusted(document.book.folder)) {
+    await dialog.showMessageBox(window, { type: 'info', message: 'This book is not trusted.',
+      detail: 'Its template asks before it connects to the internet.' });
+    return;
+  }
+  const { response } = await dialog.showMessageBox(window, { type: 'warning', buttons: ['Stop Trusting', 'Cancel'], defaultId: 1, cancelId: 1,
+    message: 'Stop trusting this book’s template?',
+    detail: 'Maps and other pictures that load from the internet stop drawing until you trust the book again.' });
+  if (response !== 0) return;
+  await distrustBook(document.book.folder);
+  await document.updateNetwork();
+}
+
 /** Library entries with why their network access needs no question, for Manage Templates and New Book. */
 async function libraryWithTrust() {
   return Promise.all((await library.list()).map(async (entry) => {
@@ -928,7 +952,8 @@ function installMenu() {
       { type: 'separator' }, registered('manage-sources'), registered('copy-assets', 'copy-assets', 'checkbox'),
       { type: 'separator' }, registered('book-check'),
     ] },
-    { label: 'Templates', submenu: [{ label: 'Manage Templates…', click: () => showTemplates() }] },
+    { label: 'Templates', submenu: [{ label: 'Manage Templates…', click: () => showTemplates() },
+      { type: 'separator' }, { id: 'stop-trusting-book', label: 'Stop Trusting This Book’s Template…', enabled: false, click: (_item, owner) => void stopTrustingBook(owner) }] },
     { label: 'View', submenu: [
       registered('sidebar', 'toggle-project'), registered('inspector', 'toggle-inspector'), registered('sources', 'toggle-sources'),
       { type: 'separator' }, registered('layout-vertical', 'layout-vertical', 'radio'), registered('layout-grid', 'layout-grid', 'radio'),
@@ -976,6 +1001,8 @@ function updateMenus() {
   }
   const inAssets = !!document && owner === assetsWindows.get(document)?.window;
   const native = (!inBook && !inAssets) || (inBook && state.textEditing);
+  const stopTrusting = menu?.getMenuItemById('stop-trusting-book');
+  if (stopTrusting) stopTrusting.enabled = state.document;
   const zoomAlias = menu?.getMenuItemById('zoom-in-equals');
   if (zoomAlias) zoomAlias.enabled = commandState('zoom-in', state).enabled;
   for (const direction of ['undo', 'redo']) {
@@ -1012,7 +1039,7 @@ async function installMcp(target: McpClientTarget) {
   const launch = mcpLaunch();
   if (target === 'claude') {
     const file = join(app.getPath('userData'), 'ImageFlow.mcpb');
-    await writeFile(file, claudeExtension({ launch, version: app.getVersion(), tools: mcpTools }));
+    await writeFile(file, claudeExtension({ launch, version: app.getVersion(), tools: mcpTools, icon: await readFile(join(app.getAppPath(), 'extension-icon.png')) }));
     if (process.platform === 'darwin') {
       try { await openWith('com.anthropic.claudefordesktop', file); }
       catch {
@@ -1568,6 +1595,7 @@ void app.whenReady().then(async () => {
     try {
       if (patch && typeof patch === 'object' && 'updateChannel' in patch && patch.updateChannel !== settings.value.updateChannel &&
           ['checking', 'downloading', 'ready'].includes(updates.state.status)) throw new Error('Finish the current update before changing channels.');
+      if (patch && typeof patch === 'object' && 'agentAccess' in patch) throw new Error('Change agent access in Settings → Agents.');
       const previousChannel = settings.value.updateChannel;
       const value = await settings.update(patch);
       nativeTheme.themeSource = value.appearance;
@@ -1690,6 +1718,8 @@ void app.whenReady().then(async () => {
       const update = connectionSettingsQueue.then(async () => {
         if (enabled === true && !mcpConnection) await enableMcp();
         if (enabled === false) await disableMcp();
+        // The choice outlasts this run: the connection starts again when ImageFlow next opens.
+        if (enabled !== undefined && !!settings.value.agentAccess !== enabled) await settings.update({ agentAccess: enabled });
       });
       connectionSettingsQueue = update.catch(() => {});
       await update;
@@ -1716,7 +1746,7 @@ void app.whenReady().then(async () => {
         return { summary: document.activate(await document.projectSession.save(files, 'Place asset')), imported: [source.id] };
       }
     }
-    return document.importFiles(document.window, id, request);
+    return document.importFiles(document.window, id, request, undefined, true);
   }));
   ipcMain.handle(channels.network, async (event, id: string, origins: unknown) => {
     const document = editorOwner(event);
@@ -1771,6 +1801,12 @@ void app.whenReady().then(async () => {
   }
   if (!documents.size) showStart();
   updates.setAutomatic(settings.value.automaticUpdates);
+  // Agent access the user turned on stays on across restarts, with new credentials for this run; installed bridges read
+  // the connection file before each call, so agents reconnect without being set up again.
+  if (settings.value.agentAccess && !quitting && !preparingQuit) {
+    const restore = connectionSettingsQueue.then(async () => { if (!mcpConnection) await enableMcp(); });
+    connectionSettingsQueue = restore.catch((error) => console.warn('ImageFlow could not restore agent access', error));
+  }
   // Signature/filesystem checks must not delay creating the library or the first usable window.
   void updateUnavailable({ packaged: app.isPackaged, platform: process.platform,
     executable: process.execPath, downloads: app.getPath('downloads') }).then((reason) => {

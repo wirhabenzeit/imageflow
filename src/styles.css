@@ -785,6 +785,8 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .connection-dot { position: absolute; right: 3px; top: 2px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .status-spinner { width: 12px; height: 12px; border: 1.5px solid var(--edge); border-top-color: var(--muted); border-radius: 50%; animation: status-spin .8s linear infinite; }
 @keyframes status-spin { to { transform: rotate(360deg); } }
+/* Long work in the status line (imports, opening, export preparation) shows the same spinner before its message. */
+.status-busy .status-spinner { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .issue-count { font-size: 10px; }
 .element-editor.item-controls { height: min(560px, calc(100cqh - 32px)); }
 .element-editor .ee-body { flex: 1; }

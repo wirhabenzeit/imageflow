@@ -46,12 +46,21 @@ export async function approvedExtensions(folder: string, key: string) {
 }
 /** Called only after an explicit file/folder selection, never while loading a manifest. */
 export async function approveSource(folder: string, source: Target, accept?: string[]) {
-  if (!source.linked || !source.key) throw new Error('Choose an external source to link.');
-  const path = await realpath(source.path);
-  if (source.kind === 'file' && !accept?.includes(extname(path).toLowerCase())) throw new Error('Choose a file with an extension accepted by the parameter.');
+  await approveSources(folder, [source], accept);
+}
+/** Approves the sources of one explicit selection together, so importing many files writes the registry once. */
+export async function approveSources(folder: string, sources: readonly Target[], accept?: string[]) {
+  const approved: Grants = {};
+  for (const source of sources) {
+    if (!source.linked || !source.key) throw new Error('Choose an external source to link.');
+    const path = await realpath(source.path);
+    if (source.kind === 'file' && !accept?.includes(extname(path).toLowerCase())) throw new Error('Choose a file with an extension accepted by the parameter.');
+    approved[source.key] = { path, ...(source.kind === 'file' ? { accept } : {}) };
+  }
+  if (!sources.length) return;
   const { key, book } = await accessFor(folder);
   const task = book.writes.then(async () => {
-    const grants = { ...book.grants, [source.key!]: { path, ...(source.kind === 'file' ? { accept } : {}) } };
+    const grants = { ...book.grants, ...approved };
     await saveGrants(key, grants);
     book.grants = grants;
   });
@@ -73,23 +82,60 @@ export async function transferSourceAccess(from: string, to: string, entries: So
 }
 
 // Network origins the user allowed this book's template to reach (ADR 0006), kept with the source grants: app-owned,
-// outside the book, bound to the book's filesystem identity and to the template's hash when they were allowed. Any
-// change to the template's files ends them, as it ends library trust.
+// outside the book and bound to the book's filesystem identity. They belong to the book, not to one version of its
+// template: editing the template keeps them, and only an origin the template newly declares needs a question. The
+// template hash recorded with older grants is informational only.
 const networkKey = (origin: string) => 'network:' + origin;
-export async function approvedNetwork(folder: string, hash: string | undefined) {
-  if (!hash) return [];
+export async function approvedNetwork(folder: string) {
   const { book } = await accessFor(folder);
-  return Object.entries(book.grants).filter(([key, grant]) => key.startsWith('network:') && grant.hash === hash)
-    .map(([key]) => key.slice('network:'.length));
+  return Object.keys(book.grants).filter((key) => key.startsWith('network:')).map((key) => key.slice('network:'.length));
 }
-/** Called only after the user allowed these origins for the template with this hash. */
-export async function approveNetwork(folder: string, origins: string[], hash: string) {
+/** Called only after the user allowed these origins for this book, or the book's template was trusted for them. */
+export async function approveNetwork(folder: string, origins: readonly string[], hash?: string) {
   const { key, book } = await accessFor(folder);
   const task = book.writes.then(async () => {
-    const grants = { ...book.grants, ...Object.fromEntries(origins.map((origin) => [networkKey(origin), { path: origin, hash }])) };
+    const added = origins.filter((origin) => !book.grants[networkKey(origin)]);
+    if (!added.length) return;
+    const grants = { ...book.grants, ...Object.fromEntries(added.map((origin) => [networkKey(origin), { path: origin, ...(hash ? { hash } : {}) }])) };
     await saveGrants(key, grants);
     book.grants = grants;
   });
   book.writes = task.catch(() => {});
   await task;
+}
+
+// Whether this book is the user's own (ADR 0006): made with New Book on this Mac from a template whose sites were
+// already trusted, saved as a copy of such a book, or trusted once when it came from elsewhere. Its template may then
+// reach every site it declares without asking, including sites added later by the user or their agent. The mark is
+// app-owned and bound to the book's filesystem identity, so a book received from someone else cannot claim it. A book
+// that already had sites allowed before the mark existed counts as trusted: the user decided for it then.
+const trustKey = 'trust:book';
+export async function bookTrusted(folder: string) {
+  const { book } = await accessFor(folder);
+  return !!book.grants[trustKey] || Object.keys(book.grants).some((key) => key.startsWith('network:'));
+}
+async function changeGrants(folder: string, change: (grants: Grants) => Grants) {
+  const { key, book } = await accessFor(folder);
+  const task = book.writes.then(async () => {
+    const grants = change({ ...book.grants });
+    await saveGrants(key, grants);
+    book.grants = grants;
+  });
+  book.writes = task.catch(() => {});
+  await task;
+}
+/** Called when the user made this book here, or chose to trust it. */
+export async function trustBook(folder: string) {
+  if ((await accessFor(folder)).book.grants[trustKey]) return;
+  await changeGrants(folder, (grants) => ({ ...grants, [trustKey]: { path: 'trusted' } }));
+}
+/** Withdraws the mark and every site allowed for the book; its template asks again. */
+export async function distrustBook(folder: string) {
+  await changeGrants(folder, (grants) => Object.fromEntries(Object.entries(grants).filter(([key]) => key !== trustKey && !key.startsWith('network:'))));
+}
+/** A saved copy of the user's own book is theirs too, with the sites already allowed for it. */
+export async function transferBookTrust(from: string, to: string) {
+  if (!await bookTrusted(from)) return;
+  await approveNetwork(to, await approvedNetwork(from));
+  await trustBook(to);
 }

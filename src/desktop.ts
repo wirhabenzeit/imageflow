@@ -26,7 +26,7 @@ export const channels = {
   showMarkdown: 'markdown:open', markdownAction: 'markdown:action', markdownChanged: 'markdown:changed', markdownPrepareClose: 'markdown:prepare-close',
   presentationState: 'presentation:state', presentationSpread: 'presentation:spread', presentationClose: 'presentation:close', presentationClosed: 'presentation:closed',
   showAssets: 'document:show-assets', showTemplates: 'library:show', templatePreview: 'library:preview',
-  current: 'document:current', appError: 'app:error',
+  current: 'document:current', appError: 'app:error', appNotice: 'app:notice',
   recents: 'app:recents', recentsChanged: 'app:recents-changed', recentAction: 'app:recent-action',
   sourceCommand: 'document:source-command', templateAction: 'library:action', sourceAction: 'document:source-action', saveCopy: 'document:save-copy',
   chooseStarter: 'app:choose-starter', documentAction: 'document:action',
@@ -133,6 +133,7 @@ export type DesktopApi = {
   saveCopy(includeAssets?: boolean): Promise<Result<null>>;
   currentProject(): Promise<Result<ProjectSummary>>;
   onAppError(listener: (message: string) => void): () => void;
+  onAppNotice(listener: (message: string) => void): () => void;
   recentDocuments(): Promise<Result<RecentDocument[]>>;
   onRecentsChanged(listener: () => void): () => void;
   recentDocument(id: string, action: 'open' | 'locate' | 'remove' | 'reveal'): Promise<Result<null>>;
@@ -220,6 +221,10 @@ export type TemplateInfo = {
   // one format), so commands and fixtures can check layouts against a format other than the current one. Absent in
   // summaries from apps that predate it.
   structures?: Record<string, PrintFormat['structure']>;
+  // Every format the template offers, in full (trim, bleed, safe area, structure, page count and output), by format ID
+  // ('default' for a template with one format), so an agent can compare presets without reading the template source.
+  // Absent in summaries from apps that predate it.
+  printFormats?: Record<string, PrintFormat>;
 };
 export type BoxLocation = { id: string; type: 'photo' | 'markdown'; x: number; y: number; width: number; height: number };
 // The editor shows the whole book in two frames: the scrolling spread view and the sidebar thumbnails.

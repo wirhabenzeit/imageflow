@@ -1,5 +1,5 @@
-// Renders the SVG sources in resources/brand/ into the files used for packaging: the macOS .icns files and the DMG
-// window background. 16 and 32 pt icons use the pixel-fitted *-small.svg artwork; 64 pt and larger use the detailed
+// Renders the SVG sources in resources/brand/ into the files used for packaging: the macOS .icns files, the Claude Desktop
+// extension icon and the DMG window background. 16 and 32 pt icons use the pixel-fitted *-small.svg artwork; 64 pt and larger use the detailed
 // artwork. On a Mac with Xcode 26 it also compiles the layered Icon Composer icon (resources/brand/ImageFlow.icon)
 // into resources/Assets.car, which macOS 26 and later prefer over ImageFlow.icns.
 // Run `npm run build:icons` after editing a source and commit the regenerated files.
@@ -51,6 +51,10 @@ for (const icon of icons) {
   await writeFile(join(root, 'resources', icon.output), chunk('icns', body));
   console.log(`resources/${icon.output}`);
 }
+
+// Claude Desktop shows this 512 px icon on the extension's page (the .mcpb manifest's `icon`).
+await writeFile(join(root, 'resources', 'extension-icon.png'), await render(await readFile(join(brand, 'app.svg')), 512));
+console.log('resources/extension-icon.png');
 
 // The DMG window is 660 × 420 pt; macOS picks the @2x file on Retina displays once the release joins both into a TIFF.
 const background = await readFile(join(brand, 'dmg-background.svg'));

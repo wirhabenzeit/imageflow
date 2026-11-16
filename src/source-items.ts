@@ -1,6 +1,6 @@
 import { orderedPhotos, photoGroups, defaultPhotoView } from './photo-view';
 import type { PhotoView } from './photo-view';
-import { sourcePath } from './source-locations';
+import { sourceFileName, sourcePath } from './source-locations';
 import type { SourceReference } from './source-locations';
 import type { ProjectSummary } from './desktop';
 
@@ -17,7 +17,7 @@ export type SourceRef = { kind: SourceKind; id: string };
 export type SourcesTab = SourceKind | 'assets';
 
 // Imported files are stored as "<id>-<name>"; show the original name.
-export const fileName = (path: SourceReference) => (sourcePath(path).split('/').pop() ?? sourcePath(path)).replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');
+export const fileName = (path: SourceReference) => sourceFileName(path);
 export const words = (source: string) => source.split(/\s+/).filter(Boolean).length;
 
 export function excerpt(source: string) {
@@ -34,6 +34,24 @@ export function sourceList(summary: ProjectSummary, kind: SourceKind, view?: Pho
     : Object.entries(summary.project.texts).map(([id, path]) => ({ id, title: fileName(path), path: sourcePath(path) }));
 }
 
+
+/**
+ * The book's texts as choices for a Markdown box, named as the Texts list names them. Texts that share a name are told
+ * apart by their folder when that differs, otherwise by a running number; storage IDs never appear.
+ */
+export function textChoices(summary: Pick<ProjectSummary, 'project'>): (readonly [id: string, name: string])[] {
+  const entries = Object.entries(summary.project.texts).map(([id, path]) => ({ id, name: sourceFileName(path),
+    folder: sourcePath(path).split('/').slice(0, -1).pop() ?? '' }));
+  const seen = new Map<string, number>();
+  return entries.map(({ id, name, folder }) => {
+    const same = entries.filter((entry) => entry.name === name);
+    if (same.length < 2) return [id, name] as const;
+    if (new Set(same.map((entry) => entry.folder)).size === same.length && folder) return [id, name + ' — ' + folder] as const;
+    const count = (seen.get(name) ?? 0) + 1;
+    seen.set(name, count);
+    return [id, count === 1 ? name : name + ' (' + count + ')'] as const;
+  });
+}
 
 // The name shown for a photo or Markdown source.
 export function sourceTitle(summary: ProjectSummary, kind: SourceKind, id: string) {

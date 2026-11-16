@@ -15,7 +15,8 @@ export function checkTemplateTypes(folder: string, signal: AbortSignal, runtimeR
   return new Promise((resolve, reject) => {
     const worker = new Worker(join(runtimeRoot, 'typecheck-worker.cjs'), {
       workerData: { folder, typesRoot: join(runtimeRoot, 'authoring-types') },
-      resourceLimits: { maxOldGenerationSizeMb: 256 },
+      // Declarations of large vendored packages (Mapbox GL, chart libraries) need more than the compiler's minimum.
+      resourceLimits: { maxOldGenerationSizeMb: 512 },
     });
     let settled = false;
     const finish = (result?: TypecheckResult, error?: unknown) => {
@@ -34,7 +35,9 @@ export function checkTemplateTypes(folder: string, signal: AbortSignal, runtimeR
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
     worker.once('message', (result: TypecheckResult) => finish(result));
-    worker.once('error', () => fail('typescript-unavailable', 'The installed template type checker could not complete.'));
+    worker.once('error', (error: Error & { code?: string }) => error?.code === 'ERR_WORKER_OUT_OF_MEMORY'
+      ? fail('typescript-out-of-memory', 'Type checking ran out of memory. The template’s declarations, including vendored packages, are too large to check.')
+      : fail('typescript-unavailable', 'The installed template type checker could not complete.'));
     worker.once('exit', () => { if (!settled) fail('typescript-unavailable', 'The template type checker stopped without a result.'); });
   });
 }

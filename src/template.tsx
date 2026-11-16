@@ -1,6 +1,7 @@
 import { Component, createContext, Fragment, useContext, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { flushSync } from 'react-dom';
 import { RenderedImage } from './rendered-image';
+import { Choice } from './choice';
 import { parseFormatted, plainFormatted } from './formatted-text';
 import { renderingSpread } from './purity';
 import type { CSSProperties, ReactNode } from 'react';
@@ -482,6 +483,7 @@ export function templateInfo(template: Template): TemplateInfo {
   return {
     format: template.format, formatId: template.formatId, formats: template.formatChoices,
     structures: Object.fromEntries(Object.entries(template.formats ?? { default: template.format }).map(([id, format]) => [id, format.structure])),
+    printFormats: { ...template.formats ?? { default: template.format } },
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
     ...(template.preview ? { preview: previewPath(template.preview)! } : {}),
@@ -894,7 +896,7 @@ export function issue(found: TemplateIssue): Required<IssueMarker> {
 
 export const runtime = {
   defineTemplate, spreadFor, p, mm, pt, inch, printFormat, Spread, PhotoBox, MarkdownBox, Element, asset, file, geometry, box, issue, capabilities,
-  RenderedImage, FormattedText, plainText,
+  RenderedImage, FormattedText, plainText, Choice,
 } satisfies Record<typeof runtimeExports[number], unknown>;
 
 // The values `render` reads for one spread: its parameters, the document's, and its boxes and elements.

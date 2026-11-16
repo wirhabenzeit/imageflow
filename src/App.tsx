@@ -714,20 +714,24 @@ export function App() {
     });
     const command = api.onCommand((command) => onCommand(command));
     const changed = api.onProjectChanged((change) => onProjectChanged(change));
-    const progress = api.onProgress(setBusy);
+    // Progress belongs to the import or export that is running. A message can arrive after its task has finished and
+    // cleared the status (IPC sends are not ordered with invoke replies); taking it then would leave the book busy,
+    // with a spinner that never stops and Quit refused.
+    const progress = api.onProgress((stage) => { if (pendingTasks.current) setBusy(stage); });
     const appError = api.onAppError(setError);
+    const appNotice = api.onAppNotice(setNotice);
     let mounted = true;
     void api.currentProject().then((result) => {
       if (!mounted || current.current) return;
       if ('error' in result) setError(result.error);
       else adopt(result.value, true);
     });
-    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); };
+    return () => { mounted = false; prepare(); cancelQuit(); sourceCommand(); presentationClosed(); command(); changed(); progress(); lease(); release(); appError(); appNotice(); };
   }, [api]);
 
-  // Network origins the template declares (ADR 0006): decided once per book and template version (its hash) when it
-  // first renders, and again whenever an element editor opens. Newly allowed origins reload the frames so they may
-  // reach them.
+  // Network origins the template declares (ADR 0006): checked once per book and template version (its hash) when it
+  // first renders, and again whenever an element editor opens. The user's own books never ask; a book from elsewhere
+  // asks once whether to trust it. Newly allowed origins reload the frames so they may reach them.
   const networkAsked = useRef(new Set<string>());
   // Resolves to the project ID to render from now on.
   function decideNetwork(declared: TemplateInfo | undefined, always = false): Promise<string | void> {
@@ -1885,8 +1889,8 @@ export function App() {
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     {photoView.dialog}
     <footer className="status-bar">
-      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
-        {issue || busy || notice}
+      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
+        {!issue && busy && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice}
       </span>
       <AgentStatus api={api} />
       {summary && <BookCheckIndicator requestSpread={checkScope} request={checkRequest} check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={select} />}

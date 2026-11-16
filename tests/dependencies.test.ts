@@ -123,11 +123,9 @@ test('relative imports cannot reach installed packages or dotfiles, which the ha
   await bundleTemplate(folder);
 });
 
-test('the type check resolves packages from the saved declarations, without node_modules', async (t) => {
-  const { folder, root } = await fixture(t);
-  await rebuildDependencies(root);
-  await rm(join(root, 'node_modules'), { recursive: true });
-  const runtime = join(folder, '..', 'runtime-' + Date.now());
+// The type check as the app runs it: a worker with the installed authoring declarations.
+async function typeChecker(t: TestContext, folder: string) {
+  const runtime = join(folder, '..', 'runtime-' + Date.now() + '-' + Math.random().toString(36).slice(2));
   t.after(() => rm(runtime, { recursive: true, force: true }));
   await mkdir(runtime);
   await cp(resolve('authoring'), join(runtime, 'authoring-types'), { recursive: true });
@@ -136,7 +134,14 @@ test('the type check resolves packages from the saved declarations, without node
   await symlink(resolve('node_modules'), join(runtime, 'node_modules'));
   await build({ entryPoints: ['desktop/typecheck-worker.ts'], outfile: join(runtime, 'typecheck-worker.cjs'),
     bundle: true, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent' });
-  const check = () => checkTemplateTypes(folder, new AbortController().signal, runtime, 15_000);
+  return () => checkTemplateTypes(folder, new AbortController().signal, runtime, 15_000);
+}
+
+test('the type check resolves packages from the saved declarations, without node_modules', async (t) => {
+  const { folder, root } = await fixture(t);
+  await rebuildDependencies(root);
+  await rm(join(root, 'node_modules'), { recursive: true });
+  const check = await typeChecker(t, folder);
   assert.deepEqual((await check()).diagnostics, []);
   // A wrong use of a vendored type is reported in template code.
   await writeFile(join(root, 'index.tsx'), template.replace('double(tiny)', "double('tiny')"));
@@ -144,4 +149,53 @@ test('the type check resolves packages from the saved declarations, without node
   assert.equal(result.diagnostics.length, 1, JSON.stringify(result.diagnostics));
   assert.equal(result.diagnostics[0].location?.path, 'template/index.tsx');
   assert.ok(!result.files.some((path) => path.includes('vendor')));
+});
+
+test('declarations exposed only through package exports, subpaths and linked packages type-check without shims', async (t) => {
+  const { folder, root } = await fixture(t);
+  const modules = join(root, 'node_modules');
+  // Types only through `exports`, as @tanstack/charts and react-map-gl ship them: no top-level `types`, and a subpath
+  // whose declarations the root entry never reaches.
+  await mkdir(join(modules, '@scope/charts/dist'), { recursive: true });
+  await writeFile(join(modules, '@scope/charts/package.json'), JSON.stringify({ name: '@scope/charts', version: '2.0.0', type: 'module',
+    exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' }, './scales/linear': { types: './dist/linear.d.ts', import: './dist/linear.js' } } }));
+  await writeFile(join(modules, '@scope/charts/dist/index.js'), 'export const chart = (n) => String(n);\n');
+  await writeFile(join(modules, '@scope/charts/dist/index.d.ts'), 'export declare const chart: (n: number) => string;\n');
+  await writeFile(join(modules, '@scope/charts/dist/linear.js'), 'export const linear = (n) => n;\n');
+  await writeFile(join(modules, '@scope/charts/dist/linear.d.ts'), "import type { Scale } from './scale';\nexport declare const linear: Scale;\n");
+  await writeFile(join(modules, '@scope/charts/dist/scale.d.ts'), 'export type Scale = (n: number) => number;\n');
+  // A file: dependency installed as a link to a folder outside node_modules.
+  const linked = join(folder, 'bridge');
+  await mkdir(join(linked, 'lib'), { recursive: true });
+  await writeFile(join(linked, 'package.json'), JSON.stringify({ name: 'bridge', version: '0.1.0', type: 'module',
+    exports: { '.': { types: './lib/index.d.ts', default: './lib/index.js' } } }));
+  await writeFile(join(linked, 'lib/index.js'), 'export const bridge = (s) => s.length;\n');
+  await writeFile(join(linked, 'lib/index.d.ts'), 'export declare const bridge: (s: string) => number;\n');
+  await symlink(linked, join(modules, 'bridge'));
+  const source = `import { defineTemplate } from 'imageflow';
+import { chart } from '@scope/charts';
+import { linear } from '@scope/charts/scales/linear';
+import { bridge } from 'bridge';
+export const label: string = chart(linear(bridge('abc')));
+export default defineTemplate({ id: 'deps', version: '1', contract: 1, spreads: {} } as never);
+`;
+  await writeFile(join(root, 'index.tsx'), source);
+  const manifest = await rebuildDependencies(root);
+  assert.ok(manifest);
+  assert.deepEqual(manifest.untyped, []);
+  assert.deepEqual(manifest.types, {
+    '@scope/charts': 'types/packages/@scope/charts/dist/index.d.ts',
+    '@scope/charts/scales/linear': 'types/packages/@scope/charts/dist/linear.d.ts',
+    bridge: 'types/packages/bridge/lib/index.d.ts',
+  });
+  const tsconfig = JSON.parse(await readFile(join(root, 'tsconfig.json'), 'utf8'));
+  assert.deepEqual(tsconfig.compilerOptions.paths['@scope/charts/scales/linear'], ['./vendor/types/packages/@scope/charts/dist/linear.d.ts']);
+  await rm(modules, { recursive: true });
+  await rm(linked, { recursive: true });
+  const check = await typeChecker(t, folder);
+  assert.deepEqual((await check()).diagnostics, []);
+  await writeFile(join(root, 'index.tsx'), source.replace("bridge('abc')", 'bridge(3)'));
+  const result = await check();
+  assert.equal(result.diagnostics.length, 1, JSON.stringify(result.diagnostics));
+  assert.equal(result.diagnostics[0].location?.path, 'template/index.tsx');
 });

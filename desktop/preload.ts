@@ -41,6 +41,7 @@ const api: DesktopApi = {
   saveCopy: (includeAssets) => ipcRenderer.invoke(channels.saveCopy, includeAssets),
   currentProject: () => ipcRenderer.invoke(channels.current),
   onAppError: (listener) => listen(channels.appError, listener),
+  onAppNotice: (listener) => listen(channels.appNotice, listener),
   recentDocuments: () => ipcRenderer.invoke(channels.recents),
   onRecentsChanged: (listener) => listen(channels.recentsChanged, listener),
   recentDocument: (id, action) => ipcRenderer.invoke(channels.recentAction, id, action),

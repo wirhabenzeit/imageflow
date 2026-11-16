@@ -718,7 +718,7 @@ export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issu
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'editor-context' | 'document-editors' |
   'editor-network' | 'rendered-images' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
-  'formatted-text';
+  'formatted-text' | 'app-controls';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -1093,6 +1093,33 @@ export function RenderedImage(props: RenderedImageProps): ImageFlowElement;
  * Unmatched markers show as typed; the value is never read as HTML. `ctx.Text` does this for you.
  */
 export function FormattedText(props: { value: string }): ImageFlowElement;
+
+export type ChoiceValue = string | number | boolean;
+export type ChoiceOption<V extends ChoiceValue = ChoiceValue> = { value: V; label: string; disabled?: boolean };
+export type ChoiceProps<V extends ChoiceValue = ChoiceValue> = {
+  /** Names the choice; shown above it unless `hideLabel`, and always its accessible name. */
+  label: string;
+  /** The selected option's value; none is selected when no option has it. */
+  value: V | undefined;
+  options: readonly ChoiceOption<V>[];
+  /** Called with the option the user chose by click, arrow keys, Home or End. */
+  onChange(value: V): void;
+  disabled?: boolean;
+  hideLabel?: boolean;
+};
+/**
+ * ImageFlow's own segmented choice, for custom element editors and layout-family pickers: it looks and behaves like
+ * the generated settings around it (colours, sizes, selected, disabled and focus states, light and dark) without
+ * template CSS. A radio group: Tab reaches the selected option, and the arrow keys, Home and End choose another.
+ * `<Control>` already draws a parameter's own control; use `Choice` for choices that are not one parameter, such as a
+ * layout family's variants:
+ *
+ *     <Choice label="Photos" value={selected.photos} onChange={(photos) => choose(find({ photos })!)}
+ *       options={[{ value: 1, label: 'One photo' }, { value: 2, label: 'Two photos', disabled: !find({ photos: 2 }) }]} />
+ *
+ * On the page it renders unstyled; it is meant for editor and picker frames.
+ */
+export function Choice<V extends ChoiceValue>(props: ChoiceProps<V>): ImageFlowElement;
 /**
  * The visible text of a `markdown: 'inline'` value, without its markers: `plainText('**Day** one')` is `'Day one'`.
  * Use it where formatting cannot show, such as anchor titles for a contents page.

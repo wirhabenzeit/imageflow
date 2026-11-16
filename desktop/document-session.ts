@@ -13,8 +13,9 @@ import type { BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, 
 import { identifier } from '../src/project';
 import type { RenderProject } from '../src/project';
 import { printBook, savePdf } from './export';
-import { approveNetwork, approvedNetwork } from './source-access';
+import { approveNetwork, approvedNetwork, bookTrusted, trustBook } from './source-access';
 import { importIntoProject, loadProject, projectSummary, readProjectManifest } from './project';
+import type { ImportProgress } from './project';
 import type { OpenProject } from './project';
 import { photoExtensions } from './photos';
 import { bundledFontNames } from './fonts';
@@ -86,12 +87,12 @@ export class DocumentSession {
   private agentLeases = new Map<string, (allowed: boolean) => void>();
   private renderIds = new Set<string>();
   private previewPictures = new PreviewPictureCache();
-  // The origins this book's frames may reach (ADR 0006), and the template hash they were allowed for. A frame of a
-  // book whose template has another hash gets none, so a changed template never inherits an earlier approval.
+  // The origins this book's frames may reach (ADR 0006), and the template hash they were last decided for. They
+  // belong to the book: a changed template keeps them, and only origins it newly declares need a question.
   private network: { hash?: string; origins: readonly string[] } = { origins: [] };
   private networkPrepared = false;
-  private originsFor(book: OpenProject) {
-    return book.templateHash && book.templateHash === this.network.hash ? this.network.origins : [];
+  private originsFor(_book: OpenProject) {
+    return this.network.origins;
   }
   /** The network origins the user allowed for this book's template; its render frames may reach them (ADR 0006). */
   get networkOrigins() { return this.originsFor(this.book); }
@@ -103,7 +104,7 @@ export class DocumentSession {
   async prepareNetwork() {
     const book = this.book;
     const hash = book.templateHash;
-    const origins = !hash ? [] : [...new Set([...await approvedNetwork(book.folder, hash),
+    const origins = !hash ? [] : [...new Set([...await approvedNetwork(book.folder),
       ...await this.networkTrust?.(hash).catch(() => []) ?? []])];
     this.network = { hash, origins };
     this.networkPrepared = true;
@@ -116,7 +117,12 @@ export class DocumentSession {
    */
   async updateNetwork() {
     if (this.closing) return;
-    const before = this.network.hash === this.book.templateHash ? this.network.origins : [];
+    const before = this.network.origins;
+    // A local edit of the template keeps what its previous version could reach, including sites the library or a
+    // built-in trusted for that exact version: they become this book's own approval, so editing never asks again.
+    if (this.networkPrepared && before.length && this.network.hash !== this.book.templateHash) {
+      await approveNetwork(this.book.folder, before, this.network.hash).catch((error) => console.warn('ImageFlow could not keep network approvals', error));
+    }
     await this.prepareNetwork();
     if (this.closing) return;
     const after = this.originsFor(this.book);
@@ -504,7 +510,8 @@ export class DocumentSession {
     return this.active.book;
   }
 
-  async importFiles(owner: BrowserWindow, id: string, request: ImportRequest, base?: OpenProject) {
+  /** `report` sends progress to the owner's status bar; only the book window's own import, which clears it, asks. */
+  async importFiles(owner: BrowserWindow, id: string, request: ImportRequest, base?: OpenProject, report = false) {
     const current = this.currentBook(id);
     const book = base ?? current;
     if (request.kind !== undefined && request.kind !== 'photo' && request.kind !== 'markdown' && request.kind !== 'file') throw new Error('Unknown import type.');
@@ -546,7 +553,13 @@ export class DocumentSession {
       if ((await stat(path)).isDirectory()) await collect(path);
       else files.push(path);
     }
-    const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)]);
+    const noun = request.kind === 'photo' ? 'photos' : request.kind === 'markdown' ? 'texts' : 'files';
+    const progress = report ? ({ done, total, saving }: ImportProgress) => {
+      if (owner.isDestroyed()) return;
+      owner.webContents.send(channels.progress, saving ? 'Adding ' + total + ' ' + (total === 1 ? noun.slice(0, -1) : noun) + ' to the book…'
+        : total > 1 ? 'Importing ' + noun + '… ' + done + ' of ' + total : 'Importing ' + noun.slice(0, -1) + '…');
+    } : undefined;
+    const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)], progress);
     for (const file of [...createdDirectories, ...copied]) {
       const path = relative(book.folder, file);
       this.importedWrites.set(path, await fingerprint(file), this.observedChanges.has(path));
@@ -559,8 +572,9 @@ export class DocumentSession {
   }
 
   /** The origins the template declares that this book's frames may reach, asking once for new ones (ADR 0006):
-   * element editors, and previews, checks and exports that draw <RenderedImage> pictures. Sites allowed for the
-   * template's exact version in the library need no question. Declining keeps the frames offline, so such pictures
+   * element editors, and previews, checks and exports that draw <RenderedImage> pictures. Sites this book already
+   * allowed, for any version of its template, and sites allowed for the template's exact version in the library
+   * need no question; the question lists only the others. Declining keeps the frames offline, so such pictures
    * fail and export stops; the question comes back the next time an editor opens or the book opens. When the
    * allowed origins change, the book is rendered again under a new ID, which the summary carries. */
   async editorNetwork(id: string, declared: unknown) {
@@ -572,18 +586,33 @@ export class DocumentSession {
     if (!origins.length || !hash) { this.network = { hash, origins: [] }; return { origins: [] as string[] }; }
     while (this.askingNetwork) await this.askingNetwork.catch(() => {});
     const ask = (async () => {
+      const known = await approvedNetwork(book.folder);
+      // The user's own book (made here, or trusted once): every declared site, without asking. A site its template
+      // newly declares is recorded and named in a quiet notice instead of a question.
+      if (await bookTrusted(book.folder)) {
+        const added = origins.filter((origin) => !known.includes(origin));
+        if (added.length) {
+          await approveNetwork(book.folder, added, hash);
+          if (known.length && !this.window.isDestroyed()) this.window.webContents.send(channels.appNotice,
+            'This book’s template now also loads maps or data from ' + added.join(', ') + '.');
+        }
+        return origins;
+      }
       const trusted = await this.networkTrust?.(hash, origins).catch(() => []) ?? [];
-      const approved = new Set([...await approvedNetwork(book.folder, hash), ...trusted]);
+      const approved = new Set([...known, ...trusted]);
       const pending = origins.filter((origin) => !approved.has(origin));
+      // A book from elsewhere, or made from a template whose sites were not allowed: the one question, for the book.
       if (pending.length && !this.window.isDestroyed()) {
         const { response } = await dialog.showMessageBox(this.window, {
-          type: 'question', buttons: ['Allow', 'Not Now'], defaultId: 0, cancelId: 1,
-          message: 'Allow this book’s template to connect to the internet?',
-          detail: 'This template loads maps or data from:\n' + pending.join('\n') + '\n\nAllow only templates you trust.',
+          type: 'question', buttons: ['Trust This Book', 'Not Now'], defaultId: 0, cancelId: 1,
+          message: 'Trust this book’s template?',
+          detail: 'Its template contains code that loads maps or data from:\n' + pending.join('\n') +
+            '\n\nTrust only books you made or got from someone you trust. A trusted book does not ask again, even when its template changes.',
         });
         if (response === 0) {
-          await approveNetwork(book.folder, pending, hash);
-          for (const origin of pending) approved.add(origin);
+          await approveNetwork(book.folder, origins, hash);
+          await trustBook(book.folder);
+          return origins;
         }
       }
       return origins.filter((origin) => approved.has(origin));

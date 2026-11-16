@@ -8,10 +8,11 @@ import { spanFits } from './format';
 // Authoring fixtures render layouts with synthetic content in a separate book, so an agent can test layouts that the
 // saved book does not use yet, and see how they cope with long, empty or awkward content. Nothing is saved.
 
-export const fixtureCases = ['typical', 'long-text', 'empty', 'portrait-photos', 'malformed-files'] as const;
+export const fixtureCases = ['typical', 'long-text', 'empty', 'portrait-photos', 'malformed-files', 'alternate-files'] as const;
 export type FixtureCase = typeof fixtureCases[number];
 export const fixtureCaseLabels: Record<FixtureCase, string> = {
   typical: 'Typical', 'long-text': 'Long text', empty: 'Empty', 'portrait-photos': 'Portrait photos', 'malformed-files': 'Malformed files',
+  'alternate-files': 'Alternate files',
 };
 
 export const fixtureLimits = {
@@ -26,7 +27,7 @@ export const fixtureRequestSchema = z.strictObject({
   layouts: z.array(id).min(1).max(fixtureLimits.layouts).optional()
     .describe('Layout IDs to test, including layouts the book does not use yet. Defaults to every declared layout (at most 24).'),
   formats: z.union([z.literal('all'), z.array(id).min(1).max(fixtureLimits.formats)]).optional()
-    .describe('Print format IDs to test, or "all" for up to four declared formats. Defaults to the book\'s current format.'),
+    .describe('Print format IDs to test (at most four per check), or "all" for the first four declared formats. Defaults to the book\'s current format.'),
   cases: z.array(fixtureCase).min(1).max(fixtureCases.length).optional()
     .describe('Synthetic content cases. Defaults to every case that applies to each layout.'),
   preview: z.strictObject({
@@ -60,7 +61,7 @@ export type FixturePlan = {
   preview?: Omit<NonNullable<FixtureRequest['preview']>, 'printFormat' | 'cells'> & { printFormat: string; cells: FixtureCell[] };
 };
 
-type Inputs = { photos: number; markdown: number; strings: number; files: number };
+type Inputs = { photos: number; markdown: number; strings: number; files: number; sampleFiles: number };
 function layoutInputs(definition: SpreadDefinition): Inputs {
   // A list's item fields count like parameters: fixtures fill one item of each list.
   const parameters: Parameter[] = [definition.parameters, ...Object.values(definition.boxes).map((box) => box.parameters),
@@ -70,6 +71,7 @@ function layoutInputs(definition: SpreadDefinition): Inputs {
   return {
     photos: boxes.filter(({ type }) => type === 'photo').length, markdown: boxes.filter(({ type }) => type === 'markdown').length,
     strings: parameters.filter(({ type }) => type === 'string').length, files: parameters.filter(({ type }) => type === 'file').length,
+    sampleFiles: parameters.filter((param) => param.type === 'file' && sampleExtension(param.accept)).length,
   };
 }
 
@@ -81,6 +83,8 @@ function inapplicable(fixture: FixtureCase, inputs: Inputs) {
     case 'empty': return inputs.photos + inputs.markdown + inputs.strings + inputs.files ? undefined : 'The layout has no boxes, string or file parameters.';
     case 'portrait-photos': return inputs.photos ? undefined : 'The layout has no photo boxes.';
     case 'malformed-files': return inputs.files ? undefined : 'The layout has no file parameters.';
+    case 'alternate-files': return inputs.sampleFiles ? undefined
+      : 'The layout has no file parameters accepting a type with synthetic samples (' + Object.keys(fixtureFiles).join(', ') + ').';
   }
 }
 
@@ -100,6 +104,13 @@ export function fixtureSpreadId(layout: string, fixture: FixtureCase) {
   return 'fixture-' + fixture + '-' + layout;
 }
 
+// Advice naming untested formats in batches that fit one check each.
+function remainingFormats(formats: string[]) {
+  const batches = Array.from({ length: Math.ceil(formats.length / fixtureLimits.formats) },
+    (_, index) => formats.slice(index * fixtureLimits.formats, (index + 1) * fixtureLimits.formats));
+  return 'test the remaining formats with ' + batches.map((batch) => 'formats: ' + JSON.stringify(batch)).join(', then ') + '.';
+}
+
 export function planFixtures(template: TemplateInfo, request: FixtureRequest): FixturePlan {
   const skipped: FixtureSkip[] = [];
   const declaredLayouts = Object.keys(template.spreads);
@@ -115,7 +126,9 @@ export function planFixtures(template: TemplateInfo, request: FixtureRequest): F
   let formats: string[];
   if (request.formats === 'all') {
     formats = declaredFormats.slice(0, fixtureLimits.formats);
-    skipped.push(...declaredFormats.slice(fixtureLimits.formats).map((format) => ({ format, reason: 'Only ' + fixtureLimits.formats + ' formats are tested per check; request the remaining formats explicitly.' })));
+    const rest = declaredFormats.slice(fixtureLimits.formats);
+    const reason = '"all" tests the first ' + fixtureLimits.formats + ' formats per check; ' + remainingFormats(rest);
+    skipped.push(...rest.map((format) => ({ format, reason })));
   } else {
     for (const format of request.formats ?? []) {
       if (!declaredFormats.includes(format)) throw new FixtureError('FORMAT_NOT_FOUND', 'The template declares no format ' + format + '. Declared formats: ' + declaredFormats.join(', ') + '.');
@@ -123,7 +136,12 @@ export function planFixtures(template: TemplateInfo, request: FixtureRequest): F
     formats = [...new Set(request.formats ?? [template.formatId])];
   }
   const untested = declaredFormats.filter((format) => !formats.includes(format) && !skipped.some((skip) => skip.format === format));
-  if (untested.length) skipped.push(...untested.map((format) => ({ format, reason: 'Not requested. Pass formats: "all" to test every format.' })));
+  if (untested.length) {
+    // "all" covers every format only while the template declares no more than one check may test.
+    const advice = declaredFormats.length <= fixtureLimits.formats ? 'Not requested. Pass formats: "all" to test every format.'
+      : 'Not requested. One check tests at most ' + fixtureLimits.formats + ' formats; ' + remainingFormats(untested);
+    skipped.push(...untested.map((format) => ({ format, reason: advice })));
+  }
   // A layout no tested format fits is not rendered; one that fits only some of them is left out of the others.
   const unfit = layouts.filter((layout) => !formats.some((format) => fixtureFits(template, layout, format)));
   for (const layout of unfit) {
@@ -215,10 +233,42 @@ function longString(maxLength: number | undefined, multiline: boolean | undefine
   return text.slice(0, target).trimEnd();
 }
 
+// Valid synthetic file contents by lowercase extension. `typical` is a realistic file (a GPX track with elevation and
+// times); `alternate` a valid file in another common shape (a GPX track in several segments, without elevation or
+// times), so layouts are tested against both. Deterministic, and placed in an invented, recognisably round area.
+function gpxTrack(segments: number[][][], elevation: boolean) {
+  const point = ([lat, lon, ele]: number[], index: number) => '<trkpt lat="' + lat.toFixed(6) + '" lon="' + lon.toFixed(6) + '">' +
+    (elevation ? '<ele>' + ele.toFixed(1) + '</ele><time>' + new Date(Date.UTC(2024, 6, 1, 8) + index * 60_000).toISOString() + '</time>' : '') + '</trkpt>';
+  let index = 0;
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="ImageFlow synthetic fixture" xmlns="http://www.topografix.com/GPX/1/1">\n' +
+    '<metadata><name>Synthetic fixture track</name></metadata>\n<trk><name>Synthetic fixture track</name>\n' +
+    segments.map((segment) => '<trkseg>\n' + segment.map((p) => point(p, index++)).join('\n') + '\n</trkseg>').join('\n') + '\n</trk>\n</gpx>\n';
+}
+function syntheticRoute(count: number) {
+  // A loop of about 25 km climbing from 1,200 m to 2,100 m and back.
+  return Array.from({ length: count }, (_, i) => {
+    const t = i / (count - 1);
+    return [46.5 + 0.06 * Math.sin(t * Math.PI * 2) + 0.01 * Math.sin(t * Math.PI * 12),
+      8 + 0.09 * (1 - Math.cos(t * Math.PI * 2)) / 2 + 0.03 * t, 1200 + 900 * Math.sin(t * Math.PI) ** 2 + 40 * Math.sin(t * Math.PI * 9)];
+  });
+}
+export const fixtureFiles: Record<string, { typical: string; alternate: string }> = {
+  '.gpx': (() => {
+    const route = syntheticRoute(181);
+    return { typical: gpxTrack([route], true), alternate: gpxTrack([route.slice(0, 60), route.slice(75, 130), route.slice(140)], false) };
+  })(),
+};
+/** The first accepted extension with synthetic sample files, if any. */
+export function sampleExtension(accept: readonly string[]) {
+  return accept.map((extension) => extension.toLowerCase()).find((extension) => Object.hasOwn(fixtureFiles, extension));
+}
+
 export type FixtureSourceIds = {
   photo: { landscape: string; portrait: string };
   // Malformed file sources by lowercase extension, such as `.gpx`.
   file: (extension: string) => string;
+  // Valid synthetic file sources by lowercase extension (one of `fixtureFiles`) and variant.
+  sample?: (extension: string, variant: 'typical' | 'alternate') => string;
 };
 
 function sampleValues(parameters: Parameters, fixture: FixtureCase, ids: FixtureSourceIds): Values {
@@ -233,6 +283,10 @@ function sampleValues(parameters: Parameters, fixture: FixtureCase, ids: Fixture
       }
     } else if (param.type === 'file' && fixture === 'malformed-files') {
       values[key] = ids.file(param.accept[0]);
+    } else if (param.type === 'file' && fixture !== 'empty' && ids.sample) {
+      // Every other filled case gets a valid synthetic file when the parameter accepts a type with samples.
+      const extension = sampleExtension(param.accept);
+      if (extension) values[key] = ids.sample(extension, fixture === 'alternate-files' ? 'alternate' : 'typical');
     } else if (param.type === 'list') {
       // Empty lists are empty (or as short as `min` allows); other cases fill items with the case's values, so a long
       // label or a malformed file inside a list item is tested too.
