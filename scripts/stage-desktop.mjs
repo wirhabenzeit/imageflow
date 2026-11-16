@@ -47,6 +47,7 @@ export async function stageDesktop({ packaged = false, dev = false, destination 
     })),
     cp(join(root, 'docs'), join(destination, 'docs'), { recursive: true }),
     cp(join(root, 'skills'), join(destination, 'skills'), { recursive: true }),
+    cp(join(root, 'resources', 'extension-icon.png'), join(destination, 'extension-icon.png')),
     buildMcp(join(destination, 'mcp-bridge.cjs')),
     buildMacHeader(destination),
     build(mainBuild(destination, updateTest)),

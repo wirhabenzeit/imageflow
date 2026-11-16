@@ -1039,7 +1039,7 @@ async function installMcp(target: McpClientTarget) {
   const launch = mcpLaunch();
   if (target === 'claude') {
     const file = join(app.getPath('userData'), 'ImageFlow.mcpb');
-    await writeFile(file, claudeExtension({ launch, version: app.getVersion(), tools: mcpTools }));
+    await writeFile(file, claudeExtension({ launch, version: app.getVersion(), tools: mcpTools, icon: await readFile(join(app.getAppPath(), 'extension-icon.png')) }));
     if (process.platform === 'darwin') {
       try { await openWith('com.anthropic.claudefordesktop', file); }
       catch {

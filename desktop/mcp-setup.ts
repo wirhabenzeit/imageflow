@@ -31,7 +31,7 @@ fi
 ELECTRON_RUN_AS_NODE=1 exec "$@"
 `;
 
-export function claudeExtension(options: { launch: McpLaunch; version: string; tools: { name: string; description: string }[] }) {
+export function claudeExtension(options: { launch: McpLaunch; version: string; tools: { name: string; description: string }[]; icon: Buffer }) {
   const { launch } = options;
   const manifest = {
     manifest_version: '0.2',
@@ -40,7 +40,14 @@ export function claudeExtension(options: { launch: McpLaunch; version: string; t
     version: options.version,
     description: 'Check, preview and edit the photo book open in ImageFlow.',
     long_description: 'Connects Claude to the ImageFlow app on this Mac. Keep ImageFlow open with agent access turned on. Edits go through ImageFlow with Undo.',
-    author: { name: 'ImageFlow' },
+    author: { name: 'ImageFlow', url: 'https://github.com/wirhabenzeit/imageflow' },
+    homepage: 'https://github.com/wirhabenzeit/imageflow',
+    documentation: 'https://github.com/wirhabenzeit/imageflow/blob/main/docs/mcp.md',
+    support: 'https://github.com/wirhabenzeit/imageflow/issues',
+    repository: { type: 'git', url: 'https://github.com/wirhabenzeit/imageflow.git' },
+    license: 'MIT',
+    keywords: ['photo book', 'layout', 'design', 'macOS'],
+    icon: 'icon.png',
     server: {
       type: 'binary',
       entry_point: 'server/imageflow-mcp.sh',
@@ -51,6 +58,7 @@ export function claudeExtension(options: { launch: McpLaunch; version: string; t
   };
   return zip([
     { name: 'manifest.json', data: Buffer.from(JSON.stringify(manifest, null, 2) + '\n') },
+    { name: 'icon.png', data: options.icon },
     { name: 'server/imageflow-mcp.sh', data: Buffer.from(launcherScript), mode: 0o755 },
   ]);
 }
