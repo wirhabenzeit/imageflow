@@ -24,6 +24,10 @@
     "eb874221448998aa9ce9c5b135171699d02489cf6e85a324dce686febf8661f8": {
       "template": "starter",
       "app": "1.0.0-beta.7"
+    },
+    "f6c526d096774f2a5a0040deaee776bde9e493bd86c5186a98c7ec66758eff18": {
+      "template": "starter",
+      "app": "1.0.0-beta.8"
     }
   }
 }
