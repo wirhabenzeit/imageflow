@@ -53,6 +53,7 @@ import type { SettingsPane } from '../src/settings';
 import { mcpTools } from '../src/mcp-contract';
 import { starters } from '../src/starters';
 import { copyTemplate, TemplateImportError, TemplateLibrary } from './template-library';
+import { agentLibraryEntry, saveTemplateToLibrary } from './library-tools';
 import { TemplateTrust, trustedOrigins } from './template-trust';
 import { ReleasedTemplates } from './released-templates';
 import { isTemplateArchive, templateArchiveExtension } from './template-archive';
@@ -854,6 +855,15 @@ async function libraryWithTrust() {
   }));
 }
 
+/** Saves an open book's template into the library for an agent, then renders its picture as an import does. */
+async function saveBookTemplate(folder: string, replaceHash: string | undefined, signal: AbortSignal) {
+  const result = await saveTemplateToLibrary(library, await templateFolder(folder), replaceHash, signal);
+  if (result.status === 'saved' || result.status === 'replaced') {
+    void saveTemplatePreview(result.template.id).catch((error) => console.warn('ImageFlow could not render a template preview', error));
+  }
+  return result;
+}
+
 /** Imports chosen folders or archives, with the code/trust warning in the import confirmation. */
 async function importTemplates(owner: BrowserWindow | undefined, paths?: string[]): Promise<LibraryImportResult[]> {
   const options = { title: 'Import Templates', buttonLabel: 'Import',
@@ -1148,8 +1158,11 @@ async function enableMcp() {
           return { projects: results.flatMap((result) => 'projects' in result && Array.isArray(result.projects) ? result.projects : []),
             scope: 'Open, authorized books. Select an explicit project handle; focus does not change the target. Handles expire when the book closes.' };
         }
+        if (name === 'list_templates') return { templates: (await libraryWithTrust()).map(agentLibraryEntry) };
         const document = [...documents.values()].find((document) => !document.closing && document.projectSession.handle === args.project);
         if (!document) throw new AuthoringError('PROJECT_CLOSED', 'This book is no longer open. Call list_projects for current handles.');
+        // Queued with the book's other agent calls, so closing the book waits for the save.
+        if (name === 'save_template_to_library') return await document.queue.run((queued) => saveBookTemplate(document.book.folder, args.replaceHash as string | undefined, queued), signal);
         return await document.agentCall(name, args, signal);
       } catch (error) { return authoringErrorResult(error, signal); }
     },

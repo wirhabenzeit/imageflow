@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { AuthoringDiagnostic } from './authoring';
 import type { AuthoringCheckResult } from './authoring-check';
 import type { HistoryState } from './desktop';
+import type { LibraryEntry } from './library';
 import type { PreviewMetadata } from './preview';
 
 // Output schemas for the result shapes that MCP capability discovery freezes (#77): the input revision, the diagnostic
@@ -84,6 +85,18 @@ const commandFields = {
   reflow: z.boolean().optional().describe('Whether text flow may have moved on other spreads.'),
 };
 
+const libraryEntry = z.looseObject({
+  id: z.string(), version: z.string(), label: z.string(), description: z.string().optional(),
+  source: z.enum(['built-in', 'imported']), replacesBuiltIn: z.boolean().optional(),
+  hash: z.string().describe('As in templateIdentity.'), importedAt: z.string().optional(),
+  formats: z.array(z.string()), layouts: z.array(z.string()), openingSpreads: z.number(),
+  shape: z.enum(['Square', 'Landscape', 'Portrait']).optional(),
+  packages: z.array(z.looseObject({ name: z.string(), version: z.string(), license: z.string() })).optional(),
+  network: z.array(z.string()).optional(), networkTrust: z.enum(['built-in', 'allowed']).optional(),
+  unavailable: z.string().optional().describe('Why no book can be made from it.'),
+});
+const libraryVersion = z.looseObject({ id: z.string(), version: z.string(), hash: z.string(), source: z.enum(['built-in', 'imported']) });
+
 export const mcpOutputSchemas = {
   list_projects: z.looseObject({
     projects: z.array(z.looseObject({
@@ -138,6 +151,17 @@ export const mcpOutputSchemas = {
     leftoverNodeModules: z.boolean().optional().describe('template/node_modules exists. The book does not use it; ask the user before deleting it.'),
     notice: z.string().optional(),
   }),
+  list_templates: z.looseObject({
+    templates: z.array(libraryEntry),
+  }),
+  save_template_to_library: z.looseObject({
+    status: z.enum(['saved', 'replaced', 'unchanged', 'conflict']).describe('conflict: nothing was saved; see reason and current.'),
+    template: z.looseObject({ id: z.string(), version: z.string(), label: z.string(), hash: z.string().optional() }),
+    reason: z.enum(['changed', 'older', 'built-in', 'replaced-meanwhile']).optional(),
+    current: libraryVersion.optional().describe('The entry a conflict would replace.'),
+    replaced: libraryVersion.optional(),
+    message: z.string().optional(), notice: z.string().optional(),
+  }),
   import_sources: z.looseObject({
     state, revision, committed: z.union([z.boolean(), z.literal('pending')]),
     sources: z.array(z.looseObject({ id: z.string(), path: z.string(), kind: z.enum(['photo', 'markdown', 'file']) })).optional()
@@ -155,5 +179,6 @@ const accepts: [
   Accepts<typeof checksSchema, AuthoringCheckResult['checks']>,
   Accepts<typeof imageSchema, PreviewMetadata & Pick<NonNullable<AuthoringCheckResult['image']>, 'mimeType' | 'draft' | 'fixture'>>,
   Accepts<typeof history, HistoryState>,
-] = [true, true, true, true];
+  Accepts<typeof libraryEntry, LibraryEntry>,
+] = [true, true, true, true, true];
 void accepts;

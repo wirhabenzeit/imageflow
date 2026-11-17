@@ -51,7 +51,7 @@ For an empty book, inspect `template.openingSpreads` and the layout declarations
 
 Editors do not change where values are saved. Parameter commands use `scope: "document"`, `"spread"`, `"box"` or `"element"`; box/element commands also name `owner`. Context lists each custom editor's owned `parameters` and any editor-owned `spread` parameters. Change those spread fields with `scope: "spread"`, even when the editor appears on an element. Inline text and custom editors share draft protection and Undo with conventional fields: finish or cancel the human edit and close the editor before applying commands.
 
-The six project tools operate on authorized open books. Template library discovery, save/import/export and creating a book from a library entry use the app's **New Book** and **Manage Templates…** windows; they are not MCP tools. App-level library authorization and non-dialog conflict/trust handling remain separate scope in #81.
+The project tools operate on authorized open books. `list_templates` and `save_template_to_library` reach the template library; see [Template library](#template-library). Importing and exporting `.imageflow-template` files and creating a book from a library entry still use the app's **New Book** and **Manage Templates…** windows.
 
 Call `check_book` after source edits. It refreshes inputs from disk, bundles the template, resolves the whole book and returns diagnostics. Request a page or spread image when checking its composition. A template error leaves the last successful artwork visible in the app with a stale indication. Correcting the source triggers another reload.
 
@@ -68,6 +68,8 @@ Every inspection/check result identifies an input revision. Pass that revision a
 | `apply_project_changes` | `project`, `expectedRevision`, `idempotencyKey`, `label`, `operations`, optional `dryRun`. Validates the complete batch and applies it through the app. One successful batch creates one named Undo entry. |
 | `rebuild_dependencies` | `project`. Installs the npm packages in `template/package.json` outside the book and bundles the ones the template imports into `template/vendor/`. See [Template dependencies](#template-dependencies). |
 | `import_sources` | `project`, `expectedRevision`, `idempotencyKey`, `kind`, `paths`, and `accept` for file inputs. Registers files copied into this project’s `inbox/` folder and returns source IDs. |
+| `list_templates` | No arguments. Returns the library's `templates`: built-in and imported entries with `id`, `version`, `label`, `description`, `source`, `hash`, format and layout labels, `openingSpreads`, bundled `packages`, `network` origins and their `networkTrust`, and `unavailable` when no book can be made from one. |
+| `save_template_to_library` | `project`, optional `replaceHash`. Validates the book's `template/` folder and saves it into the library. Returns `status` `saved`, `replaced`, `unchanged` or `conflict`. See [Template library](#template-library). |
 
 Tool argument schemas are advertised through `tools/list`, with a `title` for each tool and a description on every argument; definitions used more than once, such as the command union that drafts and `apply_project_changes` share, appear once under `$defs`. Each tool also declares an `outputSchema` for the result fields that stay stable: `revision`, the diagnostic envelope, `checks`, `templateIdentity`, image metadata and command results. Result objects may gain fields; declared fields keep their types. Error results (`isError`) carry `{ state: "error", error: { code, message } }` and are not validated against the output schema. The app validates arguments again before execution. Requests use only the selected project handle, even if the foreground book changes during a call.
 
@@ -326,6 +328,18 @@ To use an npm package in a template, add it to `template/package.json` (`depende
 
 The result has `state: "ready"`, the bundled `packages` and their versions (linked `file:` folders are not listed), the `imports` the bundle provides, `untyped` imports, whether the install was `reused`, whether the `lockfileUpdated`, and `leftoverNodeModules` when an earlier `template/node_modules` folder is still there: the book no longer uses it; ask the user before deleting it. A long install answers `state: "installing"` before the call's time limit; call again to wait for the same install. Then run `check_book`. Errors: `NPM_UNAVAILABLE` (npm is not installed; the user installs Node.js), `NPM_FAILED` (npm's own error, such as an unknown version or no network) and `PACKAGE_INVALID` (no or invalid `package.json` while the template imports packages). People use **Templates → Rebuild Template Dependencies** for the same.
 
+### Template library
+
+Both tools work while **Allow agents to use open books** is on; `list_templates` needs no open book. `list_templates` lists what **New Book** offers. An imported entry with a built-in ID hides the built-in one and has `replacesBuiltIn: true`. Compare an entry's `hash` with a book's `templateIdentity` to see whether the book's template is in the library unchanged. Local paths are not returned.
+
+`save_template_to_library` saves an open book's `template/` folder with the same rules as **Manage Templates… → Import…**: the template must load as a book's would (a failure is a `TEMPLATE_INVALID` error with `details`), the library keeps one entry per `id`, and generated tooling, dotfiles and `node_modules/` are left out. It never opens a dialog. Instead:
+
+- A new `id` returns `saved`, and a later `version` of an imported entry returns `replaced` with the `replaced` entry's version and hash.
+- Files identical to the library entry return `unchanged`.
+- The same version with other files, an earlier version, or any version under a built-in template's `id` returns `conflict` with a `reason` (`changed`, `older` or `built-in`), the `current` entry and a `message`. Nothing is saved. Raise `version` or give the template its own `id`, or, when the user wants the entry replaced, save again with `replaceHash` set to `current.hash`. A `replaceHash` that no longer matches returns `reason: "replaced-meanwhile"`.
+
+A replaced imported entry goes to the Trash. Saving does not allow the network sites the template declares: books made from it ask once, as for any imported template, until the user allows them in **Manage Templates…**.
+
 ## Limits and recovery
 
 The socket accepts at most eight attached clients and four outstanding calls per client. Each book queues overlapping agent requests in arrival order, with at most 32 waiting requests. Requests wait for that book's active UI operations and earlier agent work; mutations retain exclusive access and the human-editing check. A full queue returns `AUTHORING_QUEUE_FULL`. Transport requests are limited to 1 MiB. Responses, including emitted MCP image content and metadata, are limited to 8 MiB. Reduce page resolution, requested source files or pagination size when a payload is too large.
@@ -349,6 +363,8 @@ Source consistency uses content revisions, filesystem metadata and watcher gener
 `tests/mcp-contract.test.ts` requires a title, a short description and argument descriptions for every tool, an output schema for each, and a size budget for the advertised tool list. The service tests validate every successful result they produce against its tool's output schema. `tests/docs-topics.test.ts` fails when the generated `template-api.md` or the skill's references and examples differ from `docs/template-api/` and `docs/examples/` (run `npm run generate:docs`).
 
 `tests/mcp-connection.test.ts` exercises token rejection, private file/socket permissions, argument/path validation, request/response limits, cancellation, revocation, reconnection and SDK client tool discovery/image delivery. `scripts/smoke-mcp.mjs` exercises a real running ImageFlow instance with the official SDK client.
+
+`tests/library-tools.test.ts` checks the template library tools' save statuses, conflicts, `replaceHash` and listed fields against their output schemas.
 
 `tests/authoring-context.test.ts` checks saved/current template identity, library hash parity, generated-tooling exclusions, compile failures, unavailable inputs and concurrent edits. `scripts/smoke-mcp-context.mjs` uses the SDK client against the desktop app for empty-book inspection/check/missing-preview/first-insertion, explicit single-page images, inline text and element draft refusal/completion/revision conflict/shared Undo, identically titled books, editing an unfocused book, stale handles after close/reopen, closing during a pending mutation without blocking another book, and the 30,000-byte (about 8k tokens) context budget on a copy of the starter book. It requires `--visible` on an isolated desktop and runs in the full visible desktop suite and, with `--packaged --visible`, the packaged suite.
 
