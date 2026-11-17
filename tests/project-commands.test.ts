@@ -259,7 +259,7 @@ test('no-op operations preserve state and do not report changes', () => {
   assert.equal(result.reflow, false);
 });
 
-test('commands refuse split-spread targets until page addressing is supported; merging stays available', () => {
+test('content commands require page addressing on split sheets; merging stays available', () => {
   const original = files();
   const spread = original.project.spreads[0];
   spread.split = true;
@@ -278,9 +278,6 @@ test('commands refuse split-spread targets until page addressing is supported; m
     { op: 'update_list_item', spread: 'one', scope: 'spread', key: 'items', id: 'x', values: { title: 'x' } },
     { op: 'remove_list_item', spread: 'one', scope: 'spread', key: 'items', id: 'x' },
     { op: 'move_list_item', spread: 'one', scope: 'spread', key: 'items', id: 'x', after: null },
-    { op: 'duplicate_spread', spread: 'one' },
-    { op: 'move_spread', spread: 'one', after: 'two' },
-    { op: 'remove_spread', spread: 'one' },
     { op: 'swap_content', from: { spread: 'one', box: 'hero' }, to: { spread: 'two', box: 'hero' } },
     { op: 'swap_content', from: { spread: 'two', box: 'hero' }, to: { spread: 'one', box: 'hero' } },
   ];
@@ -306,6 +303,71 @@ test('switch_layout refuses page layouts on a split sheet whatever its hidden de
     spread.split = true;
     spread.pages = { left: { definition: 'page', params: {}, boxes: {}, elements: {} } };
     assert.throws(() => applyProjectCommands(original, info, [{ op: 'switch_layout', spread: 'one', definition: 'page' }]),
-      (error) => error instanceof ProjectCommandError && error.code === 'INCOMPATIBLE_LAYOUT' && /shown as pages/.test(error.message), definition);
+      (error) => error instanceof ProjectCommandError && error.code === 'INCOMPATIBLE_LAYOUT' && /Specify page/.test(error.message), definition);
   }
+});
+
+test('page commands isolate duplicate IDs, validate values and remain atomic', () => {
+  const original = files();
+  const info: TemplateInfo = { ...template, spreads: { ...template.spreads, page: {
+    ...template.spreads.main, span: 'page', parameters: { heading, items: p.list({ label: 'Items', item: { title: heading } }) },
+  } } };
+  const initial = applyProjectCommands(original, info, [
+    { op: 'insert_page_pair', ref: 'pair', pages: {
+      left: { definition: 'page', boxes: { hero: { photo: 'p1' } } },
+      right: { definition: 'page', boxes: { hero: { photo: 'p2' } } },
+    } },
+    { op: 'set_parameter', spread: '$pair', page: 'right', scope: 'spread', key: 'heading', value: 'Right' },
+    { op: 'set_parameter', spread: '$pair', page: 'right', scope: 'box', owner: 'hero', key: 'caption', value: true },
+    { op: 'set_parameter', spread: '$pair', page: 'right', scope: 'element', owner: 'calendar', key: 'month', value: '2026-02-01' },
+    { op: 'insert_list_item', spread: '$pair', page: 'right', scope: 'spread', key: 'items', item: { id: 'x', title: 'One' } },
+    { op: 'update_list_item', spread: '$pair', page: 'right', scope: 'spread', key: 'items', id: 'x', values: { title: 'Two' } },
+    { op: 'set_crop', spread: '$pair', page: 'right', box: 'hero', centerX: .3, centerY: .4, zoom: 2 },
+  ]);
+  const pair = initial.files.project.spreads.at(-1)!;
+  assert.equal(pair.pages!.left!.boxes.hero.photo, 'p1');
+  assert.deepEqual(pair.pages!.left!.params, {});
+  assert.equal(pair.pages!.right!.params.heading, 'Right');
+  assert.equal(pair.pages!.right!.elements.calendar.params.month, '2026-02-01');
+  assert.equal(pair.pages!.right!.boxes.hero.crops!.page.zoom, 2);
+  assert.deepEqual(pair.pages!.right!.params.items, [{ id: 'x', title: 'Two' }]);
+  assert.equal(pair.boxes.hero, undefined, 'hidden spread remains untouched');
+  assert.deepEqual(original, files(), 'input files remain unchanged');
+  const edited = applyProjectCommands(initial.files, info, [
+    { op: 'swap_content', from: { spread: pair.id, page: 'left', box: 'hero' }, to: { spread: pair.id, page: 'right', box: 'hero' } },
+    { op: 'reset_parameter', spread: pair.id, page: 'right', scope: 'spread', key: 'heading' },
+    { op: 'clear_box', spread: pair.id, page: 'right', box: 'hero' },
+    { op: 'assign_source', spread: pair.id, page: 'left', box: 'hero', kind: 'photo', source: 'p1' },
+  ]).files;
+  assert.equal(edited.project.spreads.at(-1)!.pages!.right!.boxes.hero.photo, undefined);
+  assert.equal(edited.project.spreads.at(-1)!.pages!.right!.params.heading, undefined);
+  assert.throws(() => applyProjectCommands(initial.files, info, [
+    { op: 'set_title', title: 'Should roll back' },
+    { op: 'set_parameter', spread: pair.id, page: 'right', scope: 'spread', key: 'heading', value: 'x'.repeat(40) },
+  ]), /rejects this value/);
+  assert.equal(initial.files.project.title, original.project.title);
+});
+
+test('page layout transitions, blank pages and sheet operations share editor rules', () => {
+  const info: TemplateInfo = { ...template, spreads: { ...template.spreads,
+    page: { ...template.spreads.main, span: 'page' },
+    left: { ...template.spreads.main, span: 'page', sides: ['left'] },
+  } };
+  const split = applyProjectCommands(files(), info, [
+    { op: 'switch_layout', spread: 'one', page: 'left', definition: 'page' },
+    { op: 'switch_layout', spread: 'one', page: 'right', definition: 'page' },
+    { op: 'swap_pages', spread: 'one' },
+    { op: 'clear_page', spread: 'one', page: 'left' },
+    { op: 'duplicate_spread', spread: 'one', ref: 'copy' },
+    { op: 'move_spread', spread: '$copy', after: 'two' },
+    { op: 'remove_spread', spread: 'one' },
+  ]);
+  const copy = split.files.project.spreads.at(-1)!;
+  assert.equal(copy.split, true);
+  assert.equal(copy.pages!.left!.definition, undefined);
+  assert.equal(copy.pages!.right!.definition, 'page');
+  assert.throws(() => applyProjectCommands(split.files, info, [{ op: 'switch_layout', spread: copy.id, page: 'right', definition: 'left' }]), /not allowed/);
+  assert.throws(() => applyProjectCommands(files(), info, [{ op: 'assign_source', spread: 'one', page: 'left', box: 'hero', kind: 'photo', source: 'p2' }]), /requires a split/);
+  const restricted = applyProjectCommands(files(), info, [{ op: 'switch_layout', spread: 'one', page: 'left', definition: 'left' }]);
+  assert.throws(() => applyProjectCommands(restricted.files, info, [{ op: 'swap_pages', spread: 'one' }]), /restricted/);
 });

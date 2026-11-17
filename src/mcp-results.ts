@@ -23,7 +23,7 @@ export const diagnosticSchema = z.looseObject({
   location: z.looseObject({
     path: z.string().optional().describe('Project-relative file.'),
     line: z.number().optional(), column: z.number().optional(),
-    spread: z.string().optional(), box: z.string().optional(), element: z.string().optional(),
+    spread: z.string().optional(), page: z.enum(['left', 'right']).optional(), box: z.string().optional(), element: z.string().optional(),
     source: z.string().optional().describe('Source ID of the photo, text or file involved.'),
     parameter: z.string().optional(),
     where: z.string().optional().describe('Human-readable place, such as a page or fixture label.'),

@@ -55,3 +55,16 @@ test('requesting a page side in a facing-pages format explains the supported alt
   assert.equal(artworkTarget(spreads, sequence, { spread: 'one', side: 'right' }).side, 'right');
   assert.equal(artworkTarget(spreads, sequence, { spread: 'one' }).side, 'spread');
 });
+
+test('detail previews and element inspection accept explicit facing pages without physical-page revisions', () => {
+  for (const page of ['left', 'right'] as const) {
+    for (const owner of [{ box: 'hero' }, { element: 'map' }]) {
+      const preview = { target: { spread: 'one', page, ...owner } };
+      assert.doesNotThrow(() => parseMcpArguments('check_book', { project: 'book', preview, inspect: { spread: 'one', page, ...owner } }));
+      assert.doesNotThrow(() => parseMcpArguments('inspect_book', { project: 'book', view: 'elements', spread: 'one', page, ...owner }));
+      const format = printFormat({ label: 'Facing', trim: { width: mm(100), height: mm(100) }, bleed: mm(0), safe: mm(5),
+        ends: 'inside-covers', pageCount: { min: 2, max: 20, step: 2 } });
+      assert.equal(artworkTarget([{ id: 'one' }], pageSequence(['spread'], format), parsePreviewRequest(preview).target as typeof preview.target).side, page);
+    }
+  }
+});

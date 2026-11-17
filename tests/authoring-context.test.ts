@@ -727,3 +727,21 @@ test('context outside the book declarations stays within its size budget', async
   assert.ok(bytes <= 12_000, 'Context without declarations uses ' + bytes + ' bytes.');
   assert.ok((rest.examples as { source?: string }[]).length >= 6 && (rest.examples as { source?: string }[]).every(({ source }) => source === undefined));
 });
+
+test('parameter inspection reports each visible page declaration instead of hidden spread declarations', async (t) => {
+  const { folder, hooks } = await fixture(t);
+  await writeFile(join(folder, 'project.json'), JSON.stringify({ ...project, schemaVersion: 2,
+    spreads: [{ id: 'one', definition: 'main', split: true, pages: {
+      left: { definition: 'photo', params: { title: 'Left' } }, right: { params: {} },
+    } }],
+  }));
+  const pageStatus = structuredClone(status);
+  pageStatus.template.spreads.photo = { label: 'Photo page', span: 'page', parameters: {}, boxes: {}, elements: {} };
+  hooks.check = (book, request, signal, index) => checkProject(book, hooks.cache, request, async () => ({ status: pageStatus }), signal, index);
+  const session = hooks.session()!;
+  const service = createAuthoringService(hooks);
+  const result = await service('inspect_book', { project: session.handle, view: 'parameters' }, new AbortController().signal);
+  const item = (result.items as Record<string, unknown>[])[0];
+  assert.equal(item.declarations, undefined);
+  assert.deepEqual(item.pageDeclarations, { left: pageStatus.template.spreads.photo, right: null });
+});

@@ -12,12 +12,12 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 
 - Edit `template/` TSX, CSS and assets directly with your workspace tools.
 - Edit registered Markdown at its source location; linked Markdown stays outside the package.
-- Use `apply_project_changes` for supported spread-level `project.json` and `photos.json` changes. Never edit these manifests while the app is open. Page-addressed mutations are pending: split spreads reject unaddressed commands with `SPREAD_SHOWN_AS_PAGES`, except layout merging through `switch_layout`. Use the editor for individual page edits; see [Page layouts](page-layouts.md).
+- Use `apply_project_changes` for supported sheet/page changes in `project.json` and metadata changes in `photos.json`. Never edit these manifests while the app is open. Address split-page content with `page: 'left' | 'right'` beside `spread`; unaddressed content commands return `SPREAD_SHOWN_AS_PAGES`. Insert facing pages with `insert_page_pair`; see [Page layouts](page-layouts.md).
 - Copy new content into `inbox/` and call `import_sources`. Then assign the returned IDs with a command batch.
 - Parameter commands use saved scopes: `document`, `spread`, `box` or `element`. An element editor can also own spread parameters; use `scope: 'spread'` for those fields, not `scope: 'element'`.
 - To find the parameter a request means, read each parameter's description with its unit, range and options. Give new parameters a description when their meaning or direction is not obvious from the label.
 - To start or extend a template, read the [package](package.md) topic's example table, fetch the closest example with `includeExamples` and copy its layout.
-- For an empty book, inspect `template.openingSpreads` and insert suitable layouts with `insert_spread`. `openingSpreads` describes new-book defaults and is not applied again automatically.
+- For an empty book, inspect `template.openingSpreads` and insert suitable layouts with `insert_spread` or facing page pairs with `insert_page_pair`. `openingSpreads` describes new-book defaults and is not applied again automatically.
 - Use a layout family when layouts are variants of one design (`template.layoutFamilies`; `family` and `variant` on each layout). Pickers should choose by variant tags, not hard-coded IDs. Switch variants with `switch_layout` and the layout ID of the variant ([Layout families](layout-families.md)).
 
 ## Verifying

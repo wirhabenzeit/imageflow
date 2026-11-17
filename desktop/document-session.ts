@@ -256,6 +256,7 @@ export class DocumentSession {
   dependencyCache?: string;
   /** The installed app's authoring SDK, refreshed into the template's .imageflow-sdk when dependencies are rebuilt. */
   authoringTypes?: string;
+  authoringSkills?: string;
   private dependencyTask?: Promise<DependencyRebuild>;
   /**
    * Installs the template's packages outside the book and rebuilds template/vendor/ (ADR 0006); the folder watcher then
@@ -266,7 +267,7 @@ export class DocumentSession {
     if (this.book.readOnly) throw new Error('Create an editable book before rebuilding its template dependencies.');
     if (!this.dependencyCache) throw new Error('Template dependencies are not available.');
     const cache = this.dependencyCache;
-    this.dependencyTask ??= rebuildTemplateDependencies(join(this.book.folder, 'template'), cache, { authoringTypes: this.authoringTypes })
+    this.dependencyTask ??= rebuildTemplateDependencies(join(this.book.folder, 'template'), cache, { authoringTypes: this.authoringTypes, authoringSkills: this.authoringSkills })
       .finally(() => { this.dependencyTask = undefined; });
     const task = this.dependencyTask;
     let stopWaiting = () => {};
@@ -285,7 +286,7 @@ export class DocumentSession {
     if (!waited) return { state: 'installing', notice: 'npm is still installing the template packages. Call rebuild_dependencies again to wait for it.' };
     const { packages, imports, untyped, reused, lockfileUpdated, leftoverNodeModules } = waited.result;
     return { state: 'ready', packages, imports, untyped, reused, lockfileUpdated, leftoverNodeModules,
-      notice: 'Saved the bundle in template/vendor/; the book renders it now. Run check_book.' +
+      notice: 'Saved the bundle in template/vendor/ and refreshed generated authoring types and agent references; the book renders it now. Run check_book.' +
         (leftoverNodeModules ? ' template/node_modules is no longer used; ask the user before deleting it.' : '') };
   }
   async agentCall(name: McpToolName, args: Record<string, unknown>, signal: AbortSignal) {
