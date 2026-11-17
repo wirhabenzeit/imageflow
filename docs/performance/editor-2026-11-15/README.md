@@ -2,6 +2,8 @@
 
 Follow-up: [targeted panel and hover optimization results](optimization/README.md).
 
+Second pass: [book rendering profile, 2026-11-17](../render-2026-11-17/README.md).
+
 Profiling pass for #98, after the #83 fix merged in `fabac1e2af3b69b2e7e4cf40a228cdbd1d943722`. No performance fixes are included.
 
 ## Findings and priority

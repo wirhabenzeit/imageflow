@@ -1,0 +1,540 @@
+{
+ "machine": "Apple M4 Pro, 14 cores, 48 GB, macOS 27.0.1; Electron 45.2.3; hidden windows (IMAGEFLOW_HIDE_WINDOW=1)",
+ "command": "IMAGEFLOW_PROFILE=1 build; node scripts/bench-render.mjs --spreads N --unique --repeat 5",
+ "before": {
+  "commit": "aedd8eb",
+  "note": "Before the cover and rendition-queue changes. No reopen measurement.",
+  "runs": [
+   {
+    "spreads": 20,
+    "pages": 38,
+    "photos": 31,
+    "openMs": 4220,
+    "process": {
+     "thumbs": "own",
+     "book": "own",
+     "layouts": "own"
+    },
+    "editMs": {
+     "book": 261,
+     "thumbs": 262,
+     "layouts": 263
+    },
+    "stepMs": {
+     "thumbs": {
+      "data": 9,
+      "template": 17,
+      "index": 1,
+      "react": 6,
+      "pictures": 1,
+      "decode": 50,
+      "findings": 0,
+      "validate": 1,
+      "flow": 6,
+      "text-checks": 4,
+      "layout": 4,
+      "output": 8
+     },
+     "book": {
+      "data": 5,
+      "template": 38,
+      "index": 1,
+      "react": 5,
+      "pictures": 0,
+      "decode": 48,
+      "findings": 32,
+      "validate": 1,
+      "flow": 7,
+      "text-checks": 4,
+      "layout": 4,
+      "output": 13
+     },
+     "layouts": {
+      "data": 2,
+      "template": 55
+     }
+    },
+    "idleMB": 1610,
+    "peakMB": 1816,
+    "rapid5Ms": 268,
+    "finalCorrect": true,
+    "images": {
+     "boxes": 30,
+     "loaded": 3
+    }
+   },
+   {
+    "spreads": 60,
+    "pages": 118,
+    "photos": 100,
+    "openMs": 13484,
+    "process": {
+     "thumbs": "own",
+     "book": "own",
+     "layouts": "own"
+    },
+    "editMs": {
+     "book": 353,
+     "thumbs": 354,
+     "layouts": 355
+    },
+    "stepMs": {
+     "thumbs": {
+      "data": 11,
+      "template": 17,
+      "index": 1,
+      "react": 11,
+      "pictures": 2,
+      "decode": 71,
+      "findings": 1,
+      "validate": 1,
+      "flow": 8,
+      "text-checks": 9,
+      "layout": 9,
+      "output": 14
+     },
+     "book": {
+      "data": 7,
+      "template": 43,
+      "index": 1,
+      "react": 12,
+      "pictures": 0,
+      "decode": 73,
+      "findings": 38,
+      "validate": 4,
+      "flow": 7,
+      "text-checks": 9,
+      "layout": 11,
+      "output": 21
+     },
+     "layouts": {
+      "data": 2,
+      "template": 78
+     }
+    },
+    "idleMB": 1920,
+    "peakMB": 2060,
+    "rapid5Ms": 314,
+    "finalCorrect": true,
+    "images": {
+     "boxes": 96,
+     "loaded": 3
+    }
+   },
+   {
+    "spreads": 150,
+    "pages": 298,
+    "photos": 262,
+    "openMs": 34807,
+    "process": {
+     "thumbs": "own",
+     "book": "own",
+     "layouts": "own"
+    },
+    "editMs": {
+     "book": 663,
+     "thumbs": 668,
+     "layouts": 669
+    },
+    "stepMs": {
+     "book": {
+      "data": 8,
+      "template": 73,
+      "index": 2,
+      "react": 28,
+      "pictures": 0,
+      "decode": 181,
+      "findings": 59,
+      "validate": 4,
+      "flow": 12,
+      "text-checks": 55,
+      "layout": 34,
+      "longtasks": 2,
+      "longestTask": 118,
+      "output": 32
+     },
+     "thumbs": {
+      "data": 11,
+      "template": 17,
+      "index": 2,
+      "react": 25,
+      "pictures": 5,
+      "decode": 129,
+      "findings": 2,
+      "validate": 3,
+      "flow": 12,
+      "text-checks": 53,
+      "layout": 31,
+      "longtasks": 1,
+      "longestTask": 132,
+      "output": 39
+     },
+     "layouts": {
+      "data": 3,
+      "template": 132,
+      "longtasks": 1,
+      "longestTask": 132
+     }
+    },
+    "idleMB": 1807,
+    "peakMB": 2401,
+    "rapid5Ms": 359,
+    "finalCorrect": true,
+    "images": {
+     "boxes": 252,
+     "loaded": 3
+    }
+   }
+  ]
+ },
+ "after": {
+  "note": "With preview photos for covers and the rendition priority queue.",
+  "runs": [
+   {
+    "spreads": 20,
+    "pages": 38,
+    "photos": 31,
+    "openMs": 1562,
+    "reopenMs": 539,
+    "openViewMs": {
+     "book": 1457,
+     "thumbs": 1457,
+     "layouts": 1560
+    },
+    "openSteps": {
+     "book": {
+      "data": 20,
+      "template": 67,
+      "index": 2,
+      "react": 40,
+      "pictures": 1,
+      "decode": 92,
+      "findings": 132,
+      "validate": 2,
+      "flow": 9,
+      "text-checks": 6,
+      "layout": 6,
+      "output": 365
+     },
+     "thumbs": {
+      "data": 6,
+      "template": 52,
+      "index": 1,
+      "react": 6,
+      "pictures": 1,
+      "decode": 1248,
+      "findings": 0,
+      "validate": 1,
+      "flow": 6,
+      "text-checks": 4,
+      "layout": 4,
+      "output": 6
+     },
+     "layouts": {
+      "data": 1,
+      "template": 3
+     }
+    },
+    "openRequests": {
+     "layouts": {
+      "count": 1,
+      "firstStart": 62,
+      "lastEnd": 62,
+      "medianMs": 0,
+      "maxMs": 0,
+      "kinds": [
+       "thumb"
+      ]
+     }
+    },
+    "process": {
+     "thumbs": "own",
+     "book": "own",
+     "layouts": "own"
+    },
+    "editMs": {
+     "book": 260,
+     "thumbs": 261,
+     "layouts": 262
+    },
+    "stepMs": {
+     "thumbs": {
+      "data": 10,
+      "template": 37,
+      "index": 0,
+      "react": 5,
+      "pictures": 1,
+      "decode": 50,
+      "findings": 0,
+      "validate": 1,
+      "flow": 6,
+      "text-checks": 4,
+      "layout": 4,
+      "output": 8
+     },
+     "book": {
+      "data": 5,
+      "template": 19,
+      "index": 0,
+      "react": 6,
+      "pictures": 0,
+      "decode": 49,
+      "findings": 34,
+      "validate": 1,
+      "flow": 6,
+      "text-checks": 4,
+      "layout": 4,
+      "output": 11
+     },
+     "layouts": {
+      "data": 2,
+      "template": 51
+     }
+    },
+    "idleMB": 1392,
+    "peakMB": 1566,
+    "rapid5Ms": 265,
+    "finalCorrect": true,
+    "images": {
+     "boxes": 30,
+     "loaded": 3
+    }
+   },
+   {
+    "spreads": 60,
+    "pages": 118,
+    "photos": 100,
+    "openMs": 3955,
+    "reopenMs": 735,
+    "openViewMs": {
+     "book": 3851,
+     "thumbs": 3852,
+     "layouts": 3953
+    },
+    "openSteps": {
+     "book": {
+      "data": 22,
+      "template": 103,
+      "index": 3,
+      "react": 47,
+      "pictures": 2,
+      "decode": 81,
+      "findings": 115,
+      "validate": 2,
+      "flow": 11,
+      "text-checks": 12,
+      "layout": 12,
+      "output": 308
+     },
+     "thumbs": {
+      "data": 7,
+      "template": 20,
+      "index": 2,
+      "react": 22,
+      "pictures": 2,
+      "decode": 3624,
+      "findings": 1,
+      "validate": 2,
+      "flow": 9,
+      "text-checks": 11,
+      "layout": 11,
+      "output": 12
+     },
+     "layouts": {
+      "data": 10,
+      "template": 3
+     }
+    },
+    "openRequests": {
+     "layouts": {
+      "count": 1,
+      "firstStart": 50,
+      "lastEnd": 50,
+      "medianMs": 0,
+      "maxMs": 0,
+      "kinds": [
+       "thumb"
+      ]
+     }
+    },
+    "process": {
+     "book": "own",
+     "thumbs": "own",
+     "layouts": "own"
+    },
+    "editMs": {
+     "book": 351,
+     "thumbs": 353,
+     "layouts": 354
+    },
+    "stepMs": {
+     "thumbs": {
+      "data": 10,
+      "template": 17,
+      "index": 1,
+      "react": 11,
+      "pictures": 2,
+      "decode": 72,
+      "findings": 1,
+      "validate": 2,
+      "flow": 8,
+      "text-checks": 9,
+      "layout": 10,
+      "output": 15
+     },
+     "book": {
+      "data": 6,
+      "template": 43,
+      "index": 1,
+      "react": 12,
+      "pictures": 0,
+      "decode": 72,
+      "findings": 60,
+      "validate": 3,
+      "flow": 8,
+      "text-checks": 9,
+      "layout": 11,
+      "output": 45
+     },
+     "layouts": {
+      "data": 2,
+      "template": 77
+     }
+    },
+    "idleMB": 1946,
+    "peakMB": 1988,
+    "rapid5Ms": 335,
+    "finalCorrect": true,
+    "images": {
+     "boxes": 96,
+     "loaded": 3
+    }
+   },
+   {
+    "spreads": 150,
+    "pages": 298,
+    "photos": 262,
+    "openMs": 9684,
+    "reopenMs": 1123,
+    "openViewMs": {
+     "book": 9587,
+     "thumbs": 9587,
+     "layouts": 9682
+    },
+    "openSteps": {
+     "book": {
+      "data": 25,
+      "template": 137,
+      "index": 5,
+      "react": 109,
+      "pictures": 5,
+      "decode": 87,
+      "findings": 55,
+      "validate": 4,
+      "flow": 17,
+      "text-checks": 56,
+      "layout": 35,
+      "output": 247
+     },
+     "thumbs": {
+      "data": 8,
+      "template": 21,
+      "index": 3,
+      "react": 40,
+      "pictures": 5,
+      "decode": 9209,
+      "findings": 2,
+      "validate": 3,
+      "flow": 13,
+      "text-checks": 63,
+      "layout": 32,
+      "output": 34
+     },
+     "layouts": {
+      "data": 2,
+      "template": 4
+     }
+    },
+    "openRequests": {
+     "layouts": {
+      "count": 1,
+      "firstStart": 58,
+      "lastEnd": 58,
+      "medianMs": 0,
+      "maxMs": 0,
+      "kinds": [
+       "thumb"
+      ]
+     }
+    },
+    "process": {
+     "book": "own",
+     "thumbs": "own",
+     "layouts": "own"
+    },
+    "editMs": {
+     "book": 1153,
+     "thumbs": 1157,
+     "layouts": 1159
+    },
+    "stepMs": {
+     "book": {
+      "data": 7,
+      "template": 19,
+      "index": 2,
+      "react": 28,
+      "pictures": 0,
+      "decode": 90,
+      "findings": 100,
+      "validate": 4,
+      "flow": 13,
+      "text-checks": 52,
+      "layout": 35,
+      "longtasks": 1,
+      "longestTask": 108,
+      "output": 146
+     },
+     "thumbs": {
+      "data": 12,
+      "template": 69,
+      "index": 2,
+      "react": 26,
+      "pictures": 5,
+      "decode": 242,
+      "findings": 2,
+      "validate": 3,
+      "flow": 13,
+      "text-checks": 52,
+      "layout": 32,
+      "longtasks": 1,
+      "longestTask": 114,
+      "output": 43
+     },
+     "layouts": {
+      "data": 4,
+      "template": 115,
+      "longtasks": 0,
+      "longestTask": 0
+     }
+    },
+    "idleMB": 2081,
+    "peakMB": 2317,
+    "rapid5Ms": 971,
+    "finalCorrect": true,
+    "images": {
+     "boxes": 252,
+     "loaded": 3
+    }
+   }
+  ]
+ },
+ "after150Settled": {
+  "note": "--settle 20000: edits measured after the background cover finished.",
+  "editMs": {
+   "book": 659,
+   "thumbs": 663,
+   "layouts": 664
+  },
+  "rapid5Ms": 439
+ }
+}
