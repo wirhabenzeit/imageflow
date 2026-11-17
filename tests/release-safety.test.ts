@@ -10,6 +10,7 @@ function capture(source: string) {
     import assert from 'node:assert/strict';
     import { generateKeyPairSync } from 'node:crypto';
     import { validateReleaseSecrets } from ${JSON.stringify(script('release-secrets'))};
+    import { publishRelease } from ${JSON.stringify(script('release-publish'))};
     import { findRelease, publishDraft } from ${JSON.stringify(script('release-draft'))};
     import { retryBookRefresh } from ${JSON.stringify(script('ui-actions'))};
     import { verifyReleaseMain } from ${JSON.stringify(script('release-main'))};
@@ -127,6 +128,70 @@ test('only confirmed absence creates a draft; an existing draft is reused and pu
     if (!existing) for (const flag of ['--draft', '--verify-tag', '--generate-notes', '--prerelease']) assert.ok(calls[0].includes(flag));
   }
   await assert.rejects(publishDraft(options, async () => ({ status: 200, body: { tag_name: options.tag, draft: false } }), async () => { throw new Error('Unexpected write'); }), /Refusing to modify a published release/);
+`));
+
+test('stable and beta publication follows the existing latest-release policy', () => check(`
+  for (const [version, stable, expectedPrerelease, expectedLatest] of [
+    ['1.0.0', false, false, true], ['1.0.0', true, false, true],
+    ['1.0.0-beta.7', false, false, true], ['1.1.0-beta.1', true, true, false],
+  ]) {
+    const calls = []; let edited = false;
+    const execute = async (command, args) => {
+      calls.push(args);
+      if (args[1] === 'edit') edited = true;
+      return { stdout: JSON.stringify({ isDraft: !edited, url: 'release', assets: [
+        { name: 'ImageFlow-' + version + '-mac-arm64.zip', size: 100 },
+        { name: 'ImageFlow-' + version + '-arm64.dmg', size: 200 },
+      ] }) };
+    };
+    const result = await publishRelease({ tag: 'v' + version, version, prerelease: version.includes('-') },
+      async () => ({ status: 200, body: stable ? [{ tag_name: 'v1.0.0', draft: false }] : [{ tag_name: 'v1.0.0-beta.6', draft: false }] }), execute);
+    assert.equal(result.published, true);
+    const edit = calls.find(args => args[1] === 'edit');
+    assert.ok(edit.includes('--draft=false'));
+    assert.ok(edit.includes('--prerelease=' + expectedPrerelease));
+    assert.ok(edit.includes('--latest=' + expectedLatest));
+  }
+`));
+
+test('publication stops for incomplete assets and rehearsal tags remain private', () => check(`
+  for (const version of ['1.0.0', '1.0.0-beta.7', '1.0.0-test.1']) {
+    let writes = 0;
+    const options = { tag: 'v' + version, version, prerelease: version.includes('-') };
+    const execute = async (command, args) => {
+      if (args[1] === 'edit') writes++;
+      return { stdout: JSON.stringify({ isDraft: true, url: 'draft', assets: [
+        { name: 'ImageFlow-' + version + '-mac-arm64.zip', size: 100 },
+        { name: 'ImageFlow-' + version + '-arm64.dmg', size: 200 },
+      ] }) };
+    };
+    await assert.rejects(publishRelease(options, async () => ({ status: 500 }), async () => ({ stdout: JSON.stringify({ isDraft: true, assets: [] }) })), /Missing release asset/);
+    if (version.endsWith('test.1')) {
+      const result = await publishRelease(options, async () => { throw new Error('Unexpected lookup'); }, execute);
+      assert.equal(result.published, false);
+    } else if (options.prerelease) {
+      await assert.rejects(publishRelease(options, async () => ({ status: 503 }), execute), /Cannot determine/);
+    }
+    assert.equal(writes, 0);
+  }
+`));
+
+test('publication rejects published releases and incomplete stable-release lookups without editing', () => check(`
+  const version = '1.1.0-beta.1';
+  const options = { tag: 'v' + version, version, prerelease: true };
+  let writes = 0;
+  const execute = isDraft => async (command, args) => {
+    if (args[1] === 'edit') writes++;
+    return { stdout: JSON.stringify({ isDraft, assets: [
+      { name: 'ImageFlow-' + version + '-mac-arm64.zip', size: 100 },
+      { name: 'ImageFlow-' + version + '-arm64.dmg', size: 200 },
+    ] }) };
+  };
+  await assert.rejects(publishRelease(options, async () => { throw new Error('Unexpected lookup'); }, execute(false)), /Refusing to modify/);
+  await assert.rejects(publishRelease(options, async path => path.endsWith('page=1')
+    ? { status: 200, body: Array.from({ length: 100 }, () => ({ tag_name: 'v1.0.0-beta.1', draft: false })) }
+    : { status: 503 }, execute(true)), /Cannot determine/);
+  assert.equal(writes, 0);
 `));
 
 test('release ancestry rejects unmerged commits and accepts commits merged onto origin/main', () => check(`

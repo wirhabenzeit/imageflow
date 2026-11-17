@@ -143,3 +143,43 @@ jobs:
           merge-multiple: true
       - name: Create or update draft release
         run: node scripts/release-draft.mjs release-assets/*.zip release-assets/*.dmg
+
+  publish:
+    needs: [version, draft]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.version.outputs.tag }}
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.x'
+      - name: Publish tested beta or stable release
+        id: publish
+        run: node scripts/release-publish.mjs
+
+  refresh-feeds:
+    needs: publish
+    if: needs.publish.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      # GITHUB_TOKEN publication does not trigger the release-event workflow.
+      # workflow_dispatch does, and Pages must deploy from main rather than a tag.
+      - name: Refresh and verify the live update feeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run pages.yml --ref main
