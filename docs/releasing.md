@@ -1,6 +1,6 @@
 # Releasing ImageFlow for Mac
 
-The **Release** workflow builds Apple silicon downloads when a `v*.*.*` tag is pushed. It checks the tag against `package.json` and verifies that the tagged commit belongs to `origin/main`, then builds and tests the Developer ID signed app, notarizes and staples the app and DMG, then attaches the ZIP and DMG to a **draft** GitHub Release with generated notes. Publishing is a manual step. Ordinary PR checks stay separate.
+The **Release** workflow builds Apple silicon downloads when a `v*.*.*` tag is pushed. It checks the tag against `package.json` and verifies that the tagged commit belongs to `origin/main`, then builds and tests the Developer ID signed app, notarizes and staples the app and DMG, then stages the ZIP and DMG in a draft with generated notes and automatically publishes beta and stable releases. Approving the protected **release** environment is the only release approval. The workflow explicitly starts **Pages** on `main` to refresh and verify the update feeds. Rehearsal and other experimental prerelease tags remain drafts. Ordinary PR checks stay separate.
 
 The six signing secrets in [Mac signing and notarization](signing.md) must be configured in the protected **release** environment first, with no repository-level copies. It accepts only `v*` tags, requires approval by `wirhabenzeit`, and disables administrator bypass. Before the first public release, make this repository public so release downloads and channel feeds are accessible without credentials.
 
@@ -31,7 +31,7 @@ The six signing secrets in [Mac signing and notarization](signing.md) must be co
 
    `v1.0.0` must match `package.json` version `1.0.0` exactly. A mismatch or a commit outside `origin/main` fails before release approval or credential access. Semver build metadata (`+...`) is rejected because the updater does not treat it as a distinct version; use a new version or a prerelease suffix instead.
 
-3. In **Actions → Release**, review the tagged commit and approve the pending **release** environment deployment. The Mac job validates the secrets before building, builds without Apple credentials, signs with a temporary keychain, removes it before packaged tests, then obtains temporary credentials again for notarization. Wait for the workflow to succeed. Its final job links to the draft, which contains:
+3. In **Actions → Release**, review the tagged commit and approve the pending **release** environment deployment. The Mac job validates the secrets before building, builds without Apple credentials, signs with a temporary keychain, removes it before packaged tests, then obtains temporary credentials again for notarization. Once both the signed-app checks and signed-upgrade tests succeed, it publishes the release and starts the Pages feed refresh. Wait for both workflows to succeed. The published release contains:
 
    ```text
    ImageFlow-1.0.0-mac-arm64.zip
@@ -40,11 +40,11 @@ The six signing secrets in [Mac signing and notarization](signing.md) must be co
 
    The ZIP is for Squirrel.Mac updates and retains `ImageFlow.app` at its root. The DMG is for first installs.
 
-## Review and publish
+## Published downloads
 
-Open the draft under **GitHub → Releases**, review the generated notes, and download the DMG. On an Apple silicon Mac that has not run ImageFlow before, open it, drag ImageFlow to Applications, eject the disk image, then launch the installed app. Check that Gatekeeper accepts it, **About ImageFlow** shows the expected version, and a new book made from a built-in template opens, accepts a few imported photos and exports a proof PDF.
+After approval and successful automated checks, the release is public under **GitHub → Releases**. Review the generated notes and download the DMG for an installation spot check. On an Apple silicon Mac that has not run ImageFlow before, open it, drag ImageFlow to Applications, eject the disk image, then launch the installed app. Check that Gatekeeper accepts it, **About ImageFlow** shows the expected version, and a new book made from a built-in template opens, accepts a few imported photos and exports a proof PDF.
 
-After the workflow and installation check succeed, click **Publish release**. Keep both assets attached under their original names. The built-in updater uses the public ZIP. Publishing a release does not add update support to builds that predate the updater.
+No separate **Publish release** click is needed for beta or stable tags. Keep both assets attached under their original names. The built-in updater uses the public ZIP. Publishing a release does not add update support to builds that predate the updater.
 
 ## Test tags and retries
 
@@ -56,7 +56,7 @@ Existing draft assets can be replaced on a rerun. Draft creation requires an exp
 
 Signing and notarization child output streams directly to Actions, including before failure or cancellation. The notarization library still waits internally for Apple's final response; if a run is interrupted before it reports a submission ID, use `xcrun notarytool history` with the same API credentials to find it, then `xcrun notarytool log <id>` to inspect it.
 
-Signing credentials are imported only for the separate signing and notarization operations and removed immediately afterward; the API key file exists only during notarization. Only the ZIP and DMG pass to the job with permission to write the draft release. Action artifacts are retained for seven days; the assets attached to the draft release remain there.
+Signing credentials are imported only for the separate signing and notarization operations and removed immediately afterward; the API key file exists only during notarization. Only the ZIP and DMG pass to the job that stages the draft; publication follows automatically after it validates both assets. Publication and feed refresh use separate jobs, so a failed feed dispatch can be retried without modifying the published release. Action artifacts are retained for seven days; the assets attached to the draft release remain there.
 
 ## Stable and beta updates
 
@@ -79,7 +79,9 @@ GitHub Pages is configured to use Actions, with its protected `github-pages` env
 2. Run **Actions → Pages** from `main`. Check that both URLs return JSON without credentials. Published beta assets must also be downloadable without credentials.
 3. Keep `.github/workflows/pages.yml` as the only Pages deployment workflow. It builds the documentation, copies that output into `.build/pages/`, and generates `updates/` alongside it before uploading one artifact. Every main push and release refresh rebuilds both components. PR builds validate without deploying. Feed/API or documentation build failures stop the entire deployment, preserving the previously published site.
 
-Publishing a beta uses the existing reviewed release path: update package files to e.g. `1.0.0-beta.1`, merge onto `main`, push its matching tag, approve signing, review the resulting draft and publish it. The workflow marks a beta draft as a pre-release. Until the first final release (1.0.0) exists, untick **Set as a pre-release** and tick **Set as the latest release** when publishing, so the repository page shows the beta for download; afterwards, keep betas as pre-releases so the final release stays "Latest". Either way the version decides the channel: a `-beta.N` release only ever enters the beta feed, and a final version reaches stable only as a full release. Publishing a final version follows the same path without the beta suffix. The feed workflow publishes the matching channel metadata automatically. Draft creation never publishes an app release or advances a channel.
+Publishing either beta or stable uses the same path: update package files, merge onto `main`, push the matching tag, and approve the protected release environment. Successful tests, signing and notarization automatically lead to publication and a Pages refresh. The workflow uses an explicit `workflow_dispatch`: publishing with `GITHUB_TOKEN` does not trigger another release-event workflow. Pages verifies the live feeds after deployment; if its run fails, retry that Pages run rather than publishing again.
+
+Until the first stable release exists, betas are automatically marked as GitHub's latest full release so the repository shows the current download. After that, betas are marked as prereleases and leave the stable release as Latest. The version decides the updater channel regardless of that GitHub flag: `-beta.N` enters only the beta feed, and final versions enter stable and beta. Rehearsal (`-test.N`) and other experimental prerelease tags stay unpublished drafts.
 
 ## Automatic checks and safe quit
 
@@ -103,7 +105,7 @@ It checks stable/beta isolation, offline recovery, actual ZIP download, native i
 
 All three transitions passed locally on 2026-11-14 using the installed Developer ID identity, without exporting its private key. The [recorded report](validation/signed-upgrade-2026-11-14.json) includes artifact hashes and identifies the working-tree source used. The temporary local TLS trust was removed and independently checked afterwards. These fixtures were signed, not notarized.
 
-The release workflow runs this test automatically and requires it to succeed before preparing the draft release. It reuses the existing tag-only protected `release` environment and its three signing secrets; no extra environment, key export or credential copy is required. Tagging a release candidate creates a draft only, so the test does not require public publication.
+The release workflow runs this test automatically and requires it to succeed before preparing the draft release. It reuses the existing tag-only protected `release` environment and its three signing secrets; no extra environment, key export or credential copy is required. Rehearsal tags (`-test.N`) stay drafts; normal beta and stable tags publish automatically after all required jobs succeed. The standalone signed-upgrade workflow never publishes a release.
 
 After the workflow exists on a trusted version tag, it can also be rerun on that tag without creating or publishing another release:
 
