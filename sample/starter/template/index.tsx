@@ -142,13 +142,13 @@ const gridBoxes = <const S extends keyof typeof gridSizes>(size: S) => {
   const { columns, ids } = gridSizes[size];
   return box.photos(ids, (_id, i) => cellLabels[columns][i]);
 };
-// The credits of everything the book uses (ctx.book.credits), each with the pages it is on. The node is marked with
-// their IDs (data-credits), so the Book check knows they are printed.
+// Book-wide resource credits are already deduplicated by ctx.book.credits. Keep page usage in the index for
+// diagnostics, while the printed attribution lists each resource once. Mark the IDs so the Book check sees them.
 function Credits({ context, rect }: { context: Context; rect: Rect }) {
   const credits = context.book.credits;
   if (!credits.length) return null;
   return <p className="book-credits" data-credits={credits.map(({ id }) => id).join(' ')} style={context.geometry.css(rect)}>
-    {credits.map(({ text, pages }) => text + (pages.length ? ' (' + pageRanges([...pages]).toLowerCase() + ')' : '')).join(' · ')}
+    {credits.map(({ text }) => text).join(' · ')}
   </p>;
 }
 
@@ -306,7 +306,7 @@ const compass = <svg viewBox="0 0 100 100" aria-hidden="true">
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.11.0',
+  version: '0.11.1',
   label: 'Photobook',
   description: 'A travel journal with full-bleed photographs, stories, grids, maps and a picture list, in a light or a dark theme.',
   preview: './preview.jpg',
