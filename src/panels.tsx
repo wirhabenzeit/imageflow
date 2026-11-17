@@ -3,9 +3,14 @@ import { gridColumns } from './desktop';
 import type { CanvasLayout } from './desktop';
 import type { PointerEvent } from 'react';
 
-type Side = 'left' | 'right' | 'bottom';
-const defaults = { left: 232, right: 276, bottom: 170 };
-const limits = { left: [220, 420], right: [260, 520], bottom: [170, 600] };
+// `settings` is the height of Book settings above the spread list, inside the project panel.
+type Side = 'left' | 'right' | 'bottom' | 'settings';
+const defaults = { left: 232, right: 276, bottom: 170, settings: 260 };
+const limits = { left: [220, 420], right: [260, 520], bottom: [170, 600], settings: [80, 1200] };
+// Which way a drag or arrow key grows a panel: the side panels and Book settings grow away from their edge, Sources
+// grows upwards.
+const growth = { left: 1, right: -1, bottom: -1, settings: 1 };
+const labels = { left: 'Resize project panel', right: 'Resize Inspector', bottom: 'Resize Sources', settings: 'Resize Book settings' };
 const key = 'imageflow.workspace.v1';
 const initial = { ...defaults, leftHidden: false, rightHidden: false, bottomHidden: false };
 function bounded(side: Side, value: number) {
@@ -17,6 +22,7 @@ function restore() {
     return { left: Number.isFinite(saved.left) ? bounded('left', saved.left) : initial.left,
       right: Number.isFinite(saved.right) ? bounded('right', saved.right) : initial.right,
       bottom: Number.isFinite(saved.bottom) ? bounded('bottom', saved.bottom) : initial.bottom,
+      settings: Number.isFinite(saved.settings) ? bounded('settings', saved.settings) : initial.settings,
       leftHidden: saved.leftHidden === true, rightHidden: saved.rightHidden === true, bottomHidden: saved.bottomHidden === true };
   } catch { return initial; }
 }
@@ -33,9 +39,9 @@ export function usePanels(resizing = false) {
     if (resizing) return;
     try { localStorage.setItem(key, JSON.stringify(panels)); } catch { /* Preferences are optional. */ }
   }, [panels, resizing]);
-  const hiddenKey = (side: Side) => (side + 'Hidden') as 'leftHidden' | 'rightHidden' | 'bottomHidden';
-  const toggle = (side: Side) => setPanels((value) => ({ ...value, [hiddenKey(side)]: !value[hiddenKey(side)] }));
-  const show = (side: Side) => setPanels((value) => value[hiddenKey(side)] ? { ...value, [hiddenKey(side)]: false } : value);
+  const hiddenKey = (side: Exclude<Side, 'settings'>) => (side + 'Hidden') as 'leftHidden' | 'rightHidden' | 'bottomHidden';
+  const toggle = (side: Exclude<Side, 'settings'>) => setPanels((value) => ({ ...value, [hiddenKey(side)]: !value[hiddenKey(side)] }));
+  const show = (side: Exclude<Side, 'settings'>) => setPanels((value) => value[hiddenKey(side)] ? { ...value, [hiddenKey(side)]: false } : value);
   const resize = (side: Side, size: number) => setPanels((value) => {
     const next = side === 'bottom' ? Math.min(bottomMaximum, bounded(side, size)) : bounded(side, size);
     return value[side] === next ? value : { ...value, [side]: next };
@@ -46,23 +52,41 @@ export function PanelDivider({ side, size, maximum = limits[side][1], resize, on
   side: Side; size: number; maximum?: number; resize: (side: Side, size: number) => void; onResizing: (active: boolean) => void;
 }) {
   const [drag, setDrag] = useState<{ at: number; size: number }>();
-  const horizontal = side === 'bottom';
+  const horizontal = side === 'bottom' || side === 'settings';
   const move = (event: PointerEvent<HTMLDivElement>) => {
-    if (drag) resize(side, drag.size + ((horizontal ? event.clientY : event.clientX) - drag.at) * (side === 'left' ? 1 : -1));
+    if (drag) resize(side, drag.size + ((horizontal ? event.clientY : event.clientX) - drag.at) * growth[side]);
   };
-  return <div className={'panel-divider' + (horizontal ? ' panel-divider-bottom' : '')} role="separator" tabIndex={0}
-    aria-label={side === 'left' ? 'Resize project panel' : side === 'right' ? 'Resize Inspector' : 'Resize Sources'}
-    aria-orientation={horizontal ? 'horizontal' : 'vertical'} aria-valuemin={limits[side][0]} aria-valuemax={maximum} aria-valuenow={size}
+  return <div className={'panel-divider' + (horizontal ? ' panel-divider-bottom' : '') + (side === 'settings' ? ' panel-divider-settings' : '')} role="separator" tabIndex={0}
+    aria-label={labels[side]}
+    aria-orientation={horizontal ? 'horizontal' : 'vertical'} aria-valuemin={limits[side][0]} aria-valuemax={maximum} aria-valuenow={Math.min(size, maximum)}
     onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); onResizing(true);
       setDrag({ at: horizontal ? event.clientY : event.clientX, size }); }}
     onPointerMove={move} onPointerUp={() => setDrag(undefined)} onLostPointerCapture={() => { setDrag(undefined); onResizing(false); }}
     onDoubleClick={() => resize(side, defaults[side])} onKeyDown={(event) => {
       if (event.key === 'Home') { event.preventDefault(); resize(side, defaults[side]); }
-      const increase = horizontal ? 'ArrowUp' : 'ArrowRight', decrease = horizontal ? 'ArrowDown' : 'ArrowLeft';
-      if (event.key === increase || event.key === decrease) {
-        event.preventDefault(); resize(side, size + (event.key === increase ? 10 : -10) * (side === 'right' ? -1 : 1));
+      // An arrow key moves the divider its way, as a drag does.
+      const forward = horizontal ? 'ArrowDown' : 'ArrowRight', back = horizontal ? 'ArrowUp' : 'ArrowLeft';
+      if (event.key === forward || event.key === back) {
+        event.preventDefault(); resize(side, Math.min(size, maximum) + (event.key === forward ? 10 : -10) * growth[side]);
       }
     }} />;
+}
+
+// Whether each sidebar section is open, remembered across books and launches like the panel sizes.
+const sectionsKey = 'imageflow.sections.v1';
+function savedSections(): Record<string, boolean> {
+  try {
+    const saved = JSON.parse(localStorage.getItem(sectionsKey) ?? '{}');
+    return saved && typeof saved === 'object' ? saved : {};
+  } catch { return {}; }
+}
+export function useSectionOpen(id: string, initiallyOpen: boolean) {
+  const [open, setOpen] = useState(() => savedSections()[id] ?? initiallyOpen);
+  const change = (next: boolean) => {
+    setOpen(next);
+    try { localStorage.setItem(sectionsKey, JSON.stringify({ ...savedSections(), [id]: next })); } catch { /* Preferences are optional. */ }
+  };
+  return [open, change] as const;
 }
 
 // The canvas layout of each book window, remembered per book like the panel sizes. A book opened for the first

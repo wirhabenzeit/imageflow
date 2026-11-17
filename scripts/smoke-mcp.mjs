@@ -179,7 +179,7 @@ try {
   assert.equal(JSON.parse(await readFile(join(folder,'project.json'),'utf8')).spreads.length,2);
 
   // Human typing blocks mutations without changing or discarding the draft.
-  await window.locator('.template-controls > summary').click();
+  if (!await window.locator('.template-controls').getAttribute('open')) await window.locator('.template-controls > summary').click();
   const title=window.getByLabel('Note', {exact:true});
   await title.fill('Human draft');
   revision=(await good('list_projects')).projects[0].revision;

@@ -671,10 +671,18 @@ export class DocumentSession {
 
   async exportBook(owner: BrowserWindow, projectId: string) {
     this.currentBook(projectId);
+    // Cancel works from the moment the export starts, while it prepares the book and asks for a destination too.
+    const job = new AbortController();
+    this.exportJob = job;
+    try { return await this.runExport(owner, job); } finally { if (this.exportJob === job) this.exportJob = undefined; }
+  }
+
+  private async runExport(owner: BrowserWindow, job: AbortController) {
     const before = await this.projectSession.inputs.capture();
     const privateCache = await mkdtemp(join(this.cache, 'export-'));
     try {
       const book = await loadProject(this.book.folder, privateCache, true, true);
+      if (job.signal.aborted) return null;
       const loaded = await this.projectSession.inputs.capture();
       if (before.revision !== loaded.revision || before.observation !== loaded.observation) throw new Error('Sources changed while preparing export. Please retry.');
       const fileName = bookName(book.folder).replace(/[^\p{L}\p{N} _-]/gu, '-').slice(0, 80) + '.pdf';
@@ -682,10 +690,8 @@ export class DocumentSession {
         title: 'Export PDF', defaultPath: join(app.getPath('documents'), fileName),
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       });
-      if (canceled || !filePath || owner.isDestroyed()) return null;
+      if (canceled || !filePath || owner.isDestroyed() || job.signal.aborted) return null;
       const id = randomUUID();
-      const job = new AbortController();
-      this.exportJob = job;
       this.renders.set(id, { book, mode: 'export', network: () => this.originsFor(book) });
       const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
       try {
@@ -708,7 +714,6 @@ export class DocumentSession {
         throw error;
       } finally {
         progress('');
-        this.exportJob = undefined;
         this.renders.delete(id);
       }
     } finally { await rm(privateCache, { recursive: true, force: true }); }
