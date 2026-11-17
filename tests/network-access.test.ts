@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { approveNetwork, approvedNetwork, approveSource, approvedSource, bookTrusted, configureSourceAccess, distrustBook, sourceBookKey, transferBookTrust, trustBook } from '../desktop/source-access';
-import { networkPendingSuggestion, pendingNetwork } from '../src/network-access';
+import { networkPendingSuggestion, pendingNetwork, pictureFailureSuggestion } from '../src/network-access';
 
 // A book's network approvals (ADR 0006) belong to the book, not to one version of its template, so editing the
 // template never asks again for sites it was already allowed to reach.
@@ -47,6 +47,19 @@ test('declared origins the book may not reach are reported as waiting for permis
   assert.deepEqual(pendingNetwork(['https://a.example.com'], undefined), [], 'no report when the app did not decide the origins');
   assert.deepEqual(pendingNetwork(undefined, []), []);
   assert.match(networkPendingSuggestion(['https://b.example.com']), /Allow/);
+});
+
+test('a failed picture mentions permission only while it can be the cause', () => {
+  const declared = ['https://tiles.example.com'];
+  const failed = { timedOut: false }, slow = { timedOut: true };
+  assert.match(pictureFailureSuggestion(failed, { declared, allowed: [] }), /permission/, 'a site still waiting for the user');
+  assert.match(pictureFailureSuggestion(failed, { declared, allowed: undefined }), /allowed/, 'the app did not say what is allowed');
+  const allowed = pictureFailureSuggestion(failed, { declared, allowed: declared, online: true });
+  assert.doesNotMatch(allowed, /allowed|permission/, 'every site allowed: an HTTP 503 is the site\'s, not a permission');
+  assert.match(allowed, /try again later/);
+  assert.match(pictureFailureSuggestion(slow, { declared, allowed: declared }), /internet connection/);
+  assert.match(pictureFailureSuggestion(failed, { declared, allowed: declared, online: false }), /offline/);
+  assert.doesNotMatch(pictureFailureSuggestion(failed, {}), /allowed|permission/, 'a template without network sites');
 });
 
 test('a book is the user\'s own once trusted, survives restarts, and can be untrusted', async (t) => {

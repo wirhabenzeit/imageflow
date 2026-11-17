@@ -53,7 +53,7 @@ import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
 import { Field, ProjectFilesContext } from './Fields';
 import { editorChanges, unknownControl } from './editor-changes';
 import { pictureTimeoutMs } from './render-budget';
-import { networkPendingSuggestion, pendingNetwork } from './network-access';
+import { pendingNetwork, pictureFailureSuggestion } from './network-access';
 import './render.css';
 
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
@@ -1747,9 +1747,8 @@ export async function startRender(root: HTMLElement) {
       ...(failed.spread ? located(failed.spread, failed.message) : message(failed.message)), code: 'rendered-image-failed',
       ...(failed.element ? { element: failed.element } : {}), ...onPage(failed.page),
       details: { label: failed.label, timedOut: failed.timedOut ? 1 : 0, ...(pendingSites.length ? { networkPending: pendingSites.join(' ') } : {}) },
-      suggestion: pendingSites.length ? networkPendingSuggestion(pendingSites)
-        : failed.timedOut ? 'Check the internet connection, then check or export again.'
-        : 'Check that the template’s network sites are allowed for this book and reachable, then check or export again.' }));
+      suggestion: pictureFailureSuggestion(failed, { declared: declared.data.network, allowed: book.network,
+        online: typeof navigator === 'undefined' ? undefined : navigator.onLine }) }));
     errors.push(...pictureIssues(pictureFailures));
     if (!present && !lazy && !(edit && view !== 'book')) for (const note of renderedImageNotes()) {
       warnings.push({ ...(note.spread ? located(note.spread, note.message) : message(note.message)), code: note.code,
