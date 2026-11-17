@@ -167,7 +167,7 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   assert.equal((await PDFDocument.load(await readFile(pdfPath))).getPageCount(), 4);
   console.log('Independent inline editing and PDF export passed.');
   assert.equal(await inspector.getByRole('button', { name: 'Swap pages', exact: true }).count(), 0);
-  assert.equal(await inspector.locator('details > summary').first().textContent(), 'Templates');
+  assert.equal(await inspector.locator('details > summary').first().textContent(), 'Layout');
   // Swap whole page states through Book > Swap Pages; Undo restores them exactly.
   const beforeSwap = (await readBook()).spreads[0];
   await rerendered(() => menuAction(app, 'Swap Pages'));

@@ -5,6 +5,7 @@ import { sourceFileName } from './source-locations';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Fields } from './Fields';
+import { PanelSection } from './PanelSection';
 import { Icon } from './Icon';
 import type { BookGeometry, ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
 import { layoutPreviewKey } from './layout-preview';
@@ -102,7 +103,7 @@ function KeptContent({ summary, spread, template, kept, label, settings, writabl
   settings: string[]; writable: boolean; place: (from: KeptItem, to: ContentTarget) => void; discard: (item: KeptItem, name: string) => void;
 }) {
   const elementName = (id: string) => Object.values(template.spreads).find((item) => Object.hasOwn(item.elements, id))?.elements[id].label ?? id;
-  return <details open={expanded} className="kept-content" onToggle={(event) => setExpanded(event.currentTarget.open)}>
+  return <details open={expanded} className="panel-section kept-content" onToggle={(event) => setExpanded(event.currentTarget.open)}>
     <summary>{replaced ? 'Replaced' : 'Set aside'}{label ? ' · ' + label : ''}</summary>
     <ul className="kept-list">{kept.map((item) => {
       const name = sourceTitle(summary, item.kind, item.source);
@@ -222,6 +223,8 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
       return [{ target, label: fields.map(({ param }) => param.label).join(', '), value: param.type === 'string' && param.markdown === 'inline' ? plainFormatted(text) : text }];
     }) : [];
   const flow = render?.state === 'ready' ? render.flow : undefined;
+  // The layout's settings this inspector edits; the rest are edited on the page.
+  const settingIds = Object.keys(definition?.parameters ?? {}).filter((id) => !claimed.has(id));
   const contents = definition ? [
     ...Object.entries(definition.boxes).map(([id, box]) => ({ id, kind: box.type, label: box.label })),
     ...Object.entries(definition.elements).map(([id, element]) => ({ id, kind: 'element' as const, label: element.label })),
@@ -238,14 +241,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   return <aside className="inspector" aria-label="Inspector">
     {header}
     <fieldset disabled={!writable}>
-      {template && <details open><summary onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
-        event.preventDefault(); event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
-      } }} onContextMenu={async (event) => {
-        event.preventDefault();
-        if (!definition || !Object.keys(definition.parameters).length) return;
-        const result = await window.imageflow?.showContextMenu(['reset-defaults'], assetMenuState(false));
-        if (result?.command === 'reset-defaults') changeSpread((item) => { for (const id of Object.keys(definition.parameters)) delete item.params[id]; }, 'Spread settings reset');
-      }}>Templates</summary>
+      {template && <PanelSection id="inspector.layout" title="Layout">
         {!definition && spread.definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
         <LayoutPicker summary={summary} spread={sheet} template={template} page={page} choose={chooseLayout ?? ((next) => {
           let consequence = '';
@@ -254,14 +250,22 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
           }, () => consequence, true);
         })} />
         {familyPicker}
+      </PanelSection>}
+      {/* The selection's own settings: a sibling of Layout, so collapsing the layout choice leaves them in reach. */}
+      {template && definition && settingIds.length > 0 && <PanelSection id="inspector.settings" title={selectedPage ? 'Page settings' : 'Spread settings'}
+        summaryProps={{ onKeyDown: (event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+          event.preventDefault(); event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
+        } }, onContextMenu: async (event) => {
+          event.preventDefault();
+          const result = await window.imageflow?.showContextMenu(['reset-defaults'], assetMenuState(false));
+          if (result?.command === 'reset-defaults') changeSpread((item) => { for (const id of Object.keys(definition.parameters)) delete item.params[id]; }, (selectedPage ? 'Page' : 'Spread') + ' settings reset');
+        } }}>
         {/* Keyed by spread: a rejected or unsaved draft must not carry over to another spread's field. */}
-        <fieldset>
-          {definition && <Fields key={spread.id + ':' + (selectedPage ?? '') + ':' + spread.definition} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
-            values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />}
-        </fieldset>
-      </details>}
-      {template && (contents.length > 0 || marked.length > 0) && <section className="spread-contents" aria-label={selectedPage ? 'On this page' : 'On this spread'}>
-        <p className="field-label">{selectedPage ? 'On this page' : 'On this spread'}</p>
+        <Fields key={spread.id + ':' + (selectedPage ?? '') + ':' + spread.definition} schema={definition.parameters} controls={definition.controls} exclude={[...claimed]}
+          values={spread.params} update={(id, value) => changeSpread((item) => { item.params[id] = value; }, definition.parameters[id].label + ' updated')} />
+      </PanelSection>}
+      {template && (contents.length > 0 || marked.length > 0) && <PanelSection id="inspector.contents" title={selectedPage ? 'On this page' : 'On this spread'}
+        className="spread-contents">
         <ul className="content-list">
           {marked.map(({ target, label, value }) => <li key={spread.id + ':' + target.edits.join(' ')}>
             <button type="button" className="content-item" aria-label={'Edit ' + label} onClick={() => openTarget(target)}>
@@ -290,7 +294,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
             </li>;
           })}
         </ul>
-      </section>}
+      </PanelSection>}
       {template && (kept.length > 0 || keptSettings.length > 0) && <KeptContent summary={summary} spread={sheet} template={template}
         expanded={keptOpen} setExpanded={setKeptOpen} kept={kept} label={keptLabel} settings={keptSettings} writable={writable} place={place}
         discard={(item, name) => changeSpread((current) => discardKeptContent(current, item), name + ' removed from this spread', true)} />}

@@ -101,7 +101,7 @@ try {
   assert.equal(pages[0].getTrimBox().x, 0);
   assert.ok(pages.at(-1).getTrimBox().x > 0);
 
-  await window.locator('.template-controls > summary').click();
+  if (!await window.locator('.template-controls').getAttribute('open')) await window.locator('.template-controls > summary').click();
   const oldTheme = (await read()).params.theme;
   await saveState(() => window.getByRole('radio', { name: 'Dark', exact: true }).click(), (data) => data.params.theme === 'dark');
   await saveState(() => button('Undo').click(), (data) => data.params.theme === oldTheme);

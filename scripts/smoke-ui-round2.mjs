@@ -39,7 +39,7 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   await ready(page);
   const settings = page.locator('.document-settings');
-  await settings.locator('summary').click();
+  if (!await settings.getAttribute('open')) await settings.locator('summary').first().click();
   assert.equal(await settings.getByLabel('Footer', { exact: true }).count(), 1);
   await settings.getByLabel('Footer', { exact: true }).fill('WWW');
   await page.keyboard.press('Tab');

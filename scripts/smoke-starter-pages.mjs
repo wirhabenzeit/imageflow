@@ -92,7 +92,7 @@ try {
     const bounds = await frame.locator('[data-spread="' + id + '"] .if-sheet').boundingBox();
     assert.ok(bounds);
     await w.mouse.click(bounds.x + bounds.width * (side === 'left' ? .2 : .8), bounds.y + 4);
-    await inspector.locator('details > summary').first().filter({ hasText: 'Templates' }).waitFor();
+    await inspector.locator('details > summary').first().filter({ hasText: 'Layout' }).waitFor();
   };
   // A shared full-spread photo still requires selecting the opposite page before opening its editor.
   const beforePageSelection = await readBook();

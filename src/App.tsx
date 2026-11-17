@@ -25,7 +25,8 @@ import { bookLayout, gridColumns, renderOrigin, spreadCommands } from './desktop
 import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
 import type { TargetAnchor } from './edit-targets';
 import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
-import { PanelDivider, useCanvasLayout, usePanels } from './panels';
+import { PanelDivider, useCanvasLayout, usePanels, useSectionOpen } from './panels';
+import { PanelSection } from './PanelSection';
 import { Icon } from './Icon';
 import { BookFrame } from './BookFrame';
 import type { CropPreview } from './BookFrame';
@@ -854,6 +855,27 @@ export function App() {
   const togglePanel: typeof togglePanelState = (side) => { preserveViewAnchor(); togglePanelState(side); };
   const showPanel: typeof showPanelState = (side) => { preserveViewAnchor(); showPanelState(side); };
   const resizePanel: typeof resizePanelState = (side, size) => { preserveViewAnchor(); resizePanelState(side, size); };
+  // Book settings take the height the user gives them above the spread list, up to what leaves the list usable.
+  const bookSettings = useSectionOpen('project.settings', false);
+  const projectContent = useRef<HTMLDivElement>(null);
+  const [settingsMaximum, setSettingsMaximum] = useState(Infinity);
+  useLayoutEffect(() => {
+    const content = projectContent.current;
+    if (!content || !bookSettings[0]) return;
+    const measure = () => {
+      const body = content.querySelector<HTMLElement>('.document-settings > .panel-section-body');
+      const bar = content.querySelector<HTMLElement>('.spread-bar');
+      if (!body) return;
+      // The list keeps at least 120px; the divider is 6px.
+      setSettingsMaximum(Math.max(48, Math.floor(content.getBoundingClientRect().bottom - body.getBoundingClientRect().top - (bar?.offsetHeight ?? 0) - 6 - 120)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [bookSettings[0], !!summary, !!template]);
+  const settingsHeight = Math.min(panels.settings, settingsMaximum);
+  const resizeSettings: typeof resizePanelState = (side, size) => resizePanelState(side, Math.min(size, settingsMaximum));
   function preserveViewAnchor() {
     if (pendingAnchor.current) return;
     rememberViewAnchor();
@@ -1742,8 +1764,13 @@ export function App() {
       <div className="toolbar-actions">
         <button className="toolbar-icon" aria-label="Presentation" title="Presentation (⇧W)" disabled={!summary || !!editing || !!cropping} onClick={() => act('presentation')}><Icon name="play" /></button>
         <div className="export-area">
-          {exporting ? <div className="export-progress"><span role="status" title={busy}>{busy}</span><button onClick={() => void api?.cancelExport()}>Cancel export</button></div>
-            : <button className="export-button" disabled={!pdfCommand.enabled} title="Export PDF… (⌘E)" onClick={() => act('export')}><Icon name="export" /><span>Export PDF…</span></button>}
+          {/* One button in one place: exporting changes its label and makes it cancel, so the toolbar never moves. The
+              stages show in the status bar. */}
+          <button className="export-button" data-exporting={exporting || undefined} disabled={!exporting && !pdfCommand.enabled}
+            title={exporting ? 'Cancel export' : 'Export PDF… (⌘E)'} aria-label={exporting ? 'Exporting, cancel export' : undefined}
+            onClick={() => { if (exporting) void api?.cancelExport(); else act('export'); }}>
+            {exporting ? <span className="status-spinner" aria-hidden="true" /> : <Icon name="export" />}<span>{exporting ? 'Exporting…' : 'Export PDF…'}</span>
+          </button>
         </div>
         <button className="toolbar-icon" aria-label="Toggle Inspector" aria-pressed={!panels.rightHidden} title="Toggle Inspector (⌥⌘I)" disabled={!summary} onClick={() => togglePanel('right')}><Icon name="sidebarRight" /></button>
       </div>
@@ -1754,13 +1781,12 @@ export function App() {
         '--bottom-panel': panels.bottomHidden ? '0px' : panels.bottom + 'px', '--bottom-divider': panels.bottomHidden ? '0px' : '6px',
         '--left-divider': panels.leftHidden ? '0px' : '6px', '--right-divider': panels.rightHidden ? '0px' : '6px' } as CSSProperties}>
       <aside className={'project-panel' + (panels.leftHidden ? ' is-collapsed' : '')} aria-label="Project" inert={panels.leftHidden} aria-hidden={panels.leftHidden}>
-        <div className="project-panel-content">
+        <div ref={projectContent} className="project-panel-content" style={{ '--settings-height': settingsHeight + 'px' } as CSSProperties}>
         <div className="project-head">
 
           <p className="muted" title={summary?.folder}>{summary ? (sequence ? sequence.count + ' pages · ' + spreads.length + ' spreads' : 'Loading book…') : ''}</p>
         </div>
-        {summary && template && <details className="document-settings template-controls">
-          <summary>{template.label ? template.label + ' settings' : 'Template controls'}</summary>
+        {summary && template && <PanelSection id="project.settings" title="Book settings" state={bookSettings} className="document-settings template-controls">
           <fieldset disabled={!writable}>
             {(Object.keys(template.formats).length > 1 || missingFormat) && <label className="field">Format
               <select value={missingFormat ? summary.project.format : template.formatId} onChange={(event) => {
@@ -1771,9 +1797,9 @@ export function App() {
               </select></label>}
             <Fields schema={template.parameters} values={summary.project.params} controls={template.controls} exclude={editorOwnedDocument(template)}
               update={(id, value) => edit(({ project }) => { project.params[id] = value; })} />
-
           </fieldset>
-        </details>}
+        </PanelSection>}
+        {summary && template && bookSettings[0] && <PanelDivider side="settings" size={settingsHeight} maximum={settingsMaximum} resize={resizeSettings} onResizing={setResizing} />}
         {summary && <>
           <div className="spread-bar">
             <span className="eyebrow">Spreads</span>
@@ -1991,6 +2017,7 @@ export function App() {
       <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
         {!issue && busy && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice}
       </span>
+      {exporting && <button type="button" className="status-cancel" onClick={() => void api?.cancelExport()}>Cancel</button>}
       <AgentStatus api={api} />
       {summary && <BookCheckIndicator requestSpread={checkScope} request={checkRequest} check={check} checking={!checkCurrent} spread={spreadSelected ? spread?.id ?? '' : ''} select={(id, page) => select(id, true, page)} />}
     </footer>

@@ -104,7 +104,7 @@ try {
   await printed('a3', { width: 6835, height: 4866 });
 
   // A first month later in the year renumbers the pages; the cover's year stays as written.
-  await w.locator('.template-controls > summary').click();
+  if (!await w.locator('.template-controls').getAttribute('open')) await w.locator('.template-controls > summary').click();
   const first = w.getByLabel('First month', { exact: true });
   await first.fill('2026-09');
   await frame.locator('.month-name').first().filter({ hasText: 'SEP' }).waitFor();

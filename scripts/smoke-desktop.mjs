@@ -107,7 +107,7 @@ try {
     dialog.showMessageBox = async (_owner, options) => { globalThis.exportConfirmation = options; return { response: 0 }; };
   }, output);
   await exportAction(window);
-  await window.locator('.export-button:enabled').waitFor();
+  await window.locator('.export-button:not([data-exporting]):enabled').waitFor();
   await assert.rejects(readFile(output), { code: 'ENOENT' });
   const confirmation = await instance.evaluate(() => globalThis.exportConfirmation);
   assert.equal(confirmation.message, 'Export PDF with errors?');

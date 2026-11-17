@@ -141,7 +141,7 @@ export async function exportAction(page) {
     const status = document.querySelector('.status');
     const previous = status?.textContent;
     const observer = new MutationObserver(() => {
-      if (document.querySelector('.export-progress') || status?.textContent !== previous) {
+      if (document.querySelector('.export-button[data-exporting]') || status?.textContent !== previous) {
         window.__exportStarted = true; observer.disconnect();
       }
     });
