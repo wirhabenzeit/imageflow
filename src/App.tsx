@@ -40,7 +40,7 @@ import { anchoredTarget, clickWithin, elementRect, hiddenOccurrence, inlinePlace
 import type { OpenEditor } from './inline-editors';
 import { LayoutFamilyPicker } from './LayoutFamilyPicker';
 import { InlineTextEditor } from './InlineTextEditor';
-import { textEditorOwner, textFits } from './inline-text';
+import { minimumText, textEditorOwner, textExtent, textFits } from './inline-text';
 import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
@@ -1233,6 +1233,24 @@ export function App() {
   const resumeInline = !!(canvasReady && editing?.held && liveInline && inlineValues(liveInline) === inlineValues(editing.held));
   const inline = resumeInline ? liveInline : editing?.held ?? liveInline;
   const textInline = !!(editing?.text && !editing.panel && inline);
+  // Text the template edits on the page, opened in the panel only because it is too small on screen at this zoom
+  // (inline-text: textFits). The panel says so, and offers the zoom at which it can be edited where it is.
+  const smallText = editing && !editing.owner && !editing.panel && !textInline && inline?.target.inlineText &&
+    inline.target.upright !== false && !textFits(inline.target) ? inline.target : undefined;
+  const textZoom = smallText && (() => {
+    const { along, across } = textExtent(smallText);
+    const needed = zoom * Math.max(minimumText.along / Math.max(along, 1), minimumText.across / Math.max(across, 1)) * 1.1;
+    return needed <= 3 ? Math.max(needed, zoom * 1.2) : undefined;
+  })();
+  // After zooming for it, the text opens on the page once the book shows it at the new size.
+  const reopenText = useRef<{ spread: string; key: string; page?: PageSide }>(undefined);
+  useEffect(() => {
+    const wanted = reopenText.current;
+    const target = wanted && geometry?.targets.find((item) => targetKey(item) === wanted.key);
+    if (!wanted || !target || !textFits(target)) return;
+    reopenText.current = undefined;
+    openEditing({ spread: wanted.spread, key: wanted.key, page: wanted.page });
+  }, [geometry]);
   const [textShown, setTextShown] = useState(false);
   function holdInlineEditor() {
     if (editing && !editing.held && liveInline) setEditing({ ...editing, held: liveInline });
@@ -1977,6 +1995,14 @@ export function App() {
                   return stageRect && host ? { x: stageRect.left - host.left + inline.target.x, y: stageRect.top - host.top + inline.target.y, width: inline.target.width, height: inline.target.height } : undefined;
                 }} project={inline.project} spread={inline.spread} page={inline.target.page} template={inline.template} edits={inline.target.edits} host={canvasWrap.current}
                 textFallback={inline.target.textFallback}
+                note={smallText ? <>
+                  <span>{textZoom ? 'This text is too small to edit on the page at this zoom.' : 'This text is too small to edit on the page.'}</span>
+                  {textZoom && <button type="button" onClick={() => {
+                    reopenText.current = { spread: editing.spread, key: editing.key, page: inline.target.page };
+                    closeEditor();
+                    setZoom(textZoom);
+                  }}>Zoom In to Edit on Page</button>}
+                </> : undefined}
                 blocked={blockedInline || undefined}
                 edit={editInline} close={closeEditor} step={stepEditor} title={editing.owner && ownerLabel(inline.spread, editing.owner)}
                 actions={!editing.owner && editPhotoBox && !cropBlocked(editing.spread, editPhotoBox)

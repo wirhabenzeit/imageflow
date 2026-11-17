@@ -8,6 +8,7 @@
 // theme and Night in the dark one. Changing the theme recolours the drawn map without drawing it again.
 import type { StyleSpecification } from 'maplibre-gl';
 import mlcontour from 'maplibre-contour';
+import { describeLoadError } from './map-errors';
 
 export const mapOrigin = 'https://tiles.openfreemap.org';
 const mapAttribution = '© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors';
@@ -18,6 +19,28 @@ export const elevationOrigin = 'https://tiles.mapterhorn.com';
 const elevationAttribution = '© Mapterhorn';
 // Decoded on the page rather than in a worker: a map is drawn once, off screen.
 const elevation = new mlcontour.DemSource({ url: elevationOrigin + '/{z}/{x}/{y}.webp', encoding: 'terrarium', maxzoom: 12, worker: false });
+// Mapterhorn has no tile where it has no elevation data, such as the open sea, and answers 404 there. That is sea
+// level, not a failure: a contour tile is made from a tile and its eight neighbours, so one missing neighbour would
+// otherwise fail the contours of the land beside it, and the whole map with them.
+type TileResponse = { data: Blob; expires?: string; cacheControl?: string };
+let seaLevel: Promise<Blob> | undefined;
+// A terrarium tile of 0 m everywhere: red 128, green 0, blue 0. At the source's 512-pixel tile size, so it lines up
+// with its neighbours.
+const seaLevelTile = () => seaLevel ??= (() => {
+  const canvas = new OffscreenCanvas(512, 512);
+  const context = canvas.getContext('2d')!;
+  context.fillStyle = 'rgb(128, 0, 0)';
+  context.fillRect(0, 0, 512, 512);
+  return canvas.convertToBlob({ type: 'image/png' });
+})();
+const elevationManager = elevation.manager as unknown as { getTile: (url: string, controller: AbortController) => Promise<TileResponse> };
+elevationManager.getTile = async (url, controller) => {
+  const response = await fetch(url, { signal: controller.signal });
+  if (response.status === 404) return { data: await seaLevelTile() };
+  if (!response.ok) throw new Error('Bad response: ' + response.status + ' for ' + url);
+  return { data: await response.blob(), expires: response.headers.get('expires') ?? undefined,
+    cacheControl: response.headers.get('cache-control') ?? undefined };
+};
 let prepared = false;
 /** Lets MapLibre load contour tiles; call it with the MapLibre module before making a map. */
 export function prepareMapLibre(maplibre: { addProtocol: (id: string, protocol: never) => void }) {
@@ -25,6 +48,10 @@ export function prepareMapLibre(maplibre: { addProtocol: (id: string, protocol: 
   prepared = true;
   elevation.setupMaplibre(maplibre as Parameters<typeof elevation.setupMaplibre>[0]);
 }
+
+/** What went wrong loading a map, naming the site that failed (map-errors.ts). */
+export const describeMapError = (error: unknown) => describeLoadError(error, {
+  [mapOrigin]: 'OpenFreeMap (map tiles)', [elevationOrigin]: 'Mapterhorn (elevation for contour lines)' });
 /** Whether the style draws contour lines. */
 export const hasContours = (style: MapStyle) => style === 'lines';
 /** The credits of a map's data in a style, for a layout's `credits`: the book prints them on its last page. */

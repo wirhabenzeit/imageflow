@@ -70,11 +70,13 @@ export function MarkedFields({ project, spread, template, edits, edit, compact =
 // Edits the selected item from a stable panel at the bottom of the visible canvas: a node the template marked with `ctx.edit(...)` or
 // `ctx.Text`, or a box or element. For a box, `children` is the platform's part (its photo or text) and `title`
 // names the box.
-export function EditPopover({ project, spread, template, edits, host, blocked, edit, close, step, actions, title, children, textFallback, compact = false, anchor, page }: {
+export function EditPopover({ project, spread, template, edits, host, blocked, edit, close, step, actions, title, children, textFallback, note, compact = false, anchor, page }: {
   page?: PageSide; project: Project; spread: SpreadState; template: TemplateInfo; edits: string[]; host?: HTMLElement | null;
   blocked?: string; edit: (change: Edit, notice?: string) => void; close: () => void; step: (direction: 1 | -1) => void;
   compact?: boolean; anchor?: () => Rect | undefined; actions?: ReactNode; title?: string; children?: ReactNode;
   textFallback?: { parameter: string; text: string; label: string };
+  // Why the item is edited here rather than where it is, with what to do about it.
+  note?: ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const [drafts, setDrafts] = useState<Record<string, Value>>({});
@@ -210,6 +212,7 @@ export function EditPopover({ project, spread, template, edits, host, blocked, e
       <span>{heading}</span>
       <button type="button" className="ep-close" aria-label="Close" title="Close (Esc cancels typing)" onClick={() => { commit(); close(); }}><Icon name="close" /></button>
     </div>}
+    {note && <div className="ep-note" role="note">{note}</div>}
     <fieldset className={compact ? 'ep-compact-row' : undefined} disabled={!!blocked}>
       {children}
       {compact ? <>{render(inline, true)}{overflow.length > 0 && <details className="compact-overflow"><summary title="More settings" aria-label="More settings">⚙</summary><div>{render(overflow)}</div></details>}</> : render(shown)}

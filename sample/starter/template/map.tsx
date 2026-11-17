@@ -11,7 +11,7 @@ import type { Map as MapLibreMap } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { drawMapSvg, projector } from 'maplibre-svg';
 import type { MapView as View } from 'maplibre-svg';
-import { mapColor, mapOrigin, mapStyle, mapStyles, mapThemeColors, prepareMapLibre } from './map-styles';
+import { describeMapError, mapColor, mapOrigin, mapStyle, mapStyles, mapThemeColors, prepareMapLibre } from './map-styles';
 import type { ColourTheme, MapStyle } from './map-styles';
 
 export { mapOrigin };
@@ -111,7 +111,8 @@ async function drawMap(style: MapStyle, view: View, signal: AbortSignal) {
       font: (stack) => ({ className: labelRole(stack).className }),
       text: (label, stack) => fonts.settable(label, labelRole(stack).font) });
   } catch (error) {
-    throw new Error((error instanceof Error ? error.message : String(error)) + ' (' + mapOrigin + ')');
+    if ((error as { name?: string })?.name === 'AbortError') throw error;
+    throw new Error(describeMapError(error));
   }
 }
 
@@ -246,7 +247,7 @@ export function MapEditor({ values, set, readOnly, context, document, presentati
       created.once('load', () => setTimeout(drawn, 600));
       created.on('error', (event) => {
         drawn();
-        if (!created.isStyleLoaded()) setError('The map could not load (' + (event.error?.message ?? 'no connection') + '). It needs ' + mapOrigin + '.');
+        if (!created.isStyleLoaded()) setError('The map could not load. ' + (event.error ? describeMapError(event.error) : 'There may be no internet connection.'));
       });
       created.on('style.load', () => { setError(''); drawTrack(created); });
       map.current = created;

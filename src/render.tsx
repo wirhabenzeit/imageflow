@@ -699,6 +699,8 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
   let state: PresentationView = { spread: spreads[initial]?.id ?? '', side: hasSinglePage(format) ? 'page' : sequence.spreads[initial]?.span ?? 'spread', bounds: 'trim', overview: false };
   const cache = new Map<string, HTMLElement>();
   const sources = new Map<HTMLElement, HTMLElement>();
+  // The drawn <svg> each presentation copy of a vector picture shows, so a copy is replaced only when it changes.
+  const copiedVectors = new WeakMap<HTMLElement, Element | null>();
   let warm = false;
   let drawRevision = 0;
   let firstPaint!: () => void;
@@ -711,9 +713,27 @@ async function renderPresentation(root: HTMLElement, sheets: HTMLElement[], spre
         if (!original) return;
         picture.dataset.rendered = original.dataset.rendered;
         picture.title = original.title;
-        const image = picture.querySelector('img'), source = original.querySelector('img');
+        for (const property of ['--if-failure-line', '--if-failure-lines']) picture.style.setProperty(property, original.style.getPropertyValue(property));
+        const image = picture.querySelector<HTMLElement>(':scope > img') as HTMLImageElement | null;
+        const source = original.querySelector<HTMLElement>(':scope > img') as HTMLImageElement | null;
         if (image && source?.getAttribute('src') && image.getAttribute('src') !== source.getAttribute('src')) image.src = source.src;
         if (image && source) image.style.display = source.style.display;
+        // A vector picture is an <svg> element, not an image source: copy the drawing itself. A copy made before the
+        // picture was drawn, or restored from the cache, would otherwise never show it, such as a map's borders and
+        // labels over its shaded relief.
+        const vector = picture.querySelector<HTMLElement>(':scope > div'), drawn = original.querySelector<HTMLElement>(':scope > div');
+        if (!vector || !drawn) return;
+        const svg = drawn.firstElementChild;
+        if (copiedVectors.get(vector) !== svg) {
+          copiedVectors.set(vector, svg);
+          if (svg) {
+            const copy = svg.cloneNode(true) as Element;
+            renameIds(copy, '.p' + ++printCopies);
+            vector.replaceChildren(copy);
+          } else vector.replaceChildren();
+        }
+        vector.style.display = drawn.style.display;
+        if ('vector' in original.dataset) picture.dataset.vector = ''; else delete picture.dataset.vector;
       });
     }
   }

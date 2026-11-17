@@ -6,11 +6,16 @@ import type { EditTarget } from './editing';
 import { scopeSpread } from './project';
 import type { Project } from './project';
 
-// Text needs less screen area than a map, but still needs a usable caret and line: 64 px along the line and 18 px
-// across it. Vertical text (a non-horizontal writing mode) runs its lines down the box, so the two sides swap.
+// Text needs less screen area than a map, but still needs a usable caret and line: 48 px along the line and 12 px
+// across it, enough for a heading at whole-spread zoom (24 pt is about 16 px there on a laptop). Vertical text (a
+// non-horizontal writing mode) runs its lines down the box, so the two sides swap.
+export const minimumText = { along: 48, across: 12 };
+/** The target's size on screen along its lines and across them. */
+export const textExtent = (target: Pick<BookGeometry['targets'][number], 'width' | 'height' | 'vertical'>) =>
+  target.vertical ? { along: target.height, across: target.width } : { along: target.width, across: target.height };
 export function textFits(target: BookGeometry['targets'][number]) {
-  const [along, across] = target.vertical ? [target.height, target.width] : [target.width, target.height];
-  return target.inlineText && target.upright !== false && along >= 64 && across >= 18;
+  const { along, across } = textExtent(target);
+  return target.inlineText && target.upright !== false && along >= minimumText.along && across >= minimumText.across;
 }
 
 /** A custom editor remains the sole editing surface for the parameters it owns, including layout fields. */
