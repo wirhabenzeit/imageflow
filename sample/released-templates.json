@@ -20,6 +20,10 @@
     "36b995d07cc119192ca90cc893c56ba5977e132ca88a810c2a08176183b2987d": {
       "template": "starter",
       "app": "1.0.0-beta.5"
+    },
+    "eb874221448998aa9ce9c5b135171699d02489cf6e85a324dce686febf8661f8": {
+      "template": "starter",
+      "app": "1.0.0-beta.7"
     }
   }
 }
