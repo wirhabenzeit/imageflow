@@ -49,8 +49,8 @@ export async function writeAuthoringSnapshot(template: string, typesRoot: string
 // folder, or in a folder above it, finds the template API reference without installing anything.
 export const agentSkillFolder = '.claude/skills/imageflow-templates';
 
-/** Copies the installed imageflow-templates skill into a newly created book. Like the SDK snapshot, it is written only
- * when a book is created, never when one is opened, and it is outside the book's inputs and template identity. */
+/** Copies the installed imageflow-templates skill into a new book or refreshes it on an explicit dependency rebuild.
+ * Opening a book never rewrites it; it remains outside the book's inputs and template identity. */
 export async function writeAgentSkill(book: string, skills: string) {
   const target = join(book, agentSkillFolder);
   await rm(target, { recursive: true, force: true });

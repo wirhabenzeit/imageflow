@@ -826,7 +826,7 @@ function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: ResolvedF
 
 function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat,
   request: ReturnType<typeof inspectionSchema.parse>): ElementInspection {
-  const nodes = request.box ? findDeclared(sheet, { box: request.box }) : request.element ? findDeclared(sheet, { element: request.element }) : declaredNodes(sheet);
+  const nodes = request.box ? findDeclared(sheet, { box: request.box, page: request.page }) : request.element ? findDeclared(sheet, { element: request.element, page: request.page }) : declaredNodes(sheet).filter(node => !request.page || node.page === request.page);
   if ((request.box || request.element) && !nodes.length) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread.id + '.');
   const items: ElementMeasurement[] = nodes.slice(request.offset, request.offset + request.limit).map(({ node, kind: declared, id, page }) => {
     // A node on a page belongs to that page's layout and state (validated before inspection); a page that draws a box
@@ -969,7 +969,7 @@ function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: Spread
   if ('box' in artwork.target || 'element' in artwork.target) {
     const request = artwork.target;
     const box = 'box' in request ? request.box : undefined, element = 'element' in request ? request.element : undefined;
-    const node = findDeclared(sheets[index], box ? { box } : { element: element! })[0]?.node;
+    const node = findDeclared(sheets[index], box ? { box, page: request.page } : { element: element!, page: request.page })[0]?.node;
     if (!node) throw new PreviewError('preview-target-not-found', 'The requested box or element is not rendered on spread ' + spread + '.');
     const rect = measuredBounds(node, sheets[index], format), padding = request.paddingMm;
     const x = Math.max(crop.x, rect.x - padding), y = Math.max(crop.y, rect.y - padding);

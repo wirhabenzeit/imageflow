@@ -414,14 +414,14 @@ export function createAuthoringService(hooks: Hooks) {
     }
     const session = get(args.project);
     if (name === 'check_book') {
-      if (args.preview?.target?.page && !args.expectedRevision) throw new AuthoringError('REVISION_REQUIRED', 'Page-number previews require expectedRevision; spread IDs can be used without it.');
+      if (typeof args.preview?.target?.page === 'number' && !args.expectedRevision) throw new AuthoringError('REVISION_REQUIRED', 'Page-number previews require expectedRevision; spread IDs can be used without it.');
       if (args.fixtures) return fixtureCheck(session, signal, args.fixtures, args.expectedRevision, args.typescript);
       if (!args.draft) return checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview,
         ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true);
       return draftCheck(session, signal, args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript);
     }
     if (name === 'inspect_book' && args.view === 'elements') {
-      const report = await checked(session, signal, { inspect: { spread: args.spread, box: args.box, element: args.element,
+      const report = await checked(session, signal, { inspect: { spread: args.spread, page: args.page, box: args.box, element: args.element,
         offset: args.offset, limit: args.limit } });
       return { project: session.handle, revision: report.revision, state: report.state, diagnostics: report.diagnostics,
         checks: report.checks, ...report.render?.inspection };
@@ -504,7 +504,7 @@ export function createAuthoringService(hooks: Hooks) {
             maxPreviewEdge: 1600, typescript: true, printPreflight: false, draftPreview: true, contactSheets: true,
             fixtures: { cases: [...fixtureCases], maxLayouts: fixtureLimits.layouts, maxFormats: fixtureLimits.formats,
               maxFixturesPerFormat: fixtureLimits.cellsPerFormat, maxPreviewFixtures: fixtureLimits.previewCells },
-            elementInspection: true, detailPreviews: true, maxContactSheetSpreads: 12,
+            pageAddressing: true, pagePairInsertion: true, elementInspection: true, detailPreviews: true, maxContactSheetSpreads: 12,
             templateApi: { contract: 1, baseline: [...contract1Capabilities], capabilities: [...templateCapabilities], exports: [...runtimeExports] },
             diagnostics: 'Stable codes with spread/box/element/source locations, measured details and suggested fixes.',
             draftProtection: 'All agent mutations wait until active human editors are closed or blurred.',
@@ -525,7 +525,10 @@ export function createAuthoringService(hooks: Hooks) {
         ] : project?.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...spread,
           page: sequence?.spreads[project.spreads.indexOf(spread)].page,
           kept: template ? keptOutside(spread, template.spreads) : [],
-          ...(view === 'parameters' && template ? { declarations: template.spreads[spread.definition] } : {}),
+          ...(view === 'parameters' && template ? spread.split ? {
+            pageDeclarations: Object.fromEntries(['left', 'right'].map(side => [side,
+              template.spreads[spread.pages?.[side as 'left' | 'right']?.definition ?? ''] ?? null])),
+          } : { declarations: template.spreads[spread.definition] } : {}),
         })) ?? [];
         result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format, templateIdentity,
           pages: report.render?.pages, total: records.length, offset, items: records.slice(offset, offset + limit),

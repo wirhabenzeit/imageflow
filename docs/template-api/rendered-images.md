@@ -24,3 +24,5 @@ import { RenderedImage } from 'imageflow';
 - **Failure:** throw or reject with a message, such as `Error('The map style could not be loaded.')`. The box shows the message, and the Book check reports `rendered-image-failed` for the element, so export stops instead of printing the page without its picture. Decide readiness yourself: the starter's map resolves on MapLibre's `idle` event and rejects on any `error` event, so a style or tile that failed to load fails the picture.
 - **Network:** `draw` may reach the template's declared [`network`](element-editors.md#element-editors) origins once the user has allowed them; otherwise its requests are blocked and the picture fails. Its requests, WebGL contexts, workers and timers are not `render-impure`.
 - `label` names the picture in messages (default `'Picture'`); `alt`, `className` and `style` apply to the box, whose class is `if-rendered-image` with `data-rendered="pending" | "ready" | "failed"`.
+
+For a reusable map helper and vector-map example, see [SVG maps](svg-maps.md).

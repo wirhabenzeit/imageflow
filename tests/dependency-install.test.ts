@@ -65,3 +65,21 @@ test('a template that imports packages needs a package.json; one without imports
   assert.deepEqual(result.packages, {});
   await assert.rejects(stat(cache), 'nothing was installed');
 });
+
+test('an explicit rebuild refreshes book-local SDK and skill even without npm dependencies', async (t) => {
+  const { root, template, cache } = await fixture(t);
+  await writeFile(join(template, 'index.tsx'), 'export const value = 4;\n');
+  const types = join(root, 'installed-types'), skills = join(root, 'installed-skills');
+  await mkdir(types);
+  await mkdir(join(skills, 'imageflow-templates', 'references'), { recursive: true });
+  await writeFile(join(types, 'imageflow.d.ts'), '// Current SDK');
+  await writeFile(join(skills, 'imageflow-templates', 'SKILL.md'), 'Current skill');
+  const localSkill = join(root, 'book.imageflow', '.claude', 'skills', 'imageflow-templates');
+  await mkdir(localSkill, { recursive: true });
+  await writeFile(join(localSkill, 'obsolete.md'), 'Stale reference');
+  await rebuildTemplateDependencies(template, cache, { authoringTypes: types, authoringSkills: skills });
+  assert.equal(await readFile(join(template, '.imageflow-sdk', 'imageflow.d.ts'), 'utf8'), '// Current SDK');
+  assert.equal(await readFile(join(localSkill, 'SKILL.md'), 'utf8'), 'Current skill');
+  await assert.rejects(stat(join(localSkill, 'obsolete.md')));
+  assert.equal(await readFile(join(template, 'index.tsx'), 'utf8'), 'export const value = 4;\n');
+});

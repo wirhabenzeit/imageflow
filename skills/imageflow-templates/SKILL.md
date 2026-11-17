@@ -15,7 +15,7 @@ Books created by ImageFlow carry a copy of this skill in `.claude/skills/imagefl
 2. **Read only the topics you need** from the table below. Start a new template or layout from the closest example in `examples/` rather than from scratch.
 3. **Edit template files** (`template/*.tsx`, `styles.css`, assets) with your file tools. Never edit `project.json` or `photos.json` while the book is open in ImageFlow; use `apply_project_changes` instead.
 4. **Verify with `check_book`** after every edit: request a spread `preview` to see the result, `typescript: true` for type errors, `draft.operations` to preview a new layout before saving it, and `fixtures` to stress-test layouts with long, empty and malformed content. Fix every error diagnostic before you finish.
-5. **Save supported project data** (spread layouts, parameter values, photo assignments) with one `apply_project_changes` batch, passing the revision from the last check as `expectedRevision`. Page-addressed mutations are still pending: use the editor for individual page changes; current commands reject split-spread edits except merging with `switch_layout`.
+5. **Save supported project data** (spread layouts, parameter values, photo assignments) with one `apply_project_changes` batch, passing the revision from the last check as `expectedRevision`. Address split-sheet content with `page: 'left' | 'right'`; use `insert_page_pair` for independent facing pages and `switch_layout` with `page` for page layout changes. Omit page for unsplit units and whole-sheet operations.
 
 Without the MCP server, type-check with the template's generated `.imageflow-sdk/tsconfig.json` (`npx tsc -p template`) and open the book in ImageFlow to see it; see [compatibility](references/compatibility.md).
 
@@ -47,6 +47,7 @@ Without the MCP server, type-check with the template's generated `.imageflow-sdk
 | Use an npm package such as a map library | `template/package.json`, dependency bundle | [dependencies](references/dependencies.md) |
 | Read parameters, boxes and photo capture data while rendering | `render(ctx)`, `ctx.params`, `ctx.boxes`, `ctx.view` | [render-function](references/render-function.md) |
 | Draw something asynchronously, such as a WebGL map | `<RenderedImage draw>` | [rendered-images](references/rendered-images.md) |
+| Draw printable basemaps and SVG overlays | `maplibre-svg`, `drawMapSvg`, `projector` | [svg-maps](references/svg-maps.md) |
 | Open a parameter popover by clicking rendered text | `ctx.edit(...paths)` | [click-to-edit](references/click-to-edit.md) |
 | Build a table of contents or refer to another spread | `anchors`, `ctx.book` | [anchors-and-index](references/anchors-and-index.md) |
 | Arrange, group or hide generated controls | `controls`, `when` | [editing-ui](references/editing-ui.md) |

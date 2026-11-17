@@ -31,6 +31,6 @@ A spread shown as two pages stores `split: true` and `pages.left`/`pages.right`,
 
 The same `hero` ID on the left and right is two assignments, addressed by page. A layout switch can move a whole box state, including focus, box parameters and per-layout crops, between these states. See [Switching layouts](switching-layouts.md) for matching, memory and replacement rules.
 
-Any stored page state, split sheet or displaced content requires book `schemaVersion: 2`. Books without them remain format 1. Older apps refuse format 2 rather than dropping page data. Never edit manifests directly while the book is open; current MCP mutation commands do not yet address page states, so use the editor for these edits.
+Any stored page state, split sheet or displaced content requires book `schemaVersion: 2`. Books without them remain format 1. Older apps refuse format 2 rather than dropping page data. Never edit manifests directly while the book is open; use page-addressed MCP commands for these edits ([Page layouts](page-layouts.md)).
 
 Template `openingSpreads` may also declare page pairs for new books. Those declarations use `layout` and optional `params` per side; the created project stores them as `pages` with `definition`, alongside `split: true`. See [Template library](template-library.md).

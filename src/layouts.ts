@@ -552,7 +552,7 @@ function content(box: BoxState | undefined): Partial<BoxState> {
 
 // Swaps the content of two boxes, on one spread or two; an empty box takes the content and leaves the other empty.
 // Returns what was in box `to`, if anything.
-export function swapContent(from: SpreadState, fromBox: string, to: SpreadState, toBox: string) {
+export function swapContent(from: LayoutState, fromBox: string, to: LayoutState, toBox: string) {
   if (from === to && fromBox === toBox) return;
   const moving = content(from.boxes[fromBox]);
   if (!moving.photo && !moving.text) throw new Error('There is no content in box ' + fromBox + '.');
@@ -570,7 +570,7 @@ export function moveContent(spread: SpreadState, from: string, to: string) {
 }
 
 // Removes kept content from the spread; the source stays in the project.
-export function discardContent(spread: SpreadState, id: string) {
+export function discardContent(spread: LayoutState, id: string) {
   const box = spread.boxes[id];
   if (box) spread.boxes[id] = { params: box.params };
 }

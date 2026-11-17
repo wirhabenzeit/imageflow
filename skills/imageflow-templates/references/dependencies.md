@@ -13,3 +13,5 @@ A book never contains installed packages, so it stays small: a `template/node_mo
 - **Purity still applies:** a library may run freely in an [element editor](element-editors.md#element-editors). In a layout, asynchronous or GPU work such as drawing a map runs inside a [`<RenderedImage>`](rendered-images.md#rendered-images); `render` itself stays synchronous ([Render function](render-function.md#render-function)).
 - **Stylesheets:** a package's CSS is bundled with the template's own, and inline `data:` images in it stay inline.
 - Licences: `vendor/LICENSES/` holds each bundled package's licence file. Keep it when you share the template.
+
+Rebuilding explicitly in the app or through MCP also refreshes the book's generated `.imageflow-sdk/` and `.claude/skills/imageflow-templates/` from the installed app, including removal of obsolete generated references. These folders are generated tooling; keep personal instructions elsewhere. Opening a book does not rewrite them. After updating ImageFlow, rebuild once to update local editor types and agent guidance; MCP reference topics always come from the installed app.

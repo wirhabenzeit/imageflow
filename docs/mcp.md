@@ -361,3 +361,9 @@ The connection belongs to the app. `list_projects` lists all open authorized boo
 ## Copied and linked sources
 
 A book has an import default, with per-source storage. `inspect_book` source records expose linked locations; the registered IDs and placements survive refresh, replacement, and relinking. Photo, Markdown and parameter-file links use the same availability and collection rules. Missing originals can have cached content, which never clears source diagnostics or makes a print check current. Checks include registered external files in their input revision and render pinned source snapshots. Agent imports remain restricted to authorized package/inbox paths; importing from within the package keeps that source document-owned. Location management and selecting new external files use the app's native pickers.
+
+## Independent facing pages
+
+Split-sheet edits, page-pair insertion, blank/swap actions, inspection and detail previews use the page addressing described in [Page layouts](template-api/page-layouts.md). Content commands require `page: "left" | "right"` for split sheets; whole-sheet duplicate, move and remove commands omit it. `rebuild_dependencies` also refreshes generated SDK types and book-local agent references from the installed app.
+
+`scripts/smoke-mcp-pages.mjs` checks page-pair insertion and page edits through the SDK client, unsaved drafts, visible page declarations, distinct left/right detail images, page-scoped element inspection, saves and shared Undo. It runs in the desktop suite.

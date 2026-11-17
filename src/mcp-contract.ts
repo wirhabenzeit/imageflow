@@ -47,9 +47,11 @@ export const mcpToolSchemas = {
     offset: z.int().min(0).default(0).describe('Index of the first item to return, for paging.'),
     limit: z.int().min(1).max(100).default(30).describe('Number of items to return. Continue from nextOffset.'),
     spread: z.string().min(1).max(256).optional().describe('Spread ID. Required by the elements view; filters the spreads and parameters views.'),
+    page: z.enum(['left', 'right']).optional().describe('Elements view only: facing page of a split sheet.'),
     box: z.string().min(1).max(256).optional().describe('Elements view only: measure just this box.'),
     element: z.string().min(1).max(256).optional().describe('Elements view only: measure just this element.'),
   }).superRefine((request, context) => {
+    if (request.page && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Page filtering requires the elements view.' });
     if (request.view === 'elements' && !request.spread) context.addIssue({ code: 'custom', path: ['spread'], message: 'Element inspection requires a spread ID.' });
     if ((request.box || request.element) && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Box and element filters require the elements view.' });
     if (request.box && request.element) context.addIssue({ code: 'custom', message: 'Choose either a box or an element.' });
@@ -72,7 +74,7 @@ export const mcpToolSchemas = {
     if (request.fixtures && (request.preview || request.inspect || request.draft)) {
       context.addIssue({ code: 'custom', path: ['fixtures'], message: 'Fixture checks use fixtures.preview for images and cannot be combined with preview, inspect or draft.' });
     }
-    if (request.preview && 'page' in request.preview.target && !request.expectedRevision) {
+    if (request.preview && 'page' in request.preview.target && !('spread' in request.preview.target) && !request.expectedRevision) {
       context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'Page-number previews require the inspected input revision.' });
     }
     if (request.draft && !request.expectedRevision) {

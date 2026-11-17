@@ -6,7 +6,7 @@ import { execFile, spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, delimiter, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, delimiter, isAbsolute, join, resolve } from 'node:path';
 
 export class DependencyInstallError extends Error {
   constructor(readonly code: 'npm-unavailable' | 'npm-failed' | 'package-invalid', message: string) { super(message); }
@@ -195,7 +195,7 @@ export type DependencyRebuild = {
  * template/vendor/. Without a package.json, nothing is installed and the bundle covers no packages.
  */
 export async function rebuildTemplateDependencies(template: string, cache: string,
-  options: { npm?: Npm; keep?: number; authoringTypes?: string } = {}): Promise<DependencyRebuild> {
+  options: { npm?: Npm; keep?: number; authoringTypes?: string; authoringSkills?: string } = {}): Promise<DependencyRebuild> {
   const { rebuildDependencies, templateImports } = await import('./dependencies');
   const hasPackage = await stat(join(template, 'package.json')).then((info) => info.isFile(), () => false);
   const imports = await templateImports(template);
@@ -209,6 +209,10 @@ export async function rebuildTemplateDependencies(template: string, cache: strin
   if (options.authoringTypes) {
     const { writeAuthoringSnapshot } = await import('./authoring-sdk');
     await writeAuthoringSnapshot(template, options.authoringTypes);
+  }
+  if (options.authoringSkills) {
+    const { writeAgentSkill } = await import('./authoring-sdk');
+    await writeAgentSkill(dirname(template), options.authoringSkills);
   }
   if (install?.lockfile) await writeFile(join(template, 'package-lock.json'), install.lockfile);
   const manifest = await rebuildDependencies(template, install?.modules ?? join(cache, 'none', 'node_modules'));

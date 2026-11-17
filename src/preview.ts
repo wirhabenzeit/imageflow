@@ -18,8 +18,8 @@ export const makePreviewRequestSchema = (spread: z.ZodType<string, string>) => {
         .describe('A spread or one of its pages.'),
       z.strictObject({ page: z.int().positive().describe('Page number as printed in the book.') })
         .describe('The spread that holds this page. Requires expectedRevision.'),
-      z.strictObject({ spread: spreadId, box: owner.describe('Box ID.'), paddingMm }).describe('A close-up of one box.'),
-      z.strictObject({ spread: spreadId, element: owner.describe('Element ID.'), paddingMm }).describe('A close-up of one element.'),
+      z.strictObject({ spread: spreadId, page: z.enum(['left', 'right']).optional().describe('Facing page of a split sheet.'), box: owner.describe('Box ID.'), paddingMm }).describe('A close-up of one box.'),
+      z.strictObject({ spread: spreadId, page: z.enum(['left', 'right']).optional().describe('Facing page of a split sheet.'), element: owner.describe('Element ID.'), paddingMm }).describe('A close-up of one element.'),
       z.strictObject({ spreads: z.array(spreadId).min(1).max(12).describe('Up to 12 spreads, in order.'),
         columns: z.int().min(1).max(4).default(3).describe('Spreads per row.') })
         .describe('A labelled contact sheet of several spreads.'),
@@ -90,7 +90,7 @@ export function parsePreviewRequest(value: unknown) {
 }
 
 export function artworkTarget(spreads: Pick<SpreadState, 'id'>[], sequence: ReturnType<typeof pageSequence>, target: Exclude<ReturnType<typeof parsePreviewRequest>['target'], { spreads: string[] }>): { index: number; side: PrintSide; page: UnitPages; spread: string } {
-  if ('page' in target) {
+  if ('page' in target && !('spread' in target)) {
     const index = sequence.spreads.findIndex(({ page }) => pageNumbers(page).includes(target.page));
     if (index < 0) throw new PreviewError('preview-target-not-found', 'Page ' + target.page + ' does not exist in this book.');
     const { page } = sequence.spreads[index];
@@ -101,7 +101,7 @@ export function artworkTarget(spreads: Pick<SpreadState, 'id'>[], sequence: Retu
   if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + target.spread + ' does not exist in this book.');
   const { span, page } = sequence.spreads[index];
   // A unit without facing pages is one page; a single-page layout in a facing format is drawn as a spread.
-  const side = ('side' in target ? target.side : undefined) ?? (page.number !== undefined ? 'page' : span === 'page' ? 'spread' : span);
+  const side = ('side' in target ? target.side : 'page' in target ? target.page : undefined) ?? (page.number !== undefined ? 'page' : span === 'page' ? 'spread' : span);
   if (page.number !== undefined) {
     if (side !== 'page') throw new PreviewError('preview-target-not-found', 'Page ' + target.spread + ' has no ' + side + ' side: this format has no facing pages.');
     return { index, side, page, spread: target.spread };

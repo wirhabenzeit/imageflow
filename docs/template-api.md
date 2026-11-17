@@ -20,6 +20,7 @@ This page is generated from the topic files in [`template-api/`](template-api), 
 - [Dependencies](#dependencies): Using npm packages in a template: the saved dependency bundle, licences and network sites.
 - [Render function](#render-function): The pure render(ctx) contract, the render context fields, and photo capture metadata.
 - [Rendered images](#rendered-images): <RenderedImage> for pictures that draw asynchronously, such as WebGL maps, and how check and export wait for them.
+- [SVG maps](#svg-maps): Reuse the template-local maplibre-svg helper: dependency setup, a minimal vector map, projection, labels, attribution and limits.
 - [Click-to-edit](#click-to-edit): ctx.edit(...paths) to make rendered nodes open parameter popovers when clicked.
 - [Anchors](#anchors): Anchors that other spreads refer to (tables of contents, map captions) and the book index of anchors, pages and credits.
 - [Editing UI](#editing-ui): Choosing between generated controls, arranged controls and custom editors, and where each kind of editing happens.
@@ -51,12 +52,12 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 
 - Edit `template/` TSX, CSS and assets directly with your workspace tools.
 - Edit registered Markdown at its source location; linked Markdown stays outside the package.
-- Use `apply_project_changes` for supported spread-level `project.json` and `photos.json` changes. Never edit these manifests while the app is open. Page-addressed mutations are pending: split spreads reject unaddressed commands with `SPREAD_SHOWN_AS_PAGES`, except layout merging through `switch_layout`. Use the editor for individual page edits; see [Page layouts](#page-layouts).
+- Use `apply_project_changes` for supported sheet/page changes in `project.json` and metadata changes in `photos.json`. Never edit these manifests while the app is open. Address split-page content with `page: 'left' | 'right'` beside `spread`; unaddressed content commands return `SPREAD_SHOWN_AS_PAGES`. Insert facing pages with `insert_page_pair`; see [Page layouts](#page-layouts).
 - Copy new content into `inbox/` and call `import_sources`. Then assign the returned IDs with a command batch.
 - Parameter commands use saved scopes: `document`, `spread`, `box` or `element`. An element editor can also own spread parameters; use `scope: 'spread'` for those fields, not `scope: 'element'`.
 - To find the parameter a request means, read each parameter's description with its unit, range and options. Give new parameters a description when their meaning or direction is not obvious from the label.
 - To start or extend a template, read the [package](#package) topic's example table, fetch the closest example with `includeExamples` and copy its layout.
-- For an empty book, inspect `template.openingSpreads` and insert suitable layouts with `insert_spread`. `openingSpreads` describes new-book defaults and is not applied again automatically.
+- For an empty book, inspect `template.openingSpreads` and insert suitable layouts with `insert_spread` or facing page pairs with `insert_page_pair`. `openingSpreads` describes new-book defaults and is not applied again automatically.
 - Use a layout family when layouts are variants of one design (`template.layoutFamilies`; `family` and `variant` on each layout). Pickers should choose by variant tags, not hard-coded IDs. Switch variants with `switch_layout` and the layout ID of the variant ([Layout families](#layout-families)).
 
 ### Verifying
@@ -320,7 +321,11 @@ Opening and closing units in a `single-pages` format use ordinary page layouts t
 
 The editor supports page selection, page settings and source assignment, cropping, inline text and element editors, layout changes, content recovery, Undo, saving/reopening and PDF export. To test a reusable design, place it on both sides, edit just one page, switch or merge layouts, Undo, save/reopen, and export. Test each allowed side in every offered format; synthetic layout fixtures also render page designs on their allowed sides.
 
-MCP page addressing is still pending. Current spread-targeted edit commands reject spreads shown as pages with `SPREAD_SHOWN_AS_PAGES`; `switch_layout` can merge one back into a spread layout. Do not pass an undocumented `page` field to mutation commands. Read-only book context, Book check and rendering can inspect split books, and page findings carry their side. Use the editor for page-level mutations until command support lands. `openingSpreads` can already declare page pairs for new books; see [Template library](#template-library).
+MCP content commands accept `page: 'left' | 'right'` beside the sheet's `spread` ID for split sheets. This applies to parameters (including list items), source assignments, crops, clearing boxes and each endpoint of `swap_content`. `scope: 'spread'` means the selected page's layout parameters when `page` is present. Omit `page` for document parameters, book ends and non-facing units. Unaddressed content commands on split sheets return `SPREAD_SHOWN_AS_PAGES`; page addressing on an unsplit unit is rejected.
+
+Use `switch_layout` with `page` to split a full facing sheet or change its selected side, or choose a spread layout to merge it. The selected side wins when merging. `clear_page` shows a blank side while retaining content for recovery; `swap_pages` exchanges page states if their side restrictions allow it. `insert_page_pair` inserts a sheet with `pages.left` and/or `pages.right`, each with a `definition`, optional `params`, `boxes` and `elements`; an omitted side is blank. It supports `after` and `ref` like `insert_spread`. Whole-sheet duplicate, move and remove commands also work on split sheets. All commands retain the normal revision checks, atomic batches, drafts and shared Undo.
+
+`inspect_book(view: 'parameters')` returns `pageDeclarations.left/right` for a split sheet (null for a blank page), beside its saved `pages` values. It does not label hidden spread declarations as visible. Element inspection accepts `page`; whole-sheet inspection includes each measured node's page. Detail previews use `{ spread, page, box }` or `{ spread, page, element }`, so identical IDs on facing pages stay separate. Whole-page preview targets still use `{ spread, side }`, or a physical `{ page: number }` with `expectedRevision`.
 
 ## Parameters
 
@@ -465,7 +470,7 @@ The template and the format each have one job. The template offers layouts with 
 
 - **Page sequence.** A book that breaks the rule gets a `page-sequence` error naming the first or last spread, with the span to switch it to. Export asks for confirmation before saving a PDF with these errors. A book of only its opening page is reported as missing its closing page.
 - **`delivery` and `ends`.** Single end pages need page delivery: `delivery: 'spreads'` with `ends: 'single-pages'` is a schema error, because a PDF of whole spreads cannot open on a single right page. `printFormat` defaults `ends` to `'inside-covers'` when `delivery` is `'spreads'`, else to `'single-pages'`. `right` and `left` layouts fit only formats with `ends: 'single-pages'` and `delivery: 'pages'`; in other formats they are filtered and reported like `span: 'page'` layouts.
-- **Editor.** With `'single-pages'`, nothing is inserted before the opening page or after the closing page, spreads do not move into or out of the end positions, and the end pages are not duplicated. The layout picker at the first and last positions offers page layouts allowed on that side and compatible legacy `right`/`left` layouts. An empty book starts with a layout allowed on the right. Removing an end spread stays possible and is reported by the page sequence. MCP page addressing and page-pair insertion remain pending; existing spread-based commands `insert_spread`, `duplicate_spread` and `move_spread` follow the same rules and fail with `INVALID_POSITION`; `switch_layout` fails with `INCOMPATIBLE_LAYOUT` naming the span the position requires.
+- **Editor.** With `'single-pages'`, nothing is inserted before the opening page or after the closing page, spreads do not move into or out of the end positions, and the end pages are not duplicated. The layout picker at the first and last positions offers page layouts allowed on that side and compatible legacy `right`/`left` layouts. An empty book starts with a layout allowed on the right. Removing an end spread stays possible and is reported by the page sequence. MCP supports page-addressed edits and `insert_page_pair` (see [Page layouts](#page-layouts)); whole-sheet commands `insert_spread`, `duplicate_spread` and `move_spread` follow the same rules and fail with `INVALID_POSITION`; `switch_layout` fails with `INCOMPATIBLE_LAYOUT` naming the span the position requires.
 - **Declaration check.** A template with a `'single-pages'` format but no layout allowed on the right or no layout allowed on the left loads with a `declaration-ends-missing` warning.
 - **Opening spreads** may be only the start of a book, so full spreads may come first or last among them; single pages must still be at their own end.
 
@@ -583,7 +588,7 @@ defineTemplate({
 - **The picker** runs in a sandboxed frame with the template's CSS, as a labelled settings field. Prefer compact controls, such as a segmented choice for two grid sizes, over preview illustrations; build them from [`<Choice>`](#app-controls) so they match the settings around them. Each `choose(id)` immediately switches layouts as one Undo step; `commit()` applies the current choice and `cancel()` leaves the controls. Undo reverts an applied choice. It receives `variants` (each with `id`, `label` and its `variant` tags), `current` (the variant chosen in the draft), `saved` (the spread's layout), `choose(id)`, `find(tags)` (the first variant whose tags include all the given ones, or `undefined`), `document`, `format`, `readOnly`, `commit()` and `cancel()`.
 - **Only declared variants:** `choose` with anything other than a variant ID of the family changes nothing and the inline picker reports the invalid choice. A picker with several independent choices decides itself what a combination without a variant does, for example by disabling that option or choosing the nearest variant: `find({ size: '3x3', text: true }) ?? find({ size: '3x3' })`. Prefer tags over hard-coded IDs, so a new variant needs only a new layout.
 - **Changes from elsewhere:** the controls keep their frame and measured height while their saved layout and document context follow the book. While the book reloads or cannot be edited, the controls are disabled; messages from stale declarations cannot change the book.
-- **Agents and commands** keep switching spread layouts by ID with `switch_layout`; page-addressed mutations are still pending, so use the editor for page family changes. `get_authoring_context` reports `layoutFamilies`, and `family` and `variant` on each layout, so agents see the same grouping.
+- **Agents and commands** switch layout variants by ID with `switch_layout`; include `page: 'left' | 'right'` for a page family on a split sheet. `get_authoring_context` reports `layoutFamilies`, and `family` and `variant` on each layout, so agents see the same grouping.
 - **Page families:** page designs can form families too. The picker shows the selected page's variant and changes only that page. Families contain only spread layouts or only page layouts; every page variant allows the same sides.
 - **Scope today:** a finite list of explicitly declared variants, controlled from the sidebar's spread settings. The set of boxes is never derived from parameters, and unbounded counts (rows 1 to n) are not supported.
 
@@ -623,6 +628,8 @@ A book never contains installed packages, so it stays small: a `template/node_mo
 - **Purity still applies:** a library may run freely in an [element editor](#element-editors). In a layout, asynchronous or GPU work such as drawing a map runs inside a [`<RenderedImage>`](#rendered-images); `render` itself stays synchronous ([Render function](#render-function)).
 - **Stylesheets:** a package's CSS is bundled with the template's own, and inline `data:` images in it stay inline.
 - Licences: `vendor/LICENSES/` holds each bundled package's licence file. Keep it when you share the template.
+
+Rebuilding explicitly in the app or through MCP also refreshes the book's generated `.imageflow-sdk/` and `.claude/skills/imageflow-templates/` from the installed app, including removal of obsolete generated references. These folders are generated tooling; keep personal instructions elsewhere. Opening a book does not rewrite them. After updating ImageFlow, rebuild once to update local editor types and agent guidance; MCP reference topics always come from the installed app.
 
 ## Render function
 
@@ -714,6 +721,70 @@ import { RenderedImage } from 'imageflow';
 - **Failure:** throw or reject with a message, such as `Error('The map style could not be loaded.')`. The box shows the message, and the Book check reports `rendered-image-failed` for the element, so export stops instead of printing the page without its picture. Decide readiness yourself: the starter's map resolves on MapLibre's `idle` event and rejects on any `error` event, so a style or tile that failed to load fails the picture.
 - **Network:** `draw` may reach the template's declared [`network`](#element-editors) origins once the user has allowed them; otherwise its requests are blocked and the picture fails. Its requests, WebGL contexts, workers and timers are not `render-impure`.
 - `label` names the picture in messages (default `'Picture'`); `alt`, `className` and `style` apply to the box, whose class is `if-rendered-image` with `data-rendered="pending" | "ready" | "failed"`.
+
+For a reusable map helper and vector-map example, see [SVG maps](#svg-maps).
+
+## SVG maps
+
+For a printable map, use `<RenderedImage output="vector">` with the starter template's `maplibre-svg` package. This is a template-local dependency, not an export of `imageflow` or a package to fetch from npm. The complete implementation is in `sample/starter/template/map.tsx`; `map-styles.ts` supplies palettes, contour tiles and attribution.
+
+### Reuse the helper
+
+Copy `sample/starter/template/packages/maplibre-svg/` into your template's `packages/maplibre-svg/`. Add `"maplibre-svg": "file:packages/maplibre-svg"` and the starter's pinned `maplibre-gl` version to `template/package.json` dependencies, then call `rebuild_dependencies`. Do not run npm install inside the template. The rebuild bundles the helper's TypeScript source and its declarations; no package build is needed. See [Dependencies](#dependencies).
+
+Declare every style, tile, glyph and sprite origin in the template's `network`. The example below uses OpenFreeMap; a style with additional providers needs their origins too. Preserve the provider's attribution in the printed page or collect it through layout `credits` and `ctx.book.credits` ([Credits](#credits)).
+
+### Minimal map element
+
+This render fragment assumes a declared `map` element and a template with `network: ['https://tiles.openfreemap.org']`. Use it inside `<Page>` for a `page()` layout. Use the appropriate spread rectangle inside `<Spread>` for a spread layout.
+
+```tsx
+import { fonts, Page, RenderedImage } from 'imageflow';
+import { drawMapSvg, projector } from 'maplibre-svg';
+
+// The page must use this bundled font family (replace it with your own).
+const labelFamily = 'Field Serif';
+const safe = ctx.geometry.page('safe');
+const rect = { ...safe, height: safe.height - 8 }; // reserve attribution space
+const centre = { longitude: 17.75, latitude: 69.35, zoom: 8.5 };
+const cssPerMm = 96 / 25.4;
+const view = { ...centre, width: rect.width * cssPerMm, height: rect.height * cssPerMm };
+const marker = projector(view)([17.75, 69.35]);
+
+return <Page style={{ fontFamily: labelFamily }}>
+  <ctx.Element id="map" rect={rect}>
+    <RenderedImage label="Map" output="vector" inputs={view}
+      style={{ position: 'absolute', inset: 0 }}
+      draw={async ({ signal }) => {
+        const module = await import('maplibre-gl');
+        return drawMapSvg({
+          maplibre: module.default ?? module,
+          style: 'https://tiles.openfreemap.org/styles/positron', view, signal,
+          // Inherit a bundled font from the page; omit characters it cannot set.
+          text: label => fonts.settable(label, { family: labelFamily }),
+        });
+      }} />
+    <svg viewBox={`0 0 ${view.width} ${view.height}`}
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+      <circle cx={marker[0]} cy={marker[1]} r="4" fill="#c8432b" />
+    </svg>
+  </ctx.Element>
+  <p style={{ ...ctx.geometry.css({ ...safe, y: safe.y + rect.height + 2, height: 6 }), margin: 0, fontSize: '8pt' }}>© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors</p>
+</Page>;
+```
+
+For the fonts helper's family/style arguments, see [Fonts and output](#fonts-and-output). Keep every changing draw input (including style and label options) in `inputs`. The marker and basemap must share the same view. The starter's editor saves longitude, latitude and print zoom as normal element parameters; an inset map on a split sheet is edited through MCP with the sheet ID and `page: 'left'` or `'right'`.
+
+### Helper API and limits
+
+- `drawMapSvg({ maplibre, style, view, signal?, ...options })` loads an off-screen MapLibre map, waits for tiles and label placement, returns SVG markup and releases the map. Tile/style failures reject; pass the host's abort signal.
+- `mapToSvg(map, view, options?)` converts an already loaded, idle map.
+- `projector(view)([longitude, latitude])` maps coordinates to the SVG's CSS-pixel viewBox. `view` contains longitude, latitude, zoom, width and height; size is CSS pixels at 96 per inch, not millimetres.
+- Options: `font(stack)` chooses label classes/faces, `text(label, stack)` filters label text, `color(color, use)` maps paints (including CSS variables), `layers(layer)` filters layers, `avoid: [{ at: [longitude, latitude], radius }]` suppresses nearby basemap labels, and `className` styles the SVG root. Radius is CSS pixels.
+
+The helper draws backgrounds, fills, flat extrusions, lines and symbol text. It omits icons, fill patterns, raster imagery, hillshade, line offsets and blur. It uses MapLibre's internal feature/style data, so keep the tested dependency version pinned and verify before upgrading. It does not provide a general rotated or pitched camera. Tracks, markers, custom labels and insets belong in your layout as SVG overlays. The starter demonstrates label fonts, terrain contours and theme-aware palettes.
+
+Run `check_book` with `typescript: true`, then inspect page previews and export a PDF to check vector paths, labels, attribution and bundled fonts. MCP Book check does not run PDF print preflight. See [Rendered images](#rendered-images) for host SVG handling, font limitations, caching and failures.
 
 ## Click-to-edit
 
@@ -817,7 +888,7 @@ map: spread({
 
 IDs are whitespace-free tokens; a declaration with spaces in its ID is rejected. `side: 'left' | 'right'` credits only that page of a two-page spread, such as an inset map on the right page (`{ id: 'openstreetmap', text: '…', side: 'right' }`); without it, the credit covers both pages. When a later spread declares an ID with other `text` or `url` than the first, the book keeps the first and the Book check warns `credit-conflict` on that spread and page when applicable, so give different credits their own IDs, such as `'photo-' + photo.credit`.
 
-Mark the node that prints credits with `data-credits` and their IDs, space-separated, such as `data-credits={ctx.book.credits.map(({ id }) => id).join(' ')}`. When the whole book renders, the Book check warns `credit-unprinted` for each credit the book uses that no page marks, on the first spread that uses it, so moving credits off the maps onto a credits page never loses them. The starter prints its map credits at the foot of its last page, the Picture list, which is the only layout it offers there.
+Mark the node that prints credits with `data-credits` and their IDs, space-separated, such as `data-credits={ctx.book.credits.map(({ id }) => id).join(' ')}`. When the whole book renders, the Book check warns `credit-unprinted` for each credit the book uses that no page marks, on the first spread that uses it, so moving credits off the maps onto a credits page never loses them. The starter prints one consolidated map-resource attribution at the foot of its last page, the Picture list, which is the only layout it offers there. It prints each resource text once without page numbers; page usage remains available in the structured index for diagnostics. Terrain attribution is included only when a map style uses it.
 
 ## Editing UI
 
@@ -890,6 +961,8 @@ elements: { grid: {
 - **Scope today:** the element's parameters and the layout parameters it lists, shown in a non-modal panel (`presentation: 'dialog'`, the default) or [on the page](#editing-on-the-page) (`presentation: 'inline'`); a sidebar placement is not available yet. Editors can read files of file parameters with `file()`, and reach remote resources only through `network`. The photobook starter's **Map** layout has a reference editor (below). The file-control smoke test uses a separate route editor fixture (`scripts/fixtures/route.tsx`) to check choosing a track and framing its viewport together.
 
 The **Map** layout (`sample/starter/template/map.tsx`) is the full-capability example ([ADR 0006](https://github.com/wirhabenzeit/imageflow/blob/main/docs/decisions/0006-template-capabilities.md)). The map uses OpenFreeMap tiles, declared in `network`, in book styles drawn for print (in `map-styles.ts`: quiet palettes without icons, place names in the book's fonts) and OpenFreeMap's own Liberty, Bright and Positron. The default, Book, follows the book's colour theme: its SVG names each colour by its palette role as a CSS variable (`maplibre-svg`'s `color` option), and the map element sets the variables from the theme's palette, so switching between the light and the dark theme recolours the map without drawing it again; Lines follows the theme too, in the page's own colour variables (ink, muted, rule, accent and paper): contour lines of the terrain, shores, rivers, roads and borders as lines, water as a faint wash, for a map that sits on the page. Its contours come from Mapterhorn's open terrain tiles (also declared in `network`, credited in the attribution), which the `maplibre-contour` package turns into contour lines inside MapLibre, so they print as vector paths too; it is the default of the **Inset map** layout, which insets the map inside a single page's margins and can face a story or any other page design. Paper, Ink, Atlas and Night are fixed palettes. A line layer on areas (a shore, say) leaves out the edges where tiles cut the area, and area fills get a hairline of their own colour so their tile edges never show as seams. Its editor runs MapLibre GL from the saved dependency bundle, shows the same palette with real colours, and is shown [on the page](#editing-on-the-page): dragging and zooming frame the map in its printed place, with the tracks, the attribution and the map title where the page draws them. It owns the view (longitude, latitude and a print zoom that is independent of the screen size), saved as ordinary parameters as you move it; its list of GPX tracks (each with a colour and a label), the style and the track width are generated controls in its toolbar, where the list is a *Tracks (n)* button that opens it. A button beside the zoom buttons fits the view to all tracks. The layout draws the map with a [`<RenderedImage output="vector">`](#rendered-images) through `maplibre-svg`, a small package in the template's `packages/` folder ([dependencies](#dependencies), linked with `file:`): MapLibre loads the style and tiles and places the labels off screen, and `drawMapSvg` writes the drawn features out as SVG paths, and labels the page sets in the book's fonts (a class per label role, styled in `styles.css`, with `fonts.settable` keeping only what those fonts can set). Icons, fill patterns and raster relief are left out. The package draws only the base map; what the book adds goes on top in the layout, drawn with `projector(view)` from the same package so it lines up: the starter's GPX tracks, and in your own template markers, names or insets. `avoid` keeps the base map's labels clear of such markers, and `layers` leaves style layers out. A map that cannot be drawn, for example because the map server is down, fails the Book check with `rendered-image-failed`.
+
+For setup, a minimal vector map, helper options and supported layers, see [SVG maps](#svg-maps).
 
 ## Document editors
 
@@ -1197,7 +1270,7 @@ A spread shown as two pages stores `split: true` and `pages.left`/`pages.right`,
 
 The same `hero` ID on the left and right is two assignments, addressed by page. A layout switch can move a whole box state, including focus, box parameters and per-layout crops, between these states. See [Switching layouts](#switching-layouts) for matching, memory and replacement rules.
 
-Any stored page state, split sheet or displaced content requires book `schemaVersion: 2`. Books without them remain format 1. Older apps refuse format 2 rather than dropping page data. Never edit manifests directly while the book is open; current MCP mutation commands do not yet address page states, so use the editor for these edits.
+Any stored page state, split sheet or displaced content requires book `schemaVersion: 2`. Books without them remain format 1. Older apps refuse format 2 rather than dropping page data. Never edit manifests directly while the book is open; use page-addressed MCP commands for these edits ([Page layouts](#page-layouts)).
 
 Template `openingSpreads` may also declare page pairs for new books. Those declarations use `layout` and optional `params` per side; the created project stores them as `pages` with `definition`, alongside `split: true`. See [Template library](#template-library).
 
@@ -1253,7 +1326,7 @@ The API is the in-process `imageflow` template module. There is no documented pu
 
 The canonical SDK is `authoring/`. `npm run generate:authoring` generates standalone snapshots for both shipped templates; the build runs it automatically. Their tiny `tsconfig.json` extends `./.imageflow-sdk/tsconfig.json`. No template maintains a declaration copy or synchronization test.
 
-Creating a book writes the installed SDK into `template/.imageflow-sdk/`, and the installed agent skill, with this reference and the examples, into `.claude/skills/imageflow-templates/` at the book's root, where Claude Code and other agents that read project skills find it. The skill is written only when a book is created; it is not a book input and not part of the template. Rebuilding the template's dependencies (the `rebuild_dependencies` agent tool or **Templates → Rebuild Template Dependencies**) refreshes the SDK snapshot from the installed app, so an older book's editors and standalone checks see current declarations. Exporting a template includes a fresh snapshot in the archive for external authoring, without changing its source folder. App import discards all archive-supplied SDK folders, at any depth; new books and subsequent exports use the installed SDK instead. Existing books are never rewritten when opened. The snapshot includes React declarations (the host's React, including React's component, ref and context types that package declarations name), a standalone TypeScript configuration and `api.json` identifying contract 1 and the SDK content digest. Outside ImageFlow, run `tsc -p .imageflow-sdk/tsconfig.json`, or extend that configuration from your own `tsconfig.json`.
+Creating a book writes the installed SDK into `template/.imageflow-sdk/`, and the installed agent skill, with this reference and the examples, into `.claude/skills/imageflow-templates/` at the book's root, where Claude Code and other agents that read project skills find it. The skill is generated tooling; it is not a book input and not part of the template. Rebuilding the template's dependencies (the `rebuild_dependencies` agent tool or **Templates → Rebuild Template Dependencies**) refreshes both the SDK snapshot and the generated agent skill from the installed app, so an older book's editors, standalone checks and local agent references use the current API. Exporting a template includes a fresh snapshot in the archive for external authoring, without changing its source folder. App import discards all archive-supplied SDK folders, at any depth; new books and subsequent exports use the installed SDK instead. Existing books are never rewritten when opened. The snapshot includes React declarations (the host's React, including React's component, ref and context types that package declarations name), a standalone TypeScript configuration and `api.json` identifying contract 1 and the SDK content digest. Outside ImageFlow, run `tsc -p .imageflow-sdk/tsconfig.json`, or extend that configuration from your own `tsconfig.json`.
 
 `.imageflow-sdk/` is reserved for generated tooling. It is excluded from template hashes, saved-input revisions and runtime imports; the app always checks against its installed SDK. Authored source and other declaration files remain part of template identity. An export may contain different tooling bytes after an app update while retaining the same authored-template hash.
 
