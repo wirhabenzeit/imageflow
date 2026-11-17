@@ -25,15 +25,16 @@ type Conflict = { reason: 'changed' | 'older' | 'built-in' | 'replaced-meanwhile
 /**
  * Why saving `plan` needs the agent to name the entry it replaces, or undefined when it may save at once: a newer
  * version of an imported entry, or a new ID. Replacing a built-in template, the same version with other files or a
- * later version needs `replaceHash` to match the current entry.
+ * later version needs `replaceHash` to match the current entry. When supplied, it must also match for an upgrade.
  */
 function conflict(plan: ImportPlan, replaceHash: string | undefined): Conflict | undefined {
   const current = plan.current;
   if (!current || plan.kind === 'same') return undefined;
+  if (replaceHash && replaceHash !== current.hash) return { reason: 'replaced-meanwhile', current };
   const reason = current.source === 'built-in' ? 'built-in' : plan.kind === 'changed' || plan.kind === 'older' ? plan.kind : undefined;
   if (!reason) return undefined;
   if (replaceHash === current.hash) return undefined;
-  return { reason: replaceHash ? 'replaced-meanwhile' : reason, current };
+  return { reason, current };
 }
 
 const conflictMessages: Record<Conflict['reason'], string> = {
@@ -52,7 +53,7 @@ export async function saveTemplateToLibrary(library: TemplateLibrary, folder: st
   signal.throwIfAborted();
   let decided: { plan: ImportPlan; conflict?: Conflict } | undefined;
   const result = await library.import(folder, async () => true, async (plan) => {
-    // The library asks before every save that changes it, with the plan it commits: the decision uses that plan.
+    // The library repeats this decision if the entry changes before the queued commit.
     decided = { plan, conflict: conflict(plan, replaceHash) };
     return !decided.conflict && !signal.aborted;
   });

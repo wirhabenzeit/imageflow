@@ -104,6 +104,58 @@ test('other files under the same version, an older version and a built-in ID con
   } finally { await done(); }
 });
 
+test('a newer version still rejects a stale replaceHash', async () => {
+  const { library, book, done } = await setup();
+  try {
+    await template(book, { id: 'travel', version: '1' });
+    await save(library, book);
+    const current = (await library.list()).find(({ id }) => id === 'travel')!;
+    await template(book, { id: 'travel', version: '2' });
+    const stale = await save(library, book, 'f'.repeat(64));
+    assert.equal(stale.status, 'conflict');
+    assert.equal('reason' in stale && stale.reason, 'replaced-meanwhile');
+    assert.equal('current' in stale && stale.current?.hash, current.hash);
+    assert.equal((await library.list()).find(({ id }) => id === 'travel')!.hash, current.hash);
+    assert.equal((await save(library, book, current.hash)).status, 'replaced');
+  } finally { await done(); }
+});
+
+test('concurrent saves reconsider conflicts against the entry that actually won', async () => {
+  // Cover both a new ID and upgrades, with and without explicit permission to replace the original entry.
+  for (const mode of ['new', 'upgrade', 'replace'] as const) {
+    const { library, book, work, done } = await setup();
+    try {
+      let replaceHash: string | undefined;
+      if (mode !== 'new') {
+        await template(book, { id: 'travel', version: '1' });
+        await save(library, book);
+        if (mode === 'replace') replaceHash = (await library.list()).find(({ id }) => id === 'travel')!.hash;
+      }
+      await template(book, { id: 'travel', version: '2', extra: 'first book' });
+      const other = await template(join(work, 'other'), { id: 'travel', version: '2', extra: 'second book' });
+      // Both requests finish planning against the same entry before either can proceed to commit.
+      const plan = library.plan.bind(library);
+      let planned = 0;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      library.plan = async (folder) => {
+        const result = await plan(folder);
+        if (++planned === 2) release();
+        await gate;
+        return result;
+      };
+      const results = await Promise.all([save(library, book, replaceHash), save(library, other, replaceHash)]);
+      const winner = results.find((result) => result.status === (mode === 'new' ? 'saved' : 'replaced'))!;
+      const loser = results.find((result) => result.status === 'conflict')!;
+      assert.ok(winner, mode);
+      assert.ok(loser, mode);
+      assert.equal('reason' in loser && loser.reason, mode === 'replace' ? 'replaced-meanwhile' : 'changed');
+      assert.equal('current' in loser && loser.current?.hash, winner.template.hash);
+      assert.equal((await library.list()).find(({ id }) => id === 'travel')!.hash, winner.template.hash);
+    } finally { await done(); }
+  }
+});
+
 test('a template that fails to load is an error with its diagnostics', async () => {
   const { library, book, done } = await setup();
   try {

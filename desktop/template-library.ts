@@ -353,27 +353,37 @@ export class TemplateLibrary {
 
   private async importFolder(folder: string, source: string, confirm: (plan: ImportPlan) => Promise<boolean>,
     review?: (plan: ImportPlan) => Promise<boolean>): Promise<ImportResult> {
-    let plan: ImportPlan;
-    try { plan = await this.plan(folder); }
-    catch (error) {
-      return { source, status: 'failed', message: error instanceof Error ? error.message : String(error),
-        details: error instanceof TemplateImportError ? error.details : [] };
+    // Confirmation may open a dialog, so it runs outside the write queue. Check its target again inside the queue;
+    // if another import or removal won the race, make a fresh plan and ask again before replacing anything.
+    for (;;) {
+      let plan: ImportPlan;
+      try { plan = await this.plan(folder); }
+      catch (error) {
+        return { source, status: 'failed', message: error instanceof Error ? error.message : String(error),
+          details: error instanceof TemplateImportError ? error.details : [] };
+      }
+      const { info } = plan;
+      const named = { id: info.id, label: info.label ?? info.id, version: info.version };
+      if (plan.kind === 'same') return { source, status: 'unchanged', ...named };
+      if ((plan.kind === 'changed' || plan.kind === 'older') && !await confirm(plan)) return { source, status: 'cancelled', ...named };
+      if (review && !await review(plan)) return { source, status: 'cancelled', ...named };
+      const replaced = !!plan.current && plan.current.source === 'imported';
+      const task = this.writes.then(async () => {
+        await this.loadBuiltIns();
+        const current = (await this.userEntries()).find(({ entry }) => entry.id === info.id)?.entry ?? this.builtIns.get(info.id!)?.entry;
+        if (current?.hash !== plan.current?.hash || current?.source !== plan.current?.source) return false;
+        await this.commit(folder, source, info, plan.hash);
+        return true;
+      });
+      this.writes = task.then(() => {}, () => {});
+      try { if (!await task) continue; }
+      catch (error) {
+        return { source, status: 'failed', ...named, message: error instanceof Error ? error.message : String(error),
+          details: error instanceof TemplateImportError ? error.details : [] };
+      }
+      this.changed();
+      return { source, status: replaced ? 'replaced' : 'imported', ...named };
     }
-    const { info } = plan;
-    const named = { id: info.id, label: info.label ?? info.id, version: info.version };
-    if (plan.kind === 'same') return { source, status: 'unchanged', ...named };
-    if ((plan.kind === 'changed' || plan.kind === 'older') && !await confirm(plan)) return { source, status: 'cancelled', ...named };
-    if (review && !await review(plan)) return { source, status: 'cancelled', ...named };
-    const replaced = !!plan.current && plan.current.source === 'imported';
-    const task = this.writes.then(() => this.commit(folder, source, info, plan.hash));
-    this.writes = task.catch(() => {});
-    try { await task; }
-    catch (error) {
-      return { source, status: 'failed', ...named, message: error instanceof Error ? error.message : String(error),
-        details: error instanceof TemplateImportError ? error.details : [] };
-    }
-    this.changed();
-    return { source, status: replaced ? 'replaced' : 'imported', ...named };
   }
 
   // Copies into a staging folder inside the library, checks the copy again, and swaps it in. A failure leaves the
