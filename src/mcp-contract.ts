@@ -94,6 +94,12 @@ export const mcpToolSchemas = {
     dryRun: z.boolean().default(false).describe('Validate and report the changes without saving them.'),
   }),
   rebuild_dependencies: z.strictObject({ project }),
+  list_templates: z.strictObject({}),
+  save_template_to_library: z.strictObject({
+    project,
+    replaceHash: z.string().regex(/^[a-f0-9]{64}$/, 'Expected a template hash from list_templates.').optional()
+      .describe('Hash of the library entry with the same ID that this save may replace, from list_templates or a conflict result. Needed to replace a built-in template, the same version with other files, or a later version.'),
+  }),
   import_sources: z.discriminatedUnion('kind', [
     z.strictObject({ ...importFields, kind: z.literal('photo').describe('Import photos (.jpg, .jpeg, .png or .webp).') }),
     z.strictObject({ ...importFields, kind: z.literal('markdown').describe('Import Markdown texts (.md).') }),
@@ -118,6 +124,10 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
     description: 'Save a batch of project commands (spreads, layouts, parameters, sources, crops, photo metadata) atomically as one named Undo step. Use it for project.json and photos.json instead of editing them.' },
   { name: 'rebuild_dependencies', title: 'Rebuild template dependencies', readOnly: false,
     description: 'Install the npm packages listed in template/package.json outside the book, in a cache ImageFlow manages, and bundle the ones the template imports into template/vendor/, which is all the book renders. Call it after changing template/package.json or adding a package import; never run npm install in template/. A long install answers state "installing": call again until it is "ready", then check_book.' },
+  { name: 'list_templates', title: 'List library templates', readOnly: true,
+    description: 'List the templates new books are made from: built-in and imported entries with ID, version, hash, formats, layouts, packages and network sites. Compare hashes with a book\'s templateIdentity.' },
+  { name: 'save_template_to_library', title: 'Save template to library', readOnly: false,
+    description: 'Validate a book\'s template/ folder and save it into the template library, so New Book offers it. Raise version for a changed template. A conflict result names the entry it would replace; pass its hash as replaceHash only when the user wants it replaced.' },
   { name: 'import_sources', title: 'Import sources', readOnly: false,
     description: 'Register files you copied into the book\'s inbox/ folder as photos, Markdown texts or files, and return their source IDs for assign_source or file parameters.' },
 ];

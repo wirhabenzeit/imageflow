@@ -221,6 +221,29 @@ test('imports are reviewed with their packages and network sites, and a declined
   } finally { await done(); }
 });
 
+test('an import rechecks replacement permission when another import finishes during review', { timeout: 5000 }, async () => {
+  const { work, library, done } = await setup();
+  try {
+    const original = await template(work, 'original', { id: 'travel', version: '1' });
+    const candidate = await template(work, 'candidate', { id: 'travel', version: '2' });
+    const newer = await template(work, 'newer', { id: 'travel', version: '3' });
+    await library.import(original, no);
+    const confirmations: string[] = [];
+    const result = await library.import(candidate, async (plan) => {
+      confirmations.push(plan.current!.version);
+      return false;
+    }, async () => {
+      // A review must not hold the write queue: library reads and another import can finish while it is open.
+      assert.equal((await library.list()).find(({ id }) => id === 'travel')!.version, '1');
+      assert.equal((await library.import(newer, no)).status, 'replaced');
+      return true;
+    });
+    assert.equal(result.status, 'cancelled');
+    assert.deepEqual(confirmations, ['3']);
+    assert.equal((await library.list()).find(({ id }) => id === 'travel')!.version, '3');
+  } finally { await done(); }
+});
+
 const jpeg = (width: number, height: number) => sharp({ create: { width, height, channels: 3, background: '#557' } }).jpeg().toBuffer();
 
 test('entries carry the preview image, a saved render of the opening spread, and the shape to crop the image to', async () => {
