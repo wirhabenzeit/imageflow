@@ -120,7 +120,11 @@ try {
     } else {
       await run('calendar-edit', async () => { const frame = page.frameLocator('iframe.inline-editor-frame'); await frame.locator('.days-on-page li button').nth(10).evaluate(node => node.click()); });
     }
-    await run('close-inline-editor', async () => { await page.keyboard.press('Escape'); });
+    // Escape first closes an open dialog of the editor, such as the map's Tracks, then the editor itself.
+    await run('close-inline-editor', async () => {
+      for (let i = 0; i < 3 && await page.locator('.inline-editor').count(); i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(200); }
+      await page.locator('.inline-editor').waitFor({ state: 'detached' });
+    });
     if (sample === 'calendar') {
       await menuAction(app, 'Grid');
       for (let i = 0; i < 4; i++) await menuAction(app, 'Zoom Out');

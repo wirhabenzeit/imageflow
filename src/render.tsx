@@ -1549,6 +1549,14 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
 
 export async function startRender(root: HTMLElement) {
   let info: TemplateInfo | undefined;
+  // Profiling builds time each step of a render as imageflow.render.<step>, from the end of the previous step.
+  let stepStart = performance.now();
+  const step = (name: string) => {
+    if (!import.meta.env.IMAGEFLOW_PROFILE) return;
+    const now = performance.now();
+    performance.measure('imageflow.render.' + name, { start: stepStart, end: now });
+    stepStart = now;
+  };
   // The editor reports which part of the book frame is on screen, and how many grid columns the book view uses (0 for
   // one column). Listen before anything slow happens and ask once, because the editor's first report may otherwise
   // arrive before this script runs.
@@ -1572,6 +1580,7 @@ export async function startRender(root: HTMLElement) {
     const response = await fetch(location.pathname + '/data');
     if (!response.ok) throw new Error('Could not load the project. Reload and try again.');
     const book: RenderProject = await response.json();
+    step('data');
     document.title = book.project.title;
     const base = document.createElement('base');
     base.href = new URL('./', book.template.script).href;
@@ -1608,6 +1617,7 @@ export async function startRender(root: HTMLElement) {
     }
     const format = resolveFormat(template.format);
     const query = new URLSearchParams(location.search);
+    step('template');
     if (book.mode === 'edit') {
       const focus = () => post({ type: 'editor-focus', text: document.activeElement instanceof HTMLElement &&
         (document.activeElement.isContentEditable || document.activeElement.matches('textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"])')) });
@@ -1669,6 +1679,7 @@ export async function startRender(root: HTMLElement) {
     if (edit) root.className = 'if-preview';
     const lookups = new Map<string, AnchorLookup>();
     const index = { ...bookIndex(book, template, sequence), lookups };
+    step('index');
 
     let renderError: unknown;
     const layoutFailures = new Map<string, Failure>();
@@ -1680,6 +1691,7 @@ export async function startRender(root: HTMLElement) {
         {edit ? view : <LayoutBoundary spread={spread.id} failures={layoutFailures}>{view}</LayoutBoundary>}
       </div>;
     })));
+    step('react');
     if (renderError) throw renderError;
     if (layoutFailures.size) throw new LayoutRenderError(layoutFailures);
     if (textEditor) {
@@ -1702,10 +1714,12 @@ export async function startRender(root: HTMLElement) {
     const pictureFailures = present || lazy || (edit && view !== 'book') ? [] : await settleRenderedImages();
     // A replacement frame shows unchanged pictures from the cache at once, not a placeholder that redraws them.
     if ((edit && (view === 'thumbs' || view === 'book')) || present) await settleRestoredImages();
+    step('pictures');
     // Presentation waits for the visible crop's photos below. SVG photos elsewhere in the book use detached
     // decode proxies that Chromium may never resolve while the candidate frame is hidden.
     const images = present ? [] : decodable(root);
     const decoded = await settle(images);
+    step('decode');
     const message = (text: string): Issue => ({ message: text });
     const located = (spread: string, text: string): Issue => ({ message: text, spread, where: where[spreads.findIndex(({ id }) => id === spread)] });
     // A control the generated controls could hide for good is fine on a spread that also marks it as editable on
@@ -1835,6 +1849,7 @@ export async function startRender(root: HTMLElement) {
       errors.push({ ...message('Font ' + family + ' could not be loaded; text using it renders with a fallback font.'), code: 'font-load-failed',
         details: { family }, suggestion: 'Check the @font-face src path in the template CSS and that the font file exists inside template/.' });
     }
+    step('findings');
     const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
     const layouts = new Map(visible.map(({ spread, i }, n) => {
       try { return [spread.id, validateSpread(containers[n], spread, template, format, where[i], warnings, errors)] as const; }
@@ -1846,6 +1861,7 @@ export async function startRender(root: HTMLElement) {
     }));
     if (layoutFailures.size) throw new LayoutRenderError(layoutFailures);
     const validated = layouts as Map<string, NonNullable<ReturnType<typeof validateSpread>>>;
+    step('validate');
     for (const [source, chain] of activeChains) {
       const first = chain[0];
       if (book.texts[source] === undefined) {
@@ -1865,6 +1881,7 @@ export async function startRender(root: HTMLElement) {
             ' to it so the flow continues, or enlarge the boxes, reduce the text size or shorten the text.' });
       }
     }
+    step('flow');
     const minimum = template.format.output.minimumTextSize;
     for (const [spread, { sheet }] of present ? [] : validated) {
       const minimumMm = minimum && toMillimeters(minimum);
@@ -1916,6 +1933,7 @@ export async function startRender(root: HTMLElement) {
             'or let the first block push the second down instead of positioning both absolutely.' });
       }
     }
+    step('text-checks');
     const sheets = [...validated.values()].map(({ sheet }) => sheet);
     let inspection: ElementInspection | undefined;
     if (inspect) {
@@ -1924,6 +1942,7 @@ export async function startRender(root: HTMLElement) {
       inspection = inspectElements(sheets[index], spreads[index], template, format, inspect);
     }
     if (edit) setGrid = layoutBook(root, [...validated].map(([spread, { sheet }]) => ({ spread, sheet })), view, format, grid);
+    step('layout');
     if (present) await renderPresentation(root, sheets, spreads, sequence, format, presentationStart);
     else if (lazy) {
       const load = photoLoader(root, () => onScreen);
@@ -1945,6 +1964,7 @@ export async function startRender(root: HTMLElement) {
     }
     const units: { side: PrintSide; spread: string; where: string }[] = sequence.spreads.flatMap(({ sides }, i) =>
       sides.map((side) => ({ side, spread: spreads[i].id, where: where[i] })));
+    step('output');
     publish({
       state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions, anchors: index.anchors,
       ...(inspection ? { inspection } : {}),

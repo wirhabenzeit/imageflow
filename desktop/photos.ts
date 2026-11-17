@@ -41,10 +41,36 @@ export async function importPhotoDetails(original: string) {
   return details;
 }
 
-const pending = new Map<string, Promise<string>>();
+// Making a rendition decodes the whole original, about 100–300 ms for a large photo, and requests arrive by the
+// hundred: opening a book asks for every thumbnail, the photos on screen, and a cover in the background. They run a
+// few at a time, most urgent first, so the photos on screen do not wait behind the rest. sharp runs on libuv's four
+// worker threads and parallelises each image itself, so more at once only lengthens every one of them.
+//   0  photos on screen in the editor
+//   1  other work someone waits for: thumbnails, exports and checks
+//   2  background work, such as a recent book's cover
+export type PhotoPriority = 0 | 1 | 2;
+type Job = { priority: PhotoPriority; start?: () => void };
+const slots = 4;
+const waiting: Job[] = [];
+let active = 0;
+function startNext() {
+  while (active < slots && waiting.length) {
+    // The first of the most urgent, so equally urgent requests keep their order.
+    const index = waiting.reduce((best, job, i) => job.priority < waiting[best].priority ? i : best, 0);
+    const [job] = waiting.splice(index, 1);
+    active++;
+    job.start!();
+  }
+}
+async function scheduled<T>(job: Job, run: () => Promise<T>) {
+  await new Promise<void>((start) => { job.start = start; waiting.push(job); startNext(); });
+  try { return await run(); } finally { active--; startNext(); }
+}
+
+const pending = new Map<string, { job: Job; work: Promise<string> }>();
 
 // Export renditions are resampled to `width` pixels when the placement needs fewer pixels than the original has.
-export async function photoFile(photo: ProjectPhoto, rendition: Rendition, width?: number) {
+export async function photoFile(photo: ProjectPhoto, rendition: Rendition, width?: number, priority: PhotoPriority = 1) {
   const resample = rendition === 'export' && width !== undefined && width < photo.width ? width : undefined;
   const unchanged = async () => {
     if (await realpath(photo.original) !== photo.original || (photo.observation && observation(await stat(photo.original, { bigint: true })) !== photo.observation)) {
@@ -54,35 +80,44 @@ export async function photoFile(photo: ProjectPhoto, rendition: Rendition, width
   if (rendition === 'export' && !resample && photo.passthrough) { await unchanged(); return photo.original; }
   const extension = photo.alpha ? '.png' : '.jpg';
   const path = join(photo.cache, photo.key + '-' + rendition + (resample ? '-' + resample : '') + extension);
-  if (pending.has(path)) return pending.get(path)!;
+  const queued = pending.get(path);
+  if (queued) {
+    // A rendition queued for the background moves up when the editor shows it.
+    if (priority < queued.job.priority) queued.job.priority = priority;
+    return queued.work;
+  }
+  const job: Job = { priority };
   const work = (async () => {
     try {
       await access(path);
       return path;
     } catch {
-      await unchanged();
-      await mkdir(photo.cache, { recursive: true });
-      const staging = await mkdtemp(join(photo.cache, '.render-'));
-      try {
-        const image = sharp(photo.original).autoOrient().withIccProfile('srgb');
-        if (rendition !== 'export') {
-          const size = rendition === 'thumb' ? 240 : 1400;
-          image.resize({ width: size, height: size, fit: 'inside', withoutEnlargement: true });
-        } else if (resample) {
-          image.resize({ width: resample, kernel: 'lanczos3' });
-        }
-        if (photo.alpha) image.png(); else image.jpeg({ quality: rendition === 'export' ? 95 : 86, chromaSubsampling: rendition === 'export' ? '4:4:4' : '4:2:0' });
-        const candidate = join(staging, 'photo' + extension);
-        await image.toFile(candidate);
-        await unchanged();
-        await rename(candidate, path);
-        return path;
-      } finally {
-        await rm(staging, { recursive: true, force: true });
-      }
+      return scheduled(job, make);
     }
   })();
-  pending.set(path, work);
+  async function make() {
+    await unchanged();
+    await mkdir(photo.cache, { recursive: true });
+    const staging = await mkdtemp(join(photo.cache, '.render-'));
+    try {
+      const image = sharp(photo.original).autoOrient().withIccProfile('srgb');
+      if (rendition !== 'export') {
+        const size = rendition === 'thumb' ? 240 : 1400;
+        image.resize({ width: size, height: size, fit: 'inside', withoutEnlargement: true });
+      } else if (resample) {
+        image.resize({ width: resample, kernel: 'lanczos3' });
+      }
+      if (photo.alpha) image.png(); else image.jpeg({ quality: rendition === 'export' ? 95 : 86, chromaSubsampling: rendition === 'export' ? '4:4:4' : '4:2:0' });
+      const candidate = join(staging, 'photo' + extension);
+      await image.toFile(candidate);
+      await unchanged();
+      await rename(candidate, path);
+      return path;
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  }
+  pending.set(path, { job, work });
   try {
     return await work;
   } finally {

@@ -221,9 +221,11 @@ async function serve(request: Request) {
   if (photoMatch) {
     const [, kind, photoId, size] = photoMatch;
     const photo = session.book.photos.get(photoId);
-    const rendition = kind === 'thumb' ? 'thumb' : kind === 'proof-photo' ? 'export' : session.mode === 'edit' ? 'preview' : 'export';
+    const rendition = kind === 'thumb' ? 'thumb' : kind === 'proof-photo' ? 'export' : session.mode === 'edit' || session.photos === 'preview' ? 'preview' : 'export';
     const width = size && rendition === 'export' ? Number(size) : undefined;
-    if (photo) return net.fetch(pathToFileURL(await photoFile(photo, rendition, width)).href);
+    // The editor's book view asks only for photos on or near the screen; a cover renders in the background.
+    const priority = session.photos === 'preview' ? 2 : session.mode === 'edit' && rendition === 'preview' ? 0 : 1;
+    if (photo) return net.fetch(pathToFileURL(await photoFile(photo, rendition, width, priority)).href);
   }
   return new Response(null, { status: 404 });
 }
@@ -379,7 +381,8 @@ function captureCover(document: DocumentSession, book: OpenProject, closing = fa
   state.job = job;
   state.task = (async () => {
     const id = randomUUID();
-    sessions.set(id, { book, mode: 'export', network: () => document.networkOrigins });
+    // A 320-pixel cover needs no print-resolution photos.
+    sessions.set(id, { book, mode: 'export', photos: 'preview', network: () => document.networkOrigins });
     try {
       const cover = await captureBookPreview(renderOrigin + '/render/' + id,
         { target: { page: 1 }, maxEdge: 320, format: 'jpeg' }, job.signal);
@@ -634,7 +637,7 @@ function templatePreview(id: string, hash: string, origins: string[], persist = 
       const book = await loadProject(stage, cache, true);
       const first = book.project.spreads[0];
       if (!first) return null;
-      sessions.set(session, { book, mode: 'export', network: () => origins });
+      sessions.set(session, { book, mode: 'export', photos: 'preview', network: () => origins });
       let preview = await captureBookPreview(renderOrigin + '/render/' + session,
         { target: { spread: first.id }, maxEdge: 320, format: 'jpeg' }, controller.signal);
       // A blank opening page says little about a template. Prefer an illustrated sample spread in that case.

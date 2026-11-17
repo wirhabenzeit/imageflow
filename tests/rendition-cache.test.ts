@@ -35,3 +35,24 @@ test('editor renditions survive relaunch while check caches remain private, and 
   assert.ok((await lstat(join(cache, '.render-in-progress'))).isDirectory());
   assert.equal(await readFile(join(cache, 'unrelated'), 'utf8'), 'keep');
 });
+
+test('photos on screen are rendered before queued background renditions, also when already queued', async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'imageflow-priority-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const photos = await Promise.all(Array.from({ length: 22 }, async (_, i) => {
+    const original = join(root, 'photo-' + i + '.jpg');
+    await sharp({ create: { width: 2400, height: 1600, channels: 3, background: { r: i * 10, g: 80, b: 120 } } }).jpeg().toFile(original);
+    return { ...await photoDetails(original), original, cache: join(root, 'cache') };
+  }));
+  const finished: string[] = [];
+  const track = (name: string, work: Promise<string>) => work.then(() => { finished.push(name); });
+  // A cover renders the whole book in the background; then the editor shows two photos, one of them already queued.
+  const background = photos.slice(0, 20).map((photo, i) => track('background-' + i, photoFile(photo, 'preview', undefined, 2)));
+  const screen = track('screen', photoFile(photos[21], 'preview', undefined, 0));
+  const promoted = track('promoted', photoFile(photos[15], 'preview', undefined, 0));
+  await Promise.all([...background, screen, promoted]);
+  for (const name of ['screen', 'promoted']) {
+    const later = finished.length - 1 - finished.indexOf(name);
+    assert.ok(later >= 10, name + ' finished before only ' + later + ' background renditions: ' + finished.join(', '));
+  }
+});

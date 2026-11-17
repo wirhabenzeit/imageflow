@@ -41,9 +41,11 @@ import { renderIdleMs } from '../src/render-budget';
 import { previewPictures } from './preview-picture-cache';
 
 // `network` lists the origins this book's frames may reach now (ADR 0006): its preview, check, export and element
-// editor frames. Absent for frames that stay offline, such as template probes.
+// editor frames. Absent for frames that stay offline, such as template probes. `photos: 'preview'` serves the editor's
+// screen-sized photo renditions to an export-mode render that only makes a small picture, such as a book cover, instead
+// of re-encoding every original at print resolution.
 export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[];
-  pictures?: ReturnType<typeof previewPictures.view>; pictureScope?: string }>;
+  photos?: 'preview'; pictures?: ReturnType<typeof previewPictures.view>; pictureScope?: string }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 async function fingerprint(path: string) {
