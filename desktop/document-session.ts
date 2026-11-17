@@ -38,12 +38,12 @@ import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { McpToolName } from '../src/mcp-contract';
 import { renderIdleMs } from '../src/render-budget';
-import { PreviewPictureCache } from './preview-picture-cache';
+import { previewPictures } from './preview-picture-cache';
 
 // `network` lists the origins this book's frames may reach now (ADR 0006): its preview, check, export and element
 // editor frames. Absent for frames that stay offline, such as template probes.
 export type RenderSessions = Map<string, { book: OpenProject; mode: RenderProject['mode']; network?: () => readonly string[];
-  pictures?: PreviewPictureCache; pictureScope?: string }>;
+  pictures?: ReturnType<typeof previewPictures.view>; pictureScope?: string }>;
 const viewPath = /^\/render\/([a-f0-9-]{36})(?:\/(.*))?$/;
 function errorMessage(error: unknown) { return error instanceof Error ? error.message : 'ImageFlow could not complete the request.'; }
 async function fingerprint(path: string) {
@@ -88,7 +88,8 @@ export class DocumentSession {
   private importedWrites = new ImportReceipts();
   private agentLeases = new Map<string, (allowed: boolean) => void>();
   private renderIds = new Set<string>();
-  private previewPictures = new PreviewPictureCache();
+  // This window's share of the pictures cache all book windows use; closing the book releases it.
+  private previewPictures = previewPictures.view(randomUUID());
   // The origins this book's frames may reach (ADR 0006), and the template hash they were last decided for. They
   // belong to the book: a changed template keeps them, and only origins it newly declares need a question.
   private network: { hash?: string; origins: readonly string[] } = { origins: [] };

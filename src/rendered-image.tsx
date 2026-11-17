@@ -168,6 +168,55 @@ async function toBlob(picture: RenderedPicture): Promise<Blob> {
   return new Promise((resolve, reject) => picture.toBlob((blob) => blob ? resolve(blob) : reject(new Error('The canvas could not be encoded.')), 'image/png'));
 }
 
+/**
+ * Calls `expire` once `ms` of drawing time has passed, and returns a function that stops it. Drawing time advances
+ * with the window's animation frames, which MapLibre needs to draw a map: while the window is hidden, minimised or on
+ * another Space the browser delivers none, and that time is not held against the picture. A long pause between two
+ * frames, such as a busy main thread, counts as at most a quarter of a second.
+ */
+export function frameTimer(expire: () => void, ms: number) {
+  let elapsed = 0, last = performance.now(), frame = 0;
+  const tick = (now: number) => {
+    elapsed += Math.min(Math.max(0, now - last), 250);
+    last = now;
+    if (elapsed >= ms) { frame = 0; expire(); return; }
+    frame = requestAnimationFrame(tick);
+  };
+  frame = requestAnimationFrame(tick);
+  return () => { if (frame) cancelAnimationFrame(frame); frame = 0; };
+}
+
+/**
+ * Pictures layered in one box, such as shaded relief under a map's lines, may fail together: their messages are
+ * stacked one above the other instead of printed over each other. Each failed picture learns its line and the count.
+ */
+function arrangeFailures(parent: HTMLElement | null) {
+  if (!parent) return;
+  const failed = [...parent.children].filter((child): child is HTMLElement => child instanceof HTMLElement &&
+    child.classList.contains('if-rendered-image') && child.dataset.rendered === 'failed');
+  failed.forEach((picture, line) => {
+    picture.style.setProperty('--if-failure-line', String(line));
+    picture.style.setProperty('--if-failure-lines', String(failed.length));
+  });
+}
+
+/**
+ * The copy of a picture the preview cache keeps. Only screens show it, never a check or an export, so pixels are kept
+ * as WebP: a canvas arrives as PNG, which for shaded relief or imagery is about thirteen times larger at the same look
+ * (a 3652 × 1860 relief: 9.1 MB as PNG, 0.7 MB as WebP). Vectors, and pictures already compressed, stay as they are.
+ */
+export async function screenCopy(blob: Blob): Promise<Blob> {
+  if (blob.type !== 'image/png' && blob.type !== 'image/bmp') return blob;
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const webp = await canvas.convertToBlob({ type: 'image/webp', quality: .9 });
+    return webp.type === 'image/webp' && webp.size < blob.size ? webp : blob;
+  } catch { return blob; }
+}
+
 // Libraries also reject with plain objects or events that carry a message.
 const messageOf = (error: unknown) => error instanceof Error ? error.message
   : error && typeof error === 'object' && typeof (error as { message?: unknown }).message === 'string' ? (error as { message: string }).message : String(error);
@@ -211,6 +260,7 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
     const vectorBox = vector.current!;
     // The picture shown so far stays until a new one replaces it, so a redraw never blanks the box.
     node.dataset.rendered = 'pending';
+    arrangeFailures(node.parentElement);
     failures.delete(node);
     notes.delete(node);
     const where = () => ({ ...onPage(pageOf(node)), spread: node.closest<HTMLElement>('[data-spread]')?.dataset.spread, element: node.closest<HTMLElement>('[data-element]')?.dataset.element });
@@ -236,12 +286,17 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
     };
     const fail = (message: string, timedOut: boolean) => {
       if (controller.signal.aborted && !timedOut) return;
-      img.style.display = 'none';
-      vectorBox.style.display = 'none';
+      // On screen the last picture drawn here stays under the message, such as the map before a slow redraw; a check
+      // or an export shows none, so a stale picture is never taken for the requested one.
+      if (mode !== 'preview') {
+        img.style.display = 'none';
+        vectorBox.style.display = 'none';
+      }
       node.dataset.rendered = 'failed';
       node.title = message;
       failures.set(node, { label, message, timedOut, spread: node.closest<HTMLElement>('[data-spread]')?.dataset.spread,
         element: node.closest<HTMLElement>('[data-element]')?.dataset.element, ...onPage(pageOf(node)) });
+      arrangeFailures(node.parentElement);
     };
     // Shows a picture in the box; false when the drawing was replaced meanwhile. `check` is false for a stale picture
     // shown only until the new one is drawn.
@@ -317,13 +372,18 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
       if (!cached) restored();
       const blob = cached ?? await slot(async () => {
         controller.signal.throwIfAborted();
-        let timer: ReturnType<typeof setTimeout> | undefined;
+        let stop = () => {};
         const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(() => { controller.abort(); reject(Object.assign(new Error(label + ' did not finish rendering within ' +
-            Math.round(timeoutMs / 1000) + ' s.'), { timedOut: true })); }, timeoutMs);
+          const expire = () => { controller.abort(); reject(Object.assign(new Error(label + ' did not finish rendering within ' +
+            Math.round(timeoutMs / 1000) + ' s.'), { timedOut: true })); };
+          // In the editor and the presentation, only time the window draws counts (frameTimer).
+          stop = previewCache && mode === 'preview' ? frameTimer(expire, timeoutMs) : (() => {
+            const timer = setTimeout(expire, timeoutMs);
+            return () => clearTimeout(timer);
+          })();
         });
         try { return await Promise.race([draw({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]); }
-        finally { clearTimeout(timer); }
+        finally { stop(); }
       });
       if (controller.signal.aborted) return;
       if (output === 'vector' && blob.type !== svgType) throw new Error('it is declared output="vector", but draw returned pixels (' + (blob.type || 'a canvas') + ').');
@@ -335,12 +395,14 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
       if (controller.signal.aborted) return;
       if (!await show(shownBlob, true)) return;
       if (found.length) notes.set(node, found);
-      if (cacheUrl && !cached) await savePreviewPicture(cacheUrl, blob);
-      if (vectorUrl && !cached && blob.type === svgType) await savePreviewPicture(vectorUrl, blob);
-      if (placeUrl) await savePreviewPicture(placeUrl, blob);
+      const saved = cacheUrl || placeUrl ? await screenCopy(blob) : blob;
+      if (cacheUrl && !cached) await savePreviewPicture(cacheUrl, saved);
+      if (vectorUrl && !cached && blob.type === svgType) await savePreviewPicture(vectorUrl, saved);
+      if (placeUrl) await savePreviewPicture(placeUrl, saved);
       if (controller.signal.aborted) return;
       node.dataset.rendered = 'ready';
       node.removeAttribute('title');
+      arrangeFailures(node.parentElement);
     })().catch((error) => {
       const timedOut = !!(error as { timedOut?: boolean })?.timedOut;
       fail(timedOut ? messageOf(error) : label + ' could not be rendered: ' + messageOf(error), timedOut);
@@ -353,6 +415,7 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
       restored();
       failures.delete(node);
       notes.delete(node);
+      arrangeFailures(node.parentElement);
       changed();
     };
   }, [key]);

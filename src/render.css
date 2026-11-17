@@ -197,9 +197,14 @@ html:has(.if-layout-settings) { background: transparent; }
 :where(.if-rendered-image) { position: relative; overflow: hidden; }
 .if-rendered-image[data-rendered="pending"] { background: repeating-linear-gradient(135deg, rgb(0 0 0 / 4%) 0 6px, rgb(0 0 0 / 7%) 6px 12px); }
 .if-rendered-image[data-rendered="failed"] { background: rgb(190 40 40 / 10%); outline: 1px dashed rgb(190 40 40 / 60%); outline-offset: -1px; }
+/* A label over the picture, legible over a map kept from before; failed pictures layered in one box stack their
+   labels (--if-failure-line of --if-failure-lines, set by the picture) instead of printing them over each other. */
 .if-rendered-image[data-rendered="failed"]::after {
-  content: attr(title); position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; text-align: center;
-  font: 12px/1.3 system-ui, sans-serif; color: rgb(140 20 20);
+  content: attr(title); position: absolute; left: 50%; top: 50%; z-index: 1; box-sizing: border-box;
+  width: max-content; max-width: calc(100% - 16px); padding: 6px 10px; border-radius: 6px; text-align: center;
+  transform: translate(-50%, calc(-50% + (var(--if-failure-line, 0) - (var(--if-failure-lines, 1) - 1) / 2) * 3.4em));
+  font: 12px/1.3 system-ui, sans-serif; color: rgb(140 20 20); background: rgb(255 255 255 / 92%);
+  box-shadow: 0 0 0 1px rgb(190 40 40 / 35%);
 }
 
 /* A zero-specificity fallback: authored classes, inherited typography rules on the node and inline styles win. */

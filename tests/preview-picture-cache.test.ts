@@ -46,3 +46,45 @@ test('thumbnail identity includes drawing inputs and output resolution, without 
   assert.notEqual(await previewPictureUrl('/session-one/picture/', [...identity, 'changed']), before);
   assert.notEqual(await previewPictureUrl('/session-one/picture/', identity.with(5, 1)), before);
 });
+
+test('one picture saved under several keys is stored once and stays while any key names it', async () => {
+  const cache = new PreviewPictureCache(10, 10);
+  for (const key of ['drawing', 'vector', 'place']) assert.equal((await put(cache, key, [1, 2, 3, 4, 5, 6])).status, 204);
+  assert.equal(cache.size, 6, 'Three keys of identical bytes take the memory of one picture');
+  await put(cache, 'other', [9, 9, 9, 9]);
+  assert.equal(cache.size, 10);
+  // A new picture needs room: the least recently used keys go, and their bytes only once no key is left.
+  await put(cache, 'new', [7, 7, 7, 7]);
+  assert.equal((await get(cache, 'drawing')).status, 404);
+  assert.equal(cache.size, 8, 'The shared picture went with its last key');
+  assert.equal((await get(cache, 'other')).status, 200);
+  const same = new PreviewPictureCache(6, 6, 2);
+  await put(same, 'a', [1, 2, 3]);
+  await put(same, 'b', [4, 5, 6]);
+  await put(same, 'c', [4, 5, 6]);
+  assert.equal(same.size, 3, 'Evicting another key of the reused picture keeps it accounted once');
+  assert.deepEqual([...new Uint8Array(await (await get(same, 'c')).arrayBuffer())], [4, 5, 6]);
+});
+
+test('book windows share one cache, and closing a book releases only what no other open book uses', async () => {
+  const cache = new PreviewPictureCache();
+  const one = cache.view('one'), two = cache.view('two');
+  const request = (bytes?: number[]) => new Request('https://cache.test/picture', bytes ? { method: 'PUT', body: new Uint8Array(bytes),
+    headers: { 'Content-Type': 'image/webp' } } : {});
+  await one.respond(request([1]), 'scope', 'mine');
+  await one.respond(request([2]), 'scope', 'shared');
+  assert.equal((await two.respond(request(), 'scope', 'shared')).status, 200);
+  one.clear();
+  assert.equal((await two.respond(request(), 'scope', 'mine')).status, 404);
+  assert.equal((await two.respond(request(), 'scope', 'shared')).status, 200, 'A picture the other open book used stays');
+  two.clear();
+  assert.equal(cache.size, 0);
+});
+
+test('the budget follows the computer’s memory, between 1 and 4 GiB', async () => {
+  const { previewPictureBudget } = await import('../desktop/preview-picture-cache');
+  const GiB = 1024 ** 3;
+  assert.equal(previewPictureBudget(4 * GiB), GiB);
+  assert.equal(previewPictureBudget(16 * GiB), 2 * GiB);
+  assert.equal(previewPictureBudget(128 * GiB), 4 * GiB);
+});
