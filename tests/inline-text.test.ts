@@ -24,14 +24,17 @@ test('small, transformed and non-opted-in targets use the parameter panel', () =
   assert.ok(textFits(target));
   assert.ok(!textFits({ ...target, inlineText: false }));
   assert.ok(!textFits({ ...target, upright: false }));
-  assert.ok(!textFits({ ...target, width: 40 }));
-  assert.ok(!textFits({ ...target, height: 12 }));
+  // A heading at whole-spread zoom: 48 × 12 screen pixels is enough, a pixel less on either side is not.
+  assert.ok(textFits({ ...target, width: 48, height: 12 }));
+  assert.ok(!textFits({ ...target, width: 47 }));
+  assert.ok(!textFits({ ...target, height: 11 }));
 });
 
 test('vertical text needs length along its height and width for one line', () => {
   const target = { spread: 'one', edits: ['heading'], occurrence: 0, inlineText: true, vertical: true, x: 0, y: 0, width: 30, height: 200 };
   assert.ok(textFits(target));
-  assert.ok(!textFits({ ...target, width: 12 }));
+  assert.ok(textFits({ ...target, width: 12, height: 48 }));
+  assert.ok(!textFits({ ...target, width: 11 }));
   assert.ok(!textFits({ ...target, height: 40 }));
   // The same rectangle is too narrow for horizontal text.
   assert.ok(!textFits({ ...target, vertical: false }));

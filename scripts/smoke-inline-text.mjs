@@ -371,14 +371,14 @@ try {
 
   // Text too small on screen to edit where it prints opens the panel, which says why and offers the zoom that fixes it.
   await writeFile(templateFile, source.replace(heading, heading.replace('as="h1"', 'as="h1" style={{ fontSize: "6pt", lineHeight: 1 }}')
-    .replace('page - 2 * margin, 110)', 'page - 2 * margin, 9)')));
+    .replace('page - 2 * margin, 110)', 'page - 2 * margin, 6)')));
   for (let n = 0; n < 200; n++) {
     const height = await occurrence().boundingBox().then((box) => box?.height ?? 99).catch(() => 99);
-    if (height < 18) break;
+    if (height < 12) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   const small = await occurrence().boundingBox();
-  assert.ok(small.height < 18, 'The heading is too small for on-page editing: ' + small.height);
+  assert.ok(small.height < 12, 'The heading is too small for on-page editing: ' + small.height);
   await clickPage(w, small.x + small.width * .5, small.y + small.height * .5);
   const note = w.locator('.edit-popover .ep-note');
   await note.waitFor();

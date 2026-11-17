@@ -40,7 +40,7 @@ import { anchoredTarget, clickWithin, elementRect, hiddenOccurrence, inlinePlace
 import type { OpenEditor } from './inline-editors';
 import { LayoutFamilyPicker } from './LayoutFamilyPicker';
 import { InlineTextEditor } from './InlineTextEditor';
-import { textEditorOwner, textFits } from './inline-text';
+import { minimumText, textEditorOwner, textExtent, textFits } from './inline-text';
 import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
@@ -1238,8 +1238,8 @@ export function App() {
   const smallText = editing && !editing.owner && !editing.panel && !textInline && inline?.target.inlineText &&
     inline.target.upright !== false && !textFits(inline.target) ? inline.target : undefined;
   const textZoom = smallText && (() => {
-    const [along, across] = smallText.vertical ? [smallText.height, smallText.width] : [smallText.width, smallText.height];
-    const needed = zoom * Math.max(64 / Math.max(along, 1), 18 / Math.max(across, 1)) * 1.1;
+    const { along, across } = textExtent(smallText);
+    const needed = zoom * Math.max(minimumText.along / Math.max(along, 1), minimumText.across / Math.max(across, 1)) * 1.1;
     return needed <= 3 ? Math.max(needed, zoom * 1.2) : undefined;
   })();
   // After zooming for it, the text opens on the page once the book shows it at the new size.
