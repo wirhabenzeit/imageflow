@@ -168,10 +168,18 @@ export function App() {
     setCanvasMotion(animate && start ? { offsets: reorderOffsets(geometry, next), start } : undefined);
     setGeometry(next);
     // Resize messages from the old displayed frame must not adopt the pending revision's labels. Geometry can arrive
-    // before the template, which has no page numbers or layout names yet; the live labels stand in until it does.
-    if (revision === summary?.id && template) setCanvasLabels(Object.fromEntries(spreads.map(({ id }, i) =>
-      [id, pagesLabel(i) + ' · ' + label(i)])));
+    // before the template, which has no page numbers or layout names yet; the live labels stand in until it does,
+    // and the effect below takes the snapshot when it arrives.
+    if (revision) shownRevision.current = revision;
+    if (revision === summary?.id && template) adoptCanvasLabels();
   }
+  const shownRevision = useRef<string>(undefined);
+  const adoptCanvasLabels = () => setCanvasLabels(Object.fromEntries(spreads.map(({ id }, i) => [id, pagesLabel(i) + ' · ' + label(i)])));
+  // A book's first frame usually shows before its template loads. Without this, its labels would keep following the
+  // live book, and the first edit would relabel the old artwork before the new frame shows.
+  useEffect(() => {
+    if (template && summary && shownRevision.current === summary.id) adoptCanvasLabels();
+  }, [template]);
   const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean; start?: number }>({ animate: true });
   const thumbs = thumbnailState.geometry;
   function setThumbs(geometry: BookGeometry | undefined, animate = true, start?: number) {
