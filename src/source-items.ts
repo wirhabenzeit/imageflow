@@ -10,6 +10,10 @@ import type { TextMetaValue } from './frontmatter';
 export const photosMime = 'application/x-imageflow-photos';
 export const photoMime = 'application/x-imageflow-photo';
 export const textMime = 'application/x-imageflow-text';
+// A parameter file dragged from the Assets tab onto a file setting: its ID, and its extension as a type of its own, so
+// a setting can tell while dragging whether it accepts the file (drag data is readable only on drop).
+export const fileMime = 'application/x-imageflow-file';
+export const fileExtensionMime = (extension: string) => fileMime + '-ext' + extension.toLowerCase();
 // Content a spread keeps outside its layout, dragged from the Inspector: `{ spread, box }` as JSON. The drag also
 // carries the photo or text ID, so dropping it on another spread places another use of the source.
 export const keptMime = 'application/x-imageflow-kept';

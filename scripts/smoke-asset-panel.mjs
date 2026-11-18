@@ -40,7 +40,7 @@ try {
   // No previews or photo tools: the list is plain and its picture is the file type's icon.
   assert.equal(await page.locator('.source-manager-embedded .new-markdown', { hasText: 'New Text' }).count(), 0);
   assert.equal(await page.locator('.source-manager-embedded .photo-view-menu').count(), 0);
-  assert.equal(await rows.first().getAttribute('draggable'), 'false');
+  assert.equal(await rows.first().getAttribute('draggable'), 'true', 'a file can be dragged onto a file setting (F-028)');
   if (process.platform === 'darwin') {
     await until(async () => await page.locator('.asset-icon img').count() === 1, 'Document icon loaded');
     const [source] = await page.locator('.asset-icon img').evaluateAll((nodes) => nodes.map((node) => node.src));
