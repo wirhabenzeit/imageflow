@@ -47,7 +47,7 @@ import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
-import { editorLayoutsAt, firstEditorLayouts, newEditorSpread, openingSpreadStates, readEdit, resolveEditPath } from './editing';
+import { continuedSpread, editorLayoutsAt, firstEditorLayouts, newEditorSpread, openingSpreadStates, readEdit, resolveEditPath } from './editing';
 import { describeLayoutChange, editorLayoutChoices, editorLayoutPreviews, editorLayoutTarget, pickerFamily, swapContent, sheetLayoutLabel, swapPages, switchLayout } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
@@ -453,6 +453,7 @@ export function App() {
       preserveViewAnchor();
       if (current.current?.project.format !== next.project.format) revealedThumb.current = '';
     }
+    const previousSpreads = current.current?.project.spreads ?? [];
     current.current = next;
     candidateId.current = next.id;
     readyId.current = undefined;
@@ -481,8 +482,14 @@ export function App() {
       canvas.current?.scrollTo({ top: 0, left: 0 });
     }
     // A book may have no spreads yet; then nothing is selected.
+    // A selected sheet that is gone hands the selection to the sheet now in its place, not to the first one.
+    const inPlaceOf = (id: string) => {
+      const at = previousSpreads.findIndex((spread) => spread.id === id);
+      const kept = new Set(next.project.spreads.map(({ id }) => id));
+      return at < 0 ? undefined : (previousSpreads.slice(at).find(({ id }) => kept.has(id)) ?? previousSpreads.slice(0, at).findLast(({ id }) => kept.has(id)))?.id;
+    };
     setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0]?.id :
-      next.project.spreads.find(({ id }) => id === previous)?.id ?? next.project.spreads[0]?.id) ?? '');
+      next.project.spreads.find(({ id }) => id === previous)?.id ?? inPlaceOf(previous) ?? next.project.spreads[0]?.id) ?? '');
     if (selected) { pendingReveal.current = selected; if (selected !== spreadId) setSelectedSide(undefined); }
     // The selected sheet is gone (an agent removed it, say): the fallback sheet starts on its default page.
     else if (!next.project.spreads.some(({ id }) => id === spreadId)) setSelectedSide(undefined);
@@ -1083,8 +1090,9 @@ export function App() {
     const position = { index: insertionAfter(spread, spreads), count: spreads.length + 1 };
     const eligible = editorLayoutsAt(template.spreads, template.format, position);
     const definition = eligible.find(id => template.spreads[id].span === 'spread') ?? eligible[0];
+    // A new spread continues the selected one's layout where it fits, and otherwise takes the first layout that does.
     const next = duplicate ? { ...structuredClone(spread), id: crypto.randomUUID() }
-      : definition && newEditorSpread(definition, template.spreads, template.format, position);
+      : continuedSpread(spread, template.spreads, template.format, position) ?? (definition && newEditorSpread(definition, template.spreads, template.format, position));
     if (!next) return;
     edit(({ project }) => {
       if (!project.spreads.some(item => item.id === spread.id)) return false;
@@ -1096,6 +1104,7 @@ export function App() {
 
   function deleteSelected(ids: string[]) {
     if (!canChangeBook || !ids.length) return;
+    // The sheet after the deleted ones then takes the selection (adopt), so the thumbnails stay where the user was.
     edit(({ project }) => { project.spreads = project.spreads.filter(({ id }) => !ids.includes(id)); }, ids.length === 1 ? 'Spread deleted' : ids.length + ' spreads deleted');
     spreadSelection.setSelection([]);
   }
