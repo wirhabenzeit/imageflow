@@ -1,3 +1,4 @@
+import { authoringSnapshotState } from './authoring-sdk';
 import { layoutFootprint } from '../src/layouts';
 import { sourcePath, sourceLinked } from '../src/source-locations';
 import { DependencyInstallError } from './dependency-install';
@@ -56,6 +57,8 @@ type Hooks = {
   import: (request: ImportRequest, paths: string[], base: OpenProject, checkpoint?: SaveCheckpoint) => Promise<{ imported: string[] }>;
   // Installs the template's packages outside the book and rebuilds template/vendor/ (ADR 0006).
   dependencies?: (signal: AbortSignal) => Promise<Record<string, unknown>>;
+  // The installed app's authoring SDK, to tell whether the template's .imageflow-sdk snapshot is current.
+  authoringTypes?: () => string | undefined;
 };
 
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
@@ -578,6 +581,8 @@ export function createAuthoringService(hooks: Hooks) {
           }
         };
         const reference = await referenceTopics(hooks.docs, [...new Set<string>(args.docs ?? [])]);
+        const types = hooks.authoringTypes?.();
+        const sdkState = types ? await authoringSnapshotState(join(folder, 'template'), types).catch(() => undefined) : undefined;
         result = {
           project: session.handle, revision: report.revision, root: session.book.folder, guide: contextGuide,
           template, templateIdentity, diagnostics, checks: report.checks, sources,
@@ -585,6 +590,7 @@ export function createAuthoringService(hooks: Hooks) {
           topics: reference.topics,
           ...(args.docs?.length ? { docs: reference.docs } : {}),
           examples: await templateExamples(hooks.docs, args.includeExamples),
+          ...(sdkState ? { sdk: { snapshot: sdkState, ...(sdkState === 'stale' ? { notice: 'template/.imageflow-sdk is from an earlier ImageFlow version and lacks newer API declarations, so editor tooling may flag code that renders fine. Type checks here use the installed SDK. Call rebuild_dependencies to refresh it.' } : {}) } } : {}),
           capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
             maxPreviewEdge: 1600, typescript: true, printPreflight: false, draftPreview: true, contactSheets: true,
             fixtures: { cases: [...fixtureCases], maxLayouts: fixtureLimits.layouts, maxFormats: fixtureLimits.formats,

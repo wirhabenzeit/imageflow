@@ -161,6 +161,7 @@ export class DocumentSession {
       changed: (next) => this.notify({ value: this.activate(next) }),
       recovery: (message) => this.notify({ error: message }),
       dependencies: (signal) => this.rebuildDependencies(signal),
+      authoringTypes: () => this.authoringTypes,
       import: async (request, paths, base, checkpoint) => {
         const result = await this.importFiles(this.window, this.active.id, { ...request, paths }, base, false, checkpoint);
         if (!result) throw new AuthoringError('PROJECT_CLOSED', 'The book closed before import completed.');
