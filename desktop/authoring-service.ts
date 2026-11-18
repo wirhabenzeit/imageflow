@@ -32,7 +32,7 @@ import type { McpClientSession } from './mcp-connection';
 import { FixtureError, fixtureCases, fixtureFits, fixtureLimits, fixtureRequestSchema, planFixtures } from '../src/fixtures';
 import type { FixtureCell } from '../src/fixtures';
 import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
-import { cellReport, fixtureAssets, fixtureDraft, fixtureFindings, fixtureNotEvaluated } from './fixtures';
+import { cellReport, fixtureAssets, fixtureDraft, fixtureFindings, fixtureNotEvaluated, mergeFormatFindings } from './fixtures';
 import { templateFiles, templateHash } from './template-library';
 import { docTopics } from '../src/doc-topics';
 
@@ -425,13 +425,14 @@ export function createAuthoringService(hooks: Hooks) {
       reports.push(...fitting.map((cell) => outcome.get(cell.spread)!));
     }
     const count = (state: FixtureCellReport['state']) => reports.filter((report) => report.state === state).length;
+    const listed = mergeFormatFindings(findings);
     const report: FixtureReport = {
       synthetic: true, committed: false, revision: base.revision,
       matrix: { layouts: plan.layouts, formats, cases: plan.cases },
       coverage: { planned: reports.length, rendered: reports.length - count('failed') - count('not-isolated'),
         failed: count('failed'), notIsolated: count('not-isolated'), skipped },
-      cells: reports, diagnostics: findings.slice(0, fixtureLimits.diagnostics),
-      diagnosticsTruncated: findings.length > fixtureLimits.diagnostics, notEvaluated: fixtureNotEvaluated,
+      cells: reports, diagnostics: listed.slice(0, fixtureLimits.diagnostics),
+      diagnosticsTruncated: listed.length > fixtureLimits.diagnostics, notEvaluated: fixtureNotEvaluated,
     };
     get(session.handle);
     return { ...base, checks: { ...base.checks, fixtures: !reports.length ? 'not-run' as const : count('not-isolated') ? 'failed' as const : 'completed' as const },

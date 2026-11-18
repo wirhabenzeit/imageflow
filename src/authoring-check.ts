@@ -49,8 +49,9 @@ export type FixtureReport = {
   matrix: { layouts: string[]; formats: string[]; cases: FixtureCase[] };
   coverage: { planned: number; rendered: number; failed: number; notIsolated: number; skipped: FixtureSkip[] };
   cells: FixtureCellReport[];
-  // Findings in fixture books, located by layout, case and format instead of a saved spread.
-  diagnostics: (AuthoringDiagnostic & { fixture: { layout: string; case: FixtureCase; format: string } })[];
+  // Findings in fixture books, located by layout, case and format instead of a saved spread. A finding that is the
+  // same in several formats is listed once: `format` is the first, `formats` every one it was found in.
+  diagnostics: (AuthoringDiagnostic & { fixture: { layout: string; case: FixtureCase; format: string; formats?: string[] } })[];
   diagnosticsTruncated: boolean;
   // Checks that synthetic books cannot answer; the saved-book check and print preflight cover them.
   notEvaluated: string[];
