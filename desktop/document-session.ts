@@ -164,9 +164,12 @@ export class DocumentSession {
         return { imported: result.imported };
       },
     });
+    this.guardNavigation(window);
+  }
+  start() {
+    const book = this.book;
     this.activate(book);
     this.watchProject(book);
-    this.guardNavigation(window);
   }
   private guardNavigation(window: BrowserWindow) {
     window.webContents.on('will-frame-navigate', (event) => {

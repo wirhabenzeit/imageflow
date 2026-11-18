@@ -794,8 +794,8 @@ export function PhotoBox({ id, className, style, rect, children, decorative, 'da
   // A callback needs the box's size. A `rect` gives it at once; otherwise the box is measured before it is painted.
   const [size, setSize] = useState<{ width: number; height: number } | null>(() =>
     rect && rect.width > 0 && rect.height > 0 ? { width: rect.width * pixelsPerMm, height: rect.height * pixelsPerMm } : null);
-  // Only the editor's scrolling book draws callback boxes as they come near. Presentation (export mode) copies its
-  // spreads from a hidden render, so their callback boxes draw at once there.
+  // The editor draws callback boxes as they come near. Presentation (export mode) copies its spreads from a
+  // hidden render, so their callback boxes draw at once there.
   const deferred = lazyPhotos && book.mode === 'edit';
   const [near, setNear] = useState(!deferred);
   const liveOf = () => render && book.mode === 'edit' ? livePlacements.get(liveKey(spread.id, id, page)) : undefined;
@@ -847,7 +847,7 @@ export function PhotoBox({ id, className, style, rect, children, decorative, 'da
     const resolved = values.boxes[id];
     const state = { id, uid: photoBoxUid(spread.id, id, page), params: resolved?.params ?? {}, photo: resolved?.photo ?? null };
     content = <PhotoRenderCall render={render} photo={shown} state={state} spread={spread.id} />;
-    // Outside the editor's book view a throw fails the render as for any other template code.
+    // In a deferred editor view, a throw can affect only this box since the frame may already be visible.
     if (deferred) {
       content = <PhotoRenderBoundary spread={spread.id} page={page} box={id}
         reset={JSON.stringify([shown.src, shown.placement, shown.box, state.params, state.photo])}>{content}</PhotoRenderBoundary>;
@@ -1132,7 +1132,7 @@ export function withEditorDraft(context: EditorContext, draft: { document: Value
     elements: { ...context.elements, [draft.element]: { ...context.elements[draft.element], params: { ...context.elements[draft.element]?.params, ...draft.values } } } };
 }
 
-// `lazyPhotos` leaves photo sources in data-src; the editor's book view loads them as spreads come near the screen.
+// `lazyPhotos` leaves photo sources in data-src until spreads come near the viewport.
 export function SpreadView(props: {
   book: RenderProject; template: Template; format: ResolvedFormat; spread: SpreadState; bookSpread?: string;
   page: RenderContext['page']; index: BookIndex; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;

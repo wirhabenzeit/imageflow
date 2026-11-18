@@ -183,6 +183,8 @@ export function App() {
   }, [template]);
   const [thumbnailState, setThumbnailState] = useState<{ geometry?: BookGeometry; animate: boolean; start?: number }>({ animate: true });
   const thumbs = thumbnailState.geometry;
+  // Each view can first appear on its own. Once both show artwork, release replacement frames together.
+  const pairFrames = Boolean(fittedGeometry && thumbs);
   function setThumbs(geometry: BookGeometry | undefined, animate = true, start?: number) {
     setThumbnailState({ geometry, animate, start });
   }
@@ -294,6 +296,7 @@ export function App() {
   const canvasWrap = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const thumbList = useRef<HTMLDivElement>(null);
+  const thumbScroll = useRef<HTMLDivElement>(null);
   const previousThumbs = useRef<BookGeometry>(undefined);
   const thumbAnimations = useRef<Animation[]>([]);
   useLayoutEffect(() => {
@@ -885,6 +888,26 @@ export function App() {
       }
     }
   }
+  function thumbnailViewport() {
+    const view = thumbScroll.current;
+    if (!view) return undefined;
+    const top = view.scrollTop;
+    return { top, bottom: top + view.clientHeight, left: 0, right: view.clientWidth, columns: 0 };
+  }
+  function measureThumbnails() {
+    const range = thumbnailViewport();
+    if (!range) return;
+    for (const frame of thumbList.current?.querySelectorAll<HTMLIFrameElement>('iframe.book-frame-thumbs') ?? []) {
+      frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
+    }
+  }
+  useEffect(() => {
+    const view = thumbScroll.current;
+    if (!view) return;
+    const observer = new ResizeObserver(measureThumbnails);
+    observer.observe(view);
+    return () => observer.disconnect();
+  }, [projectInstance]);
   function pageMap() {
     return Object.fromEntries(spreads.map((spread, i) => [spread.id, sequence ? pageNumbers(sequence.spreads[i].page) : [i + 1]]));
   }
@@ -1878,7 +1901,7 @@ export function App() {
                 onClick={() => deleteSelected(selectedSpreads)}><Icon name="delete" /></button>
             </div>
           </div>
-          <div className="thumbs-scroll" onDragOver={reorder.over} onDragLeave={reorder.leave} onDrop={reorder.drop}>
+          <div ref={thumbScroll} className="thumbs-scroll" onScroll={measureThumbnails} onDragOver={reorder.over} onDragLeave={reorder.leave} onDrop={reorder.drop}>
             <div ref={thumbList} className={thumbs ? 'spread-thumbs placed' : 'spread-thumbs'} style={{ height: thumbs?.height }}
               role="group" aria-label="Spreads" onKeyDown={thumbKeys}>
               {spreads.map(({ id }, i) => {
@@ -1905,8 +1928,9 @@ export function App() {
                 </button>;
               })}
               {reorder.indicator && <div className="spread-insertion" aria-hidden="true" style={{ top: reorder.indicator.top }} />}
-              <BookFrame project={summary.id} view="thumbs" onPrepared={(id) => preparedView(id, 'thumbs')} release={frameRelease} title="Spread thumbnails" onGeometry={setThumbs}
-                hold={holdPreview} accept={acceptCandidate} />
+              <BookFrame project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined}
+                release={frameRelease} title="Spread thumbnails" onGeometry={setThumbs}
+                viewport={thumbnailViewport} hold={holdPreview} accept={acceptCandidate} />
             </div>
           </div>
         </>}
@@ -1980,7 +2004,8 @@ export function App() {
               >
               <div className="canvas-artwork-clip">
                 <div className="canvas-artwork">
-                  <BookFrame project={summary.id} view="book" onPrepared={(id) => preparedView(id, 'book')} release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
+                  <BookFrame project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined}
+                    release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
                     viewport={frameViewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
                     onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
                 </div>
@@ -2075,7 +2100,9 @@ export function App() {
             </div>}
             {!summary && <p className="book-loading" role="status">{error || 'Opening book…'}</p>}
           </main>
-          {summary && previewNotice && <div className={geometry ? 'preview-state' : 'preview-message'} role="status">{previewNotice}</div>}
+          {summary && (previewNotice || !geometry) && <div className={geometry ? 'preview-state' : 'preview-message'} role="status">
+            {previewNotice || 'Rendering book…'}
+          </div>}
         </div>
         {summary && (!panels.bottomHidden ? <PanelDivider side="bottom" size={panels.bottom} maximum={bottomMaximum} resize={resizePanel} onResizing={setResizing} /> : <div />)}
         <div className="sources-host" inert={panels.bottomHidden} aria-hidden={panels.bottomHidden}>

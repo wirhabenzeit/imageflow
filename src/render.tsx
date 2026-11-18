@@ -1130,6 +1130,7 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
   return () => {
     const profileStart = import.meta.env.IMAGEFLOW_PROFILE ? performance.now() : 0;
     const range = visible() ?? { top: 0, bottom: screen.height, left: 0, right: screen.width };
+    if (range.bottom <= range.top || range.right <= range.left) return [];
     const height = Math.max(1, range.bottom - range.top);
     const width = Math.max(1, range.right - range.left);
     const loading: HTMLImageElement[] = [];
@@ -1650,7 +1651,7 @@ export async function startRender(root: HTMLElement) {
       for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
     }
     if (present) for (const photo of Object.values(book.photos)) photo.src = photo.src.replace('/photo/', '/proof-photo/');
-    const lazy = edit && view === 'book';
+    const lazy = edit && (view === 'book' || view === 'thumbs');
     if (edit) book.view = frameView(view);
     // Pictures drawn by <RenderedImage>: at the screen's resolution in the editor (smaller for thumbnails), cheaply
     // in the Book check, and at the format's target resolution for export (ADR 0006).
@@ -1948,7 +1949,7 @@ export async function startRender(root: HTMLElement) {
       const load = photoLoader(root, () => onScreen);
       let timer: ReturnType<typeof setTimeout> | undefined;
       onScreenChange = () => { timer ??= setTimeout(() => { timer = undefined; load(); }, 16); };
-      // Report ready once the photos on screen are decoded, so swapping in this frame shows them.
+      // Wait for photos near the viewport so replacements show their artwork as soon as they swap in.
       await Promise.allSettled(load().map((img) => img.decode()));
     }
     else if (artwork) {
@@ -1971,7 +1972,7 @@ export async function startRender(root: HTMLElement) {
     });
     // The editor's book view does not wait for its pictures. It reports them to the live Book check as they start,
     // finish or fail, so a map that failed on the page is never missing from the check.
-    if (lazy && window.parent !== window) {
+    if (edit && view === 'book' && window.parent !== window) {
       let queued = false;
       const report = () => {
         if (queued) return;
