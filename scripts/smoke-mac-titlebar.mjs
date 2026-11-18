@@ -40,7 +40,20 @@ try {
   assert.deepEqual(await click('Fill'), original, 'A second double-click restores the previous bounds');
   assert.notDeepEqual(await click('Maximize'), original, 'The macOS Zoom action resizes the window');
   assert.deepEqual(await click('Maximize'), original, 'Zoom restores the previous window size');
-  console.log('macOS toolbar double-click Fill, Zoom, restore and No Action passed.');
+  // The title row above the toolbar responds the same way (F-031), outside the window buttons and the document icon.
+  const titleRow = async (action, x = 0.62) => {
+    await window.evaluate((win, { helper, x, action }) => {
+      const require = process.getBuiltinModule('node:module').createRequire(process.execPath);
+      require(helper).titleRowDoubleClick(win.getNativeWindowHandle(), win.getBounds().width * x, 12, action);
+    }, { helper, x, action });
+    await page.waitForTimeout(600);
+    return window.evaluate(win => win.getBounds());
+  };
+  assert.deepEqual(await titleRow('None'), original);
+  assert.deepEqual(await titleRow('Fill'), display, 'Double-clicking the title row fills the available screen');
+  assert.deepEqual(await titleRow('Fill'), original, 'and restores the previous bounds');
+  assert.deepEqual(await titleRow('Fill', 0.01), original, 'The window buttons keep their own clicks');
+  console.log('macOS toolbar and title row double-click Fill, Zoom, restore and No Action passed.');
 } finally {
   if (app) await closeApp(app);
   await rm(work, { recursive: true, force: true });

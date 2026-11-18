@@ -7,6 +7,7 @@
 @interface ImageFlowToolbarDrag : NSView
 @property(nonatomic, copy) NSArray<NSValue *> *regions;
 @property(nonatomic, strong) NSValue *frameBeforeFill;
+- (void)performTitleBarAction;
 @end
 @implementation ImageFlowToolbarDrag
 - (BOOL)isFlipped { return YES; }
@@ -23,13 +24,15 @@
   return self;
 }
 - (void)mouseDown:(NSEvent *)event {
-  NSWindow *window = self.window;
   if (event.clickCount != 2) {
-    [window performWindowDragWithEvent:event];
+    [self.window performWindowDragWithEvent:event];
     return;
   }
-
-  // AppKit handles the native title row itself. The blank editor toolbar is a custom drag region.
+  [self performTitleBarAction];
+}
+// The user's "Double-click a window's title bar to" setting, for the blank editor toolbar and the title row above it.
+- (void)performTitleBarAction {
+  NSWindow *window = self.window;
   NSString *action = [NSUserDefaults.standardUserDefaults stringForKey:@"AppleActionOnDoubleClick"];
   if (!action || [action isEqualToString:@"Maximize"] || [action isEqualToString:@"Zoom"]) {
     [window performZoom:nil];
@@ -57,6 +60,35 @@ static ImageFlowToolbarDrag *dragView(NSWindow *window) {
     if ([view isKindOfClass:ImageFlowToolbarDrag.class]) return (ImageFlowToolbarDrag *)view;
   }
   return nil;
+}
+
+// Whether a double-click at `point` (window coordinates) is on the blank title row above the content: not on a window
+// button or the document icon, which keep their own clicks.
+static BOOL inBlankTitleRow(NSWindow *window, NSPoint point) {
+  if (window.styleMask & NSWindowStyleMaskFullScreen) return NO;
+  NSRect content = [window.contentView convertRect:window.contentView.bounds toView:nil];
+  if (point.y < NSMaxY(content) || point.y > NSHeight(window.frame) || point.x < 0 || point.x > NSWidth(window.frame)) return NO;
+  for (NSNumber *kind in @[@(NSWindowCloseButton), @(NSWindowMiniaturizeButton), @(NSWindowZoomButton), @(NSWindowDocumentIconButton)]) {
+    NSButton *button = [window standardWindowButton:(NSWindowButton)kind.integerValue];
+    if (button && !button.isHidden && NSPointInRect(point, NSInsetRect([button convertRect:button.bounds toView:nil], -2, -2))) return NO;
+  }
+  return YES;
+}
+
+// AppKit's title row in these windows passes its clicks to Electron's content view, which ignores double-clicks, so
+// only the toolbar below it zoomed the window (beta finding F-031). One monitor serves every configured window.
+static void watchTitleRow() {
+  static id monitor = nil;
+  if (monitor) return;
+  monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown handler:^NSEvent *(NSEvent *event) {
+    NSWindow *window = event.window;
+    if (event.clickCount != 2 || (event.modifierFlags & NSEventModifierFlagControl) || !window) return event;
+    ImageFlowToolbarDrag *drag = nil;
+    for (NSView *view in window.contentView.subviews) if ([view isKindOfClass:ImageFlowToolbarDrag.class]) drag = (ImageFlowToolbarDrag *)view;
+    if (!drag || !inBlankTitleRow(window, event.locationInWindow)) return event;
+    [drag performTitleBarAction];
+    return nil;
+  }];
 }
 
 // Electron exposes its NSView, but not AppKit's centered document-title layout.
@@ -109,6 +141,7 @@ static napi_value configure(napi_env env, napi_callback_info info) {
     drag.regions = @[];
     [window.contentView addSubview:drag positioned:NSWindowAbove relativeTo:nil];
   }
+  watchTitleRow();
   napi_value result;
   napi_get_undefined(env, &result);
   return result;

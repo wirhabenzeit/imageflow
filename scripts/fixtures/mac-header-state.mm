@@ -76,12 +76,47 @@ static napi_value doubleClick(napi_env env, napi_callback_info info) {
   return result;
 }
 
+// Posts a double-click in the title row above the content, `fromTop` points below the window's top edge, through the
+// event queue as a real click arrives. The temporary preference lasts until the click has been handled.
+static napi_value titleRowDoubleClick(napi_env env, napi_callback_info info) {
+  size_t argc = 4;
+  napi_value args[4];
+  napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+  double x, fromTop;
+  char action[32];
+  if (argc != 4 || napi_get_value_double(env, args[1], &x) != napi_ok || napi_get_value_double(env, args[2], &fromTop) != napi_ok ||
+      napi_get_value_string_utf8(env, args[3], action, sizeof(action), nullptr) != napi_ok) {
+    napi_throw_type_error(env, nullptr, "Expected a window handle, coordinates and title bar action.");
+    return nullptr;
+  }
+  NSWindow *window = windowFromHandle(env, args[0]);
+  if (!window) return nullptr;
+  NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+  NSDictionary *before = [defaults volatileDomainForName:NSArgumentDomain];
+  NSMutableDictionary *override = [before mutableCopy];
+  override[@"AppleActionOnDoubleClick"] = [NSString stringWithUTF8String:action];
+  [defaults setVolatileDomain:override forName:NSArgumentDomain];
+  NSPoint point = NSMakePoint(x, NSHeight(window.frame) - fromTop);
+  for (NSEventType type : (NSEventType[]){ NSEventTypeLeftMouseDown, NSEventTypeLeftMouseUp }) {
+    [NSApp postEvent:[NSEvent mouseEventWithType:type location:point modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
+      windowNumber:window.windowNumber context:nil eventNumber:0 clickCount:2 pressure:type == NSEventTypeLeftMouseDown ? 1 : 0] atStart:NO];
+  }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 400 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+    [defaults setVolatileDomain:before forName:NSArgumentDomain];
+  });
+  napi_value result;
+  napi_get_undefined(env, &result);
+  return result;
+}
+
 static napi_value initialize(napi_env env, napi_value exports) {
   napi_value function;
   napi_create_function(env, "inspect", NAPI_AUTO_LENGTH, inspect, nullptr, &function);
   napi_set_named_property(env, exports, "inspect", function);
   napi_create_function(env, "doubleClick", NAPI_AUTO_LENGTH, doubleClick, nullptr, &function);
   napi_set_named_property(env, exports, "doubleClick", function);
+  napi_create_function(env, "titleRowDoubleClick", NAPI_AUTO_LENGTH, titleRowDoubleClick, nullptr, &function);
+  napi_set_named_property(env, exports, "titleRowDoubleClick", function);
   return exports;
 }
 NAPI_MODULE(NODE_GYP_MODULE_NAME, initialize)
