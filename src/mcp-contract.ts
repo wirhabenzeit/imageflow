@@ -152,17 +152,28 @@ export function mcpCatalog(): McpCatalogTool[] {
   return mcpTools.map((tool) => ({ ...tool, ...advertisedSchemas(tool.name) }));
 }
 
+// A preview target that fits no shape is answered with the list of shapes. When one shape fits its keys, that shape's
+// own issues (an invalid spread ID, an unknown page side) are what the agent has to fix, so those are reported instead.
+function previewTargetIssues(issue: z.core.$ZodIssue, args: unknown): z.core.$ZodIssue[] {
+  if (issue.code !== 'invalid_union' || issue.path.at(-2) !== 'preview' || issue.path.at(-1) !== 'target') return [issue];
+  const target = issue.path.reduce<unknown>((value, key) =>
+    typeof value === 'object' && value !== null ? (value as Record<PropertyKey, unknown>)[key] : undefined, args);
+  const present = (key: PropertyKey) => typeof target === 'object' && target !== null && Object.hasOwn(target, key);
+  const fitting = issue.errors.find((branch) => branch.every((inner) =>
+    inner.code !== 'unrecognized_keys' && (!inner.path.length || present(inner.path[0]))));
+  return fitting ? fitting.map((inner) => ({ ...inner, path: [...issue.path, ...inner.path] })) : [{ ...issue, message: previewTargets }];
+}
+
 export function parseMcpArguments(name: string, args: unknown): { name: McpToolName; args: Record<string, unknown> } {
   if (!Object.hasOwn(mcpToolSchemas, name)) throw new Error('Unknown ImageFlow tool ' + name + '.');
   const tool = name as McpToolName;
   const parsed = mcpToolSchemas[tool].safeParse(args);
   if (!parsed.success) {
-    const issues = parsed.error.issues;
+    const issues = parsed.error.issues.flatMap((issue) => previewTargetIssues(issue, args));
     const messages = issues.slice(0, 4).map((issue) => {
       const path = issue.path.map((part, index) =>
         typeof part === 'number' ? '[' + part + ']' : (index ? '.' : '') + String(part).slice(0, 80)).join('');
       const error = (message: string) => path ? path + ': ' + message : message;
-      if (path === 'preview.target' && issue.code === 'invalid_union') return error(previewTargets);
       const draft = issue.path[0] === 'draft';
       const [field, index, key] = draft ? issue.path.slice(1) : issue.path;
       if (field !== 'operations' || typeof index !== 'number') return error(issue.message.slice(0, 300));

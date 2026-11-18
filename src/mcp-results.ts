@@ -4,6 +4,8 @@ import type { AuthoringCheckResult } from './authoring-check';
 import type { HistoryState } from './desktop';
 import type { LibraryEntry } from './library';
 import type { PreviewMetadata } from './preview';
+import { pageSides } from './project';
+import type { ActiveBookEditor } from './desktop';
 
 // Output schemas for the result shapes that MCP capability discovery freezes (#77): the input revision, the diagnostic
 // envelope, check coverage, template identity, image metadata and command results. Objects are loose: a later version
@@ -97,6 +99,15 @@ const libraryEntry = z.looseObject({
 });
 const libraryVersion = z.looseObject({ id: z.string(), version: z.string(), hash: z.string(), source: z.enum(['built-in', 'imported']) });
 
+// The editor the book window reports as open. The window sends it over IPC, so the main process parses it before
+// trusting it in a lease refusal or an inspect_book summary.
+export const activeBookEditorSchema = z.object({ label: z.string().min(1).max(200), spread: z.string().max(256).optional(),
+  page: z.enum(pageSides).optional(), field: z.string().max(500).optional() }) satisfies z.ZodType<ActiveBookEditor>;
+export function parseActiveEditor(value: unknown): ActiveBookEditor | undefined {
+  const parsed = activeBookEditorSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
 export const mcpOutputSchemas = {
   list_projects: z.looseObject({
     projects: z.array(z.looseObject({
@@ -121,8 +132,7 @@ export const mcpOutputSchemas = {
   }),
   inspect_book: z.looseObject({
     project: z.string(), ...reportFields,
-    activeEditor: z.looseObject({ label: z.string(), spread: z.string().optional(), page: z.enum(['left', 'right']).optional(),
-      field: z.string().optional() }).optional().describe('Editor open in ImageFlow at the time of summary inspection, with its saved field address when available.'),
+    activeEditor: activeBookEditorSchema.optional().describe('Editor open in ImageFlow at the time of summary inspection, with its saved field address when available.'),
     templateIdentity: templateIdentitySchema.optional(),
     items: z.array(z.looseObject({})).optional(), total: z.number().optional(), nextOffset: z.number().nullable().optional(),
   }),

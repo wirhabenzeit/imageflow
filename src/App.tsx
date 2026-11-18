@@ -84,6 +84,22 @@ const isGridColumns = (command: Command): command is `grid-columns-${typeof grid
   gridColumns.some((count) => command === `grid-columns-${count}`);
 
 // The editor shell must survive a template whose format cannot be resolved; the render reports why.
+// A focused form field or rich text, or any control inside an open dialog, may hold an edit that is not saved yet, so
+// it blocks agent saves. Returns the name the agent is told to finish, or undefined when focus blocks nothing.
+function focusedEditorLabel(node: Element | null): string | undefined {
+  if (!(node instanceof HTMLElement)) return;
+  const dialog = node.closest('dialog');
+  if (dialog) {
+    const labelledBy = dialog.getAttribute('aria-labelledby');
+    const name = dialog.getAttribute('aria-label') || (labelledBy && document.getElementById(labelledBy)?.textContent?.trim())
+      || dialog.querySelector('h1, h2, h3')?.textContent?.trim();
+    return name ? name + ' dialog' : 'open dialog';
+  }
+  if (!node.matches('input, textarea, select, [contenteditable="true"]')) return;
+  const labels = node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement ? node.labels : null;
+  return node.getAttribute('aria-label') || labels?.[0]?.textContent?.trim() || 'focused editor control';
+}
+
 function formatOf(template?: TemplateInfo) {
   try {
     return template && resolveFormat(template.format);
@@ -275,10 +291,7 @@ export function App() {
     const focus = () => {
       const node = document.activeElement;
       setControlFocused(!!node?.closest('input, textarea, select, [contenteditable], iframe, dialog, .edit-popover, .crop-toolbar'));
-      if (node?.matches('input, textarea, select, [contenteditable="true"]') || node?.closest('dialog')) {
-        const labels = node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement ? node.labels : null;
-        setFocusedEditor(node.getAttribute('aria-label') || labels?.[0]?.textContent?.trim() || 'focused editor control');
-      } else setFocusedEditor(undefined);
+      setFocusedEditor(focusedEditorLabel(node));
     };
     document.addEventListener('focusin', focus);
     document.addEventListener('focusout', focus);
@@ -706,12 +719,12 @@ export function App() {
     }
   });
   const acquireAgentLease = useEffectEvent(() => {
-    const focused = document.activeElement;
-    const typing = focused instanceof HTMLElement && (focused.matches('input, textarea, select, [contenteditable="true"]') || !!focused.closest('dialog'));
+    // Operations the user cannot finish by closing an editor refuse plainly; only an open editor is named to the agent.
     const reloadRunning = reloading.current && !reloadFailed.current;
-    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || typing || agentLocked.current) {
-      return activeEditor ?? false;
-    }
+    if (pendingTasks.current || busy || reloadRunning || reorder.dragging || agentLocked.current) return false;
+    if (editing || elementEditor || cropping) return activeEditor ?? false;
+    const typing = focusedEditorLabel(document.activeElement);
+    if (typing) return { label: typing };
     agentLocked.current = true;
     if (workspace.current) workspace.current.inert = true;
     setAgentWorking(true);

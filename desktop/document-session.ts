@@ -11,6 +11,7 @@ import { dirname, join, relative } from 'node:path';
 import { channels, desktopScheme, issueText, renderOrigin } from '../src/desktop';
 import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
+import { parseActiveEditor } from '../src/mcp-results';
 import type { RenderProject } from '../src/project';
 import { printBook, savePdf } from './export';
 import { approveNetwork, approvedNetwork, bookTrusted, trustBook } from './source-access';
@@ -154,7 +155,7 @@ export class DocumentSession {
     this.queue = new AuthoringQueue({ ready: () => !this.busy && !this.closing, maxPending: 32 });
     this.service = createAuthoringService({
       session: () => this.closing ? undefined : this.projectSession, cache, docs: join(app.getAppPath(), 'docs'),
-      activeEditor: () => this.menuState?.activeEditor,
+      activeEditor: () => parseActiveEditor(this.menuState?.activeEditor),
       check: (...args) => this.checkOpenBook(...args),
       changed: (next) => this.notify({ value: this.activate(next) }),
       recovery: (message) => this.notify({ error: message }),
@@ -253,7 +254,8 @@ export class DocumentSession {
     if (!this.watcher) this.watchProject(next);
     return summary;
   }
-  replyLease(id: string, reply: AgentLeaseReply) { this.agentLeases.get(id)?.(reply); }
+  // The window's reply crosses IPC: anything but true or a well-formed editor counts as a plain refusal.
+  replyLease(id: string, reply: unknown) { this.agentLeases.get(id)?.(reply === true || (parseActiveEditor(reply) ?? false)); }
   cancelExport() { this.exportJob?.abort(); }
   cancelCheck() { this.checkJob?.abort(); }
   /** Where template packages are installed, outside every book; set by the app. */
@@ -784,10 +786,10 @@ export class DocumentSession {
     if (reply) {
       const field = reply.field ? ' for ' + reply.field : '';
       const location = reply.spread ? ' on spread ' + reply.spread + (reply.page ? ' (' + reply.page + ' page)' : '') : '';
-      throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish editing in ImageFlow (' + reply.label + field + location + '), then retry.',
+      throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish editing in ImageFlow (' + reply.label + field + location + '), then retry. No changes were made.',
         { activeEditor: reply });
     }
-    throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish the current edit or operation in ImageFlow, then retry.');
+    throw new AuthoringError('EDIT_IN_PROGRESS', 'ImageFlow is busy with another operation, such as an import, export, reload or drag. Retry when it finishes. No changes were made.');
   }
 
 

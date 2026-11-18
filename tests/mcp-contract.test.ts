@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
-import { advertisedSchemas, mcpOutputSchemas, mcpToolSchemas, mcpTools } from '../src/mcp-contract';
+import { advertisedSchemas, mcpOutputSchemas, mcpToolSchemas, mcpTools, parseMcpArguments } from '../src/mcp-contract';
+import { parseActiveEditor } from '../src/mcp-results';
 import { projectOperationNames, projectOperationSchema } from '../src/project-commands';
 
 type JsonSchema = { description?: string; const?: unknown; properties?: Record<string, JsonSchema>; items?: JsonSchema; anyOf?: JsonSchema[];
@@ -64,4 +65,22 @@ test('the advertised tool list stays within its size budget', () => {
   const descriptions = mcpTools.reduce((sum, { title, description }) => sum + title.length + description.length, 0);
   assert.ok(bytes('input') + descriptions <= 45_000, 'Input schemas and descriptions use ' + (bytes('input') + descriptions) + ' bytes.');
   assert.ok(bytes('output') <= 28_000, 'Output schemas use ' + bytes('output') + ' bytes.');
+});
+
+test('a preview target that fits one shape reports that shape\'s issue, otherwise the list of shapes', () => {
+  const message = (target: unknown) => {
+    try { parseMcpArguments('check_book', { project: 'p', preview: { target } }); } catch (error) { return (error as Error).message; }
+    assert.fail('expected a validation error');
+  };
+  assert.match(message({ spread: 'bad id!' }), /^preview\.target\.spread: Use a spread ID/);
+  assert.match(message({ spread: 'one', box: 'b', page: 'top' }), /^preview\.target\.page: .*left.*right/);
+  assert.match(message({ foo: 1 }), /^preview\.target: Use \{spread\} for a spread/);
+  assert.match(message({ spread: 'one', box: 'b', element: 'c' }), /^preview\.target: Use \{spread\} for a spread/);
+});
+
+test('an active editor reply from the window is parsed before it is trusted', () => {
+  assert.deepEqual(parseActiveEditor({ label: 'Note', spread: 'one', page: 'left', extra: 1 }), { label: 'Note', spread: 'one', page: 'left' });
+  assert.equal(parseActiveEditor('Note'), undefined);
+  assert.equal(parseActiveEditor({ spread: 'one' }), undefined);
+  assert.equal(parseActiveEditor({ label: 'Note', page: 'top' }), undefined);
 });

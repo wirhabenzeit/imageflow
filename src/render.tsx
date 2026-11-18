@@ -135,7 +135,7 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     }
     for (const [id, state] of Object.entries(saved.elements)) {
       const element = Object.hasOwn(definition.elements, id) ? definition.elements[id] : undefined;
-      if (!element && !declared.element(id) && Object.keys(state.params).length) {
+      if (!element && !declared.element(id)) {
         warn(['Settings saved for element ' + id + ' fit no element of this template.'], { code: 'element-undeclared', ...onPage(page), element: id,
           suggestion: 'Declare element ' + id + ' in a layout, or reset its saved parameters.' });
         continue;

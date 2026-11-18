@@ -324,12 +324,17 @@ export function applyProjectCommands(
       }
       case 'reset_parameter': {
         const location = parameterLocation(operation);
-        const { spread, path, values } = location;
+        const { spread, state, path, values } = location;
         if (!values || !Object.hasOwn(values, operation.key)) {
+          // Nothing is saved here. Resetting is then only valid for a parameter the template declares, so a mistyped
+          // key or owner fails with PARAMETER_NOT_FOUND instead of succeeding silently.
           parameterTarget(operation, location);
           break;
         }
         delete values[operation.key];
+        // An element entry holds nothing but its params: drop it once empty, so no orphan owner remains for an element
+        // the template no longer declares.
+        if (operation.scope === 'element' && state && !Object.keys(values).length) delete state.elements[operation.owner!];
         changed('Reset ' + path, spread ? [spread.id] : allSpreads(), true);
         break;
       }

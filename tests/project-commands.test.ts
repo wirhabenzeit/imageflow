@@ -362,9 +362,12 @@ test('reset removes an undeclared saved element parameter from just the addresse
     { op: 'reset_parameter', scope: 'element', spread, page: 'left', owner: 'calendar', key: 'month' },
   ]);
   const pages = reset.files.project.spreads.at(-1)!.pages!;
-  assert.deepEqual(pages.left!.elements.calendar.params, {});
+  assert.equal(Object.hasOwn(pages.left!.elements, 'calendar'), false, 'the emptied undeclared element entry is removed');
   assert.equal(pages.right!.elements.calendar.params.month, '2026-03-01');
   assert.equal(inserted.files.project.spreads.at(-1)!.pages!.left!.elements.calendar.params.month, '2026-02-01');
+  assert.throws(() => applyProjectCommands(reset.files, migrated, [
+    { op: 'reset_parameter', scope: 'element', spread, page: 'left', owner: 'calendar', key: 'month' },
+  ]), { code: 'PARAMETER_NOT_FOUND' }, 'resetting an unsaved, undeclared key still fails');
 });
 
 test('page layout transitions, blank pages and sheet operations share editor rules', () => {
