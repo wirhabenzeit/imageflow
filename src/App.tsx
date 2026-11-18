@@ -735,7 +735,9 @@ export function App() {
   const acquireAgentLease = useEffectEvent(() => {
     // Operations the user cannot finish by closing an editor refuse plainly; only an open editor is named to the agent.
     const reloadRunning = reloading.current && !reloadFailed.current;
-    if (pendingTasks.current || busy || reloadRunning || reorder.dragging || agentLocked.current) return false;
+    if (pendingTasks.current || busy || reloadRunning || reorder.dragging || agentLocked.current) return { busy:
+      busy ? busy.replace(/…$/, '').toLowerCase() : reloadRunning ? 'reloading the book after its files changed' : reorder.dragging ? 'a drag in the editor'
+        : agentLocked.current ? 'another agent change' : 'saving an edit' };
     if (editing || elementEditor || cropping) return activeEditor ?? false;
     const typing = focusedEditorLabel(document.activeElement);
     if (typing) return { label: typing };

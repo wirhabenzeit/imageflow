@@ -56,7 +56,9 @@ export type LayoutCommand = 'layout-vertical' | 'layout-grid' | `grid-columns-${
 export const spreadCommands = ['add-spread', 'duplicate-spread', 'move-spread-up', 'move-spread-down', 'delete-spread'] as const;
 export type SpreadCommand = typeof spreadCommands[number];
 export type ActiveBookEditor = { label: string; spread?: string; page?: PageSide; field?: string };
-export type AgentLeaseReply = boolean | ActiveBookEditor;
+// What the editor answers an agent's request to save: yes, the editor the user has open, or what the app is busy with
+// (an import, a reload after files changed, a drag), which ends by itself.
+export type AgentLeaseReply = boolean | ActiveBookEditor | { busy: string };
 export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
   writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView; selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string> };
