@@ -30,3 +30,13 @@ test('a selected spread at the edge does not displace the canvas center during r
   assert.equal(anchor.y, .65);
   assert.deepEqual(restoreViewAnchor(anchor, sheets, { width: 440, height: 200 }), { left: 0, top: 290 });
 });
+
+test('pinch retains the point under the pointer instead of the viewport centre', () => {
+  const anchor = captureViewAnchor(sheets, { x: 0, y: 260, width: 440, height: 160 }, 's1', {}, { x: 120, y: 300 })!;
+  assert.equal(anchor.x, .25);
+  assert.equal(anchor.y, .2);
+  const restored = restoreViewAnchor(anchor, sheets.map(sheet => ({ ...sheet, width: sheet.width * 2, height: sheet.height * 2 })),
+    { width: 440, height: 160 })!;
+  assert.ok(Math.abs(restored.left - 100) < 1e-8);
+  assert.ok(Math.abs(restored.top - 300) < 1e-8);
+});

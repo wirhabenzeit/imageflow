@@ -80,7 +80,7 @@ export async function collectSources(book: OpenProject, keys?: readonly string[]
   }
 }
 
-/** Only byte-identical candidates are proposed automatically. Filename alone is never an identity match. */
+/** Recover exact registered originals in a selected folder, or byte-identical relocated candidates. */
 export async function relinkFolder(book: OpenProject, directory: string, keys?: readonly string[]) {
   const { readdir } = await import('node:fs/promises');
   const root = await realpath(directory);
@@ -92,7 +92,15 @@ export async function relinkFolder(book: OpenProject, directory: string, keys?: 
   let repaired = 0;
   for (const source of sourceEntries(book).filter(({ key }) => !keys || keys.includes(key))) {
     const state = await store.resolve(book.folder, source);
-    if (state.status.state === 'available' || !state.stored?.digest) continue;
+    if (state.status.state === 'available') continue;
+    // Explicit folder selection can reapprove the registered original even when its cache was lost.
+    // A same-named file elsewhere still requires a known digest; never guess by filename.
+    if (state.status.state === 'unapproved' && source.linked && within(root, source.path) && candidates.includes(source.path) &&
+        await realpath(source.path).then((actual) => actual === source.path, () => false)) {
+      next = await relocateSource(next, source.key, source.path); repaired++;
+      continue;
+    }
+    if (!state.stored?.digest) continue;
     const matches: string[] = [];
     for (const path of candidates) {
       if (basename(path) !== basename(source.path)) continue;

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { SourceEntry, SourceStatus } from '../src/source-locations';
 import { sourceFolder } from '../src/source-locations';
 import { requireSourceAccess, sourceBookKey, SourceAccessError } from './source-access';
+import { readSourceRegistry } from './source-identity';
 import { photoDetails } from './photos';
 import { isRenditionPath, renditionCacheFor } from './rendition-cache';
 
@@ -68,10 +69,13 @@ export class SourceStore {
     await mkdir(join(requestedRoot, 'content'), { recursive: true });
     await mkdir(join(requestedRoot, 'books'), { recursive: true });
     const root = await realpath(requestedRoot);
-    const index = join(root, 'books', await sourceBookKey(folder) + '.json');
+    const identity = await sourceBookKey(folder);
+    const index = join(root, 'books', identity + '.json');
     if (!stores.has(index)) stores.set(index, (async () => {
       const store = new SourceStore(folder, root, index);
-      try { store.saved = storedIndexSchema.parse(JSON.parse(await readFile(index, 'utf8'))); } catch { /* Rebuild derived state. */ }
+      const registry = await readSourceRegistry(join(root, 'books'), folder, identity, (value) => storedIndexSchema.parse(value));
+      store.saved = registry.entries;
+      if (registry.migrated) store.version++;
       return store;
     })());
     return stores.get(index)!;

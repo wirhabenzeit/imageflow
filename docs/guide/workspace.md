@@ -25,6 +25,8 @@ Drag dividers to resize panels. With a divider focused, use arrow keys to resize
 
 **View → Vertical** stacks spreads in one column. **Grid** uses one to four columns, selected under **View → Columns**. **View → Show Guides** toggles guides. Each book remembers its canvas layout on this Mac.
 
+The canvas starts in **Fit**, centred with vertical scrolling. Pinch over the paper, use the **− / +** controls at the lower right, or press **⌘− / ⌘+** to zoom temporarily. The percentage is relative to Fit. When enlarged, scroll in either direction with the trackpad, or hold **Space** and drag to pan with a mouse. **Return to Fit**, **View → Zoom to Fit**, or **Escape** while the canvas is focused restores the fitted view and the reading position where zoom began. Escape closes an open editor first. Zoom is not saved with the book. While cropping a photo, pinching over it continues to adjust that photo's crop.
+
 Choose **View → Presentation** (⇧W) to present from the current spread, or **Present from Beginning** (⌥⇧W). Presentation opens a separate fullscreen window on the editor's display. Escape or Close Window dismisses it and returns to the last viewed spread. Closing the book closes its presentation; starting from another book switches to that book.
 
 ## Appearance

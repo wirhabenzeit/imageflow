@@ -120,12 +120,16 @@ body { margin: 0; }
 
 /* Canvas: the whole book in one scrolling column */
 .canvas-wrap { position: relative; min-height: 0; }
-.canvas { position: absolute; inset: 0; overflow: auto; background: var(--canvas-surface); container-type: size; }
+.canvas { position: absolute; inset: 0; overflow: auto; overflow-anchor: none; background: var(--canvas-surface); container-type: size; }
 /* Page outlines carry selection; the pane only needs a quiet keyboard-focus edge. */
 .canvas { outline: none; }
 .canvas:focus-visible:not([data-pointer-focus]) { outline: 1px solid var(--edge); outline-offset: -1px; }
 .canvas:not(:has(.stage)) { display: grid; place-items: center; }
-.stage { position: relative; margin: 0 auto; width: min(100%, calc((100cqh - 64px) * var(--aspect, 100) + 64px)); cursor: default; }
+.stage { --canvas-fit-width: min(100cqw, calc((100cqh - 64px) * var(--aspect, 100) + 64px));
+  position: relative; margin: 0 auto; width: calc(var(--canvas-fit-width) * var(--canvas-zoom, 1)); cursor: default; }
+.canvas-artwork-clip { position: absolute; inset: 0; overflow: clip; pointer-events: none; }
+.canvas-artwork { position: absolute; inset: 0 auto auto 0; width: var(--canvas-fit-width);
+  transform-origin: top left; transform: scale(var(--canvas-zoom, 1)); }
 .sheet-label { position: absolute; display: flex; align-items: center; height: 20px; font-size: 12px; color: var(--muted); pointer-events: none; white-space: nowrap; overflow: hidden; }
 .sheet-label.selected { color: var(--accent); font-weight: 500; }
 .sheet-selection, .sheet-hover, .guides, .box-highlight, .active-spread-page { position: absolute; pointer-events: none; }
@@ -1029,3 +1033,13 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .sheet-layout-mode { display: inline-flex; align-items: center; gap: 5px; flex: none; font-size: 11px; font-weight: 500; }
 .sheet-label .sheet-layout-mode { margin-left: auto; padding-left: 10px; }
 .facing-page-selection { position: absolute; pointer-events: none; outline: 1px dashed var(--accent); outline-offset: 5px; opacity: .5; }
+
+/* Fit stays centred and vertical; temporary zoom exposes panning only above Fit. */
+.canvas:not([data-zoomed]) { overflow-x: hidden; }
+.canvas[data-pan-ready], .canvas[data-pan-ready] .stage { cursor: grab; user-select: none; }
+.canvas[data-panning], .canvas[data-panning] .stage { cursor: grabbing; }
+.canvas-zoom-controls { position: absolute; right: 20px; bottom: 14px; z-index: 7; display: flex; align-items: center; gap: 3px;
+  padding: 4px; border: 1px solid var(--control-border); border-radius: 7px; background: var(--panel-surface); box-shadow: 0 2px 8px #0002; }
+.canvas-zoom-controls button { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 5px; }
+.canvas-zoom-value { min-width: 42px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.canvas-zoom-controls .canvas-return-fit { padding: 0 8px; margin-left: 3px; }

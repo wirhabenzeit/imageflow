@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, realpath, rename, writeFile } from 'node:fs/promises';
 import { extname } from 'node:path';
+import { sourceBookKey, readSourceRegistry } from './source-identity';
+export { sourceBookKey } from './source-identity';
 import { z } from 'zod';
 import type { SourceEntry } from '../src/source-locations';
 
@@ -11,15 +13,16 @@ let root: string | undefined;
 const books = new Map<string, Promise<{ grants: Grants; writes: Promise<void> }>>();
 export function configureSourceAccess(directory: string) { root = directory; books.clear(); }
 export class SourceAccessError extends Error { readonly code = 'SOURCE_NOT_APPROVED'; }
-export async function sourceBookKey(folder: string) {
-  const info = await stat(folder, { bigint: true });
-  return `${info.dev}-${info.ino}-${info.birthtimeNs}`;
-}
 async function accessFor(folder: string) {
-  const key = (root ?? 'memory') + '/' + await sourceBookKey(folder);
+  const identity = await sourceBookKey(folder);
+  const key = (root ?? 'memory') + '/' + identity;
   if (!books.has(key)) books.set(key, (async () => {
     let grants: Grants = {};
-    if (root) try { grants = grantsSchema.parse(JSON.parse(await readFile(key + '.json', 'utf8'))); } catch { /* An invalid registry grants nothing. */ }
+    if (root) {
+      const registry = await readSourceRegistry(root, folder, identity, (value) => grantsSchema.parse(value));
+      grants = registry.entries;
+      if (registry.migrated) await saveGrants(key, grants).catch(error => console.warn('Could not save migrated source approvals', error));
+    }
     return { grants, writes: Promise.resolve() };
   })());
   return { key, book: await books.get(key)! };

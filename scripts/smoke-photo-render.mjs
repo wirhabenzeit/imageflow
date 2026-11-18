@@ -71,6 +71,12 @@ try {
   assert.equal(await window_.locator('img').count(), 0);
   // Zoom in first, so the photo can move sideways inside its frame.
   await rerendered(() => w.getByRole('button', { name: 'Zoom in', exact: true }).click());
+  // Pinch over a crop belongs to the photo; it must not magnify the whole book as well.
+  const cropBounds = await window_.boundingBox();
+  await rerendered(() => window_.dispatchEvent('wheel', { ctrlKey: true, deltaY: -10,
+    clientX: cropBounds.x + cropBounds.width / 2, clientY: cropBounds.y + cropBounds.height / 2,
+    bubbles: true, cancelable: true }));
+  assert.equal(await w.locator('.canvas-zoom-value').textContent(), 'Fit');
   const zoomed = await read();
   assert.ok(zoomed.spreads.find(({ id }) => id === 'arriving').boxes.hero.crops?.story?.zoom > 1, 'zoom saved as a crop');
   const start = await x();

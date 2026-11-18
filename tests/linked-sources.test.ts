@@ -426,3 +426,57 @@ test('removing an assigned file clears its assignments in one undoable edit that
   assert.equal(redone.project.files[id], undefined);
   assert.equal(redone.project.params.track, undefined);
 });
+
+test('restart migration restores approvals and cached photos from all legacy device records', { skip: process.platform !== 'darwin' }, async (t) => {
+  const f = await fixture(t);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
+  const id = added.imported[0];
+  const entry = sourceEntries(added.book).find((entry) => entry.id === id)!;
+  const store = await SourceStore.forBook(f.folder, f.cache);
+  await store.settled();
+  const access = join(f.root, 'source-access');
+  const indices = join(f.root, 'source-cache/books');
+  const { sourceBookKey } = await import('../desktop/source-access');
+  const key = await sourceBookKey(f.folder);
+  if (!key.startsWith('volume-')) return t.skip('The test directory is on a volume without a UUID');
+  const info = await stat(f.folder, { bigint: true });
+  const legacy = `999999-${info.ino}-${info.birthtimeNs}.json`;
+  await rename(join(access, key + '.json'), join(access, legacy));
+  await rename(join(indices, key + '.json'), join(indices, legacy));
+  // A partial registry created after the reboot must not hide the old photo approvals.
+  await writeFile(join(access, `999998-${info.ino}-${info.birthtimeNs}.json`), JSON.stringify({
+    'markdown:other': { path: f.text },
+  }));
+  configureSourceAccess(access);
+  configureSourceStore(join(f.root, 'source-cache'));
+  const reopened = await loadProject(f.folder, f.cache);
+  assert.equal(reopened.sources![entry.key].state, 'available');
+  const migrated = JSON.parse(await readFile(join(access, key + '.json'), 'utf8'));
+  assert.equal(migrated[entry.key].path, f.photo);
+  assert.equal(migrated['markdown:other'].path, f.text);
+  await stat(join(access, legacy)); // Rollback data is preserved.
+  await rm(f.photo);
+  const missing = await loadProject(f.folder, f.cache);
+  assert.equal(missing.sources![entry.key].state, 'missing');
+  assert.equal(missing.sources![entry.key].cached, true);
+  assert.ok(missing.photos.has(id));
+});
+
+test('Locate Folder reapproves exact originals with no approvals or cache, but never same-name replacements', async (t) => {
+  const f = await fixture(t);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
+  const id = added.imported[0];
+  await rm(join(f.root, 'source-access'), { recursive: true });
+  await rm(join(f.root, 'source-cache'), { recursive: true });
+  configureSourceAccess(join(f.root, 'source-access'));
+  configureSourceStore(join(f.root, 'source-cache'));
+  const unavailable = await loadProject(f.folder, f.cache);
+  assert.equal(unavailable.sources!['photo:' + id].state, 'unapproved');
+  const other = join(f.root, 'other'); await mkdir(other);
+  await cp(f.photo, join(other, 'photo.png'));
+  assert.equal((await relinkFolder(unavailable, other)).repaired, 0);
+  const repaired = await relinkFolder(unavailable, f.external);
+  assert.equal(repaired.repaired, 1);
+  assert.equal(repaired.book.sources!['photo:' + id].state, 'available');
+  assert.equal(repaired.book.photoIndex[id].path, f.photo);
+});
