@@ -23,3 +23,11 @@ test('legacy migration rejects different births, conflicting grants, and does no
   await writeFile(join(root, 'volume-test.json'), 'corrupt');
   assert.deepEqual((await readSourceRegistry(root, folder, 'volume-test', parse)).entries, {});
 });
+
+test('cached content stamps leave out the device number, which a restart may change (F-012)', async () => {
+  const { stamp } = await import('../desktop/source-store');
+  const info = { dev: 16777230n, ino: 42n, size: 1000n, mtimeNs: 1n, ctimeNs: 2n } as import('node:fs').BigIntStats;
+  assert.equal(stamp(info), stamp({ ...info, dev: 16777231n }));
+  assert.notEqual(stamp(info), stamp({ ...info, ino: 43n }));
+  assert.notEqual(stamp(info), stamp({ ...info, ctimeNs: 3n }));
+});

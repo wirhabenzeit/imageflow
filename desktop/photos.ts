@@ -1,3 +1,4 @@
+import { fileStamp } from './file-stamp';
 import { estimatedCapture } from './capture-time';
 import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, realpath, rename, rm, stat } from 'node:fs/promises';
@@ -9,7 +10,8 @@ import { captureMetadata } from '../src/photo-metadata';
 export const photoExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 type Rendition = 'thumb' | 'preview' | 'export';
 export type ProjectPhoto = Photo & { estimatedCapture?: string; original: string; cache: string; key: string; alpha: boolean; passthrough: boolean; problem?: string; observation?: string };
-const observation = (info: import('node:fs').BigIntStats) => [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
+// The same stamp as the source store's, because a photo's observation may come from either (src/file-stamp).
+const observation = fileStamp;
 
 export async function photoDetails(original: string, maximumBytes: number | null = 50 * 1024 * 1024) {
   if (!photoExtensions.has(extname(original).toLowerCase())) throw new Error('Use JPEG, PNG, or WebP images.');
@@ -30,7 +32,8 @@ export async function photoDetails(original: string, maximumBytes: number | null
     estimatedCapture: estimatedCapture(capture.captured, Number(info.mtimeMs)),
     passthrough: metadata.format === 'jpeg' && !metadata.icc && metadata.space === 'srgb' && (metadata.orientation ?? 1) === 1,
     observation: observation(info),
-    key: createHash('sha256').update([original, info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs, 'rendition-2'].join(':')).digest('hex'),
+    // Renditions are kept across restarts, so the key leaves out the device number, which a restart may change (F-012).
+    key: createHash('sha256').update([original, fileStamp(info), 'rendition-3'].join(':')).digest('hex'),
   };
 }
 

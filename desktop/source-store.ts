@@ -16,7 +16,8 @@ let persistentRoot: string | undefined;
 const stores = new Map<string, Promise<SourceStore>>();
 export function configureSourceStore(root: string) { persistentRoot = root; stores.clear(); }
 export const digestBytes = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-const stamp = (info: BigIntStats) => [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
+export { fileStamp as stamp } from './file-stamp';
+import { fileStamp as stamp } from './file-stamp';
 export function within(root: string, path: string) {
   const rel = relative(root, path);
   return !!rel && rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel);
