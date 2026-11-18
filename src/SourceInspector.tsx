@@ -1,5 +1,5 @@
 import { sourcePath } from './source-locations';
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
 import type { SourceUsage } from './editing';
@@ -7,7 +7,8 @@ import { sheetLayoutLabel } from './layouts';
 import { Field } from './Fields';
 import type { Edit } from './Inspector';
 import { markdownToHtml } from './markdown';
-import { fileName, words } from './source-items';
+import { fileName, metaText, words } from './source-items';
+import { splitFrontmatter } from './frontmatter';
 import type { SourceRef } from './source-items';
 import { captureFact, photoDate } from './photo-view';
 
@@ -43,6 +44,7 @@ export function SourceInspector({ summary, source, template, render, usage, writ
   const [openError, setOpenError] = useState('');
   const text = source.kind === 'text' ? summary.texts[source.id] : undefined;
   const html = useMemo(() => text === undefined ? undefined : markdownToHtml(text), [text]);
+  const header = useMemo(() => text === undefined ? undefined : splitFrontmatter(text), [text]);
 
   if (source.kind === 'photo') {
     const photo = summary.photoIndex[source.id];
@@ -85,7 +87,9 @@ export function SourceInspector({ summary, source, template, render, usage, writ
 
   const path = summary.project.texts[source.id];
   if (!path) return <p className="muted">This text is no longer in the project.</p>;
-  const headings = text?.split('\n').filter((line) => /^#{1,6}\s/.test(line)).length ?? 0;
+  const headings = header?.body.split('\n').filter((line) => /^#{1,6}\s/.test(line)).length ?? 0;
+  // A header's fields, as the template reads them (text.meta); the text itself leaves them out.
+  const fields = Object.entries(header?.meta ?? {});
   return <div className="source-inspector">
     <div className="si-head">
       <p className="eyebrow">Text</p>
@@ -97,6 +101,12 @@ export function SourceInspector({ summary, source, template, render, usage, writ
       <dt>Length</dt><dd>{words(text)} words · {text.length} characters</dd>
       {headings > 0 && <><dt>Headings</dt><dd>{headings}</dd></>}
     </dl>}
+    {header?.error && <p className="error-text">Header, line {header.error.line}: {header.error.message}</p>}
+    {fields.length > 0 && <details open><summary>Header</summary>
+      <dl className="si-facts si-header">{fields.map(([key, value]) => <Fragment key={key}>
+        <dt>{key}</dt><dd title={metaText(value)}>{metaText(value)}</dd>
+      </Fragment>)}</dl>
+    </details>}
     <details open><summary>Placed on</summary>
       <Placements summary={summary} template={template} usage={usage} render={render} source={source} select={select} />
     </details>
@@ -112,3 +122,4 @@ export function SourceInspector({ summary, source, template, render, usage, writ
     </details>}
   </div>;
 }
+

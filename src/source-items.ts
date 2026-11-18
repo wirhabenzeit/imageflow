@@ -3,6 +3,8 @@ import type { PhotoView } from './photo-view';
 import { sourceFileName, sourcePath } from './source-locations';
 import type { SourceReference } from './source-locations';
 import type { ProjectSummary } from './desktop';
+import { splitFrontmatter } from './frontmatter';
+import type { TextMetaValue } from './frontmatter';
 
 // Source helpers live outside Sources.tsx so React fast refresh can treat that file as components only.
 export const photosMime = 'application/x-imageflow-photos';
@@ -18,14 +20,18 @@ export type SourcesTab = SourceKind | 'assets';
 
 // Imported files are stored as "<id>-<name>"; show the original name.
 export const fileName = (path: SourceReference) => sourceFileName(path);
-export const words = (source: string) => source.split(/\s+/).filter(Boolean).length;
+// A YAML header is not part of the text (src/frontmatter.ts): words, excerpts and previews leave it out.
+export const words = (source: string) => splitFrontmatter(source).body.split(/\s+/).filter(Boolean).length;
 
+/** A text's first heading, or its header's title, and the start of its text, for a tile; with the header's fields. */
 export function excerpt(source: string) {
-  const lines = source.split('\n').map((line) => line.trim()).filter(Boolean);
-  const heading = lines.find((line) => /^#{1,6}\s/.test(line))?.replace(/^#+\s*/, '');
+  const { body: text, meta } = splitFrontmatter(source);
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const title = typeof meta?.title === 'string' && meta.title.trim() ? meta.title.trim() : undefined;
+  const heading = lines.find((line) => /^#{1,6}\s/.test(line))?.replace(/^#+\s*/, '') ?? title;
   const body = lines.filter((line) => !/^#{1,6}\s/.test(line)).join(' ')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`>#]|^[-+]\s/g, '').slice(0, 4096);
-  return { heading, body };
+  return { heading, body, meta };
 }
 
 export function sourceList(summary: ProjectSummary, kind: SourceKind, view?: PhotoView) {
@@ -57,4 +63,16 @@ export function textChoices(summary: Pick<ProjectSummary, 'project'>): (readonly
 export function sourceTitle(summary: ProjectSummary, kind: SourceKind, id: string) {
   if (kind === 'photo') return summary.photoIndex[id]?.title || (summary.photoIndex[id] ? fileName(summary.photoIndex[id].path) : id);
   return summary.project.texts[id] ? fileName(summary.project.texts[id]) : id;
+}
+
+// A header value in one line: lists joined, fields of an object named.
+export function metaText(value: TextMetaValue): string {
+  if (value === null) return '—';
+  if (Array.isArray(value)) return value.map(metaText).join(', ');
+  if (typeof value === 'object') {
+    // Named places and similar records: their name, else their fields.
+    if (typeof value.name === 'string') return value.name;
+    return Object.entries(value).map(([key, field]) => key + ': ' + metaText(field)).join(', ');
+  }
+  return String(value);
 }

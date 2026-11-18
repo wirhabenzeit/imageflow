@@ -1,7 +1,8 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { DesktopApi, MarkdownAction, MarkdownState } from './desktop';
 import { markdownToHtml } from './markdown';
-import { words } from './source-items';
+import { metaText, words } from './source-items';
+import { splitFrontmatter } from './frontmatter';
 
 export function MarkdownWindow({ api }: { api?: DesktopApi }) {
   const [state, setState] = useState<MarkdownState>();
@@ -12,6 +13,8 @@ export function MarkdownWindow({ api }: { api?: DesktopApi }) {
   const latestText = useRef('');
   const deferred = useDeferredValue(text);
   const html = useMemo(() => markdownToHtml(deferred), [deferred]);
+  // The YAML header is data for the template, not story text: the preview lists its fields above the text.
+  const header = useMemo(() => splitFrontmatter(deferred), [deferred]);
   const adopt = (next: MarkdownState) => {
     setState(next);
     if (next.version >= version.current) { version.current = next.version; basis.current = next.basis; latestText.current = next.text; setText(next.text); }
@@ -63,7 +66,12 @@ export function MarkdownWindow({ api }: { api?: DesktopApi }) {
       <section className="markdown-source"><h2>Markdown</h2><textarea aria-label="Markdown source" autoFocus spellCheck value={text} disabled={!state || state.closing}
         onChange={(event) => { const next = event.target.value; latestText.current = next; setText(next); void act({ action: 'change', text: next, version: ++version.current, basis: basis.current }); }}
         onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void act({ action: 'save' }); } }} /></section>
-      <section className="markdown-preview" aria-label="Formatted preview"><h2>Preview</h2><div className="markdown-preview-scroll"><article className="ql-markdown" dangerouslySetInnerHTML={{ __html: html }} /></div></section>
+      <section className="markdown-preview" aria-label="Formatted preview"><h2>Preview</h2><div className="markdown-preview-scroll">
+        {header.error && <p className="error-text">Header, line {header.error.line}: {header.error.message}</p>}
+        {header.meta && Object.keys(header.meta).length > 0 && <dl className="markdown-header-fields" aria-label="Header">
+          {Object.entries(header.meta).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{metaText(value)}</dd></div>)}
+        </dl>}
+        <article className="ql-markdown" dangerouslySetInnerHTML={{ __html: html }} /></div></section>
     </div>
     <footer className="markdown-footer muted">{words(text)} words · Markdown preview · Check page layout in the book window</footer>
   </main>;

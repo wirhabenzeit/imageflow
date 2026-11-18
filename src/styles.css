@@ -353,6 +353,7 @@ kbd { font: 600 10px system-ui, sans-serif; padding: 1px 4px; border: 1px solid 
 .si-facts { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0; font-size: 12px; }
 .si-facts dt { color: var(--muted); }
 .si-facts dd { margin: 0; }
+.si-header dd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .si-placements { list-style: none; padding: 0; margin: 6px 0; font-size: 12px; display: grid; gap: 3px; }
 .si-placements button.link, .box-actions + p button.link { all: unset; cursor: default; text-decoration: none; color: var(--accent); font-weight: 600; }
 .si-placements button.link:focus-visible { outline: 2px solid var(--accent); }
@@ -1044,3 +1045,9 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .canvas-zoom-value { min-width: 42px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .canvas-zoom-controls .canvas-return-fit { padding: 0 8px; margin-left: 3px; }
 .canvas[aria-busy] { cursor: progress; }
+/* A text's YAML header in the Markdown preview: fields for the template, set apart from the story. */
+.markdown-header-fields { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0 0 16px; padding: 8px 10px;
+  border: 1px solid var(--edge); border-radius: 6px; font-size: 12px; }
+.markdown-header-fields > div { display: contents; }
+.markdown-header-fields dt { color: var(--muted); }
+.markdown-header-fields dd { margin: 0; }
