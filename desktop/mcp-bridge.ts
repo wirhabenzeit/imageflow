@@ -1,5 +1,5 @@
 import { fromJsonSchema, McpServer } from '@modelcontextprotocol/server';
-import type { CallToolResult, JSONObject, RegisteredTool } from '@modelcontextprotocol/server';
+import type { CallToolResult, JSONObject, JsonSchemaValidator, RegisteredTool } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { resolve } from 'node:path';
 import { mcpCatalog, mcpLimits } from '../src/mcp-contract';
@@ -58,7 +58,13 @@ function start() {
       registered.set(tool.name, { schema, tool: server.registerTool(tool.name, {
         title: tool.title,
         description: tool.description,
-        inputSchema: fromJsonSchema<Record<string, unknown>>(tool.input as Parameters<typeof fromJsonSchema>[0]),
+        // Advertise the live app's schema, and let the app validate inputs with its discriminated Zod schemas.
+        // The SDK's JSON Schema validator reports errors from every union branch, including unrelated commands.
+        inputSchema: fromJsonSchema<Record<string, unknown>>(tool.input as Parameters<typeof fromJsonSchema>[0], {
+          getValidator<T>(): JsonSchemaValidator<T> {
+            return (input) => ({ valid: true, data: input as T, errorMessage: undefined });
+          },
+        }),
         outputSchema: fromJsonSchema<Record<string, unknown>>(tool.output as Parameters<typeof fromJsonSchema>[0]),
         annotations: { title: tool.title, readOnlyHint: tool.readOnly, destructiveHint: !tool.readOnly, idempotentHint: true, openWorldHint: false },
       }, async (args, context) => {

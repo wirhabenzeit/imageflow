@@ -12,7 +12,8 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 
 - Edit `template/` TSX, CSS and assets directly with your workspace tools.
 - Edit registered Markdown at its source location; linked Markdown stays outside the package.
-- Use `apply_project_changes` for supported sheet/page changes in `project.json` and metadata changes in `photos.json`. Never edit these manifests while the app is open. Address split-page content with `page: 'left' | 'right'` beside `spread`; unaddressed content commands return `SPREAD_SHOWN_AS_PAGES`. Insert facing pages with `insert_page_pair`; see [Page layouts](page-layouts.md).
+- Use `apply_project_changes` for sheet/page changes in `project.json` and metadata changes in `photos.json`. See [Project commands and preview targets](project-commands.md) for examples. Address split-page content with `page: 'left' | 'right'` beside `spread`; unaddressed content commands return `SPREAD_SHOWN_AS_PAGES`.
+- While an editor is active, dry runs and draft checks still validate against saved inputs. A blocked save reports `EDIT_IN_PROGRESS` with the active editor when available. `inspect_book` with `view: "summary"` also shows it.
 - Copy new content into `inbox/` and call `import_sources`. Then assign the returned IDs with a command batch.
 - Parameter commands use saved scopes: `document`, `spread`, `box` or `element`. An element editor can also own spread parameters; use `scope: 'spread'` for those fields, not `scope: 'element'`.
 - Mark a single user-written string the page prints with `<ctx.Text presentation="inline">`, so it is typed where it prints ([inline-text](inline-text.md)). Small text at whole-spread zoom opens the panel, which offers to zoom in.

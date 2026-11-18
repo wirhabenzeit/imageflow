@@ -20,6 +20,7 @@ Books created by ImageFlow carry a copy of this skill in `.claude/skills/imagefl
 Without the MCP server, type-check with the template's generated `.imageflow-sdk/tsconfig.json` (`npx tsc -p template`) and open the book in ImageFlow to see it; see [compatibility](references/compatibility.md).
 
 [authoring-workflow](references/authoring-workflow.md) describes the MCP tools, revisions, drafts and fixtures in detail.
+[project-commands](references/project-commands.md) gives JSON examples for every operation and preview target.
 
 ## Rules that matter most
 

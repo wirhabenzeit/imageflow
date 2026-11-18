@@ -6,6 +6,7 @@ import { identifier } from './project';
 import type { RenderStatus, TemplateInfo } from './desktop';
 
 export const maxPreviewEdge = 1600;
+export const previewTargets = 'Use {spread} for a spread, {spread, side} for one page (left, right or page), {page} with a positive page number and expectedRevision, {spread, box} or {spread, element} for a close-up (optional page: left or right), or {spreads: [...]} for a contact sheet.';
 const owner = identifier.refine((id) => id.length <= 256);
 const paddingMm = z.number().min(0).max(20).default(2).describe('Margin around the box or element, in millimetres.');
 // `spread` validates the spread target. Draft checks also accept `$alias` batch references, resolved before rendering.
@@ -23,7 +24,7 @@ export const makePreviewRequestSchema = (spread: z.ZodType<string, string>) => {
       z.strictObject({ spreads: z.array(spreadId).min(1).max(12).describe('Up to 12 spreads, in order.'),
         columns: z.int().min(1).max(4).default(3).describe('Spreads per row.') })
         .describe('A labelled contact sheet of several spreads.'),
-    ]).describe('What to render.'),
+    ]).describe('Spread, page, close-up or contact sheet.'),
     bounds: z.enum(['trim', 'bleed']).default('trim').describe('Crop to the trimmed page, or include the bleed.'),
     maxEdge: z.int().min(1).max(maxPreviewEdge).default(1000).describe('Longest image edge in pixels. Contact sheets need at least 128.'),
     format: z.enum(['png', 'jpeg']).default('png').describe('Image encoding. JPEG is smaller for photo-heavy spreads.'),

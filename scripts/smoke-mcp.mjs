@@ -26,7 +26,7 @@ export default defineTemplate({id:'mcp-test',version:'1',contract:1,
  formats:{portrait:format('Portrait',80,110),landscape:format('Landscape',110,80)},defaultFormat:'portrait',
  parameters:{color:p.color({label:'Color',default:'#0000ff'}),note:p.string({label:'Note',default:''})},
  spreads:{base:{label:'Base',parameters:{heading:p.string({label:'Heading',default:'Hello'})},
- boxes:{hero:{type:'photo',label:'Photo'}},render:ctx=><Spread><h1 style={{color:ctx.document.color}}>{ctx.params.heading}</h1>
+ boxes:{hero:{type:'photo',label:'Photo'}},render:ctx=><Spread><h1 {...ctx.edit('heading')} style={{color:ctx.document.color}}>{ctx.params.heading}</h1>
  <PhotoBox id="hero" style={{position:'absolute',left:'10mm',top:'25mm',width:'40mm',height:'40mm'}} /></Spread>}
  // NEW_LAYOUT
  }});`;
@@ -102,8 +102,9 @@ try {
   assert.equal(context.apiReference,undefined);
   assert.deepEqual(context.sources,{});
   assert.ok(context.topics.some(t=>t.id==='authoring-workflow'));
-  context=await good('get_authoring_context',{project,docs:['declaration'],includeExamples:['minimal'],includeSource:['template/index.tsx']});
+  context=await good('get_authoring_context',{project,docs:['declaration','project-commands'],includeExamples:['minimal'],includeSource:['template/index.tsx']});
   assert.ok(context.docs.declaration.includes('defineTemplate'));
+  assert.ok(context.docs['project-commands'].includes('"op":"select_format"'));
   assert.ok(context.examples.find(e=>e.name==='minimal').source.includes('defineTemplate'));
   assert.equal(context.examples.find(e=>e.name==='grid-bleed').source,undefined);
   assert.ok(context.sources['template/index.tsx'].text.includes('NEW_LAYOUT'));
@@ -209,6 +210,11 @@ try {
   revision=(await good('list_projects')).projects[0].revision;
   const blocked=await call('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'draft-test',label:'Agent title',operations:[{op:'set_title',title:'Agent title'}]});
   assert.equal(blocked.data.error.code,'EDIT_IN_PROGRESS');
+  assert.equal(blocked.data.error.activeEditor.label,'Note');
+  assert.match(blocked.data.error.message,/Note/);
+  const editingSummary=await good('inspect_book',{project,view:'summary'});
+  assert.deepEqual(editingSummary.activeEditor,blocked.data.error.activeEditor);
+  assert.ok(!JSON.stringify(editingSummary).includes('Human draft'));
   const whileEditing=await good('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'draft-validation',label:'Validate title',dryRun:true,operations:[{op:'set_title',title:'Validated title'}]});
   assert.equal(whileEditing.committed,false);
   assert.equal(whileEditing.dryRun,true);
@@ -216,6 +222,19 @@ try {
   await title.blur();
   await waitForProject(window, (book) => book.project.params.note === 'Human draft');
   await ready();
+  assert.equal((await good('inspect_book',{project,view:'summary'})).activeEditor,undefined);
+
+  await window.locator('.spread-thumb[data-spread="first"]').click();
+  await window.getByRole('button', { name: 'Edit Heading', exact: true }).click();
+  const popover = window.getByRole('dialog', { name: 'Edit Heading', exact: true });
+  await popover.waitFor();
+  revision=(await good('list_projects')).projects[0].revision;
+  const blockedByHeading=await call('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'heading-editor',label:'Agent title',operations:[{op:'set_title',title:'Agent title'}]});
+  assert.equal(blockedByHeading.data.error.code,'EDIT_IN_PROGRESS');
+  assert.deepEqual(blockedByHeading.data.error.activeEditor,{label:'parameter editor',spread:'first',field:'heading'});
+  await popover.getByRole('button', { name: 'Close', exact: true }).click();
+  await popover.waitFor({state:'detached'});
+
   // A UI save that lands while the agent is requesting its lease must not be rejected by agent busy state.
   revision=(await good('list_projects')).projects[0].revision;
   await app.evaluate(({BrowserWindow}) => {
@@ -299,6 +318,14 @@ try {
   const failing=await call('check_book',{project});
   assert.equal(failing.data.state,'error',JSON.stringify(failing.data));
   assert.match(failing.data.revision,/^[a-f0-9]{64}$/);
+  const fixtures=await call('check_book',{project,expectedRevision:failing.data.revision,fixtures:{
+    layouts:['chapter'],cases:['typical'],preview:{maxEdge:300,cells:[{layout:'chapter',case:'typical'}]},
+  }});
+  assert.equal(fixtures.data.state,'error',JSON.stringify(fixtures.data));
+  assert.ok(fixtures.data.diagnostics.some(d=>d.code==='layout-render-failed'));
+  assert.equal(fixtures.data.checks.fixtures,'completed');
+  assert.equal(fixtures.data.image?.fixture,true,JSON.stringify(fixtures.data));
+  assert.ok(fixtures.response.content.some(c=>c.type==='image'));
   const repair={op:'set_parameter',scope:'spread',spread:applied.references.chapter,key:'heading',value:'Recovered'};
   const repaired=await call('check_book',{project,expectedRevision:failing.data.revision,draft:{operations:[repair]},
     preview:{target:{spread:applied.references.chapter},maxEdge:300}});

@@ -7,7 +7,7 @@ import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { capabilities as templateCapabilities, contract1Capabilities, runtimeExports } from '../src/runtime-exports';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from '../src/authoring-check';
 import type { AuthoringDiagnostic } from '../src/authoring';
-import type { ImportRequest } from '../src/desktop';
+import type { ActiveBookEditor, ImportRequest } from '../src/desktop';
 import { applyProjectCommands, ProjectCommandError } from '../src/project-commands';
 import { pageLabel, pageSequence } from '../src/format';
 import { keptOutside } from '../src/layouts';
@@ -42,6 +42,7 @@ export class AuthoringError extends Error {
 }
 type Hooks = {
   session: () => ProjectSession | undefined;
+  activeEditor?: () => ActiveBookEditor | undefined;
   cache: string;
   // The app's docs folder: template API topics in template-api/ (listed in topics.json) and example templates in examples/.
   docs: string;
@@ -515,7 +516,7 @@ export function createAuthoringService(hooks: Hooks) {
             pageAddressing: true, pagePairInsertion: true, elementInspection: true, detailPreviews: true, maxContactSheetSpreads: 12,
             templateApi: { contract: 1, baseline: [...contract1Capabilities], capabilities: [...templateCapabilities], exports: [...runtimeExports] },
             diagnostics: 'Stable codes with spread/box/element/source locations, measured details and suggested fixes.',
-            draftProtection: 'All agent mutations wait until active human editors are closed or blurred.',
+            draftProtection: 'Saves and imports return EDIT_IN_PROGRESS while an editor is active. Dry runs and draft checks can still validate saved inputs.',
             imports: 'Only project/inbox paths. All selected files are validated before import; source files remain available to Undo.',
             idempotency: 'Up to 1000 successful requests for this open-project handle; replay returns the original result. Reopen expires the handle.' },
         };
@@ -563,6 +564,10 @@ export function createAuthoringService(hooks: Hooks) {
       if (currentHash && observation && after.inputs) {
         cachedTemplateHash = { session, observation: after.inputs.observation, files: observation.key, hash: currentHash };
       } else cachedTemplateHash = undefined;
+      if (name === 'inspect_book' && args.view === 'summary') {
+        const activeEditor = hooks.activeEditor?.();
+        if (activeEditor) result.activeEditor = activeEditor;
+      }
       return result;
     }
     if (name === 'rebuild_dependencies') {

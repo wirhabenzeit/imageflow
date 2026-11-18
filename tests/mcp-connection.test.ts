@@ -12,7 +12,7 @@ import { build } from 'esbuild';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createMcpConnection, McpAppClient } from '../desktop/mcp-connection';
-import { mcpLimits, mcpTools, parseMcpArguments } from '../src/mcp-contract';
+import { advertisedSchemas, mcpLimits, mcpTools, parseMcpArguments } from '../src/mcp-contract';
 
 type ConnectionOptions = Parameters<typeof createMcpConnection>[0];
 const hash = 'a'.repeat(64);
@@ -169,6 +169,31 @@ test('official MCP client lists every tool and receives image content without du
   assert.deepEqual(tools.map(({ name }) => name).sort(), mcpTools.map(({ name }) => name).sort());
   assert.ok(tools.every(({ inputSchema }) => inputSchema.type === 'object'));
   assert.ok(tools.every(({ title, annotations, outputSchema }) => title && annotations?.title === title && outputSchema?.type === 'object'));
+  for (const name of ['apply_project_changes', 'check_book', 'import_sources'] as const) {
+    assert.deepEqual(tools.find((tool) => tool.name === name)?.inputSchema, advertisedSchemas(name).input);
+  }
+
+  const valid = { op: 'set_title', title: 'Title' };
+  const operations = Array.from({ length: 40 }, () => valid as Record<string, unknown>);
+  operations[22] = { op: 'insert_spread', definition: 'story', after: { $ref: 'camp' } };
+  const checkArguments = { project: 'book', expectedRevision: hash };
+  const applyArguments = { ...checkArguments, idempotencyKey: 'validation-test', label: 'Test', dryRun: true };
+  for (const [name, args, path] of [
+    ['apply_project_changes', { ...applyArguments, operations }, 'operations[22].after'],
+    ['check_book', { ...checkArguments, draft: { operations } }, 'draft.operations[22].after'],
+    ['apply_project_changes', { ...applyArguments, operations: [{ op: 'set_format' }] }, 'operations[0].op'],
+    ['check_book', { ...checkArguments, preview: { target: { kind: 'contactSheet' } } }, 'preview.target'],
+  ] as const) {
+    const invalid = await client.callTool({ name, arguments: args });
+    assert.equal(invalid.isError, true);
+    const error = (invalid.structuredContent as Record<string, unknown>)?.error as { code: string; message: string };
+    assert.equal(error.code, 'invalid-tool-arguments');
+    assert.ok(error.message.startsWith(path), error.message);
+    assert.ok(error.message.length < 500, error.message);
+    if (path.endsWith('.after')) assert.match(error.message, /insert_spread.*"\$chapter"/);
+    if (path.endsWith('.op')) assert.match(error.message, /select_format/);
+    if (path === 'preview.target') assert.match(error.message, /\{spreads: \[\.\.\.\]\}/);
+  }
   const checked = await client.callTool({ name: 'check_book', arguments: { project: 'book', preview: { target: { spread: 'later' } } } });
   assert.equal(checked.isError, undefined, JSON.stringify(checked));
   assert.equal(checked.content[1].type, 'image');

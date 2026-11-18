@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { makePreviewRequestSchema } from './preview';
-import { projectOperationsSchema, spreadReference } from './project-commands';
+import { makePreviewRequestSchema, previewTargets } from './preview';
+import { projectOperationNames, projectOperationsSchema, spreadReference } from './project-commands';
 import { makeInspectionSchema } from './inspection';
 import { fixtureRequestSchema } from './fixtures';
 import { docTopicIds } from './doc-topics';
@@ -120,9 +120,9 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
   { name: 'inspect_book', title: 'Inspect book', readOnly: true,
     description: 'Read a book\'s saved spreads, sources or parameter values, or measure the boxes and elements of one spread. Returns the revision to pass to checks and commands.' },
   { name: 'check_book', title: 'Check book', readOnly: true,
-    description: 'Render the whole book and return diagnostics, optionally with a preview image, type checking, an unsaved draft or synthetic layout fixtures. Call it after every edit; it never saves.' },
+    description: 'Check the whole book without saving. Request a preview, type checking, an unsaved draft or synthetic fixtures. Call after each edit.' },
   { name: 'apply_project_changes', title: 'Apply changes', readOnly: false,
-    description: 'Save a batch of project commands (spreads, layouts, parameters, sources, crops, photo metadata) atomically as one named Undo step. Use it for project.json and photos.json instead of editing them.' },
+    description: 'Save project commands atomically as one named Undo step. Use it for project.json and photos.json. For command and preview examples, call get_authoring_context with docs: ["project-commands"].' },
   { name: 'rebuild_dependencies', title: 'Rebuild template dependencies', readOnly: false,
     description: 'Install the npm packages listed in template/package.json outside the book, in a cache ImageFlow manages, and bundle the ones the template imports into template/vendor/, which is all the book renders. Call it after changing template/package.json or adding a package import; never run npm install in template/. A long install answers state "installing": call again until it is "ready", then check_book.' },
   { name: 'list_templates', title: 'List library templates', readOnly: true,
@@ -157,7 +157,25 @@ export function parseMcpArguments(name: string, args: unknown): { name: McpToolN
   const tool = name as McpToolName;
   const parsed = mcpToolSchemas[tool].safeParse(args);
   if (!parsed.success) {
-    throw new Error(parsed.error.issues.map((issue) => (issue.path.length ? issue.path.join('.') + ': ' : '') + issue.message).join('\n'));
+    const issues = parsed.error.issues;
+    const messages = issues.slice(0, 4).map((issue) => {
+      const path = issue.path.map((part, index) =>
+        typeof part === 'number' ? '[' + part + ']' : (index ? '.' : '') + String(part).slice(0, 80)).join('');
+      const error = (message: string) => path ? path + ': ' + message : message;
+      if (path === 'preview.target' && issue.code === 'invalid_union') return error(previewTargets);
+      const draft = issue.path[0] === 'draft';
+      const [field, index, key] = draft ? issue.path.slice(1) : issue.path;
+      if (field !== 'operations' || typeof index !== 'number') return error(issue.message.slice(0, 300));
+      const input = args as { operations?: { op?: unknown }[]; draft?: { operations?: { op?: unknown }[] } };
+      const op = (draft ? input.draft?.operations : input.operations)?.[index]?.op;
+      const name = projectOperationNames.find((candidate) => candidate === op);
+      if (!name && key === 'op') {
+        return error('Choose an op from ' + projectOperationNames.join(', ') + '.');
+      }
+      return error((name ? name + ' — ' : '') + issue.message.slice(0, 300));
+    });
+    if (issues.length > messages.length) messages.push((issues.length - messages.length) + ' more validation issues.');
+    throw new Error(messages.join('\n'));
   }
   return { name: tool, args: parsed.data };
 }

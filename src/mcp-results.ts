@@ -121,6 +121,8 @@ export const mcpOutputSchemas = {
   }),
   inspect_book: z.looseObject({
     project: z.string(), ...reportFields,
+    activeEditor: z.looseObject({ label: z.string(), spread: z.string().optional(), page: z.enum(['left', 'right']).optional(),
+      field: z.string().optional() }).optional().describe('Editor open in ImageFlow at the time of summary inspection, with its saved field address when available.'),
     templateIdentity: templateIdentitySchema.optional(),
     items: z.array(z.looseObject({})).optional(), total: z.number().optional(), nextOffset: z.number().nullable().optional(),
   }),

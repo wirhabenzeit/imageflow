@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { advertisedSchemas, mcpOutputSchemas, mcpToolSchemas, mcpTools } from '../src/mcp-contract';
+import { projectOperationNames, projectOperationSchema } from '../src/project-commands';
 
 type JsonSchema = { description?: string; const?: unknown; properties?: Record<string, JsonSchema>; items?: JsonSchema; anyOf?: JsonSchema[];
   oneOf?: JsonSchema[]; allOf?: JsonSchema[]; additionalProperties?: JsonSchema | boolean };
@@ -36,6 +38,12 @@ test('every MCP tool declares an object output schema', () => {
     assert.equal(schema.type, 'object', tool.name);
     assert.ok(schema.properties && Object.keys(schema.properties).length > 0, tool.name);
   }
+});
+
+test('the project commands reference gives a valid example of every operation', () => {
+  const doc = readFileSync('docs/template-api/project-commands.md', 'utf8');
+  const examples = [...doc.matchAll(/`(\{"op":.*?\})`/g)].map(([, source]) => projectOperationSchema.parse(JSON.parse(source)));
+  assert.deepEqual(examples.map(({ op }) => op).sort(), [...projectOperationNames].sort());
 });
 
 test('output schemas keep the frozen result fields strict and allow later additions', () => {

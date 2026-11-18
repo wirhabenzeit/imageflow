@@ -17,7 +17,7 @@ import { assetUsage, fileExtensions } from './asset-usage';
 import { sourcePlacements } from './source-placement';
 import { importFeedback } from './import-feedback';
 import { commandState } from './commands';
-import type { BookMenuState } from './desktop';
+import type { ActiveBookEditor, BookMenuState } from './desktop';
 import { bookName } from './book-name';
 import type { ImportMode } from './source-locations';
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -263,6 +263,7 @@ export function App() {
   const [checkRequest, setCheckRequest] = useState(0);
   const [checkScope, setCheckScope] = useState<string>();
   const [controlFocused, setControlFocused] = useState(false);
+  const [focusedEditor, setFocusedEditor] = useState<string>();
   const [spreadFocused, setSpreadFocused] = useState(false);
   useEffect(() => {
     const focus = () => setSpreadFocused(!!document.activeElement?.closest('.spread-thumb, .canvas'));
@@ -271,7 +272,14 @@ export function App() {
     return () => { document.removeEventListener('focusin', focus); document.removeEventListener('pointerdown', pointer, true); };
   }, []);
   useEffect(() => {
-    const focus = () => setControlFocused(!!document.activeElement?.closest('input, textarea, select, [contenteditable], iframe, dialog, .edit-popover, .crop-toolbar'));
+    const focus = () => {
+      const node = document.activeElement;
+      setControlFocused(!!node?.closest('input, textarea, select, [contenteditable], iframe, dialog, .edit-popover, .crop-toolbar'));
+      if (node?.matches('input, textarea, select, [contenteditable="true"]') || node?.closest('dialog')) {
+        const labels = node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement ? node.labels : null;
+        setFocusedEditor(node.getAttribute('aria-label') || labels?.[0]?.textContent?.trim() || 'focused editor control');
+      } else setFocusedEditor(undefined);
+    };
     document.addEventListener('focusin', focus);
     document.addEventListener('focusout', focus);
     focus();
@@ -701,7 +709,9 @@ export function App() {
     const focused = document.activeElement;
     const typing = focused instanceof HTMLElement && (focused.matches('input, textarea, select, [contenteditable="true"]') || !!focused.closest('dialog'));
     const reloadRunning = reloading.current && !reloadFailed.current;
-    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || typing || agentLocked.current) return false;
+    if (pendingTasks.current || busy || reloadRunning || editing || elementEditor || cropping || reorder.dragging || typing || agentLocked.current) {
+      return activeEditor ?? false;
+    }
     agentLocked.current = true;
     if (workspace.current) workspace.current.inert = true;
     setAgentWorking(true);
@@ -1723,13 +1733,23 @@ export function App() {
     ? 'This field changed while you were editing. Close it and open the field again to continue.'
     : 'Editing is paused while the preview is out of date.');
   const canExport = canvasReady && !busy && spreads.length > 0;
+  let activeEditor: ActiveBookEditor | undefined;
+  if (editing) {
+    const field = editTarget?.edits.join(', ') || editing.held?.target.edits.join(', ') || editing.owner?.id;
+    activeEditor = { label: editing.text ? 'text editor' : 'parameter editor', spread: editing.spread, page: editing.page, field };
+  } else if (elementEditor) {
+    activeEditor = { label: elementEditor.kind === 'element' ? 'element editor' : 'document editor',
+      spread: elementEditor.spread, page: elementEditor.page, field: elementEditor.kind === 'element' ? elementEditor.element : elementEditor.editor };
+  } else if (cropping) {
+    activeEditor = { label: 'crop editor', spread: cropping.spread, page: cropping.page, field: cropping.box };
+  } else if (focusedEditor) activeEditor = { label: focusedEditor };
   const menuState: BookMenuState = { importMode: summary?.project.importMode, document: !!summary, enabled: { 'add-spread': canAdd, 'duplicate-spread': canDuplicate,
     'move-spread-up': canMoveUp, 'move-spread-down': canMoveDown, 'delete-spread': canDelete && spreadFocused },
     editing: controlFocused || !!editing || !!cropping || !!elementEditor || !!quick, textEditing,
     writable, busy: !!busy || exporting || !!reload || agentWorking, history: summary?.history,
     canExport, canSwapPages: !!spread && !!template && hasFacingPages(template.format) && sequence?.spreads[index]?.span === 'spread' && canSwapPages(spread, template.spreads),
     sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom, selectedSpread: spreadId, photoView: photoView.value, selectionCount: selectedSpreads.length,
-    saving, pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };
+    saving, activeEditor, pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };
   const menuKey = JSON.stringify(menuState);
   useEffect(() => { void api?.setBookMenuState(menuState); }, [api, menuKey]);
   const undoCommand = commandState('undo', menuState), redoCommand = commandState('redo', menuState);

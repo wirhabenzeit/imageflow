@@ -50,8 +50,10 @@ export const gridColumns = [1, 2, 3, 4] as const;
 export type LayoutCommand = 'layout-vertical' | 'layout-grid' | `grid-columns-${typeof gridColumns[number]}`;
 export const spreadCommands = ['add-spread', 'duplicate-spread', 'move-spread-up', 'move-spread-down', 'delete-spread'] as const;
 export type SpreadCommand = typeof spreadCommands[number];
+export type ActiveBookEditor = { label: string; spread?: string; page?: PageSide; field?: string };
+export type AgentLeaseReply = boolean | ActiveBookEditor;
 export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
-  writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canSwapPages?: boolean;
+  writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView; selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string> };
 export type Command = PhotoViewCommand | SpreadCommand | 'swap-pages' | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
@@ -168,7 +170,7 @@ export type DesktopApi = {
   mcpSettings(enabled?: boolean): Promise<Result<McpSettings>>;
   onMcpChanged(listener: (settings: McpSettings) => void): () => void;
   installMcp(target: McpClientTarget): Promise<Result<string>>;
-  onAgentLease(listener: (id: string) => boolean): () => void;
+  onAgentLease(listener: (id: string) => AgentLeaseReply): () => void;
   onAgentRelease(listener: () => void): () => void;
   importFiles(id: string, request: ImportRequest): Promise<Result<{ summary: ProjectSummary; imported: string[]; counts?: ImportCounts } | null>>;
   // Asks once per book to let its frames reach the template's declared origins; resolves to those allowed, with a new

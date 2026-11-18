@@ -114,7 +114,7 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
   const declared = declaredInTemplate(template.spreads);
   const undeclared = (scope: string, parameters: Parameters, values: Values) =>
     Object.fromEntries(Object.entries(values).filter(([id]) => Object.hasOwn(parameters, id) || !declared.param(scope, id)));
-  const parameterFix = 'Use set_parameter with a value the declaration allows, or reset_parameter to restore the default.';
+  const parameterFix = 'Use set_parameter with an allowed value, or reset_parameter to remove the saved value.';
   for (const [page, { layout: definition }] of scopes) {
     const saved = scopeState(spread, page) ?? { params: {}, boxes: {}, elements: {} };
     warn(parameterWarnings(definition.parameters, undeclared('', definition.parameters, saved.params), 'Layout'),
@@ -135,7 +135,7 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
     }
     for (const [id, state] of Object.entries(saved.elements)) {
       const element = Object.hasOwn(definition.elements, id) ? definition.elements[id] : undefined;
-      if (!element && !declared.element(id)) {
+      if (!element && !declared.element(id) && Object.keys(state.params).length) {
         warn(['Settings saved for element ' + id + ' fit no element of this template.'], { code: 'element-undeclared', ...onPage(page), element: id,
           suggestion: 'Declare element ' + id + ' in a layout, or reset its saved parameters.' });
         continue;
@@ -1737,7 +1737,7 @@ export async function startRender(root: HTMLElement) {
       ...(book.template.warnings ?? []).map((text) => ({ ...message(text), code: 'template-dependencies',
         suggestion: 'Run npm install in template/, then run the template dependency rebuild script.' })),
       ...parameterWarnings(template.parameters, book.project.params, 'Document').map((text) => ({ ...message(text), code: 'parameter-invalid',
-        suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to restore the default.' })),
+        suggestion: 'Use set_parameter with scope document and an allowed value, or reset_parameter to remove the saved value.' })),
     ];
     // The template's own preview image is checked where the whole book is: the editor's book view, Book check and export.
     if (declared.data.preview && (!edit || view === 'book')) warnings.push(...await templatePreviewWarnings(declared.data.preview, chooseFormat(declared.data).format));
