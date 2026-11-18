@@ -237,6 +237,28 @@ async function readAt(handle: FileHandle, position: number, length: number) {
   return bytes.subarray(0, count);
 }
 
+/** Writes every byte. A short write, for example on a nearly full disk, continues where it stopped. */
+async function writeAt(handle: FileHandle, bytes: Buffer, position: number) {
+  let count = 0;
+  while (count < bytes.length) {
+    const { bytesWritten } = await handle.write(bytes, count, bytes.length - count, position + count);
+    if (!bytesWritten) throw new Error('Could not write the book history.');
+    count += bytesWritten;
+  }
+}
+
+/**
+ * The complete lines in the last `maximum` bytes of a file of `size` bytes. A record cut by the window start is
+ * dropped, so memory stays bounded however large the file has grown.
+ */
+async function tailLines(handle: FileHandle, size: number, maximum: number) {
+  const start = Math.max(0, size - maximum);
+  // One byte more shows whether the first line in the window starts exactly at its boundary.
+  const bytes = await readAt(handle, Math.max(0, start - 1), size - Math.max(0, start - 1));
+  const text = (start > 0 ? bytes.subarray(bytes.indexOf(0x0a) + 1) : bytes).toString('utf8');
+  return text.split('\n').filter(Boolean);
+}
+
 /**
  * Appends a save's ledger line exactly once. Only the pending save appends, under the writer lock, so an incomplete
  * final line can only be this save's interrupted append: it is cut and written again. A complete final line for this
@@ -262,7 +284,7 @@ async function appendCheckpoint(root: string, line: string, transaction: string)
         size -= fragment.length;
         await handle.truncate(size);
       } else {
-        await handle.write(Buffer.from('\n'), 0, 1, size);
+        await writeAt(handle, Buffer.from('\n'), size);
         size += 1;
       }
     }
@@ -271,19 +293,12 @@ async function appendCheckpoint(root: string, line: string, transaction: string)
     if (parseCheckpoint(last)?.checkpoint === transaction) {
       await handle.sync();
     } else if (size + record.length <= ledgerLimits.bytes) {
-      await handle.write(record, 0, record.length, size);
+      await writeAt(handle, record, size);
       await handle.sync();
     } else {
       // Rewrite the newest records into a new file and rename it over the ledger, so a crash keeps one or the other.
-      const existing = (await readAt(handle, 0, size)).toString('utf8').split('\n').filter(Boolean);
-      const kept: string[] = [];
-      let bytes = record.length;
-      for (let i = existing.length - 1; i >= 0; i--) {
-        const length = Buffer.byteLength(existing[i]) + 1;
-        if (bytes + length > ledgerLimits.retainedBytes) break;
-        kept.unshift(existing[i]);
-        bytes += length;
-      }
+      // Only the retained window is read, even when the ledger grew far past its limit outside ImageFlow.
+      const kept = await tailLines(handle, size, Math.max(0, ledgerLimits.retainedBytes - record.length));
       const temporary = join(folder, 'ledger-' + randomUUID() + '.tmp');
       await writeDurably(temporary, kept.map((entry) => entry + '\n').join('') + record.toString('utf8'));
       await fs.rename(temporary, path);
@@ -306,17 +321,26 @@ export async function readSaveLedger(folder: string): Promise<SaveLedger> {
   const root = await realpath(folder);
   const current = Object.fromEntries(await Promise.all(names.map(async (name) =>
     [name, await manifest(root, name).then(digest, () => null)]))) as SaveLedger['current'];
-  const history = await historyFolder(root, false).catch(() => undefined);
+  // A missing folder or ledger is an empty history. Any other failure is reported, because an empty answer would let
+  // a retried request commit again.
+  const history = await historyFolder(root, false);
   if (!history) return { records: [], unreadable: 0, current };
-  const file = await boundedFile(join(history, 'ledger.jsonl'), ledgerLimits.bytes + 2 * maximumCheckpointBytes).catch((error: unknown) => {
+  const path = join(history, 'ledger.jsonl');
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch((error: unknown) => {
     if (code(error) !== 'ENOENT') throw error;
     return undefined;
   });
-  if (!file) return { records: [], unreadable: 0, current };
+  if (!handle) return { records: [], unreadable: 0, current };
+  let lines: string[];
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error(path + ' is not a regular file.');
+    // A ledger grown past its limit outside ImageFlow is read from its newest records; the next save prunes it.
+    lines = await tailLines(handle, info.size, ledgerLimits.bytes + 2 * maximumCheckpointBytes);
+  } finally { await handle.close(); }
   const records: CheckpointRecord[] = [];
   let unreadable = 0;
-  for (const line of file.bytes.toString('utf8').split('\n')) {
-    if (!line) continue;
+  for (const line of lines) {
     const record = parseCheckpoint(line);
     if (record) records.push(record); else unreadable++;
   }

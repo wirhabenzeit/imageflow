@@ -436,8 +436,16 @@ export function createAuthoringService(hooks: Hooks) {
       fixtures: report, ...(image ? { image } : {}) };
   };
   /** The newest retained checkpoint committed with this key, from any earlier session on this book. */
-  const retainedReceipt = async (session: ProjectSession, key: string) =>
-    (await readSaveLedger(session.book.folder)).records.findLast((record) => record.mcp?.idempotencyKey === key);
+  const retainedReceipt = async (session: ProjectSession, key: string) => {
+    let ledger;
+    try { ledger = await readSaveLedger(session.book.folder); }
+    catch (error) {
+      // Without the history a retried request could commit twice, so nothing is applied.
+      throw new AuthoringError('HISTORY_UNAVAILABLE', 'Could not read the book history in .imageflow/history (' +
+        (error instanceof Error ? error.message : String(error)) + '). No changes were made. Make the folder and its ledger.jsonl readable and writable, then retry.');
+    }
+    return ledger.records.findLast((record) => record.mcp?.idempotencyKey === key);
+  };
   const ledgerReplay = async (session: ProjectSession, name: string, args: Record<string, any>, record: CheckpointRecord, signal: AbortSignal) => {
     let revision: string | null = null;
     try { revision = (await session.inputs.capture({ signal })).revision; } catch { signal.throwIfAborted(); }
