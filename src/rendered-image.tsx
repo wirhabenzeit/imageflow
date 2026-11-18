@@ -352,7 +352,7 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
       const cacheUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache,
         [spread?.dataset.layout ?? spread?.dataset.spread, pictureIndex, draw.toString(), inputs ?? null, width, height, pixelRatio]) : undefined;
       // The last picture this place showed, whatever its inputs: a replacement frame shows it while it draws the new one.
-      const placeUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache,
+      const placeUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache.replace(/\/picture\/$/, '/place/'),
         ['place', spread?.dataset.spread, spread?.dataset.layout, pictureIndex, width, height, pixelRatio]) : undefined;
       // A vector picture does not depend on the pixel ratio, so the book view and its thumbnails share one: whichever
       // draws it first saves it under this key too.

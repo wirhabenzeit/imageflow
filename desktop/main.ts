@@ -169,13 +169,16 @@ async function serve(request: Request) {
   const { host, pathname } = new URL(request.url);
   const renderHost = host === 'render' || host === 'thumbs';
   if (host !== 'editor' && !renderHost) return new Response(null, { status: 404 });
-  const picture = renderHost && /^\/render\/([a-f0-9-]{36})\/picture\/([a-f0-9]{64})$/.exec(pathname);
+  const picture = renderHost && /^\/render\/([a-f0-9-]{36})\/(picture|place)\/([a-f0-9]{64})$/.exec(pathname);
   if (picture) {
     const session = sessions.get(picture[1]);
     if (session?.mode !== 'edit' || !session.pictures || !session.book.templateHash) return new Response(null, { status: 404 });
     const scope = JSON.stringify([session.book.templateHash, session.network?.() ?? []]);
     if (session.pictureScope !== scope) return new Response(null, { status: 404 });
-    return session.pictures.respond(request, scope, picture[2]);
+    // The last picture shown at a place outlives template edits: a replacement frame shows it, as still drawing,
+    // while it draws the new one, instead of an empty box for every map in the book (F-032). It is never taken as
+    // the new picture, so it stays scoped to the allowed sites only.
+    return session.pictures.respond(request, picture[2] === 'place' ? JSON.stringify(['place', session.network?.() ?? []]) : scope, picture[3]);
   }
   if (request.method !== 'GET') return new Response(null, { status: 405 });
   const dist = join(app.getAppPath(), 'dist');
