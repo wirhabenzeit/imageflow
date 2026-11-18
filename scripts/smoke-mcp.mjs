@@ -1,5 +1,5 @@
 import { packagedMacExecutable } from './mac-paths.mjs';
-import { testBook, menuAction, agentSettings, closeSettings, undoBook, waitForProject } from './ui-actions.mjs';
+import { testBook, menuAction, agentSettings, closeSettings, undoBook, waitForProject, nextSettings } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -417,7 +417,7 @@ try {
   client = undefined;
   const waiting = window.getByRole('button', { name: 'No agent connected', exact: true });
   await waiting.waitFor();
-  const reopened=app.waitForEvent('window');
+  const reopened=nextSettings(app);
   await waiting.click();
   const pane=await reopened;
   await pane.getByRole('checkbox', { name: 'Allow agents to use open books', exact: true }).uncheck();
