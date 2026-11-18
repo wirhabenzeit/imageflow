@@ -18,7 +18,7 @@ import { photoDate } from './capture-time';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
 import type { SaveCheckpoint } from './persistence';
-import { sourceEntries, sourcePath, sourceLinked } from '../src/source-locations';
+import { sourceEntries, sourcePath, sourceLinked, storedFileName } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
 import { approveSources, sourceBookKey } from './source-access';
@@ -378,7 +378,7 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
         continue;
       }
       const id = { photo: 'ph-', markdown: 'tx-', file: 'fl-' }[kind] + randomUUID().slice(0, 12);
-      const name = basename(file).replace(/[^\p{L}\p{N} ._-]/gu, '-');
+      const name = storedFileName(basename(file));
       const relativePath = folder + '/' + id + '-' + name;
       const path = join(book.folder, relativePath);
       const original = await realpath(file);

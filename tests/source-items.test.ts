@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { excerpt, textChoices, words } from '../src/source-items';
-import { sourceFileName } from '../src/source-locations';
+import { sourceFileName, storedFileName } from '../src/source-locations';
 
 const summary = (texts: Record<string, string | { path: string; linked: true }>) => ({ project: { texts } }) as unknown as Parameters<typeof textChoices>[0];
 
@@ -29,4 +29,13 @@ test('text tiles leave out the YAML header and name the text by its title (F-030
   assert.equal(words(day), 4);
   assert.equal(excerpt('# Day 1\n---\nRule above').heading, 'Day 1', 'a heading in the text wins, and a rule is not a header');
   assert.equal(excerpt('---\n\n---\nText').body, 'Text');
+});
+
+test('stored file names keep umlauts, also when macOS hands them over decomposed (F-026)', () => {
+  const decomposed = '2026-08-22 Söng Kul.gpx';
+  assert.equal(storedFileName(decomposed), '2026-08-22 Söng Kul.gpx');
+  assert.equal(storedFileName(decomposed).length, '2026-08-22 Söng Kul.gpx'.length, 'composed, as one character');
+  assert.equal(storedFileName('Café crème.md'), 'Café crème.md');
+  assert.equal(storedFileName('a/b:c?.gpx'), 'a-b-c-.gpx');
+  assert.equal(storedFileName('क्षेत्र.md'), 'क्षेत्र.md', 'scripts with marks that do not compose keep them');
 });

@@ -5,7 +5,7 @@ import { basename, join } from 'node:path';
 import { storedBoxes } from '../src/project';
 import type { ProjectFiles } from '../src/project';
 import { clearFileAssignments, fileAssigned } from '../src/asset-usage';
-import { sourceEntries, sourceFolder } from '../src/source-locations';
+import { sourceEntries, sourceFolder, storedFileName } from '../src/source-locations';
 import type { ImportMode, SourceEntry } from '../src/source-locations';
 import { createDocument } from './documents';
 import { loadProject, updateProject } from './project';
@@ -26,7 +26,7 @@ async function managedCopy(folder: string, source: SourceEntry, snapshot: string
   const directory = join(folder, sourceFolder(source.kind));
   await mkdir(directory, { recursive: true });
   if (await realpath(directory) !== directory) throw new Error('Asset folder must be inside the book.');
-  const name = basename(source.path).replace(/[^\p{L}\p{N} ._-]/gu, '-');
+  const name = storedFileName(basename(source.path));
   const relativeFolder = sourceFolder(source.kind) + '/' + source.id + '-' + randomUUID().slice(0, 8);
   await mkdir(join(folder, relativeFolder));
   const path = relativeFolder + '/' + name.replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');

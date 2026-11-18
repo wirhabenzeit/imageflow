@@ -701,7 +701,7 @@ export class DocumentSession {
       if (job.signal.aborted) return null;
       const loaded = await this.projectSession.inputs.capture();
       if (before.revision !== loaded.revision || before.observation !== loaded.observation) throw new Error('Sources changed while preparing export. Please retry.');
-      const fileName = bookName(book.folder).replace(/[^\p{L}\p{N} _-]/gu, '-').slice(0, 80) + '.pdf';
+      const fileName = bookName(book.folder).normalize('NFC').replace(/[^\p{L}\p{M}\p{N} _-]/gu, '-').slice(0, 80) + '.pdf';
       const { canceled, filePath } = await dialog.showSaveDialog(owner, {
         title: 'Export PDF', defaultPath: join(app.getPath('documents'), fileName),
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
