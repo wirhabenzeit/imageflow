@@ -63,6 +63,37 @@ export function newEditorSpread(definition: string, layouts: Layouts, format: Pr
   return sheet;
 }
 
+/**
+ * A new, empty sheet after `previous` that continues it, as New Spread makes: the same spread layout, or on a sheet
+ * shown as two pages the same page layouts, so a sequence such as a route page beside its story goes on. Undefined
+ * when that does not fit at `position`, and after a single opening or closing page, which a book has only once; the
+ * caller then takes the first layout that fits.
+ */
+export function continuedSpread(previous: SpreadState, layouts: Layouts, format: PrintFormat,
+  position: { index: number; count: number }): SpreadState | undefined {
+  const required = spanRequiredAt(position.index, position.count, format);
+  const declared = (id: string | undefined): id is string => id !== undefined && Object.hasOwn(layouts, id);
+  if (!previous.split) {
+    if (!declared(previous.definition)) return;
+    const span = layouts[previous.definition].span ?? 'spread';
+    // A page design in a full sheet continues as one; a single end page is not repeated in the middle of the book.
+    if (hasFacingPages(format) && span !== 'spread' && required === 'spread') return;
+    return newEditorSpread(previous.definition, layouts, format, position);
+  }
+  if (!hasFacingPages(format) || required !== 'spread') return;
+  const pages: NonNullable<SpreadState['pages']> = {};
+  for (const side of ['left', 'right'] as const) {
+    const definition = previous.pages?.[side]?.definition;
+    if (!declared(definition) || layouts[definition].span !== 'page') continue;
+    if (layouts[definition].sides && !layouts[definition].sides.includes(side)) continue;
+    pages[side] = { definition, params: {}, boxes: {}, elements: {} };
+  }
+  const first = pages.left?.definition ?? pages.right?.definition;
+  if (!first) return;
+  // As for opening sheets: the sheet's own definition names the state a later merge starts from, never shown here.
+  return { ...newSpread(first), split: true, pages };
+}
+
 // The boxes a spread shows: its own layout's, or its pages' when it is shown as pages. Without the template (still
 // loading), every box the spread stores counts, on its pages and among replaced content too.
 function shown(spread: SpreadState, layouts?: Layouts) {

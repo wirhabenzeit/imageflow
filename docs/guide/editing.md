@@ -4,6 +4,8 @@
 
 Add, duplicate, move or delete spreads from the left sidebar or the **Book** menu. Drag a thumbnail to an insertion line to reorder, or use ⌥⌘↑ / ⌥⌘↓. Single-page book ends stay in place. Moves can be undone.
 
+**New Spread** adds an empty spread after the selected one, in the same layout: the same spread layout, or for a spread shown as two pages, the same two page layouts. A single opening or closing page is not repeated. Where the selected layout does not fit, the new spread takes the template's first layout that does.
+
 Select a spread to choose its layout and settings in the Inspector. **On this spread** lists its content. **Set aside** holds content from previous layouts, ready to restore when you switch back.
 
 ## Independent pages
