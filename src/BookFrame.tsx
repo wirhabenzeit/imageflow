@@ -19,9 +19,11 @@ export type InlineEditing = ({ spread: string; element: string } | { spread: str
 export type CropPreview = { spread: string; box: string; page?: PageSide; placement: { centerX: number; centerY: number; zoom: number } };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, release }: {
+export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
   // Paired views reveal one revision together, on the shared animation clock.
   onPrepared?: (project: string) => void;
+  // Called when a revision is shown, paired or not, so the other view does not wait for this one to prepare it again.
+  onShown?: (project: string) => void;
   release?: { project: string; start: number };
   project: string; view: BookView; query?: string; title: string;
   presentation?: PresentationView;
@@ -71,6 +73,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     if (frame.status?.state === 'ready') {
       setShown(id);
       onGeometry(frame.geometry, frame.reorder !== 'skipped', frame.start, project);
+      onShown?.(project);
     }
     if (frame.status) onStatus?.(frame.status, project);
     if (frame.status?.state === 'ready' && frame.pictures) onPictures?.(frame.pictures, project);

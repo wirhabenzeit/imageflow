@@ -169,6 +169,8 @@ export function App() {
   const [lastReady, setLastReady] = useState<RenderStatus>();
   const [fittedGeometry, setGeometry] = useState<BookGeometry>();
   const [preparedViews, setPreparedViews] = useState<{ project: string; book?: boolean; thumbs?: boolean; start?: number }>();
+  // A view that showed a revision before the views were paired (the thumbnails render in their own process and can be
+  // first) counts as prepared for it: otherwise the other view waits for it forever.
   function preparedView(project: string, view: 'book' | 'thumbs') {
     const start = performance.timeOrigin + performance.now();
     setPreparedViews(previous => {
@@ -385,8 +387,11 @@ export function App() {
   const pageLabels = spreads.map((_, i) => pageLabel(sequence?.spreads[i]?.page ?? {}));
   const writable = !!summary && !reload && !agentWorking;
   // A change is saved, or saved and not yet shown: on a long book with maps, rendering it again takes a second or two.
-  const showingChange = saving || (!!summary && !render && !!lastReady && !reload);
+  // A reload after the book's files changed, such as a template edit, renders the whole book again and redraws its maps.
+  const reloadingFiles = !!summary && (reload === 'loading' || reload === 'rendering');
+  const showingChange = saving || reloadingFiles || (!!summary && !render && !!lastReady && !reload);
   const updating = useDelayed(showingChange, 250);
+  const updatingText = reloadingFiles ? 'Updating the book after its files changed…' : 'Updating the book…';
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
   const generation = inputGeneration.current;
@@ -1972,7 +1977,7 @@ export function App() {
                 </button>;
               })}
               {reorder.indicator && <div className="spread-insertion" aria-hidden="true" style={{ top: reorder.indicator.top }} />}
-              <BookFrame project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined}
+              <BookFrame project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined} onShown={(id) => preparedView(id, 'thumbs')}
                 release={frameRelease} title="Spread thumbnails" onGeometry={setThumbs}
                 viewport={thumbnailViewport} hold={holdPreview} accept={acceptCandidate} />
             </div>
@@ -2048,7 +2053,7 @@ export function App() {
               >
               <div className="canvas-artwork-clip">
                 <div className="canvas-artwork">
-                  <BookFrame project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined}
+                  <BookFrame project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined} onShown={(id) => preparedView(id, 'book')}
                     release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
                     viewport={frameViewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
                     onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
@@ -2173,7 +2178,7 @@ export function App() {
     {photoView.dialog}
     <footer className="status-bar">
       <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy || updating ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
-        {!issue && (busy || updating) && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice || (updating ? 'Updating the book…' : '')}
+        {!issue && (busy || updating) && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice || (updating ? updatingText : '')}
       </span>
       {exporting && <button type="button" className="status-cancel" onClick={() => void api?.cancelExport()}>Cancel</button>}
       <AgentStatus api={api} />
