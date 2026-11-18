@@ -1719,7 +1719,10 @@ export async function startRender(root: HTMLElement) {
     step('pictures');
     // Presentation waits for the visible crop's photos below. SVG photos elsewhere in the book use detached
     // decode proxies that Chromium may never resolve while the candidate frame is hidden.
-    const images = present ? [] : decodable(root);
+    // The editor does not wait for drawn pictures restored from its cache, such as a map's shaded relief: their boxes
+    // have their size already, and the browser decodes them as they come into view. Decoding every one of a long
+    // book's large relief pictures held each edit back by a third of a second.
+    const images = present ? [] : decodable(root).filter((image) => !(edit && image.closest('.if-rendered-image')));
     const decoded = await settle(images);
     step('decode');
     const message = (text: string): Issue => ({ message: text });
