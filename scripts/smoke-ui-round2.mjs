@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { menuAction, nextPresentation, testBook } from './ui-actions.mjs';
+import { canvasArtworkBounds, menuAction, nextPresentation, testBook } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/ui-polish-'));
@@ -58,8 +58,7 @@ try {
   // Format changes preserve the visible spread, even if a different spread was selected earlier.
   await page.locator('.spread-thumb[data-spread="s6"]').click();
   const anchor = async () => {
-    const frame = page.frameLocator('.canvas .book-frame-book:not(.book-frame-pending)');
-    const sheet = await frame.locator('[data-spread="s6"] .if-sheet').boundingBox();
+    const sheet = await canvasArtworkBounds(page, '[data-spread="s6"] .if-sheet');
     const viewport = await page.locator('.canvas').boundingBox();
     return { sheet, viewport, relative: (viewport.y + viewport.height / 2 - sheet.y) / sheet.height };
   };

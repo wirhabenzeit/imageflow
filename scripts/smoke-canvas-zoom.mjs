@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { menuAction, testBook } from './ui-actions.mjs';
+import { canvasArtworkBounds, menuAction, testBook } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'canvas-zoom-'));
@@ -41,19 +41,8 @@ try {
   // A native ctrl-wheel pinch keeps the point under the pointer fixed as the page changes size.
   const paper = frame.locator('.if-sheet').nth(1);
   await paper.waitFor();
-  const paperOnScreen = async () => {
-    const rect = await paper.evaluate(node => {
-      const { x, y, width, height } = node.getBoundingClientRect();
-      return { x, y, width, height };
-    });
-    // Playwright's frame-locator bounding box adds the iframe offset but omits its ancestor's scale.
-    const parent = await canvas.locator('iframe[data-current]').evaluate(node => {
-      const { x, y, width } = node.getBoundingClientRect();
-      return { x, y, scale: width / node.clientWidth };
-    });
-    return { x: parent.x + rect.x * parent.scale, y: parent.y + rect.y * parent.scale,
-      width: rect.width * parent.scale, height: rect.height * parent.scale };
-  };
+  const paperSelector = await paper.evaluate(node => '[data-spread=' + JSON.stringify(node.closest('[data-spread]').dataset.spread) + '] .if-sheet');
+  const paperOnScreen = () => canvasArtworkBounds(page, paperSelector);
   const before = await paperOnScreen();
   const bounds = await canvas.boundingBox();
   const point = { x: bounds.x + bounds.width * .55, y: Math.max(bounds.y + 80, Math.min(bounds.y + bounds.height - 80, before.y + before.height * .3)) };
