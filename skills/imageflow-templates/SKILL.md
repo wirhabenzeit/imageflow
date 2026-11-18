@@ -13,7 +13,7 @@ Books created by ImageFlow carry a copy of this skill in `.claude/skills/imagefl
 
 1. **Find the book.** With the ImageFlow MCP server, call `list_projects`, then `get_authoring_context` for the parsed declarations and `inspect_book` for saved spreads and sources. Without it, read `template/index.tsx` and `project.json` directly.
 2. **Read only the topics you need** from the table below. Start a new template or layout from the closest example in `examples/` rather than from scratch.
-3. **Edit template files** (`template/*.tsx`, `styles.css`, assets) with your file tools. Never edit `project.json` or `photos.json` while the book is open in ImageFlow; use `apply_project_changes` instead.
+3. **Edit template files** (`template/*.tsx`, `styles.css`, assets) with your file tools. Never edit `project.json` or `photos.json` while the book is open in ImageFlow; use `apply_project_changes` instead. To keep a history of template and text changes, use a Git repository at the book root; ImageFlow ignores `.git`.
 4. **Verify with `check_book`** after every edit: request a spread `preview` to see the result, `typescript: true` for type errors, `draft.operations` to preview a new layout before saving it, and `fixtures` to stress-test layouts with long, empty and malformed content. Fix every error diagnostic before you finish.
 5. **Save supported project data** (spread layouts, parameter values, photo assignments) with one `apply_project_changes` batch, passing the revision from the last check as `expectedRevision`. Address split-sheet content with `page: 'left' | 'right'`; use `insert_page_pair` for independent facing pages and `switch_layout` with `page` for page layout changes. Omit page for unsplit units and whole-sheet operations.
 

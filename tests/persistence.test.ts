@@ -222,7 +222,7 @@ test('title-only journal stores a guard for the unchanged photo manifest and ret
     const journalBytes = await readFile(journalPath(folder));
     assert.ok(journalBytes.length < 2048);
     const journal = JSON.parse(journalBytes.toString());
-    assert.equal(journal.version, 2);
+    assert.equal(journal.version, 3);
     assert.deepEqual(journal.manifests['photos.json'], { sha256: createHash('sha256').update(photoBytes).digest('hex') });
     const internal = join(folder, '.imageflow/persistence');
     for (const entry of await readdir(internal)) {

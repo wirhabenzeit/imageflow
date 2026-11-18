@@ -25,6 +25,8 @@ const maximumIndexedFiles = 8192;
 
 const ignoredName = (name: string) => name === '.DS_Store' || name === '.imageflow' ||
   name === '.imageflow-sdk' ||
+  // A Git repository an agent or user keeps for the template and texts; ImageFlow neither reads nor renders it.
+  name === '.git' ||
   // Installed packages only feed the template dependency rebuild script; books use the saved bundle in template/vendor (ADR 0006).
   name === 'node_modules' ||
   name.startsWith('.imageflow-write-') || /(?:\.sw[opx]|\.tmp|~)$/.test(name);

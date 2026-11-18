@@ -94,6 +94,13 @@ export const mcpToolSchemas = {
     operations: projectOperationsSchema,
     dryRun: z.boolean().default(false).describe('Validate and report the changes without saving them.'),
   }),
+  list_book_checkpoints: z.strictObject({
+    project,
+    idempotencyKey: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/).optional()
+      .describe('Only checkpoints committed with this key, such as a request whose reply was lost.'),
+    cursor: z.string().uuid().optional().describe('nextCursor from the previous page.'),
+    limit: z.int().min(1).max(100).default(20).describe('Number of checkpoints to return, newest first.'),
+  }),
   rebuild_dependencies: z.strictObject({ project }),
   list_templates: z.strictObject({}),
   save_template_to_library: z.strictObject({
@@ -123,6 +130,8 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
     description: 'Check the whole book without saving. Request a preview, type checking, an unsaved draft or synthetic fixtures. Call after each edit.' },
   { name: 'apply_project_changes', title: 'Apply changes', readOnly: false,
     description: 'Save project commands atomically as one named Undo step. Use it for project.json and photos.json. For command and preview examples, call get_authoring_context with docs: ["project-commands"].' },
+  { name: 'list_book_checkpoints', title: 'List book checkpoints', readOnly: true,
+    description: 'List saves of project.json and photos.json from the book history, newest first. After a reopen, look up a request whose reply was lost by idempotencyKey, or see what changed since your last session.' },
   { name: 'rebuild_dependencies', title: 'Rebuild template dependencies', readOnly: false,
     description: 'Install the npm packages listed in template/package.json outside the book, in a cache ImageFlow manages, and bundle the ones the template imports into template/vendor/, which is all the book renders. Call it after changing template/package.json or adding a package import; never run npm install in template/. A long install answers state "installing": call again until it is "ready", then check_book.' },
   { name: 'list_templates', title: 'List library templates', readOnly: true,

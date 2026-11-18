@@ -87,6 +87,11 @@ const commandFields = {
   reflow: z.boolean().optional().describe('Whether text flow may have moved on other spreads.'),
 };
 
+const checkpointFields = {
+  checkpointId: z.string().nullable().optional().describe('The book history checkpoint of this commit, or null when nothing changed.'),
+  requestFingerprint: z.string().optional(),
+};
+
 const libraryEntry = z.looseObject({
   id: z.string(), version: z.string(), label: z.string(), description: z.string().optional(),
   source: z.enum(['built-in', 'imported']), replacesBuiltIn: z.boolean().optional(),
@@ -149,8 +154,19 @@ export const mcpOutputSchemas = {
     committed: z.union([z.boolean(), z.literal('pending')]).describe('Whether the batch was saved. A failed check before planning returns false with diagnostics.'),
     dryRun: z.boolean().optional(), ...commandFields,
     replayed: z.literal(true).optional().describe('This idempotencyKey was already applied; this is the original result.'),
+    ...checkpointFields,
     diagnostics: z.array(diagnosticSchema).optional(), checks: checksSchema.optional(),
     history: history.optional(), notice: z.string().optional(),
+  }),
+  list_book_checkpoints: z.looseObject({
+    project: z.string(),
+    checkpoints: z.array(z.looseObject({
+      checkpointId: z.string(), time: z.string(), origin: z.enum(['app', 'mcp']), label: z.string(), changed: z.array(z.string()),
+      changedOutsideBefore: z.array(z.string()).optional().describe('Manifests changed outside ImageFlow since the previous checkpoint.'),
+      mcp: z.looseObject({ tool: z.string(), idempotencyKey: z.string(), requestFingerprint: z.string(), session: z.string() }).optional(),
+    })).describe('Newest first.'),
+    nextCursor: z.string().nullable(),
+    changedOutsideSinceLatest: z.array(z.string()).describe('Manifests on disk that differ from the newest checkpoint.'),
   }),
   rebuild_dependencies: z.looseObject({
     state: z.enum(['ready', 'installing']).describe('"installing" while npm is still installing; call again to wait for it.'),
@@ -178,7 +194,7 @@ export const mcpOutputSchemas = {
     state, revision, committed: z.union([z.boolean(), z.literal('pending')]),
     sources: z.array(z.looseObject({ id: z.string(), path: z.string(), kind: z.enum(['photo', 'markdown', 'file']) })).optional()
       .describe('Registered source IDs, in the order of paths.'),
-    replayed: z.literal(true).optional(),
+    replayed: z.literal(true).optional(), ...checkpointFields,
     diagnostics: z.array(diagnosticSchema).optional(), checks: checksSchema.optional(),
     history: history.optional(), notice: z.string().optional(),
   }),

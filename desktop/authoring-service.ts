@@ -1,7 +1,7 @@
 import { layoutFootprint } from '../src/layouts';
 import { sourcePath, sourceLinked } from '../src/source-locations';
 import { DependencyInstallError } from './dependency-install';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { capabilities as templateCapabilities, contract1Capabilities, runtimeExports } from '../src/runtime-exports';
@@ -26,7 +26,9 @@ const captureOf = (photo: CaptureMetadata | undefined) =>
   Object.fromEntries(captureFields.flatMap((field) => photo?.[field] ? [[field, photo[field]]] : [])) as CaptureMetadata;
 import type { OpenProject } from './project';
 import type { ProjectSession } from './project-session';
-import { CommittedProjectSaveError } from './persistence';
+import { changedBetween, CommittedProjectSaveError, readSaveLedger } from './persistence';
+import type { CheckpointRecord, SaveCheckpoint } from './persistence';
+import type { McpClientSession } from './mcp-connection';
 import { FixtureError, fixtureCases, fixtureFits, fixtureLimits, fixtureRequestSchema, planFixtures } from '../src/fixtures';
 import type { FixtureCell } from '../src/fixtures';
 import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
@@ -49,10 +51,37 @@ type Hooks = {
   check: (book: OpenProject, request: AuthoringCheckRequest, signal: AbortSignal, index?: ProjectInputIndex, draft?: CheckDraft) => Promise<AuthoringCheckResult>;
   changed: (book: OpenProject) => void;
   recovery: (message: string) => void;
-  import: (request: ImportRequest, paths: string[], base: OpenProject) => Promise<{ imported: string[] }>;
+  import: (request: ImportRequest, paths: string[], base: OpenProject, checkpoint?: SaveCheckpoint) => Promise<{ imported: string[] }>;
   // Installs the template's packages outside the book and rebuilds template/vendor/ (ADR 0006).
   dependencies?: (signal: AbortSignal) => Promise<Record<string, unknown>>;
 };
+
+const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+  : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort()
+    .filter((key) => (value as Record<string, unknown>)[key] !== undefined)
+    .map((key) => [key, canonical((value as Record<string, unknown>)[key])])) : value;
+
+/**
+ * Identifies a write request across sessions (docs/mcp.md): the SHA-256 of the JSON text of { arguments, tool }, with
+ * object keys sorted at every level and no whitespace. Arguments are the validated tool arguments, so a label is
+ * trimmed, without project, idempotencyKey and dryRun.
+ */
+export function requestFingerprint(tool: string, args: Record<string, unknown>) {
+  const { project: _project, idempotencyKey: _key, dryRun: _dryRun, ...rest } = args;
+  return createHash('sha256').update(JSON.stringify(canonical({ tool, arguments: rest }))).digest('hex');
+}
+
+const manifestNames = ['project.json', 'photos.json'] as const;
+const startOf = (record: CheckpointRecord) =>
+  Object.fromEntries(manifestNames.map((name) => [name, record.manifests[name].before])) as Record<typeof manifestNames[number], string>;
+function checkpointView(record: CheckpointRecord, outside: string[]) {
+  return {
+    checkpointId: record.checkpoint, time: record.time, origin: record.origin, label: record.label,
+    changed: manifestNames.filter((name) => record.manifests[name].before !== record.manifests[name].after),
+    ...(outside.length ? { changedOutsideBefore: outside } : {}),
+    ...(record.mcp ? { mcp: record.mcp } : {}),
+  };
+}
 
 async function contained(root: string, path: string, allowed: string[]) {
   if (isAbsolute(path) || !allowed.some((prefix) => path.startsWith(prefix + '/'))) {
@@ -172,6 +201,8 @@ const contextGuide = 'Start with docs: ["authoring-workflow"]. Request reference
   'data with apply_project_changes, and verify every edit with check_book.';
 
 export function createAuthoringService(hooks: Hooks) {
+  // Calls without a connection, such as tests, share one session for this service.
+  const unattached: McpClientSession = { name: 'MCP client', session: randomUUID() };
   let cachedCheck: { session: ProjectSession; inputs: ProjectInputCapture; result: AuthoringCheckResult } | undefined;
   let cachedTemplateHash: { session: ProjectSession; observation: string; files: string; hash: string } | undefined;
   const get = (handle: unknown) => {
@@ -404,7 +435,31 @@ export function createAuthoringService(hooks: Hooks) {
     return { ...base, checks: { ...base.checks, fixtures: !reports.length ? 'not-run' as const : count('not-isolated') ? 'failed' as const : 'completed' as const },
       fixtures: report, ...(image ? { image } : {}) };
   };
-  return async (name: string, args: Record<string, any>, signal: AbortSignal): Promise<Record<string, unknown>> => {
+  /** The newest retained checkpoint committed with this key, from any earlier session on this book. */
+  const retainedReceipt = async (session: ProjectSession, key: string) => {
+    let ledger;
+    try { ledger = await readSaveLedger(session.book.folder); }
+    catch (error) {
+      // Without the history a retried request could commit twice, so nothing is applied.
+      throw new AuthoringError('HISTORY_UNAVAILABLE', 'Could not read the book history in .imageflow/history (' +
+        (error instanceof Error ? error.message : String(error)) + '). No changes were made. Make the folder and its ledger.jsonl readable and writable, then retry.');
+    }
+    return ledger.records.findLast((record) => record.mcp?.idempotencyKey === key);
+  };
+  const ledgerReplay = async (session: ProjectSession, name: string, args: Record<string, any>, record: CheckpointRecord, signal: AbortSignal) => {
+    let revision: string | null = null;
+    try { revision = (await session.inputs.capture({ signal })).revision; } catch { signal.throwIfAborted(); }
+    const mcp = record.mcp!;
+    return { state: 'ready', project: session.handle, committed: true, replayed: true, revision,
+      checkpointId: record.checkpoint, requestFingerprint: mcp.requestFingerprint,
+      ...(name === 'apply_project_changes'
+        ? { dryRun: false, changes: mcp.changes ?? [], affectedSpreads: mcp.affectedSpreads ?? [], references: mcp.references ?? {} }
+        : { sources: (mcp.sources ?? []).map((id, i) => ({ id, path: args.paths[i], kind: args.kind })) }),
+      notice: 'This request was already committed at ' + record.time + ' and was not applied again. The book may have changed since; inspect it before the next edit.' +
+        (mcp.truncated ? ' The recorded change list was shortened.' : ''),
+      history: session.history };
+  };
+  return async (name: string, args: Record<string, any>, signal: AbortSignal, client: McpClientSession = unattached): Promise<Record<string, unknown>> => {
     if (name === 'list_projects') {
       const session = hooks.session();
       if (!session) return { projects: [] };
@@ -414,6 +469,24 @@ export function createAuthoringService(hooks: Hooks) {
         writable: !session.book.readOnly, revision: current, history: session.history }], scope: 'The currently open, authorized book. Handles expire when closed or reopened.' };
     }
     const session = get(args.project);
+    if (name === 'list_book_checkpoints') {
+      const ledger = await readSaveLedger(session.book.folder);
+      signal.throwIfAborted();
+      get(session.handle);
+      const { records } = ledger;
+      const matching = records.map((record, i) => ({ record, outside: changedBetween(records[i - 1]?.manifests, startOf(record)) }))
+        .filter(({ record }) => !args.idempotencyKey || record.mcp?.idempotencyKey === args.idempotencyKey).reverse();
+      const start = args.cursor ? matching.findIndex(({ record }) => record.checkpoint === args.cursor) + 1 : 0;
+      if (args.cursor && !start) throw new AuthoringError('CURSOR_EXPIRED', 'That checkpoint is no longer retained. List again without cursor.');
+      const limit = args.limit ?? 20;
+      const page = matching.slice(start, start + limit);
+      return { project: session.handle, checkpoints: page.map(({ record, outside }) => checkpointView(record, outside)),
+        nextCursor: start + limit < matching.length ? page.at(-1)!.record.checkpoint : null,
+        retained: records.length, oldest: records[0]?.time ?? null,
+        changedOutsideSinceLatest: records.length ? changedBetween(records.at(-1)!.manifests, ledger.current) : [],
+        ...(ledger.unreadable ? { unreadable: ledger.unreadable } : {}),
+        ...(args.idempotencyKey && !matching.length ? { notice: 'No retained checkpoint has this idempotencyKey. That does not show the request failed; inspect the book before submitting another edit.' } : {}) };
+    }
     if (name === 'check_book') {
       if (typeof args.preview?.target?.page === 'number' && !args.expectedRevision) throw new AuthoringError('REVISION_REQUIRED', 'Page-number previews require expectedRevision; spread IDs can be used without it.');
       const report = args.fixtures
@@ -518,7 +591,7 @@ export function createAuthoringService(hooks: Hooks) {
             diagnostics: 'Stable codes with spread/box/element/source locations, measured details and suggested fixes.',
             draftProtection: 'Saves and imports return EDIT_IN_PROGRESS while an editor is active. Dry runs and draft checks can still validate saved inputs.',
             imports: 'Only project/inbox paths. All selected files are validated before import; source files remain available to Undo.',
-            idempotency: 'Up to 1000 successful requests for this open-project handle; replay returns the original result. Reopen expires the handle.' },
+            idempotency: 'Up to 1000 successful requests per open-project handle replay their original result. Committed keys stay in the book history while their checkpoints are retained: after a reopen, retrying the same request returns its checkpoint without applying it again. list_book_checkpoints looks a key up.' },
         };
       } else {
         const offset = args.offset ?? 0, limit = args.limit ?? 30;
@@ -587,12 +660,28 @@ export function createAuthoringService(hooks: Hooks) {
       if (receipt.request !== request) throw new AuthoringError('IDEMPOTENCY_CONFLICT', 'This key was already used for a different request.');
       return { ...receipt.result, replayed: true };
     }
+    const fingerprint = requestFingerprint(name, args);
+    // A key committed in an earlier session on this book is answered before its revision precondition, which the
+    // committed request itself changed.
+    if (!args.dryRun) {
+      const retained = await retainedReceipt(session, args.idempotencyKey);
+      signal.throwIfAborted();
+      if (retained) {
+        if (retained.mcp!.tool !== name || retained.mcp!.requestFingerprint !== fingerprint) {
+          throw new AuthoringError('IDEMPOTENCY_CONFLICT', 'This key was already used for a different request in this book.', { checkpointId: retained.checkpoint });
+        }
+        return await ledgerReplay(session, name, args, retained, signal);
+      }
+    }
     if (session.receipts.size >= 1000) throw new AuthoringError('SESSION_LIMIT', 'This project session has reached 1000 requests. Reopen the book for a new handle.');
+    const checkpoint: SaveCheckpoint = { origin: 'mcp', label: name === 'apply_project_changes' ? args.label : 'Import sources',
+      mcp: { tool: name, idempotencyKey: args.idempotencyKey, requestFingerprint: fingerprint, session: client.session, client: client.name } };
     const commit = async (save: () => Promise<unknown>) => {
       try { return { value: await save() }; }
       catch (error) {
         if (!(error instanceof CommittedProjectSaveError)) throw error;
         const result = { state: 'error', project: session.handle, committed: 'pending', revision: null,
+          checkpointId: checkpoint.id ?? null, requestFingerprint: fingerprint,
           error: { code: 'SAVE_RECOVERY_REQUIRED', message: error.message } };
         session.receipts.set(args.idempotencyKey, { request, result });
         hooks.recovery(error.message);
@@ -614,7 +703,8 @@ export function createAuthoringService(hooks: Hooks) {
         affectedSpreads: planned.affectedSpreads, references: planned.references, reflow: planned.reflow,
         committed: !args.dryRun, dryRun: !!args.dryRun };
       if (args.dryRun) return result;
-      const saved = await commit(() => session.save(planned.files, args.label, fresh));
+      Object.assign(checkpoint.mcp!, { changes: planned.changes, affectedSpreads: planned.affectedSpreads, references: planned.references });
+      const saved = await commit(() => session.save(planned.files, args.label, fresh, checkpoint));
       if (saved.recovery) return saved.recovery;
     } else {
       const extensions = args.kind === 'photo' ? photoExtensions : new Set(args.kind === 'markdown' ? ['.md'] : args.accept);
@@ -631,13 +721,15 @@ export function createAuthoringService(hooks: Hooks) {
       }
       signal.throwIfAborted();
       let imported: { imported: string[] } | undefined;
-      const saved = await commit(async () => { imported = await hooks.import({ kind: args.kind, accept: args.accept }, paths, fresh); });
+      const saved = await commit(async () => { imported = await hooks.import({ kind: args.kind, accept: args.accept }, paths, fresh, checkpoint); });
       if (saved.recovery) return saved.recovery;
       result = { state: 'ready', project: session.handle, committed: true, revision: null,
         sources: imported!.imported.map((id, i) => ({ id, path: args.paths[i], kind: args.kind })) };
     }
     // Commit acknowledgement survives a disconnected client; retries cannot repeat a successful batch.
     result.revision = null;
+    result.checkpointId = checkpoint.id ?? null;
+    result.requestFingerprint = fingerprint;
     session.receipts.set(args.idempotencyKey, { request, result });
     hooks.changed(session.book);
     try { result.revision = (await session.inputs.capture()).revision; }

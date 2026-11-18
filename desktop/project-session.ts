@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ProjectFiles } from '../src/project';
 import type { HistoryState } from '../src/desktop';
 import { updateProject } from './project';
+import type { SaveCheckpoint } from './persistence';
 import type { OpenProject } from './project';
 import { ProjectInputIndex } from './revisions';
 import { CheckRenditionCache } from './check-cache';
@@ -71,8 +72,8 @@ export class ProjectSession {
     this.book = book;
   }
 
-  async save(files: ProjectFiles, label: string, base = this.book) {
-    const next = await updateProject(base, files);
+  async save(files: ProjectFiles, label: string, base = this.book, checkpoint: SaveCheckpoint = { origin: 'app', label }) {
+    const next = await updateProject(base, files, false, checkpoint);
     this.adoptExternal(base);
     this.record(next, label);
     return next;
@@ -88,7 +89,7 @@ export class ProjectSession {
       files.photoIndex[id].path = current.path;
       if (current.linked) files.photoIndex[id].linked = true; else delete files.photoIndex[id].linked;
     }
-    const next = await updateProject(this.book, files, true);
+    const next = await updateProject(this.book, files, true, { origin: 'app', label: 'Revert to Last Opened' });
     this.record(next, 'Revert to Last Opened');
     return next;
   }
@@ -112,7 +113,7 @@ export class ProjectSession {
     for (const kind of ['texts', 'files'] as const) for (const id of entry.membership?.[kind] ?? []) {
       if (!Object.hasOwn(entry.files.project[kind], id)) delete files.project[kind][id];
     }
-    const next = await updateProject(this.book, files, true);
+    const next = await updateProject(this.book, files, true, { origin: 'app', label: (direction === 'undo' ? 'Undo ' : 'Redo ') + entry.label });
     source.pop();
     destination.push({ files: filesOf(this.book), label: entry.label, membership: entry.membership });
     this.invalidateManifests(next);

@@ -10,6 +10,8 @@ import type { McpCatalogTool, McpDescriptor, McpToolName } from '../src/mcp-cont
 
 type WireError = { code: string; message: string };
 type Client = { name: string };
+// One attached stdio bridge, usually one agent session. Its ID groups that session's saves in the book history.
+export type McpClientSession = { name: string; session: string };
 type PendingCall = { controller: AbortController; timer: ReturnType<typeof setTimeout> };
 
 export class McpConnectionError extends Error {
@@ -92,7 +94,7 @@ function socketIsActive(path: string) {
 
 export async function createMcpConnection(options: {
   descriptorPath: string;
-  onCall: (name: McpToolName, args: Record<string, unknown>, signal: AbortSignal) => Promise<Record<string, unknown>>;
+  onCall: (name: McpToolName, args: Record<string, unknown>, signal: AbortSignal, client: McpClientSession) => Promise<Record<string, unknown>>;
   onClientsChanged?: (clients: Client[]) => void;
 }) {
   if (process.platform === 'win32') throw new McpConnectionError('connection-unsupported', 'The local ImageFlow bridge currently requires a Unix socket.');
@@ -106,6 +108,7 @@ export async function createMcpConnection(options: {
     sockets.add(socket);
     socket.setNoDelay(true);
     const pending = new Map<string, PendingCall>();
+    const session = randomUUID();
     const handshake = setTimeout(() => socket.destroy(), mcpLimits.handshakeMs);
     const replyError = (error: WireError, id?: string) => {
       try { send(socket, { type: 'error', ...(id ? { id } : {}), error }, mcpLimits.responseBytes); }
@@ -165,7 +168,7 @@ export async function createMcpConnection(options: {
         }
       }, mcpLimits.callMs);
       pending.set(id, { controller, timer });
-      void Promise.resolve().then(() => options.onCall(parsed.name, parsed.args, controller.signal)).then((result) => {
+      void Promise.resolve().then(() => options.onCall(parsed.name, parsed.args, controller.signal, { name: clients.get(socket)!.name, session })).then((result) => {
         if (!finishCall(id)) return;
         try { send(socket, { type: 'result', id, result }, mcpLimits.responseBytes); }
         catch (error) { replyError(wireError(error), id); }
