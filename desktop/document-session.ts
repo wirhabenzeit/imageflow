@@ -166,16 +166,20 @@ export class DocumentSession {
         return { imported: result.imported };
       },
     });
-    this.activate(book);
-    this.watchProject(book);
     this.guardNavigation(window);
+    // Watch from the moment the book was read, so edits made while the editor is still loading are not missed.
+    this.watchProject(book);
+  }
+  /** Publishes the first revision once the editor can receive it; reloads seen before then wait for it. */
+  start() {
+    this.activate(this.book);
   }
   private guardNavigation(window: BrowserWindow) {
     window.webContents.on('will-frame-navigate', (event) => {
       const url = new URL(event.url);
       const match = viewPath.exec(url.pathname);
       if (event.isMainFrame || url.protocol !== desktopScheme + ':' || url.host !== 'render' || !match ||
-          match[1] !== this.active.id || match[2]) event.preventDefault();
+          match[1] !== this.active?.id || match[2]) event.preventDefault();
     });
   }
 
@@ -460,6 +464,11 @@ export class DocumentSession {
       this.reloadTimer = setTimeout(reload, delay);
     }
     const reload = () => {
+      // Changes seen while the editor is still opening are reloaded once it shows the book.
+      if (!this.active && !this.closing) {
+        scheduleReload(250);
+        return;
+      }
       const current = this.active;
       const owner = this.window;
       if (current?.book.folder !== folder || !owner || !this.observedChanges.size) return;

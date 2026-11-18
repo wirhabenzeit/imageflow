@@ -48,6 +48,7 @@ import { createMcpConnection } from './mcp-connection';
 import { addToCodex, bridgeLaunch, claudeCodeCommand, claudeExtension, findCodex, skillArchive } from './mcp-setup';
 import { authoringErrorResult } from './authoring-errors';
 import { acquireProjectLock } from './persistence';
+import type { ProjectLock } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { SettingsPane } from '../src/settings';
 import { mcpTools } from '../src/mcp-contract';
@@ -108,7 +109,8 @@ let releasedTemplates: Promise<ReleasedTemplates> = Promise.resolve(new Released
 const sessions: RenderSessions = new Map();
 const documents = new Map<number, DocumentSession>();
 const identities = new Map<string, DocumentSession>();
-const opening = new Map<string, Promise<DocumentSession>>();
+const opening = new Map<string, Promise<DocumentSession | undefined>>();
+const openingEditors = new Map<number, { window: BrowserWindow; identity: string }>();
 const closing = new Set<Promise<void>>();
 const covers = new Map<DocumentSession, { dirty: boolean; timer?: ReturnType<typeof setTimeout>; job?: AbortController; task?: Promise<void> }>();
 const pickers = new Map<number, { window: BrowserWindow }>();
@@ -411,7 +413,7 @@ async function saveDevState() {
   if (devState) await writeFile(devState, JSON.stringify([...documents.values()].filter((document) => !document.closing)
     .map((document) => ({ folder: document.book.folder })))).catch(() => {});
 }
-async function openDocument(path: string): Promise<DocumentSession> {
+async function openDocument(path: string): Promise<DocumentSession | undefined> {
   if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
   if (!isDocument(path)) throw new Error('Choose an .imageflow document.');
   const { folder, identity } = await documentIdentity(path);
@@ -434,20 +436,52 @@ async function openDocument(path: string): Promise<DocumentSession> {
     return existing;
   }
   const pending = opening.get(identity);
-  if (pending) return pending;
+  const loading = [...openingEditors.values()].find((editor) => editor.identity === identity && !editor.window.isDestroyed());
+  if (pending && loading) {
+    if (loading.window.isVisible()) focus(loading.window);
+    return pending;
+  }
+  // A closed loading window's task may still be reading the book and holding its writer lock. The new window shows
+  // at once and takes over when that task lets go.
+  const previous = pending?.catch(() => undefined);
   const task = (async () => {
-    const release = await acquireProjectLock(folder);
-    let editor: BrowserWindow | undefined;
+    const editor = new BrowserWindow({ title: bookName(folder), width: 1520, height: 950, minWidth: 940, minHeight: 650, show: false,
+      webPreferences: windowOptions() });
+    const webContentsId = editor.webContents.id;
+    openingEditors.set(webContentsId, { window: editor, identity });
+    editor.once('closed', () => {
+      if (openingEditors.delete(webContentsId) && !openingEditors.size && !documents.size && !quitting && !preparingQuit) showStart();
+    });
+    const closed = new Promise<void>((resolve) => editor.once('closed', () => resolve()));
+    let release: ProjectLock | undefined;
     let document: DocumentSession | undefined;
+    let loadStarted = false;
+    let registered = false;
     try {
-      const book = await loadProject(folder, cache);
-      if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
-      editor = new BrowserWindow({ width: 1520, height: 950, minWidth: 940, minHeight: 650, show: false,
-        webPreferences: windowOptions() });
       configureMacHeader(editor);
       // The document session owns the native title; the editor page's HTML title must not replace it.
       editor.on('page-title-updated', (event) => event.preventDefault());
       secureWindow(editor);
+      editor.webContents.on('will-frame-navigate', (event) => {
+        if (openingEditors.has(webContentsId)) event.preventDefault();
+      });
+      const shell = editor.loadURL(editorURL);
+      // The editor can close during navigation while the book's files are still being read.
+      void shell.catch(() => {});
+      const reveal = () => void shell.then(() => focus(editor), () => {});
+      if (previous) {
+        reveal();
+        await previous;
+        if (editor.isDestroyed()) return;
+      }
+      release = await acquireProjectLock(folder);
+      if (editor.isDestroyed()) return;
+      // A book that cannot be locked fails without flashing an empty editor.
+      if (!previous) reveal();
+      loadStarted = true;
+      const book = await loadProject(folder, cache);
+      if (editor.isDestroyed()) return;
+      if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
       document = new DocumentSession(editor, book, cache, sessions, release, (next) => {
         if (document) queueMicrotask(() => { if (document) publishAssets(document); });
         if (document) {
@@ -461,9 +495,16 @@ async function openDocument(path: string): Promise<DocumentSession> {
       document.authoringSkills = join(__dirname, 'skills');
       // Frames may reach what is already allowed from the first render on, without a question (ADR 0006).
       await document.prepareNetwork().catch((error) => console.warn('ImageFlow could not read network approvals', error));
+      // Electron may never settle loadURL for a window destroyed mid-navigation.
+      await Promise.race([shell, closed]);
+      if (editor.isDestroyed()) return;
+      if (quitting || preparingQuit) throw new Error('ImageFlow is closing.');
+      // Start watchers only when the editor can receive and render a revision.
+      document.start();
       const current = document;
-      const webContentsId = editor.webContents.id;
       documents.set(webContentsId, document);
+      openingEditors.delete(webContentsId);
+      registered = true;
       editor.webContents.on('render-process-gone', () => {
         for (const reply of quitReplies.values()) if (reply.sender === webContentsId) reply.resolve(true);
       });
@@ -501,17 +542,14 @@ async function openDocument(path: string): Promise<DocumentSession> {
             for (const [key, value] of identities) if (value === current) identities.delete(key);
             if (lastDocument === current) lastDocument = [...documents.values()].at(-1);
             await saveDevState();
-            if (!documents.size && !quitting) showStart();
+            if (!documents.size && !openingEditors.size && !quitting) showStart();
             updateMenus();
           }
         })();
         track(task);
       });
-      await editor.loadURL(editorURL);
-      editor.once('ready-to-show', () => { if (!hidden) focus(current.window); });
-      // loadURL may finish after ready-to-show, so showing is also safe here.
-      focus(editor);
       await recents.remember(folder, book.project.title);
+      if (editor.isDestroyed()) return;
       app.addRecentDocument(folder);
       publishRecents();
       scheduleCover(current, book);
@@ -520,9 +558,17 @@ async function openDocument(path: string): Promise<DocumentSession> {
       updateMenus();
       return current;
     } catch (error) {
-      if (document) { editor?.destroy(); await document.close(); }
-      else { editor?.destroy(); await release?.(); }
+      if (editor.isDestroyed()) return;
+      openingEditors.delete(webContentsId);
+      editor.destroy();
       throw error;
+    } finally {
+      if (!registered && release) {
+        // Releasing the source registry must neither mask the open's own result nor keep the writer lock.
+        if (loadStarted) await SourceStore.release(folder).catch((error) => console.warn('ImageFlow could not release book sources', error));
+        if (document) await document.close();
+        else await release();
+      }
     }
   })();
   opening.set(identity, task);
@@ -1120,7 +1166,7 @@ async function installMcp(target: McpClientTarget) {
 
 
 function appWindows() { return [...documents.values()].map((document) => document.window).concat([...markdownWindows.windows(), startWindow, settingsWindow, templatesWindow, ...[...assetsWindows.values()].map(({ window }) => window)].filter((window): window is BrowserWindow => !!window)); }
-function updateWindows() { return [...appWindows(), ...[...pickers.values()].map(({ window }) => window)].filter((owner) => !owner.isDestroyed()); }
+function updateWindows() { return [...appWindows(), ...[...openingEditors.values()].map(({ window }) => window), ...[...pickers.values()].map(({ window }) => window)].filter((owner) => !owner.isDestroyed()); }
 function updateStateFor(owner: BrowserWindow) {
   const windows = updateWindows();
   const focused = BrowserWindow.getFocusedWindow();
@@ -1492,9 +1538,17 @@ void app.whenReady().then(async () => {
   ipcMain.handle(channels.showTemplates, (event) => {
     if (appOwner(event) || pickerOwner(event)) showTemplates();
   });
-  ipcMain.handle(channels.current, (event) => {
+  ipcMain.handle(channels.current, async (event): Promise<Result<ProjectSummary>> => {
     const document = editorOwner(event) ?? assetsOwner(event);
-    return document && !document.closing ? { value: document.summary } : { error: 'This window has no open book.' };
+    if (document && !document.closing) return { value: document.summary };
+    const loading = openingEditors.get(event.sender.id);
+    if (loading && trusted(event, loading.window, editorURL)) {
+      try {
+        const opened = await opening.get(loading.identity);
+        if (opened?.window === loading.window && !opened.closing) return { value: opened.summary };
+      } catch (error) { return { error: errorMessage(error) }; }
+    }
+    return { error: 'This window has no open book.' };
   });
   ipcMain.handle(channels.open, async (event, action: OpenAction) => {
     const owner = editorOwner(event)?.window ?? startOwner(event);
@@ -1520,6 +1574,7 @@ void app.whenReady().then(async () => {
       else if (action === 'remove') { await recents.remove(id); publishRecents(); }
       else if (action === 'open') {
         const document = await openDocument(entry.path);
+        if (!document) return { value: null };
         await recents.remember(document.book.folder, document.book.project.title, entry.id);
         publishRecents();
       }
@@ -1528,6 +1583,7 @@ void app.whenReady().then(async () => {
           filters: [{ name: 'ImageFlow Book', extensions: ['imageflow'] }] });
         if (!choice.canceled && choice.filePaths[0]) {
           const document = await openDocument(choice.filePaths[0]);
+          if (!document) return { value: null };
           await recents.remember(document.book.folder, document.book.project.title, entry.id);
           publishRecents();
         }
@@ -1638,7 +1694,11 @@ void app.whenReady().then(async () => {
     await openDocument(folder);
     return null;
   }));
-  const updateOwner = (event: IpcMainInvokeEvent) => appOwner(event) ?? pickerOwner(event) ??
+  const loadingOwner = (event: IpcMainInvokeEvent) => {
+    const loading = openingEditors.get(event.sender.id);
+    return trusted(event, loading?.window, editorURL) ? loading!.window : undefined;
+  };
+  const updateOwner = (event: IpcMainInvokeEvent) => appOwner(event) ?? loadingOwner(event) ?? pickerOwner(event) ??
     assetsWindows.get(assetsOwner(event)!)?.window ?? markdownWindows.owner(event)?.window;
   ipcMain.handle(channels.updateState, (event) => { const owner = updateOwner(event); return owner ? updateStateFor(owner) : { status: 'unavailable' }; });
   ipcMain.handle(channels.dismissUpdate, (event) => { if (updateOwner(event)) updates.dismissNotice(); });
@@ -1870,6 +1930,6 @@ void app.whenReady().then(async () => {
       console.warn('ImageFlow could not prepare update checks', error);
       if (!quitting) updates.setEligibility('Could not prepare update checks. Reopen ImageFlow to try again.');
     });
-  app.on('activate', () => { if (!documents.size && !quitting) showStart(); });
+  app.on('activate', () => { if (!documents.size && !openingEditors.size && !quitting) showStart(); });
   updateMenus();
 });
