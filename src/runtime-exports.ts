@@ -54,6 +54,9 @@ export const contract1Capabilities = [
   'formatted-text',
   // `<Choice>`: ImageFlow's own segmented choice for custom editors and layout-family pickers.
   'app-controls',
+  // `text.meta` on Markdown boxes: the source's YAML header, the same on every box its text flows through; every
+  // placed text in `ctx.book.texts`; and `boxes` in `anchors`.
+  'text-metadata',
 ] as const;
 // All supported features, including the baseline names accepted in older templates' `requires` lists. Until the
 // first public release the baseline stays open and new features join it (ADR 0008); after it, additive extensions

@@ -1,3 +1,7 @@
+---
+title: The last notes
+---
+
 We packed early and drove out before the clouds had lifted. At the last bend there was a narrow place to pull over. The water below looked almost exactly as it had on the first evening.
 
 I left the camera in its bag and stood by the road for a minute. On the way home, the notebook smelled faintly of woodsmoke.
@@ -17,3 +21,11 @@ We printed a few of the pictures large before deciding on the order. Laid out on
 There are things the book does not show. The long drive north, the evening the stove would not light, the afternoon spent waiting out a storm with a pack of cards. Those belong to the notebook, and to the two of us, and that seems right.
 
 The notebook went into a drawer, its pages slightly wavy from the damp. The book went on the shelf. Some evenings, when the light comes in low through the window, it is easy to imagine the fjord is just outside, and the boat is still tugging at its rope by the landing.
+
+## What stayed
+
+Weeks later, small things came back without being asked for. The squeak of dry snow under boots at minus twelve. The way the ferry's engine changed note as it turned into the harbour. A woman at the shop counting out change in a language we did not speak, and smiling when we got the coins wrong.
+
+None of those are in the photographs, and most of them would not have made good photographs anyway. They are the kind of thing a notebook is for: written down quickly, in bad handwriting, on the evening they happened, before they had a chance to be tidied into a story.
+
+If we go back, it will be later in the year, when the light lasts into the night and the boathouses stand against green slopes instead of white ones. It will be a different place then, and probably a different book. This one is about March, and about the week the fjord was the colour of steel.

@@ -503,6 +503,30 @@ export type BookSpread = {
   /** The current layout's photo boxes in declaration order. Content kept from other layouts is not listed. */
   readonly photos: readonly BookPhotoPlacement[];
 };
+/** A box a text flows through, in `BookText.boxes`. */
+export type BookTextPlacement = {
+  /** The spread's stable instance ID, as in `BookContext.spreads`. */
+  readonly spread: string;
+  /** The shown page the box is on, when the spread is shown as pages. */
+  readonly page?: 'left' | 'right';
+  /** The box ID in the layout. */
+  readonly box: string;
+  /** This box's place in the text's chain, as `text.part` in its render context: 1 where the text starts. */
+  readonly part: number;
+  /** The book pages of the box's spread, or of its page when the spread is shown as pages. */
+  readonly pageNumbers: Readonly<{ left?: number; right?: number; number?: number }>;
+};
+/** A Markdown source as the book places it, in `BookContext.texts`. */
+export type BookText = {
+  /** The text's ID in the project, as a source parameter or a spread's box assignment names it. */
+  readonly id: string;
+  /** The file name, as `text.title`. */
+  readonly title?: string;
+  /** The fields of the source's YAML header, `{}` without one, as `text.meta`. */
+  readonly meta: Readonly<TextMeta>;
+  /** The boxes the text flows through, in flow order; at least one. */
+  readonly boxes: readonly BookTextPlacement[];
+};
 /** The whole book as seen from one spread. */
 export type BookContext = {
   /** Number of pages in the book. */
@@ -512,6 +536,12 @@ export type BookContext = {
    * Derived from the saved book before any spread renders, so it is the same on every spread, and frozen.
    */
   spreads: readonly BookSpread[];
+  /**
+   * Every text the book places, in the order the book first shows them, with its header fields and the boxes it
+   * flows through. Derived from the saved book before any spread renders, and frozen. A page without a Markdown box
+   * reads the header of a nearby text here, such as the places of the story on its facing page.
+   */
+  texts: readonly BookText[];
   /**
    * The anchor with this ID. Undefined when no spread declares it; the first when several do. The Book check warns
    * about both, on the spread that asked.
@@ -563,8 +593,15 @@ export type Photo = {
   /** The camera's make and model as it records them, such as `{ make: 'FUJIFILM', model: 'X-T5' }`. */
   camera?: { make?: string; model?: string };
 };
-/** Where a Markdown box sits in the chain of boxes that share its text. */
-export type FlowPosition = { part: number; parts: number; title?: string };
+/** A value from a Markdown source's YAML header: what JSON can hold. */
+export type TextMetaValue = string | number | boolean | null | TextMetaValue[] | { [key: string]: TextMetaValue };
+/** The fields of a Markdown source's YAML header, `{}` when it has none. The template checks their shape. */
+export type TextMeta = { [key: string]: TextMetaValue };
+/**
+ * Where a Markdown box sits in the chain of boxes that share its text, and the text's header fields (`meta`), the
+ * same for every box of the chain.
+ */
+export type FlowPosition = { part: number; parts: number; title?: string; meta: TextMeta };
 /** A list item as saved and read without declaration types: its `id` and its field values. */
 export type ListItemValues = { id: string; [field: string]: string | number | boolean };
 export type Values = Record<string, string | number | boolean | ListItemValues[]>;
@@ -726,7 +763,12 @@ export type UntypedRenderContext = {
  * Declares a spread's anchors from its saved values. ImageFlow calls it for every spread before rendering, so it must
  * be a pure function of `params` and `document`.
  */
-export type AnchorContext<P = Values, D = Values> = { params: P; document: D };
+/**
+ * What `anchors` reads: the spread's parameters, the document's and its boxes as `render` sees them, including a
+ * Markdown box's `text` with its source's header fields, so an anchor can be named after its text.
+ */
+export type AnchorContext<P = Values, D = Values, B = Record<string, { params: Values; photo?: Photo | null; text?: FlowPosition | null }>> =
+  { params: P; document: D; boxes: B };
 
 /** Type-only marker: the document parameters a spread's render context was typed with. Never set it yourself. */
 declare const typedDocument: unique symbol;
@@ -747,7 +789,7 @@ export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issu
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' |
   'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
-  'formatted-text' | 'app-controls';
+  'formatted-text' | 'app-controls' | 'text-metadata';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
 
@@ -798,7 +840,7 @@ export type SpreadBuilder<D extends Parameters, IsPage extends boolean = false> 
   elements?: E & ElementsChecked<E, D, P>;
   render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E }, D> & (IsPage extends true ? { side: 'left' | 'right' | 'page' } : {})): ImageFlowNode;
   /** Places other spreads can refer to through `ctx.book`, declared from this spread's values. */
-  anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[];
+  anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>, { [K in keyof B]: BoxContext<B[K]> }>): readonly AnchorDeclaration[];
   /**
    * What this spread uses that needs a credit, such as a map's data, declared from its values like `anchors`; the
    * book collects them in `ctx.book.credits`.

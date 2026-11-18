@@ -1,7 +1,7 @@
 import { box, Choice, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Page, Spread } from 'imageflow';
-import type { BookSpread, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
+import type { BookSpread, FlowPosition, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
-import { insetMapParameters, MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView } from './map';
+import { insetMapParameters, MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView, placesBeside } from './map';
 import { elevationOrigin, mapCredits } from './map-styles';
 import type { MapEditorProps } from './map';
 
@@ -92,6 +92,9 @@ const heading = p.string({ label: 'Heading', default: 'Field notes', multiline: 
 const note = p.string({ label: 'Note', default: '', multiline: true, maxLength: 400, placeholder: 'A few lines about these photos', markdown: 'inline',
   description: 'A short text beside the photos. Leave it empty for no text.' });
 const oneLine = (text: string) => plainText(text).replace(/\s+/g, ' ').trim();
+// A Markdown file may name itself in a YAML header (`title: Arriving`), read from `text.meta`. Anything else there is
+// ignored, and a title that is not a string is as if there were none.
+const sourceTitle = (text: FlowPosition | null) => typeof text?.meta.title === 'string' ? oneLine(text.meta.title) : '';
 // For layouts that draw the photo's caption. Declare the toggle only where it has an effect: the editor shows a
 // control for every declared parameter. The value is shared by every layout with this box, so it returns when the
 // spread switches back to a layout that draws captions.
@@ -306,7 +309,7 @@ const compass = <svg viewBox="0 0 100 100" aria-hidden="true">
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.11.1',
+  version: '0.12.0',
   label: 'Photobook',
   description: 'A travel journal with full-bleed photographs, stories, grids, maps and a picture list, in a light or a dark theme.',
   preview: './preview.jpg',
@@ -417,12 +420,24 @@ export default defineTemplate({
     }),
     textPage: pageLayout({
       label: 'Story', parameters: { heading }, boxes: { body: body('Story') },
-      anchors: ({ params }) => oneLine(params.heading) ? [{ id: 'section', title: oneLine(params.heading) }] : [],
+      // Named after the page's heading, or where its text starts, after the text's title.
+      anchors: ({ params, boxes }) => {
+        const title = oneLine(params.heading) || (boxes.body.text?.part === 1 ? sourceTitle(boxes.body.text) : '');
+        return title ? [{ id: 'section', title }] : [];
+      },
       render: ctx => {
         const at = ctx.geometry.design(canvas);
-        const titled = !!oneLine(ctx.params.heading);
+        // A page without a heading of its own takes its text's title: as the heading where the text starts, and as a
+        // running header where it continues.
+        const own = !!oneLine(ctx.params.heading);
+        const text = ctx.boxes.body.text;
+        const title = own ? '' : sourceTitle(text);
+        const opening = !!title && text?.part === 1;
+        const titled = own || opening;
         return <PagePaper context={ctx}>
-          {titled && <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.page(margin, 36, 230, 42)} />}
+          {own && <ctx.Text presentation="inline" parameter="heading" as="h2" rect={at.page(margin, 36, 230, 42)} />}
+          {opening && <h2 style={ctx.geometry.css(at.page(margin, 36, 230, 42))}>{title}</h2>}
+          {title && !opening && <p className="eyebrow running-head" style={ctx.geometry.css(at.page(margin, 20, 230, 8))}>{title}</p>}
           <ctx.MarkdownBox id="body" {...ctx.edit('document.textSize')} className="reading" columns={ctx.boxes.body.params.columns}
             rect={at.page(margin, titled ? 90 : 36, 230, titled ? 172 : 226)} />
         </PagePaper>;
@@ -557,9 +572,14 @@ export default defineTemplate({
       render: (ctx) => {
         const at = ctx.geometry.design(canvas);
         const { trackWidth, ...values } = ctx.elements.map.params;
+        // The story on the other page names its places in its Markdown header (`places:`); the map marks them.
+        const { places, skipped, source } = placesBeside(ctx);
         return <PagePaper context={ctx}>
           <MapView values={values} trackWidth={trackWidth} rect={at.page(margin, margin, page - 2 * margin, page - 2 * margin - 22)}
-            theme={ctx.document.theme} className="map-inset" Element={ctx.Element} />
+            theme={ctx.document.theme} className="map-inset" Element={ctx.Element} places={places} />
+          {skipped > 0 && <span hidden {...issue({ code: 'places-invalid', element: 'map', details: { skipped },
+            message: skipped + ' of the places in the header of text ' + source + ' cannot be marked on the map.',
+            suggestion: 'In the header of text ' + source + ', list places as `places:` followed by entries like `- { name: Bergün, latitude: 46.63, longitude: 9.75 }`.' })} />}
           <ctx.Text presentation="inline" parameter="mapCaption" className="caption" rect={at.page(margin, page - margin - 12, page - 2 * margin, 10)} />
         </PagePaper>;
       },

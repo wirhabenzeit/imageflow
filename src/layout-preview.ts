@@ -2,9 +2,11 @@ import type { ProjectSummary, TemplateInfo } from './desktop';
 import { storedStates } from './project';
 import type { SpreadState } from './project';
 import { layoutFootprint, shownLayoutStates } from './layouts';
+import { splitFrontmatter } from './frontmatter';
 
 // Layout previews read the selected spread's content, document parameters, pagination, book anchors and the book
-// index (`ctx.book.spreads`: every shown page's layout and placed photos with their metadata), and book credits.
+// index (`ctx.book.spreads`: every shown page's layout and placed photos with their metadata; `ctx.book.texts`: where
+// each text is placed and its header, not its body), and book credits.
 // Render-session URLs, document metadata and other layouts' content apart from anchors/credits do not affect it.
 export function layoutPreviewKey(summary: ProjectSummary, template: TemplateInfo, spread: SpreadState) {
   const placed = (item: SpreadState) => shownLayoutStates(item).flatMap(({ page, state }) =>
@@ -25,7 +27,8 @@ export function layoutPreviewKey(summary: ProjectSummary, template: TemplateInfo
         const layout = template.spreads[state.definition];
         return [page, state.definition, layout?.span, layout?.declaresAnchors || layout?.declaresCredits ? state.params : null,
           layout?.declaresCredits ? [state.elements, state.boxes] : null];
-      }), placed(item)];
+      }), placed(item), shownLayoutStates(item).flatMap(({ page, state }) =>
+        Object.entries(state.boxes).flatMap(([box, { text }]) => text ? [[page, box, text]] : []))];
     }),
     photos.map((id) => {
       const photo = summary.photoIndex[id];
@@ -34,6 +37,9 @@ export function layoutPreviewKey(summary: ProjectSummary, template: TemplateInfo
         summary.photoRevisions?.[id] ?? source?.digest ?? summary.id, source?.state];
     }),
     texts.map((id) => [id, summary.texts[id]]),
+    [...new Set(summary.project.spreads.flatMap((item) => shownLayoutStates(item).flatMap(({ state }) =>
+      Object.values(state.boxes).flatMap(({ text }) => text ? [text] : []))))].sort()
+      .map((id) => [id, summary.texts[id] === undefined ? null : splitFrontmatter(summary.texts[id]).meta]),
     // file(id) can read any registered file, including one not assigned to the current layout.
     Object.entries(summary.project.files).map(([id, file]) => [id, file, summary.sources?.['file:' + id]?.digest ?? summary.id]),
   ]);

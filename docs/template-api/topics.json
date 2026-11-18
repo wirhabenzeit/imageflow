@@ -6,7 +6,7 @@
   {"id":"page-layouts","title":"Page layouts","summary":"Reusable page() layouts, Page roots, local geometry, independent facing pages, editor controls and beta automation limits."},
   {"id":"parameters","title":"Parameters","summary":"p.* parameter helpers, their value types and options (ranges, units, enums, dates, multiline, descriptions)."},
   {"id":"list-parameters","title":"List parameters","summary":"p.list for a variable number of flat items, item IDs, list controls and the list item commands."},
-  {"id":"boxes-and-elements","title":"Boxes and elements","summary":"Photo and Markdown boxes, flowOrder for text continuation, and generated elements with parameters."},
+  {"id":"boxes-and-elements","title":"Boxes and elements","summary":"Photo and Markdown boxes, flowOrder for text continuation, YAML headers in Markdown sources (text.meta), and generated elements with parameters."},
   {"id":"print-formats","title":"Print format","summary":"printFormat: trim, bleed, safe area, several named formats, formats without facing pages, single-page spans and book ends."},
   {"id":"template-library","title":"Template library","summary":"Importing templates into the library, template previews and openingSpreads for new books."},
   {"id":"switching-layouts","title":"Switching layouts","summary":"How content, crops and parameters carry over, are kept or restored when a spread switches layout."},

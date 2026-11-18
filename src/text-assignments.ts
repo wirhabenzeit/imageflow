@@ -3,6 +3,7 @@ import type { Template, FlowPosition } from './template';
 import { shownLayoutStates } from './layouts';
 import { sourceFileName } from './source-locations';
 import { onPage } from './page-scope';
+import { splitFrontmatter } from './frontmatter';
 
 type Target = { spread: string; page?: import('./project').PageSide; box: string; source: string };
 export function textAssignments(book: RenderProject, template: Template) {
@@ -22,8 +23,12 @@ export function textAssignments(book: RenderProject, template: Template) {
   }
   for (const [source, chain] of chains) {
     const title = book.project.texts[source] ? sourceFileName(book.project.texts[source]) : undefined;
+    // The header is read from the saved source, before any spread renders: it never depends on where the flow
+    // breaks, so a layout may size its boxes from it without feeding back into the flow.
+    const text = book.texts[source];
+    const meta = (text === undefined ? null : splitFrontmatter(text).meta) ?? {};
     chain.forEach(({ spread, page, box }, index) => {
-      positions[spread + ':' + (page ? page + ':' : '') + box] = { part: index + 1, parts: chain.length, title };
+      positions[spread + ':' + (page ? page + ':' : '') + box] = { part: index + 1, parts: chain.length, title, meta };
     });
   }
   return { chains, positions };

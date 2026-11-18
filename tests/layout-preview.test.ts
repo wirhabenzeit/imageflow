@@ -27,6 +27,14 @@ test('layout previews survive unrelated saves and content edits on other spreads
   summary.project.spreads[1].params.heading = 'Edited elsewhere';
   summary.photoIndex.other.caption = 'Unrelated caption';
   assert.equal(key(), before);
+  // Another spread's text body is not in the book index; its header is.
+  summary.project.spreads[1].boxes.story = { params: {}, text: 'alps' };
+  summary.texts.alps = '---\ntitle: Alps\n---\nFirst draft.';
+  const placed = key();
+  summary.texts.alps = '---\ntitle: Alps\n---\nSecond draft, much longer.';
+  assert.equal(key(), placed);
+  summary.texts.alps = '---\ntitle: The Alps\n---\nSecond draft, much longer.';
+  assert.notEqual(key(), placed);
 });
 
 test('layout previews invalidate for content, file bytes, anchors, format, template and permissions', () => {
@@ -46,6 +54,8 @@ test('layout previews invalidate for content, file bytes, anchors, format, templ
     ({ summary }) => { summary.project.spreads[1].definition = 'chapter'; },
     ({ summary }) => { summary.project.spreads[1].boxes.photo = { params: {}, photo: 'other' }; },
     ({ summary }) => { summary.project.spreads[1].boxes.photo = { params: {}, photo: 'other' }; summary.photoIndex.other.credit = 'Someone'; },
+    // `ctx.book.texts`: a text placed on another spread.
+    ({ summary }) => { summary.project.spreads[1].boxes.story = { params: {}, text: 'alps' }; },
   ];
   // A placed photo's credit on another spread changes the preview too.
   const data = fixture();

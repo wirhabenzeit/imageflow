@@ -22,11 +22,20 @@ type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' }
 type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
 ```
 
-- **One render pass.** Page numbers depend only on spread order and layout spans, never on rendered content. ImageFlow calls every spread's `anchors` with its resolved `params` and `document` values before any spread renders, so every layout reads the same anchors. Like `render`, `anchors` must be a pure function of its input. An `anchors` function that throws or returns an invalid declaration is a render error naming the layout.
+- **One render pass.** Page numbers depend only on spread order and layout spans, never on rendered content. ImageFlow calls every spread's `anchors` with its resolved `params` and `document` values and its `boxes` as `render` sees them before any spread renders, so every layout reads the same anchors. Like `render`, `anchors` must be a pure function of its input. An `anchors` function that throws or returns an invalid declaration is a render error naming the layout.
 - **Pages follow the book.** Inserting, moving, removing or switching a spread renumbers every anchor, as it does the folios. `side` picks the page of a two-page spread and defaults to the first. A single left or right page has only one page, whichever side is named. Without facing pages every unit is one page: `side` is ignored and the anchor's `side` is `'page'`.
 - **Repeated layouts.** Anchors belong to spread instances, so a layout used five times declares five anchors with the same ID. `anchors(id)` lists all of them in page order. `anchor(id)` is for an ID that one spread declares.
 - **Book check.** `anchor(id)` warns `anchor-missing` when no spread declares the ID, and `anchor-ambiguous` when several do. In that case it returns the first. Both warnings are on the spread that asked. `anchors(id)` returning an empty list is not a finding.
 - **Previews.** Layout-picker previews read the anchors of the book as saved, so a contents layout previews with real pages.
+
+A Markdown box's `boxes[id].text` carries its flow position and its source's [header fields](boxes-and-elements.md#text-metadata), so a layout can declare an anchor where a text starts, named after it:
+
+```tsx
+anchors: ({ params, boxes }) => {
+  const title = typeof boxes.body.text?.meta.title === 'string' ? boxes.body.text.meta.title : params.heading;
+  return boxes.body.text?.part === 1 && title ? [{ id: 'section', title }] : [];
+},
+```
 
 An anchor marks a whole page, not a point found by measuring the render. Text flow decides which page a heading inside Markdown continuation lands on, so such headings cannot be anchors yet.
 
@@ -56,6 +65,30 @@ for (const spread of ctx.book.spreads)
 - **Pages.** `page` is the spread's own `ctx.page`: `left` and `right`, one of them for a single page at a book end, or `number` in a format without facing pages. For a spread layout, which page a box is on is the layout's business. On a split sheet each placement carries `page`, and `pages.left`/`pages.right` expose the shown page layout and photos independently.
 - **Photos.** `photos` lists the photo boxes of the spread's current layout, in declaration order, including empty ones. `photoId` is `null` for an empty box. `photo` is the photo's metadata, the same object shape as `ctx.boxes[id].photo`, or `null` when the box is empty or its photo is missing from the book. A photo placed in several boxes appears once per placement. Content a spread keeps from a layout it no longer uses is not listed, and a spread whose layout the template no longer declares lists no photos. Markdown boxes are not listed.
 - **No images.** The index has metadata and assignments only, no photo URLs or rendered thumbnails.
+
+### Texts
+
+`ctx.book.texts` lists every Markdown source the book places, in the order the book first shows them, with its [header fields](boxes-and-elements.md#text-metadata) and the boxes it flows through. A page without a Markdown box of its own reads a text's header here: a map marks the places of the story on its facing page, a photo page between two story pages carries their running header.
+
+```ts
+type BookTextPlacement = { spread: string; page?: 'left' | 'right'; box: string; part: number;
+  pageNumbers: { left?: number; right?: number; number?: number } };
+type BookText = { id: string; title?: string; meta: TextMeta; boxes: BookTextPlacement[] };
+```
+
+```tsx
+// The text on this sheet's other page, or around this page: the last text that starts before it.
+const page = ctx.page.left ?? ctx.page.right ?? ctx.page.number ?? 0;
+const pagesOf = (text: BookText) => text.boxes.flatMap(({ pageNumbers: n }) => [n.left, n.right, n.number]).filter((p) => p !== undefined);
+const beside = ctx.book.texts.find((text) => text.boxes.some((placed) => placed.spread === ctx.spread && placed.page !== ctx.side));
+const around = ctx.book.texts.findLast((text) => Math.min(...pagesOf(text)) <= page);
+const places = (beside ?? around)?.meta.places;
+```
+
+- **Example.** The photobook starter's *Inset map* marks the `places` of the story on its facing page, in print and in its map editor, and reports `template:places-invalid` for entries it cannot mark. Its *Story* page names its `section` anchor after its text's `title` where the text starts.
+- **The template chooses.** Which text a page belongs to is the layout's decision: the one beside it, the one whose pages surround it, or one a parameter names by its `id`. ImageFlow lists facts and decides nothing.
+- **Pages.** `pageNumbers` are the book pages of the box's spread, or of its page on a split sheet, as `ctx.page`. Which page of a spread layout a box is on is the layout's business. `part` is the box's place in the chain, as its `text.part`: assigned boxes count whether or not the text reaches them.
+- **Same rules.** Like `spreads`, the list is built from the saved book before any spread renders and is frozen. Only shown layouts' boxes are listed, and a source whose file is missing is listed with `meta: {}`.
 
 Page layouts declare anchors for their own page, whatever `side` their declaration names. Two page layouts on one sheet may therefore declare two anchors with the same ID. Use `anchors(id)` when that is intentional; `anchor(id)` warns about ambiguity per asking page. Only shown page layouts contribute anchors and credits; remembered hidden layouts do not.
 

@@ -1,3 +1,7 @@
+---
+title: From the notebook
+---
+
 ## What to remember
 
 The red boathouses looked small against the mountains. From the road they felt like the only lights for miles, though we had passed two other houses a few minutes earlier. A pile of wood stood against the wall. We took one picture and kept walking.

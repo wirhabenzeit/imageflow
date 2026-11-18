@@ -1,13 +1,15 @@
 import { fromMarkdown } from 'mdast-util-from-markdown';
 import type { Definition, RootContent, Root } from 'mdast';
+import { splitFrontmatter } from './frontmatter';
 
 function escape(text: string) {
   return text.replace(/[&<>"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[char]!));
 }
 
-// Keep source offsets for the continuation engine from the text-flow spike.
+// Keep source offsets for the continuation engine from the text-flow spike. A YAML header is not part of the text;
+// it is blanked in place, so offsets still count from the start of the file.
 export function markdownToHtml(source: string) {
-  const root = fromMarkdown(source);
+  const root = fromMarkdown(splitFrontmatter(source).body);
   const definitions = new Map<string, Definition>();
   function collect(node: Root | RootContent) {
     if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node);
