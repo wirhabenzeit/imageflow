@@ -745,3 +745,13 @@ test('parameter inspection reports each visible page declaration instead of hidd
   assert.equal(item.declarations, undefined);
   assert.deepEqual(item.pageDeclarations, { left: pageStatus.template.spreads.photo, right: null });
 });
+
+test('checks omit repeated template declarations unless requested and retain them in authoring context', async (t) => {
+  const { call } = await fixture(t);
+  const compact = await call('check_book');
+  assert.equal(compact.template, undefined);
+  assert.equal((compact.render as Record<string, unknown>).template, undefined);
+  const full = await call('check_book', { includeTemplate: true });
+  assert.deepEqual((full.render as Record<string, unknown>).template, status.template);
+  assert.deepEqual((await call('get_authoring_context')).template, status.template);
+});

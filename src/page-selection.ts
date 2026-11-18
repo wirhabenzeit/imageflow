@@ -4,7 +4,11 @@ import type { PageSide } from './project';
 
 export type PageSelection = { spread: string; side?: PageSide };
 export function pageSelectionSide(pages: UnitPages, side?: PageSide): PageSide | undefined {
-  return pages.number === undefined && side && pages[side] !== undefined ? side : undefined;
+  if (pages.number !== undefined) return undefined;
+  // Single end pages always select their printable half, regardless of how the sheet was reached.
+  if (pages.left === undefined) return pages.right !== undefined ? 'right' : undefined;
+  if (pages.right === undefined) return 'left';
+  return side;
 }
 export function pageSideAt(sheet: Rect, pages: UnitPages, x: number, y: number): PageSide | undefined {
   if (y < sheet.y || pages.number !== undefined) return undefined;

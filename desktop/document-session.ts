@@ -297,7 +297,7 @@ export class DocumentSession {
     try {
       return await this.queue.run(async (queuedSignal) => {
         requestSignal = queuedSignal;
-        const mutation = name === 'apply_project_changes' || name === 'import_sources';
+        const mutation = (name === 'apply_project_changes' && args.dryRun !== true) || name === 'import_sources';
         let locked = false;
         try {
           if (mutation) await this.agentLease(queuedSignal);

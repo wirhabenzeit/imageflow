@@ -6,6 +6,7 @@
 // before Chromium handles it. Buttons and the document pass through untouched.
 @interface ImageFlowToolbarDrag : NSView
 @property(nonatomic, copy) NSArray<NSValue *> *regions;
+@property(nonatomic, strong) NSValue *frameBeforeFill;
 @end
 @implementation ImageFlowToolbarDrag
 - (BOOL)isFlipped { return YES; }
@@ -21,7 +22,34 @@
   }
   return self;
 }
-- (void)mouseDown:(NSEvent *)event { [self.window performWindowDragWithEvent:event]; }
+- (void)mouseDown:(NSEvent *)event {
+  NSWindow *window = self.window;
+  if (event.clickCount != 2) {
+    [window performWindowDragWithEvent:event];
+    return;
+  }
+
+  // AppKit handles the native title row itself. The blank editor toolbar is a custom drag region.
+  NSString *action = [NSUserDefaults.standardUserDefaults stringForKey:@"AppleActionOnDoubleClick"];
+  if (!action || [action isEqualToString:@"Maximize"] || [action isEqualToString:@"Zoom"]) {
+    [window performZoom:nil];
+  } else if ([action isEqualToString:@"Minimize"]) {
+    [window performMiniaturize:nil];
+  } else if ([action isEqualToString:@"Fill"] && (window.styleMask & NSWindowStyleMaskResizable)) {
+    NSScreen *screen = window.screen;
+    if (!screen) return;
+    NSRect visible = screen.visibleFrame;
+    if (NSEqualRects(window.frame, visible)) {
+      if (self.frameBeforeFill) {
+        [window setFrame:[window constrainFrameRect:self.frameBeforeFill.rectValue toScreen:screen] display:YES];
+        self.frameBeforeFill = nil;
+      }
+    } else {
+      self.frameBeforeFill = [NSValue valueWithRect:window.frame];
+      [window setFrame:visible display:YES];
+    }
+  }
+}
 @end
 
 static ImageFlowToolbarDrag *dragView(NSWindow *window) {

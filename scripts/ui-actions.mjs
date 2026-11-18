@@ -60,6 +60,21 @@ export function nextPresentation(app) {
   });
 }
 
+// Playwright adds the iframe's screen offset to descendant bounding boxes but omits its ancestor's transform.
+export async function canvasArtworkBounds(page, selector) {
+  const iframe = page.locator('.canvas .book-frame-book:not(.book-frame-pending)');
+  const rect = await iframe.contentFrame().locator(selector).evaluate(node => {
+    const { x, y, width, height } = node.getBoundingClientRect();
+    return { x, y, width, height };
+  });
+  const parent = await iframe.evaluate(node => {
+    const { x, y, width, height } = node.getBoundingClientRect();
+    return { x, y, scaleX: width / node.clientWidth, scaleY: height / node.clientHeight };
+  });
+  return { x: parent.x + rect.x * parent.scaleX, y: parent.y + rect.y * parent.scaleY,
+    width: rect.width * parent.scaleX, height: rect.height * parent.scaleY };
+}
+
 // Generic spread-editor regressions use this fixed book rather than depending on the evolving page starter.
 // Its authored template stays byte-identical to the compatibility fixture; only the temporary book title changes.
 export async function copySpreadStarter(path) {

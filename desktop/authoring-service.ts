@@ -415,10 +415,18 @@ export function createAuthoringService(hooks: Hooks) {
     const session = get(args.project);
     if (name === 'check_book') {
       if (typeof args.preview?.target?.page === 'number' && !args.expectedRevision) throw new AuthoringError('REVISION_REQUIRED', 'Page-number previews require expectedRevision; spread IDs can be used without it.');
-      if (args.fixtures) return fixtureCheck(session, signal, args.fixtures, args.expectedRevision, args.typescript);
-      if (!args.draft) return checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview,
-        ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true);
-      return draftCheck(session, signal, args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript);
+      const report = args.fixtures
+        ? await fixtureCheck(session, signal, args.fixtures, args.expectedRevision, args.typescript)
+        : !args.draft
+          ? await checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview,
+            ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true)
+          : await draftCheck(session, signal, args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript);
+      if (args.includeTemplate) return report;
+      // Keep full declarations in the internal check cache for planning and context, not in every agent reply.
+      const { template: _template, render, ...compact } = report;
+      if (!render) return compact;
+      const { template: _renderTemplate, ...renderSummary } = render;
+      return { ...compact, render: renderSummary };
     }
     if (name === 'inspect_book' && args.view === 'elements') {
       const report = await checked(session, signal, { inspect: { spread: args.spread, page: args.page, box: args.box, element: args.element,

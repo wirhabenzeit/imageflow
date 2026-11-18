@@ -63,9 +63,14 @@ try {
   await client.connect(new StdioClientTransport({...config,stderr:'pipe'}));
   await window.getByRole('button', { name: /^Connected:/ }).waitFor();
   // The status-bar indicator opens the Agents pane of Settings.
-  const opened=app.waitForEvent('window');
   await window.getByRole('button', { name: /^Connected:/ }).click();
-  const agents=await opened;
+  let agents;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    agents = app.windows().find((page) => page.url().startsWith('imageflow://editor/settings'));
+    if (agents) break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.ok(agents, 'The connection indicator opened Settings');
   await agents.getByRole('tab', { name: 'Agents', selected: true }).waitFor();
   await agents.getByText('Connected: ImageFlow prototype test', { exact: true }).waitFor();
   assert.equal((await agents.evaluate(()=>window.imageflow.installMcp('nope'))).error,'Unknown agent.');
@@ -204,6 +209,9 @@ try {
   revision=(await good('list_projects')).projects[0].revision;
   const blocked=await call('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'draft-test',label:'Agent title',operations:[{op:'set_title',title:'Agent title'}]});
   assert.equal(blocked.data.error.code,'EDIT_IN_PROGRESS');
+  const whileEditing=await good('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'draft-validation',label:'Validate title',dryRun:true,operations:[{op:'set_title',title:'Validated title'}]});
+  assert.equal(whileEditing.committed,false);
+  assert.equal(whileEditing.dryRun,true);
   assert.equal(await title.inputValue(),'Human draft');
   await title.blur();
   await waitForProject(window, (book) => book.project.params.note === 'Human draft');

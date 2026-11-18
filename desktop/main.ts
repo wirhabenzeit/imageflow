@@ -1601,7 +1601,8 @@ void app.whenReady().then(async () => {
       return { summary: activate(document.activate(next)) };
     }
     else if (request.action === 'locate-folder') {
-      const choice = await dialog.showOpenDialog(owner, { title: 'Locate Missing Sources in Folder', properties: ['openDirectory'] });
+      const choice = await dialog.showOpenDialog(owner, { title: 'Locate Missing Sources in Folder', buttonLabel: 'Locate',
+        properties: ['openDirectory', 'treatPackageAsDirectory'] });
       if (!choice.canceled && choice.filePaths[0]) {
         const result = await relinkFolder(document.book, choice.filePaths[0], keys);
         next = result.book;

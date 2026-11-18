@@ -1,3 +1,4 @@
+import { useCanvasGestures } from './useCanvasGestures';
 import { pageSelectionRect, pageSelectionSide, pageSideAt, stepPageSelection } from './page-selection';
 import { canSwapPages, editableSpread, keptItems, layoutMime, placeKeptContent, shownContentTargets } from './page-editor';
 import type { ContentTarget, KeptItem } from './page-editor';
@@ -10,7 +11,7 @@ import type { InspectorTarget } from './inspector-targets';
 import { useLiveCallback } from './useLiveCallback';
 import { usePhotoView } from './PhotoViewMenu';
 import { isPhotoViewCommand } from './photo-view';
-import { captureViewAnchor, restoreViewAnchor } from './view-anchor';
+import { captureViewAnchor, restoreViewAnchor, scaleBookGeometry } from './view-anchor';
 import type { ViewAnchor } from './view-anchor';
 import { assetUsage, fileExtensions } from './asset-usage';
 import { sourcePlacements } from './source-placement';
@@ -149,7 +150,7 @@ export function App() {
   // The last finished render. The Inspector keeps showing its flow positions while an edit re-renders, so lines
   // like "Flow 1 of 2" do not vanish for a moment and shift the panel.
   const [lastReady, setLastReady] = useState<RenderStatus>();
-  const [geometry, setGeometry] = useState<BookGeometry>();
+  const [fittedGeometry, setGeometry] = useState<BookGeometry>();
   const [preparedViews, setPreparedViews] = useState<{ project: string; book?: boolean; thumbs?: boolean; start?: number }>();
   function preparedView(project: string, view: 'book' | 'thumbs') {
     const start = performance.timeOrigin + performance.now();
@@ -165,7 +166,7 @@ export function App() {
   const [canvasLabels, setCanvasLabels] = useState<Record<string, string>>({});
   const [canvasMotion, setCanvasMotion] = useState<{ offsets: ReturnType<typeof reorderOffsets>; start: number }>();
   function setCanvasGeometry(next: BookGeometry | undefined, animate = false, start?: number, revision?: string) {
-    setCanvasMotion(animate && start ? { offsets: reorderOffsets(geometry, next), start } : undefined);
+    setCanvasMotion(animate && start ? { offsets: reorderOffsets(geometry, next && scaleBookGeometry(next, zoom)), start } : undefined);
     setGeometry(next);
     // Resize messages from the old displayed frame must not adopt the pending revision's labels. Geometry can arrive
     // before the template, which has no page numbers or layout names yet; the live labels stand in until it does,
@@ -230,7 +231,34 @@ export function App() {
     return () => clearTimeout(timer);
   }, [notice]);
   const [zoom, setZoomState] = useState(1);
-  const setZoom: typeof setZoomState = (next) => { if (typeof next === 'number' && next === zoom) return; preserveViewAnchor(); setZoomState(next); };
+  const geometry = useMemo(() => fittedGeometry && scaleBookGeometry(fittedGeometry, zoom), [fittedGeometry, zoom]);
+  const liveZoom = useRef(1);
+  const fitAnchor = useRef<ViewAnchor>(undefined);
+  const pinchAnchor = useRef<ViewAnchor>(undefined);
+  function setZoom(next: number | ((value: number) => number), pinch?: { x: number; y: number; start: boolean }) {
+    const previous = liveZoom.current;
+    const value = Math.max(.3, Math.min(3, typeof next === 'function' ? next(previous) : next));
+    if (!Number.isFinite(value)) return;
+    if (pinch && (pinch.start || !pinchAnchor.current)) {
+      const range = viewport();
+      const bounds = canvas.current?.getBoundingClientRect();
+      pinchAnchor.current = range && bounds && geometry ? captureViewAnchor(geometry.sheets,
+        { x: range.left, y: range.top, width: range.right - range.left, height: range.bottom - range.top }, spreadId, {},
+        { x: range.left + pinch.x - bounds.left, y: range.top + pinch.y - bounds.top }) : undefined;
+    } else if (!pinch) pinchAnchor.current = undefined;
+    if (value === previous) return;
+    if (previous === 1 && (!pinch || pinch.start || !fitAnchor.current)) {
+      rememberViewAnchor();
+      fitAnchor.current = viewAnchor.current;
+    }
+    if (value === 1 && !pinch && fitAnchor.current) {
+      pendingAnchor.current = fitAnchor.current;
+      fitAnchor.current = undefined;
+    } else if (pinch && pinchAnchor.current) pendingAnchor.current = pinchAnchor.current;
+    else preserveViewAnchor();
+    liveZoom.current = value;
+    setZoomState(value);
+  }
   const [textEditing, setTextEditing] = useState(false);
   const [checkRequest, setCheckRequest] = useState(0);
   const [checkScope, setCheckScope] = useState<string>();
@@ -417,6 +445,7 @@ export function App() {
       setReload(undefined);
       spreadSelection.setSelection([]);
       setProjectInstance((previous) => previous + 1);
+      liveZoom.current = 1; setZoomState(1); fitAnchor.current = undefined; pinchAnchor.current = undefined;
       clearCanvasEditors();
       pendingReveal.current = undefined;
       viewAnchor.current = undefined; pendingAnchor.current = undefined;
@@ -604,8 +633,8 @@ export function App() {
     if (command === 'zoom-out') { setZoom((value) => Math.max(.3, value / 1.2)); return; }
     if (command === 'zoom-fit') { setZoom(1); return; }
     if (command === 'zoom-actual') {
-      const width = canvas.current?.clientWidth ?? 1;
-      setZoom(format ? Math.max(.3, Math.min(3, (format.spreadWidth * 96 / 25.4 + 64) / width)) : 1); return;
+      const fittedScale = fittedGeometry?.sheets.find(sheet => sheet.spread === spreadId)?.zoom ?? fittedGeometry?.sheets[0]?.zoom;
+      setZoom(fittedScale ? 1 / fittedScale : 1); return;
     }
     if (command === 'import') return importFiles({});
     if (command === 'copy-assets') {
@@ -834,8 +863,7 @@ export function App() {
     if (top - label >= view.scrollTop && top + sheet.height <= view.scrollTop + view.clientHeight) return;
     view.scrollTo({ top: Math.max(0, top - Math.max(label, (view.clientHeight - sheet.height) / 2)), behavior });
   }
-  // The part of the book frame that is on screen, in frame coordinates, and the grid columns the frame should use. The
-  // book frame loads photos near the visible part.
+  // The visible area in canvas coordinates, which follow the editor zoom.
   function viewport() {
     const view = canvas.current;
     if (!view || !stage.current) return undefined;
@@ -843,8 +871,14 @@ export function App() {
     const left = view.scrollLeft - stage.current.offsetLeft;
     return { top, bottom: top + view.clientHeight, left, right: left + view.clientWidth, columns };
   }
-  function measureView() {
+  function frameViewport() {
     const range = viewport();
+    if (!range) return undefined;
+    // Artwork stays laid out at Fit. The frame loads pictures for the visible area in its own coordinates.
+    return { top: range.top / zoom, bottom: range.bottom / zoom, left: range.left / zoom, right: range.right / zoom, columns };
+  }
+  function measureView() {
+    const range = frameViewport();
     if (range) {
       for (const frame of stage.current!.querySelectorAll<HTMLIFrameElement>('iframe.book-frame-book')) {
         frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
@@ -1619,6 +1653,11 @@ export function App() {
     deleteSelected(selectedSpreads);
   }
 
+  const canvasGestures = useCanvasGestures({ canvas, instance: projectInstance,
+    active: canvasReady && !editing && !cropping && !elementEditor && !quick,
+    zoom, zoomAt: (factor, point) => setZoom((value) => value * factor, point),
+    fit: () => setZoom(1), scrolling: () => { pendingAnchor.current = undefined; pinchAnchor.current = undefined; } });
+
   // Left/right follow pages; up/down follow sheets or rows in the grid.
   function canvasArrowKeys(event: KeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented || event.metaKey || event.altKey || event.ctrlKey || event.shiftKey || !spreadSelected || !spread) return;
@@ -1876,7 +1915,16 @@ export function App() {
       {!panels.leftHidden ? <PanelDivider side="left" size={panels.left} resize={resizePanel} onResizing={setResizing} /> : <div />}
       <div className="workspace-center">
         <div ref={canvasWrap} className="canvas-wrap">
-          <main ref={canvas} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" tabIndex={0} onWheel={() => { pendingAnchor.current = undefined; }} onScroll={() => { rememberViewAnchor(); measureView(); }}
+          {summary && <div className="canvas-zoom-controls" role="toolbar" aria-label="Book zoom">
+            <button type="button" aria-label="Zoom book out" title="Zoom out (⌘−)" disabled={!canvasReady || zoom <= .3}
+              onClick={() => setZoom((value) => value / 1.2)}><Icon name="minus" /></button>
+            <span className="canvas-zoom-value" title={zoom > 1 ? 'Zoom relative to Fit. Hold Space and drag to pan.' : 'Zoom relative to the fitted view'}>{zoom === 1 ? 'Fit' : Math.round(zoom * 100) + '%'}</span>
+            <button type="button" aria-label="Zoom book in" title="Zoom in (⌘+)" disabled={!canvasReady || zoom >= 3}
+              onClick={() => setZoom((value) => value * 1.2)}><Icon name="plus" /></button>
+            {zoom !== 1 && <button type="button" className="canvas-return-fit" onClick={() => setZoom(1)} title="Restore the fitted view and reading position">Return to Fit</button>}
+          </div>}
+          <main ref={canvas} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" tabIndex={0} data-zoomed={zoom > 1 || undefined}
+            data-pan-ready={canvasGestures.panReady || undefined} data-panning={canvasGestures.panning || undefined} onScroll={() => { rememberViewAnchor(); measureView(); }}
             onContextMenu={(event) => void canvasMenu(event)} onBlur={(event) => { delete event.currentTarget.dataset.pointerFocus; }} onKeyDown={(event) => {
               delete event.currentTarget.dataset.pointerFocus;
               if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); void spreadMenu(spreadId, [spreadId], selectedSide); } else { spreadDeleteKey(event); canvasArrowKeys(event); }
@@ -1893,7 +1941,8 @@ export function App() {
             {summary && !spreads.length && <EmptyBook template={template} writable={writable && !busy} start={start} />}
             {summary && <div ref={stage} className="stage"
               // A grid fills the canvas width; the frame reports the height of all its rows.
-              style={{ width: zoom !== 1 ? (zoom * 100) + '%' : columns ? '100%' : undefined, height: geometry?.height,
+              style={{ '--canvas-fit-width': columns ? '100cqw' : undefined, height: geometry?.height,
+                '--canvas-zoom': zoom,
                 '--aspect': format ? format.spreadWidth / format.height : undefined } as CSSProperties}
               onClick={(event) => {
                 // A click that ended a photo move is not a click.
@@ -1929,9 +1978,13 @@ export function App() {
                 pendingMove.current = photo ? { spread: top.spread, box: top.id, page: top.page, photo, x: event.clientX, y: event.clientY } : undefined;
               }}
               >
-              <BookFrame project={summary.id} view="book" onPrepared={(id) => preparedView(id, 'book')} release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
-                viewport={viewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
-                onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
+              <div className="canvas-artwork-clip">
+                <div className="canvas-artwork">
+                  <BookFrame project={summary.id} view="book" onPrepared={(id) => preparedView(id, 'book')} release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
+                    viewport={frameViewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
+                    onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
+                </div>
+              </div>
               {geometry?.sheets.map(({ spread: id, x, y, width }) => {
                 const level = spreadIssues.get(id);
                 const at = spreads.findIndex(sheet => sheet.id === id);
@@ -1939,7 +1992,7 @@ export function App() {
                 return <div key={id} data-canvas-spread={id} className={'sheet-label' + (spreadSelected && id === spread?.id ? ' selected' : '')} style={{ left: x, top: y - 26, width }}>
                   {level && <span className={'issue-dot issue-' + level} />}<span className="sheet-label-name" title={displayedLabel}>{displayedLabel}</span>
                   {spreadSelected && id === spread?.id && <span className="sheet-layout-mode" data-layout-mode={selectedLayoutMode} aria-label={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'} title={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'}>
-                    <Icon name={selectedLayoutMode === 'pages' ? 'pageLayouts' : selectedLayoutMode === 'spread' ? 'spreadLayout' : 'document'} size={16} activeSide={selectionSide} />
+                    <Icon name={selectedLayoutMode === 'pages' ? 'pageLayouts' : selectedLayoutMode === 'spread' ? 'spreadLayout' : 'pageLayout'} size={16} activeSide={selectionSide} />
                   </span>}
                 </div>;
               })}

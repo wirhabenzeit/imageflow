@@ -58,6 +58,7 @@ export const mcpToolSchemas = {
   }),
   check_book: z.strictObject({
     project,
+    includeTemplate: z.boolean().optional().describe('Include full template declarations in the result. Defaults to false; get_authoring_context returns them for authoring.'),
     expectedRevision: revision.optional()
       .describe('Check exactly this revision. Required for page-number previews and drafts; a changed book returns a revision-conflict diagnostic.'),
     preview: makePreviewRequestSchema(spreadReference).optional()
