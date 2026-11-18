@@ -18,6 +18,11 @@ export const assetsURL = desktopScheme + '://editor/assets';
 export const templatesURL = desktopScheme + '://editor/templates';
 export const settingsURL = desktopScheme + '://editor/settings';
 export const renderOrigin = desktopScheme + '://render';
+// The sidebar thumbnails render the whole book too. From their own origin they get their own render process, so they
+// render alongside the book view instead of after it. Otherwise they are served like any render frame.
+export const thumbsOrigin = desktopScheme + '://thumbs';
+export const renderOrigins: readonly string[] = [renderOrigin, thumbsOrigin];
+export const isRenderOrigin = (origin: string) => renderOrigins.includes(origin);
 
 export const channels = {
   updateState: 'app:update-state', updateChanged: 'app:update-changed', checkUpdates: 'app:check-updates', restartUpdate: 'app:restart-update', dismissUpdate: 'app:dismiss-update',

@@ -8,7 +8,7 @@ import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
-import { channels, desktopScheme, issueText, renderOrigin } from '../src/desktop';
+import { channels, desktopScheme, issueText, renderOrigin, renderOrigins } from '../src/desktop';
 import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
 import { parseActiveEditor } from '../src/mcp-results';
@@ -179,7 +179,7 @@ export class DocumentSession {
     window.webContents.on('will-frame-navigate', (event) => {
       const url = new URL(event.url);
       const match = viewPath.exec(url.pathname);
-      if (event.isMainFrame || url.protocol !== desktopScheme + ':' || url.host !== 'render' || !match ||
+      if (event.isMainFrame || url.protocol !== desktopScheme + ':' || (url.host !== 'render' && url.host !== 'thumbs') || !match ||
           match[1] !== this.active?.id || match[2]) event.preventDefault();
     });
   }
@@ -364,7 +364,7 @@ export class DocumentSession {
       if (window.isDestroyed()) continue;
       for (const frame of window.webContents.mainFrame.framesInSubtree) {
         const url = frame.url;
-        const id = url.startsWith(renderOrigin + '/') ? viewPath.exec(new URL(url).pathname)?.[1] : undefined;
+        const id = renderOrigins.some((origin) => url.startsWith(origin + '/')) ? viewPath.exec(new URL(url).pathname)?.[1] : undefined;
         if (id) retained.add(id);
       }
     }

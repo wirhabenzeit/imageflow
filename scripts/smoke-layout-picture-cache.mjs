@@ -37,7 +37,7 @@ try {
     window.__thumbMessages = [];
     window.addEventListener('message', (event) => {
       const candidate = document.querySelector('iframe.book-frame-thumbs[data-current]');
-      if (!window.__holdThumbs || event.source !== candidate?.contentWindow || event.origin !== 'imageflow://render') return;
+      if (!window.__holdThumbs || event.source !== candidate?.contentWindow || event.origin !== 'imageflow://thumbs') return;
       event.stopImmediatePropagation();
       window.__thumbMessages.push({ data: event.data, origin: event.origin, source: event.source });
     });

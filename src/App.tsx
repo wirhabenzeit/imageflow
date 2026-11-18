@@ -1,4 +1,5 @@
 import { useCanvasGestures } from './useCanvasGestures';
+import { useDelayed } from './useDelayed';
 import { pageSelectionRect, pageSelectionSide, pageSideAt, stepPageSelection } from './page-selection';
 import { canSwapPages, editableSpread, keptItems, layoutMime, placeKeptContent, shownContentTargets } from './page-editor';
 import type { ContentTarget, KeptItem } from './page-editor';
@@ -22,7 +23,7 @@ import { bookName } from './book-name';
 import type { ImportMode } from './source-locations';
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
-import { bookLayout, gridColumns, renderOrigin, spreadCommands } from './desktop';
+import { bookLayout, gridColumns, isRenderOrigin, renderOrigin, spreadCommands, thumbsOrigin } from './desktop';
 import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
 import type { TargetAnchor } from './edit-targets';
 import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
@@ -305,7 +306,7 @@ export function App() {
     const isText = (node: Element | null) => !!node?.matches('textarea, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"]):not([type="file"])');
     const focus = () => setTextEditing(isText(document.activeElement));
     const message = (event: MessageEvent) => {
-      if (event.origin === renderOrigin && event.data?.type === 'editor-focus' && document.activeElement instanceof HTMLIFrameElement &&
+      if (isRenderOrigin(event.origin) && event.data?.type === 'editor-focus' && document.activeElement instanceof HTMLIFrameElement &&
           event.source === document.activeElement.contentWindow) setTextEditing(event.data.text === true);
     };
     document.addEventListener('focusin', focus); document.addEventListener('focusout', focus); window.addEventListener('message', message);
@@ -340,7 +341,7 @@ export function App() {
     const cancel = () => {
       thumbAnimations.current.forEach(animation => animation.cancel());
       for (const frame of thumbList.current?.querySelectorAll<HTMLIFrameElement>('iframe') ?? []) {
-        frame.contentWindow?.postMessage({ type: 'cancel-reorder' }, renderOrigin);
+        frame.contentWindow?.postMessage({ type: 'cancel-reorder' }, thumbsOrigin);
       }
     };
     const list = thumbList.current;
@@ -383,6 +384,9 @@ export function App() {
   const selectionSide = pageSelectionSide(sequence?.spreads[index]?.page ?? {}, selectedSide ?? selectedPage);
   const pageLabels = spreads.map((_, i) => pageLabel(sequence?.spreads[i]?.page ?? {}));
   const writable = !!summary && !reload && !agentWorking;
+  // A change is saved, or saved and not yet shown: on a long book with maps, rendering it again takes a second or two.
+  const showingChange = saving || (!!summary && !render && !!lastReady && !reload);
+  const updating = useDelayed(showingChange, 250);
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
   const generation = inputGeneration.current;
@@ -907,7 +911,7 @@ export function App() {
   function postViewport(host: HTMLElement | null, view: 'book' | 'thumbs', range: ReturnType<typeof viewport>) {
     if (!host || !range) return;
     for (const frame of host.querySelectorAll<HTMLIFrameElement>('iframe.book-frame-' + view)) {
-      frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
+      frame.contentWindow?.postMessage({ type: 'viewport', ...range }, view === 'thumbs' ? thumbsOrigin : renderOrigin);
     }
   }
   function measureView() { postViewport(stage.current, 'book', frameViewport()); }
@@ -1851,6 +1855,7 @@ export function App() {
         targets={panelTargets}
         open={openInspectorOwner}
         openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout}
+        holdPreviews={!render && !!lastReady}
         familyPicker={template && layoutFamily && <LayoutFamilyPicker
           key={JSON.stringify([summary.handle, spread.id, selectedPage, layoutFamily, summary.templateHash, template.format, summary.network])}
           project={summary.id} template={template} spread={spread} page={selectedPage} chooseLayout={chooseInspectorLayout} params={summary.project.params} family={layoutFamily}
@@ -1975,7 +1980,7 @@ export function App() {
               onClick={() => setZoom((value) => value * 1.2)}><Icon name="plus" /></button>
             {zoom !== 1 && <button type="button" className="canvas-return-fit" onClick={() => setZoom(1)} title="Restore the fitted view and reading position">Return to Fit</button>}
           </div>}
-          <main ref={canvas} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" tabIndex={0} data-zoomed={zoom > 1 || undefined}
+          <main ref={canvas} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" tabIndex={0} aria-busy={updating || undefined} data-zoomed={zoom > 1 || undefined}
             data-pan-ready={canvasGestures.panReady || undefined} data-panning={canvasGestures.panning || undefined} onScroll={() => { rememberViewAnchor(); measureView(); }}
             onContextMenu={(event) => void canvasMenu(event)} onBlur={(event) => { delete event.currentTarget.dataset.pointerFocus; }} onKeyDown={(event) => {
               delete event.currentTarget.dataset.pointerFocus;
@@ -2156,8 +2161,8 @@ export function App() {
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     {photoView.dialog}
     <footer className="status-bar">
-      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
-        {!issue && busy && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice}
+      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy || updating ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
+        {!issue && (busy || updating) && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice || (updating ? 'Updating the book…' : '')}
       </span>
       {exporting && <button type="button" className="status-cancel" onClick={() => void api?.cancelExport()}>Cancel</button>}
       <AgentStatus api={api} />

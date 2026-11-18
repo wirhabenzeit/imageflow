@@ -430,8 +430,9 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
   };
 }
 
-export function renderData(book: OpenProject, id: string, mode: RenderProject['mode'], network?: readonly string[]): RenderProject {
-  const base = renderOrigin + '/render/' + id;
+/** The data a render frame loads; its URLs are on `origin`, the frame's own, so it reads them as its own files. */
+export function renderData(book: OpenProject, id: string, mode: RenderProject['mode'], network?: readonly string[], origin = renderOrigin): RenderProject {
+  const base = origin + '/render/' + id;
   return {
     project: book.project,
     mode,

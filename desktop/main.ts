@@ -29,7 +29,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
-import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
+import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
 import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
@@ -167,8 +167,9 @@ async function pageHtml(dist: string) {
 
 async function serve(request: Request) {
   const { host, pathname } = new URL(request.url);
-  if (host !== 'editor' && host !== 'render') return new Response(null, { status: 404 });
-  const picture = host === 'render' && /^\/render\/([a-f0-9-]{36})\/picture\/([a-f0-9]{64})$/.exec(pathname);
+  const renderHost = host === 'render' || host === 'thumbs';
+  if (host !== 'editor' && !renderHost) return new Response(null, { status: 404 });
+  const picture = renderHost && /^\/render\/([a-f0-9-]{36})\/picture\/([a-f0-9]{64})$/.exec(pathname);
   if (picture) {
     const session = sessions.get(picture[1]);
     if (session?.mode !== 'edit' || !session.pictures || !session.book.templateHash) return new Response(null, { status: 404 });
@@ -189,10 +190,10 @@ async function serve(request: Request) {
   }
   if (host === 'editor' && ['/', '/settings', '/start', '/new', '/assets', '/templates', '/markdown', '/presentation'].includes(pathname)) {
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
-      'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigin + "; frame-ancestors 'none'; base-uri 'none'",
+      'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigins.join(' ') + "; frame-ancestors 'none'; base-uri 'none'",
     });
   }
-  const match = host === 'render' ? viewPath.exec(pathname) : null;
+  const match = renderHost ? viewPath.exec(pathname) : null;
   if (!match && devServer) return net.fetch(devServer + pathname + new URL(request.url).search);
   if (!match) return new Response(null, { status: 404 });
   const [, id, resource] = match;
@@ -209,7 +210,7 @@ async function serve(request: Request) {
       'Content-Security-Policy': renderPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });
   }
-  if (resource === 'data') return Response.json(renderData(session.book, id, session.mode, session.network?.()));
+  if (resource === 'data') return Response.json(renderData(session.book, id, session.mode, session.network?.(), desktopScheme + '://' + host));
   if (resource === 'template-preview') {
     // The Book check of the template's own preview image: the frame names the declared path, the app reads the file.
     const { file: _file, ...report } = await readTemplatePreview(join(session.book.folder, 'template'), new URL(request.url).searchParams.get('path') ?? '');

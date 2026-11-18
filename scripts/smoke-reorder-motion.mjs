@@ -20,7 +20,8 @@ try {
     window.reorderSamples = [];
     const sample = () => {
       const frames = ['book', 'thumbs'].map(view => document.querySelector('.book-frame-' + view + ':not(.book-frame-pending)'));
-      window.reorderSamples.push({ revisions: frames.map(frame => frame?.src.split('?')[0]),
+      // The revision is the path: the thumbnails render from their own origin.
+      window.reorderSamples.push({ revisions: frames.map(frame => frame && new URL(frame.src).pathname),
         labels: [...document.querySelectorAll('.sheet-label')].map(node => ({ id: node.dataset.canvasSpread, text: node.textContent, top: node.style.top })),
         motions: document.getAnimations().filter(a => a.effect?.target?.matches('[data-canvas-spread]')).map(a => ({ id: a.effect.target.dataset.canvasSpread, start: a.startTime })) });
       requestAnimationFrame(sample);

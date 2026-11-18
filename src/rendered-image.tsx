@@ -382,8 +382,13 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
             return () => clearTimeout(timer);
           })();
         });
+        const started = import.meta.env.IMAGEFLOW_PROFILE ? performance.now() : 0;
         try { return await Promise.race([draw({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]); }
-        finally { stop(); }
+        finally {
+          stop();
+          // Profiling builds time every picture actually drawn, that is, every miss of the preview cache.
+          if (import.meta.env.IMAGEFLOW_PROFILE) performance.measure('imageflow.picture.' + label + ' ' + (spread?.dataset.spread ?? '') + '#' + pictureIndex, { start: started, end: performance.now() });
+        }
       });
       if (controller.signal.aborted) return;
       if (output === 'vector' && blob.type !== svgType) throw new Error('it is declared output="vector", but draw returned pixels (' + (blob.type || 'a canvas') + ').');

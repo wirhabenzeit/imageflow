@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
-import { renderOrigin } from './desktop';
+import { renderOrigin, thumbsOrigin } from './desktop';
 import type { BookGeometry, BookView, RenderStatus } from './desktop';
 import type { PresentationView } from './presentation-model';
 import { reorderOffsets, reorderTiming } from './reorder-motion';
@@ -42,7 +42,9 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   // Pictures the shown frame draws after it was ready (ADR 0006): how many are still drawing, and those that failed.
   onPictures?: (pictures: PictureStatus, project: string) => void;
 }) {
-  const target = hold ? undefined : renderOrigin + '/render/' + project + '?view=' + view + (query && '&' + query);
+  // Thumbnails render from their own origin, in their own process, alongside the book view.
+  const origin = view === 'thumbs' ? thumbsOrigin : renderOrigin;
+  const target = hold ? undefined : origin + '/render/' + project + '?view=' + view + (query && '&' + query);
   const [shown, setShown] = useState<string>();
   const [frames, setFrames] = useState<Record<string, FrameState>>({});
   const latest = useRef(new Map<string, FrameState>());
@@ -77,21 +79,21 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     const previous = latest.current.get(id);
     if (id !== target || refs.current.get(id) !== element || previous?.reorder !== 'preparing') return;
     const frame: FrameState = { ...previous, reorder: 'skipped' };
-    element?.contentWindow?.postMessage({ type: 'cancel-reorder' }, renderOrigin);
+    element?.contentWindow?.postMessage({ type: 'cancel-reorder' }, origin);
     // A timeout may skip animation, but never bypass the render revision gate.
     if (!accept || accept(project)) publish(id, frame);
     storeFrame(id, frame);
   });
 
   const receive = useEffectEvent((event: MessageEvent<BookGeometry | RenderStatus | PictureStatus | { type: 'viewport-request' | 'reorder-ready' } | { type: 'inline-editing-applied'; key: string }>) => {
-    if (event.origin !== renderOrigin || !event.data) return;
+    if (event.origin !== origin || !event.data) return;
     const id = ids.find((key) => refs.current.get(key)?.contentWindow === event.source);
     if (!id) return;
     if (id !== shown && accept && !accept(project)) return;
     const data = event.data;
     if ('type' in data && data.type === 'viewport-request') {
       const range = viewport?.();
-      if (range) (event.source as Window).postMessage({ type: 'viewport', ...range }, renderOrigin);
+      if (range) (event.source as Window).postMessage({ type: 'viewport', ...range }, origin);
       return;
     }
     const element = refs.current.get(id)!;
@@ -107,7 +109,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
         return offset.spread === prepared.spread && offset.x === prepared.x && offset.y === prepared.y;
       });
       frame.reorder = unchanged ? 'ready' : 'skipped';
-      if (!unchanged) element.contentWindow?.postMessage({ type: 'cancel-reorder' }, renderOrigin);
+      if (!unchanged) element.contentWindow?.postMessage({ type: 'cancel-reorder' }, origin);
     } else if ('type' in data && data.type === 'pictures') {
       // Kept with the frame, and passed on once it is shown.
       frame.pictures = data;
@@ -115,11 +117,11 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       storeFrame(id, frame);
       return;
     } else if ('type' in data && data.type === 'geometry') {
-      if (latestCrop.current) (event.source as Window).postMessage({ type: 'crop-preview', ...latestCrop.current }, renderOrigin);
+      if (latestCrop.current) (event.source as Window).postMessage({ type: 'crop-preview', ...latestCrop.current }, origin);
       // A candidate frame is shown only once it hides what the inline editor covers.
       if (latestEditing.current) {
         if (!frame.published) frame.hiding = true;
-        (event.source as Window).postMessage({ type: 'inline-editing', key: latestKey.current, ...latestEditing.current }, renderOrigin);
+        (event.source as Window).postMessage({ type: 'inline-editing', key: latestKey.current, ...latestEditing.current }, origin);
       }
       frame.geometry = data;
       if (id === shown) onGeometry(data, false, undefined, new URL(id).pathname.split('/').at(-1)!);
@@ -139,7 +141,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
         frame.reorder = 'preparing';
         frame.offsets = offsets;
         frame.preparedAt = performance.now();
-        element.contentWindow?.postMessage({ type: 'prepare-reorder', offsets }, renderOrigin);
+        element.contentWindow?.postMessage({ type: 'prepare-reorder', offsets }, origin);
       }
       if (frame.reorder !== 'preparing') {
         publish(id, frame);
@@ -159,13 +161,13 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   const cropKey = JSON.stringify(cropPreview ?? null);
   useEffect(() => {
     for (const { element, geometry } of latest.current.values()) {
-      if (geometry) element?.contentWindow?.postMessage({ type: 'crop-preview', ...(cropPreview ?? {}) }, renderOrigin);
+      if (geometry) element?.contentWindow?.postMessage({ type: 'crop-preview', ...(cropPreview ?? {}) }, origin);
     }
   }, [cropKey]);
   useEffect(() => {
     // Frames still loading are told with their first geometry, above.
     for (const { element, geometry } of latest.current.values()) {
-      if (geometry) element?.contentWindow?.postMessage({ type: 'inline-editing', key: editingKey, ...inlineEditing }, renderOrigin);
+      if (geometry) element?.contentWindow?.postMessage({ type: 'inline-editing', key: editingKey, ...inlineEditing }, origin);
     }
     // Without a frame to ask, nothing is hidden.
     if (![...latest.current.values()].some(({ geometry }) => geometry)) onInlineEditing?.(editingKey);
@@ -198,12 +200,12 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   }, [frames, target, view]);
   useLayoutEffect(() => {
     if (shown && latest.current.get(shown)?.reorder === 'ready') {
-      refs.current.get(shown)?.contentWindow?.postMessage({ type: 'play-reorder', start: latest.current.get(shown)?.start }, renderOrigin);
+      refs.current.get(shown)?.contentWindow?.postMessage({ type: 'play-reorder', start: latest.current.get(shown)?.start }, origin);
     }
   }, [shown]);
 
   useLayoutEffect(() => {
-    if (presentation && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, renderOrigin);
+    if (presentation && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, origin);
   }, [presentation, shown]);
 
   return ids.map((id) => {

@@ -1043,3 +1043,4 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .canvas-zoom-controls button { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 5px; }
 .canvas-zoom-value { min-width: 42px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .canvas-zoom-controls .canvas-return-fit { padding: 0 8px; margin-left: 3px; }
+.canvas[aria-busy] { cursor: progress; }

@@ -5,7 +5,8 @@ import './styles.css';
 
 const root = document.getElementById('root')!;
 const show = (view: ReactNode) => createRoot(root).render(<>{view}{window.location.pathname !== "/settings" && <UpdateNotice api={window.imageflow} />}</>);
-if (window.location.hostname === 'render' && window.location.pathname.startsWith('/render/')) {
+// Render frames: the book's own host, and the thumbnails' (src/desktop.ts).
+if ((window.location.hostname === 'render' || window.location.hostname === 'thumbs') && window.location.pathname.startsWith('/render/')) {
   void import('./render').then(({ startRender }) => startRender(root));
 } else if (window.location.pathname === '/start') {
   void import('./StartWindow').then(({ StartWindow }) => show(<StartWindow api={window.imageflow} />));
