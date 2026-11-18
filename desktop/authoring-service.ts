@@ -39,6 +39,8 @@ import { docTopics } from '../src/doc-topics';
 // Fixture checks share the bridge's two-minute call deadline with queueing, so they stop starting renders after this.
 const fixtureBudgetMs = 60_000;
 
+const omitDefinition = <T extends { definition: string }>({ definition: _definition, ...rest }: T) => rest;
+
 export class AuthoringError extends Error {
   constructor(readonly code: string, message: string, readonly details?: Record<string, unknown>) { super(message); }
 }
@@ -599,22 +601,31 @@ export function createAuthoringService(hooks: Hooks) {
         const labels = project?.spreads.map((_, i) => pageLabel(sequence?.spreads[i].page ?? {})) ?? [];
         const usage = project ? sourceUsage(project, labels, template?.spreads) : { photo: {}, text: {} };
         const view = args.view ?? 'summary';
-        const records = view === 'sources' ? [
+        let records: Record<string, unknown>[] = view === 'sources' ? [
           // Capture time, location and camera come from the loaded photo file, next to what photos.json records.
           ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id)), usage: usage.photo[id] ?? [] })),
           ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path: sourcePath(path), linked: sourceLinked(path), usage: usage.text[id] ?? [] })),
           ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path: sourcePath(path), linked: sourceLinked(path) })),
-        ] : project?.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...spread,
-          page: sequence?.spreads[project.spreads.indexOf(spread)].page,
+        ] : project?.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...omitDefinition(spread),
+          // A sheet shown as pages displays pages.left/right.definition. Its own definition only names the spread-wide
+          // layout a merge restores, so it is not reported as `definition`, which reads as what is shown (F-017).
+          ...(spread.split ? { restoreDefinition: spread.definition } : { definition: spread.definition }),
+          page: sequence?.spreads[project.spreads.findIndex(({ id }) => id === spread.id)].page,
           kept: template ? keptOutside(spread, template.spreads) : [],
           ...(view === 'parameters' && template ? spread.split ? {
             pageDeclarations: Object.fromEntries(['left', 'right'].map(side => [side,
               template.spreads[spread.pages?.[side as 'left' | 'right']?.definition ?? ''] ?? null])),
           } : { declarations: template.spreads[spread.definition] } : {}),
         })) ?? [];
+        // The summary is the book at a glance: its spreads are counted, and listed by the spreads view.
+        // Sources are counted per kind, and can be listed one kind at a time.
+        const counts = view === 'sources' ? { photo: 0, text: 0, file: 0, ...Object.fromEntries(['photo', 'text', 'file'].map((kind) =>
+          [kind, records.filter((record) => (record as { kind?: string }).kind === kind).length])) } : undefined;
+        if (view === 'sources' && args.kind) records = records.filter((record) => (record as { kind?: string }).kind === args.kind);
+        const listed = view === 'summary' ? {} : { offset, items: records.slice(offset, offset + limit), nextOffset: offset + limit < records.length ? offset + limit : null,
+          ...(counts ? { counts } : {}) };
         result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format, templateIdentity,
-          pages: report.render?.pages, total: records.length, offset, items: records.slice(offset, offset + limit),
-          nextOffset: offset + limit < records.length ? offset + limit : null,
+          pages: report.render?.pages, total: records.length, ...listed,
           ...(view === 'parameters' ? { document: { values: project?.params, declarations: template?.parameters } } : {}),
           diagnostics, checks: report.checks, history: session.history };
       }

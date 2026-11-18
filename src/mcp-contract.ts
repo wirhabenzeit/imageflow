@@ -43,14 +43,16 @@ export const mcpToolSchemas = {
   inspect_book: z.strictObject({
     project,
     view: z.enum(['summary', 'spreads', 'sources', 'parameters', 'elements'])
-      .describe('summary: title, format, pages and template identity. spreads: saved spreads with their pages and contents. sources: photos, texts and files with capture metadata and where they are used. parameters: saved values next to their declarations. elements: measured bounds, typography and edit paths of the boxes and elements of one spread.'),
+      .describe('summary: title, format, pages, template identity and the number of spreads (total), without listing them. spreads: saved spreads with their pages and contents; a sheet shown as pages (split: true) shows pages.left/right.definition, and restoreDefinition names the spread-wide layout a merge restores. sources: photos, texts and files with capture metadata and where they are used. parameters: saved values next to their declarations. elements: measured bounds, typography and edit paths of the boxes and elements of one spread.'),
     offset: z.int().min(0).default(0).describe('Index of the first item to return, for paging.'),
     limit: z.int().min(1).max(100).default(30).describe('Number of items to return. Continue from nextOffset.'),
     spread: z.string().min(1).max(256).optional().describe('Spread ID. Required by the elements view; filters the spreads and parameters views.'),
     page: z.enum(['left', 'right']).optional().describe('Elements view only: facing page of a split sheet.'),
     box: z.string().min(1).max(256).optional().describe('Elements view only: measure just this box.'),
     element: z.string().min(1).max(256).optional().describe('Elements view only: measure just this element.'),
+    kind: z.enum(['photo', 'text', 'file']).optional().describe('Sources view only: list just photos, texts or files. The counts per kind are always returned.'),
   }).superRefine((request, context) => {
+    if (request.kind && request.view !== 'sources') context.addIssue({ code: 'custom', path: ['kind'], message: 'Kind filtering requires the sources view.' });
     if (request.page && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Page filtering requires the elements view.' });
     if (request.view === 'elements' && !request.spread) context.addIssue({ code: 'custom', path: ['spread'], message: 'Element inspection requires a spread ID.' });
     if ((request.box || request.element) && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Box and element filters require the elements view.' });

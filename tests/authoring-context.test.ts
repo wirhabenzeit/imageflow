@@ -256,7 +256,7 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     const { folder, call } = await fixture(t);
     const broken = 'export default );';
     await writeFile(join(folder, 'template/index.tsx'), broken);
-    const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'] } : {});
+    const result = await call(tool, tool === 'get_authoring_context' ? { includeSource: ['template/index.tsx'] } : { view: 'spreads' });
     assert.ok((result.diagnostics as AuthoringDiagnostic[]).some(({ code }) => code === 'template-compile-error'));
     assert.equal(result.template, undefined);
     assert.deepEqual(result.templateIdentity, {
@@ -269,6 +269,9 @@ for (const tool of ['get_authoring_context', 'inspect_book']) {
     } else {
       assert.equal(result.title, 'Context book');
       assert.deepEqual((result.items as { boxes: unknown }[])[0].boxes, {});
+      const summary = await call(tool, { view: 'summary' });
+      assert.equal(summary.items, undefined, 'the summary counts the spreads without listing them (F-017 follow-up)');
+      assert.equal(summary.total, (result.items as unknown[]).length);
     }
   });
 
@@ -754,4 +757,23 @@ test('checks omit repeated template declarations unless requested and retain the
   const full = await call('check_book', { includeTemplate: true });
   assert.deepEqual((full.render as Record<string, unknown>).template, status.template);
   assert.deepEqual((await call('get_authoring_context')).template, status.template);
+});
+
+test('inspection reports a split sheet\'s merge layout as restoreDefinition and lists sources by kind (F-017)', async (t) => {
+  const { folder, session, call } = await fixture(t);
+  const manifest = { ...project, texts: { a: 'texts/a.md', b: 'texts/b.md' }, files: { route: 'files/route.gpx' },
+    spreads: [{ id: 'one', definition: 'main' }, { id: 'two', definition: 'main', split: true, pages: { left: { definition: 'main' } } }] };
+  await mkdir(join(folder, 'texts')); await mkdir(join(folder, 'files'));
+  await Promise.all([writeFile(join(folder, 'texts/a.md'), 'A'), writeFile(join(folder, 'texts/b.md'), 'B'), writeFile(join(folder, 'files/route.gpx'), '<gpx/>'),
+    writeFile(join(folder, 'project.json'), JSON.stringify(manifest))]);
+  session.adoptExternal(await loadProject(folder, join(folder, '..', 'cache'), true));
+  const spreads = (await call('inspect_book', { view: 'spreads' })).items as Record<string, unknown>[];
+  assert.equal(spreads[0].definition, 'main');
+  assert.equal(spreads[0].restoreDefinition, undefined);
+  assert.equal(spreads[1].definition, undefined, 'a split sheet does not report its merge layout as shown');
+  assert.equal(spreads[1].restoreDefinition, 'main');
+  const texts = await call('inspect_book', { view: 'sources', kind: 'text' });
+  assert.deepEqual(texts.counts, { photo: 0, text: 2, file: 1 });
+  assert.deepEqual((texts.items as { kind: string }[]).map(({ kind }) => kind), ['text', 'text']);
+  assert.equal(texts.total, 2);
 });
