@@ -53,6 +53,8 @@ export const commandRegistry = {
   'asset-preview': { label: 'Quick Look', enabled: book, accelerator: 'Space', registerAccelerator: false },
   'asset-place': { label: 'Place on Current Spread', enabled: writable },
   'asset-placements': { label: 'Show Placements', enabled: book },
+  'asset-rename': { label: 'Rename…', enabled: writable },
+  'asset-place-file': { label: 'Choose Files in a Spread’s Settings', enabled: () => false },
   'asset-jump': { label: 'Go to Spread', enabled: book },
   'asset-reveal': { label: 'Show in Finder', enabled: book },
   'asset-open': { label: 'Edit in Default App', enabled: book },

@@ -1051,3 +1051,4 @@ select.settings-control { justify-self: start; width: auto; max-width: 100%; }
 .markdown-header-fields > div { display: contents; }
 .markdown-header-fields dt { color: var(--muted); }
 .markdown-header-fields dd { margin: 0; }
+.asset-rename { width: 100%; min-width: 0; font: inherit; font-weight: 600; padding: 1px 4px; }

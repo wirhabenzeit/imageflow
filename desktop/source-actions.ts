@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { copyFile, cp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { copyFile, cp, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, extname, join, posix } from 'node:path';
 import { storedBoxes } from '../src/project';
 import type { ProjectFiles } from '../src/project';
 import { clearFileAssignments, fileAssigned } from '../src/asset-usage';
@@ -29,10 +29,49 @@ async function managedCopy(folder: string, source: SourceEntry, snapshot: string
   const name = storedFileName(basename(source.path));
   const relativeFolder = sourceFolder(source.kind) + '/' + source.id + '-' + randomUUID().slice(0, 8);
   await mkdir(join(folder, relativeFolder));
-  const path = relativeFolder + '/' + name.replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');
+  const path = relativeFolder + '/' + name.replace(storedPrefix, '');
   await copyFile(snapshot, join(folder, path), constants.COPYFILE_EXCL);
   copied.push(join(folder, path));
   return path;
+}
+
+// Imported copies are stored as "<id>-<name>", or as "<id>-<random>/<name>" when collected into the book.
+const storedPrefix = /^(?:ph|tx|fl)-[a-f0-9-]{12}-/;
+
+/**
+ * Renames a text or file stored in the book (beta finding F-027): its copy is renamed in place, keeping its ID
+ * prefix, folder and extension, and the book refers to the new path. Assignments refer to the ID, so they keep
+ * working. Not undoable, like other changes of a source's location; Undo and Revert keep the current paths. A linked
+ * original is never renamed, and a photo is named by its title.
+ */
+export async function renameSource(book: OpenProject, key: string, requested: unknown) {
+  const source = sourceEntries(book).find((entry) => entry.key === key);
+  if (!source) throw new Error('This asset is no longer in the book.');
+  if (source.kind === 'photo') throw new Error('A photo is named by its title. Change the title in the Inspector.');
+  if (source.linked) throw new Error('A linked file keeps the name of its original. Copy it into the book to rename it.');
+  if (typeof requested !== 'string') throw new Error('Enter a name.');
+  const stored = posix.basename(source.path);
+  const prefix = stored.match(storedPrefix)?.[0] ?? '';
+  const current = stored.slice(prefix.length);
+  const extension = extname(current);
+  let name = storedFileName(requested.trim()).replace(/^[.\s]+/, '');
+  if (extension && extname(name).toLowerCase() !== extension.toLowerCase()) name += extension;
+  if (!name || name === extension) throw new Error('Enter a name.');
+  if (name.length > 200) throw new Error('Choose a shorter name.');
+  if (name === current) return book;
+  const relative = posix.join(posix.dirname(source.path), prefix + name);
+  const from = join(book.folder, source.path), to = join(book.folder, relative);
+  // A change of case only is the same file on a case-insensitive volume.
+  const exists = from.toLowerCase() !== to.toLowerCase() && await stat(to).then(() => true, () => false);
+  if (exists) throw new Error('Another asset already has this name.');
+  await rename(from, to);
+  const files = filesOf(book);
+  reference(files, source, relative, false);
+  try { return await updateProject(book, files, true, { origin: 'app', label: 'Rename asset' }); }
+  catch (error) {
+    if (!(error instanceof CommittedProjectSaveError)) await rename(to, from).catch(() => {});
+    throw error;
+  }
 }
 
 /** Source identity and book metadata survive changing location. External files are never modified. */

@@ -12,7 +12,7 @@ import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
 import { bookName } from '../src/book-name';
-import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, removeSources } from './source-actions';
+import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, removeSources, renameSource } from './source-actions';
 import { originalPath } from './source-store';
 import { sourceEntries } from '../src/source-locations';
 import type { SourceEntry } from '../src/source-locations';
@@ -1656,6 +1656,12 @@ void app.whenReady().then(async () => {
       next = await removeSources(document.book, keys);
       document.projectSession.record(next, 'Remove assets', true, false);
       return { summary: activate(document.activate(next)) };
+    }
+    else if (request.action === 'rename') {
+      if (!source || chosen.length !== 1) throw new Error('Choose one asset to rename.');
+      next = await renameSource(document.book, source.key, request.name);
+      if (next === document.book) return { summary: document.summary };
+      message = 'Renamed to ' + basename(sourceEntries(next).find(({ key }) => key === source.key)!.path).replace(/^(?:tx|fl)-[a-f0-9-]{12}-/, '') + '.';
     }
     else if (request.action === 'locate-folder') {
       const choice = await dialog.showOpenDialog(owner, { title: 'Locate Missing Sources in Folder', buttonLabel: 'Locate',

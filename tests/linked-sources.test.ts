@@ -10,7 +10,7 @@ import { configureRenditionCache } from '../desktop/rendition-cache';
 import { photoFile } from '../desktop/photos';
 import { isUnavailableSource } from '../src/source-diagnostics';
 import { importIntoProject, loadProject, projectSummary, renderData, updateProject } from '../desktop/project';
-import { collectSources, relocateSource, relinkFolder, removeSources, saveDocumentCopy } from '../desktop/source-actions';
+import { collectSources, relocateSource, relinkFolder, removeSources, renameSource, saveDocumentCopy } from '../desktop/source-actions';
 import { captureProjectInputs } from '../desktop/revisions';
 import { ProjectSession } from '../desktop/project-session';
 import { sourceEntries } from '../src/source-locations';
@@ -479,4 +479,37 @@ test('Locate Folder reapproves exact originals with no approvals or cache, but n
   assert.equal(repaired.repaired, 1);
   assert.equal(repaired.book.sources!['photo:' + id].state, 'available');
   assert.equal(repaired.book.photoIndex[id].path, f.photo);
+});
+
+test('a file stored in the book is renamed in place, keeping its ID, extension and assignments (F-027)', async (t) => {
+  const f = await fixture(t);
+  const decomposed = join(f.external, '2026-08-22 Söng Kul.gpx');
+  await writeFile(decomposed, '<gpx><trk/></gpx>');
+  const added = await importIntoProject(f.book, { kind: 'file', mode: 'copy', accept: ['.gpx'] }, [decomposed]);
+  const [id] = added.imported;
+  const stored = added.book.project.files[id] as string;
+  assert.equal(stored, 'files/' + id + '-2026-08-22 Söng Kul.gpx', 'the umlaut survives the copy (F-026)');
+  const session = new ProjectSession(added.book);
+  t.after(() => session.close());
+  const assigned = structuredClone({ project: added.book.project, photoIndex: added.book.photoIndex });
+  assigned.project.params.track = id;
+  const book = await session.save(assigned, 'Assign');
+
+  const renamed = await renameSource(book, 'file:' + id, 'Stage 05: Song Kul');
+  assert.equal(renamed.project.files[id], 'files/' + id + '-Stage 05- Song Kul.gpx', 'unsafe characters replaced, extension kept');
+  assert.equal(renamed.project.params.track, id);
+  assert.equal(await readFile(join(f.folder, renamed.project.files[id] as string), 'utf8'), '<gpx><trk/></gpx>');
+  await assert.rejects(readFile(join(f.folder, stored)), 'the copy moved rather than duplicated');
+  session.record(renamed, 'Source location changed', false);
+  // Undoing an earlier edit keeps the current path, so it never points at the old name.
+  const undone = await session.undo('undo');
+  assert.equal(undone.project.files[id], renamed.project.files[id]);
+  assert.equal(undone.project.params.track, undefined);
+
+  assert.equal(await renameSource(undone, 'file:' + id, 'Stage 05- Song Kul.gpx'), undone, 'the same name is no change');
+  await writeFile(join(f.folder, 'files', id + '-Taken.gpx'), 'x');
+  await assert.rejects(renameSource(undone, 'file:' + id, 'Taken'), /already has this name/);
+  await assert.rejects(renameSource(undone, 'file:' + id, '  '), /Enter a name/);
+  const linked = await importIntoProject(undone, { kind: 'file', mode: 'link', accept: ['.gpx'] }, [f.file]);
+  await assert.rejects(renameSource(linked.book, 'file:' + linked.imported[0], 'Other'), /keeps the name of its original/);
 });

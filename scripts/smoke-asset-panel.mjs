@@ -55,6 +55,34 @@ try {
   await page.getByRole('searchbox', { name: 'Search assets' }).fill('data');
   await until(async () => await rows.count() === 1);
   await page.screenshot({ path: join(work, 'assets-tab.png') });
+  // Rename… edits the name in its row (F-027); a file is chosen in a spread's settings, which the menu says (F-027).
+  await app.evaluate(({ Menu }) => {
+    Menu.prototype.popup = function ({ callback }) {
+      const walk = (menu) => menu.items.flatMap((item) => [item, ...item.submenu ? walk(item.submenu) : []]);
+      globalThis.lastContext = walk(this).map(({ id, label, enabled }) => ({ id, label, enabled }));
+      walk(this).find((item) => item.id === 'asset-rename')?.click();
+      callback?.();
+    };
+  });
+  await rows.first().click({ button: 'right' });
+  const context = await app.evaluate(() => globalThis.lastContext);
+  assert.ok(context.some(({ id, enabled }) => id === 'asset-place-file' && !enabled), JSON.stringify(context));
+  assert.ok(!context.some(({ id }) => id === 'asset-place'));
+  const field = page.getByRole('textbox', { name: 'New name for data.csv' });
+  await field.waitFor();
+  assert.equal(await field.evaluate((input) => input.value.slice(input.selectionStart, input.selectionEnd)), 'data', 'the name without its extension is selected');
+  await page.keyboard.type('Söng Kul');
+  await page.keyboard.press('Space');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Enter');
+  await page.getByRole('searchbox', { name: 'Search assets' }).fill('');
+  await page.locator('.source-manager-embedded .asset-row strong', { hasText: 'Söng Kul.csv' }).waitFor({ timeout: 5000 }).catch(async (error) => {
+    console.error('Rename failed:', JSON.stringify({ rows: await rows.allTextContents(), alerts: await page.locator('[role="alert"], [role="status"]').allTextContents() }));
+    throw error;
+  });
+  const manifest = JSON.parse(await (await import('node:fs/promises')).readFile(join(folder, 'project.json'), 'utf8'));
+  assert.equal(manifest.files.data, 'files/Söng Kul.csv');
+  await until(async () => await rows.count() === 1);
   // An unassigned file is removed at once. A book without files and file parameters has no Assets tab, so the strip
   // returns to photos.
   await rows.first().click();
