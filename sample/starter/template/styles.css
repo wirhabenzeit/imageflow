@@ -164,6 +164,7 @@
 .field-book .eyebrow { font: 500 9pt/1 "Field Sans"; letter-spacing: .14em; text-transform: uppercase; }
 .field-book h2.opener { font-size: 44pt; line-height: 1.02; display: flex; align-items: flex-start; }
 .field-book h2.closing { text-align: center; font-size: 26pt; }
+.field-book .running-head { color: var(--muted); }
 
 /* Stories, notes and quotes. The text size is a book setting, passed in as --text-size. */
 .field-book .reading { font: 400 var(--text-size, 10.5pt)/1.5 "Field Serif"; column-gap: 6mm; hyphens: auto; }
@@ -209,6 +210,11 @@
 .map-image, .map-track { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .map-image img { object-fit: cover; }
 .map-track polyline { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+/* A place from the story beside the map: a dot at the place, its name to the right. */
+.map-place { position: absolute; transform: translate(-1.2mm, -1.2mm); display: flex; align-items: center; gap: 1.2mm;
+  font: 500 8pt/1 "Field Sans"; letter-spacing: .04em; color: var(--ink, #1f2b25); white-space: nowrap; }
+.map-place::before { content: ""; width: 2.4mm; height: 2.4mm; border-radius: 50%; background: var(--accent, #9b6a3c); box-shadow: 0 0 0 .5mm var(--paper, #fff); flex: none; }
+.map-place-editor { transform: translate(-1.2mm, -1.2mm); pointer-events: none; }
 /* The map's labels (maplibre-svg), in the book's fonts: places in the semibold serif, water in the serif italic, the
    rest in the sans. The size comes from the map style. */
 .map-image .map-label { font-family: "Field Sans"; font-weight: 500; }

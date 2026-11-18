@@ -11,6 +11,8 @@ import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSeque
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
 import { identifier, pageSides, renderView, scopeSpread, values } from './project';
 import type { PageSide, Photo, ProjectFile, RenderProject, RenderView, SpreadState, Values } from './project';
+import { textAssignments } from './text-assignments';
+import type { TextMeta } from './frontmatter';
 import { getCrop, placementIn } from './spread';
 import type { Crop, Placement as CropPlacement } from './spread';
 import { declarationConflicts, familyProblems } from './layouts';
@@ -30,6 +32,7 @@ import { fonts } from './fonts';
 export { inch, mm, p, printFormat, pt };
 export type { PrintFormat, ResolvedFormat, Span } from './format';
 export type { Parameter, Parameters } from './parameters';
+export type { TextMeta, TextMetaValue } from './frontmatter';
 
 export type RenderContext = {
   params: Values;
@@ -73,7 +76,9 @@ const issueOn = (marker: IssueMarker) => ({ 'data-issue': marker['data-issue'], 
 
 // Anchors are declared from a spread's saved values, never from rendered output, so every spread can read every
 // anchor's page in the same single render: pages depend only on spread order and layout spans.
-export type AnchorContext = { params: Values; document: Values };
+// `boxes` is every box of the layout as `render` sees it: parameters, a photo box's photo metadata and a Markdown
+// box's flow position with its text's header fields (`text.meta`), so a layout can name an anchor after its text.
+export type AnchorContext = { params: Values; document: Values; boxes: RenderContext['boxes'] };
 export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
 // `side` is 'page' in a format without facing pages, where a unit has one page and a declared side is ignored.
 export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
@@ -111,10 +116,18 @@ export type BookSpread = {
   // The active layout's photo boxes, in declaration order. Content kept from other layouts is not listed.
   photos: BookPhotoPlacement[];
 };
+// A box a text flows through, in `BookText.boxes`. `pageNumbers` are the book pages of its spread, or of its page
+// when the spread is shown as pages.
+export type BookTextPlacement = { spread: string; page?: PageSide; box: string; part: number; pageNumbers: UnitPages };
+// A Markdown source as the book places it: its file name, its YAML header's fields and the boxes it flows through.
+export type BookText = { id: string; title?: string; meta: TextMeta; boxes: BookTextPlacement[] };
 export type BookContext = {
   pages: number;
   // Every spread in book order, with its pages and photo assignments. Read-only and the same for every spread.
   spreads: readonly BookSpread[];
+  // Every text the book places, in the order the book first shows them. Read-only and the same for every spread, so
+  // a page without a Markdown box can read the header of the text beside it, around it or named by a parameter.
+  texts: readonly BookText[];
   // The anchor declared with this ID, if exactly one spread declares it. With several, the first; the check warns.
   anchor(id: string): Anchor | undefined;
   // All anchors with this ID, or all anchors, in page order.
@@ -142,16 +155,20 @@ export class SpreadError extends Error {
 
 // Lookups that found no anchor, or several, keyed so repeated renders report each once.
 export type AnchorLookup = { spread: string; page?: PageSide; anchor: string; found: number };
-export type BookIndex = { pages: number; anchors: Anchor[]; credits?: readonly Credit[]; creditConflicts?: readonly CreditConflict[]; spreads?: readonly BookSpread[]; lookups?: Map<string, AnchorLookup> };
+export type BookIndex = { pages: number; anchors: Anchor[]; credits?: readonly Credit[]; creditConflicts?: readonly CreditConflict[]; spreads?: readonly BookSpread[]; texts?: readonly BookText[]; lookups?: Map<string, AnchorLookup> };
 
 export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: UnitPages }[] }): BookIndex {
   const document = resolveParams(template.parameters, book.project.params);
+  const { chains, positions } = textAssignments(book, template);
   const anchors = book.project.spreads.flatMap((sheet, i) => shownLayoutStates(sheet).flatMap(({ page: scope, state: spread }) => {
     const definition = Object.hasOwn(template.spreads, spread.definition) ? template.spreads[spread.definition] : undefined;
     if (!definition?.anchors) return [];
     let returned: unknown;
     renderingSpread(spread.id, scope);
-    try { returned = definition.anchors({ params: resolveParams(definition.parameters, spread.params), document }); }
+    try {
+      const { boxes } = spreadValues(book, template, spread, positions, scope);
+      returned = definition.anchors({ params: resolveParams(definition.parameters, spread.params), document, boxes: deepFreeze(structuredClone(boxes)) });
+    }
     catch (error) { throw new SpreadError(definition.label + ' could not declare its anchors: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error, page: scope }); }
     finally { renderingSpread(undefined); }
     const declared = anchorDeclarations.safeParse(returned);
@@ -171,7 +188,23 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
   // A spread may declare its right-page anchor before its left-page one. The sort is stable within a page.
   const { credits, conflicts } = bookCredits(book, template, sequence, document);
   return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page), credits, creditConflicts: conflicts,
-    spreads: spreadIndex(book, template, sequence) };
+    spreads: spreadIndex(book, template, sequence), texts: textIndex(book, sequence, chains, positions) };
+}
+
+// The book's texts with the boxes they flow through, from saved data only, like `spreadIndex`.
+function textIndex(book: RenderProject, sequence: { spreads: { page: UnitPages }[] }, chains: ReturnType<typeof textAssignments>['chains'],
+  positions: Record<string, FlowPosition>): readonly BookText[] {
+  const order = new Map(book.project.spreads.map(({ id }, i) => [id, i]));
+  return deepFreeze([...chains].map(([source, chain]): BookText => {
+    const first = positions[chain[0].spread + ':' + (chain[0].page ? chain[0].page + ':' : '') + chain[0].box];
+    return { id: source, ...(first?.title !== undefined ? { title: first.title } : {}), meta: structuredClone(first?.meta ?? {}),
+      boxes: chain.map(({ spread, page, box }, i): BookTextPlacement => {
+        const unit = sequence.spreads[order.get(spread)!].page;
+        const numbers = page ? { [page]: unit[page] } : unit;
+        return { spread, ...(page ? { page } : {}), box, part: i + 1,
+          pageNumbers: Object.fromEntries(Object.entries(numbers).filter(([, value]) => value !== undefined)) };
+      }) };
+  }));
 }
 
 function bookCredits(book: RenderProject, template: Template, sequence: { spreads: { page: UnitPages }[] }, document: Values) {
@@ -257,6 +290,7 @@ export function bookContext(index: BookIndex, spread: string, page?: PageSide): 
   return {
     pages: index.pages,
     spreads: index.spreads ?? [],
+    texts: index.texts ?? [],
     anchor(id) {
       const found = matching(id);
       if (found.length !== 1) index.lookups?.set(spread + '\u0000' + (page ?? '') + '\u0000' + id, { spread, ...(page ? { page } : {}), anchor: id, found: found.length });
@@ -274,7 +308,8 @@ function editTarget(book: RenderProject, prefix: string, parameters: Parameters 
   return edits.length ? [...new Set(edits)].join(' ') : undefined;
 }
 
-export type FlowPosition = { part: number; parts: number; title?: string };
+// `meta` is the source's YAML header ({} without one), the same object for every box the text flows through.
+export type FlowPosition = { part: number; parts: number; title?: string; meta: TextMeta };
 // An element may supply its own editor for some of its parameters. The component runs in a sandboxed frame
 // and reports changes; ImageFlow owns the non-modal panel, validation, live saving and Undo.
 // An editor asks for 'inline': it then edits on the page, in the frame of the element or
@@ -1095,7 +1130,7 @@ export function editorContext(book: RenderProject, template: Template, spreadId:
   const sequence = pageSequence(spreads.map((state) => layoutFootprint(state, template.spreads)), template.format);
   const index_ = bookIndex(book, template, sequence);
   const format = resolveFormat(template.format);
-  const values = spreadValues(book, template, spread, {});
+  const values = spreadValues(book, template, spread, textAssignments(book, template).positions, side);
   const allPages = sequence.spreads[index].page;
   const page = side ? { [side]: allPages[side] } : allPages;
   const context: EditorContext = {

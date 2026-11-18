@@ -216,6 +216,8 @@ Layout findings use one envelope: `code`, `severity`, `stage`, `message`, an opt
 | --- | --- |
 | `text-overflow` | Last box of the text chain and its Markdown source; `overflowCharacters`, `boxes`, `path`. |
 | `text-source-missing` | First box of the chain and its source. |
+| `text-box-unused` | A box of the text chain that the text ends before, so it prints nothing; `part`, `parts`, `path`. One warning per empty box. |
+| `text-frontmatter-invalid` | First box of the chain and its source; `line` of the YAML problem in the file, `path`. A warning: the layout renders without the header's fields. |
 | `photo-resolution-low` | Photo box and source; `ppi`, `minimumPpi`, `boxWidthMm`, `boxHeightMm`. |
 | `photo-missing`, `photo-decode-failed` | Photo box and source. |
 | `font-load-failed` | `family` of a `@font-face` whose file could not be loaded or decoded. The book renders with a fallback font. A font file that does not exist is a `template-compile-error`. |

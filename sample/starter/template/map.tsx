@@ -6,7 +6,7 @@
 // look different if the map provider changes its maps or styles.
 import React from 'react';
 import { file, fonts, geometry, issue, p, RenderedImage } from 'imageflow';
-import type { ElementEditorProps, ImageFlowNode, Rect, ResolvedFormat } from 'imageflow';
+import type { BookText, ElementEditorProps, ImageFlowNode, Rect, ResolvedFormat } from 'imageflow';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { drawMapSvg, projector } from 'maplibre-svg';
@@ -54,6 +54,28 @@ export function trackPoints(text: string) {
   if (points.length < 2 || points.some((point) => point.some((value) => !Number.isFinite(value)))) throw new Error('has no track');
   return points;
 }
+
+/** A place the map marks, from the `places` field of a story's YAML header. */
+export type Place = { name: string; longitude: number; latitude: number };
+/**
+ * The places of the story on the other page of this sheet: its Markdown file lists them in its header as
+ * `places: [{ name, latitude, longitude }, …]`. `skipped` counts entries that are not such a place.
+ */
+export function placesBeside(context: { book: { texts: readonly BookText[] }; spread: string; side?: string }) {
+  const text = context.book.texts.find(({ boxes }) => boxes.some(({ spread, page }) => spread === context.spread && page && page !== context.side));
+  const value = text?.meta.places;
+  const places: Place[] = [];
+  let skipped = value === undefined || Array.isArray(value) ? 0 : 1;
+  for (const item of Array.isArray(value) ? value : []) {
+    const { name, latitude, longitude } = (item && typeof item === 'object' && !Array.isArray(item) ? item : {}) as Record<string, unknown>;
+    if (typeof name === 'string' && name.trim() && typeof latitude === 'number' && Math.abs(latitude) <= 85 &&
+      typeof longitude === 'number' && Math.abs(longitude) <= 180) places.push({ name: name.trim(), latitude, longitude });
+    else skipped++;
+  }
+  return { places, skipped, source: text?.id };
+}
+// Base map labels give way to the places' dots and names, in CSS pixels around each place.
+const placeRoom = 34;
 
 /** The track in the element's CSS pixels, projected as the drawn map is. */
 const projectTrack = (points: number[][], project: ReturnType<typeof projector>) =>
@@ -103,9 +125,10 @@ const labelRole = (stack: string[]) => {
  * set (fonts.settable): the fonts cover Latin and Cyrillic, letters lose marks the fonts lack (ş → s), and characters
  * they have no glyphs for, such as a Chinese or Arabic line of a name, are left out.
  */
-async function drawMap(style: MapStyle, view: View, signal: AbortSignal) {
+async function drawMap(style: MapStyle, view: View, signal: AbortSignal, places: Place[] = []) {
   try {
     return await drawMapSvg({ maplibre: await loadMapLibre(), style: mapStyle(style), view, signal,
+      avoid: places.map(({ longitude, latitude }) => ({ at: [longitude, latitude] as [number, number], radius: placeRoom })),
       // The Book style's colours as CSS variables, which the map element sets from the colour theme.
       color: mapColor(style),
       font: (stack) => ({ className: labelRole(stack).className }),
@@ -116,9 +139,11 @@ async function drawMap(style: MapStyle, view: View, signal: AbortSignal) {
   }
 }
 
-/** The map as the page draws it: the map picture and the tracks over it in list order. */
-export function MapView({ values, trackWidth, rect, theme, className, Element }: {
+/** The map as the page draws it: the map picture, the tracks over it in list order, and the places on top. */
+export function MapView({ values, trackWidth, rect, theme, className, Element, places = [] }: {
   values: MapValues; trackWidth: number; rect: Rect;
+  // Marked with a dot and their name, such as the places of the story beside the map.
+  places?: Place[];
   // `map-inset` for a map inside the page's margins.
   className?: string;
   // The book's colour theme, which the Book style follows.
@@ -132,12 +157,18 @@ export function MapView({ values, trackWidth, rect, theme, className, Element }:
   const project = projector({ ...view, width, height });
   return <Element id="map" className={'map' + (className ? ' ' + className : '')} rect={rect}>
     {/* The theme reaches the drawn map only through these CSS variables, so a theme change does not draw it again. */}
-    <RenderedImage className="map-image" label="Map" output="vector" style={mapThemeColors(values.style, theme)} inputs={{ style: values.style, ...view, width: rect.width, height: rect.height }}
-      draw={(target) => drawMap(values.style, { ...view, width: target.width, height: target.height }, target.signal)} />
+    <RenderedImage className="map-image" label="Map" output="vector" style={mapThemeColors(values.style, theme)}
+      inputs={{ style: values.style, ...view, width: rect.width, height: rect.height, avoid: places.map(({ longitude, latitude }) => [longitude, latitude]) }}
+      draw={(target) => drawMap(values.style, { ...view, width: target.width, height: target.height }, target.signal, places)} />
     {tracks.some(({ points }) => points) && <svg className="map-track" viewBox={'0 0 ' + width.toFixed(1) + ' ' + height.toFixed(1)} preserveAspectRatio="none" aria-label="Route">
       {tracks.map(({ id, points, colour, label }) => points && <polyline key={id} points={projectTrack(points, project)}
         style={{ stroke: colour, strokeWidth: trackWidth * cssPerMm }}>{label && <title>{label}</title>}</polyline>)}
     </svg>}
+    {places.map((place, i) => {
+      const [x, y] = project([place.longitude, place.latitude]);
+      return x >= 0 && x <= width && y >= 0 && y <= height &&
+        <span key={i} className="map-place" style={{ left: (x / width * 100) + '%', top: (y / height * 100) + '%' }}>{place.name}</span>;
+    })}
     {tracks.map(({ id, problem, track, label }, index) => problem && <span key={id} hidden {...issue({ code: 'gpx-invalid',
       message: 'Track ' + (index + 1) + (label ? ' (' + label + ')' : '') + ': ' + problem + ' The track is left out.',
       element: 'map', parameter: 'tracks', file: track,
@@ -170,6 +201,19 @@ export function MapEditor({ values, set, readOnly, context, document, presentati
   const tracks = readTracks(values.tracks);
   const drawable = tracks.some(({ points }) => points);
   const problem = tracks.map(({ problem }) => problem).filter(Boolean).join(' ');
+  // The places of the story beside the map, where the page marks them, so the view can be framed around them.
+  const { places } = placesBeside(context);
+  const placed = React.useRef<{ remove(): void }[]>([]);
+  const drawPlaces = (maplibregl: Awaited<ReturnType<typeof loadMapLibre>>, target: MapLibreMap) => {
+    placed.current.forEach((marker) => marker.remove());
+    placed.current = places.map(({ name, longitude, latitude }) => {
+      const element = window.document.createElement('span');
+      element.className = 'map-place map-place-editor';
+      element.textContent = name;
+      return new maplibregl.Marker({ element, anchor: 'top-left' }).setLngLat([longitude, latitude]).addTo(target);
+    });
+  };
+  const library = React.useRef<Awaited<ReturnType<typeof loadMapLibre>>>(undefined);
   // The editor map's CSS pixels per printed CSS pixel: 1 inline, where the frame has the printed size; less in the panel.
   const ratio = () => (holder.current?.clientWidth || width.current) / (width.current || 1);
   // A smaller editor map shows the same area at a lower zoom.
@@ -250,6 +294,8 @@ export function MapEditor({ values, set, readOnly, context, document, presentati
         if (!created.isStyleLoaded()) setError('The map could not load. ' + (event.error ? describeMapError(event.error) : 'There may be no internet connection.'));
       });
       created.on('style.load', () => { setError(''); drawTrack(created); });
+      library.current = maplibregl;
+      drawPlaces(maplibregl, created);
       map.current = created;
     }, (failure: unknown) => { drawn(); setError('The map library could not load: ' + String(failure)); });
     return () => { removed = true; map.current?.remove(); map.current = undefined; };
@@ -261,6 +307,7 @@ export function MapEditor({ values, set, readOnly, context, document, presentati
     current.jumpTo({ center: [latest.current.longitude, latest.current.latitude], zoom: editorZoom(latest.current.zoom) });
   }, [rect?.width, rect?.height]);
   React.useEffect(() => { if (map.current?.isStyleLoaded()) drawTrack(map.current); }, [JSON.stringify(values.tracks), values.trackWidth]);
+  React.useEffect(() => { if (map.current && library.current) drawPlaces(library.current, map.current); }, [JSON.stringify(places)]);
   React.useEffect(() => { map.current?.setStyle(mapStyle(values.style, theme)); }, [values.style, theme]);
   React.useEffect(() => {
     const button = holder.current?.querySelector<HTMLButtonElement>('.map-fit-track');

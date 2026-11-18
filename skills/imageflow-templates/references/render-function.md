@@ -16,7 +16,7 @@ type RenderContext = {
       location?: { latitude: number; longitude: number };
       camera?: { make?: string; model?: string };
     } | null;
-    text?: { title?: string; part: number; parts: number } | null;  // flow position for Markdown boxes
+    text?: { title?: string; part: number; parts: number; meta: TextMeta } | null;  // flow position and YAML header fields for Markdown boxes
   }>;
   elements: Record<ElementId, { params: ElementParams }>;
   page: { left?: number; right?: number; number?: number };  // page numbers: left/right, or number without facing pages
@@ -36,6 +36,7 @@ type RenderContext = {
     anchor(id: string): Anchor | undefined; // the anchor with this ID (see Anchors)
     anchors(id?: string): Anchor[];         // all anchors with this ID, or all anchors, in page order
     spreads: BookSpread[];                  // every spread's pages and placed photos (see Book index)
+    texts: BookText[];                      // every placed text, its header fields and boxes (see Texts)
   };
 };
 ```

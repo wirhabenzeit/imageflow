@@ -7,7 +7,7 @@ import type { PrintFormat, printFormat, ResolvedFormat } from './format';
 import type { BoundGeometry } from './geometry';
 import type { Parameter } from './parameters';
 import type { Photo } from './project';
-import type { Anchor, AnchorDeclaration, BookContext, DocumentEditorProps, EditorContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, Page, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
+import type { Anchor, AnchorContext, AnchorDeclaration, BookContext, BookText, BookTextPlacement, DocumentEditorProps, EditorContext, Element, ElementEditorProps, IssueMarker, LayoutPickerProps, LayoutVariant, MarkdownBox, Page, PhotoBox, RenderContext, runtime, Spread, TemplateIssue,
   TemplateDeclaration, Text, TextTag } from './template';
 import type { Capability, runtimeExports } from './runtime-exports';
 
@@ -24,6 +24,9 @@ export const declaredTypesMatchRuntime: [
   Same<Declared.Anchor, Anchor>,
   Same<Declared.AnchorDeclaration, AnchorDeclaration>,
   Same<keyof Declared.BookContext, keyof BookContext>,
+  Same<keyof Declared.BookText, keyof BookText>,
+  Same<keyof Declared.BookTextPlacement, keyof BookTextPlacement>,
+  Same<keyof Declared.AnchorContext, keyof AnchorContext>,
   // The bundler exposes exactly the runtime's exports.
   Same<keyof typeof runtime, typeof runtimeExports[number]>,
   Same<Declared.TemplateIssue, TemplateIssue>,
@@ -54,4 +57,4 @@ export const declaredTypesMatchRuntime: [
   Same<keyof Declared.EditorContext, keyof EditorContext>,
   Same<keyof Declared.DocumentEditorProps, keyof DocumentEditorProps>,
   Assignable<Declared.OpeningSpread, NonNullable<TemplateDeclaration['openingSpreads']>[number]>,
-] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+] = [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];

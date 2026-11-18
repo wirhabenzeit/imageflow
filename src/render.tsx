@@ -25,6 +25,7 @@ import type { PrintSide, ResolvedFormat } from './format';
 import { frameView, scopeSpread, scopeState } from './project';
 import type { FixtureMarking, PageSide, RenderProject, SpreadState, Values } from './project';
 import { markdownToHtml } from './markdown';
+import { splitFrontmatter } from './frontmatter';
 import { isParameterValue, parameterWarnings, resolveParams, resolveValue } from './parameters';
 import type { ListItem } from './parameters';
 import { fileErrors } from './file-findings';
@@ -1869,6 +1870,13 @@ export async function startRender(root: HTMLElement) {
           suggestion: 'Restore ' + (book.project.texts[source] ? sourcePath(book.project.texts[source]) : 'the Markdown file') + ', or assign another text to box ' + first.box + '.' });
         continue;
       }
+      const header = splitFrontmatter(book.texts[source]).error;
+      if (header) {
+        const path = book.project.texts[source] ? sourcePath(book.project.texts[source]) : source;
+        warnings.push({ ...located(first.spread, 'The header of ' + path + ' cannot be read: ' + header.message + ' (line ' + header.line + ').'),
+          code: 'text-frontmatter-invalid', ...onPage(first.page), box: first.box, source, details: { line: header.line, path },
+          suggestion: 'Fix the YAML between the opening and closing --- lines of ' + path + '. Until then the layout shows it without its header fields.' });
+      }
       const boxes = chain.map(({ spread, page, box }) => validated.get(spread)!.boxes.get((page ? page + ':' : '') + box)!);
       const result = flow.run(markdownToHtml(book.texts[source]), boxes, 'columns');
       const overflow = result.overflowText.trim();
@@ -1879,6 +1887,19 @@ export async function startRender(root: HTMLElement) {
           details: { overflowCharacters: overflow.length, boxes: chain.length, path: book.project.texts[source] ? sourcePath(book.project.texts[source]) : '' },
           suggestion: 'Insert a spread after ' + last.spread + ' with a markdown box and assign text ' + source +
             ' to it so the flow continues, or enlarge the boxes, reduce the text size or shorten the text.' });
+      } else {
+        // The text ends before its last boxes: they are assigned but print nothing, space the book could use.
+        const used = boxes.map((box) => !!box.textContent?.trim());
+        const ends = used.lastIndexOf(true);
+        chain.forEach((target, i) => {
+          if (ends < 0 || i <= ends) return;
+          const path = book.project.texts[source] ? sourcePath(book.project.texts[source]) : source;
+          warnings.push({ ...located(target.spread, 'Text from ' + path + ' ends before box ' + target.box + ', which stays empty.'),
+            code: 'text-box-unused', ...onPage(target.page), box: target.box, source,
+            details: { part: i + 1, parts: chain.length, path },
+            suggestion: 'Remove text ' + source + ' from box ' + target.box + ' on ' + target.spread +
+              ' and use the space for something else, such as another layout for that page, or lengthen the text.' });
+        });
       }
     }
     step('flow');
@@ -1966,7 +1987,8 @@ export async function startRender(root: HTMLElement) {
       sides.map((side) => ({ side, spread: spreads[i].id, where: where[i] })));
     step('output');
     publish({
-      state: 'ready', template: info, pages: sequence.count, units, errors, warnings, flow: positions, anchors: index.anchors,
+      state: 'ready', template: info, pages: sequence.count, units, errors, warnings,
+      flow: Object.fromEntries(Object.entries(positions).map(([key, { meta: _meta, ...position }]) => [key, position])), anchors: index.anchors,
       ...(inspection ? { inspection } : {}),
     });
     // The editor's book view does not wait for its pictures. It reports them to the live Book check as they start,

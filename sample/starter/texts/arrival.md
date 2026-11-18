@@ -1,3 +1,7 @@
+---
+title: Arriving
+---
+
 We reached the coast in the last light of the afternoon. The mountains stood in blue shadow, but a band of sun still lay across the ridge above the village, and the snow on it was the colour of the inside of a shell. We left our bags in the car and walked down to the landing, where a small boat tugged at its rope and a thin skin of ice had formed along the edge of the quay.
 
 The house we had rented stood a little above the road, with a snow-covered bench by the door and a view straight down the fjord. Someone had lit the stove for us and left a note about the damper. We ate bread and cheese at the window and watched the last colour leave the sky. By nine the ridge across the water had gone a deep, even blue, and the first stars were out above it.

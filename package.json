@@ -38,6 +38,7 @@
     "react-dom": "19.2.3",
     "semver": "7.8.6",
     "sharp": "0.34.5",
+    "yaml": "2.8.1",
     "zod": "4.1.11"
   },
   "devDependencies": {

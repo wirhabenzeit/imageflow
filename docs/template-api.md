@@ -12,7 +12,7 @@ This page is generated from the topic files in [`template-api/`](template-api), 
 - [Page layouts](#page-layouts): Reusable page() layouts, Page roots, local geometry, independent facing pages, editor controls and beta automation limits.
 - [Parameters](#parameters): p.* parameter helpers, their value types and options (ranges, units, enums, dates, multiline, descriptions).
 - [List parameters](#list-parameters): p.list for a variable number of flat items, item IDs, list controls and the list item commands.
-- [Boxes and elements](#boxes-and-elements): Photo and Markdown boxes, flowOrder for text continuation, and generated elements with parameters.
+- [Boxes and elements](#boxes-and-elements): Photo and Markdown boxes, flowOrder for text continuation, YAML headers in Markdown sources (text.meta), and generated elements with parameters.
 - [Print format](#print-format): printFormat: trim, bleed, safe area, several named formats, formats without facing pages, single-page spans and book ends.
 - [Template library](#template-library): Importing templates into the library, template previews and openingSpreads for new books.
 - [Switching layouts](#switching-layouts): How content, crops and parameters carry over, are kept or restored when a spread switches layout.
@@ -152,6 +152,7 @@ defineTemplate({ id: 'travel', version: '2.0.0', contract: 1, … })
 | `photo-render` | `PhotoBox` children: a render callback that draws the box's photo from its crop, such as through an SVG mask ([PhotoBox render callbacks](#photobox-render-callbacks)). |
 | `formatted-text` | `markdown: 'inline'` on string parameters: bold, italic and strikethrough, shown by `ctx.Text` and `<FormattedText>` ([Formatted text](#formatted-text-formatted-text)). |
 | `app-controls` | `<Choice>`: ImageFlow's own segmented choice for element editors and layout-family pickers ([App controls](#app-controls)). |
+| `text-metadata` | `text.meta` on Markdown boxes: the fields of the source's YAML header, the same on every box of the chain ([Text metadata](#text-metadata)); every placed text in `ctx.book.texts` ([Texts](#texts)); and `boxes` in `anchors`. |
 
 
 Use `requires` for extensions beyond the contract-1 baseline. Unsupported extensions are rejected when the template loads, with an update hint. Listing baseline features in `requires` is also valid.
@@ -393,6 +394,40 @@ The starter's Map layout draws every track of its `tracks` list; *Fit tracks* fr
 - Markdown boxes on a spread need a unique `flowOrder` when the spread has more than one. Continuation follows project spread order, then `flowOrder`.
 - `elements` declares generated artwork (calendar, ornaments with options) that has parameters but no assigned content.
 - Identifiers are stable keys: renaming one is a breaking change for projects using the template.
+
+### Text metadata
+
+A Markdown source may start with a YAML header. ImageFlow leaves it out of the flowed text and gives its fields to every box the text flows through as `ctx.boxes[id].text.meta`, so a chapter's title, a palette or the places a map marks travel with the file that holds the chapter:
+
+```markdown
+---
+title: Crossing the Alps
+eyebrow: Field notes
+places:
+  - { name: Bergün, latitude: 46.63, longitude: 9.75 }
+  - { name: Albula Pass, latitude: 46.58, longitude: 9.84 }
+---
+
+We left before sunrise…
+```
+
+```tsx
+render: (ctx) => {
+  const text = ctx.boxes.story.text;
+  const title = typeof text?.meta.title === 'string' ? text.meta.title : undefined;
+  return <Spread>
+    {text?.part === 1 && title && <h1 className="opener">{title}</h1>}
+    {text && text.part > 1 && title && <header className="running">{title}</header>}
+    <ctx.MarkdownBox id="story" />
+  </Spread>;
+},
+```
+
+- **Recognising a header.** The first line of the file is exactly `---`, a later line is `---` or `...`, and the lines between are a YAML mapping. Anything else, such as a file that starts with a thematic break followed by a paragraph, stays Markdown. A file that starts `---`, then `key: value` lines and `---`, is a header even though it would otherwise read as a rule and a heading.
+- **Values.** `meta` holds what JSON can: strings, numbers, booleans, `null`, lists and objects. YAML 1.2's core schema applies, so `2024-05-01` and `no` stay strings. A source without a header has `meta: {}`. ImageFlow does not check the fields: read the keys your layout understands, check their shape, and fall back to the layout's normal rendering otherwise. Report a field you cannot use with [`issue()`](#template-findings).
+- **One source, every box.** `meta` is read from the saved file before any spread renders and is the same object for every box of the chain, whatever the flow puts in it, so a layout may size or style its boxes from it. Two sources on a spread each keep their own `meta`; the layout decides which one, if any, styles the page around them. Other pages read it through [`ctx.book.texts`](#texts), and `anchors` through `boxes`. In layout previews a Markdown box has no flow position, so its `text` is `null` there.
+- **Unreadable headers.** A header whose YAML cannot be read is a `text-frontmatter-invalid` warning on the text's first box. The header is still left out of the text, and `meta` is `{}`.
+- **Editing.** ImageFlow does not change the header. Edit it in the Markdown editor or the linked file.
 
 ## Print format
 
@@ -650,7 +685,7 @@ type RenderContext = {
       location?: { latitude: number; longitude: number };
       camera?: { make?: string; model?: string };
     } | null;
-    text?: { title?: string; part: number; parts: number } | null;  // flow position for Markdown boxes
+    text?: { title?: string; part: number; parts: number; meta: TextMeta } | null;  // flow position and YAML header fields for Markdown boxes
   }>;
   elements: Record<ElementId, { params: ElementParams }>;
   page: { left?: number; right?: number; number?: number };  // page numbers: left/right, or number without facing pages
@@ -670,6 +705,7 @@ type RenderContext = {
     anchor(id: string): Anchor | undefined; // the anchor with this ID (see Anchors)
     anchors(id?: string): Anchor[];         // all anchors with this ID, or all anchors, in page order
     spreads: BookSpread[];                  // every spread's pages and placed photos (see Book index)
+    texts: BookText[];                      // every placed text, its header fields and boxes (see Texts)
   };
 };
 ```
@@ -835,11 +871,20 @@ type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' }
 type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
 ```
 
-- **One render pass.** Page numbers depend only on spread order and layout spans, never on rendered content. ImageFlow calls every spread's `anchors` with its resolved `params` and `document` values before any spread renders, so every layout reads the same anchors. Like `render`, `anchors` must be a pure function of its input. An `anchors` function that throws or returns an invalid declaration is a render error naming the layout.
+- **One render pass.** Page numbers depend only on spread order and layout spans, never on rendered content. ImageFlow calls every spread's `anchors` with its resolved `params` and `document` values and its `boxes` as `render` sees them before any spread renders, so every layout reads the same anchors. Like `render`, `anchors` must be a pure function of its input. An `anchors` function that throws or returns an invalid declaration is a render error naming the layout.
 - **Pages follow the book.** Inserting, moving, removing or switching a spread renumbers every anchor, as it does the folios. `side` picks the page of a two-page spread and defaults to the first. A single left or right page has only one page, whichever side is named. Without facing pages every unit is one page: `side` is ignored and the anchor's `side` is `'page'`.
 - **Repeated layouts.** Anchors belong to spread instances, so a layout used five times declares five anchors with the same ID. `anchors(id)` lists all of them in page order. `anchor(id)` is for an ID that one spread declares.
 - **Book check.** `anchor(id)` warns `anchor-missing` when no spread declares the ID, and `anchor-ambiguous` when several do. In that case it returns the first. Both warnings are on the spread that asked. `anchors(id)` returning an empty list is not a finding.
 - **Previews.** Layout-picker previews read the anchors of the book as saved, so a contents layout previews with real pages.
+
+A Markdown box's `boxes[id].text` carries its flow position and its source's [header fields](#text-metadata), so a layout can declare an anchor where a text starts, named after it:
+
+```tsx
+anchors: ({ params, boxes }) => {
+  const title = typeof boxes.body.text?.meta.title === 'string' ? boxes.body.text.meta.title : params.heading;
+  return boxes.body.text?.part === 1 && title ? [{ id: 'section', title }] : [];
+},
+```
 
 An anchor marks a whole page, not a point found by measuring the render. Text flow decides which page a heading inside Markdown continuation lands on, so such headings cannot be anchors yet.
 
@@ -869,6 +914,30 @@ for (const spread of ctx.book.spreads)
 - **Pages.** `page` is the spread's own `ctx.page`: `left` and `right`, one of them for a single page at a book end, or `number` in a format without facing pages. For a spread layout, which page a box is on is the layout's business. On a split sheet each placement carries `page`, and `pages.left`/`pages.right` expose the shown page layout and photos independently.
 - **Photos.** `photos` lists the photo boxes of the spread's current layout, in declaration order, including empty ones. `photoId` is `null` for an empty box. `photo` is the photo's metadata, the same object shape as `ctx.boxes[id].photo`, or `null` when the box is empty or its photo is missing from the book. A photo placed in several boxes appears once per placement. Content a spread keeps from a layout it no longer uses is not listed, and a spread whose layout the template no longer declares lists no photos. Markdown boxes are not listed.
 - **No images.** The index has metadata and assignments only, no photo URLs or rendered thumbnails.
+
+#### Texts
+
+`ctx.book.texts` lists every Markdown source the book places, in the order the book first shows them, with its [header fields](#text-metadata) and the boxes it flows through. A page without a Markdown box of its own reads a text's header here: a map marks the places of the story on its facing page, a photo page between two story pages carries their running header.
+
+```ts
+type BookTextPlacement = { spread: string; page?: 'left' | 'right'; box: string; part: number;
+  pageNumbers: { left?: number; right?: number; number?: number } };
+type BookText = { id: string; title?: string; meta: TextMeta; boxes: BookTextPlacement[] };
+```
+
+```tsx
+// The text on this sheet's other page, or around this page: the last text that starts before it.
+const page = ctx.page.left ?? ctx.page.right ?? ctx.page.number ?? 0;
+const pagesOf = (text: BookText) => text.boxes.flatMap(({ pageNumbers: n }) => [n.left, n.right, n.number]).filter((p) => p !== undefined);
+const beside = ctx.book.texts.find((text) => text.boxes.some((placed) => placed.spread === ctx.spread && placed.page !== ctx.side));
+const around = ctx.book.texts.findLast((text) => Math.min(...pagesOf(text)) <= page);
+const places = (beside ?? around)?.meta.places;
+```
+
+- **Example.** The photobook starter's *Inset map* marks the `places` of the story on its facing page, in print and in its map editor, and reports `template:places-invalid` for entries it cannot mark. Its *Story* page names its `section` anchor after its text's `title` where the text starts.
+- **The template chooses.** Which text a page belongs to is the layout's decision: the one beside it, the one whose pages surround it, or one a parameter names by its `id`. ImageFlow lists facts and decides nothing.
+- **Pages.** `pageNumbers` are the book pages of the box's spread, or of its page on a split sheet, as `ctx.page`. Which page of a spread layout a box is on is the layout's business. `part` is the box's place in the chain, as its `text.part`: assigned boxes count whether or not the text reaches them.
+- **Same rules.** Like `spreads`, the list is built from the saved book before any spread renders and is frozen. Only shown layouts' boxes are listed, and a source whose file is missing is listed with `meta: {}`.
 
 Page layouts declare anchors for their own page, whatever `side` their declaration names. Two page layouts on one sheet may therefore declare two anchors with the same ID. Use `anchors(id)` when that is intentional; `anchor(id)` warns about ambiguity per asking page. Only shown page layouts contribute anchors and credits; remembered hidden layouts do not.
 
@@ -956,7 +1025,7 @@ elements: { grid: {
 - **What ImageFlow owns:** the non-modal panel, × to close, Escape and ⌘↩, read-only mode, validation against the parameter schema, and saving. Each valid `set()` or `setSpread()` change is undoable. Closing leaves applied changes in place. Escape discards only uncommitted typing.
 - **Applying and closing:** `set()` applies changes immediately, so `set({ ... }); commit()` applies those changes and closes; `values` catches up on the next render. `commit()` finishes the active field and closes. `cancel()` closes without applying the active field; it does not revert earlier changes. These callbacks remain available to existing custom components.
 - **Changes `set()` and `setSpread()` cannot make:** a key that is not one of the editor's parameters, or a value the parameter does not allow (an enum value outside its options, a number out of range), is not applied. The other changes in the same call are. Each such problem is reported once, in the frame's console and in the dialog, with the parameters the editor edits or the values the parameter takes; it does not prevent valid edits or closing. `<Control>` for a parameter the editor does not own fails the editor with a message listing the ones it does.
-- **Context:** `context` is the spread the editor was opened from, read-only, with the same values `render` reads: `spread` and `layout` (its ID and layout), `params`, `document`, `boxes` (with each photo's metadata), `elements`, `page`, `book` (page count and anchors), `format` and `formatId`. Markdown boxes' `text` is `null`, since flow positions are known only to the book render. The editor's own draft is applied to it: an element editor's element values (including the generated controls' draft) and the layout parameters it owns, or a document editor's own document parameters. The top-level `format` and an element editor's `document` are the context's, so they follow it too. Write helpers that need the page's place in the book against `Pick<RenderContext, 'page' | 'book' | 'document'>`, so `render` and the editor share them instead of saving a second, possibly inconsistent value. Included in the contract-1 baseline.
+- **Context:** `context` is the spread the editor was opened from, read-only, with the same values `render` reads: `spread` and `layout` (its ID and layout), `params`, `document`, `boxes` (with each photo's metadata and each Markdown box's flow position and header fields), `elements`, `page`, `book` (page count, anchors, spreads and texts), `format` and `formatId`. The editor's own draft is applied to it: an element editor's element values (including the generated controls' draft) and the layout parameters it owns, or a document editor's own document parameters. The top-level `format` and an element editor's `document` are the context's, so they follow it too. Write helpers that need the page's place in the book against `Pick<RenderContext, 'page' | 'book' | 'document'>`, so `render` and the editor share them instead of saving a second, possibly inconsistent value. Included in the contract-1 baseline.
 - **The context follows the book; the editor's values do not.** While the editor is open, every newer render of the book refreshes `context`: moving the spread, another photo, another format, or a changed document setting the editor does not edit. The draft is kept and nothing is reported. A change to the values the editor edits is a conflict, handled as below. Deleting the spread closes the editor.
 - **Changes from elsewhere:** if what the editor works on changes while it is open (a saved value after Reload or Undo, or a template edit that changes a default or a declaration of the parameters it handles), the panel says so and refuses to save; the user reopens the editor on the current values. During a reload, controls pause visibly and resume when the preview is ready. A rejected or failed save also pauses the editor with a message; reopening starts from confirmed saved values.
 - **Failures:** if the component throws while rendering, in an event handler or in async work, the panel shows the error and keeps Close available. Earlier applied changes remain saved. The editor counts as loaded once the component has mounted.
