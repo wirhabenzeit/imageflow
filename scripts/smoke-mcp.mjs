@@ -77,7 +77,7 @@ try {
   assert.match((await window.evaluate(()=>window.imageflow.installMcp('claude'))).error,/only available to Settings/);
   await closeSettings(app);
   const tools = await client.listTools();
-  assert.deepEqual(tools.tools.map(t=>t.name).sort(),['apply_project_changes','check_book','get_authoring_context','import_sources','inspect_book','list_projects','list_templates','rebuild_dependencies','save_template_to_library'].sort());
+  assert.deepEqual(tools.tools.map(t=>t.name).sort(),['apply_project_changes','check_book','get_authoring_context','import_sources','inspect_book','list_book_checkpoints','list_projects','list_templates','rebuild_dependencies','save_template_to_library'].sort());
   const call = async(name,args={}) => {
     const response=await client.callTool({name,arguments:args},{timeout:110000});
     return {response,data:response.structuredContent ?? JSON.parse(response.content.find(c=>c.type==='text').text)};
@@ -190,6 +190,9 @@ try {
   await ready();
   assert.equal((await good('apply_project_changes',batch)).replayed,true);
   assert.equal(JSON.parse(await readFile(join(folder,'project.json'),'utf8')).spreads.length,2);
+  // The committed batch is in the book history under its key, once.
+  const history=await good('list_book_checkpoints',{project,idempotencyKey:batch.idempotencyKey});
+  assert.deepEqual(history.checkpoints.map(c=>[c.checkpointId,c.origin,c.mcp.requestFingerprint]),[[applied.checkpointId,'mcp',applied.requestFingerprint]]);
   assert.equal((await call('apply_project_changes',{...batch,idempotencyKey:'stale'})).data.error.code,'REVISION_CONFLICT');
   const invalid=await call('apply_project_changes',{...batch,expectedRevision:applied.revision,idempotencyKey:'invalid',operations:[{op:'set_title',title:'Must not save'},{op:'remove_spread',spread:'missing'}]});
   assert.equal(invalid.data.error.code,'SPREAD_NOT_FOUND');

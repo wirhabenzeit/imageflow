@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import fs, { link, lstat, mkdir, mkdtemp, open, realpath, rm, stat, unlink } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { photoIndexSchema, projectSchema } from '../src/project';
@@ -17,11 +18,49 @@ const entrySchema = z.object({
   after: z.string().max(Math.ceil(maximumManifestBytes / 3) * 4),
 }).strict();
 const guardedEntrySchema = z.union([entrySchema, z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict()]);
+const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
+// One committed save in .imageflow/history/ledger.jsonl. It holds metadata only, never manifest contents (#201).
+const checkpointMcpSchema = z.object({
+  tool: z.enum(['apply_project_changes', 'import_sources']),
+  idempotencyKey: z.string().max(128),
+  requestFingerprint: sha256,
+  session: z.string().max(64),
+  client: z.string().max(120).optional(),
+  changes: z.array(z.string().max(300)).max(200).optional(),
+  affectedSpreads: z.array(z.string().max(256)).max(200).optional(),
+  references: z.record(z.string().max(256), z.string().max(256)).optional(),
+  sources: z.array(z.string().max(256)).max(20).optional(),
+  truncated: z.literal(true).optional(),
+}).strict();
+const checkpointRecordSchema = z.object({
+  version: z.literal(1),
+  checkpoint: z.string().uuid(),
+  time: z.string().datetime(),
+  origin: z.enum(['app', 'mcp']),
+  label: z.string().max(160),
+  manifests: z.object({
+    'project.json': z.object({ before: sha256, after: sha256 }).strict(),
+    'photos.json': z.object({ before: sha256, after: sha256 }).strict(),
+  }).strict(),
+  mcp: checkpointMcpSchema.optional(),
+}).strict();
+export type CheckpointRecord = z.infer<typeof checkpointRecordSchema>;
+export type CheckpointMcp = z.infer<typeof checkpointMcpSchema>;
+/** What a save records about itself. persistProjectManifests sets `id` to the checkpoint ID once the save's
+ * journal is published, so a caller can name the checkpoint even when finishing the save is interrupted. */
+export type SaveCheckpoint = { origin: 'app' | 'mcp'; label: string; mcp?: CheckpointMcp; id?: string };
+const maximumCheckpointBytes = 64 * 1024;
+// The ledger is pruned to its newest records when an append would make it larger than `bytes`.
+export const ledgerLimits = { bytes: 4 * 1024 * 1024, retainedBytes: 2 * 1024 * 1024 };
 const journalSchema = z.discriminatedUnion('version', [
   z.object({ version: z.literal(1), transaction: z.string().uuid(),
     manifests: z.object({ 'project.json': entrySchema, 'photos.json': entrySchema }).strict() }).strict(),
   z.object({ version: z.literal(2), transaction: z.string().uuid(),
     manifests: z.object({ 'project.json': guardedEntrySchema, 'photos.json': guardedEntrySchema }).strict() }).strict(),
+  // Version 3 also carries the ledger line this save appends, serialized once so recovery appends the same bytes.
+  z.object({ version: z.literal(3), transaction: z.string().uuid(),
+    manifests: z.object({ 'project.json': guardedEntrySchema, 'photos.json': guardedEntrySchema }).strict(),
+    checkpoint: z.string().max(maximumCheckpointBytes) }).strict(),
 ]);
 const ownerFields = { pid: z.number().int().positive().max(2147483647), token: z.string().uuid() };
 const ownerSchema = z.discriminatedUnion('version', [
@@ -30,7 +69,7 @@ const ownerSchema = z.discriminatedUnion('version', [
     directory: z.object({ device: z.string(), inode: z.string() }).strict().optional() }).strict(),
 ]);
 type ManifestEdit = { before: Buffer; after: Buffer } | { sha256: string };
-type Journal = { transaction: string; manifests: Record<ManifestName, ManifestEdit> };
+type Journal = { transaction: string; manifests: Record<ManifestName, ManifestEdit>; checkpoint?: string };
 const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
 export class CommittedProjectSaveError extends Error {
@@ -132,8 +171,12 @@ function decodeJournal(bytes: Buffer): Journal {
   const parsed = journalSchema.safeParse(value);
   if (!parsed.success) throw new Error('The pending save journal has an unsupported version or invalid manifest entries. Preserve it before repairing this project.');
   const { transaction, manifests } = parsed.data;
+  const checkpoint = parsed.data.version === 3 ? parsed.data.checkpoint : undefined;
+  if (checkpoint !== undefined && parseCheckpoint(checkpoint)?.checkpoint !== transaction) {
+    throw new Error('The pending save journal has an invalid history record. Preserve it before repairing this project.');
+  }
   return {
-    transaction,
+    transaction, checkpoint,
     manifests: Object.fromEntries(names.map((name) => {
       const entry = manifests[name];
       return [name, 'sha256' in entry ? entry : { before: decodeSource(name, entry.before), after: decodeSource(name, entry.after) }];
@@ -145,6 +188,146 @@ async function writeDurably(path: string, bytes: Buffer | string) {
   const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try { await handle.writeFile(bytes); await handle.sync(); }
   finally { await handle.close(); }
+}
+
+function parseCheckpoint(line: string) {
+  try {
+    const parsed = checkpointRecordSchema.safeParse(JSON.parse(line));
+    return parsed.success ? parsed.data : undefined;
+  } catch { return undefined; }
+}
+
+/** The ledger line for a save, bounded so one record never dominates the ledger. Long change lists are cut. */
+function checkpointLine(transaction: string, checkpoint: SaveCheckpoint, before: ProjectManifests, after: ProjectManifests) {
+  const manifests = Object.fromEntries(names.map((name) => [name, { before: digest(before[name]), after: digest(after[name]) }]));
+  const time = new Date().toISOString();
+  const given = checkpoint.mcp;
+  const lists = given && {
+    changes: given.changes?.slice(0, 200).map((change) => change.slice(0, 300)),
+    affectedSpreads: given.affectedSpreads?.slice(0, 200),
+    references: given.references && Object.fromEntries(Object.entries(given.references).slice(0, 200)),
+    sources: given.sources?.slice(0, 20),
+  };
+  let truncated = !!given && (given.changes?.length !== lists?.changes?.length || given.affectedSpreads?.length !== lists?.affectedSpreads?.length ||
+    Object.keys(given.references ?? {}).length !== Object.keys(lists?.references ?? {}).length || given.sources?.length !== lists?.sources?.length);
+  for (let keep = 200; ; keep = Math.floor(keep / 2)) {
+    const mcp = given && lists && { ...given, changes: lists.changes?.slice(0, keep), affectedSpreads: lists.affectedSpreads?.slice(0, keep),
+      references: lists.references && Object.fromEntries(Object.entries(lists.references).slice(0, keep)), sources: lists.sources, ...(truncated ? { truncated: true as const } : {}) };
+    const line = JSON.stringify({ version: 1, checkpoint: transaction, time, origin: checkpoint.origin,
+      label: checkpoint.label.slice(0, 160), manifests, ...(mcp ? { mcp } : {}) });
+    if (Buffer.byteLength(line) <= maximumCheckpointBytes && parseCheckpoint(line)) return line;
+    if (!given || !keep) throw new Error('Could not record this save in the book history.');
+    truncated = true;
+  }
+}
+
+async function historyFolder(root: string, create: boolean) {
+  const internal = await internalFolder(root, create);
+  return internal && directory(join(internal, 'history'), internal, create);
+}
+
+async function readAt(handle: FileHandle, position: number, length: number) {
+  const bytes = Buffer.alloc(length);
+  let count = 0;
+  while (count < length) {
+    const { bytesRead } = await handle.read(bytes, count, length - count, position + count);
+    if (!bytesRead) break;
+    count += bytesRead;
+  }
+  return bytes.subarray(0, count);
+}
+
+/**
+ * Appends a save's ledger line exactly once. Only the pending save appends, under the writer lock, so an incomplete
+ * final line can only be this save's interrupted append: it is cut and written again. A complete final line for this
+ * transaction is kept. Any other unterminated tail is sealed as an unreadable line instead of blocking the save.
+ */
+async function appendCheckpoint(root: string, line: string, transaction: string) {
+  const folder = await historyFolder(root, true);
+  if (!folder) throw new Error('Could not create the book history directory.');
+  const path = join(folder, 'ledger.jsonl');
+  const record = Buffer.from(line + '\n');
+  const handle = await open(path, constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new Error(path + ' is not a regular file.');
+    let size = info.size;
+    const window = 2 * record.length + 2;
+    const tail = await readAt(handle, Math.max(0, size - window), Math.min(size, window));
+    if (tail.length && tail.at(-1) !== 0x0a) {
+      const start = tail.lastIndexOf(0x0a) + 1;
+      const fragment = tail.subarray(start);
+      const whole = start > 0 || tail.length === size;
+      if (whole && record.subarray(0, fragment.length).equals(fragment)) {
+        size -= fragment.length;
+        await handle.truncate(size);
+      } else {
+        await handle.write(Buffer.from('\n'), 0, 1, size);
+        size += 1;
+      }
+    }
+    const end = (await readAt(handle, Math.max(0, size - record.length - 1), Math.min(size, record.length + 1))).toString('utf8');
+    const last = end.slice(0, -1).split('\n').at(-1) ?? '';
+    if (parseCheckpoint(last)?.checkpoint === transaction) {
+      await handle.sync();
+    } else if (size + record.length <= ledgerLimits.bytes) {
+      await handle.write(record, 0, record.length, size);
+      await handle.sync();
+    } else {
+      // Rewrite the newest records into a new file and rename it over the ledger, so a crash keeps one or the other.
+      const existing = (await readAt(handle, 0, size)).toString('utf8').split('\n').filter(Boolean);
+      const kept: string[] = [];
+      let bytes = record.length;
+      for (let i = existing.length - 1; i >= 0; i--) {
+        const length = Buffer.byteLength(existing[i]) + 1;
+        if (bytes + length > ledgerLimits.retainedBytes) break;
+        kept.unshift(existing[i]);
+        bytes += length;
+      }
+      const temporary = join(folder, 'ledger-' + randomUUID() + '.tmp');
+      await writeDurably(temporary, kept.map((entry) => entry + '\n').join('') + record.toString('utf8'));
+      await fs.rename(temporary, path);
+    }
+  } finally { await handle.close(); }
+  // Covers a newly created ledger and a pruning rename.
+  await syncDirectory(folder);
+}
+
+export type SaveLedger = {
+  records: CheckpointRecord[];
+  // Lines that could not be read, such as a sealed interrupted write. They are skipped.
+  unreadable: number;
+  // SHA-256 of each manifest on disk now, or null when it is missing or unreadable.
+  current: Record<ManifestName, string | null>;
+};
+
+/** The retained checkpoints of a book, oldest first. Reading never creates the history folder. */
+export async function readSaveLedger(folder: string): Promise<SaveLedger> {
+  const root = await realpath(folder);
+  const current = Object.fromEntries(await Promise.all(names.map(async (name) =>
+    [name, await manifest(root, name).then(digest, () => null)]))) as SaveLedger['current'];
+  const history = await historyFolder(root, false).catch(() => undefined);
+  if (!history) return { records: [], unreadable: 0, current };
+  const file = await boundedFile(join(history, 'ledger.jsonl'), ledgerLimits.bytes + 2 * maximumCheckpointBytes).catch((error: unknown) => {
+    if (code(error) !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (!file) return { records: [], unreadable: 0, current };
+  const records: CheckpointRecord[] = [];
+  let unreadable = 0;
+  for (const line of file.bytes.toString('utf8').split('\n')) {
+    if (!line) continue;
+    const record = parseCheckpoint(line);
+    if (record) records.push(record); else unreadable++;
+  }
+  return { records, unreadable, current };
+}
+
+/** Manifests whose bytes differ between the end of one checkpoint and the start of the next: edits made outside
+ * ImageFlow, or by a save the ledger no longer retains. The hashes say neither how many edits there were nor when. */
+export function changedBetween(previous: CheckpointRecord['manifests'] | undefined, next: Record<ManifestName, string | null>) {
+  if (!previous) return [];
+  return names.filter((name) => previous[name].after !== next[name]);
 }
 
 function conflict(name: string) {
@@ -201,6 +384,8 @@ async function finishSave(folder: string, pending: NonNullable<Awaited<ReturnTyp
   if (current.info.ino !== pending.info.ino || current.info.dev !== pending.info.dev || !current.bytes.equals(pending.bytes)) {
     throw new Error('The pending save journal changed during recovery. Preserve it and reopen the project after resolving the conflict.');
   }
+  // The journal stays until the history record is durable, so recovery can finish recording this save.
+  if (journal.checkpoint) await appendCheckpoint(folder, journal.checkpoint, journal.transaction);
   await unlink(pending.path);
   await syncDirectory(pending.internal);
 }
@@ -221,7 +406,8 @@ export async function recoverProjectSave(folder: string, { readOnly = false }: {
   }
 }
 
-export async function persistProjectManifests(folder: string, before: ProjectManifests, after: ProjectManifests) {
+export async function persistProjectManifests(folder: string, before: ProjectManifests, after: ProjectManifests,
+  checkpoint: SaveCheckpoint = { origin: 'app', label: 'Project edit' }) {
   const root = await realpath(folder);
   for (const name of names) {
     validateManifest(name, before[name]);
@@ -232,12 +418,13 @@ export async function persistProjectManifests(folder: string, before: ProjectMan
   if (await pendingJournal(root)) throw new Error('A previous project save needs recovery. Reload this project before making another edit.');
   for (const name of names) if (!(await manifest(root, name)).equals(before[name])) throw new Error('The project changed on disk. Reload before making more edits.');
   const transaction = randomUUID();
+  const line = checkpointLine(transaction, checkpoint, before, after);
   const edits = Object.fromEntries(names.map((name) => [name, before[name].equals(after[name])
     ? { sha256: digest(before[name]) } : { before: before[name], after: after[name] }])) as Journal['manifests'];
-  const bytes = Buffer.from(JSON.stringify({ version: 2, transaction, manifests: Object.fromEntries(names.map((name) => {
+  const bytes = Buffer.from(JSON.stringify({ version: 3, transaction, manifests: Object.fromEntries(names.map((name) => {
     const entry = edits[name];
     return [name, 'sha256' in entry ? entry : { before: entry.before.toString('base64'), after: entry.after.toString('base64') }];
-  })) }) + '\n');
+  })), checkpoint: line }) + '\n');
   const staging = await mkdtemp(join(internal, 'save-'));
   let published = false;
   let complete = false;
@@ -248,9 +435,10 @@ export async function persistProjectManifests(folder: string, before: ProjectMan
     const path = join(internal, 'pending-save.json');
     await link(source, path);
     published = true;
+    checkpoint.id = transaction;
     await syncDirectory(internal);
     const pending = { internal, path, ...await boundedFile(path, maximumJournalBytes) };
-    await finishSave(root, pending, { transaction, manifests: edits }, staging);
+    await finishSave(root, pending, { transaction, manifests: edits, checkpoint: line }, staging);
     complete = true;
   } catch (error) {
     if (published) throw new CommittedProjectSaveError('The save was interrupted after its recovery journal was committed. Reload this project to finish saving before making more edits.', { cause: error });

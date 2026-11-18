@@ -28,6 +28,7 @@ import type { CheckDraft } from './check';
 import { captureBookPreview, checkBookRender } from './preview';
 import { ProjectSession } from './project-session';
 import { createAuthoringService, AuthoringError } from './authoring-service';
+import type { McpClientSession } from './mcp-connection';
 import { AuthoringQueue } from './authoring-queue';
 import { authoringErrorResult } from './authoring-errors';
 import { ImportReceipts } from './import-receipts';
@@ -35,7 +36,7 @@ import { saveDocumentCopy } from './source-actions';
 import { rebuildTemplateDependencies } from './dependency-install';
 import type { DependencyRebuild } from './dependency-install';
 import { acquireProjectLock, CommittedProjectSaveError } from './persistence';
-import type { ProjectLock } from './persistence';
+import type { ProjectLock, SaveCheckpoint } from './persistence';
 import type { AuthoringCheckRequest } from '../src/authoring-check';
 import type { McpToolName } from '../src/mcp-contract';
 import { renderIdleMs } from '../src/render-budget';
@@ -160,8 +161,8 @@ export class DocumentSession {
       changed: (next) => this.notify({ value: this.activate(next) }),
       recovery: (message) => this.notify({ error: message }),
       dependencies: (signal) => this.rebuildDependencies(signal),
-      import: async (request, paths, base) => {
-        const result = await this.importFiles(this.window, this.active.id, { ...request, paths }, base);
+      import: async (request, paths, base, checkpoint) => {
+        const result = await this.importFiles(this.window, this.active.id, { ...request, paths }, base, false, checkpoint);
         if (!result) throw new AuthoringError('PROJECT_CLOSED', 'The book closed before import completed.');
         return { imported: result.imported };
       },
@@ -299,7 +300,7 @@ export class DocumentSession {
       notice: 'Saved the bundle in template/vendor/ and refreshed generated authoring types and agent references; the book renders it now. Run check_book.' +
         (leftoverNodeModules ? ' template/node_modules is no longer used; ask the user before deleting it.' : '') };
   }
-  async agentCall(name: McpToolName, args: Record<string, unknown>, signal: AbortSignal) {
+  async agentCall(name: McpToolName, args: Record<string, unknown>, signal: AbortSignal, client?: McpClientSession) {
     let requestSignal = signal;
     try {
       return await this.queue.run(async (queuedSignal) => {
@@ -314,7 +315,7 @@ export class DocumentSession {
             this.busy = true;
             locked = true;
           }
-          return await this.service(name, args, queuedSignal);
+          return await this.service(name, args, queuedSignal, client);
         } finally {
           if (mutation) {
             if (locked) this.busy = false;
@@ -566,7 +567,7 @@ export class DocumentSession {
   }
 
   /** `report` sends progress to the owner's status bar; only the book window's own import, which clears it, asks. */
-  async importFiles(owner: BrowserWindow, id: string, request: ImportRequest, base?: OpenProject, report = false) {
+  async importFiles(owner: BrowserWindow, id: string, request: ImportRequest, base?: OpenProject, report = false, checkpoint?: SaveCheckpoint) {
     const current = this.currentBook(id);
     const book = base ?? current;
     if (request.kind !== undefined && request.kind !== 'photo' && request.kind !== 'markdown' && request.kind !== 'file') throw new Error('Unknown import type.');
@@ -614,7 +615,7 @@ export class DocumentSession {
       owner.webContents.send(channels.progress, saving ? 'Adding ' + total + ' ' + (total === 1 ? noun.slice(0, -1) : noun) + ' to the book…'
         : total > 1 ? 'Importing ' + noun + '… ' + done + ' of ' + total : 'Importing ' + noun.slice(0, -1) + '…');
     } : undefined;
-    const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)], progress);
+    const { book: next, imported, copied, createdDirectories, counts } = await importIntoProject(book, request, [...new Set(files)], progress, checkpoint);
     for (const file of [...createdDirectories, ...copied]) {
       const path = relative(book.folder, file);
       this.importedWrites.set(path, await fingerprint(file), this.observedChanges.has(path));

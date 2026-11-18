@@ -1196,7 +1196,7 @@ async function enableMcp() {
   const connection = await createMcpConnection({
     descriptorPath: mcpDescriptorPath(),
     onClientsChanged: (clients) => { mcpClients = clients; publishMcpSettings(); },
-    onCall: async (name, args, signal) => {
+    onCall: async (name, args, signal, client) => {
       try {
         if (name === 'list_projects') {
           const results = await Promise.all([...documents.values()].filter((document) => !document.closing)
@@ -1209,7 +1209,7 @@ async function enableMcp() {
         if (!document) throw new AuthoringError('PROJECT_CLOSED', 'This book is no longer open. Call list_projects for current handles.');
         // Queued with the book's other agent calls, so closing the book waits for the save.
         if (name === 'save_template_to_library') return await document.queue.run((queued) => saveBookTemplate(document.book.folder, args.replaceHash as string | undefined, queued), signal);
-        return await document.agentCall(name, args, signal);
+        return await document.agentCall(name, args, signal, client);
       } catch (error) { return authoringErrorResult(error, signal); }
     },
   });

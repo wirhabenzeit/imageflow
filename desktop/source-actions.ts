@@ -50,7 +50,7 @@ export async function relocateSource(book: OpenProject, key: string, selection?:
     const linked = !copy && source.linked;
     const path = linked ? chosen.path : await managedCopy(book.folder, chosen, resolved.stored.snapshot, copied);
     reference(files, source, path, linked);
-    const next = await updateProject(book, files, true);
+    const next = await updateProject(book, files, true, { origin: 'app', label: 'Locate source' });
     await store.settled();
     return next === book ? await loadProject(book.folder, book.cache, book.readOnly) : next;
   } catch (error) {
@@ -73,7 +73,7 @@ export async function collectSources(book: OpenProject, keys?: readonly string[]
     const after = await captureProjectInputs(book.folder);
     if (before.revision !== after.revision || before.observation !== after.observation) throw new Error('Sources changed while collecting assets. Please retry.');
     files.project.importMode = 'copy';
-    return await updateProject(book, files, true);
+    return await updateProject(book, files, true, { origin: 'app', label: 'Collect assets' });
   } catch (error) {
     if (!(error instanceof CommittedProjectSaveError)) await Promise.all(copied.map((path) => rm(path, { force: true })));
     throw error;
@@ -140,7 +140,7 @@ export async function removeSources(book: OpenProject, keys: readonly string[]) 
       }
     }
   }
-  return updateProject(book, files, true);
+  return updateProject(book, files, true, { origin: 'app', label: 'Remove sources' });
 }
 
 /** Save a consistent copy. Collection is prepared before publishing any destination document. */
@@ -150,7 +150,8 @@ export async function saveDocumentCopy(source: OpenProject, destination: string,
   const result = await createDocument(destination, async (stage) => {
     await cp(book.folder, stage, { recursive: true, dereference: true, filter: async (path) => {
       // Installed packages are not part of the book; it uses the saved bundle in template/vendor (ADR 0006).
-      if (basename(path) === '.imageflow' || basename(path) === 'node_modules') return false;
+      // A Git repository, at any depth, can hold deleted captions and metadata, as .imageflow/ can.
+      if (basename(path) === '.imageflow' || basename(path) === 'node_modules' || basename(path) === '.git') return false;
       const actual = await realpath(path);
       if (actual !== book.folder && !within(book.folder, actual)) throw new Error('The package contains a link outside the book: ' + path);
       return true;
@@ -189,7 +190,7 @@ export async function createMarkdownSource(book: OpenProject, title: string) {
   const files = filesOf(book);
   files.project.texts[id] = path;
   await writeFile(join(book.folder, path), '', { flag: 'wx' });
-  try { return { id, book: await updateProject(book, files, true) }; }
+  try { return { id, book: await updateProject(book, files, true, { origin: 'app', label: 'New text' }) }; }
   catch (error) {
     if (!(error instanceof CommittedProjectSaveError)) await rm(join(book.folder, path), { force: true });
     throw error;

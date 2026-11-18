@@ -17,6 +17,7 @@ import { renditionCacheFor } from './rendition-cache';
 import { photoDate } from './capture-time';
 import type { ProjectPhoto } from './photos';
 import { CommittedProjectSaveError, persistProjectManifests, recoverProjectSave } from './persistence';
+import type { SaveCheckpoint } from './persistence';
 import { sourceEntries, sourcePath, sourceLinked } from '../src/source-locations';
 import type { SourceStatus } from '../src/source-locations';
 import { digestBytes, SourceStore } from './source-store';
@@ -266,7 +267,8 @@ function projectJson(value: unknown) {
   return JSON.stringify(value, null, 2) + '\n';
 }
 
-export async function updateProject(book: OpenProject, files: ProjectFiles, reloadContent = false) {
+export async function updateProject(book: OpenProject, files: ProjectFiles, reloadContent = false,
+  checkpoint: SaveCheckpoint = { origin: 'app', label: 'Project edit' }) {
   if (book.readOnly) throw new Error('Use New Project to make an editable copy of the sample.');
   const project = parseDocument(projectSchema, files.project, 'project.json');
   const photoIndex = parseDocument(photoIndexSchema, files.photoIndex, 'photos.json');
@@ -285,7 +287,7 @@ export async function updateProject(book: OpenProject, files: ProjectFiles, relo
     'project.json': projectChanged ? Buffer.from(projectSource) : projectFile,
     'photos.json': indexChanged ? Buffer.from(indexSource) : photoFile,
   };
-  await persistProjectManifests(book.folder, { 'project.json': projectFile, 'photos.json': photoFile }, manifests);
+  await persistProjectManifests(book.folder, { 'project.json': projectFile, 'photos.json': photoFile }, manifests, checkpoint);
   if (reloadContent) {
     try { return await readContent({ ...book, project, photoIndex, manifests }); }
     catch (error) {
@@ -314,7 +316,8 @@ export type ImportProgress = { done: number; total: number; saving?: boolean };
 // holding many full-size images in memory (the same batch size as loading a book's sources).
 const importConcurrency = 8;
 
-export async function importIntoProject(book: OpenProject, request: ImportRequest, paths: string[], progress?: (value: ImportProgress) => void) {
+export async function importIntoProject(book: OpenProject, request: ImportRequest, paths: string[], progress?: (value: ImportProgress) => void,
+  checkpoint: SaveCheckpoint = { origin: 'app', label: 'Import sources' }) {
   const project = structuredClone(book.project);
   const photoIndex: PhotoIndex = structuredClone(book.photoIndex);
   const mode = request.mode ?? book.project.importMode ?? 'copy';
@@ -402,7 +405,8 @@ export async function importIntoProject(book: OpenProject, request: ImportReques
       };
     }
     progress?.({ done: imported.length, total: imported.length, saving: true });
-    const next = await updateProject(book, { project, photoIndex }, true);
+    if (checkpoint.mcp) checkpoint.mcp.sources = [...imported];
+    const next = await updateProject(book, { project, photoIndex }, true, checkpoint);
     return { book: next, imported, copied, createdDirectories, counts };
   } catch (error) {
     // A durable save intent may already refer to these assets, including when it needs recovery on next open.

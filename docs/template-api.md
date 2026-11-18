@@ -73,7 +73,7 @@ How an agent edits an ImageFlow book through the MCP server. The template API to
 
 ### Revisions
 
-Every result carries the input `revision`. Pass it as `expectedRevision` to commands, page-number previews and drafts. A `REVISION_CONFLICT` means the book changed: inspect or check again before editing. Commands need a unique `idempotencyKey`, so a retry after a lost reply returns the original result instead of applying the batch twice.
+Every result carries the input `revision`. Pass it as `expectedRevision` to commands, page-number previews and drafts. A `REVISION_CONFLICT` means the book changed: inspect or check again before editing. Commands need a unique `idempotencyKey`, so a retry of the same request after a lost reply returns the original result instead of applying the batch twice, also after ImageFlow restarts. After reopening a book, `list_book_checkpoints` with the key confirms whether a batch was committed and lists what changed since.
 
 ## Project commands and preview targets
 

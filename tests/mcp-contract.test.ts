@@ -59,12 +59,12 @@ test('output schemas keep the frozen result fields strict and allow later additi
 // Clients load every tool schema into the agent's context before the first call. Descriptions belong on the fields,
 // but a shared definition is emitted once, and the whole list stays within this budget.
 // Page addressing and page-pair/blank/swap commands add schemas shared by drafts and saves; the template library tools
-// add their entries and save results.
+// add their entries and save results. The book history tool adds its entry and write results their checkpoint.
 test('the advertised tool list stays within its size budget', () => {
   const bytes = (part: 'input' | 'output') => mcpTools.reduce((sum, { name }) => sum + JSON.stringify(advertisedSchemas(name)[part]).length, 0);
   const descriptions = mcpTools.reduce((sum, { title, description }) => sum + title.length + description.length, 0);
-  assert.ok(bytes('input') + descriptions <= 45_000, 'Input schemas and descriptions use ' + (bytes('input') + descriptions) + ' bytes.');
-  assert.ok(bytes('output') <= 28_000, 'Output schemas use ' + bytes('output') + ' bytes.');
+  assert.ok(bytes('input') + descriptions <= 46_500, 'Input schemas and descriptions use ' + (bytes('input') + descriptions) + ' bytes.');
+  assert.ok(bytes('output') <= 29_500, 'Output schemas use ' + bytes('output') + ' bytes.');
 });
 
 test('a preview target that fits one shape reports that shape\'s issue, otherwise the list of shapes', () => {
