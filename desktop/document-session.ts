@@ -9,8 +9,9 @@ import type { FSWatcher } from 'node:fs';
 import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { channels, desktopScheme, issueText, renderOrigin } from '../src/desktop';
-import type { BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result } from '../src/desktop';
+import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
+import { parseActiveEditor } from '../src/mcp-results';
 import type { RenderProject } from '../src/project';
 import { printBook, savePdf } from './export';
 import { approveNetwork, approvedNetwork, bookTrusted, trustBook } from './source-access';
@@ -88,7 +89,7 @@ export class DocumentSession {
   private reloadTimer?: ReturnType<typeof setTimeout>;
   private observedChanges = new Set<string>();
   private importedWrites = new ImportReceipts();
-  private agentLeases = new Map<string, (allowed: boolean) => void>();
+  private agentLeases = new Map<string, (reply: AgentLeaseReply) => void>();
   private renderIds = new Set<string>();
   // This window's share of the pictures cache all book windows use; closing the book releases it.
   private previewPictures = previewPictures.view(randomUUID());
@@ -154,6 +155,7 @@ export class DocumentSession {
     this.queue = new AuthoringQueue({ ready: () => !this.busy && !this.closing, maxPending: 32 });
     this.service = createAuthoringService({
       session: () => this.closing ? undefined : this.projectSession, cache, docs: join(app.getAppPath(), 'docs'),
+      activeEditor: () => parseActiveEditor(this.menuState?.activeEditor),
       check: (...args) => this.checkOpenBook(...args),
       changed: (next) => this.notify({ value: this.activate(next) }),
       recovery: (message) => this.notify({ error: message }),
@@ -252,7 +254,8 @@ export class DocumentSession {
     if (!this.watcher) this.watchProject(next);
     return summary;
   }
-  replyLease(id: string, allowed: boolean) { this.agentLeases.get(id)?.(allowed === true); }
+  // The window's reply crosses IPC: anything but true or a well-formed editor counts as a plain refusal.
+  replyLease(id: string, reply: unknown) { this.agentLeases.get(id)?.(reply === true || (parseActiveEditor(reply) ?? false)); }
   cancelExport() { this.exportJob?.abort(); }
   cancelCheck() { this.checkJob?.abort(); }
   /** Where template packages are installed, outside every book; set by the app. */
@@ -764,12 +767,12 @@ export class DocumentSession {
     const owner = this.window;
     if (!owner || owner.isDestroyed()) throw new AuthoringError('PROJECT_CLOSED', 'Open a book in ImageFlow first.');
     const id = randomUUID();
-    const allowed = await new Promise<boolean>((resolve) => {
-      const finish = (allowed: boolean) => {
+    const reply = await new Promise<AgentLeaseReply>((resolve) => {
+      const finish = (reply: AgentLeaseReply) => {
         clearTimeout(timer);
         signal.removeEventListener('abort', abort);
         this.agentLeases.delete(id);
-        resolve(allowed);
+        resolve(reply);
       };
       const abort = () => finish(false);
       const timer = setTimeout(() => finish(false), 3000);
@@ -779,7 +782,14 @@ export class DocumentSession {
       owner.webContents.send(channels.agentLease, id);
     });
     signal.throwIfAborted();
-    if (!allowed) throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish or close the active editor in ImageFlow, then retry. No changes were made.');
+    if (reply === true) return;
+    if (reply) {
+      const field = reply.field ? ' for ' + reply.field : '';
+      const location = reply.spread ? ' on spread ' + reply.spread + (reply.page ? ' (' + reply.page + ' page)' : '') : '';
+      throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish editing in ImageFlow (' + reply.label + field + location + '), then retry. No changes were made.',
+        { activeEditor: reply });
+    }
+    throw new AuthoringError('EDIT_IN_PROGRESS', 'ImageFlow is busy with another operation, such as an import, export, reload or drag. Retry when it finishes. No changes were made.');
   }
 
 

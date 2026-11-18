@@ -14,8 +14,9 @@ import { maxZoom, setPlacement } from './spread';
 import { insertionProblem, spreadOrder } from './spread-order';
 
 const id = identifier.refine((value) => value.length <= 256, 'Identifiers must be at most 256 characters.');
+const spreadReferenceMessage = 'Use a spread ID or a string such as "$chapter" for a batch reference.';
 export const spreadReference = z.union([id, z.string().startsWith('$').refine((value) => id.safeParse(value.slice(1)).success,
-  'Use a spread ID or $ followed by a batch reference.')]);
+  spreadReferenceMessage)], { error: spreadReferenceMessage });
 const scalar = z.union([z.string(), z.boolean(), z.number()]);
 // A list parameter's value is its whole array of items, each with its `id`.
 const value = z.union([scalar, z.array(z.record(z.string(), scalar))])
@@ -53,7 +54,8 @@ const after = spreadReference.nullable().optional()
   .describe('Insert after this spread ID or $ref; null inserts at the start; omitted appends at the end.');
 const ref = id.optional().describe('Name for the new spread, usable as $name in later operations of this batch and in draft preview targets.');
 const definition = id.describe('Layout ID from template.spreads.');
-function validParameterTarget(target: z.infer<z.ZodObject<typeof parameterTarget>>) {
+type ParameterAddress = z.infer<z.ZodObject<typeof parameterTarget>>;
+function validParameterTarget(target: ParameterAddress) {
   return target.scope === 'document' ? target.spread === undefined && target.owner === undefined && target.page === undefined
     : target.scope === 'spread' ? target.spread !== undefined && target.owner === undefined
     : target.spread !== undefined && target.owner !== undefined;
@@ -75,7 +77,7 @@ export const projectOperationSchema = z.discriminatedUnion('op', [
   z.strictObject({ op: z.literal('set_parameter'), ...parameterTarget, value }).refine(validParameterTarget, targetMessage)
     .describe('Set a document, spread, box or element parameter.'),
   z.strictObject({ op: z.literal('reset_parameter'), ...parameterTarget }).refine(validParameterTarget, targetMessage)
-    .describe('Remove a saved parameter value so its default applies again.'),
+    .describe('Remove a saved parameter value, including one the template no longer declares.'),
   // Item operations on a list parameter, addressed by the item's stable id, so an agent does not resend the list.
   z.strictObject({ op: z.literal('insert_list_item'), ...parameterTarget, item: itemValues.describe('Field values; missing fields take their defaults. An id is generated unless given.'),
     after: id.nullable().optional().describe('Item id to insert after, null for the start; omitted appends.') }).refine(validParameterTarget, targetMessage)
@@ -129,6 +131,7 @@ export const projectOperationSchema = z.discriminatedUnion('op', [
 ]);
 export const projectOperationsSchema = z.array(projectOperationSchema).min(1).max(100)
   .describe('Up to 100 operations, applied in order as one atomic step: either all succeed or none is saved.');
+export const projectOperationNames = projectOperationSchema.options.map((schema) => schema.shape.op.value);
 export type ProjectOperation = z.input<typeof projectOperationSchema>;
 export type ProjectOperations = z.input<typeof projectOperationsSchema>;
 export type ProjectCommandResult = {
@@ -273,19 +276,26 @@ export function applyProjectCommands(
     if (!state) fail('INVALID_OPERATION', 'The requested page is blank. Choose its layout first.');
     return { sheet, state };
   }
-  function parameterTarget(operation: { page?: PageSide; scope: 'document' | 'spread' | 'box' | 'element'; spread?: string; owner?: string; key: string }) {
+  function parameterLocation(operation: ParameterAddress) {
     const scoped = operation.scope === 'document' ? undefined : commandState(operation.spread!, operation.page);
     const spread = scoped?.sheet, state = scoped?.state;
+    const path = operation.scope === 'document' ? 'document.' + operation.key : operation.scope === 'spread' ? operation.key :
+      (operation.scope === 'box' ? 'boxes.' : 'elements.') + operation.owner + '.' + operation.key;
+    const group = operation.scope === 'box' ? state?.boxes : state?.elements;
+    const values = operation.scope === 'document' ? project.params
+      : operation.scope === 'spread' ? state?.params : group && own(group, operation.owner!)?.params;
+    return { spread, state, path, values };
+  }
+  function parameterTarget(operation: ParameterAddress, location = parameterLocation(operation)) {
+    const { state, path } = location;
     let target: EditTarget | undefined;
     if (operation.scope === 'document') {
       const parameter = own(template.parameters, operation.key);
-      if (parameter) target = { scope: 'document', path: 'document.' + operation.key, key: operation.key, param: parameter };
+      if (parameter) target = { scope: 'document', path, key: operation.key, param: parameter };
     } else {
-      const path = operation.scope === 'spread' ? operation.key :
-        (operation.scope === 'box' ? 'boxes.' : 'elements.') + operation.owner + '.' + operation.key;
       target = resolveEditPath(template, state!.definition ?? '', path, operation.page);
     }
-    return { spread, state, target: target ?? fail('PARAMETER_NOT_FOUND', 'The current template has no parameter at this location.') };
+    return { ...location, target: target ?? fail('PARAMETER_NOT_FOUND', 'The current template has no parameter at this location.') };
   }
 
   for (const operation of parsed.data) {
@@ -304,33 +314,37 @@ export function applyProjectCommands(
           changed('Selected print format ' + operation.format, allSpreads(), true);
         }
         break;
-      case 'set_parameter':
+      case 'set_parameter': {
+        const { spread, target, values } = parameterTarget(operation);
+        validateValue(target.param, operation.value, target.key);
+        if (values && Object.hasOwn(values, target.key) && sameValue(values[target.key], operation.value)) break;
+        writeEdit(project, spread?.id, target, operation.value);
+        changed('Updated ' + target.path, target.scope === 'document' ? allSpreads() : [spread!.id], true);
+        break;
+      }
       case 'reset_parameter': {
-        const { spread, state, target } = parameterTarget(operation);
-        const group = target.scope === 'box' ? state?.boxes ?? {} : state?.elements ?? {};
-        const values = target.scope === 'document' ? project.params : target.scope === 'spread' ? state?.params : own(group, target.owner!)?.params;
-        if (operation.op === 'set_parameter') {
-          validateValue(target.param, operation.value, target.key);
-          if (values && Object.hasOwn(values, target.key) && sameValue(values[target.key], operation.value)) break;
-          if ((target.scope === 'box' || target.scope === 'element') && !Object.hasOwn(group, target.owner!)) group[target.owner!] = { params: {} };
-          writeEdit(project, spread?.id, target, operation.value);
-        } else {
-          if (!values || !Object.hasOwn(values, target.key)) break;
-          delete values[target.key];
+        const location = parameterLocation(operation);
+        const { spread, state, path, values } = location;
+        if (!values || !Object.hasOwn(values, operation.key)) {
+          // Nothing is saved here. Resetting is then only valid for a parameter the template declares, so a mistyped
+          // key or owner fails with PARAMETER_NOT_FOUND instead of succeeding silently.
+          parameterTarget(operation, location);
+          break;
         }
-        changed((operation.op === 'set_parameter' ? 'Updated ' : 'Reset ') + target.path,
-          target.scope === 'document' ? allSpreads() : [spread!.id], true);
+        delete values[operation.key];
+        // An element entry holds nothing but its params: drop it once empty, so no orphan owner remains for an element
+        // the template no longer declares.
+        if (operation.scope === 'element' && state && !Object.keys(values).length) delete state.elements[operation.owner!];
+        changed('Reset ' + path, spread ? [spread.id] : allSpreads(), true);
         break;
       }
       case 'insert_list_item':
       case 'update_list_item':
       case 'remove_list_item':
       case 'move_list_item': {
-        const { spread, state, target } = parameterTarget(operation);
+        const { spread, target, values } = parameterTarget(operation);
         const param = target.param;
         if (param.type !== 'list') fail('NOT_A_LIST', 'Parameter ' + target.path + ' is not a list. Use set_parameter.');
-        const group = target.scope === 'box' ? state?.boxes ?? {} : state?.elements ?? {};
-        const values = target.scope === 'document' ? project.params : target.scope === 'spread' ? state?.params : own(group, target.owner!)?.params;
         const saved = values && Object.hasOwn(values, target.key) ? values[target.key] : undefined;
         // Item operations start from the saved list, or the default when none is saved. A saved list the template no
         // longer allows is not rewritten item by item: replace it with set_parameter or reset_parameter.
@@ -369,7 +383,6 @@ export function applyProjectCommands(
         }
         validateValue(param, items, target.key);
         if (saved !== undefined && sameValue(saved, items)) break;
-        if ((target.scope === 'box' || target.scope === 'element') && !Object.hasOwn(group, target.owner!)) group[target.owner!] = { params: {} };
         writeEdit(project, spread?.id, target, items);
         changed(message + target.path, target.scope === 'document' ? allSpreads() : [spread!.id], true);
         break;

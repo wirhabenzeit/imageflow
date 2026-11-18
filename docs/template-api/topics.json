@@ -1,5 +1,6 @@
 [
   {"id":"authoring-workflow","title":"Authoring workflow","summary":"Order of work for agents: which MCP tool reads, edits, previews and verifies what, and how revisions and drafts fit together."},
+  {"id":"project-commands","title":"Project commands and preview targets","summary":"Every MCP project operation with a JSON example, plus batch references, parameter scopes and preview targets."},
   {"id":"package","title":"Package","summary":"The template/ folder, host-provided imports, the shipped example templates and the contract-1 baseline features."},
   {"id":"declaration","title":"Declaration","summary":"defineTemplate fields, parameter scopes, spread()/page() builders and typed reusable declarations."},
   {"id":"page-layouts","title":"Page layouts","summary":"Reusable page() layouts, Page roots, local geometry, independent facing pages, editor controls and beta automation limits."},

@@ -348,6 +348,28 @@ test('page commands isolate duplicate IDs, validate values and remain atomic', (
   assert.equal(initial.files.project.title, original.project.title);
 });
 
+test('reset removes an undeclared saved element parameter from just the addressed split page', () => {
+  const before = files();
+  const inserted = applyProjectCommands(before, { ...template, spreads: {
+    ...template.spreads, page: { ...template.spreads.main, span: 'page' },
+  } }, [{ op: 'insert_page_pair', ref: 'pair', pages: {
+    left: { definition: 'page', elements: { calendar: { params: { month: '2026-02-01' } } } },
+    right: { definition: 'page', elements: { calendar: { params: { month: '2026-03-01' } } } },
+  } }]);
+  const spread = inserted.references.pair;
+  const migrated = { ...template, spreads: { ...template.spreads, page: { ...template.spreads.main, span: 'page' as const, elements: {} } } };
+  const reset = applyProjectCommands(inserted.files, migrated, [
+    { op: 'reset_parameter', scope: 'element', spread, page: 'left', owner: 'calendar', key: 'month' },
+  ]);
+  const pages = reset.files.project.spreads.at(-1)!.pages!;
+  assert.equal(Object.hasOwn(pages.left!.elements, 'calendar'), false, 'the emptied undeclared element entry is removed');
+  assert.equal(pages.right!.elements.calendar.params.month, '2026-03-01');
+  assert.equal(inserted.files.project.spreads.at(-1)!.pages!.left!.elements.calendar.params.month, '2026-02-01');
+  assert.throws(() => applyProjectCommands(reset.files, migrated, [
+    { op: 'reset_parameter', scope: 'element', spread, page: 'left', owner: 'calendar', key: 'month' },
+  ]), { code: 'PARAMETER_NOT_FOUND' }, 'resetting an unsaved, undeclared key still fails');
+});
+
 test('page layout transitions, blank pages and sheet operations share editor rules', () => {
   const info: TemplateInfo = { ...template, spreads: { ...template.spreads,
     page: { ...template.spreads.main, span: 'page' },
