@@ -880,27 +880,22 @@ export function App() {
     // Artwork stays laid out at Fit. The frame loads pictures for the visible area in its own coordinates.
     return { top: range.top / zoom, bottom: range.bottom / zoom, left: range.left / zoom, right: range.right / zoom, columns };
   }
-  function measureView() {
-    const range = frameViewport();
-    if (range) {
-      for (const frame of stage.current!.querySelectorAll<HTMLIFrameElement>('iframe.book-frame-book')) {
-        frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
-      }
-    }
-  }
-  function thumbnailViewport() {
-    const view = thumbScroll.current;
-    if (!view) return undefined;
-    const top = view.scrollTop;
-    return { top, bottom: top + view.clientHeight, left: 0, right: view.clientWidth, columns: 0 };
-  }
-  function measureThumbnails() {
-    const range = thumbnailViewport();
-    if (!range) return;
-    for (const frame of thumbList.current?.querySelectorAll<HTMLIFrameElement>('iframe.book-frame-thumbs') ?? []) {
+  // Tells a view's current and pending frames which area is on screen, so they load the pictures near it.
+  function postViewport(host: HTMLElement | null, view: 'book' | 'thumbs', range: ReturnType<typeof viewport>) {
+    if (!host || !range) return;
+    for (const frame of host.querySelectorAll<HTMLIFrameElement>('iframe.book-frame-' + view)) {
       frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
     }
   }
+  function measureView() { postViewport(stage.current, 'book', frameViewport()); }
+  function thumbnailViewport() {
+    const view = thumbScroll.current;
+    if (!view) return undefined;
+    // The placed thumbnail list has no padding, so the scroll position is already in the frame's coordinates.
+    const top = view.scrollTop;
+    return { top, bottom: top + view.clientHeight, left: 0, right: view.clientWidth, columns: 0 };
+  }
+  function measureThumbnails() { postViewport(thumbList.current, 'thumbs', thumbnailViewport()); }
   useEffect(() => {
     const view = thumbScroll.current;
     if (!view) return;

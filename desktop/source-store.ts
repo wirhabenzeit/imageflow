@@ -83,8 +83,11 @@ export class SourceStore {
   static async release(folder: string) {
     const identity = await sourceBookKey(folder).catch(() => undefined);
     for (const [key, promise] of stores) {
-      const store = await promise;
-      if (store.folder === folder || (identity && key.endsWith('/' + identity + '.json'))) {
+      const ownKey = !!identity && key.endsWith('/' + identity + '.json');
+      // A registry that failed to load is dropped for its book, so the next open reads it again.
+      const store = await promise.catch(() => undefined);
+      if (!store) { if (ownKey) stores.delete(key); continue; }
+      if (store.folder === folder || ownKey) {
         await store.settled().catch((error) => console.warn('ImageFlow could not retain source previews', error));
         stores.delete(key);
       }
