@@ -78,7 +78,10 @@ const issueOn = (marker: IssueMarker) => ({ 'data-issue': marker['data-issue'], 
 // anchor's page in the same single render: pages depend only on spread order and layout spans.
 // `boxes` is every box of the layout as `render` sees it: parameters, a photo box's photo metadata and a Markdown
 // box's flow position with its text's header fields (`text.meta`), so a layout can name an anchor after its text.
-export type AnchorContext = { params: Values; document: Values; boxes: RenderContext['boxes'] };
+// What anchors() reads: saved values only, read before any spread renders. `spread` and `side` place it as they place
+// `render`, and `book.texts` lets a page without a Markdown box name its anchor after the text beside it.
+export type AnchorContext = { params: Values; document: Values; boxes: RenderContext['boxes']; spread: string; side?: PageSide;
+  book: { texts: readonly BookText[] } };
 export type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' };
 // `side` is 'page' in a format without facing pages, where a unit has one page and a declared side is ignored.
 export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
@@ -160,6 +163,8 @@ export type BookIndex = { pages: number; anchors: Anchor[]; credits?: readonly C
 export function bookIndex(book: RenderProject, template: Template, sequence: { count: number; spreads: { page: UnitPages }[] }): BookIndex {
   const document = resolveParams(template.parameters, book.project.params);
   const { chains, positions } = textAssignments(book, template);
+  // From saved data only, so anchors can read it as render does (beta finding F-022).
+  const texts = textIndex(book, sequence, chains, positions);
   const anchors = book.project.spreads.flatMap((sheet, i) => shownLayoutStates(sheet).flatMap(({ page: scope, state: spread }) => {
     const definition = Object.hasOwn(template.spreads, spread.definition) ? template.spreads[spread.definition] : undefined;
     if (!definition?.anchors) return [];
@@ -167,7 +172,8 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
     renderingSpread(spread.id, scope);
     try {
       const { boxes } = spreadValues(book, template, spread, positions, scope);
-      returned = definition.anchors({ params: resolveParams(definition.parameters, spread.params), document, boxes: deepFreeze(structuredClone(boxes)) });
+      returned = definition.anchors({ params: resolveParams(definition.parameters, spread.params), document, boxes: deepFreeze(structuredClone(boxes)),
+        spread: sheet.id, ...(scope ? { side: scope } : {}), book: { texts } });
     }
     catch (error) { throw new SpreadError(definition.label + ' could not declare its anchors: ' + (error instanceof Error ? error.message : String(error)), spread.id, { cause: error, page: scope }); }
     finally { renderingSpread(undefined); }
@@ -188,7 +194,7 @@ export function bookIndex(book: RenderProject, template: Template, sequence: { c
   // A spread may declare its right-page anchor before its left-page one. The sort is stable within a page.
   const { credits, conflicts } = bookCredits(book, template, sequence, document);
   return { pages: sequence.count, anchors: anchors.sort((a, b) => a.page - b.page), credits, creditConflicts: conflicts,
-    spreads: spreadIndex(book, template, sequence), texts: textIndex(book, sequence, chains, positions) };
+    spreads: spreadIndex(book, template, sequence), texts };
 }
 
 // The book's texts with the boxes they flow through, from saved data only, like `spreadIndex`.

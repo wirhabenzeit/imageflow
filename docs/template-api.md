@@ -936,7 +936,7 @@ type AnchorDeclaration = { id: string; title?: string; side?: 'left' | 'right' }
 type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' };
 ```
 
-- **One render pass.** Page numbers depend only on spread order and layout spans, never on rendered content. ImageFlow calls every spread's `anchors` with its resolved `params` and `document` values and its `boxes` as `render` sees them before any spread renders, so every layout reads the same anchors. Like `render`, `anchors` must be a pure function of its input. An `anchors` function that throws or returns an invalid declaration is a render error naming the layout.
+- **One render pass.** Page numbers depend only on spread order and layout spans, never on rendered content. ImageFlow calls every spread's `anchors` with its resolved `params` and `document` values, its `boxes` as `render` sees them, its `spread` ID and the book's `texts` before any spread renders, so every layout reads the same anchors. Like `render`, `anchors` must be a pure function of its input. An `anchors` function that throws or returns an invalid declaration is a render error naming the layout.
 - **Pages follow the book.** Inserting, moving, removing or switching a spread renumbers every anchor, as it does the folios. `side` picks the page of a two-page spread and defaults to the first. A single left or right page has only one page, whichever side is named. Without facing pages every unit is one page: `side` is ignored and the anchor's `side` is `'page'`.
 - **Repeated layouts.** Anchors belong to spread instances, so a layout used five times declares five anchors with the same ID. `anchors(id)` lists all of them in page order. `anchor(id)` is for an ID that one spread declares.
 - **Book check.** `anchor(id)` warns `anchor-missing` when no spread declares the ID, and `anchor-ambiguous` when several do. In that case it returns the first. Both warnings are on the spread that asked. `anchors(id)` returning an empty list is not a finding.
@@ -950,6 +950,19 @@ anchors: ({ params, boxes }) => {
   return boxes.body.text?.part === 1 && title ? [{ id: 'section', title }] : [];
 },
 ```
+
+A page without a Markdown box of its own, such as a route map facing its day's story, reads the book's texts: `anchors` also receives `book.texts`, as [`ctx.book.texts`](#text-metadata) lists them, and `spread`, the sheet's ID (with `side` for a page layout), as `render` does:
+
+```tsx
+anchors: ({ spread, book, params }) => {
+  // The text that starts on this sheet's other page.
+  const day = book.texts.find((text) => text.boxes.some((box) => box.spread === spread && box.part === 1));
+  const title = typeof day?.meta.title === 'string' ? day.meta.title : params.heading;
+  return title ? [{ id: 'stage', title }] : [];
+},
+```
+
+Both are read from the saved book before any spread renders and are frozen, like the boxes.
 
 An anchor marks a whole page, not a point found by measuring the render. Text flow decides which page a heading inside Markdown continuation lands on, so such headings cannot be anchors yet.
 

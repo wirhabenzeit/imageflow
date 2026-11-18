@@ -387,9 +387,9 @@ test('facing-page fixtures exercise every allowed side with independent text and
 
 test('a fixture finding found in several formats is listed once with its formats', () => {
   const finding = (format: string, message = 'Text overflows box body.') => ({ code: 'text-overflow', stage: 'render' as const, severity: 'warning' as const,
-    message, location: { where: 'Fixture · Story · long' }, fixture: { layout: 'story', case: 'long' as const, format } });
+    message, location: { where: 'Fixture · Story · long' }, fixture: { layout: 'story', case: 'long-text' as const, format } });
   const merged = mergeFormatFindings([finding('a4'), finding('square'), finding('a4', 'Other'), finding('letter'), finding('a4')]);
   assert.equal(merged.length, 2);
-  assert.deepEqual(merged[0].fixture, { layout: 'story', case: 'long', format: 'a4', formats: ['a4', 'square', 'letter'] });
-  assert.deepEqual(merged[1].fixture, { layout: 'story', case: 'long', format: 'a4' }, 'a finding of one format keeps its shape');
+  assert.deepEqual(merged[0].fixture, { layout: 'story', case: 'long-text', format: 'a4', formats: ['a4', 'square', 'letter'] });
+  assert.deepEqual(merged[1].fixture, { layout: 'story', case: 'long-text', format: 'a4' }, 'a finding of one format keeps its shape');
 });

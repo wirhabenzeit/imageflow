@@ -765,10 +765,12 @@ export type UntypedRenderContext = {
  */
 /**
  * What `anchors` reads: the spread's parameters, the document's and its boxes as `render` sees them, including a
- * Markdown box's `text` with its source's header fields, so an anchor can be named after its text.
+ * Markdown box's `text` with its source's header fields, so an anchor can be named after its text. `spread` is the
+ * sheet's ID and `side` the page a page layout is on, as in `render`; `book.texts` lists every text the book places
+ * with its header and boxes, so a page without a Markdown box can name its anchor after the text beside it.
  */
 export type AnchorContext<P = Values, D = Values, B = Record<string, { params: Values; photo?: Photo | null; text?: FlowPosition | null }>> =
-  { params: P; document: D; boxes: B };
+  { params: P; document: D; boxes: B; spread: string; side?: 'left' | 'right'; book: { readonly texts: readonly BookText[] } };
 
 /** Type-only marker: the document parameters a spread's render context was typed with. Never set it yourself. */
 declare const typedDocument: unique symbol;
