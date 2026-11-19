@@ -102,20 +102,28 @@ export class SourceStore {
     try {
       const actual = await originalPath(folder, source);
       const before = await stat(actual, { bigint: true });
-      const privatePin = options.pin && !source.linked && source.kind === 'photo';
+      // Checks and exports read every photo, owned or linked, from a private copy that lives as long as the job.
+      const privatePin = options.pin && source.kind === 'photo';
       if (source.kind === 'markdown' && extname(source.path).toLowerCase() !== '.md') throw new Error('Expected a Markdown (.md) file.');
       const maximum = source.kind === 'photo' ? source.linked ? 50 : undefined : source.kind === 'markdown' ? 5 : 20;
       if (!before.isFile() || (maximum && before.size > BigInt(maximum * 1024 * 1024))) throw new Error(`Expected a regular file${maximum ? ` up to ${maximum} MB` : ''}.`);
-      // Metadata reads do not copy or decode every document-owned photo on first open.
-      if (source.kind === 'photo' && !source.linked && !options.pin) {
+      // The editor reads photos where they are, owned or linked, from their metadata: opening neither copies, hashes nor
+      // decodes them. A linked photo re-exported in place (from Lightroom, say) has another stamp, so it gets new
+      // renditions (rendition keys name the stamp) and the book reloads with it (DocumentSession watches linked folders).
+      if (source.kind === 'photo' && !options.pin) {
         const details = await photoDetails(actual, null);
         if (stamp(await stat(actual, { bigint: true })) !== stamp(before)) throw new Error('Source changed while being read.');
         const cache = renditionCacheFor(options.cache ?? '');
         const extension = details.alpha ? '.png' : '.jpg';
-        const stored = { path: source.path, snapshot: actual, observation: stamp(before), direct: true, key: details.key,
+        // Locate Folder finds a moved linked original by its content, so its digest is kept: from the last record while
+        // the file is unchanged, and otherwise computed in the background, not while the book opens.
+        const previous = this.saved[source.key];
+        const digest = source.linked && previous?.digest && previous.path === source.path && previous.observation === stamp(before) ? previous.digest : undefined;
+        const stored = { path: source.path, snapshot: actual, observation: stamp(before), direct: true, key: details.key, ...(digest ? { digest } : {}),
           width: details.width, height: details.height, modified: modifiedAt(before), preview: join(cache, details.key + '-preview' + extension), thumb: join(cache, details.key + '-thumb' + extension) };
         this.remember(source, stored);
-        return { status: { ...source, state: 'available' }, stored };
+        if (source.linked && !digest) this.recordDigest(source.key, actual, stamp(before));
+        return { status: { ...source, state: 'available', ...(digest ? { digest } : {}) }, stored };
       }
       const previous = this.saved[source.key];
       if (!privatePin && previous?.digest && !previous.direct && previous.path === source.path && previous.observation === stamp(before) &&
@@ -166,9 +174,24 @@ export class SourceStore {
       } else if (stored && (!stored.digest || !within(join(this.root, 'content'), stored.snapshot) || await hashFile(stored.snapshot).then((digest) => digest !== stored!.digest, () => true))) stored = undefined;
       if (stored && within(join(this.root, 'content'), stored.snapshot)) this.pins.add(stored.snapshot);
       const problem = state === 'missing' ? (source.linked ? 'Original missing: ' : 'Missing project file: ') + source.path : state === 'denied' ? 'Access denied' : 'Original unavailable: ' + (error instanceof Error ? error.message : String(error));
-      return { status: { ...source, state, problem, cached: !!stored, digest: stored?.digest }, stored };
+      // The last known content of the original, for Locate Folder, also when nothing cached can stand in for it.
+      const digest = stored?.digest ?? this.saved[source.key]?.digest;
+      return { status: { ...source, state, problem, cached: !!stored, ...(digest ? { digest } : {}) }, stored };
     }
   }
+  private digests = Promise.resolve();
+  /** Records a linked photo's digest after it was read in place, one file at a time, if it is still the same file. */
+  private recordDigest(key: string, path: string, observation: string) {
+    this.digests = this.digests.then(async () => {
+      if (this.saved[key]?.observation !== observation || this.saved[key]?.digest) return;
+      const digest = await hashFile(path);
+      if (stamp(await stat(path, { bigint: true })) !== observation || this.saved[key]?.observation !== observation) return;
+      this.saved[key] = { ...this.saved[key], digest }; this.version++;
+      await this.settled();
+    }).catch(() => {});
+  }
+  /** Waits for digests being recorded in the background (tests). */
+  async digested() { await this.digests; await this.settled(); }
   async settled() {
     const task = this.writes.then(async () => {
       while (this.written !== this.version) {

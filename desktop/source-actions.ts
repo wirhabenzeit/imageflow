@@ -139,13 +139,14 @@ export async function relinkFolder(book: OpenProject, directory: string, keys?: 
       next = await relocateSource(next, source.key, source.path); repaired++;
       continue;
     }
-    if (!state.stored?.digest) continue;
+    const digest = state.status.digest ?? state.stored?.digest;
+    if (!digest) continue;
     const matches: string[] = [];
     for (const path of candidates) {
       if (basename(path) !== basename(source.path)) continue;
       const actual = await realpath(path);
       if (!within(root, actual) || (await stat(actual)).size > 50 * 1024 * 1024) continue;
-      if (digestBytes(await readFile(actual)) === state.stored.digest) matches.push(actual);
+      if (digestBytes(await readFile(actual)) === digest) matches.push(actual);
     }
     if (matches.length === 1) { next = await relocateSource(next, source.key, matches[0]); repaired++; }
     else if (matches.length > 1) ambiguous.push(source.key);
