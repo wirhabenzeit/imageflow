@@ -2,6 +2,7 @@
 // and its thumbnails show the new revision. Works on a copy of the book, so the original is never changed.
 //
 //   IMAGEFLOW_PROFILE=1 npx vite build && node scripts/stage-desktop.mjs   (or npm run build, without render steps)
+//   IMAGEFLOW_PROFILE=1 IMAGEFLOW_WARM=1 npx vite build ...                 (prototype: frames render new revisions in place)
 //   node scripts/bench-insert.mjs --book path/to/Book.imageflow [--repeat 3] [--settle 45000] [--profile out.json]
 //
 // --book     the book to copy; the copy is made next to it, so photos it links by relative path still resolve
@@ -48,6 +49,7 @@ const views = ['book', 'thumbs'];
 try {
   await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false }); });
   const w = await testBook(app, project);
+  w.on('console', (message) => { if (message.text().startsWith('imageflow.warm')) console.error(message.text()); });
   w.setDefaultTimeout(300000);
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((window) => window.setContentSize(1400, 900)));
   let start = Date.now();
@@ -55,8 +57,9 @@ try {
   const openMs = Date.now() - start;
   await w.waitForTimeout(Number(values.settle));
   const pictures = async () => Object.fromEntries(await Promise.all(w.frames().filter((frame) => frame.url().includes('/render/')).map(async (frame) =>
-    [viewOf(frame.url()), await frame.evaluate(() => [...document.querySelectorAll('.if-rendered-image')]
-      .reduce((counts, node) => ({ ...counts, [node.dataset.rendered]: (counts[node.dataset.rendered] ?? 0) + 1 }), {})).catch(() => 'gone')])));
+    [viewOf(frame.url()), await frame.evaluate(() => ({ spreads: document.querySelectorAll('.if-spread-container').length,
+      ...[...document.querySelectorAll('.if-rendered-image')]
+        .reduce((counts, node) => ({ ...counts, [node.dataset.rendered]: (counts[node.dataset.rendered] ?? 0) + 1 }), {}) })).catch(() => 'gone')])));
   const processes = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().flatMap((window) =>
     window.webContents.mainFrame.framesInSubtree.filter((frame) => frame.url.includes('/render/')).map((frame) => [frame.url, frame.osProcessId])));
   console.error(JSON.stringify({ openMs, pictures: await pictures(),
@@ -64,7 +67,7 @@ try {
   const runs = [];
   for (let run = 0; run < Number(values.repeat); run++) {
     const before = await w.evaluate((views) => Object.fromEntries(views.map((view) =>
-      [view, document.querySelector('iframe.book-frame-' + view + '[data-current]')?.getAttribute('src')])), views);
+      [view, document.querySelector('iframe.book-frame-' + view + '[data-current]')?.dataset.revision])), views);
     const profile = values.profile && run === 0;
     // New render frames start paused, so their whole render is profiled.
     if (profile) await app.evaluate(async ({ BrowserWindow }) => {
@@ -90,7 +93,8 @@ try {
     const ms = {};
     await Promise.all(views.map((view) => w.waitForFunction(({ view, old }) => {
       const frame = document.querySelector('iframe.book-frame-' + view + '[data-current][data-ready]');
-      return frame && frame.getAttribute('src') !== old;
+      // The revision a frame shows: a new frame's, or a newer one a warm frame rendered in place (IMAGEFLOW_WARM).
+      return frame && frame.dataset.revision !== old;
     }, { view, old: before[view] }, { polling: 10 }).then(() => { ms[view] = Date.now() - start; })));
     await w.waitForTimeout(3000);
     if (profile) {

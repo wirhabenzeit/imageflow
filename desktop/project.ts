@@ -453,6 +453,7 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
       ...(book.assets.warnings ? { warnings: book.assets.warnings } : {}),
       // What each bundled font can set, for `fonts` and the Book check's font coverage.
       fonts: bundledFontCoverage(book.assets.files),
+      ...(book.templateHash ? { hash: book.templateHash } : {}),
     },
   };
 }

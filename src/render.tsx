@@ -57,6 +57,8 @@ import { pictureTimeoutMs } from './render-budget';
 import { pendingNetwork, pictureFailureSuggestion } from './network-access';
 import './render.css';
 
+// The revision a warm frame last rendered in place (IMAGEFLOW_WARM), named in its status and geometry.
+let currentRevision: string | undefined;
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
 // After the next painted frame. A frame that is not shown yet gets no animation frames, so a short timer stands in.
 const afterPaint = () => new Promise<void>((resolve) => {
@@ -424,7 +426,8 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
 // Fits sheets to the frame width and reports where sheets and boxes landed. In book grid mode, each sheet fits
 // one column and book order runs left to right, then continues on the next row. The book grows vertically.
 type GridRequest = { columns: number };
-function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest) {
+function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest) {
+  let sheets = initialSheets;
   if (view === 'thumbs' || view === 'book') {
     let animations: Animation[] = [];
     window.addEventListener('message', (event: MessageEvent) => {
@@ -517,7 +520,7 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
         ...ownTarget(node),
       })))),
     };
-    post(geometry);
+    post(currentRevision ? { ...geometry, revision: currentRevision } : geometry);
   }
   root.classList.add('if-book', 'if-view-' + view);
   if (view === 'book') {
@@ -566,18 +569,32 @@ function layoutBook(root: HTMLElement, sheets: { spread: string; sheet: HTMLElem
     requestAnimationFrame(() => { measuring = false; laidOut = ''; fit(); });
   };
   const elements = new ResizeObserver(measure);
-  for (const { sheet } of sheets) for (const { node, kind } of declaredNodes(sheet)) if (kind === 'element') elements.observe(node);
   // Position can change without resizing: a class/style change or a sibling's content may move an element.
   // Observe template content only; fit() writes the surrounding sheet/slot styles, so it cannot retrigger this.
   const layout = new MutationObserver(measure);
-  for (const { sheet } of sheets) layout.observe(sheet.querySelector('.if-spread')!, {
-    subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'],
-  });
+  const observe = () => {
+    for (const { sheet } of sheets) for (const { node, kind } of declaredNodes(sheet)) if (kind === 'element') elements.observe(node);
+    for (const { sheet } of sheets) layout.observe(sheet.querySelector('.if-spread')!, {
+      subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'],
+    });
+  };
+  observe();
   window.addEventListener('resize', fit);
-  return (next: GridRequest) => {
-    if (view !== 'book') return;
-    gridColumns = next.columns;
-    fit();
+  return {
+    setGrid: (next: GridRequest) => {
+      if (view !== 'book') return;
+      gridColumns = next.columns;
+      fit();
+    },
+    // A warm frame rendered a newer revision into the same root: measure its sheets.
+    update(next: { spread: string; sheet: HTMLElement }[]) {
+      sheets = next;
+      elements.disconnect();
+      layout.disconnect();
+      observe();
+      laidOut = '';
+      fit();
+    },
   };
 }
 
@@ -1636,44 +1653,55 @@ export async function startRender(root: HTMLElement) {
         query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined);
       return;
     }
-    const { spreads } = book.project;
-    const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
-    const { chains, positions } = textAssignments(book, template);
     const present = query.get('view') === 'present';
-    const presentationStart = spreads.find(({ id }) => id === query.get('spread'))?.id ?? spreads[0]?.id ?? '';
-    if (present) book.mode = 'export';
     const edit = book.mode === 'edit' && !present;
     const check = !edit && query.get('view') === 'check';
     const artwork = !edit && query.get('view') === 'artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
     const inspect = !edit && query.has('inspect') ? inspectionSchema.parse(JSON.parse(query.get('inspect')!)) : undefined;
     // The editor renders the whole book twice: as scrolling spreads and as sidebar thumbnails.
     const view: BookView = present ? 'present' : query.get('view') === 'thumbs' ? 'thumbs' : query.get('view') === 'layouts' ? 'layouts' : 'book';
-    if (edit && view !== 'book') {
-      for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
-    }
-    if (present) for (const photo of Object.values(book.photos)) photo.src = photo.src.replace('/photo/', '/proof-photo/');
     const lazy = edit && (view === 'book' || view === 'thumbs');
-    if (edit) book.view = frameView(view);
+    const textEditor = edit && query.get('view') === 'inline-text';
     // Pictures drawn by <RenderedImage>: at the screen's resolution in the editor (smaller for thumbnails), cheaply
     // in the Book check, and at the format's target resolution for export (ADR 0006).
     const target = template.format.output.resolution?.target ?? 300;
-    configureRenderedImages(present ? { mode: 'preview', pixelRatio: window.devicePixelRatio || 1, concurrency: 3, timeoutMs: pictureTimeoutMs.preview,
-      activeSpreads: new Set([presentationStart]),
-      // The editor's cached pictures: a map drawn in the book view shows in the presentation at once (vector
-      // pictures are shared across pixel ratios).
-      previewCache: location.pathname + '/picture/' } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
-      concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
-      previewCache: location.pathname + '/picture/' }
-      : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
-        : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
-          : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
+    const startOf = (book: RenderProject) => book.project.spreads.find(({ id }) => id === query.get('spread'))?.id ?? book.project.spreads[0]?.id ?? '';
+    // What each revision of the book needs before it renders: photo URLs for this view, and the picture settings.
+    const prepare = (book: RenderProject) => {
+      if (present) book.mode = 'export';
+      if (edit && view !== 'book') {
+        for (const photo of Object.values(book.photos)) photo.src = photo.src.replace(/\/photo\/([\w-]+)$/, '/thumb/$1');
+      }
+      if (present) for (const photo of Object.values(book.photos)) photo.src = photo.src.replace('/photo/', '/proof-photo/');
+      if (edit) book.view = frameView(view);
+      configureRenderedImages(present ? { mode: 'preview', pixelRatio: window.devicePixelRatio || 1, concurrency: 3, timeoutMs: pictureTimeoutMs.preview,
+        activeSpreads: new Set([startOf(book)]),
+        // The editor's cached pictures: a map drawn in the book view shows in the presentation at once (vector
+        // pictures are shared across pixel ratios).
+        previewCache: location.pathname + '/picture/' } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
+        concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
+        previewCache: location.pathname + '/picture/' }
+        : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
+          : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
+            : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
+    };
+    prepare(book);
     if (edit && view === 'layouts') {
       await renderLayouts(root, book, template, info, query.get('spread') ?? '',
         query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined);
       return;
     }
+    // Kept across revisions when the frame renders newer ones in place (IMAGEFLOW_WARM).
+    let react: ReturnType<typeof createRoot> | undefined;
+    let renderError: unknown;
+    let laidOutBook: ReturnType<typeof layoutBook> | undefined;
+    let reportPictures: (() => void) | undefined;
+    const renderRevision = async (book: RenderProject) => {
+    const { spreads } = book.project;
+    const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
+    const { chains, positions } = textAssignments(book, template);
+    const presentationStart = startOf(book);
     const activeChains = [...chains];
-    const textEditor = edit && query.get('view') === 'inline-text';
     const visible = spreads.map((spread, i) => ({ spread, i })).filter(({ spread }) => !textEditor || spread.id === query.get('spread'));
     const where = spreads.map((spread, i) => {
       return pagesText(sequence.spreads[i].page) + ' · ' + (sheetLayoutLabel(template.spreads, spread) ?? spread.definition);
@@ -1683,10 +1711,10 @@ export async function startRender(root: HTMLElement) {
     const index = { ...bookIndex(book, template, sequence), lookups };
     step('index');
 
-    let renderError: unknown;
+    renderError = undefined;
     const layoutFailures = new Map<string, Failure>();
-    const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
-    flushSync(() => react.render(visible.map(({ spread, i }) => {
+    react ??= createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
+    flushSync(() => react!.render(visible.map(({ spread, i }) => {
       const view = <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
         page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy || present} />;
       return <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} data-layout={spread.definition} key={spread.id}>
@@ -1966,7 +1994,12 @@ export async function startRender(root: HTMLElement) {
       if (index < 0) throw new PreviewError('preview-target-not-found', 'Spread ' + inspect.spread + ' does not exist in this book.');
       inspection = inspectElements(sheets[index], spreads[index], template, format, inspect);
     }
-    if (edit) setGrid = layoutBook(root, [...validated].map(([spread, { sheet }]) => ({ spread, sheet })), view, format, grid);
+    if (edit) {
+      const laidOut = [...validated].map(([spread, { sheet }]) => ({ spread, sheet }));
+      if (laidOutBook) laidOutBook.update(laidOut);
+      else laidOutBook = layoutBook(root, laidOut, view, format, grid);
+      setGrid = laidOutBook.setGrid;
+    }
     step('layout');
     if (present) await renderPresentation(root, sheets, spreads, sequence, format, presentationStart);
     else if (lazy) {
@@ -1993,8 +2026,8 @@ export async function startRender(root: HTMLElement) {
     publish({
       state: 'ready', template: info, pages: sequence.count, units, errors, warnings,
       flow: Object.fromEntries(Object.entries(positions).map(([key, { meta: _meta, ...position }]) => [key, position])), anchors: index.anchors,
-      ...(inspection ? { inspection } : {}),
-    });
+      ...(inspection ? { inspection } : {}), ...(currentRevision ? { revision: currentRevision } : {}),
+    } as RenderStatus);
     // The editor's book view does not wait for its pictures. It reports them to the live Book check as they start,
     // finish or fail, so a map that failed on the page is never missing from the check.
     if (edit && view === 'book' && window.parent !== window) {
@@ -2008,9 +2041,53 @@ export async function startRender(root: HTMLElement) {
           post({ type: 'pictures', pending, errors: [...pictureIssues(failures), ...photoRenderIssues(currentPhotoRenderFailures())] });
         }, 50);
       };
-      watchRenderedImages(report);
-      watchPhotoRenderFailures(report);
+      if (!reportPictures) {
+        watchRenderedImages(() => reportPictures?.());
+        watchPhotoRenderFailures(() => reportPictures?.());
+      }
+      reportPictures = report;
       report();
+    }
+    };
+    await renderRevision(book);
+    // Prototype (IMAGEFLOW_WARM builds): the book view and thumbnails stay alive across edits. The app names each newer
+    // render session; the frame moves to it and renders that revision into the same React root. A revision with
+    // another template, format or network access is refused, and the app creates a new frame for it as before.
+    if (import.meta.env.IMAGEFLOW_WARM && lazy && !textEditor) {
+      // URLs name the render session; the hash names the template files. Without a hash every revision is refused.
+      const identity = (next: RenderProject) => JSON.stringify([next.template.hash ?? Math.random(), next.template, next.project.format,
+        next.project.template, next.network, next.mode]).replaceAll(/\/render\/[\w-]{36}\//g, '/render/*/');
+      const shape = identity(book);
+      let wanted: string | undefined;
+      let running = false;
+      window.addEventListener('message', async (event) => {
+        if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'revision' || typeof event.data.project !== 'string') return;
+        wanted = event.data.project;
+        if (running) return;
+        running = true;
+        try {
+          while (wanted && wanted !== currentRevision) {
+            const revision = wanted;
+            const path = location.pathname.replace(/\/render\/[^/]+/, '/render/' + revision);
+            history.replaceState(null, '', path + location.search);
+            stepStart = performance.now();
+            try {
+              const response = await fetch(path + '/data');
+              if (!response.ok) throw new Error('Could not load the project.');
+              const next: RenderProject = await response.json();
+              step('data');
+              if (identity(next) !== shape) { post({ type: 'revision-refused', revision }); currentRevision = revision; continue; }
+              setTemplateFiles(next.files);
+              prepare(next);
+              currentRevision = revision;
+              await renderRevision(next);
+            } catch (error) {
+              currentRevision = revision;
+              post({ type: 'revision-refused', revision, message: error instanceof Error ? error.message : String(error) });
+            }
+          }
+        } finally { running = false; }
+      });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The template could not be rendered.';

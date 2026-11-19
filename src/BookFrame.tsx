@@ -8,7 +8,7 @@ import type { Issue } from './desktop';
 import type { PageSide } from './project';
 export type PictureStatus = { type: 'pictures'; pending: number; errors: Issue[] };
 
-type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
+type FrameState = { revision?: string; element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
   reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number; hiding?: boolean; start?: number };
 
 // The occurrence an inline editor is drawn over, whose artwork the book view hides while it edits.
@@ -51,7 +51,15 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   const [frames, setFrames] = useState<Record<string, FrameState>>({});
   const latest = useRef(new Map<string, FrameState>());
   const refs = useRef(new Map<string, HTMLIFrameElement>());
-  const ids = [shown, shown === target ? undefined : target].filter((id): id is string => id !== undefined);
+  // Prototype (IMAGEFLOW_WARM builds): the shown frame renders newer revisions in place, unless it refused one.
+  const [cold, setCold] = useState<ReadonlySet<string>>(new Set());
+  const projectOf = (id: string) => new URL(id).pathname.split('/').at(-1)!;
+  const sameView = (a: string, b: string) => { const x = new URL(a), y = new URL(b); return x.search === y.search && x.origin === y.origin; };
+  const shownState = shown ? frames[shown] : undefined;
+  const warm = !!import.meta.env.IMAGEFLOW_WARM && (view === 'book' || view === 'thumbs') && !!shown && !!target && shown !== target &&
+    sameView(shown, target) && shownState?.status?.state === 'ready' && !cold.has(project);
+  const revisionOf = (id: string) => latest.current.get(id)?.revision ?? projectOf(id);
+  const ids = [shown, shown === target || warm ? undefined : target].filter((id): id is string => id !== undefined);
 
   function storeFrame(id: string, frame: FrameState) {
     latest.current = new Map(ids.map((key) => [key, key === id ? frame : latest.current.get(key) ?? {}]));
@@ -103,6 +111,26 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     const previous = latest.current.get(id);
     // Revisiting a URL creates a new iframe. Readiness belongs to that instance, not its previous mount.
     const frame: FrameState = previous?.element === element ? { ...previous } : { element };
+    if ('type' in data && (data as { type: string }).type === 'revision-refused') {
+      const refused = (data as unknown as { revision: string }).revision;
+      console.warn('imageflow.warm-refused', view, JSON.stringify(data));
+      setCold((current) => new Set([...current, refused]));
+      return;
+    }
+    if ('state' in data && 'revision' in data && id === shown) {
+      // A revision the shown frame rendered in place: it is on screen already.
+      const revision = (data as { revision: string }).revision;
+      if (revision !== project) return;
+      frame.status = data;
+      frame.revision = revision;
+      frame.published = true;
+      storeFrame(id, frame);
+      onGeometry(frame.geometry, false, undefined, revision);
+      onShown?.(revision);
+      onStatus?.(data, revision);
+      if (frame.pictures && data.state === 'ready') onPictures?.(frame.pictures, revision);
+      return;
+    }
     if ('type' in data && data.type === 'reorder-ready') {
       if (frame.reorder !== 'preparing') return;
       const offsets = matchMedia('(prefers-reduced-motion: reduce)').matches ? [] :
@@ -116,7 +144,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     } else if ('type' in data && data.type === 'pictures') {
       // Kept with the frame, and passed on once it is shown.
       frame.pictures = data;
-      if (id === shown) onPictures?.(data, new URL(id).pathname.split('/').at(-1)!);
+      if (id === shown) onPictures?.(data, revisionOf(id));
       storeFrame(id, frame);
       return;
     } else if ('type' in data && data.type === 'geometry') {
@@ -127,7 +155,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
         (event.source as Window).postMessage({ type: 'inline-editing', key: latestKey.current, ...latestEditing.current }, origin);
       }
       frame.geometry = data;
-      if (id === shown) onGeometry(data, false, undefined, new URL(id).pathname.split('/').at(-1)!);
+      if (id === shown) onGeometry(data, false, undefined, (data as { revision?: string }).revision ?? revisionOf(id));
     } else if ('type' in data && data.type === 'inline-editing-applied') {
       frame.hiding = false;
       if (id === shown && data.key === latestKey.current) latestApplied.current?.(data.key);
@@ -207,6 +235,9 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     }
   }, [shown]);
 
+  useEffect(() => {
+    if (warm && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'revision', project }, origin);
+  }, [warm, shown, project]);
   useLayoutEffect(() => {
     if (presentation && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, origin);
   }, [presentation, shown]);
@@ -215,7 +246,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
     const frame = frames[id];
     return <iframe key={id} title={title} tabIndex={-1}
       className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending')}
-      data-current={id === target || undefined} data-ready={frame?.status?.state === 'ready' && frame.published ? '' : undefined}
+      data-current={id === target || (warm && id === shown) || undefined} data-revision={frame?.revision ?? projectOf(id)} data-ready={frame?.status?.state === 'ready' && frame.published ? '' : undefined}
       aria-hidden={id !== shown || undefined}
       style={{ height: frame?.geometry?.height }}
       ref={(element) => {
