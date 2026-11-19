@@ -8,7 +8,7 @@ import type { Issue } from './desktop';
 import type { PageSide } from './project';
 export type PictureStatus = { type: 'pictures'; pending: number; errors: Issue[] };
 
-type FrameState = { revision?: string; element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
+type FrameState = { revision?: string; held?: { revision: string; status: RenderStatus; motion: boolean }; element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
   reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number; hiding?: boolean; start?: number };
 
 // The occurrence an inline editor is drawn over, whose artwork the book view hides while it edits.
@@ -88,6 +88,25 @@ export function BookFrame({ busy = false, project, view, query = '', title, onGe
     if (frame.status) onStatus?.(frame.status, project);
     if (frame.status?.state === 'ready' && frame.pictures) onPictures?.(frame.pictures, project);
   }
+  // Shows the revision a reused frame holds: it drops its previous picture, and moved sheets start sliding on `start`.
+  function showHeld(id: string, start = performance.timeOrigin + performance.now()) {
+    const frame = latest.current.get(id);
+    if (!frame?.held || frame.held.revision !== project) return;
+    const { revision, status, motion } = frame.held;
+    const element = refs.current.get(id);
+    element?.contentWindow?.postMessage({ type: 'release-revision', project: revision }, origin);
+    if (motion) element?.contentWindow?.postMessage({ type: 'play-reorder', start }, origin);
+    const next: FrameState = { ...frame, held: undefined, status, revision, published: true };
+    storeFrame(id, next);
+    onGeometry(next.geometry, motion, motion ? start : undefined, revision);
+    onShown?.(revision);
+    onStatus?.(status, revision);
+    if (next.pictures && status.state === 'ready') onPictures?.(next.pictures, revision);
+  }
+  const showReleased = useEffectEvent(() => {
+    if (shown && release?.project === project) showHeld(shown, release.start);
+  });
+  useEffect(() => { showReleased(); }, [release]);
   const skipReorder = useEffectEvent((id: string, element: HTMLIFrameElement | undefined) => {
     const previous = latest.current.get(id);
     if (id !== target || refs.current.get(id) !== element || previous?.reorder !== 'preparing') return;
@@ -120,17 +139,14 @@ export function BookFrame({ busy = false, project, view, query = '', title, onGe
       return;
     }
     if ('state' in data && 'revision' in data && id === shown) {
-      // A revision the shown frame rendered in place: it is on screen already. Moved sheets slide on the frame's clock,
-      // and the app's overlays and thumbnails follow it. Unlike new frames, the two views are not revealed together.
+      // A revision the shown frame rendered in place, still behind its previous picture: it is shown when released,
+      // together with the other view's, as a new frame is.
       const revision = (data as { revision: string }).revision;
       if (revision !== project) return;
-      const motion = (data as { motion?: number }).motion;
-      const next: FrameState = { ...frame, status: data, revision, published: true };
-      storeFrame(id, next);
-      onGeometry(next.geometry, motion !== undefined, motion, revision);
-      onShown?.(revision);
-      onStatus?.(data, revision);
-      if (next.pictures && data.state === 'ready') onPictures?.(next.pictures, revision);
+      frame.held = { revision, status: data, motion: !!(data as { motion?: boolean }).motion };
+      storeFrame(id, frame);
+      if (data.state === 'ready' && onPrepared && release?.project !== project) onPrepared(project);
+      else showHeld(id, release?.project === project ? release.start : undefined);
       return;
     }
     if ('type' in data && data.type === 'reorder-ready') {

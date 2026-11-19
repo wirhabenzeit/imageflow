@@ -596,9 +596,10 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
     },
     // A warm frame rendered a newer revision into the same root: measure its sheets.
     hold() { held = true; },
-    // Lays out a newer revision rendered into the same root. Sheets that only moved, such as after a reorder, slide
-    // from their previous places, as a new frame's do; returns when that motion started.
-    update(next: { spread: string; sheet: HTMLElement }[]): number | undefined {
+    // Lays out a newer revision rendered into the same root. Sheets that only moved, such as after a reorder, wait at
+    // their previous places, as a new frame's do after prepare-reorder, until play-reorder starts them; returns whether
+    // any moved.
+    update(next: { spread: string; sheet: HTMLElement }[]): boolean {
       held = false;
       sheets = next;
       root.classList.add('if-book');
@@ -611,16 +612,16 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
       const offsets = view === 'book' || view === 'thumbs' ? reorderOffsets(before, reported) : [];
       animations.forEach((animation) => animation.cancel());
       animations = [];
-      if (!offsets.length || matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
-      const start = performance.timeOrigin + performance.now();
+      if (!offsets.length || matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
       animations = offsets.flatMap((offset) => {
         const slot = sheets.find((sheet) => sheet.spread === offset.spread)?.sheet.parentElement;
         if (!slot) return [];
         const animation = animateReorder(slot, offset);
-        animation.startTime = start - performance.timeOrigin;
+        animation.pause();
+        animation.currentTime = 0;
         return [animation];
       });
-      return animations.length ? start : undefined;
+      return animations.length > 0;
     },
   };
 }
@@ -1762,8 +1763,8 @@ export async function startRender(root: HTMLElement) {
     step('index');
 
     renderError = undefined;
-    // When sheets of a revision rendered in place started sliding to their new places, if any moved.
-    let motion: number | undefined;
+    // Whether sheets of a revision rendered in place wait to slide to their new places (play-reorder).
+    let motion = false;
     laidOutBook?.hold();
     // The previous revision's photo loader would measure this one's sheets while they are rendered and laid out, and
     // drop or restart photos the decode step below is waiting for. A new loader starts after the layout step.
@@ -2137,9 +2138,14 @@ export async function startRender(root: HTMLElement) {
       const shape = identity(book);
       let wanted: string | undefined;
       let running = false;
+      let release: (() => void) | undefined;
+      window.addEventListener('message', (event) => {
+        if (event.origin === editorURL.slice(0, -1) && event.data?.type === 'release-revision' && event.data.project === currentRevision) release?.();
+      });
       window.addEventListener('message', async (event) => {
         if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'revision' || typeof event.data.project !== 'string') return;
         wanted = event.data.project;
+        release?.();
         if (running) return;
         running = true;
         try {
@@ -2157,7 +2163,24 @@ export async function startRender(root: HTMLElement) {
               setTemplateFiles(next.files);
               prepare(next);
               currentRevision = revision;
-              await renderRevision(next);
+              // The frame keeps showing the revision it showed until the app releases this one, so the book view and
+              // the thumbnails change together, as new frames do. A newer revision ends the wait as well.
+              const shown = new Promise<void>((resolve) => { release = resolve; });
+              if (document.startViewTransition) {
+                // A revision that fails to render is not waited for, and fails below, as without a transition.
+                let failed: { error: unknown } | undefined;
+                const transition = document.startViewTransition(async () => {
+                  try { await renderRevision(next); } catch (error) { failed = { error }; return; }
+                  // A newer revision asked for meanwhile, also before this wait began, makes this one outdated: the app
+                  // will not release it, so it is not waited for.
+                  if (wanted === revision) await shown;
+                });
+                // Chromium gives up on a long update, or one it cannot capture (in a hidden window, say), and shows it at
+                // once; the frame then simply is not paired. Each of its promises reports that.
+                void transition.ready.catch(() => {}); void transition.finished.catch(() => {});
+                await transition.updateCallbackDone.catch(() => {});
+                if (failed) throw failed.error;
+              } else await renderRevision(next);
             } catch (error) {
               currentRevision = revision;
               laidOutBook?.update([...root.querySelectorAll<HTMLElement>('.if-spread-container[data-spread]')].flatMap((container) => {

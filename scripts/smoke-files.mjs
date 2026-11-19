@@ -107,6 +107,8 @@ try {
   await saved('Route map updated');
   const framed = (await read()).spreads.find(({ id }) => id === 'road').elements.route.params;
   assert.deepEqual(framed, { track: 'senja-road', centerX: 0.5444, zoom: 2.25 });
+  // Saved is not yet shown: the book view renders the saved view next.
+  for (let i = 0; i < 100 && await viewBox() !== '32.218 27.778 44.444 44.444'; i++) await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(await viewBox(), '32.218 27.778 44.444 44.444');
   for (let i = 0; i < 3; i++) await rerendered(() => w.getByRole('button', { name: 'Undo', exact: true }).click());
   assert.equal(await viewBox(), '0.000 0.000 100.000 100.000');
