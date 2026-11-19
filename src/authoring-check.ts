@@ -46,6 +46,7 @@ export type FixtureReport = {
   synthetic: true; committed: false;
   // Revision of the saved inputs (template, document parameters) the fixtures were rendered from.
   revision: string | null;
+  cover?: { interiorPages: number };
   matrix: { layouts: string[]; formats: string[]; cases: FixtureCase[] };
   coverage: { planned: number; rendered: number; failed: number; notIsolated: number; skipped: FixtureSkip[] };
   cells: FixtureCellReport[];
@@ -57,5 +58,5 @@ export type FixtureReport = {
 };
 export type AuthoringDraftSummary = {
   applied: boolean; committed: false;
-  changes?: string[]; affectedSpreads?: string[]; references?: Record<string, string>; reflow?: boolean;
+  changes?: string[]; affectedSpreads?: string[]; affectedCover?: true; references?: Record<string, string>; reflow?: boolean;
 };

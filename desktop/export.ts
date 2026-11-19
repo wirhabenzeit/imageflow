@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, PDFRawStream, rgb } from 'pdf-lib';
 import type { PDFObject } from 'pdf-lib';
 import { formatSchema, pdfPoints, resolveFormat, trimBox } from '../src/format';
+import { coverTrimBox, printSpecificationSchema, resolveCover } from '../src/cover';
 import { parseDocument } from '../src/project';
 import type { Issue, RenderStatus } from '../src/desktop';
 import { isUnavailableSource } from '../src/source-diagnostics';
@@ -48,7 +49,7 @@ function preflightPage(page: PDFDict, resources: PDFDict | undefined, fontNames:
   return [...errors];
 }
 
-export async function printBook(url: string, fontNames: string[], signal: AbortSignal, progress: (message: string) => void) {
+export async function printBook(url: string, fontNames: string[], signal: AbortSignal, progress: (message: string) => void, surface?: 'cover') {
   signal.throwIfAborted();
   const window = new BrowserWindow({
     show: false,
@@ -59,7 +60,7 @@ export async function printBook(url: string, fontNames: string[], signal: AbortS
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   try {
-    progress('Rendering spreads and preparing photos…');
+    progress(surface === 'cover' ? 'Rendering cover and preparing photos…' : 'Rendering spreads and preparing photos…');
     try {
       await window.loadURL(url);
     } catch (error) {
@@ -82,36 +83,41 @@ export async function printBook(url: string, fontNames: string[], signal: AbortS
       })
     `);
     if (status.state === 'error') throw new Error(status.message);
-    if (!status.units.length) throw new Error('The book has no spreads yet. Add a spread before exporting.');
     const format = parseDocument(formatSchema, status.template.format, 'Print format');
     const resolved = resolveFormat(format);
-    const { outputWidth, height } = resolved;
+    const cover = surface === 'cover' ? resolveCover(parseDocument(printSpecificationSchema,
+      { interior: format, cover: status.template.coverFormats?.[status.template.formatId] }, 'Cover print specification'), status.pages) : undefined;
+    if (cover && cover.status !== 'ready') throw new Error('The cover dimensions cannot be resolved for export.');
+    if (!cover && !status.units.length) throw new Error('The book has no spreads yet. Add a spread before exporting.');
+    const outputWidth = cover ? cover.geometry.sheet.width : resolved.outputWidth;
+    const height = cover ? cover.geometry.sheet.height : resolved.height;
+    const output = cover?.geometry.output ?? format.output;
     progress('Printing PDF…');
     const pdf = await PDFDocument.load(await window.webContents.printToPDF({
       pageSize: { width: outputWidth / 25.4, height: height / 25.4 },
       preferCSSPageSize: true, printBackground: true, margins: { top: 0, bottom: 0, left: 0, right: 0 },
     }), { updateMetadata: false });
-    if (pdf.getPageCount() !== status.units.length) throw new Error('Chromium did not produce the expected number of PDF pages.');
+    if (pdf.getPageCount() !== (cover ? 1 : status.units.length)) throw new Error('Chromium did not produce the expected number of PDF pages.');
     progress('Checking PDF…');
     const widthPt = pdfPoints(outputWidth);
     const heightPt = pdfPoints(height);
     const issues = new Set<string>();
     for (const [index, page] of pdf.getPages().entries()) {
-      const { side, where } = status.units[index];
+      const where = cover ? 'Cover' : status.units[index].where;
       const actual = page.getMediaBox();
       if (Math.abs(actual.width - widthPt) > 0.5 || Math.abs(actual.height - heightPt) > 0.5) {
         throw new Error('Chromium produced an unexpected size on PDF page ' + (index + 1) + '.');
       }
-      const box = trimBox(resolved, side);
+      const box = cover ? coverTrimBox(cover) : trimBox(resolved, status.units[index].side);
       page.setMediaBox(0, 0, widthPt, heightPt);
       page.setCropBox(0, 0, widthPt, heightPt);
       page.setBleedBox(0, 0, widthPt, heightPt);
       page.setTrimBox(pdfPoints(box.x), pdfPoints(box.y), pdfPoints(box.width), pdfPoints(box.height));
-      for (const issue of preflightPage(page.node, page.node.Resources(), fontNames, format.output.transparency === 'forbid')) {
+      for (const issue of preflightPage(page.node, page.node.Resources(), fontNames, output.transparency === 'forbid')) {
         issues.add(where + ' · ' + issue[0].toUpperCase() + issue.slice(1) + '.');
       }
       if (status.errors.some((issue) => isUnavailableSource(issue) &&
-          (!issue.spread || issue.spread === status.units[index].spread))) {
+          (cover ? issue.cover : !issue.spread || issue.spread === status.units[index].spread))) {
         page.drawRectangle({ x: 0, y: 0, width: widthPt, height: 22, color: rgb(1, .91, .86), opacity: .96 });
         page.drawText('ORIGINAL UNAVAILABLE - cached content or placeholder', { x: 8, y: 7, size: 8, color: rgb(.65, .08, .05) });
       }
@@ -119,7 +125,7 @@ export async function printBook(url: string, fontNames: string[], signal: AbortS
     const errors: Issue[] = [...status.errors, ...[...issues].map((message) => ({ message, code: 'pdf-resource' }))];
     signal.throwIfAborted();
     const bytes = await pdf.save();
-    const limit = format.output.maximumFileSize?.pages;
+    const limit = cover ? cover.geometry.output.maximumFileSize : format.output.maximumFileSize?.pages;
     if (limit && bytes.length > limit) {
       errors.push({ code: 'pdf-file-size', message: 'The PDF is ' + Math.ceil(bytes.length / 1e6) + ' MB; the format allows ' + Math.floor(limit / 1e6) + ' MB.' });
     }

@@ -30,8 +30,8 @@ export type CheckDraft = (book: OpenProject) => {
 };
 
 function diagnostic(issue: Issue, severity: 'error' | 'warning'): AuthoringDiagnostic {
-  const { message, code, spread, where, box, element, page, source, parameter, details, suggestion } = issue;
-  const location = Object.fromEntries(Object.entries({ spread, box, element, page, source, parameter, where })
+  const { message, code, spread, cover, where, box, element, page, source, parameter, details, suggestion } = issue;
+  const location = Object.fromEntries(Object.entries({ spread, cover, box, element, page, source, parameter, where })
     .filter(([, value]) => value !== undefined && value !== ''));
   return {
     code: code ?? (severity === 'error' ? 'layout-error' : 'layout-warning'), stage: 'render', severity, message,
@@ -145,7 +145,7 @@ export async function checkProject(
     }
     else {
       const previewFailure = error instanceof PreviewError &&
-        ['invalid-preview-request', 'preview-target-not-found', 'preview-capture-failed'].includes(error.code);
+        ['invalid-preview-request', 'preview-target-not-found', 'preview-capture-failed', 'cover-unavailable'].includes(error.code);
       if (phase === 'render' && !(error instanceof ProjectRevisionError)) {
         result.checks.layout = previewFailure
           ? error.code === 'preview-capture-failed' ? 'completed' : 'not-run'

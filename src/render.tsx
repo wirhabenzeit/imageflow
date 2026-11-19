@@ -16,9 +16,12 @@ import * as jsx from 'react/jsx-runtime';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { editorURL } from './desktop';
+import { getCrop, placementIn } from './spread';
 import { bookLayout } from './desktop';
 import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
-import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, spanRequiredAt, toMillimeters } from './format';
+import { cssMM, pageLabel, pageSequence, pagesText, pdfPoints, resolveFormat, sheetBleed, sheetPages, spanRequiredAt, toMillimeters } from './format';
+import { coverLayoutsFor, resolveCover } from './cover';
+import type { CoverResolution } from './cover';
 import { animateReorder } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat } from './format';
@@ -33,7 +36,7 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, currentPhotoRenderFailures, watchPhotoRenderFailures, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import { bookIndex, chooseFormat, CoverArtwork, currentPhotoRenderFailures, watchPhotoRenderFailures, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup, PhotoRenderFailure, EditorContext, EditorPresentation } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
@@ -47,7 +50,7 @@ import { readEdit } from './editing';
 import { artworkTarget, parsePreviewRequest, PreviewError } from './preview';
 import { previewAspectMismatch, trimAspect } from './template-preview';
 import type { PreviewFileReport } from './template-preview';
-import type { PreviewMetadata, PagePreviewMetadata } from './preview';
+import type { CoverPreviewMetadata, PreviewMetadata, PagePreviewMetadata } from './preview';
 import { inspectionSchema } from './inspection';
 import type { ElementInspection, ElementMeasurement } from './inspection';
 import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
@@ -839,10 +842,17 @@ function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: Retu
   document.body.append(pages);
 }
 
-function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: ResolvedFormat) {
+function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: Pick<ResolvedFormat, 'spreadWidth'>) {
   const outer = sheet.getBoundingClientRect(), rect = node.getBoundingClientRect();
   const scale = format.spreadWidth / outer.width;
   return { x: (rect.left - outer.left) * scale, y: (rect.top - outer.top) * scale, width: rect.width * scale, height: rect.height * scale };
+}
+
+function typographyOf(node: HTMLElement) {
+  const style = getComputedStyle(node);
+  const points = (value: string) => Math.round(parseFloat(value) * 72 / 96 * 100) / 100;
+  return { fontFamily: style.fontFamily, fontSizePt: points(style.fontSize),
+    lineHeightPt: style.lineHeight === 'normal' ? null : points(style.lineHeight), fontWeight: style.fontWeight, color: style.color };
 }
 
 function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat,
@@ -857,12 +867,9 @@ function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Temp
     const box = declared === 'box', kind = box ? definition.boxes[id].type : 'element';
     const prefix = (box ? 'boxes.' : 'elements.') + id + '.';
     const parameters = box ? definition.boxes[id].parameters : definition.elements[id].parameters;
-    const style = getComputedStyle(node);
-    const points = (value: string) => Math.round(parseFloat(value) * 72 / 96 * 100) / 100;
     const source = box ? state.boxes[id]?.photo ?? state.boxes[id]?.text : undefined;
     return { spread: spread.id, id, ...onPage(page), kind, boundsMm: measuredBounds(node, sheet, format), upright: upright(node, sheet),
-      typography: { fontFamily: style.fontFamily, fontSizePt: points(style.fontSize),
-        lineHeightPt: style.lineHeight === 'normal' ? null : points(style.lineHeight), fontWeight: style.fontWeight, color: style.color },
+      typography: typographyOf(node),
       editPaths: Object.keys(parameters).map((key) => prefix + key), ...(source ? { source } : {}) };
   });
   return { spread: spread.id, coordinateSpace: 'sheet-bleed-mm', items, total: nodes.length,
@@ -878,7 +885,7 @@ const overlayStyle = (rect: MmRect, extra: Partial<CSSStyleDeclaration>) => ({
 /** Draws requested authoring overlays onto a sheet after all checks and measurements: trim and safe-area guides, and
  * outlined, labelled boxes and elements. Coordinates are millimetres from the sheet's outer bleed corner, so the
  * overlays scale and crop with the artwork. */
-function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, labels }: { guides: boolean; labels: boolean }) {
+function annotationLayer(sheet: HTMLElement) {
   const layer = document.createElement('div');
   Object.assign(layer.style, { position: 'absolute', inset: '0', pointerEvents: 'none', zIndex: '2147483647' });
   const add = (rect: MmRect, extra: Partial<CSSStyleDeclaration>, text?: string) => {
@@ -893,6 +900,12 @@ function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, lab
     }
     layer.append(node);
   };
+  sheet.append(layer);
+  return add;
+}
+
+function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, labels }: { guides: boolean; labels: boolean }) {
+  const add = annotationLayer(sheet);
   if (labels) {
     for (const found of declaredNodes(sheet)) {
       add(measuredBounds(found.node, sheet, format), { border: '0.35mm solid #ff6a00' }, declaredName(found));
@@ -906,7 +919,6 @@ function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, lab
         height: trim.height - safe.top - safe.bottom }, { border: '0.3mm dashed #00a3e0' });
     }
   }
-  sheet.append(layer);
 }
 
 // The flowed book stays laid out at its size while the artwork shows its copy. Hiding it with display:none would
@@ -936,6 +948,7 @@ function paintSentinel(sentinel: Sentinel, top: number) {
 
 function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>,
   format: ResolvedFormat, artwork: ReturnType<typeof parsePreviewRequest>, fixture?: FixtureMarking) {
+  if ('cover' in artwork.target) throw new PreviewError('invalid-preview-request', 'Use the cover renderer for an exterior cover preview.');
   const { bounds, maxEdge, guides, labels } = artwork;
   const overlays = { ...(guides ? { guides: true as const } : {}), ...(labels ? { labels: true as const } : {}) };
   const annotated = new Set<number>();
@@ -1549,6 +1562,220 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   flushSync(() => react.render(React.createElement(Host)));
 }
 
+function coverArtworkPreview(root: HTMLElement, sheet: HTMLElement, cover: Exclude<CoverResolution, { status: 'unavailable' }>,
+  artwork: ReturnType<typeof parsePreviewRequest>, query: URLSearchParams) {
+  const { target, bounds, guides, labels, maxEdge } = artwork;
+  const { geometry } = cover;
+  const relative = (rect: Rect) => ({ ...rect, x: rect.x - geometry.sheet.x, y: rect.y - geometry.sheet.y });
+  let crop = relative(bounds === 'trim' ? geometry.trim : geometry.sheet);
+  let detail: CoverPreviewMetadata['detail'];
+  if ('cover' in target && (target.box || target.element)) {
+    const owner = target.box ? { box: target.box } : { element: target.element! };
+    const node = findDeclared(sheet, owner)[0]?.node;
+    if (!node) throw new PreviewError('preview-target-not-found', 'The requested box or element is not drawn on the cover.');
+    const rect = measuredBounds(node, sheet, { spreadWidth: geometry.sheet.width });
+    const padding = target.paddingMm ?? 2;
+    const x = Math.max(crop.x, rect.x - padding), y = Math.max(crop.y, rect.y - padding);
+    const width = Math.min(crop.x + crop.width, rect.x + rect.width + padding) - x;
+    const height = Math.min(crop.y + crop.height, rect.y + rect.height + padding) - y;
+    if (width <= 0 || height <= 0) throw new PreviewError('preview-target-not-found', 'The requested cover artwork has no visible area.');
+    crop = { x, y, width, height };
+    detail = { ...owner, xMm: x, yMm: y };
+  }
+  if (guides || labels) {
+    const add = annotationLayer(sheet);
+    if (guides) {
+      add(relative(geometry.trim), { border: '0.3mm solid #e6007e' });
+      for (const area of Object.values(geometry.safe)) if (area) add(relative(area), { border: '0.3mm dashed #00a3e0' });
+      for (const x of geometry.folds) add(relative({ x, y: geometry.sheet.y, width: .2, height: geometry.sheet.height }), { background: '#e6007e' });
+    }
+    if (labels) for (const node of declaredNodes(sheet)) {
+      add(measuredBounds(node.node, sheet, { spreadWidth: geometry.sheet.width }), { border: '0.35mm solid #ff6a00' }, declaredName(node));
+    }
+  }
+  const scale = maxEdge / Math.max(crop.width, crop.height);
+  const width = Math.max(1, Math.round(crop.width * scale)), height = Math.max(1, Math.round(crop.height * scale));
+  const frame = croppedSheet(sheet, { x: crop.x, y: crop.y, widthMm: crop.width, heightMm: crop.height }, { width, height });
+  const marker = query.get('sentinel');
+  const sentinel = marker && parseSentinel(marker);
+  if (sentinel) {
+    frame.dataset.previewArtwork = marker;
+    paintSentinel(sentinel, height);
+  }
+  hideArtworkSource(root);
+  document.body.append(frame);
+  const metadata: CoverPreviewMetadata = { cover: true, width, height, widthMm: crop.width, heightMm: crop.height, bounds,
+    interiorPages: cover.interiorPages, ...(cover.status === 'provisional' ? { previewPages: cover.previewPages } : {}),
+    ...(detail ? { detail } : {}), ...(guides ? { guides: true } : {}), ...(labels ? { labels: true } : {}) };
+  window.imageflowPreview = { state: 'ready', metadata };
+}
+
+async function renderPhysicalCover(root: HTMLElement, book: RenderProject, template: ReturnType<typeof chooseFormat>,
+  info: TemplateInfo, sequence: ReturnType<typeof pageSequence>, query: URLSearchParams, renderIssues: () => string[]) {
+  const formats = template.coverFormats;
+  const coverFormat = !template.unknownChoice && formats && Object.hasOwn(formats, template.formatId) ? formats[template.formatId] : undefined;
+  const interiorPages = book.fixture?.coverPages ?? sequence.count;
+  const cover = resolveCover({ interior: template.format, cover: coverFormat }, interiorPages);
+  if (cover.status === 'unavailable') throw new PreviewError('cover-unavailable', 'This format does not have an exterior cover.');
+  const state = book.project.cover;
+  const candidates = coverLayoutsFor(template.coverLayouts, template.formatId);
+  const layout = state && Object.hasOwn(candidates, state.definition) ? candidates[state.definition] : undefined;
+  const { geometry } = cover;
+  const edit = book.mode === 'edit';
+  const errors: Issue[] = [], warnings: Issue[] = [];
+  const issue = (message: string, code: string, box?: string): Issue => ({ message, code, cover: true, where: 'Cover', box });
+  if (cover.status === 'provisional') {
+    errors.push(issue('The cover needs a supported interior page count. The preview uses ' + cover.previewPages + ' pages.', 'cover-page-count'));
+  } else if (book.fixture?.coverPages === undefined && sequence.issues.length) {
+    errors.push(issue('Fix the interior page sequence before exporting the cover. ' + sequence.issues[0], 'cover-page-sequence'));
+  }
+  if (!layout) errors.push(issue('Choose a cover layout for this format.', 'cover-layout-unavailable'));
+  const printing = !edit && query.get('view') === 'cover';
+  const artwork = query.get('view') === 'cover-artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
+  const inspect = query.has('inspect') ? inspectionSchema.parse(JSON.parse(query.get('inspect')!)) : undefined;
+  if (printing && errors.length) throw new Error(errors[0].message);
+  if (!layout && (artwork || inspect)) throw new PreviewError('preview-target-not-found', 'Choose a cover layout before requesting its artwork.');
+
+  const width = cssMM(geometry.sheet.width), height = cssMM(geometry.sheet.height);
+  root.className = 'if-cover-root';
+  if (edit) {
+    root.classList.add('if-preview');
+    const fit = () => {
+      root.style.transform = 'scale(' + Math.min(innerWidth / (geometry.sheet.width * 96 / 25.4), innerHeight / (geometry.sheet.height * 96 / 25.4)) + ')';
+    };
+    fit();
+    window.addEventListener('resize', fit);
+  } else if (printing) {
+    const style = document.createElement('style');
+    style.textContent = '@page { size: ' + width + ' ' + height + '; margin: 0; }';
+    document.head.append(style);
+  }
+  configureRenderedImages({ mode: edit ? 'preview' : printing ? 'export' : 'check',
+    pixelRatio: edit ? window.devicePixelRatio || 1 : (geometry.output.resolution?.target ?? 300) / 96,
+    concurrency: edit ? 2 : 3, timeoutMs: edit ? pictureTimeoutMs.preview : pictureTimeoutMs.export });
+  let renderError: unknown;
+  const reactRoot = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
+  flushSync(() => reactRoot.render(
+    <div className="if-cover-sheet" style={{ width, height }}>
+      <div className="if-cover-trim" style={{ left: cssMM(-geometry.sheet.x), top: cssMM(-geometry.sheet.y),
+        width: cssMM(geometry.trim.width), height: cssMM(geometry.trim.height) }}>
+        {layout && state && <CoverArtwork book={book} template={template} cover={state} geometry={geometry} interiorPages={interiorPages} />}
+      </div>
+    </div>,
+  ));
+  if (renderError) throw renderError;
+  const sheet = root.firstElementChild as HTMLElement;
+  const bounds = sheet.getBoundingClientRect();
+  const mmPerPixel = geometry.sheet.width / bounds.width;
+  const files = (parameters: Parameters, values: Values) => fileErrors(book, parameters, values, 'Cover')
+    .map((found) => ({ ...found, cover: true as const, where: 'Cover' }));
+  if (layout && state) {
+    errors.push(...files(layout.parameters, state.params));
+    const boxes = new Map<string, HTMLElement>();
+    const elements = new Set<string>();
+    for (const { kind, id, node, boxType } of declaredNodes(sheet)) {
+      if (kind === 'element') {
+        if (!Object.hasOwn(layout.elements, id) || elements.has(id)) throw new Error('Unknown or duplicate cover element ' + id + '.');
+        elements.add(id);
+      } else {
+        if (!Object.hasOwn(layout.boxes, id) || boxes.has(id) || boxType !== 'photo') throw new Error('Unknown or duplicate cover photo box ' + id + '.');
+        if (!node.clientWidth || !node.clientHeight) throw new Error('Cover photo box ' + id + ' has no area.');
+        boxes.set(id, node);
+      }
+    }
+    for (const [id, declared] of Object.entries(layout.boxes)) {
+      const node = boxes.get(id);
+      if (!node) errors.push(issue('Draw ' + declared.label + ' exactly once.', 'cover-box-count', id));
+      const box = state.boxes[id];
+      const photo = box?.photo && book.photos[box.photo];
+      const available = box?.photo && book.sources?.['photo:' + box.photo];
+      if (available && available.state !== 'available' && available.cached) errors.push({
+        ...issue(available.problem + '. The cover preview uses a cached image.', 'source-unavailable', id), source: box.photo,
+      });
+      if (box?.photo && !photo) errors.push({ ...issue(declared.label + ' uses an unavailable photo.', 'photo-missing', id), source: box.photo });
+      else if (!box?.photo) warnings.push(issue(declared.label + ' is empty.', 'cover-box-empty', id));
+      if (photo && node && geometry.output.resolution) {
+        const rect = node.getBoundingClientRect();
+        const { width, height } = { width: rect.width * mmPerPixel, height: rect.height * mmPerPixel };
+        if (width > 0 && height > 0) {
+          const placement = placementIn(box, state.definition);
+          const crop = getCrop(photo, placement, width / height);
+          const ppi = Math.min(photo.width * crop.width * 25.4 / width, photo.height * crop.height * 25.4 / height);
+          const { minimum, target } = geometry.output.resolution;
+          if (ppi < target) (ppi < minimum ? errors : warnings).push(issue(
+            declared.label + ' has ' + Math.round(ppi) + ' ppi at its current crop.', 'photo-resolution-low', id));
+        }
+      }
+      errors.push(...files(declared.parameters, box?.params ?? {}).map((finding) => ({ ...finding, box: id })));
+    }
+    for (const [id, declared] of Object.entries(layout.elements)) {
+      errors.push(...files(declared.parameters, state.elements[id]?.params ?? {}).map((finding) => ({ ...finding, element: id })));
+    }
+  }
+  // Wait for asynchronous artwork before printing or giving an agent a proof.
+  if (!edit) {
+    const images = await settleRenderedImages();
+    errors.push(...images.map(({ message, element }) => ({ ...issue(message, 'rendered-image-failed'), element })));
+    const photos = decodable(sheet);
+    const decoded = await settle(photos);
+    for (const [index, result] of decoded.entries()) {
+      if (result.status === 'rejected') errors.push(issue('A cover image could not be decoded.', 'photo-decode', ownerOf(pictureSource.get(photos[index]) ?? photos[index]).box));
+    }
+    errors.push(...currentPhotoRenderFailures().map(({ message, box }) => issue(message, 'photo-render-failed', box)));
+    errors.push(...renderIssues().map((message) => issue(message, 'render-impure')));
+    for (const font of fontFailures()) errors.push(issue('Could not load cover font ' + font + '.', 'font-load'));
+    const fontUse = checkFonts(sheet);
+    for (const { chars, family, owner } of fontUse.missing) errors.push({
+      ...issue(family + ' has no glyphs for ' + [...chars].join(' ') + '.', 'font-coverage'), ...owner,
+    });
+    if (fontUse.stroked) errors.push({ ...issue('Stroked cover text prints as a Type 3 font.', 'text-stroked'), ...fontUse.stroked.owner });
+  }
+  if (layout) {
+    const text = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    let outside = false, fold = false, small = false;
+    for (let node = text.nextNode(); node; node = text.nextNode()) {
+      const parent = node.parentElement;
+      if (!node.textContent?.trim() || !parent || parent.closest('svg, [data-empty], [data-decorative]')) continue;
+      const size = pdfPoints(parseFloat(getComputedStyle(parent).fontSize) * 25.4 / 96);
+      const minimum = geometry.output.minimumTextSize;
+      if (minimum && size < pdfPoints(toMillimeters(minimum))) small = true;
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) {
+        if (!rect.width || !rect.height) continue;
+        const x = (rect.left - bounds.left) * mmPerPixel + geometry.sheet.x;
+        const y = (rect.top - bounds.top) * mmPerPixel + geometry.sheet.y;
+        const right = x + rect.width * mmPerPixel, bottom = y + rect.height * mmPerPixel;
+        if (!Object.values(geometry.safe).some((area) => area && x >= area.x - .2 && right <= area.x + area.width + .2 &&
+          y >= area.y - .2 && bottom <= area.y + area.height + .2)) outside = true;
+        if (geometry.avoid.some((area) => x < area.x + area.width && right > area.x && y < area.y + area.height && bottom > area.y)) fold = true;
+      }
+    }
+    if (outside) warnings.push(issue('Some cover text extends outside its region’s safe area.', 'text-outside-safe-area'));
+    if (fold) warnings.push(issue('Some cover text crosses a fold avoidance area.', 'cover-text-near-fold'));
+    if (small) warnings.push(issue('Some cover text is smaller than the minimum print size.', 'text-too-small'));
+  }
+  let inspection: ElementInspection | undefined;
+  if (inspect && layout && state) {
+    const nodes = (inspect.box ? findDeclared(sheet, { box: inspect.box }) : inspect.element ? findDeclared(sheet, { element: inspect.element })
+      : declaredNodes(sheet)).filter(({ kind, id }) => Object.hasOwn(kind === 'box' ? layout.boxes : layout.elements, id));
+    if ((inspect.box || inspect.element) && !nodes.length) throw new PreviewError('preview-target-not-found', 'The requested box or element is not drawn on the cover.');
+    const items: ElementMeasurement[] = nodes.slice(inspect.offset, inspect.offset + inspect.limit).map(({ node, kind, id }) => {
+      const box = kind === 'box';
+      const parameters = (box ? layout.boxes[id] : layout.elements[id]).parameters;
+      const prefix = (box ? 'boxes.' : 'elements.') + id + '.';
+      return { cover: true, id, kind: box ? 'photo' : 'element', boundsMm: measuredBounds(node, sheet, { spreadWidth: geometry.sheet.width }),
+        typography: typographyOf(node), upright: upright(node, sheet), editPaths: Object.keys(parameters).map((key) => prefix + key),
+        ...(box && state.boxes[id]?.photo ? { source: state.boxes[id].photo } : {}) };
+    });
+    inspection = { cover: true, coordinateSpace: 'sheet-bleed-mm', items, total: nodes.length,
+      nextOffset: inspect.offset + items.length < nodes.length ? inspect.offset + items.length : null };
+  }
+  if (artwork) coverArtworkPreview(root, sheet, cover, artwork, query);
+  publish({ state: 'ready', template: info, pages: interiorPages, units: [], errors, warnings, flow: {}, anchors: [], cover,
+    ...(inspection ? { inspection } : {}) });
+}
+
 export async function startRender(root: HTMLElement) {
   let info: TemplateInfo | undefined;
   // Profiling builds time each step of a render as imageflow.render.<step>, from the end of the previous step.
@@ -1638,6 +1865,10 @@ export async function startRender(root: HTMLElement) {
     }
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
+    if (['cover', 'cover-check', 'cover-artwork'].includes(query.get('view') ?? '')) {
+      await renderPhysicalCover(root, book, template, info, sequence, query, () => (guards?.calls ?? []).map(({ api }) => impureMessage(api)));
+      return;
+    }
     const { chains, positions } = textAssignments(book, template);
     const present = query.get('view') === 'present';
     const presentationStart = spreads.find(({ id }) => id === query.get('spread'))?.id ?? spreads[0]?.id ?? '';

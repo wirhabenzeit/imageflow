@@ -166,7 +166,7 @@ export async function exportAction(page) {
     observer.observe(document.querySelector('.studio'), { subtree: true, childList: true, characterData: true });
     setTimeout(() => observer.disconnect(), 10000);
   });
-  await page.getByRole('button', { name: 'Export PDF…', exact: true }).click();
+  await page.getByRole('button', { name: /^Export (?:Content )?PDF…$/ }).click();
   await page.waitForFunction(() => window.__exportStarted);
 
 }

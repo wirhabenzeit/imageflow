@@ -10,7 +10,7 @@ export type AuthoringDiagnostic = {
   message: string;
   location?: {
     path?: string; line?: number; column?: number;
-    spread?: string; box?: string; element?: string; source?: string; parameter?: string; where?: string;
+    spread?: string; cover?: true; box?: string; element?: string; source?: string; parameter?: string; where?: string;
     // The page of a spread shown as page layouts that the box or element is on (ADR 0009).
     page?: 'left' | 'right';
     // Path inside the template's default export, such as `spreads.chapter.parameters.heading.default`.

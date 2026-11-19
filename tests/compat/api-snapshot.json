@@ -1,6 +1,6 @@
 {
   "bookFormat": {
-    "schemaVersion": 2,
+    "schemaVersion": 3,
     "project.json": {
       "type": "object",
       "properties": {
@@ -8,7 +8,8 @@
           "type": "number",
           "enum": [
             1,
-            2
+            2,
+            3
           ]
         },
         "title": {
@@ -155,6 +156,244 @@
               }
             ]
           }
+        },
+        "cover": {
+          "type": "object",
+          "properties": {
+            "definition": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+            },
+            "params": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            "boxes": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "photo": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                  },
+                  "text": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                  },
+                  "crops": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "centerX": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "centerY": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "zoom": {
+                          "type": "number",
+                          "minimum": 1,
+                          "maximum": 20
+                        }
+                      },
+                      "required": [
+                        "centerX",
+                        "centerY",
+                        "zoom"
+                      ]
+                    }
+                  },
+                  "focus": {
+                    "type": "object",
+                    "properties": {
+                      "centerX": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "centerY": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "centerX",
+                      "centerY"
+                    ]
+                  },
+                  "params": {
+                    "default": {},
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "elements": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "params": {
+                    "default": {},
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+                    },
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "number"
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "required": [
+            "definition"
+          ]
         },
         "spreads": {
           "type": "array",
@@ -1119,7 +1358,8 @@
       "template-preview",
       "photo-render",
       "formatted-text",
-      "app-controls"
+      "app-controls",
+      "text-metadata"
     ],
     "capabilities": [
       "anchors",
@@ -1152,7 +1392,9 @@
       "template-preview",
       "photo-render",
       "formatted-text",
-      "app-controls"
+      "app-controls",
+      "text-metadata",
+      "physical-covers"
     ],
     "declarations": {
       "imageflow.d.ts": {
@@ -1168,6 +1410,11 @@
         "FacingFormat": "export type FacingFormat = { label: string; trim: { width: Length; height: Length; }; bleed: Insets; safe: Insets; structure: { facingPages?: true; delivery: 'pages' | 'spreads'; ends: 'single-pages' | 'inside-covers'; pageCount: { min: number; max: number; step: 2 | 4; }; }; output: FormatOutput; };",
         "SinglePageFormat": "export type SinglePageFormat = { label: string; trim: { width: Length; height: Length; }; bleed: PageInsets; safe: PageInsets; structure: { facingPages: false; pageCount: { min: number; max: number; step: 1 | 2 | 4; }; }; output: FormatOutput; };",
         "PrintFormat": "export type PrintFormat = FacingFormat | SinglePageFormat;",
+        "CoverOutput": "export type CoverOutput = Omit<FormatOutput, 'maximumFileSize' | 'fonts'> & { maximumFileSize?: number; };",
+        "CoverWidths": "export type CoverWidths = { spine: Length; flaps?: { back: Length; front: Length; }; };",
+        "CoverFormat": "export type CoverFormat = { kind: 'wrap'; height: Length; panels: { back: Length; front: Length; }; widths: { kind: 'fixed'; value: CoverWidths; } | { kind: 'page-bands'; bands: { from: number; to: number; value: CoverWidths; }[]; }; outer: { kind: 'bleed' | 'wrap'; insets: PageInsets; }; safe: { back: PageInsets; spine: PageInsets; front: PageInsets; }; flaps?: { safe: { back: PageInsets; front: PageInsets; }; }; foldAvoidance?: { back: Length; front: Length; }; output: CoverOutput; };",
+        "CoverRegion": "export type CoverRegion = 'backFlap' | 'back' | 'spine' | 'front' | 'frontFlap';",
+        "ResolvedCover": "export type ResolvedCover = { outerKind: 'bleed' | 'wrap'; sheet: Rect; trim: Rect; regions: Record<'back' | 'spine' | 'front', Rect> & Partial<Record<'backFlap' | 'frontFlap', Rect>>; safe: Partial<Record<CoverRegion, Rect | null>>; folds: number[]; avoid: Rect[]; output: CoverOutput; };",
         "InsetsShorthand": "export type InsetsShorthand = Length | (Partial<Insets> & { all: Length; }) | Insets;",
         "PageInsetsShorthand": "export type PageInsetsShorthand = Length | (Partial<PageInsets> & { all: Length; }) | PageInsets;",
         "FormatOptions": "type FormatOptions = { label: string; trim: { width: Length; height: Length; }; output?: Partial<FormatOutput>; };",
@@ -1201,7 +1448,7 @@
         "DefaultItemsChecked": "type DefaultItemsChecked<D, I> = { [N in keyof D]: { [F in keyof D[N]]: F extends 'id' ? string : F extends keyof I ? ScalarValue<I[F]> : never; }; };",
         "Known": "type Known<O, Allowed> = O & { [K in Exclude<keyof O, keyof Allowed>]: never; };",
         "EnumKeys": "type EnumKeys<C> = `${Extract<keyof C, string | number>}`;",
-        "FirstStatement #45": "export const p: { boolean<const O extends Options<BooleanParameter>>(options: Known<O, Options<BooleanParameter>>): O & { type: 'boolean'; }; string<const O extends Options<StringParameter>>(options: Known<O, Options<StringParameter>>): O & { type: 'string'; }; integer<const O extends Options<IntegerParameter>>(options: Known<O, Options<IntegerParameter>>): O & { type: 'integer'; }; number<const O extends Options<NumberParameter>>(options: Known<O, Options<NumberParameter>>): O & { type: 'number'; }; enum<const T extends string>(options: Common & { options: readonly T[]; default: NoInfer<T>; labels?: Partial<Record<T, string>>; }): Common & { options: readonly T[]; default: T; labels?: Partial<Record<T, string>>; type: 'enum'; }; enum<const C extends Record<string, string>>(options: Common & { options: C; default: NoInfer<EnumKeys<C>>; }): Common & { options: EnumKeys<C>[]; default: EnumKeys<C>; labels: C; type: 'enum'; }; color<const O extends Options<ColorParameter>>(options: Known<O, Options<ColorParameter>>): O & { type: 'color'; }; date<const O extends Options<DateParameter>>(options: Known<O, Options<DateParameter>>): O & { type: 'date'; }; file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: Known<O, Omit<FileParameter, 'type' | 'default'>>): O & { type: 'file'; default: ''; }; list<const O extends Common & { item: Record<string, ScalarParameter>; min?: number; max?: number; default?: readonly ListItemInput[]; }>(options: Known<O, Common & { item: unknown; min?: number; max?: number; default?: unknown; }> & { item: ParametersChecked<O['item']>; default?: DefaultItemsChecked<O['default'], O['item']>; }): Omit<O, 'default'> & { type: 'list'; default: ({ id: string; } & Partial<ListItemValue<O['item']>>)[]; }; };",
+        "FirstStatement #50": "export const p: { boolean<const O extends Options<BooleanParameter>>(options: Known<O, Options<BooleanParameter>>): O & { type: 'boolean'; }; string<const O extends Options<StringParameter>>(options: Known<O, Options<StringParameter>>): O & { type: 'string'; }; integer<const O extends Options<IntegerParameter>>(options: Known<O, Options<IntegerParameter>>): O & { type: 'integer'; }; number<const O extends Options<NumberParameter>>(options: Known<O, Options<NumberParameter>>): O & { type: 'number'; }; enum<const T extends string>(options: Common & { options: readonly T[]; default: NoInfer<T>; labels?: Partial<Record<T, string>>; }): Common & { options: readonly T[]; default: T; labels?: Partial<Record<T, string>>; type: 'enum'; }; enum<const C extends Record<string, string>>(options: Common & { options: C; default: NoInfer<EnumKeys<C>>; }): Common & { options: EnumKeys<C>[]; default: EnumKeys<C>; labels: C; type: 'enum'; }; color<const O extends Options<ColorParameter>>(options: Known<O, Options<ColorParameter>>): O & { type: 'color'; }; date<const O extends Options<DateParameter>>(options: Known<O, Options<DateParameter>>): O & { type: 'date'; }; file<const O extends Omit<FileParameter, 'type' | 'default'>>(options: Known<O, Omit<FileParameter, 'type' | 'default'>>): O & { type: 'file'; default: ''; }; list<const O extends Common & { item: Record<string, ScalarParameter>; min?: number; max?: number; default?: readonly ListItemInput[]; }>(options: Known<O, Common & { item: unknown; min?: number; max?: number; default?: unknown; }> & { item: ParametersChecked<O['item']>; default?: DefaultItemsChecked<O['default'], O['item']>; }): Omit<O, 'default'> & { type: 'list'; default: ({ id: string; } & Partial<ListItemValue<O['item']>>)[]; }; };",
         "ConditionValue": "export type ConditionValue = string | number | boolean | readonly (string | number | boolean)[];",
         "Condition": "export type Condition<K extends string = string> = { [P in K]?: ConditionValue; };",
         "ControlItem": "export type ControlItem<K extends string = string> = K | { parameter: K; label?: string; description?: string; when?: Condition<K>; } | { group: string; description?: string; controls: readonly ControlItem<K>[]; when?: Condition<K>; };",
@@ -1235,12 +1482,16 @@
         "Anchor": "export type Anchor = { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page'; };",
         "BookPhotoPlacement": "export type BookPhotoPlacement = { readonly page?: 'left' | 'right'; readonly box: string; readonly photoId: string | null; readonly photo: Readonly<Photo> | null; };",
         "BookSpread": "export type BookSpread = { readonly id: string; readonly layout?: string; pages?: Partial<Record<'left' | 'right', { layout?: string; photos: BookPhotoPlacement[]; }>>; readonly page: Readonly<{ left?: number; right?: number; number?: number; }>; readonly photos: readonly BookPhotoPlacement[]; };",
-        "BookContext": "export type BookContext = { pages: number; spreads: readonly BookSpread[]; anchor(id: string): Anchor | undefined; anchors(id?: string): Anchor[]; credits: readonly Credit[]; };",
+        "BookTextPlacement": "export type BookTextPlacement = { readonly spread: string; readonly page?: 'left' | 'right'; readonly box: string; readonly part: number; readonly pageNumbers: Readonly<{ left?: number; right?: number; number?: number; }>; };",
+        "BookText": "export type BookText = { readonly id: string; readonly title?: string; readonly meta: Readonly<TextMeta>; readonly boxes: readonly BookTextPlacement[]; };",
+        "BookContext": "export type BookContext = { pages: number; spreads: readonly BookSpread[]; texts: readonly BookText[]; anchor(id: string): Anchor | undefined; anchors(id?: string): Anchor[]; credits: readonly Credit[]; };",
         "CreditDeclaration": "export type CreditDeclaration = { id: string; text: string; url?: string; side?: 'left' | 'right'; };",
         "Credit": "export type Credit = { readonly id: string; readonly text: string; readonly url?: string; readonly pages: readonly number[]; readonly spreads: readonly string[]; };",
         "CreditContext": "export type CreditContext<P = Values, D = Values, E = Record<string, { params: Values; }>, B = Record<string, { params: Values; photo?: Photo | null; }>> = { params: P; document: D; elements: E; boxes: B; };",
         "Photo": "export type Photo = { width: number; height: number; caption?: string; title?: string; credit?: string; altText?: string; captured?: { dateTime: string; offset: string | null; }; location?: { latitude: number; longitude: number; }; camera?: { make?: string; model?: string; }; };",
-        "FlowPosition": "export type FlowPosition = { part: number; parts: number; title?: string; };",
+        "TextMetaValue": "export type TextMetaValue = string | number | boolean | null | TextMetaValue[] | { [key: string]: TextMetaValue; };",
+        "TextMeta": "export type TextMeta = { [key: string]: TextMetaValue; };",
+        "FlowPosition": "export type FlowPosition = { part: number; parts: number; title?: string; meta: TextMeta; };",
         "ListItemValues": "export type ListItemValues = { id: string; [field: string]: string | number | boolean; };",
         "Values": "export type Values = Record<string, string | number | boolean | ListItemValues[]>;",
         "ValuesOf": "type ValuesOf<T> = T extends { parameters: infer P; } ? ParameterValues<P> : {};",
@@ -1264,18 +1515,20 @@
         "RenderView": "export type RenderView = 'canvas' | 'thumbnail' | 'layout-preview' | 'export';",
         "RenderContext": "export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D extends Parameters = Parameters> = { params: ValuesOf<S>; document: ParameterValues<D>; boxes: { [K in keyof S['boxes']]: BoxContext<S['boxes'][K]>; }; elements: { [K in keyof S['elements']]: { params: ValuesOf<S['elements'][K]>; }; }; page: { left?: number; right?: number; number?: number; }; side?: 'left' | 'right' | 'page'; format: ResolvedFormat; formatId: string; spread: string; layout: string; mode: 'edit' | 'export'; view: RenderView; edit(...paths: EditPath<S, D>[]): EditMarker; book: BookContext; geometry: BoundGeometry; PhotoBox<I extends BoxIds<S, 'photo'>>(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: I; children?: (photo: PhotoRender, box: PhotoBoxState<I, ValuesOf<S['boxes'][I]>>) => ImageFlowNode; }): ImageFlowElement; MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: BoxIds<S, 'markdown'>; columns?: Columns; }): ImageFlowElement; Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: keyof S['elements'] & string; children?: ImageFlowNode; }): ImageFlowElement; Text(props: TextProps<TextPath<S, D>>): ImageFlowElement; };",
         "UntypedRenderContext": "export type UntypedRenderContext = { params: Values; document: Values; boxes: Record<string, { params: Values; photo?: Photo | null; text?: FlowPosition | null; }>; elements: Record<string, { params: Values; }>; page: { left?: number; right?: number; number?: number; }; side?: 'left' | 'right' | 'page'; format: ResolvedFormat; formatId: string; spread: string; layout: string; mode: 'edit' | 'export'; view: RenderView; edit(...paths: string[]): EditMarker; book: BookContext; geometry: BoundGeometry; PhotoBox: typeof PhotoBox; MarkdownBox: typeof MarkdownBox; Element: typeof Element; Text(props: TextProps): ImageFlowElement; };",
-        "AnchorContext": "export type AnchorContext<P = Values, D = Values> = { params: P; document: D; };",
-        "FirstStatement #109": "declare const typedDocument: unique symbol;",
-        "FirstStatement #110": "declare const typedFamily: unique symbol;",
+        "AnchorContext": "export type AnchorContext<P = Values, D = Values, B = Record<string, { params: Values; photo?: Photo | null; text?: FlowPosition | null; }>> = { params: P; document: D; boxes: B; };",
+        "FirstStatement #118": "declare const typedDocument: unique symbol;",
+        "FirstStatement #119": "declare const typedFamily: unique symbol;",
         "SpreadDefinition": "export type SpreadDefinition<D extends Parameters = Parameters, F extends string = string> = SpreadDeclaration & { render(context: UntypedRenderContext): ImageFlowNode; anchors?(context: AnchorContext): readonly AnchorDeclaration[]; credits?(context: CreditContext): readonly CreditDeclaration[]; readonly [typedDocument]?: D; readonly [typedFamily]?: F; };",
-        "Capability": "export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' | 'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' | 'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' | 'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' | 'formatted-text' | 'app-controls';",
-        "FirstStatement #113": "export const capabilities: readonly Capability[];",
-        "TemplateDeclaration": "export type TemplateDeclaration = { id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string; parameters?: Parameters; controls?: Controls; layoutFamilies?: Record<string, LayoutFamily>; spreads: Record<string, SpreadDefinition>; openingSpreads?: readonly OpeningSpread[]; editors?: Record<string, DocumentEditor>; };",
+        "Capability": "export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' | 'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' | 'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' | 'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' | 'formatted-text' | 'app-controls' | 'text-metadata' | 'physical-covers';",
+        "FirstStatement #122": "export const capabilities: readonly Capability[];",
+        "CoverRenderContext": "export type CoverRenderContext = Pick<UntypedRenderContext, 'params' | 'document' | 'boxes' | 'elements' | 'formatId' | 'layout' | 'mode' | 'view' | 'PhotoBox' | 'Text' | 'Element'> & { cover: ResolvedCover; interiorPages: number; };",
+        "CoverLayout": "export type CoverLayout = { label: string; formats?: string[]; parameters?: Parameters; controls?: Controls; boxes?: Record<string, { type: 'photo'; label: string; parameters?: Parameters; controls?: Controls; }>; elements?: Record<string, { label: string; parameters?: Parameters; controls?: Controls; }>; render: (context: CoverRenderContext) => ImageFlowNode; };",
+        "TemplateDeclaration": "export type TemplateDeclaration = { id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; format?: PrintFormat; formats?: Record<string, PrintFormat>; defaultFormat?: string; parameters?: Parameters; controls?: Controls; layoutFamilies?: Record<string, LayoutFamily>; spreads: Record<string, SpreadDefinition>; openingSpreads?: readonly OpeningSpread[]; coverFormats?: Record<string, CoverFormat>; coverLayouts?: Record<string, CoverLayout>; editors?: Record<string, DocumentEditor>; };",
         "OpeningPage": "export type OpeningPage<L extends string = string> = { layout?: L; params?: Values; };",
         "OpeningSpread": "export type OpeningSpread<L extends string = string> = { layout: L; params?: Values; } | { pages: { left?: OpeningPage<L>; right?: OpeningPage<L>; }; };",
-        "SpreadBuilder": "export type SpreadBuilder<D extends Parameters, IsPage extends boolean = false> = <const P extends Parameters = {}, const B extends Record<string, BoxDeclaration> = {}, const E extends Record<string, ElementDeclaration> = {}, const F extends string = never>(definition: { label: string; span?: IsPage extends true ? never : Span; sides?: readonly ('left' | 'right')[]; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string>; boxes?: B & BoxesChecked<B>; elements?: E & ElementsChecked<E, D, P>; render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E; }, D> & (IsPage extends true ? { side: 'left' | 'right' | 'page'; } : {})): ImageFlowNode; anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>>): readonly AnchorDeclaration[]; credits?(context: CreditContext<ParameterValues<P>, ParameterValues<D>, { [K in keyof E]: { params: ValuesOf<E[K]>; }; }, { [K in keyof B]: B[K] extends { type: 'photo'; } ? { params: ValuesOf<B[K]>; photo: Photo | null; } : { params: ValuesOf<B[K]>; }; }>): readonly CreditDeclaration[]; family?: F; variant?: VariantTags; }) => SpreadDefinition<D, F>;",
+        "SpreadBuilder": "export type SpreadBuilder<D extends Parameters, IsPage extends boolean = false> = <const P extends Parameters = {}, const B extends Record<string, BoxDeclaration> = {}, const E extends Record<string, ElementDeclaration> = {}, const F extends string = never>(definition: { label: string; span?: IsPage extends true ? never : Span; sides?: readonly ('left' | 'right')[]; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string>; boxes?: B & BoxesChecked<B>; elements?: E & ElementsChecked<E, D, P>; render(context: RenderContext<{ label: string; parameters: P; boxes: B; elements: E; }, D> & (IsPage extends true ? { side: 'left' | 'right' | 'page'; } : {})): ImageFlowNode; anchors?(context: AnchorContext<ParameterValues<P>, ParameterValues<D>, { [K in keyof B]: BoxContext<B[K]>; }>): readonly AnchorDeclaration[]; credits?(context: CreditContext<ParameterValues<P>, ParameterValues<D>, { [K in keyof E]: { params: ValuesOf<E[K]>; }; }, { [K in keyof B]: B[K] extends { type: 'photo'; } ? { params: ValuesOf<B[K]>; photo: Photo | null; } : { params: ValuesOf<B[K]>; }; }>): readonly CreditDeclaration[]; family?: F; variant?: VariantTags; }) => SpreadDefinition<D, F>;",
         "TemplateTools": "export type TemplateTools<D extends Parameters> = { spread: SpreadBuilder<D>; page: SpreadBuilder<D, true>; };",
-        "TemplateBase": "type TemplateBase<D extends Parameters, L extends string = string> = { id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; parameters?: D & ParametersChecked<D>; controls?: Controls<keyof D & string>; layoutFamilies?: { [K in L]: LayoutFamily; }; editors?: Record<string, DocumentEditor<D, any>>; };",
+        "TemplateBase": "type TemplateBase<D extends Parameters, L extends string = string> = { id: string; version: string; label?: string; description?: string; preview?: string; contract: 1; requires?: readonly Capability[]; network?: readonly string[]; parameters?: D & ParametersChecked<D>; controls?: Controls<keyof D & string>; layoutFamilies?: { [K in L]: LayoutFamily; }; editors?: Record<string, DocumentEditor<D, any>>; coverFormats?: Record<string, CoverFormat>; coverLayouts?: Record<string, CoverLayout>; };",
         "Opening": "type Opening<L extends string> = { openingSpreads?: readonly OpeningSpread<L>[]; };",
         "OpeningLayouts": "type OpeningLayouts<S, L extends string> = { [K in Exclude<L, keyof S>]: SpreadDefinition<any>; };",
         "FormatChoice": "type FormatChoice<F extends string> = { format: PrintFormat; formats?: never; defaultFormat?: never; } | { formats: { [K in F]: PrintFormat; }; defaultFormat?: NoInfer<F>; format?: never; };",
@@ -1300,18 +1553,18 @@
         "PhotoBox": "export function PhotoBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; children?: (photo: PhotoRender, box: PhotoBoxState) => ImageFlowNode; }): ImageFlowElement;",
         "MarkdownBox": "export function MarkdownBox(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; columns?: Columns; }): ImageFlowElement;",
         "Element": "export function Element(props: Styling & Placement & EditMarker & IssueMarker & Decorative & { id: string; children?: ImageFlowNode; }): ImageFlowElement;",
-        "FirstStatement #144": "export const box: { photo<const P extends Parameters = {}>(label: string, parameters?: P & ParametersChecked<P>, options?: { controls?: Controls<keyof P & string>; }): { type: 'photo'; label: string; parameters: P; controls?: Controls<keyof P & string>; }; markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string>; }): { type: 'markdown'; label: string; parameters: P; flowOrder?: number; controls?: Controls<keyof P & string>; }; photos<const K extends string, const P extends Parameters = {}>(ids: readonly K[], label: (id: K, index: number) => string, parameters?: P & ParametersChecked<P>): { [Id in K]: { type: 'photo'; label: string; parameters: P; }; }; };",
+        "FirstStatement #155": "export const box: { photo<const P extends Parameters = {}>(label: string, parameters?: P & ParametersChecked<P>, options?: { controls?: Controls<keyof P & string>; }): { type: 'photo'; label: string; parameters: P; controls?: Controls<keyof P & string>; }; markdown<const P extends Parameters = {}>(label: string, options?: { flowOrder?: number; parameters?: P & ParametersChecked<P>; controls?: Controls<keyof P & string>; }): { type: 'markdown'; label: string; parameters: P; flowOrder?: number; controls?: Controls<keyof P & string>; }; photos<const K extends string, const P extends Parameters = {}>(ids: readonly K[], label: (id: K, index: number) => string, parameters?: P & ParametersChecked<P>): { [Id in K]: { type: 'photo'; label: string; parameters: P; }; }; };",
         "Rect": "export type Rect = { x: number; y: number; width: number; height: number; };",
         "Area": "export type Area = 'trim' | 'safe' | 'bleed';",
         "DesignCanvas": "export type DesignCanvas = { left(x: number, y: number, width: number, height: number): Rect; right(x: number, y: number, width: number, height: number): Rect; page(x: number, y: number, width: number, height: number): Rect; width(value: number): number; height(value: number): number; scaleX: number; scaleY: number; length(value: number, unit: 'mm' | 'pt' | 'px', axis: 'x' | 'y' | 'min' | 'max'): string; };",
-        "FirstStatement #148": "export const geometry: { page(format: ResolvedFormat, side: 'left' | 'right', area?: Area): Rect; page(format: ResolvedFormat, area?: Area): Rect; spread(format: ResolvedFormat, area?: Area): Rect; inset(rect: Rect, by: number | { top?: number; right?: number; bottom?: number; left?: number; }): Rect; grid(rect: Rect, options: { columns: number; rows?: number; gap?: number; columnGap?: number; rowGap?: number; }): Rect[]; design(format: ResolvedFormat, canvas: { width: number; height: number; }): DesignCanvas; css(rect: Rect): CSSProperties; };",
+        "FirstStatement #159": "export const geometry: { page(format: ResolvedFormat, side: 'left' | 'right', area?: Area): Rect; page(format: ResolvedFormat, area?: Area): Rect; spread(format: ResolvedFormat, area?: Area): Rect; inset(rect: Rect, by: number | { top?: number; right?: number; bottom?: number; left?: number; }): Rect; grid(rect: Rect, options: { columns: number; rows?: number; gap?: number; columnGap?: number; rowGap?: number; }): Rect[]; design(format: ResolvedFormat, canvas: { width: number; height: number; }): DesignCanvas; css(rect: Rect): CSSProperties; };",
         "TemplateIssue": "export type TemplateIssue = { code: string; message: string; severity?: 'error' | 'warning'; box?: string; element?: string; parameter?: string; file?: string; details?: Record<string, string | number>; suggestion?: string; };",
         "issue": "export function issue(found: TemplateIssue): Required<IssueMarker>;",
         "asset": "export function asset(path: string): string;",
         "file": "export function file(id: string): { name: string; extension: string; text: string; } | undefined;",
         "BundledFont": "export type BundledFont = { family: string; weight: number | [ number, number ]; style: 'normal' | 'italic'; };",
         "FontQuery": "export type FontQuery = { family: string | readonly string[]; weight?: number; style?: 'normal' | 'italic'; };",
-        "FirstStatement #155": "export const fonts: { list(): BundledFont[]; missing(text: string, font: FontQuery): string[]; settable(text: string, font: FontQuery): string; };",
+        "FirstStatement #166": "export const fonts: { list(): BundledFont[]; missing(text: string, font: FontQuery): string[]; settable(text: string, font: FontQuery): string; };",
         "RenderTarget": "export type RenderTarget = { width: number; height: number; pixelRatio: number; mode: 'preview' | 'check' | 'export'; signal: AbortSignal; };",
         "RenderedImageProps": "export type RenderedImageProps = { draw: (target: RenderTarget) => Promise<Blob | HTMLCanvasElement | OffscreenCanvas | SVGSVGElement | string>; output?: 'vector' | 'raster'; inputs: unknown; label?: string; alt?: string; className?: string; style?: CSSProperties; };",
         "RenderedImage": "export function RenderedImage(props: RenderedImageProps): ImageFlowElement;",
@@ -1321,7 +1574,7 @@
         "ChoiceProps": "export type ChoiceProps<V extends ChoiceValue = ChoiceValue> = { label: string; value: V | undefined; options: readonly ChoiceOption<V>[]; onChange(value: V): void; disabled?: boolean; hideLabel?: boolean; };",
         "Choice": "export function Choice<V extends ChoiceValue>(props: ChoiceProps<V>): ImageFlowElement;",
         "plainText": "export function plainText(value: string): string;",
-        "ExportDeclaration #165": "export {};"
+        "ExportDeclaration #176": "export {};"
       },
       "jsx-runtime.d.ts": {
         "ImportDeclaration #0": "import type { CSSProperties, ImageFlowElement, ImageFlowNode } from './imageflow';",
@@ -1474,6 +1727,7 @@
               "type": "string",
               "enum": [
                 "authoring-workflow",
+                "project-commands",
                 "package",
                 "declaration",
                 "page-layouts",
@@ -1487,6 +1741,7 @@
                 "dependencies",
                 "render-function",
                 "rendered-images",
+                "svg-maps",
                 "click-to-edit",
                 "anchors-and-index",
                 "editing-ui",
@@ -1601,6 +1856,17 @@
                     },
                     "spread": {
                       "type": "string"
+                    },
+                    "cover": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "page": {
+                      "type": "string",
+                      "enum": [
+                        "left",
+                        "right"
+                      ]
                     },
                     "box": {
                       "type": "string"
@@ -1930,6 +2196,7 @@
             "enum": [
               "summary",
               "spreads",
+              "cover",
               "sources",
               "parameters",
               "elements"
@@ -1951,6 +2218,17 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 256
+          },
+          "cover": {
+            "type": "boolean",
+            "const": true
+          },
+          "page": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right"
+            ]
           },
           "box": {
             "type": "string",
@@ -2027,6 +2305,17 @@
                     },
                     "spread": {
                       "type": "string"
+                    },
+                    "cover": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "page": {
+                      "type": "string",
+                      "enum": [
+                        "left",
+                        "right"
+                      ]
                     },
                     "box": {
                       "type": "string"
@@ -2138,6 +2427,35 @@
             ],
             "additionalProperties": {}
           },
+          "activeEditor": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "spread": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "page": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "right"
+                ]
+              },
+              "field": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "label"
+            ],
+            "additionalProperties": false
+          },
           "templateIdentity": {
             "type": "object",
             "properties": {
@@ -2226,6 +2544,11 @@
             ],
             "additionalProperties": {}
           },
+          "cover": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {}
+          },
           "items": {
             "type": "array",
             "items": {
@@ -2266,6 +2589,9 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 128
+          },
+          "includeTemplate": {
+            "type": "boolean"
           },
           "expectedRevision": {
             "type": "string",
@@ -2313,8 +2639,37 @@
                   {
                     "type": "object",
                     "properties": {
+                      "cover": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "box": {
+                        "$ref": "#/$defs/__schema3"
+                      },
+                      "element": {
+                        "$ref": "#/$defs/__schema3"
+                      },
+                      "paddingMm": {
+                        "$ref": "#/$defs/__schema4"
+                      }
+                    },
+                    "required": [
+                      "cover"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
                       "spread": {
                         "$ref": "#/$defs/__schema0"
+                      },
+                      "page": {
+                        "type": "string",
+                        "enum": [
+                          "left",
+                          "right"
+                        ]
                       },
                       "box": {
                         "$ref": "#/$defs/__schema3"
@@ -2334,6 +2689,13 @@
                     "properties": {
                       "spread": {
                         "$ref": "#/$defs/__schema0"
+                      },
+                      "page": {
+                        "type": "string",
+                        "enum": [
+                          "left",
+                          "right"
+                        ]
                       },
                       "element": {
                         "$ref": "#/$defs/__schema3"
@@ -2415,6 +2777,17 @@
               "spread": {
                 "$ref": "#/$defs/__schema1"
               },
+              "cover": {
+                "type": "boolean",
+                "const": true
+              },
+              "page": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "right"
+                ]
+              },
               "box": {
                 "$ref": "#/$defs/__schema5"
               },
@@ -2434,9 +2807,6 @@
                 "maximum": 100
               }
             },
-            "required": [
-              "spread"
-            ],
             "additionalProperties": false
           },
           "typescript": {
@@ -2493,20 +2863,26 @@
                           "type": "string",
                           "const": "set_parameter"
                         },
-                        "scope": {
+                        "spread": {
                           "$ref": "#/$defs/__schema6"
                         },
-                        "spread": {
-                          "$ref": "#/$defs/__schema7"
+                        "page": {
+                          "$ref": "#/$defs/__schema8"
                         },
-                        "owner": {
+                        "cover": {
                           "$ref": "#/$defs/__schema9"
                         },
-                        "key": {
+                        "scope": {
                           "$ref": "#/$defs/__schema10"
                         },
-                        "value": {
+                        "owner": {
                           "$ref": "#/$defs/__schema11"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema12"
+                        },
+                        "value": {
+                          "$ref": "#/$defs/__schema13"
                         }
                       },
                       "required": [
@@ -2524,17 +2900,23 @@
                           "type": "string",
                           "const": "reset_parameter"
                         },
-                        "scope": {
+                        "spread": {
                           "$ref": "#/$defs/__schema6"
                         },
-                        "spread": {
-                          "$ref": "#/$defs/__schema7"
+                        "page": {
+                          "$ref": "#/$defs/__schema8"
                         },
-                        "owner": {
+                        "cover": {
                           "$ref": "#/$defs/__schema9"
                         },
-                        "key": {
+                        "scope": {
                           "$ref": "#/$defs/__schema10"
+                        },
+                        "owner": {
+                          "$ref": "#/$defs/__schema11"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema12"
                         }
                       },
                       "required": [
@@ -2551,20 +2933,26 @@
                           "type": "string",
                           "const": "insert_list_item"
                         },
-                        "scope": {
+                        "spread": {
                           "$ref": "#/$defs/__schema6"
                         },
-                        "spread": {
-                          "$ref": "#/$defs/__schema7"
+                        "page": {
+                          "$ref": "#/$defs/__schema8"
                         },
-                        "owner": {
+                        "cover": {
                           "$ref": "#/$defs/__schema9"
                         },
-                        "key": {
+                        "scope": {
                           "$ref": "#/$defs/__schema10"
                         },
+                        "owner": {
+                          "$ref": "#/$defs/__schema11"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema12"
+                        },
                         "item": {
-                          "$ref": "#/$defs/__schema13"
+                          "$ref": "#/$defs/__schema15"
                         },
                         "after": {
                           "anyOf": [
@@ -2592,23 +2980,29 @@
                           "type": "string",
                           "const": "update_list_item"
                         },
-                        "scope": {
+                        "spread": {
                           "$ref": "#/$defs/__schema6"
                         },
-                        "spread": {
-                          "$ref": "#/$defs/__schema7"
+                        "page": {
+                          "$ref": "#/$defs/__schema8"
                         },
-                        "owner": {
+                        "cover": {
                           "$ref": "#/$defs/__schema9"
                         },
-                        "key": {
+                        "scope": {
                           "$ref": "#/$defs/__schema10"
                         },
+                        "owner": {
+                          "$ref": "#/$defs/__schema11"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema12"
+                        },
                         "id": {
-                          "$ref": "#/$defs/__schema14"
+                          "$ref": "#/$defs/__schema16"
                         },
                         "values": {
-                          "$ref": "#/$defs/__schema13"
+                          "$ref": "#/$defs/__schema15"
                         }
                       },
                       "required": [
@@ -2627,20 +3021,26 @@
                           "type": "string",
                           "const": "remove_list_item"
                         },
-                        "scope": {
+                        "spread": {
                           "$ref": "#/$defs/__schema6"
                         },
-                        "spread": {
-                          "$ref": "#/$defs/__schema7"
+                        "page": {
+                          "$ref": "#/$defs/__schema8"
                         },
-                        "owner": {
+                        "cover": {
                           "$ref": "#/$defs/__schema9"
                         },
-                        "key": {
+                        "scope": {
                           "$ref": "#/$defs/__schema10"
                         },
+                        "owner": {
+                          "$ref": "#/$defs/__schema11"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema12"
+                        },
                         "id": {
-                          "$ref": "#/$defs/__schema14"
+                          "$ref": "#/$defs/__schema16"
                         }
                       },
                       "required": [
@@ -2658,20 +3058,26 @@
                           "type": "string",
                           "const": "move_list_item"
                         },
-                        "scope": {
+                        "spread": {
                           "$ref": "#/$defs/__schema6"
                         },
-                        "spread": {
-                          "$ref": "#/$defs/__schema7"
+                        "page": {
+                          "$ref": "#/$defs/__schema8"
                         },
-                        "owner": {
+                        "cover": {
                           "$ref": "#/$defs/__schema9"
                         },
-                        "key": {
+                        "scope": {
                           "$ref": "#/$defs/__schema10"
                         },
+                        "owner": {
+                          "$ref": "#/$defs/__schema11"
+                        },
+                        "key": {
+                          "$ref": "#/$defs/__schema12"
+                        },
                         "id": {
-                          "$ref": "#/$defs/__schema14"
+                          "$ref": "#/$defs/__schema16"
                         },
                         "after": {
                           "anyOf": [
@@ -2701,99 +3107,23 @@
                           "const": "insert_spread"
                         },
                         "definition": {
-                          "$ref": "#/$defs/__schema15"
+                          "$ref": "#/$defs/__schema17"
                         },
                         "ref": {
-                          "$ref": "#/$defs/__schema16"
+                          "$ref": "#/$defs/__schema18"
                         },
                         "after": {
-                          "$ref": "#/$defs/__schema17"
+                          "$ref": "#/$defs/__schema19"
                         },
                         "params": {
                           "default": {},
-                          "$ref": "#/$defs/__schema18"
+                          "$ref": "#/$defs/__schema20"
                         },
                         "boxes": {
-                          "default": {},
-                          "type": "object",
-                          "propertyNames": {
-                            "$ref": "#/$defs/__schema2"
-                          },
-                          "additionalProperties": {
-                            "type": "object",
-                            "properties": {
-                              "photo": {
-                                "$ref": "#/$defs/__schema2"
-                              },
-                              "text": {
-                                "$ref": "#/$defs/__schema2"
-                              },
-                              "params": {
-                                "default": {},
-                                "$ref": "#/$defs/__schema18"
-                              },
-                              "crops": {
-                                "type": "object",
-                                "propertyNames": {
-                                  "$ref": "#/$defs/__schema2"
-                                },
-                                "additionalProperties": {
-                                  "type": "object",
-                                  "properties": {
-                                    "centerX": {
-                                      "$ref": "#/$defs/__schema19"
-                                    },
-                                    "centerY": {
-                                      "$ref": "#/$defs/__schema21"
-                                    },
-                                    "zoom": {
-                                      "$ref": "#/$defs/__schema22"
-                                    }
-                                  },
-                                  "required": [
-                                    "centerX",
-                                    "centerY",
-                                    "zoom"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              },
-                              "focus": {
-                                "type": "object",
-                                "properties": {
-                                  "centerX": {
-                                    "$ref": "#/$defs/__schema19"
-                                  },
-                                  "centerY": {
-                                    "$ref": "#/$defs/__schema21"
-                                  }
-                                },
-                                "required": [
-                                  "centerX",
-                                  "centerY"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "additionalProperties": false
-                          }
+                          "$ref": "#/$defs/__schema21"
                         },
                         "elements": {
-                          "default": {},
-                          "type": "object",
-                          "propertyNames": {
-                            "$ref": "#/$defs/__schema2"
-                          },
-                          "additionalProperties": {
-                            "type": "object",
-                            "properties": {
-                              "params": {
-                                "default": {},
-                                "$ref": "#/$defs/__schema18"
-                              }
-                            },
-                            "additionalProperties": false
-                          }
+                          "$ref": "#/$defs/__schema26"
                         }
                       },
                       "required": [
@@ -2807,16 +3137,90 @@
                       "properties": {
                         "op": {
                           "type": "string",
+                          "const": "insert_page_pair"
+                        },
+                        "ref": {
+                          "$ref": "#/$defs/__schema18"
+                        },
+                        "after": {
+                          "$ref": "#/$defs/__schema19"
+                        },
+                        "pages": {
+                          "type": "object",
+                          "properties": {
+                            "left": {
+                              "$ref": "#/$defs/__schema27"
+                            },
+                            "right": {
+                              "$ref": "#/$defs/__schema27"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "pages"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "clear_page"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema7"
+                        },
+                        "page": {
+                          "type": "string",
+                          "enum": [
+                            "left",
+                            "right"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "spread",
+                        "page"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
+                          "const": "swap_pages"
+                        },
+                        "spread": {
+                          "$ref": "#/$defs/__schema7"
+                        }
+                      },
+                      "required": [
+                        "op",
+                        "spread"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "op": {
+                          "type": "string",
                           "const": "duplicate_spread"
                         },
                         "spread": {
-                          "$ref": "#/$defs/__schema8"
+                          "$ref": "#/$defs/__schema7"
                         },
                         "ref": {
-                          "$ref": "#/$defs/__schema16"
+                          "$ref": "#/$defs/__schema18"
                         },
                         "after": {
-                          "$ref": "#/$defs/__schema17"
+                          "$ref": "#/$defs/__schema19"
                         }
                       },
                       "required": [
@@ -2833,7 +3237,7 @@
                           "const": "move_spread"
                         },
                         "spread": {
-                          "$ref": "#/$defs/__schema8"
+                          "$ref": "#/$defs/__schema7"
                         },
                         "after": {
                           "anyOf": [
@@ -2861,7 +3265,7 @@
                           "const": "remove_spread"
                         },
                         "spread": {
-                          "$ref": "#/$defs/__schema8"
+                          "$ref": "#/$defs/__schema7"
                         }
                       },
                       "required": [
@@ -2878,15 +3282,20 @@
                           "const": "switch_layout"
                         },
                         "spread": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "page": {
                           "$ref": "#/$defs/__schema8"
                         },
+                        "cover": {
+                          "$ref": "#/$defs/__schema9"
+                        },
                         "definition": {
-                          "$ref": "#/$defs/__schema15"
+                          "$ref": "#/$defs/__schema17"
                         }
                       },
                       "required": [
                         "op",
-                        "spread",
                         "definition"
                       ],
                       "additionalProperties": false
@@ -2899,10 +3308,16 @@
                           "const": "assign_source"
                         },
                         "spread": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "page": {
                           "$ref": "#/$defs/__schema8"
                         },
+                        "cover": {
+                          "$ref": "#/$defs/__schema9"
+                        },
                         "box": {
-                          "$ref": "#/$defs/__schema23"
+                          "$ref": "#/$defs/__schema28"
                         },
                         "kind": {
                           "type": "string",
@@ -2917,7 +3332,6 @@
                       },
                       "required": [
                         "op",
-                        "spread",
                         "box",
                         "kind",
                         "source"
@@ -2932,15 +3346,20 @@
                           "const": "clear_box"
                         },
                         "spread": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "page": {
                           "$ref": "#/$defs/__schema8"
                         },
+                        "cover": {
+                          "$ref": "#/$defs/__schema9"
+                        },
                         "box": {
-                          "$ref": "#/$defs/__schema23"
+                          "$ref": "#/$defs/__schema28"
                         }
                       },
                       "required": [
                         "op",
-                        "spread",
                         "box"
                       ],
                       "additionalProperties": false
@@ -2953,10 +3372,10 @@
                           "const": "swap_content"
                         },
                         "from": {
-                          "$ref": "#/$defs/__schema24"
+                          "$ref": "#/$defs/__schema29"
                         },
                         "to": {
-                          "$ref": "#/$defs/__schema24"
+                          "$ref": "#/$defs/__schema29"
                         }
                       },
                       "required": [
@@ -2974,24 +3393,29 @@
                           "const": "set_crop"
                         },
                         "spread": {
+                          "$ref": "#/$defs/__schema6"
+                        },
+                        "page": {
                           "$ref": "#/$defs/__schema8"
                         },
+                        "cover": {
+                          "$ref": "#/$defs/__schema9"
+                        },
                         "box": {
-                          "$ref": "#/$defs/__schema23"
+                          "$ref": "#/$defs/__schema28"
                         },
                         "centerX": {
-                          "$ref": "#/$defs/__schema19"
+                          "$ref": "#/$defs/__schema22"
                         },
                         "centerY": {
-                          "$ref": "#/$defs/__schema21"
+                          "$ref": "#/$defs/__schema24"
                         },
                         "zoom": {
-                          "$ref": "#/$defs/__schema22"
+                          "$ref": "#/$defs/__schema25"
                         }
                       },
                       "required": [
                         "op",
-                        "spread",
                         "box",
                         "centerX",
                         "centerY",
@@ -3080,7 +3504,7 @@
                 "maxItems": 24,
                 "type": "array",
                 "items": {
-                  "$ref": "#/$defs/__schema25"
+                  "$ref": "#/$defs/__schema30"
                 }
               },
               "formats": {
@@ -3094,7 +3518,7 @@
                     "maxItems": 4,
                     "type": "array",
                     "items": {
-                      "$ref": "#/$defs/__schema25"
+                      "$ref": "#/$defs/__schema30"
                     }
                   }
                 ]
@@ -3104,14 +3528,35 @@
                 "maxItems": 6,
                 "type": "array",
                 "items": {
-                  "$ref": "#/$defs/__schema26"
+                  "$ref": "#/$defs/__schema31"
                 }
+              },
+              "cover": {
+                "type": "object",
+                "properties": {
+                  "layout": {
+                    "$ref": "#/$defs/__schema30"
+                  },
+                  "pages": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "format": {
+                    "$ref": "#/$defs/__schema30"
+                  }
+                },
+                "required": [
+                  "layout",
+                  "pages"
+                ],
+                "additionalProperties": false
               },
               "preview": {
                 "type": "object",
                 "properties": {
                   "printFormat": {
-                    "$ref": "#/$defs/__schema25"
+                    "$ref": "#/$defs/__schema30"
                   },
                   "cells": {
                     "minItems": 1,
@@ -3121,10 +3566,10 @@
                       "type": "object",
                       "properties": {
                         "layout": {
-                          "$ref": "#/$defs/__schema25"
+                          "$ref": "#/$defs/__schema30"
                         },
                         "case": {
-                          "$ref": "#/$defs/__schema26"
+                          "$ref": "#/$defs/__schema31"
                         }
                       },
                       "required": [
@@ -3215,30 +3660,42 @@
             "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
           },
           "__schema6": {
+            "$ref": "#/$defs/__schema7"
+          },
+          "__schema7": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "__schema8": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right"
+            ]
+          },
+          "__schema9": {
+            "type": "boolean",
+            "const": true
+          },
+          "__schema10": {
             "type": "string",
             "enum": [
               "document",
               "spread",
+              "cover",
               "box",
               "element"
             ]
           },
-          "__schema7": {
-            "$ref": "#/$defs/__schema8"
-          },
-          "__schema8": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "__schema9": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "__schema10": {
-            "$ref": "#/$defs/__schema2"
-          },
           "__schema11": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "__schema12": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "__schema13": {
             "anyOf": [
               {
-                "$ref": "#/$defs/__schema12"
+                "$ref": "#/$defs/__schema14"
               },
               {
                 "type": "array",
@@ -3248,13 +3705,13 @@
                     "type": "string"
                   },
                   "additionalProperties": {
-                    "$ref": "#/$defs/__schema12"
+                    "$ref": "#/$defs/__schema14"
                   }
                 }
               }
             ]
           },
-          "__schema12": {
+          "__schema14": {
             "anyOf": [
               {
                 "type": "string"
@@ -3267,25 +3724,25 @@
               }
             ]
           },
-          "__schema13": {
+          "__schema15": {
             "type": "object",
             "propertyNames": {
               "$ref": "#/$defs/__schema2"
             },
             "additionalProperties": {
-              "$ref": "#/$defs/__schema12"
+              "$ref": "#/$defs/__schema14"
             }
-          },
-          "__schema14": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "__schema15": {
-            "$ref": "#/$defs/__schema2"
           },
           "__schema16": {
             "$ref": "#/$defs/__schema2"
           },
           "__schema17": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "__schema18": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "__schema19": {
             "anyOf": [
               {
                 "$ref": "#/$defs/__schema1"
@@ -3295,55 +3752,161 @@
               }
             ]
           },
-          "__schema18": {
+          "__schema20": {
             "type": "object",
             "propertyNames": {
               "$ref": "#/$defs/__schema2"
             },
             "additionalProperties": {
-              "$ref": "#/$defs/__schema11"
+              "$ref": "#/$defs/__schema13"
             }
           },
-          "__schema19": {
-            "$ref": "#/$defs/__schema20"
+          "__schema21": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "photo": {
+                  "$ref": "#/$defs/__schema2"
+                },
+                "text": {
+                  "$ref": "#/$defs/__schema2"
+                },
+                "params": {
+                  "default": {},
+                  "$ref": "#/$defs/__schema20"
+                },
+                "crops": {
+                  "type": "object",
+                  "propertyNames": {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "centerX": {
+                        "$ref": "#/$defs/__schema22"
+                      },
+                      "centerY": {
+                        "$ref": "#/$defs/__schema24"
+                      },
+                      "zoom": {
+                        "$ref": "#/$defs/__schema25"
+                      }
+                    },
+                    "required": [
+                      "centerX",
+                      "centerY",
+                      "zoom"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "focus": {
+                  "type": "object",
+                  "properties": {
+                    "centerX": {
+                      "$ref": "#/$defs/__schema22"
+                    },
+                    "centerY": {
+                      "$ref": "#/$defs/__schema24"
+                    }
+                  },
+                  "required": [
+                    "centerX",
+                    "centerY"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
           },
-          "__schema20": {
+          "__schema22": {
+            "$ref": "#/$defs/__schema23"
+          },
+          "__schema23": {
             "type": "number",
             "minimum": 0,
             "maximum": 1
           },
-          "__schema21": {
-            "$ref": "#/$defs/__schema20"
+          "__schema24": {
+            "$ref": "#/$defs/__schema23"
           },
-          "__schema22": {
+          "__schema25": {
             "type": "number",
             "minimum": 1,
             "maximum": 20
           },
-          "__schema23": {
+          "__schema26": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/__schema2"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "params": {
+                  "default": {},
+                  "$ref": "#/$defs/__schema20"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "__schema27": {
+            "type": "object",
+            "properties": {
+              "definition": {
+                "$ref": "#/$defs/__schema17"
+              },
+              "params": {
+                "default": {},
+                "$ref": "#/$defs/__schema20"
+              },
+              "boxes": {
+                "$ref": "#/$defs/__schema21"
+              },
+              "elements": {
+                "$ref": "#/$defs/__schema26"
+              }
+            },
+            "additionalProperties": false
+          },
+          "__schema28": {
             "$ref": "#/$defs/__schema2"
           },
-          "__schema24": {
+          "__schema29": {
             "type": "object",
             "properties": {
               "spread": {
+                "$ref": "#/$defs/__schema6"
+              },
+              "page": {
                 "$ref": "#/$defs/__schema8"
               },
+              "cover": {
+                "$ref": "#/$defs/__schema9"
+              },
               "box": {
-                "$ref": "#/$defs/__schema23"
+                "$ref": "#/$defs/__schema28"
               }
             },
             "required": [
-              "spread",
               "box"
             ],
             "additionalProperties": false
           },
-          "__schema25": {
+          "__schema30": {
             "type": "string",
             "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
           },
-          "__schema26": {
+          "__schema31": {
             "type": "string",
             "enum": [
               "typical",
@@ -3418,6 +3981,17 @@
                     },
                     "spread": {
                       "type": "string"
+                    },
+                    "cover": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "page": {
+                      "type": "string",
+                      "enum": [
+                        "left",
+                        "right"
+                      ]
                     },
                     "box": {
                       "type": "string"
@@ -3586,6 +4160,65 @@
                   "spread",
                   "side",
                   "page",
+                  "mimeType"
+                ],
+                "additionalProperties": {}
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "cover": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "interiorPages": {
+                    "type": "number"
+                  },
+                  "previewPages": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "$ref": "#/$defs/__schema0"
+                  },
+                  "height": {
+                    "$ref": "#/$defs/__schema1"
+                  },
+                  "widthMm": {
+                    "$ref": "#/$defs/__schema2"
+                  },
+                  "heightMm": {
+                    "$ref": "#/$defs/__schema3"
+                  },
+                  "bounds": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "detail": {
+                    "$ref": "#/$defs/__schema8"
+                  },
+                  "guides": {
+                    "$ref": "#/$defs/__schema9"
+                  },
+                  "labels": {
+                    "$ref": "#/$defs/__schema10"
+                  },
+                  "mimeType": {
+                    "$ref": "#/$defs/__schema11"
+                  },
+                  "draft": {
+                    "$ref": "#/$defs/__schema12"
+                  },
+                  "fixture": {
+                    "$ref": "#/$defs/__schema13"
+                  }
+                },
+                "required": [
+                  "cover",
+                  "interiorPages",
+                  "width",
+                  "height",
+                  "widthMm",
+                  "heightMm",
+                  "bounds",
                   "mimeType"
                 ],
                 "additionalProperties": {}
@@ -3772,6 +4405,10 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "affectedCover": {
+                "type": "boolean",
+                "const": true
               },
               "references": {
                 "type": "object",
@@ -3971,20 +4608,26 @@
                       "type": "string",
                       "const": "set_parameter"
                     },
-                    "scope": {
+                    "spread": {
                       "$ref": "#/$defs/__schema1"
                     },
-                    "spread": {
-                      "$ref": "#/$defs/__schema2"
+                    "page": {
+                      "$ref": "#/$defs/__schema4"
                     },
-                    "owner": {
+                    "cover": {
                       "$ref": "#/$defs/__schema5"
                     },
-                    "key": {
+                    "scope": {
                       "$ref": "#/$defs/__schema6"
                     },
-                    "value": {
+                    "owner": {
                       "$ref": "#/$defs/__schema7"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema8"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/__schema9"
                     }
                   },
                   "required": [
@@ -4002,17 +4645,23 @@
                       "type": "string",
                       "const": "reset_parameter"
                     },
-                    "scope": {
+                    "spread": {
                       "$ref": "#/$defs/__schema1"
                     },
-                    "spread": {
-                      "$ref": "#/$defs/__schema2"
+                    "page": {
+                      "$ref": "#/$defs/__schema4"
                     },
-                    "owner": {
+                    "cover": {
                       "$ref": "#/$defs/__schema5"
                     },
-                    "key": {
+                    "scope": {
                       "$ref": "#/$defs/__schema6"
+                    },
+                    "owner": {
+                      "$ref": "#/$defs/__schema7"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema8"
                     }
                   },
                   "required": [
@@ -4029,20 +4678,26 @@
                       "type": "string",
                       "const": "insert_list_item"
                     },
-                    "scope": {
+                    "spread": {
                       "$ref": "#/$defs/__schema1"
                     },
-                    "spread": {
-                      "$ref": "#/$defs/__schema2"
+                    "page": {
+                      "$ref": "#/$defs/__schema4"
                     },
-                    "owner": {
+                    "cover": {
                       "$ref": "#/$defs/__schema5"
                     },
-                    "key": {
+                    "scope": {
                       "$ref": "#/$defs/__schema6"
                     },
+                    "owner": {
+                      "$ref": "#/$defs/__schema7"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema8"
+                    },
                     "item": {
-                      "$ref": "#/$defs/__schema9"
+                      "$ref": "#/$defs/__schema11"
                     },
                     "after": {
                       "anyOf": [
@@ -4070,23 +4725,29 @@
                       "type": "string",
                       "const": "update_list_item"
                     },
-                    "scope": {
+                    "spread": {
                       "$ref": "#/$defs/__schema1"
                     },
-                    "spread": {
-                      "$ref": "#/$defs/__schema2"
+                    "page": {
+                      "$ref": "#/$defs/__schema4"
                     },
-                    "owner": {
+                    "cover": {
                       "$ref": "#/$defs/__schema5"
                     },
-                    "key": {
+                    "scope": {
                       "$ref": "#/$defs/__schema6"
                     },
+                    "owner": {
+                      "$ref": "#/$defs/__schema7"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema8"
+                    },
                     "id": {
-                      "$ref": "#/$defs/__schema10"
+                      "$ref": "#/$defs/__schema12"
                     },
                     "values": {
-                      "$ref": "#/$defs/__schema9"
+                      "$ref": "#/$defs/__schema11"
                     }
                   },
                   "required": [
@@ -4105,20 +4766,26 @@
                       "type": "string",
                       "const": "remove_list_item"
                     },
-                    "scope": {
+                    "spread": {
                       "$ref": "#/$defs/__schema1"
                     },
-                    "spread": {
-                      "$ref": "#/$defs/__schema2"
+                    "page": {
+                      "$ref": "#/$defs/__schema4"
                     },
-                    "owner": {
+                    "cover": {
                       "$ref": "#/$defs/__schema5"
                     },
-                    "key": {
+                    "scope": {
                       "$ref": "#/$defs/__schema6"
                     },
+                    "owner": {
+                      "$ref": "#/$defs/__schema7"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema8"
+                    },
                     "id": {
-                      "$ref": "#/$defs/__schema10"
+                      "$ref": "#/$defs/__schema12"
                     }
                   },
                   "required": [
@@ -4136,20 +4803,26 @@
                       "type": "string",
                       "const": "move_list_item"
                     },
-                    "scope": {
+                    "spread": {
                       "$ref": "#/$defs/__schema1"
                     },
-                    "spread": {
-                      "$ref": "#/$defs/__schema2"
+                    "page": {
+                      "$ref": "#/$defs/__schema4"
                     },
-                    "owner": {
+                    "cover": {
                       "$ref": "#/$defs/__schema5"
                     },
-                    "key": {
+                    "scope": {
                       "$ref": "#/$defs/__schema6"
                     },
+                    "owner": {
+                      "$ref": "#/$defs/__schema7"
+                    },
+                    "key": {
+                      "$ref": "#/$defs/__schema8"
+                    },
                     "id": {
-                      "$ref": "#/$defs/__schema10"
+                      "$ref": "#/$defs/__schema12"
                     },
                     "after": {
                       "anyOf": [
@@ -4179,99 +4852,23 @@
                       "const": "insert_spread"
                     },
                     "definition": {
-                      "$ref": "#/$defs/__schema11"
+                      "$ref": "#/$defs/__schema13"
                     },
                     "ref": {
-                      "$ref": "#/$defs/__schema12"
+                      "$ref": "#/$defs/__schema14"
                     },
                     "after": {
-                      "$ref": "#/$defs/__schema13"
+                      "$ref": "#/$defs/__schema15"
                     },
                     "params": {
                       "default": {},
-                      "$ref": "#/$defs/__schema14"
+                      "$ref": "#/$defs/__schema16"
                     },
                     "boxes": {
-                      "default": {},
-                      "type": "object",
-                      "propertyNames": {
-                        "$ref": "#/$defs/__schema0"
-                      },
-                      "additionalProperties": {
-                        "type": "object",
-                        "properties": {
-                          "photo": {
-                            "$ref": "#/$defs/__schema0"
-                          },
-                          "text": {
-                            "$ref": "#/$defs/__schema0"
-                          },
-                          "params": {
-                            "default": {},
-                            "$ref": "#/$defs/__schema14"
-                          },
-                          "crops": {
-                            "type": "object",
-                            "propertyNames": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "additionalProperties": {
-                              "type": "object",
-                              "properties": {
-                                "centerX": {
-                                  "$ref": "#/$defs/__schema15"
-                                },
-                                "centerY": {
-                                  "$ref": "#/$defs/__schema17"
-                                },
-                                "zoom": {
-                                  "$ref": "#/$defs/__schema18"
-                                }
-                              },
-                              "required": [
-                                "centerX",
-                                "centerY",
-                                "zoom"
-                              ],
-                              "additionalProperties": false
-                            }
-                          },
-                          "focus": {
-                            "type": "object",
-                            "properties": {
-                              "centerX": {
-                                "$ref": "#/$defs/__schema15"
-                              },
-                              "centerY": {
-                                "$ref": "#/$defs/__schema17"
-                              }
-                            },
-                            "required": [
-                              "centerX",
-                              "centerY"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "additionalProperties": false
-                      }
+                      "$ref": "#/$defs/__schema17"
                     },
                     "elements": {
-                      "default": {},
-                      "type": "object",
-                      "propertyNames": {
-                        "$ref": "#/$defs/__schema0"
-                      },
-                      "additionalProperties": {
-                        "type": "object",
-                        "properties": {
-                          "params": {
-                            "default": {},
-                            "$ref": "#/$defs/__schema14"
-                          }
-                        },
-                        "additionalProperties": false
-                      }
+                      "$ref": "#/$defs/__schema22"
                     }
                   },
                   "required": [
@@ -4285,16 +4882,90 @@
                   "properties": {
                     "op": {
                       "type": "string",
+                      "const": "insert_page_pair"
+                    },
+                    "ref": {
+                      "$ref": "#/$defs/__schema14"
+                    },
+                    "after": {
+                      "$ref": "#/$defs/__schema15"
+                    },
+                    "pages": {
+                      "type": "object",
+                      "properties": {
+                        "left": {
+                          "$ref": "#/$defs/__schema23"
+                        },
+                        "right": {
+                          "$ref": "#/$defs/__schema23"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "pages"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "clear_page"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema2"
+                    },
+                    "page": {
+                      "type": "string",
+                      "enum": [
+                        "left",
+                        "right"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "spread",
+                    "page"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "swap_pages"
+                    },
+                    "spread": {
+                      "$ref": "#/$defs/__schema2"
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "spread"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
                       "const": "duplicate_spread"
                     },
                     "spread": {
-                      "$ref": "#/$defs/__schema3"
+                      "$ref": "#/$defs/__schema2"
                     },
                     "ref": {
-                      "$ref": "#/$defs/__schema12"
+                      "$ref": "#/$defs/__schema14"
                     },
                     "after": {
-                      "$ref": "#/$defs/__schema13"
+                      "$ref": "#/$defs/__schema15"
                     }
                   },
                   "required": [
@@ -4311,12 +4982,12 @@
                       "const": "move_spread"
                     },
                     "spread": {
-                      "$ref": "#/$defs/__schema3"
+                      "$ref": "#/$defs/__schema2"
                     },
                     "after": {
                       "anyOf": [
                         {
-                          "$ref": "#/$defs/__schema4"
+                          "$ref": "#/$defs/__schema3"
                         },
                         {
                           "type": "null"
@@ -4339,7 +5010,7 @@
                       "const": "remove_spread"
                     },
                     "spread": {
-                      "$ref": "#/$defs/__schema3"
+                      "$ref": "#/$defs/__schema2"
                     }
                   },
                   "required": [
@@ -4356,15 +5027,20 @@
                       "const": "switch_layout"
                     },
                     "spread": {
-                      "$ref": "#/$defs/__schema3"
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "page": {
+                      "$ref": "#/$defs/__schema4"
+                    },
+                    "cover": {
+                      "$ref": "#/$defs/__schema5"
                     },
                     "definition": {
-                      "$ref": "#/$defs/__schema11"
+                      "$ref": "#/$defs/__schema13"
                     }
                   },
                   "required": [
                     "op",
-                    "spread",
                     "definition"
                   ],
                   "additionalProperties": false
@@ -4377,10 +5053,16 @@
                       "const": "assign_source"
                     },
                     "spread": {
-                      "$ref": "#/$defs/__schema3"
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "page": {
+                      "$ref": "#/$defs/__schema4"
+                    },
+                    "cover": {
+                      "$ref": "#/$defs/__schema5"
                     },
                     "box": {
-                      "$ref": "#/$defs/__schema19"
+                      "$ref": "#/$defs/__schema24"
                     },
                     "kind": {
                       "type": "string",
@@ -4395,7 +5077,6 @@
                   },
                   "required": [
                     "op",
-                    "spread",
                     "box",
                     "kind",
                     "source"
@@ -4410,15 +5091,20 @@
                       "const": "clear_box"
                     },
                     "spread": {
-                      "$ref": "#/$defs/__schema3"
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "page": {
+                      "$ref": "#/$defs/__schema4"
+                    },
+                    "cover": {
+                      "$ref": "#/$defs/__schema5"
                     },
                     "box": {
-                      "$ref": "#/$defs/__schema19"
+                      "$ref": "#/$defs/__schema24"
                     }
                   },
                   "required": [
                     "op",
-                    "spread",
                     "box"
                   ],
                   "additionalProperties": false
@@ -4431,10 +5117,10 @@
                       "const": "swap_content"
                     },
                     "from": {
-                      "$ref": "#/$defs/__schema20"
+                      "$ref": "#/$defs/__schema25"
                     },
                     "to": {
-                      "$ref": "#/$defs/__schema20"
+                      "$ref": "#/$defs/__schema25"
                     }
                   },
                   "required": [
@@ -4452,24 +5138,29 @@
                       "const": "set_crop"
                     },
                     "spread": {
-                      "$ref": "#/$defs/__schema3"
+                      "$ref": "#/$defs/__schema1"
+                    },
+                    "page": {
+                      "$ref": "#/$defs/__schema4"
+                    },
+                    "cover": {
+                      "$ref": "#/$defs/__schema5"
                     },
                     "box": {
-                      "$ref": "#/$defs/__schema19"
+                      "$ref": "#/$defs/__schema24"
                     },
                     "centerX": {
-                      "$ref": "#/$defs/__schema15"
+                      "$ref": "#/$defs/__schema18"
                     },
                     "centerY": {
-                      "$ref": "#/$defs/__schema17"
+                      "$ref": "#/$defs/__schema20"
                     },
                     "zoom": {
-                      "$ref": "#/$defs/__schema18"
+                      "$ref": "#/$defs/__schema21"
                     }
                   },
                   "required": [
                     "op",
-                    "spread",
                     "box",
                     "centerX",
                     "centerY",
@@ -4563,21 +5254,12 @@
             "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
           },
           "__schema1": {
-            "type": "string",
-            "enum": [
-              "document",
-              "spread",
-              "box",
-              "element"
-            ]
+            "$ref": "#/$defs/__schema2"
           },
           "__schema2": {
             "$ref": "#/$defs/__schema3"
           },
           "__schema3": {
-            "$ref": "#/$defs/__schema4"
-          },
-          "__schema4": {
             "anyOf": [
               {
                 "$ref": "#/$defs/__schema0"
@@ -4588,16 +5270,37 @@
               }
             ]
           },
+          "__schema4": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right"
+            ]
+          },
           "__schema5": {
-            "$ref": "#/$defs/__schema0"
+            "type": "boolean",
+            "const": true
           },
           "__schema6": {
-            "$ref": "#/$defs/__schema0"
+            "type": "string",
+            "enum": [
+              "document",
+              "spread",
+              "cover",
+              "box",
+              "element"
+            ]
           },
           "__schema7": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "__schema8": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "__schema9": {
             "anyOf": [
               {
-                "$ref": "#/$defs/__schema8"
+                "$ref": "#/$defs/__schema10"
               },
               {
                 "type": "array",
@@ -4607,13 +5310,13 @@
                     "type": "string"
                   },
                   "additionalProperties": {
-                    "$ref": "#/$defs/__schema8"
+                    "$ref": "#/$defs/__schema10"
                   }
                 }
               }
             ]
           },
-          "__schema8": {
+          "__schema10": {
             "anyOf": [
               {
                 "type": "string"
@@ -4626,74 +5329,180 @@
               }
             ]
           },
-          "__schema9": {
+          "__schema11": {
             "type": "object",
             "propertyNames": {
               "$ref": "#/$defs/__schema0"
             },
             "additionalProperties": {
-              "$ref": "#/$defs/__schema8"
+              "$ref": "#/$defs/__schema10"
             }
-          },
-          "__schema10": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "__schema11": {
-            "$ref": "#/$defs/__schema0"
           },
           "__schema12": {
             "$ref": "#/$defs/__schema0"
           },
           "__schema13": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "__schema14": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "__schema15": {
             "anyOf": [
               {
-                "$ref": "#/$defs/__schema4"
+                "$ref": "#/$defs/__schema3"
               },
               {
                 "type": "null"
               }
             ]
           },
-          "__schema14": {
+          "__schema16": {
             "type": "object",
             "propertyNames": {
               "$ref": "#/$defs/__schema0"
             },
             "additionalProperties": {
-              "$ref": "#/$defs/__schema7"
+              "$ref": "#/$defs/__schema9"
             }
           },
-          "__schema15": {
-            "$ref": "#/$defs/__schema16"
+          "__schema17": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "photo": {
+                  "$ref": "#/$defs/__schema0"
+                },
+                "text": {
+                  "$ref": "#/$defs/__schema0"
+                },
+                "params": {
+                  "default": {},
+                  "$ref": "#/$defs/__schema16"
+                },
+                "crops": {
+                  "type": "object",
+                  "propertyNames": {
+                    "$ref": "#/$defs/__schema0"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "centerX": {
+                        "$ref": "#/$defs/__schema18"
+                      },
+                      "centerY": {
+                        "$ref": "#/$defs/__schema20"
+                      },
+                      "zoom": {
+                        "$ref": "#/$defs/__schema21"
+                      }
+                    },
+                    "required": [
+                      "centerX",
+                      "centerY",
+                      "zoom"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "focus": {
+                  "type": "object",
+                  "properties": {
+                    "centerX": {
+                      "$ref": "#/$defs/__schema18"
+                    },
+                    "centerY": {
+                      "$ref": "#/$defs/__schema20"
+                    }
+                  },
+                  "required": [
+                    "centerX",
+                    "centerY"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
           },
-          "__schema16": {
+          "__schema18": {
+            "$ref": "#/$defs/__schema19"
+          },
+          "__schema19": {
             "type": "number",
             "minimum": 0,
             "maximum": 1
           },
-          "__schema17": {
-            "$ref": "#/$defs/__schema16"
+          "__schema20": {
+            "$ref": "#/$defs/__schema19"
           },
-          "__schema18": {
+          "__schema21": {
             "type": "number",
             "minimum": 1,
             "maximum": 20
           },
-          "__schema19": {
+          "__schema22": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "params": {
+                  "default": {},
+                  "$ref": "#/$defs/__schema16"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "__schema23": {
+            "type": "object",
+            "properties": {
+              "definition": {
+                "$ref": "#/$defs/__schema13"
+              },
+              "params": {
+                "default": {},
+                "$ref": "#/$defs/__schema16"
+              },
+              "boxes": {
+                "$ref": "#/$defs/__schema17"
+              },
+              "elements": {
+                "$ref": "#/$defs/__schema22"
+              }
+            },
+            "additionalProperties": false
+          },
+          "__schema24": {
             "$ref": "#/$defs/__schema0"
           },
-          "__schema20": {
+          "__schema25": {
             "type": "object",
             "properties": {
               "spread": {
-                "$ref": "#/$defs/__schema3"
+                "$ref": "#/$defs/__schema1"
+              },
+              "page": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "cover": {
+                "$ref": "#/$defs/__schema5"
               },
               "box": {
-                "$ref": "#/$defs/__schema19"
+                "$ref": "#/$defs/__schema24"
               }
             },
             "required": [
-              "spread",
               "box"
             ],
             "additionalProperties": false
@@ -4747,6 +5556,10 @@
               "type": "string"
             }
           },
+          "affectedCover": {
+            "type": "boolean",
+            "const": true
+          },
           "references": {
             "type": "object",
             "propertyNames": {
@@ -4762,6 +5575,19 @@
           "replayed": {
             "type": "boolean",
             "const": true
+          },
+          "checkpointId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requestFingerprint": {
+            "type": "string"
           },
           "diagnostics": {
             "type": "array",
@@ -4804,6 +5630,17 @@
                     },
                     "spread": {
                       "type": "string"
+                    },
+                    "cover": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "page": {
+                      "type": "string",
+                      "enum": [
+                        "left",
+                        "right"
+                      ]
                     },
                     "box": {
                       "type": "string"
@@ -4939,6 +5776,137 @@
         "additionalProperties": {}
       }
     },
+    "list_book_checkpoints": {
+      "readOnly": true,
+      "input": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_-]{1,128}$"
+          },
+          "cursor": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string"
+          },
+          "checkpoints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "checkpointId": {
+                  "type": "string"
+                },
+                "time": {
+                  "type": "string"
+                },
+                "origin": {
+                  "type": "string",
+                  "enum": [
+                    "app",
+                    "mcp"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "changed": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "changedOutsideBefore": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "mcp": {
+                  "type": "object",
+                  "properties": {
+                    "tool": {
+                      "type": "string"
+                    },
+                    "idempotencyKey": {
+                      "type": "string"
+                    },
+                    "requestFingerprint": {
+                      "type": "string"
+                    },
+                    "session": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "tool",
+                    "idempotencyKey",
+                    "requestFingerprint",
+                    "session"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "checkpointId",
+                "time",
+                "origin",
+                "label",
+                "changed"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changedOutsideSinceLatest": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "project",
+          "checkpoints",
+          "nextCursor",
+          "changedOutsideSinceLatest"
+        ],
+        "additionalProperties": {}
+      }
+    },
     "rebuild_dependencies": {
       "readOnly": false,
       "input": {
@@ -5007,6 +5975,243 @@
           "project"
         ],
         "additionalProperties": {}
+      }
+    },
+    "list_templates": {
+      "readOnly": true,
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "templates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "built-in",
+                    "imported"
+                  ]
+                },
+                "replacesBuiltIn": {
+                  "type": "boolean"
+                },
+                "hash": {
+                  "type": "string"
+                },
+                "importedAt": {
+                  "type": "string"
+                },
+                "formats": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "layouts": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "openingSpreads": {
+                  "type": "number"
+                },
+                "shape": {
+                  "type": "string",
+                  "enum": [
+                    "Square",
+                    "Landscape",
+                    "Portrait"
+                  ]
+                },
+                "packages": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "string"
+                      },
+                      "license": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version",
+                      "license"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                "network": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "networkTrust": {
+                  "type": "string",
+                  "enum": [
+                    "built-in",
+                    "allowed"
+                  ]
+                },
+                "unavailable": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "version",
+                "label",
+                "source",
+                "hash",
+                "formats",
+                "layouts",
+                "openingSpreads"
+              ],
+              "additionalProperties": {}
+            }
+          }
+        },
+        "required": [
+          "templates"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "save_template_to_library": {
+      "readOnly": false,
+      "input": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "replaceHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "project"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "saved",
+              "replaced",
+              "unchanged",
+              "conflict"
+            ]
+          },
+          "template": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "hash": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "version",
+              "label"
+            ],
+            "additionalProperties": {}
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "changed",
+              "older",
+              "built-in",
+              "replaced-meanwhile"
+            ]
+          },
+          "current": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "replaced": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "message": {
+            "type": "string"
+          },
+          "notice": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "template"
+        ],
+        "additionalProperties": {},
+        "$defs": {
+          "__schema0": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "hash": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "built-in",
+                  "imported"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "version",
+              "hash",
+              "source"
+            ],
+            "additionalProperties": {}
+          }
+        }
       }
     },
     "import_sources": {
@@ -5202,6 +6407,19 @@
             "type": "boolean",
             "const": true
           },
+          "checkpointId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requestFingerprint": {
+            "type": "string"
+          },
           "diagnostics": {
             "type": "array",
             "items": {
@@ -5243,6 +6461,17 @@
                     },
                     "spread": {
                       "type": "string"
+                    },
+                    "cover": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "page": {
+                      "type": "string",
+                      "enum": [
+                        "left",
+                        "right"
+                      ]
                     },
                     "box": {
                       "type": "string"

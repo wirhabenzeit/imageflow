@@ -8,7 +8,8 @@ import { describeLayoutChange, discardContent, editorLayoutChoices, editorLayout
 import { hasFacingPages, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import { isParameterValue, listProblems, newItemId, resolveValue, sameValue } from './parameters';
 import type { ListItem, Parameter, Parameters } from './parameters';
-import { identifier, scopeState, storedBoxes } from './project';
+import { coverInstance, identifier, scopeState, storedBoxes } from './project';
+import { coverLayoutsFor } from './cover';
 import type { LayoutState, PageSide, ProjectFiles, SpreadState, Values } from './project';
 import { maxZoom, setPlacement } from './spread';
 import { insertionProblem, spreadOrder } from './spread-order';
@@ -41,27 +42,37 @@ const initialBox = z.strictObject({
 const spreadTarget = spreadReference.describe('Spread ID, or a $ref defined earlier in this batch.');
 const boxId = id.describe('Box ID, as the spread\'s layout declares it.');
 const page = z.enum(['left', 'right']).optional().describe('Split-sheet page; omit for unsplit units.');
-const boxTarget = z.strictObject({ spread: spreadTarget, page, box: boxId });
+const address = {
+  spread: spreadTarget.optional(), page,
+  cover: z.literal(true).optional().describe('Target the exterior cover. Omit spread and page.'),
+};
+type LayoutAddress = { spread?: string; page?: PageSide; cover?: true };
+const validAddress = ({ spread, page, cover }: LayoutAddress) =>
+  cover ? spread === undefined && page === undefined : spread !== undefined;
+const addressMessage = 'Choose a spread (with an optional page) or cover: true.';
+const boxTarget = z.strictObject({ ...address, box: boxId }).refine(validAddress, addressMessage);
 const parameterTarget = {
-  page,
-  scope: z.enum(['document', 'spread', 'box', 'element'])
-    .describe('Where the parameter is saved: document (whole book), spread, or a box or element of a spread. Parameters an element editor owns for its spread use spread.'),
-  spread: spreadTarget.optional().describe('Spread of a spread, box or element parameter. Omit for document parameters.'),
+  ...address,
+  scope: z.enum(['document', 'spread', 'cover', 'box', 'element'])
+    .describe('Where the parameter is saved: document, spread, cover layout, box or element.'),
   owner: id.optional().describe('Box or element ID of a box or element parameter.'),
   key: id.describe('Parameter ID.'),
 };
 const after = spreadReference.nullable().optional()
   .describe('Insert after this spread ID or $ref; null inserts at the start; omitted appends at the end.');
 const ref = id.optional().describe('Name for the new spread, usable as $name in later operations of this batch and in draft preview targets.');
-const definition = id.describe('Layout ID from template.spreads.');
+const definition = id.describe('Layout ID from the target’s layout declarations.');
 type ParameterAddress = z.infer<z.ZodObject<typeof parameterTarget>>;
 function validParameterTarget(target: ParameterAddress) {
-  return target.scope === 'document' ? target.spread === undefined && target.owner === undefined && target.page === undefined
-    : target.scope === 'spread' ? target.spread !== undefined && target.owner === undefined
-    : target.spread !== undefined && target.owner !== undefined;
+  if (target.scope === 'document' || target.scope === 'cover') {
+    return target.spread === undefined && target.owner === undefined && target.page === undefined &&
+      (target.scope === 'cover' || target.cover === undefined);
+  }
+  return target.scope === 'spread' ? target.spread !== undefined && target.cover === undefined && target.owner === undefined
+    : validAddress(target) && target.owner !== undefined;
 }
 
-const targetMessage = 'Document parameters omit spread/owner, spread parameters require spread, and box/element parameters require spread and owner.';
+const targetMessage = 'Use document or cover for layout-wide settings, spread with a spread ID, or box/element with an owner and a spread or cover target.';
 const itemId = id.describe('ID of an existing list item.');
 const initialBoxes = z.record(id, initialBox).default({}).describe('Initial box content by ID.');
 const initialElements = z.record(id, z.strictObject({ params: parameterValues.default({}) })).default({}).describe('Initial element parameters by ID.');
@@ -110,16 +121,17 @@ export const projectOperationSchema = z.discriminatedUnion('op', [
     after: spreadReference.nullable().describe('Required destination. Use null to move to the start, or an existing spread ID or $alias to move immediately after it.') })
     .describe('Move a spread.'),
   z.strictObject({ op: z.literal('remove_spread'), spread: spreadTarget }).describe('Remove a spread.'),
-  z.strictObject({ op: z.literal('switch_layout'), spread: spreadTarget, page, definition })
+  z.strictObject({ op: z.literal('switch_layout'), ...address, definition }).refine(validAddress, addressMessage)
     .describe('Change a spread to another layout with the same page footprint, carrying over content with matching IDs. Also switches layout family variants.'),
   z.strictObject({ op: z.literal('assign_source'), ...boxTarget.shape,
     kind: z.enum(['photo', 'text']).describe('photo for photo boxes, text for Markdown boxes.'),
     source: id.describe('Source ID from inspect_book sources or import_sources.') })
-    .describe('Put a photo or Markdown text into a box.'),
-  z.strictObject({ op: z.literal('clear_box'), ...boxTarget.shape }).describe('Remove the content of a box.'),
+    .refine(validAddress, addressMessage).describe('Put a photo or Markdown text into a box.'),
+  z.strictObject({ op: z.literal('clear_box'), ...boxTarget.shape }).refine(validAddress, addressMessage).describe('Remove the content of a box.'),
   z.strictObject({ op: z.literal('swap_content'), from: boxTarget.describe('First box.'), to: boxTarget.describe('Second box.') })
     .describe('Exchange the contents of two boxes, on the same or different spreads.'),
   z.strictObject({ op: z.literal('set_crop'), ...boxTarget.shape, ...placement })
+    .refine(validAddress, addressMessage)
     .describe('Set the crop of the photo in a box for the spread\'s current layout.'),
   z.strictObject({ op: z.literal('set_photo_metadata'), photo: id.describe('Photo source ID.'), values: z.strictObject({
     title: z.string().nullable().optional().describe('Short title of the photo.'),
@@ -135,12 +147,12 @@ export const projectOperationNames = projectOperationSchema.options.map((schema)
 export type ProjectOperation = z.input<typeof projectOperationSchema>;
 export type ProjectOperations = z.input<typeof projectOperationsSchema>;
 export type ProjectCommandResult = {
-  files: ProjectFiles; changes: string[]; affectedSpreads: string[]; references: Record<string, string>; reflow: boolean;
+  files: ProjectFiles; changes: string[]; affectedSpreads: string[]; affectedCover?: true; references: Record<string, string>; reflow: boolean;
 };
 export type ProjectCommandErrorCode = 'INVALID_OPERATION' | 'SPREAD_SHOWN_AS_PAGES' | 'SPREAD_NOT_FOUND' | 'LAYOUT_NOT_FOUND' | 'BOX_NOT_FOUND' |
   'ELEMENT_NOT_FOUND' | 'PARAMETER_NOT_FOUND' | 'INVALID_PARAMETER_VALUE' | 'SOURCE_NOT_FOUND' | 'BOX_TYPE_MISMATCH' | 'INCOMPATIBLE_LAYOUT' |
   'REFERENCE_NOT_FOUND' | 'DUPLICATE_REFERENCE' | 'INVALID_SPREAD_ID' | 'FORMAT_NOT_FOUND' | 'EMPTY_BOX' | 'INVALID_POSITION' |
-  'NOT_A_LIST' | 'ITEM_NOT_FOUND';
+  'NOT_A_LIST' | 'ITEM_NOT_FOUND' | 'COVER_UNAVAILABLE' | 'COVER_LAYOUT_REQUIRED';
 
 export class ProjectCommandError extends Error {
   constructor(readonly code: ProjectCommandErrorCode, message: string, readonly operationIndex?: number) {
@@ -163,6 +175,7 @@ export function applyProjectCommands(
   const references: Record<string, string> = {};
   const changes: string[] = [];
   const affected = new Set<string>();
+  let affectedCover = false;
   let reflow = false;
   let operationIndex = 0;
   const own = <T,>(record: Record<string, T>, key: string) => Object.hasOwn(record, key) ? record[key] : undefined;
@@ -173,10 +186,14 @@ export function applyProjectCommands(
   // The book's format as the batch has changed it so far: a select_format earlier in the batch applies to the
   // commands after it.
   let format: Pick<PrintFormat, 'label' | 'structure'> = template.format;
+  let formatId = template.formatId;
   function changed(message: string, spreads: string[], affectsFlow = false) {
     changes.push(message);
-    for (const spread of spreads) affected.add(spread);
-    reflow ||= affectsFlow;
+    for (const spread of spreads) {
+      if (spread === coverInstance) affectedCover = true;
+      else affected.add(spread);
+    }
+    reflow ||= affectsFlow && (spreads.length === 0 || spreads.some((id) => id !== coverInstance));
   }
   function resolveReference(reference: string) {
     if (!reference.startsWith('$')) return reference;
@@ -189,8 +206,19 @@ export function applyProjectCommands(
   function findLayout(definition: string) {
     return own(template.spreads, definition) ?? fail('LAYOUT_NOT_FOUND', 'The template has no layout ' + definition + '.');
   }
+  function coverLayouts() {
+    const layouts = coverLayoutsFor(template.coverLayouts, formatId);
+    if (!template.coverFormats || !Object.hasOwn(template.coverFormats, formatId) || !Object.keys(layouts).length) {
+      fail('COVER_UNAVAILABLE', 'The active format has no exterior cover.');
+    }
+    return layouts;
+  }
+  function coverLayout(definition: string) {
+    return own(coverLayouts(), definition) ?? fail('LAYOUT_NOT_FOUND', 'The active format has no cover layout ' + definition + '.');
+  }
   function findBox(spread: LayoutState, box: string) {
-    return own(findLayout(spread.definition ?? '').boxes, box) ??
+    const layout = spread === project.cover ? coverLayout(spread.definition ?? '') : findLayout(spread.definition ?? '');
+    return own(layout.boxes, box) ??
       fail('BOX_NOT_FOUND', 'Layout ' + spread.definition + ' has no box ' + box + '.');
   }
   function requireSource(kind: 'photo' | 'text', source: string) {
@@ -268,8 +296,14 @@ export function applyProjectCommands(
     const position = after === undefined ? project.spreads.length : after === null ? 0 : project.spreads.indexOf(findSpread(after)) + 1;
     project.spreads.splice(position, 0, spread);
   }
-  function commandState(reference: string, page?: PageSide) {
-    const sheet = findSpread(reference);
+  function commandState({ spread, page, cover }: LayoutAddress) {
+    if (cover) {
+      const layouts = coverLayouts();
+      const state = project.cover;
+      if (!state || !Object.hasOwn(layouts, state.definition)) return fail('COVER_LAYOUT_REQUIRED', 'Choose a cover layout first.');
+      return { sheet: { id: coverInstance }, state };
+    }
+    const sheet = findSpread(spread!);
     if (page && !sheet.split) fail('INVALID_OPERATION', 'Page addressing requires a split sheet. Omit page for an unsplit unit.');
     if (!page && sheet.split) fail('SPREAD_SHOWN_AS_PAGES', 'Spread ' + sheet.id + ' is shown as pages. Specify page: left or right.');
     const state = scopeState(sheet, page);
@@ -277,13 +311,14 @@ export function applyProjectCommands(
     return { sheet, state };
   }
   function parameterLocation(operation: ParameterAddress) {
-    const scoped = operation.scope === 'document' ? undefined : commandState(operation.spread!, operation.page);
+    const scoped = operation.scope === 'document' ? undefined : commandState(operation.scope === 'cover' ? { cover: true } : operation);
     const spread = scoped?.sheet, state = scoped?.state;
-    const path = operation.scope === 'document' ? 'document.' + operation.key : operation.scope === 'spread' ? operation.key :
+    const layoutScope = operation.scope === 'spread' || operation.scope === 'cover';
+    const path = operation.scope === 'document' ? 'document.' + operation.key : layoutScope ? operation.key :
       (operation.scope === 'box' ? 'boxes.' : 'elements.') + operation.owner + '.' + operation.key;
     const group = operation.scope === 'box' ? state?.boxes : state?.elements;
     const values = operation.scope === 'document' ? project.params
-      : operation.scope === 'spread' ? state?.params : group && own(group, operation.owner!)?.params;
+      : layoutScope ? state?.params : group && own(group, operation.owner!)?.params;
     return { spread, state, path, values };
   }
   function parameterTarget(operation: ParameterAddress, location = parameterLocation(operation)) {
@@ -293,7 +328,8 @@ export function applyProjectCommands(
       const parameter = own(template.parameters, operation.key);
       if (parameter) target = { scope: 'document', path, key: operation.key, param: parameter };
     } else {
-      target = resolveEditPath(template, state!.definition ?? '', path, operation.page);
+      const scoped = state === project.cover ? { ...template, spreads: coverLayouts() } : template;
+      target = resolveEditPath(scoped, state!.definition ?? '', path, operation.page);
     }
     return { ...location, target: target ?? fail('PARAMETER_NOT_FOUND', 'The current template has no parameter at this location.') };
   }
@@ -309,6 +345,7 @@ export function applyProjectCommands(
       case 'select_format':
         if (!Object.hasOwn(template.formats, operation.format)) fail('FORMAT_NOT_FOUND', 'Unknown print format ' + operation.format + '.');
         format = { label: template.formats[operation.format], structure: template.structures?.[operation.format] ?? template.format.structure };
+        formatId = operation.format;
         if (project.format !== operation.format) {
           project.format = operation.format;
           changed('Selected print format ' + operation.format, allSpreads(), true);
@@ -481,7 +518,15 @@ export function applyProjectCommands(
         break;
       }
       case 'switch_layout': {
-        const spread = findSpread(operation.spread);
+        if (operation.cover) {
+          const layout = coverLayout(operation.definition);
+          if (project.cover?.definition === operation.definition) break;
+          if (project.cover) project.cover.definition = operation.definition;
+          else project.cover = { definition: operation.definition, params: {}, boxes: {}, elements: {} };
+          changed('Selected cover layout ' + layout.label, [coverInstance]);
+          break;
+        }
+        const spread = findSpread(operation.spread!);
         findLayout(operation.definition);
         const position = { index: project.spreads.indexOf(spread), count: project.spreads.length };
         if (operation.page) {
@@ -516,7 +561,7 @@ export function applyProjectCommands(
         break;
       }
       case 'assign_source': {
-        const { sheet: spread, state } = commandState(operation.spread, operation.page);
+        const { sheet: spread, state } = commandState(operation);
         requireBoxKind(state, operation.box, operation.kind);
         requireSource(operation.kind, operation.source);
         const before = own(state.boxes, operation.box);
@@ -528,20 +573,21 @@ export function applyProjectCommands(
         break;
       }
       case 'clear_box': {
-        const { sheet: spread, state } = commandState(operation.spread, operation.page);
+        const { sheet: spread, state } = commandState(operation);
         const before = own(state.boxes, operation.box);
         // Saved content outside the current layout, including content no layout declares any more, can be cleared too.
         if (!before) findBox(state, operation.box);
         if (!before || (!before.photo && !before.text && !before.crops && !before.focus)) break;
-        if (Object.values(template.spreads).some((layout) => own(layout.boxes, operation.box))) discardContent(state, operation.box);
+        const layouts = operation.cover ? template.coverLayouts ?? {} : template.spreads;
+        if (Object.values(layouts).some((layout) => own(layout.boxes, operation.box))) discardContent(state, operation.box);
         // No layout can show or edit this box, so its parameters go with its content.
         else delete state.boxes[operation.box];
         changed('Cleared box ' + operation.box, [spread.id], !!before.text);
         break;
       }
       case 'swap_content': {
-        const { sheet: fromSheet, state: from } = commandState(operation.from.spread, operation.from.page);
-        const { sheet: toSheet, state: to } = commandState(operation.to.spread, operation.to.page);
+        const { sheet: fromSheet, state: from } = commandState(operation.from);
+        const { sheet: toSheet, state: to } = commandState(operation.to);
         const fromType = findBox(from, operation.from.box).type;
         if (findBox(to, operation.to.box).type !== fromType) fail('BOX_TYPE_MISMATCH', 'Swapped boxes must accept the same content type.');
         if (from === to && operation.from.box === operation.to.box) break;
@@ -563,7 +609,7 @@ export function applyProjectCommands(
         break;
       }
       case 'set_crop': {
-        const { sheet: spread, state } = commandState(operation.spread, operation.page);
+        const { sheet: spread, state } = commandState(operation);
         requireBoxKind(state, operation.box, 'photo');
         const box = own(state.boxes, operation.box);
         if (!box?.photo) fail('EMPTY_BOX', 'Assign a photo before setting its crop.');
@@ -588,5 +634,5 @@ export function applyProjectCommands(
     }
     operationIndex++;
   }
-  return { files: next, changes, affectedSpreads: [...affected], references, reflow };
+  return { files: next, changes, affectedSpreads: [...affected], ...(affectedCover ? { affectedCover: true as const } : {}), references, reflow };
 }

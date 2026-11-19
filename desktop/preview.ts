@@ -105,11 +105,14 @@ async function withRenderedBook<T>(
 }
 
 export function checkBookRender(url: string, signal?: AbortSignal, inspect?: InspectionRequest, onActivity?: () => void) {
-  const query = new URLSearchParams({ view: 'check' });
+  const query = new URLSearchParams({ view: inspect?.cover ? 'cover-check' : 'check' });
   if (inspect) query.set('inspect', JSON.stringify(inspect));
   return withRenderedBook(url, query, signal, (_window, status) => status, onActivity);
 }
 
+export function checkCoverRender(url: string, signal?: AbortSignal, onActivity?: () => void) {
+  return withRenderedBook(url, new URLSearchParams({ view: 'cover-check' }), signal, (_window, status) => status, onActivity);
+}
 // How often a capture without the sentinel is retried before the preview fails, and how long to wait between.
 const captureAttempts = 8;
 const captureRetryMs = 250;
@@ -162,7 +165,7 @@ export async function captureBookPreview(url: string, request: PreviewRequest, s
   const options = parsePreviewRequest(request);
   const sentinel = makeSentinel();
   const marker = formatSentinel(sentinel);
-  const query = new URLSearchParams({ view: 'artwork', request: JSON.stringify(options), sentinel: marker });
+  const query = new URLSearchParams({ view: 'cover' in options.target ? 'cover-artwork' : 'artwork', request: JSON.stringify(options), sentinel: marker });
   if (inspect) query.set('inspect', JSON.stringify(inspect));
   return withRenderedBook(url, query, signal, async (window, status, metadata) => {
     if (!metadata) throw new PreviewError('preview-capture-failed', 'The renderer did not produce the requested artwork.');

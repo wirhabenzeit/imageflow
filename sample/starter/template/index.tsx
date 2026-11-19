@@ -1,5 +1,5 @@
 import { box, Choice, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Page, Spread } from 'imageflow';
-import type { BookSpread, FlowPosition, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
+import type { BookSpread, CoverFormat, FlowPosition, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
 import { insetMapParameters, MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView, placesBeside } from './map';
 import { elevationOrigin, mapCredits } from './map-styles';
@@ -25,6 +25,34 @@ const bookFormat = (label: string, width: number, height: number) => printFormat
     maximumFileSize: { pages: 500_000_000 },
   },
 });
+
+const allEdges = (length: ReturnType<typeof mm>) => ({ top: length, right: length, bottom: length, left: length });
+const coverPdf = { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' } as const;
+const whiteWallCover: CoverFormat = {
+  kind: 'wrap', height: mm(296), panels: { back: mm(296), front: mm(296) },
+  widths: { kind: 'page-bands', bands: Array.from({ length: 11 }, (_, i) => {
+    const from = 28 + 8 * i;
+    return { from, to: from + 4, value: { spine: mm(11 + 1.5 * i) } };
+  }) },
+  outer: { kind: 'wrap', insets: allEdges(mm(10)) },
+  safe: { back: allEdges(mm(5)), front: allEdges(mm(5)), spine: allEdges(mm(2)) },
+  foldAvoidance: { back: mm(12), front: mm(12) },
+  output: { ...coverPdf, maximumFileSize: 250_000_000, resolution: { minimum: 180, target: 250, maximum: 300 } },
+};
+const blurbCover: CoverFormat = {
+  kind: 'wrap', height: pt(864), panels: { back: pt(879), front: pt(879) },
+  widths: { kind: 'page-bands', bands: [
+    { from: 20, to: 50, spine: 33, flap: 284 },
+    { from: 52, to: 100, spine: 41, flap: 280 },
+    { from: 102, to: 160, spine: 54, flap: 273 },
+    { from: 162, to: 200, spine: 66, flap: 267 },
+    { from: 202, to: 240, spine: 79, flap: 261 },
+  ].map(({ from, to, spine, flap }) => ({ from, to, value: { spine: pt(spine), flaps: { back: pt(flap), front: pt(flap) } } })) },
+  outer: { kind: 'bleed', insets: allEdges(pt(9)) },
+  safe: { back: allEdges(pt(18)), front: allEdges(pt(18)), spine: allEdges(pt(0)) },
+  flaps: { safe: { back: allEdges(pt(18)), front: allEdges(pt(18)) } },
+  output: { ...coverPdf, resolution: { minimum: 180, target: 250, maximum: 300 } },
+};
 
 // Book settings. The theme sets every colour of the book (paper, text, rules and the shades over photos) in
 // styles.css, so pages never pick colours of their own and a book switches between light and dark in one step.
@@ -309,19 +337,57 @@ const compass = <svg viewBox="0 0 100 100" aria-hidden="true">
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.12.0',
+  version: '0.13.0',
   label: 'Photobook',
   description: 'A travel journal with full-bleed photographs, stories, grids, maps and a picture list, in a light or a dark theme.',
   preview: './preview.jpg',
   contract: 1,
+  requires: ['physical-covers'],
   // The map layouts load OpenFreeMap styles and tiles, and Mapterhorn elevation for contour lines, once the user allows
   // it, in their editor, the page and export.
   network: [mapOrigin, elevationOrigin],
   formats: {
     square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
     landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
+    blurbJacket: printFormat({ label: 'Blurb Large Square · Premium Matte Dust Jacket', trim: { width: pt(846), height: pt(846) },
+      bleed: { all: pt(9), binding: pt(0) }, safe: { all: pt(18), binding: pt(36) },
+      pageCount: { min: 20, max: 240, step: 2 }, output: { resolution: { minimum: 180, target: 250, maximum: 300 } } }),
   },
   defaultFormat: 'square',
+  coverFormats: { square: whiteWallCover, blurbJacket: blurbCover },
+  coverLayouts: {
+    wrapPhoto: {
+      label: 'Photo wrap',
+      parameters: {
+        title: p.string({ label: 'Cover title', default: '' }),
+        spineTitle: p.string({ label: 'Spine title', default: '' }),
+        backText: p.string({ label: 'Back cover text', default: '', multiline: true }),
+        backFlapText: p.string({ label: 'Back flap text', default: '', multiline: true }),
+        frontFlapText: p.string({ label: 'Front flap text', default: '', multiline: true }),
+      },
+      boxes: { hero: { type: 'photo', label: 'Cover photo' } },
+      render: ({ cover, PhotoBox, Text }) => {
+        const { sheet, safe, regions } = cover;
+        const front = safe.front, back = safe.back, spine = safe.spine;
+        const picture = { ...regions.front, x: regions.front.x + 14, y: 48, width: regions.front.width - 28, height: regions.front.height - 70 };
+        return <div style={{ ...geometry.css(sheet), background: '#eeebe2', color: '#2b322b', fontFamily: 'Field Serif' }}>
+          <div style={{ ...geometry.css({ ...cover.trim, x: -sheet.x, y: -sheet.y }) }}>
+            <PhotoBox id="hero" rect={picture} />
+            {front && <Text parameter="title" as="h1" rect={{ ...front, x: front.x + 12, y: 19, width: front.width - 24, height: 20 }}
+              style={{ fontSize: '32pt', margin: 0, lineHeight: 1.15 }} />}
+            {back && <Text parameter="backText" rect={{ ...back, x: back.x + 16, y: 36, width: back.width - 32, height: 70 }}
+              style={{ fontSize: '14pt', lineHeight: 1.4, margin: 0, whiteSpace: 'pre-line' }} />}
+            {spine && <Text parameter="spineTitle" rect={{ ...spine, y: spine.y + 15, height: spine.height - 30 }}
+              style={{ writingMode: 'vertical-rl', fontSize: '11pt', margin: 0, lineHeight: 1, display: 'grid', placeItems: 'center' }} />}
+            {safe.backFlap && <Text parameter="backFlapText" rect={geometry.inset(safe.backFlap, 7)}
+              style={{ fontSize: '12pt', lineHeight: 1.4, margin: 0, whiteSpace: 'pre-line' }} />}
+            {safe.frontFlap && <Text parameter="frontFlapText" rect={geometry.inset(safe.frontFlap, 7)}
+              style={{ fontSize: '12pt', lineHeight: 1.4, margin: 0, whiteSpace: 'pre-line' }} />}
+          </div>
+        </div>;
+      },
+    },
+  },
   parameters: documentParameters,
   controls: [
     { group: 'Look', controls: ['theme', 'headingFont'] },

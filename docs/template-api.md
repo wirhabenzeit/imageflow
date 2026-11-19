@@ -81,6 +81,18 @@ Pass these operations to `apply_project_changes` with `project`, `expectedRevisi
 
 Use layout, format and parameter IDs from `get_authoring_context`; use spread and source IDs from `inspect_book`. A command that creates a spread can name it with `"ref":"chapter"`. Later commands and draft preview targets refer to it with the string `"$chapter"`. Use an earlier spread ID or reference in `after`, or use `null` to insert at the start. With no `after`, inserts append and duplicates follow the original.
 
+### Exterior covers
+
+Pass `cover: true` where a layout, box, or element operation would otherwise name a spread. Use `scope: "cover"` for whole-cover parameters. Run these operations as a batch or check them as a draft.
+
+```json
+[
+  { "op": "switch_layout", "cover": true, "definition": "wrapPhoto" },
+  { "op": "set_parameter", "scope": "cover", "key": "title", "value": "Along the coast" },
+  { "op": "assign_source", "cover": true, "box": "hero", "kind": "photo", "source": "registered-photo-id" }
+]
+```
+
 ### Layout and book operations
 
 | Operation | Example |
@@ -515,6 +527,14 @@ Each entry is a complete `PrintFormat`, so presets may differ in bleed, safe are
 Changing the format re-renders the book: assignments, crops and text sources stay, while text flow, photo resolution and print checks are recomputed. Layouts adapt through `ctx.format` (resolved millimetres), `ctx.geometry` (the geometry helpers for that format), `ctx.formatId` (the chosen key, or `'default'` for a single `format`), and the `--trim-*`, `--bleed-*` and `--safe-*` CSS variables of `<Spread>`. The starter template draws its layouts on a 290 × 290 design page and scales positions with the trim size; full-bleed boxes use the bleed variables directly.
 
 Arbitrary dimensions within declared limits, rather than named presets, are not supported yet.
+
+### Exterior covers
+
+Declare `requires: ['physical-covers']`, `coverFormats` keyed by interior format ID, and `coverLayouts`. For a template with a single `format`, use the key `default`. A cover layout is available for every declared cover format unless its `formats` list names specific IDs. An interior format without a corresponding cover specification opens in the usual content editor.
+
+Each cover layout renders one full exterior sheet. It can declare photo boxes, parameters, and elements with generated controls. The render context provides `cover.sheet`, `cover.trim`, and `cover.regions` for the back, spine, front and optional flaps, in millimetres. Use `cover.safe` for text placement. A region can have a `null` safe area if its insets consume the available space. `cover.sheet` starts at negative trim-relative coordinates so artwork can extend into the wrap or bleed.
+
+Print specifications can use fixed widths or inclusive page-count bands for the spine and both flaps. Bands cover every valid interior page count, with printer rounding applied in the source unit. Interior page counts include blank pages. Guides and provisional sizing appear in the editor and preview metadata.
 
 ### Formats without facing pages
 

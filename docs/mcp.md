@@ -274,6 +274,10 @@ ImageFlow bundles each template with an external source map. It is never linked 
 
 ### Project command batches
 
+For an opted-in format, use `inspect_book` with `view: "cover"` for the saved layout, page count and geometry. In the elements view, pass `cover: true` to measure the sheet. Send `preview: { "target": { "cover": true } }` to `check_book` for artwork. Include `box` or `element` for a close-up. A provisional image includes both `interiorPages` and `previewPages`.
+
+Use `fixtures: { "cover": { "layout": "wrapPhoto", "format": "blurbJacket", "pages": 52 }, "cases": ["typical", "long-text"] }` to check a cover layout against synthetic content and a specific interior page count. Pass a cover-targeted `switch_layout`, parameter, photo, or crop operation to `apply_project_changes` or `check_book` drafts. Cover edits report `affectedCover: true`. [Cover command examples](template-api/project-commands.md)
+
 Use a unique `idempotencyKey` for a new request. If the connection is lost after sending a request, retry the exact same arguments and key, including the original `expectedRevision`, with the current project handle. A committed key stays in the [book history](#book-history) while its checkpoint is retained, also after ImageFlow quits or the book reopens. The retry returns the original `checkpointId` with `replayed: true` and applies nothing, even though the committed batch changed the revision. Reusing a key with different arguments returns `IDEMPOTENCY_CONFLICT`. If the history can't be read, the request returns `HISTORY_UNAVAILABLE` and changes nothing. A dry run validates and describes the batch without committing it or consulting the history.
 
 `requestFingerprint` identifies a request across sessions. It is the SHA-256, in lowercase hex, of the JSON text of `{ "arguments": …, "tool": … }` with object keys sorted at every level and no whitespace. `arguments` are the validated arguments without `project`, `idempotencyKey` and `dryRun`, so a `label` is trimmed. Write results return it, so a client can store it instead of computing it.

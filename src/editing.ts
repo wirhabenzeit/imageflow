@@ -1,4 +1,4 @@
-import { scopeSpread, storedBoxes } from './project';
+import { coverInstance, scopeState, storedBoxes } from './project';
 import type { PageSide, Project, SpreadState, Values } from './project';
 import { resolveValue } from './parameters';
 import type { Parameter, Parameters } from './parameters';
@@ -72,20 +72,23 @@ function shown(spread: SpreadState, layouts?: Layouts) {
   return states.flatMap((state) => shownBoxes(state, layout(state.definition)).map((id) => state.boxes[id]));
 }
 
-export type SourceUsage = Record<'photo' | 'text', Record<string, { spread: string; pages: string }[]>>;
+export type SourcePlace = { spread: string; pages: string; cover?: true };
+export type SourceUsage = Record<'photo' | 'text', Record<string, SourcePlace[]>>;
 
 // Lists the spreads that show each photo and Markdown source. `pages` holds a readable page range per spread.
 export function sourceUsage(project: Project, pages: string[], layouts?: Layouts) {
   const usage: SourceUsage = { photo: {}, text: {} };
-  project.spreads.forEach((spread, i) => {
-    for (const box of shown(spread, layouts)) {
+  function record(boxes: ReturnType<typeof shown>, place: SourcePlace) {
+    for (const box of boxes) {
       for (const [kind, id] of [['photo', box.photo], ['text', box.text]] as const) {
         if (!id) continue;
         const list = usage[kind][id] ??= [];
-        if (!list.some((entry) => entry.spread === spread.id)) list.push({ spread: spread.id, pages: pages[i] });
+        if (!list.some((entry) => entry.spread === place.spread)) list.push(place);
       }
     }
-  });
+  }
+  project.spreads.forEach((spread, i) => record(shown(spread, layouts), { spread: spread.id, pages: pages[i] }));
+  if (project.cover) record(Object.values(project.cover.boxes), { spread: coverInstance, pages: 'Cover', cover: true });
   return usage;
 }
 
@@ -123,9 +126,8 @@ export function resolveEditPath(template: EditableTemplate, definition: string, 
   }
 }
 
-function editValues(project: Project, spread: SpreadState, target: EditTarget, create = false) {
+function editValues(project: Project, state: ReturnType<typeof scopeState> | Project['cover'], target: EditTarget, create = false) {
   if (target.scope === 'document') return project.params;
-  const state = scopeSpread(spread, target.page);
   if (!state) return;
   if (target.scope === 'spread') return state.params;
   const group = target.scope === 'element' ? state.elements : state.boxes;
@@ -134,7 +136,7 @@ function editValues(project: Project, spread: SpreadState, target: EditTarget, c
 }
 
 export function readEdit(project: Project, spread: SpreadState, target: EditTarget) {
-  const value = editValues(project, spread, target)?.[target.key];
+  const value = editValues(project, scopeState(spread, target.page), target)?.[target.key];
   return resolveValue(target.param, value);
 }
 
@@ -142,5 +144,7 @@ export function readEdit(project: Project, spread: SpreadState, target: EditTarg
 export function writeEdit(project: Project, spreadId: string | undefined, target: EditTarget, value: Values[string]) {
   if (target.scope === 'document') { project.params[target.key] = value; return; }
   const spread = project.spreads.find(({ id }) => id === spreadId);
-  if (spread) { const values = editValues(project, spread, target, true); if (values) values[target.key] = value; }
+  const state = spread ? scopeState(spread, target.page) : spreadId === coverInstance ? project.cover : undefined;
+  const values = editValues(project, state, target, true);
+  if (values) values[target.key] = value;
 }
