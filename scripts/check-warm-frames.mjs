@@ -175,26 +175,33 @@ try {
   await w.waitForFunction(() => !document.querySelector('.status-error') &&
     document.querySelector('iframe.book-frame-book[data-current][data-ready]'), null, { timeout: 30000 });
 
-  // Overlapping edits: while the thumbnails are slow, the book view holds a revision the editor has not shown yet. A
-  // newer edit that fails must bring back what the editor showed, not that held revision.
+  // Overlapping edits: after a revision the editor shows, a newer edit fails while the thumbnails are slow. Both views
+  // must come back to exactly the spreads the editor showed last, in order: not the opening book, nor a held revision.
   const thumbsFrame = async () => (await w.locator('iframe.book-frame-thumbs:not(.book-frame-pending)').elementHandle()).contentFrame();
+  const order = (frame) => frame.evaluate(() => [...document.querySelectorAll('.if-spread-container')].map((container) => container.dataset.spread));
+  const shorter = JSON.parse(good);
+  shorter.spreads.splice(2, 1);
+  const beforeDelete = await current();
+  await writeFile(join(project, 'project.json'), JSON.stringify(shorter, null, 2) + '\n');
+  await compare('Delete a spread before a failing edit', beforeDelete);
+  const expected = shorter.spreads.map((spread) => spread.id);
+  const labels = () => w.evaluate(() => [...document.querySelectorAll('.sheet-label')].map((label) => label.dataset.canvasSpread));
+  assert.deepEqual(await order(await bookFrame()), expected, 'the book view shows the shorter book');
+  assert.deepEqual(await order(await thumbsFrame()), expected, 'the thumbnails show the shorter book');
+  assert.deepEqual(await labels(), expected, 'the labels show the shorter book');
   await (await thumbsFrame()).evaluate(() => {
     const fetch = window.originalFetch = window.fetch;
     window.fetch = (url, options) => String(url).endsWith('/data') ? new Promise((resolve) => setTimeout(() => resolve(fetch(url, options)), 3000)) : fetch(url, options);
   });
-  const shorter = JSON.parse(good);
-  shorter.spreads.splice(2, 1);
-  await writeFile(join(project, 'project.json'), JSON.stringify(shorter, null, 2) + '\n');
-  await w.waitForTimeout(800);
   const failing = structuredClone(shorter);
   failing.spreads.find((spread) => !spread.split).definition = 'no-such-layout';
   await writeFile(join(project, 'project.json'), JSON.stringify(failing, null, 2) + '\n');
   await w.waitForFunction(() => document.querySelector('.status-error'), null, { timeout: 30000 });
   await w.waitForTimeout(5000);
-  const overlapSheets = await (await bookFrame()).evaluate(() => document.querySelectorAll('.if-sheet').length);
-  const overlapLabels = await w.evaluate(() => document.querySelectorAll('.sheet-label').length);
-  const consistent = overlapSheets === overlapLabels;
-  console.log((consistent ? '✓ ' : '✖ ') + 'A failed edit after an unshown one restores what the editor showed · ' + overlapSheets + ' sheets, ' + overlapLabels + ' sheet labels');
+  const recovered = { book: await order(await bookFrame()), thumbs: await order(await thumbsFrame()), labels: await labels() };
+  const consistent = Object.values(recovered).every((ids) => JSON.stringify(ids) === JSON.stringify(expected));
+  console.log((consistent ? '✓ ' : '✖ ') + 'A failed edit restores the spreads the editor showed last · book ' + recovered.book.length +
+    ', thumbnails ' + recovered.thumbs.length + ', labels ' + recovered.labels.length + ' of ' + expected.length);
   failures += consistent ? 0 : 1;
   await (await thumbsFrame()).evaluate(() => { window.fetch = window.originalFetch; });
   await writeFile(join(project, 'project.json'), good);

@@ -2198,6 +2198,8 @@ export async function startRender(root: HTMLElement) {
                 let failed: { error: unknown } | undefined;
                 const transition = document.startViewTransition(async () => {
                   try { await renderRevision(next); } catch (error) { failed = { error }; await restore(); return; }
+                  // Known before its release arrives, which this wait is for.
+                  rendered.set(revision, { book: next, path, revision });
                   // A newer revision asked for meanwhile, also before this wait began, makes this one outdated: the app
                   // will not release it, so it is not waited for.
                   if (wanted === revision) await shown;
@@ -2209,8 +2211,8 @@ export async function startRender(root: HTMLElement) {
                 if (failed) { rendering = false; throw failed.error; }
               } else {
                 try { await renderRevision(next); } catch (error) { await restore(); rendering = false; throw error; }
+                rendered.set(revision, { book: next, path, revision });
               }
-              rendered.set(revision, { book: next, path, revision });
             } catch (error) {
               // A revision that never started rendering leaves the shown one as it is, under its own session's URL.
               if (rendering) await restore();
