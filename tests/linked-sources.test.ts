@@ -557,4 +557,24 @@ test('a file stored in the book is renamed in place, keeping its ID, extension a
   await assert.rejects(renameSource(undone, 'file:' + id, '  '), /Enter a name/);
   const linked = await importIntoProject(undone, { kind: 'file', mode: 'link', accept: ['.gpx'] }, [f.file]);
   await assert.rejects(renameSource(linked.book, 'file:' + linked.imported[0], 'Other'), /keeps the name of its original/);
+
+  // A change of case renames the file itself. On a case-sensitive volume, another file that differs only in case is
+  // a different file and is never replaced.
+  const recased = await renameSource(linked.book, 'file:' + id, 'stage 05- song kul');
+  assert.equal(recased.project.files[id], 'files/' + id + '-stage 05- song kul.gpx');
+  assert.equal(await readFile(join(f.folder, recased.project.files[id] as string), 'utf8'), '<gpx><trk/></gpx>');
+  const other = join(f.folder, 'files', id + '-STAGE 05- SONG KUL.gpx');
+  const sensitive = await stat(other).then(() => false, () => true);
+  if (sensitive) {
+    await writeFile(other, 'another file');
+    await assert.rejects(renameSource(recased, 'file:' + id, 'STAGE 05- SONG KUL'), /already has this name/);
+    assert.equal(await readFile(other, 'utf8'), 'another file');
+  }
+
+  // A files folder replaced by a link to somewhere else is not renamed into, nor is anything there renamed.
+  const outside = join(f.root, 'outside');
+  await rename(join(f.folder, 'files'), outside);
+  await symlink(outside, join(f.folder, 'files'));
+  await assert.rejects(renameSource(recased, 'file:' + id, 'Escaped'), /book’s own folder|must be inside|points outside/);
+  assert.equal(await readFile(join(outside, id + '-stage 05- song kul.gpx'), 'utf8'), '<gpx><trk/></gpx>');
 });

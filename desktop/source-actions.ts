@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { copyFile, cp, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, extname, join, posix } from 'node:path';
+import { basename, dirname, extname, join, posix } from 'node:path';
 import { storedBoxes } from '../src/project';
 import type { ProjectFiles } from '../src/project';
 import { clearFileAssignments, fileAssigned } from '../src/asset-usage';
@@ -12,7 +12,7 @@ import { loadProject, updateProject } from './project';
 import type { OpenProject } from './project';
 import { CommittedProjectSaveError } from './persistence';
 import { captureProjectInputs } from './revisions';
-import { digestBytes, SourceStore, within } from './source-store';
+import { digestBytes, originalPath, SourceStore, within } from './source-store';
 import { approveSource, approvedExtensions, transferSourceAccess, transferBookTrust } from './source-access';
 
 const filesOf = (book: OpenProject): ProjectFiles => structuredClone({ project: book.project, photoIndex: book.photoIndex });
@@ -60,10 +60,18 @@ export async function renameSource(book: OpenProject, key: string, requested: un
   if (name.length > 200) throw new Error('Choose a shorter name.');
   if (name === current) return book;
   const relative = posix.join(posix.dirname(source.path), prefix + name);
-  const from = join(book.folder, source.path), to = join(book.folder, relative);
-  // A change of case only is the same file on a case-insensitive volume.
-  const exists = from.toLowerCase() !== to.toLowerCase() && await stat(to).then(() => true, () => false);
-  if (exists) throw new Error('Another asset already has this name.');
+  // Both names must stay inside the book's own folder for this kind of asset, also when a folder on the way has been
+  // replaced by a link: the stored copy resolves there (originalPath), and so does the folder the manifest names.
+  const from = await originalPath(book.folder, source);
+  const root = await realpath(join(book.folder, sourceFolder(source.kind)));
+  const folder = await realpath(join(book.folder, posix.dirname(source.path)));
+  if (folder !== dirname(from) || (folder !== root && !within(root, folder))) throw new Error('This asset is not stored in the book’s own folder.');
+  const to = join(folder, prefix + name);
+  if (!within(root, to)) throw new Error('Choose another name.');
+  // An existing name is free only when it is this very file, as a change of case is on a case-insensitive volume;
+  // on a case-sensitive one, Notes.md and notes.md are two files.
+  const [own, existing] = await Promise.all([stat(from), stat(to).catch(() => undefined)]);
+  if (existing && (existing.ino !== own.ino || existing.dev !== own.dev)) throw new Error('Another asset already has this name.');
   await rename(from, to);
   const files = filesOf(book);
   reference(files, source, relative, false);
