@@ -174,6 +174,32 @@ try {
   await writeFile(join(project, 'project.json'), good);
   await w.waitForFunction(() => !document.querySelector('.status-error') &&
     document.querySelector('iframe.book-frame-book[data-current][data-ready]'), null, { timeout: 30000 });
+
+  // Overlapping edits: while the thumbnails are slow, the book view holds a revision the editor has not shown yet. A
+  // newer edit that fails must bring back what the editor showed, not that held revision.
+  const thumbsFrame = async () => (await w.locator('iframe.book-frame-thumbs:not(.book-frame-pending)').elementHandle()).contentFrame();
+  await (await thumbsFrame()).evaluate(() => {
+    const fetch = window.originalFetch = window.fetch;
+    window.fetch = (url, options) => String(url).endsWith('/data') ? new Promise((resolve) => setTimeout(() => resolve(fetch(url, options)), 3000)) : fetch(url, options);
+  });
+  const shorter = JSON.parse(good);
+  shorter.spreads.splice(2, 1);
+  await writeFile(join(project, 'project.json'), JSON.stringify(shorter, null, 2) + '\n');
+  await w.waitForTimeout(800);
+  const failing = structuredClone(shorter);
+  failing.spreads.find((spread) => !spread.split).definition = 'no-such-layout';
+  await writeFile(join(project, 'project.json'), JSON.stringify(failing, null, 2) + '\n');
+  await w.waitForFunction(() => document.querySelector('.status-error'), null, { timeout: 30000 });
+  await w.waitForTimeout(5000);
+  const overlapSheets = await (await bookFrame()).evaluate(() => document.querySelectorAll('.if-sheet').length);
+  const overlapLabels = await w.evaluate(() => document.querySelectorAll('.sheet-label').length);
+  const consistent = overlapSheets === overlapLabels;
+  console.log((consistent ? '✓ ' : '✖ ') + 'A failed edit after an unshown one restores what the editor showed · ' + overlapSheets + ' sheets, ' + overlapLabels + ' sheet labels');
+  failures += consistent ? 0 : 1;
+  await (await thumbsFrame()).evaluate(() => { window.fetch = window.originalFetch; });
+  await writeFile(join(project, 'project.json'), good);
+  await w.waitForFunction(() => !document.querySelector('.status-error') &&
+    document.querySelector('iframe.book-frame-book[data-current][data-ready]'), null, { timeout: 30000 });
   const last = await current();
   for (const view of views) assert.equal(last[view].src, first[view].src, view + ': the frame was reused, not replaced');
   console.log(failures ? failures + ' comparisons differ.' : 'Every reused frame matched a fresh one; the frames were reused throughout.');

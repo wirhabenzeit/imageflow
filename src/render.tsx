@@ -2141,9 +2141,13 @@ export async function startRender(root: HTMLElement) {
       let attempted = currentRevision;
       let running = false;
       let release: (() => void) | undefined;
-      // The last revision that rendered, to show again when a newer one fails partway: React has cleared the root by
-      // then, and the app keeps showing this frame until a new one replaces it.
-      let good = { book, path: location.pathname, revision: currentRevision };
+      // The last revision the app showed, to draw again when a newer one fails partway: React has cleared the root by
+      // then, and the app keeps showing this frame until a new one replaces it. A revision becomes it only when the
+      // app releases it: one that a newer edit made outdated rendered here but was never shown, so it must not return.
+      type Good = { book: RenderProject; path: string; revision: string | undefined };
+      let good: Good = { book, path: location.pathname, revision: currentRevision };
+      // Revisions rendered here and not yet released, oldest first; the app may release one after a newer one began.
+      const rendered = new Map<string, Good>();
       const restore = async () => {
         history.replaceState(null, '', good.path + location.search);
         setTemplateFiles(good.book.files);
@@ -2152,7 +2156,14 @@ export async function startRender(root: HTMLElement) {
         try { await renderRevision(good.book); } catch { /* The app replaces this frame. */ }
       };
       window.addEventListener('message', (event) => {
-        if (event.origin === editorURL.slice(0, -1) && event.data?.type === 'release-revision' && event.data.project === currentRevision) release?.();
+        if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'release-revision') return;
+        const project = event.data.project;
+        const shown = typeof project === 'string' ? rendered.get(project) : undefined;
+        if (shown) {
+          good = shown;
+          for (const key of [...rendered.keys()]) { rendered.delete(key); if (key === project) break; }
+        }
+        if (project === currentRevision) release?.();
       });
       window.addEventListener('message', async (event) => {
         if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'revision' || typeof event.data.project !== 'string') return;
@@ -2199,7 +2210,7 @@ export async function startRender(root: HTMLElement) {
               } else {
                 try { await renderRevision(next); } catch (error) { await restore(); rendering = false; throw error; }
               }
-              good = { book: next, path, revision };
+              rendered.set(revision, { book: next, path, revision });
             } catch (error) {
               // A revision that never started rendering leaves the shown one as it is, under its own session's URL.
               if (rendering) await restore();
