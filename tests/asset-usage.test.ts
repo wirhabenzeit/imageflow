@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { assetPageLabels, assetUsage, clearFileAssignments, fileAssigned, fileExtensions, usageLabel } from '../src/asset-usage';
 import { assetMenu } from '../src/asset-menu';
 import type { ProjectSummary } from '../src/desktop';
-import { projectSchema } from '../src/project';
+import { coverInstance, projectSchema } from '../src/project';
 test('Assets and placement menus use the same page labels as the book canvas', () => {
   const summary: ProjectSummary = { id: 'book', folder: 'Book', photos: {}, photoSizes: {}, texts: {},
     pageLabels: { one: '4–5' }, photoIndex: { photo: { path: 'photos/photo.jpg' } },
@@ -27,6 +27,28 @@ test('unused detection includes document, layout, box and element parameter refe
   assert.equal(usage.text.story[0].spread, 's');
   assert.equal(usage.file.route[0].pages, 'Book settings');
   assert.equal(usage.photo.unused, undefined);
+});
+
+test('cover placements include layout, element and active box parameters', () => {
+  const summary: ProjectSummary = { id: 'book', folder: 'Book', photos: {}, photoSizes: {}, texts: {}, coverBoxIds: ['hero'],
+    photoIndex: { background: { path: 'photos/background.jpg' }, alternate: { path: 'photos/alternate.jpg' } },
+    project: projectSchema.parse({ schemaVersion: 3, title: 'Book', template: { id: 't', version: '1' }, spreads: [],
+      texts: { blurb: 'texts/blurb.md', retained: 'texts/retained.md' },
+      cover: { definition: 'jacket', params: { background: 'background' }, elements: { text: { params: { source: 'blurb' } } },
+        boxes: { hero: { photo: 'background', params: { fallback: 'alternate' } }, old: { params: { source: 'retained' } } } },
+    }) };
+  const cover = [{ spread: coverInstance, pages: 'Cover', cover: true }];
+  const placements = assetUsage(summary, [], summary.coverBoxIds);
+  assert.deepEqual(placements.photo, { background: cover, alternate: cover });
+  assert.deepEqual(placements.text, { blurb: cover });
+  assert.deepEqual(assetMenu(summary, ['markdown:blurb']).find((item) => typeof item === 'object' && 'command' in item && item.command === 'asset-placements'),
+    { command: 'asset-placements', items: [{ command: 'asset-jump', label: 'Cover', value: coverInstance }] });
+
+  const boxless = assetUsage(summary, [], []);
+  assert.deepEqual(boxless.photo, { background: cover });
+  assert.deepEqual(boxless.text, { blurb: cover });
+  assert.deepEqual(assetUsage(summary, [], null), { photo: {}, text: {}, file: {} });
+  assert.deepEqual(assetUsage(summary, []).text, { blurb: cover, retained: cover });
 });
 
 test('a file held in a list item counts as used, and clearing takes it out of every scope', () => {

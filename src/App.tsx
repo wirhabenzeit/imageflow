@@ -1800,8 +1800,8 @@ export function App() {
     thumbList.current?.querySelector<HTMLElement>('[data-spread="' + CSS.escape(next.id) + '"]')?.focus();
   }
 
-  const coverBoxIds = useMemo(() => coverGeometry && coverDefinition ? Object.keys(coverDefinition.boxes) : [], [coverGeometry, coverDefinition]);
-  const usage = useMemo(() => summary ? assetUsage(summary, pageLabels, coverBoxIds) : { photo: {}, text: {} },
+  const coverBoxIds = useMemo(() => coverGeometry && coverDefinition ? Object.keys(coverDefinition.boxes) : undefined, [coverGeometry, coverDefinition]);
+  const usage = useMemo(() => summary ? assetUsage(summary, pageLabels, coverBoxIds ?? null) : { photo: {}, text: {} },
     [summary, pageLabels.join(), coverBoxIds]);
   const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id, page }) => spread + ':' + (page ? page + ':' : '') + id === dropTarget) :
     highlight ? geometry?.boxes.find(({ spread: owner, id, page }) => owner === spread?.id && id === highlight && page === selectedPage) : undefined;

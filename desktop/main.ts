@@ -1885,7 +1885,7 @@ void app.whenReady().then(async () => {
       const label = state.pageLabels?.[id];
       return typeof label === 'string' ? [[id, label.slice(0, 100)]] : [];
     }));
-    const coverBoxIds = Array.isArray(state.coverBoxIds) ? state.coverBoxIds.filter((id) => typeof id === 'string') : [];
+    const coverBoxIds = Array.isArray(state.coverBoxIds) ? state.coverBoxIds.filter((id) => typeof id === 'string') : undefined;
     document.menuState = { ...emptyMenuState, ...state,
       pageLabels, coverBoxIds, enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
     if (previousLabels !== JSON.stringify([pageLabels, coverBoxIds])) publishAssets(document);
