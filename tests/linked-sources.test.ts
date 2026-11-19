@@ -334,7 +334,7 @@ test('partial writes retain last-good content and damaged caches rebuild without
   const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
   const id = added.imported[0];
   const original = await readFile(f.photo);
-  await photoFile(added.book.photos.get(id)!, 'preview');
+  const first = await photoFile(added.book.photos.get(id)!, 'preview');
   await writeFile(f.photo, original.subarray(0, 12));
   const partial = await loadProject(f.folder, f.cache);
   assert.equal(partial.sources!['photo:' + id].state, 'unreadable');
@@ -343,10 +343,17 @@ test('partial writes retain last-good content and damaged caches rebuild without
   await writeFile(f.photo, original);
   const restored = await loadProject(f.folder, f.cache);
   assert.equal(restored.sources!['photo:' + id].state, 'available');
+  // The rewritten file is another version: until it has a preview, the earlier version's stands in for it.
+  await rm(f.photo);
+  const fallback = await loadProject(f.folder, f.cache);
+  assert.equal(fallback.sources!['photo:' + id].cached, true);
+  assert.equal(fallback.photos.get(id)!.original, first);
   // A damaged preview never stands in for a missing original.
-  const preview = await photoFile(restored.photos.get(id)!, 'preview');
+  await writeFile(f.photo, original);
+  const preview = await photoFile((await loadProject(f.folder, f.cache)).photos.get(id)!, 'preview');
   await rm(f.photo);
   await writeFile(preview, 'damaged derived cache');
+  await writeFile(first, 'damaged derived cache');
   const missing = await loadProject(f.folder, f.cache);
   assert.equal(missing.sources!['photo:' + id].cached, false);
   assert.equal(missing.photos.has(id), false);

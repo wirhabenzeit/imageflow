@@ -48,12 +48,15 @@ async function hashFile(path: string) {
 // capture time from this instead (see desktop/capture-time.ts).
 const modifiedAt = (info: BigIntStats) => new Date(Number(info.mtimeMs)).toISOString();
 export type StoredSource = { digest?: string; snapshot: string; path: string; observation: string; snapshotObservation?: string;
-  width?: number; height?: number; modified?: string; direct?: boolean; key?: string; preview?: string; thumb?: string };
+  width?: number; height?: number; modified?: string; direct?: boolean; key?: string; preview?: string; thumb?: string;
+  // Renditions of the version before, for a photo read in place: they stand in while the current version has none.
+  earlier?: string[] };
 const storedIndexSchema = z.record(z.string(), z.object({
   digest: z.string().regex(/^[a-f0-9]{64}$/).optional(), snapshot: z.string(), path: z.string(), observation: z.string(),
   snapshotObservation: z.string().optional(), width: z.number().optional(), height: z.number().optional(),
   modified: z.string().optional(),
   direct: z.boolean().optional(), key: z.string().optional(), preview: z.string().optional(), thumb: z.string().optional(),
+  earlier: z.array(z.string()).max(4).optional(),
 }));
 export type ResolvedSource = { status: SourceStatus; stored?: StoredSource };
 
@@ -119,7 +122,11 @@ export class SourceStore {
         // the file is unchanged, and otherwise computed in the background, not while the book opens.
         const previous = this.saved[source.key];
         const digest = source.linked && previous?.digest && previous.path === source.path && previous.observation === stamp(before) ? previous.digest : undefined;
-        const stored = { path: source.path, snapshot: actual, observation: stamp(before), direct: true, key: details.key, ...(digest ? { digest } : {}),
+        // A re-exported photo keeps the renditions of the version before as a fallback, until its own exist: a file
+        // caught half-written by the next export then still shows a picture.
+        const earlier = previous?.direct && previous.key !== details.key ? [previous.preview, previous.thumb].filter((path): path is string => !!path)
+          : previous?.direct ? previous.earlier : undefined;
+        const stored = { path: source.path, snapshot: actual, observation: stamp(before), direct: true, key: details.key, ...(digest ? { digest } : {}), ...(earlier?.length ? { earlier } : {}),
           width: details.width, height: details.height, modified: modifiedAt(before), preview: join(cache, details.key + '-preview' + extension), thumb: join(cache, details.key + '-thumb' + extension) };
         this.remember(source, stored);
         if (source.linked && !digest) this.recordDigest(source.key, actual, stamp(before));
@@ -164,7 +171,7 @@ export class SourceStore {
       if (stored?.direct) {
         const original = stored;
         stored = undefined;
-        for (const path of [original.preview, original.thumb]) if (path && isRenditionPath(path, options.cache ?? '')) {
+        for (const path of [original.preview, original.thumb, ...(original.earlier ?? [])]) if (path && isRenditionPath(path, options.cache ?? '')) {
           try {
             if (!(await lstat(path)).isFile()) continue;
             const metadata = await sharp(path).metadata();
