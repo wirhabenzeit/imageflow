@@ -1,3 +1,4 @@
+import { authoringSnapshotState } from './authoring-sdk';
 import { layoutFootprint } from '../src/layouts';
 import { sourcePath, sourceLinked } from '../src/source-locations';
 import { DependencyInstallError } from './dependency-install';
@@ -34,12 +35,14 @@ import type { McpClientSession } from './mcp-connection';
 import { coverFixturePlan, FixtureError, fixtureCases, fixtureFits, fixtureLimits, fixtureRequestSchema, planFixtures } from '../src/fixtures';
 import type { FixtureCell } from '../src/fixtures';
 import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
-import { cellReport, fixtureAssets, fixtureDraft, fixtureFindings, fixtureNotEvaluated } from './fixtures';
+import { cellReport, fixtureAssets, fixtureDraft, fixtureFindings, fixtureNotEvaluated, mergeFormatFindings } from './fixtures';
 import { templateFiles, templateHash } from './template-library';
 import { docTopics } from '../src/doc-topics';
 
 // Fixture checks share the bridge's two-minute call deadline with queueing, so they stop starting renders after this.
 const fixtureBudgetMs = 60_000;
+
+const omitDefinition = <T extends { definition: string }>({ definition: _definition, ...rest }: T) => rest;
 
 export class AuthoringError extends Error {
   constructor(readonly code: string, message: string, readonly details?: Record<string, unknown>) { super(message); }
@@ -56,6 +59,8 @@ type Hooks = {
   import: (request: ImportRequest, paths: string[], base: OpenProject, checkpoint?: SaveCheckpoint) => Promise<{ imported: string[] }>;
   // Installs the template's packages outside the book and rebuilds template/vendor/ (ADR 0006).
   dependencies?: (signal: AbortSignal) => Promise<Record<string, unknown>>;
+  // The installed app's authoring SDK, to tell whether the template's .imageflow-sdk snapshot is current.
+  authoringTypes?: () => string | undefined;
 };
 
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
@@ -470,13 +475,14 @@ export function createAuthoringService(hooks: Hooks) {
       reports.push(...fitting.map((cell) => outcome.get(cell.spread)!));
     }
     const count = (state: FixtureCellReport['state']) => reports.filter((report) => report.state === state).length;
+    const listed = mergeFormatFindings(findings);
     const report: FixtureReport = {
       synthetic: true, committed: false, revision: base.revision,
       matrix: { layouts: plan.layouts, formats, cases: plan.cases },
       coverage: { planned: reports.length, rendered: reports.length - count('failed') - count('not-isolated'),
         failed: count('failed'), notIsolated: count('not-isolated'), skipped },
-      cells: reports, diagnostics: findings.slice(0, fixtureLimits.diagnostics),
-      diagnosticsTruncated: findings.length > fixtureLimits.diagnostics, notEvaluated: fixtureNotEvaluated,
+      cells: reports, diagnostics: listed.slice(0, fixtureLimits.diagnostics),
+      diagnosticsTruncated: listed.length > fixtureLimits.diagnostics, notEvaluated: fixtureNotEvaluated,
     };
     get(session.handle);
     return { ...base, checks: { ...base.checks, fixtures: !reports.length ? 'not-run' as const : count('not-isolated') ? 'failed' as const : 'completed' as const },
@@ -623,6 +629,8 @@ export function createAuthoringService(hooks: Hooks) {
           }
         };
         const reference = await referenceTopics(hooks.docs, [...new Set<string>(args.docs ?? [])]);
+        const types = hooks.authoringTypes?.();
+        const sdkState = types ? await authoringSnapshotState(join(folder, 'template'), types).catch(() => undefined) : undefined;
         result = {
           project: session.handle, revision: report.revision, root: session.book.folder, guide: contextGuide,
           template, templateIdentity, diagnostics, checks: report.checks, sources,
@@ -630,6 +638,7 @@ export function createAuthoringService(hooks: Hooks) {
           topics: reference.topics,
           ...(args.docs?.length ? { docs: reference.docs } : {}),
           examples: await templateExamples(hooks.docs, args.includeExamples),
+          ...(sdkState ? { sdk: { snapshot: sdkState, ...(sdkState === 'stale' ? { notice: 'template/.imageflow-sdk is from an earlier ImageFlow version and lacks newer API declarations, so editor tooling may flag code that renders fine. Type checks here use the installed SDK. Call rebuild_dependencies to refresh it.' } : {}) } } : {}),
           capabilities: { commands: true, dryRun: true, batchReferences: '$alias', sharedUndo: true, preview: ['page', 'spread'],
             maxPreviewEdge: 1600, typescript: true, printPreflight: false, draftPreview: true, contactSheets: true,
             fixtures: { cases: [...fixtureCases], maxLayouts: fixtureLimits.layouts, maxFormats: fixtureLimits.formats,
@@ -660,23 +669,32 @@ export function createAuthoringService(hooks: Hooks) {
         if (view === 'cover' && !availableCover && !savedCover) {
           throw new AuthoringError('COVER_UNAVAILABLE', 'The active format has no exterior cover.');
         }
-        const records = view === 'sources' ? [
+        let records: Record<string, unknown>[] = view === 'sources' ? [
           // Capture time, location and camera come from the loaded photo file, next to what photos.json records.
           ...Object.entries(photos ?? {}).map(([id, source]) => ({ kind: 'photo', id, ...source, ...captureOf(session.book.photos.get(id)), usage: sourcePlaces(usage.photo[id]) })),
           ...Object.entries(project?.texts ?? {}).map(([id, path]) => ({ kind: 'text', id, path: sourcePath(path), linked: sourceLinked(path), usage: sourcePlaces(usage.text[id]) })),
           ...Object.entries(project?.files ?? {}).map(([id, path]) => ({ kind: 'file', id, path: sourcePath(path), linked: sourceLinked(path) })),
         ] : view === 'cover' ? (project?.cover ? [project.cover] : [])
-          : project?.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...spread,
-          page: sequence?.spreads[project.spreads.indexOf(spread)].page,
+          : project?.spreads.filter((spread) => !args.spread || spread.id === args.spread).map((spread) => ({ ...omitDefinition(spread),
+          // A sheet shown as pages displays pages.left/right.definition. Its own definition only names the spread-wide
+          // layout a merge restores, so it is not reported as `definition`, which reads as what is shown (F-017).
+          ...(spread.split ? { restoreDefinition: spread.definition } : { definition: spread.definition }),
+          page: sequence?.spreads[project.spreads.findIndex(({ id }) => id === spread.id)].page,
           kept: template ? keptOutside(spread, template.spreads) : [],
           ...(view === 'parameters' && template ? spread.split ? {
             pageDeclarations: Object.fromEntries(['left', 'right'].map(side => [side,
               template.spreads[spread.pages?.[side as 'left' | 'right']?.definition ?? ''] ?? null])),
           } : { declarations: template.spreads[spread.definition] } : {}),
         })) ?? [];
+        // The summary is the book at a glance: its spreads are counted, and listed by the spreads view.
+        // Sources are counted per kind, and can be listed one kind at a time.
+        const counts = view === 'sources' ? { photo: 0, text: 0, file: 0, ...Object.fromEntries(['photo', 'text', 'file'].map((kind) =>
+          [kind, records.filter((record) => (record as { kind?: string }).kind === kind).length])) } : undefined;
+        if (view === 'sources' && args.kind) records = records.filter((record) => (record as { kind?: string }).kind === args.kind);
+        const listed = view === 'summary' ? {} : { offset, items: records.slice(offset, offset + limit), nextOffset: offset + limit < records.length ? offset + limit : null,
+          ...(counts ? { counts } : {}) };
         result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format, templateIdentity,
-          pages: report.render?.pages, total: records.length, offset, items: records.slice(offset, offset + limit),
-          nextOffset: offset + limit < records.length ? offset + limit : null,
+          pages: report.render?.pages, total: records.length, ...listed,
           ...((view === 'summary' || view === 'cover') && (availableCover || savedCover) ? {
             cover: { ...(availableCover ?? { status: 'unavailable', reason: 'The active format has no exterior cover.' }),
               layout: savedCover?.definition ?? null, ...(view === 'cover' ? { artwork: savedCover ?? null } : {}) },

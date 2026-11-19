@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { editorLayoutsAt, firstEditorLayouts, firstSpreadLayouts, newEditorSpread } from '../src/editing';
+import { continuedSpread, editorLayoutsAt, firstEditorLayouts, firstSpreadLayouts, newEditorSpread } from '../src/editing';
 import { layoutFootprint, planLayoutChange } from '../src/layouts';
 import type { Layouts } from '../src/layouts';
 import { mm, pageSequence, printFormat } from '../src/format';
@@ -52,4 +52,31 @@ test('non-facing and spread designs preserve their ordinary one-state representa
   assert.equal(newEditorSpread('missing', layouts, format, { index: 0, count: 1 }), undefined);
   const created = newEditorSpread('any', layouts, format, { index: 0, count: 1 })!;
   assert.equal(planLayoutChange(created, 'full', layouts).spread.split, undefined);
+});
+
+test('a new spread continues the selected sheet\'s layout where it fits (F-033)', () => {
+  const ends = { ...format, structure: { ...format.structure, ends: 'single-pages' as const } };
+  const layouts: Layouts = { ...pages, map: { ...layout(), label: 'Map', span: 'spread' }, photo: { ...layout(), label: 'Photo', span: 'spread' },
+    title: layout(['right']) };
+  const middle = { index: 2, count: 4 };
+  const photo = { id: 'a', definition: 'photo', params: { caption: 'x' }, boxes: { hero: { photo: 'p1', params: {} } }, elements: {} };
+  const next = continuedSpread(photo, layouts, format, middle)!;
+  assert.equal(next.definition, 'photo');
+  assert.notEqual(next.id, 'a');
+  assert.deepEqual([next.params, next.boxes, next.split], [{}, {}, undefined], 'the layout continues, not the content');
+
+  // A sheet of two page designs continues with both, empty; its stale sheet-level layout is not carried over.
+  const sheet = { id: 'b', definition: 'map', split: true as const, params: {}, boxes: {}, elements: {},
+    pages: { left: { definition: 'left', params: { x: 1 }, boxes: { a: { photo: 'p', params: {} } }, elements: {} }, right: { definition: 'any', params: {}, boxes: {}, elements: {} } } };
+  const pair = continuedSpread(sheet, layouts, format, middle)!;
+  assert.equal(pair.split, true);
+  assert.equal(pair.definition, 'left');
+  assert.deepEqual(pair.pages, { left: { definition: 'left', params: {}, boxes: {}, elements: {} }, right: { definition: 'any', params: {}, boxes: {}, elements: {} } });
+  assert.equal(layoutFootprint(pair, layouts).span, 'spread');
+
+  // A single opening page is not repeated inside the book, and a layout that does not fit falls back to the caller.
+  const opening = { id: 'c', definition: 'title', params: {}, boxes: {}, elements: {} };
+  assert.equal(continuedSpread(opening, layouts, ends, { index: 1, count: 3 }), undefined);
+  assert.equal(continuedSpread(photo, layouts, ends, { index: 2, count: 3 }), undefined, 'the closing page of a single-ended book');
+  assert.equal(continuedSpread({ ...photo, definition: 'removed' }, layouts, format, middle), undefined);
 });

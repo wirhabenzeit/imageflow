@@ -6,7 +6,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { PDFDocument } from 'pdf-lib';
 import { copySample } from '../desktop/sample-book.mjs';
-import { closeApp, exportAction, menuAction, testBook } from './ui-actions.mjs';
+import { closeApp, exportAction, menuAction, pickLayout, testBook } from './ui-actions.mjs';
 
 // ADR 0009 phases 3–5: page checks, selection, Inspector, layout changes, swap, Undo and export through the real app.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -66,11 +66,11 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   const inspector = w.getByRole('complementary', { name: 'Inspector', exact: true });
   const readBook = async () => JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
   const rerendered = async (action) => {
-    const before = await w.locator(ready).getAttribute('src');
+    const before = await w.locator(ready).getAttribute('data-revision');
     await action();
     await w.waitForFunction((before) => {
       const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-      return frame && frame.getAttribute('src') !== before;
+      return frame && frame.getAttribute('data-revision') !== before;
     }, before);
   };
   const choose = async (name) => rerendered(() => inspector.getByRole('radio', { name, exact: true }).click());
@@ -134,7 +134,7 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   const beforePageVariant = (await readBook()).spreads[0];
   const pageFamily = inspector.frameLocator('iframe.element-editor-frame');
   await pageFamily.getByRole('button', { name: 'Text alternate', exact: true }).waitFor();
-  await rerendered(() => pageFamily.getByRole('button', { name: 'Text alternate', exact: true }).click());
+  await pickLayout(w, pageFamily.getByRole('button', { name: 'Text alternate', exact: true }));
   assert.equal((await readBook()).spreads[0].pages.right.definition, 'textAlt');
   assert.deepEqual((await readBook()).spreads[0].pages.left, beforePageVariant.pages.left);
   await rerendered(() => menuAction(app, 'Undo Book Edit'));
@@ -147,13 +147,13 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   const input = w.locator('.edit-popover').getByRole('textbox', { name: 'Heading', exact: true });
-  const beforeSave = await w.locator(ready).getAttribute('src');
+  const beforeSave = await w.locator(ready).getAttribute('data-revision');
   await input.fill('Edited right');
   await input.press('Enter');
   await w.keyboard.press('Escape');
   await w.waitForFunction((before) => {
     const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-    return frame && frame.getAttribute('src') !== before;
+    return frame && frame.getAttribute('data-revision') !== before;
   }, beforeSave);
   const saved = JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
   assert.equal(saved.spreads[0].pages.right.params.heading, 'Edited right');
@@ -199,7 +199,7 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   assert.equal(await inspector.getByRole('checkbox', { name: 'Spread-only option', exact: true }).isEnabled(), true);
   const family = inspector.frameLocator('iframe.element-editor-frame');
   await family.getByRole('button', { name: 'Other', exact: true }).waitFor();
-  await rerendered(() => family.getByRole('button', { name: 'Other', exact: true }).click());
+  await pickLayout(w, family.getByRole('button', { name: 'Other', exact: true }));
   assert.equal((await readBook()).spreads[0].definition, 'other');
   await rerendered(() => menuAction(app, 'Undo Book Edit'));
   assert.deepEqual((await readBook()).spreads[0], merged);

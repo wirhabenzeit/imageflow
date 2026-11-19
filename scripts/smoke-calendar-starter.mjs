@@ -204,9 +204,9 @@ try {
   await printed('a3', { width: 6835, height: 4866 }, 12);
 
   // The 60 × 45 format keeps the proportions and passes the print checks too.
-  const before = await w.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  const before = await w.locator('iframe.book-frame-book[data-current]').getAttribute('data-revision');
   await w.getByRole('combobox', { name: 'Format' }).selectOption('a2');
-  await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('src') !== url; }, before);
+  await w.waitForFunction((url) => { const f = document.querySelector('iframe.book-frame-book[data-current][data-ready]'); return f && f.getAttribute('data-revision') !== url; }, before);
   assert.deepEqual((await renderStatus()).errors, []);
   await daysFit();
   await printed('a2', { width: 9417, height: 6677 }, 12);

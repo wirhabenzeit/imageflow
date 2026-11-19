@@ -43,7 +43,7 @@ export const mcpToolSchemas = {
   inspect_book: z.strictObject({
     project,
     view: z.enum(['summary', 'spreads', 'cover', 'sources', 'parameters', 'elements'])
-      .describe('summary: book details. spreads and cover: saved layout state. sources: registry and usage. parameters: saved values and declarations. elements: bounds, typography and edit paths.'),
+      .describe('summary: book details and the spread count, without the spreads. spreads and cover: saved layout state; split sheets give restoreDefinition, not definition. sources: registry, usage and counts per kind. parameters: saved values and declarations. elements: bounds, typography and edit paths.'),
     offset: z.int().min(0).default(0).describe('Index of the first item to return, for paging.'),
     limit: z.int().min(1).max(100).default(30).describe('Number of items to return. Continue from nextOffset.'),
     spread: z.string().min(1).max(256).optional().describe('Spread ID for element measurements or to filter spreads and parameters.'),
@@ -51,7 +51,9 @@ export const mcpToolSchemas = {
     page: z.enum(['left', 'right']).optional().describe('Elements view only: facing page of a split sheet.'),
     box: z.string().min(1).max(256).optional().describe('Elements view only: measure just this box.'),
     element: z.string().min(1).max(256).optional().describe('Elements view only: measure just this element.'),
+    kind: z.enum(['photo', 'text', 'file']).optional().describe('Sources view only: list just photos, texts or files. The counts per kind are always returned.'),
   }).superRefine((request, context) => {
+    if (request.kind && request.view !== 'sources') context.addIssue({ code: 'custom', path: ['kind'], message: 'Kind filtering requires the sources view.' });
     if (request.page && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Page filtering requires the elements view.' });
     if (request.view === 'elements' && (request.cover ? !!request.spread || !!request.page : !request.spread)) {
       context.addIssue({ code: 'custom', message: 'Element inspection requires one spread or cover: true.' });

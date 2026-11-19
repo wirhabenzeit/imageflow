@@ -8,7 +8,7 @@ import { photoGroups, photoDate, captureLabel } from './photo-view';
 import { sourceList } from './source-items';
 import { sourceEntries } from './source-locations';
 import { useListSelection } from './list-selection';
-import { photoMime, textMime } from './source-items';
+import { fileExtensionMime, fileMime, photoMime, textMime } from './source-items';
 import type { SourceRef } from './source-items';
 import type { SourceKind } from './source-locations';
 import { assetMenu, assetMenuState, assetActions } from './asset-menu';
@@ -38,6 +38,8 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [error, setError] = useState<{ message: string; code?: string }>();
   const [notice, setNotice] = useState('');
+  // The asset whose name is being edited in its row (Rename…).
+  const [renaming, setRenaming] = useState<string>();
   const [kind, setKind] = useState('all');
   const [used, setUsed] = useState('all');
   const [storage, setStorage] = useState('all');
@@ -80,7 +82,8 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
       const item = sourceEntries(summary).find(({ key }) => key === keys[0]);
       if (item?.kind === 'file') await act({ action: 'preview', keys });
       else if (item) quickLook?.({ kind: item.kind === 'photo' ? 'photo' : 'text', id: item.id });
-    } else if (result.command === 'asset-jump') await act({ action: 'jump', spread: result.value });
+    } else if (result.command === 'asset-rename') setRenaming(keys[0]);
+    else if (result.command === 'asset-jump') await act({ action: 'jump', spread: result.value });
     else if (result.command in assetActions) await act({ action: assetActions[result.command as keyof typeof assetActions], keys });
   }
   const locked = busy || disabled;
@@ -145,10 +148,18 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
           {group && <button className="asset-group-heading" onClick={() => list.setSelection(group.ids.map((id) => 'photo:' + id))}>
             {group.label} · {group.ids.length === group.total ? group.total : group.ids.length + ' of ' + group.total}</button>}
           <div role="option" aria-selected={list.selected.includes(entry.key)} key={entry.key} data-source={entry.key} data-list-id={entry.key}
-          className="asset-row" tabIndex={(list.focused ?? shown[0]?.key) === entry.key ? 0 : -1} draggable={!locked && !problem && !embedded}
+          className="asset-row" tabIndex={(list.focused ?? shown[0]?.key) === entry.key ? 0 : -1} draggable={!locked && !problem && renaming !== entry.key && (!embedded || entry.kind === 'file')}
           onClick={(event) => list.choose(entry.key, event)}
           onContextMenu={(event) => void menu(list.context(entry.key, event))}
           onDragStart={(event) => {
+            // In the bottom panel a file goes to a file setting in the Inspector (F-028).
+            if (embedded) {
+              const extension = fileName(entry.path).match(/\.[^.]+$/)?.[0] ?? '';
+              event.dataTransfer.setData(fileMime, entry.id);
+              event.dataTransfer.setData(fileExtensionMime(extension), '');
+              event.dataTransfer.effectAllowed = 'link';
+              return;
+            }
             const keys = list.selected.includes(entry.key) ? list.selected : [entry.key];
             if (entry.kind === 'photo') event.dataTransfer.setData(photoMime, entry.id);
             if (entry.kind === 'markdown') event.dataTransfer.setData(textMime, entry.id);
@@ -160,7 +171,12 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
           }}>
           <span className={'asset-icon' + (embedded ? ' asset-icon-document' : '')}>{embedded ? <DocumentIcon src={documentIcon(fileExtension(fileName(entry.path)))} kind={entry.kind} />
             : entry.kind === 'photo' && summary.photos[entry.id] ? <img src={summary.photos[entry.id]} alt="" /> : <Glyph kind={entry.kind} />}</span>
-          <span className="asset-name" title={entry.path}><span className="asset-description"><strong>{fileName(entry.path)}</strong>
+          <span className="asset-name" title={entry.path}><span className="asset-description">{renaming === entry.key
+            ? <RenameField name={fileName(entry.path)} done={(name) => {
+                setRenaming(undefined);
+                if (name !== undefined && name !== fileName(entry.path)) void act({ action: 'rename', key: entry.key, name });
+              }} />
+            : <strong>{fileName(entry.path)}</strong>}
             {(entry.linked || problem) && <span className="muted">{entry.path.split('/').slice(-2, -1)[0]}</span>}</span></span>
           <span className="asset-status">{entry.kind === 'markdown' && <EditMarkdown api={api} id={entry.id} name={fileName(entry.path)} disabled={locked || problem} failure={(message) => setError({ message })} />}{entry.kind === 'photo' && view.value.showTime && <span className="muted" title={photoDate(summary, entry.id)?.capturedEstimated ? 'Estimated from file modification time' : undefined}>{captureLabel(photoDate(summary, entry.id)?.captured, photoDate(summary, entry.id)?.capturedEstimated)}{photoDate(summary, entry.id)?.capturedEstimated ? ' ≈' : ''}</span>}<span className="muted">{placements(entry).length ? placements(entry).length + '×' : 'Not used'}</span>{badge && <span className="source-badge warning" title={status?.problem}>{badge}</span>}
             {entry.linked && <span className="asset-linked" role="img" aria-label="Linked to original file" title="Linked to original file"><Icon name="link" size={16} /></span>}
@@ -178,4 +194,27 @@ export function SourceManager({ view, api, summary, adopt, disabled = false, qui
     </footer>
     {error && <p role="alert" data-error-code={error.code} className="error-text">{error.message}</p>}{notice && <p role="status">{notice}</p>}
   </section>;
+}
+
+// Edits an asset's name in its row, as in Finder: the name without its extension is selected; Return or leaving the
+// field renames, Escape keeps the name. Keys stay in the field, so Space or arrows do not act on the list.
+function RenameField({ name, done }: { name: string; done: (name?: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const finished = useRef(false);
+  const finish = (value?: string) => { if (finished.current) return; finished.current = true; done(value); };
+  useEffect(() => {
+    const field = input.current;
+    if (!field) return;
+    field.focus();
+    const dot = name.lastIndexOf('.');
+    field.setSelectionRange(0, dot > 0 ? dot : name.length);
+  }, []);
+  return <input ref={input} className="asset-rename" aria-label={'New name for ' + name} defaultValue={name} spellCheck={false}
+    onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}
+    onKeyDown={(event) => {
+      event.stopPropagation();
+      if (event.key === 'Enter') { event.preventDefault(); finish(event.currentTarget.value.trim() || undefined); }
+      else if (event.key === 'Escape') { event.preventDefault(); finish(); }
+    }}
+    onBlur={(event) => finish(event.currentTarget.value.trim() || undefined)} />;
 }

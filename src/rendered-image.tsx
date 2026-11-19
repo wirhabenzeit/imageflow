@@ -352,7 +352,7 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
       const cacheUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache,
         [spread?.dataset.layout ?? spread?.dataset.spread, pictureIndex, draw.toString(), inputs ?? null, width, height, pixelRatio]) : undefined;
       // The last picture this place showed, whatever its inputs: a replacement frame shows it while it draws the new one.
-      const placeUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache,
+      const placeUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache.replace(/\/picture\/$/, '/place/'),
         ['place', spread?.dataset.spread, spread?.dataset.layout, pictureIndex, width, height, pixelRatio]) : undefined;
       // A vector picture does not depend on the pixel ratio, so the book view and its thumbnails share one: whichever
       // draws it first saves it under this key too.
@@ -382,8 +382,13 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
             return () => clearTimeout(timer);
           })();
         });
+        const started = import.meta.env.IMAGEFLOW_PROFILE ? performance.now() : 0;
         try { return await Promise.race([draw({ width, height, pixelRatio, mode, signal: controller.signal }).then(toBlob), timeout]); }
-        finally { stop(); }
+        finally {
+          stop();
+          // Profiling builds time every picture actually drawn, that is, every miss of the preview cache.
+          if (import.meta.env.IMAGEFLOW_PROFILE) performance.measure('imageflow.picture.' + label + ' ' + (spread?.dataset.spread ?? '') + '#' + pictureIndex, { start: started, end: performance.now() });
+        }
       });
       if (controller.signal.aborted) return;
       if (output === 'vector' && blob.type !== svgType) throw new Error('it is declared output="vector", but draw returned pixels (' + (blob.type || 'a canvas') + ').');

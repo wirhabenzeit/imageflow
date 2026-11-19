@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { textChoices } from '../src/source-items';
-import { sourceFileName } from '../src/source-locations';
+import { excerpt, textChoices, words } from '../src/source-items';
+import { sourceFileName, storedFileName } from '../src/source-locations';
 
 const summary = (texts: Record<string, string | { path: string; linked: true }>) => ({ project: { texts } }) as unknown as Parameters<typeof textChoices>[0];
 
@@ -18,4 +18,29 @@ test('texts that share a name are told apart by folder, else by a number', () =>
     [['a', 'Intro.md — Kyrgyzstan'], ['b', 'Intro.md — Alps']]);
   assert.deepEqual(textChoices(summary({ 'tx-000000000001': 'texts/tx-000000000001-Intro.md', 'tx-000000000002': 'texts/tx-000000000002-Intro.md' })),
     [['tx-000000000001', 'Intro.md'], ['tx-000000000002', 'Intro.md (2)']]);
+});
+
+test('text tiles leave out the YAML header and name the text by its title (F-030)', () => {
+  const day = '---\ntitle: Towards Kegety\ndate: 2026-08-17\nplaces:\n  - Kegety pass\n---\n\nWe left Bishkek early.\n';
+  const { heading, body, meta } = excerpt(day);
+  assert.equal(heading, 'Towards Kegety');
+  assert.equal(body, 'We left Bishkek early.');
+  assert.deepEqual(meta, { title: 'Towards Kegety', date: '2026-08-17', places: ['Kegety pass'] });
+  assert.equal(words(day), 4);
+  assert.equal(excerpt('# Day 1\n---\nRule above').heading, 'Day 1', 'a heading in the text wins, and a rule is not a header');
+  assert.equal(excerpt('---\n\n---\nText').body, 'Text');
+  // A diary text that starts with prose: its title, not the next day's section heading, names it.
+  const diary = excerpt('---\ntitle: Karakol Valley\n---\n\nWe wake up early.\n\n### 20.08. Tyres in Bishkek\n\nAn early start.');
+  assert.equal(diary.heading, 'Karakol Valley');
+  assert.equal(diary.body, 'We wake up early. 20.08. Tyres in Bishkek An early start.');
+  assert.equal(excerpt('We wake up.\n\n## Later').heading, undefined);
+});
+
+test('stored file names keep umlauts, also when macOS hands them over decomposed (F-026)', () => {
+  const decomposed = '2026-08-22 Söng Kul.gpx';
+  assert.equal(storedFileName(decomposed), '2026-08-22 Söng Kul.gpx');
+  assert.equal(storedFileName(decomposed).length, '2026-08-22 Söng Kul.gpx'.length, 'composed, as one character');
+  assert.equal(storedFileName('Café crème.md'), 'Café crème.md');
+  assert.equal(storedFileName('a/b:c?.gpx'), 'a-b-c-.gpx');
+  assert.equal(storedFileName('क्षेत्र.md'), 'क्षेत्र.md', 'scripts with marks that do not compose keep them');
 });

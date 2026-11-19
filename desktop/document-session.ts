@@ -8,7 +8,7 @@ import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
-import { channels, desktopScheme, issueText, renderOrigin } from '../src/desktop';
+import { channels, desktopScheme, issueText, renderOrigin, renderOrigins } from '../src/desktop';
 import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result } from '../src/desktop';
 import { identifier } from '../src/project';
 import { parseActiveEditor } from '../src/mcp-results';
@@ -161,6 +161,7 @@ export class DocumentSession {
       changed: (next) => this.notify({ value: this.activate(next) }),
       recovery: (message) => this.notify({ error: message }),
       dependencies: (signal) => this.rebuildDependencies(signal),
+      authoringTypes: () => this.authoringTypes,
       import: async (request, paths, base, checkpoint) => {
         const result = await this.importFiles(this.window, this.active.id, { ...request, paths }, base, false, checkpoint);
         if (!result) throw new AuthoringError('PROJECT_CLOSED', 'The book closed before import completed.');
@@ -179,7 +180,7 @@ export class DocumentSession {
     window.webContents.on('will-frame-navigate', (event) => {
       const url = new URL(event.url);
       const match = viewPath.exec(url.pathname);
-      if (event.isMainFrame || url.protocol !== desktopScheme + ':' || url.host !== 'render' || !match ||
+      if (event.isMainFrame || url.protocol !== desktopScheme + ':' || (url.host !== 'render' && url.host !== 'thumbs') || !match ||
           match[1] !== this.active?.id || match[2]) event.preventDefault();
     });
   }
@@ -260,7 +261,10 @@ export class DocumentSession {
     return summary;
   }
   // The window's reply crosses IPC: anything but true or a well-formed editor counts as a plain refusal.
-  replyLease(id: string, reply: unknown) { this.agentLeases.get(id)?.(reply === true || (parseActiveEditor(reply) ?? false)); }
+  replyLease(id: string, reply: unknown) {
+    const busy = reply && typeof reply === 'object' && typeof (reply as { busy?: unknown }).busy === 'string' ? { busy: (reply as { busy: string }).busy.slice(0, 120) } : undefined;
+    this.agentLeases.get(id)?.(reply === true || busy || (parseActiveEditor(reply) ?? false));
+  }
   cancelExport() { this.exportJob?.abort(); }
   cancelCheck() { this.checkJob?.abort(); }
   /** Where template packages are installed, outside every book; set by the app. */
@@ -364,7 +368,7 @@ export class DocumentSession {
       if (window.isDestroyed()) continue;
       for (const frame of window.webContents.mainFrame.framesInSubtree) {
         const url = frame.url;
-        const id = url.startsWith(renderOrigin + '/') ? viewPath.exec(new URL(url).pathname)?.[1] : undefined;
+        const id = renderOrigins.some((origin) => url.startsWith(origin + '/')) ? viewPath.exec(new URL(url).pathname)?.[1] : undefined;
         if (id) retained.add(id);
       }
     }
@@ -701,7 +705,7 @@ export class DocumentSession {
       if (job.signal.aborted) return null;
       const loaded = await this.projectSession.inputs.capture();
       if (before.revision !== loaded.revision || before.observation !== loaded.observation) throw new Error('Sources changed while preparing export. Please retry.');
-      const fileName = bookName(book.folder).replace(/[^\p{L}\p{N} _-]/gu, '-').slice(0, 80) + (surface === 'cover' ? ' - Cover' : '') + '.pdf';
+      const fileName = bookName(book.folder).normalize('NFC').replace(/[^\p{L}\p{M}\p{N} _-]/gu, '-').slice(0, 80) + (surface === 'cover' ? ' - Cover' : '') + '.pdf';
       const { canceled, filePath } = await dialog.showSaveDialog(owner, {
         title: surface === 'cover' ? 'Export Cover PDF' : 'Export PDF', defaultPath: join(app.getPath('documents'), fileName),
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
@@ -783,7 +787,34 @@ export class DocumentSession {
   }
 
 
+  // Busy states end by themselves, such as the reload after a template edit, which redraws every map: a save waits
+  // for them this long before it is refused (beta finding F-023).
+  static busyWaitMs = 30_000;
   async agentLease(signal: AbortSignal) {
+    const started = Date.now();
+    while (true) {
+      const reply = await this.requestLease(signal);
+      if (reply && typeof reply === 'object' && 'busy' in reply) {
+        if (Date.now() - started < DocumentSession.busyWaitMs) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          signal.throwIfAborted();
+          continue;
+        }
+        throw new AuthoringError('EDIT_IN_PROGRESS', 'ImageFlow is still busy with ' + reply.busy + ' after ' + Math.round(DocumentSession.busyWaitMs / 1000) +
+          ' s. Retry when it finishes. No changes were made.', { busy: reply.busy });
+      }
+      if (reply === true) return;
+      if (reply) {
+        const field = reply.field ? ' for ' + reply.field : '';
+        const location = reply.spread ? ' on spread ' + reply.spread + (reply.page ? ' (' + reply.page + ' page)' : '') : '';
+        throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish editing in ImageFlow (' + reply.label + field + location + '), then retry. No changes were made.',
+          { activeEditor: reply });
+      }
+      throw new AuthoringError('EDIT_IN_PROGRESS', 'ImageFlow did not answer in time; it may be busy rendering. Retry in a moment. No changes were made.');
+    }
+  }
+
+  private async requestLease(signal: AbortSignal) {
     const owner = this.window;
     if (!owner || owner.isDestroyed()) throw new AuthoringError('PROJECT_CLOSED', 'Open a book in ImageFlow first.');
     const id = randomUUID();
@@ -802,14 +833,7 @@ export class DocumentSession {
       owner.webContents.send(channels.agentLease, id);
     });
     signal.throwIfAborted();
-    if (reply === true) return;
-    if (reply) {
-      const field = reply.field ? ' for ' + reply.field : '';
-      const location = reply.spread ? ' on spread ' + reply.spread + (reply.page ? ' (' + reply.page + ' page)' : '') : '';
-      throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish editing in ImageFlow (' + reply.label + field + location + '), then retry. No changes were made.',
-        { activeEditor: reply });
-    }
-    throw new AuthoringError('EDIT_IN_PROGRESS', 'ImageFlow is busy with another operation, such as an import, export, reload or drag. Retry when it finishes. No changes were made.');
+    return reply;
   }
 
 

@@ -19,6 +19,11 @@ export const assetsURL = desktopScheme + '://editor/assets';
 export const templatesURL = desktopScheme + '://editor/templates';
 export const settingsURL = desktopScheme + '://editor/settings';
 export const renderOrigin = desktopScheme + '://render';
+// The sidebar thumbnails render the whole book too. From their own origin they get their own render process, so they
+// render alongside the book view instead of after it. Otherwise they are served like any render frame.
+export const thumbsOrigin = desktopScheme + '://thumbs';
+export const renderOrigins: readonly string[] = [renderOrigin, thumbsOrigin];
+export const isRenderOrigin = (origin: string) => renderOrigins.includes(origin);
 
 export const channels = {
   updateState: 'app:update-state', updateChanged: 'app:update-changed', checkUpdates: 'app:check-updates', restartUpdate: 'app:restart-update', dismissUpdate: 'app:dismiss-update',
@@ -52,7 +57,9 @@ export type LayoutCommand = 'layout-vertical' | 'layout-grid' | `grid-columns-${
 export const spreadCommands = ['add-spread', 'duplicate-spread', 'move-spread-up', 'move-spread-down', 'delete-spread'] as const;
 export type SpreadCommand = typeof spreadCommands[number];
 export type ActiveBookEditor = { label: string; spread?: string; page?: PageSide; field?: string };
-export type AgentLeaseReply = boolean | ActiveBookEditor;
+// What the editor answers an agent's request to save: yes, the editor the user has open, or what the app is busy with
+// (an import, a reload after files changed, a drag), which ends by itself.
+export type AgentLeaseReply = boolean | ActiveBookEditor | { busy: string };
 export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
   writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView;
@@ -94,7 +101,7 @@ export type ImportRequest = {
 
 export type RecentDocument = { id: string; path: string; title: string; openedAt: string; available: boolean; cover?: string };
 
-export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[] };
+export type SourceAction = { action: 'retry' | 'locate' | 'replace' | 'reveal' | 'copy' | 'collect' | 'locate-folder' | 'remove' | 'preview' | 'open' | 'place' | 'jump' | 'import' | 'rename'; spread?: string; key?: string; keys?: string[]; accept?: string[]; paths?: string[]; name?: string };
 
 export type ContextMenuItem = import('./commands').RegisteredCommand | { command: import('./commands').RegisteredCommand; value?: string; label?: string; enabled?: boolean; checked?: boolean; items?: ContextMenuItem[] } | { type: 'separator' };
 export type ContextMenuResult = { command: import('./commands').RegisteredCommand; value?: string };

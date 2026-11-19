@@ -1,4 +1,5 @@
 import { useCanvasGestures } from './useCanvasGestures';
+import { useDelayed } from './useDelayed';
 import { pageSelectionRect, pageSelectionSide, pageSideAt, stepPageSelection } from './page-selection';
 import { canSwapPages, editableSpread, keptItems, layoutMime, placeKeptContent, shownContentTargets } from './page-editor';
 import type { ContentTarget, KeptItem } from './page-editor';
@@ -25,7 +26,7 @@ import { bookName } from './book-name';
 import type { ImportMode } from './source-locations';
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, DragEvent, KeyboardEvent } from 'react';
-import { bookLayout, gridColumns, renderOrigin, spreadCommands } from './desktop';
+import { bookLayout, gridColumns, isRenderOrigin, renderOrigin, spreadCommands, thumbsOrigin } from './desktop';
 import { resolveTarget, targetAnchor, targetKey } from './edit-targets';
 import type { TargetAnchor } from './edit-targets';
 import type { BookGeometry, CanvasLayout, Command, ImportRequest, Issue, ProjectChange, ProjectSummary, Rect, RenderStatus, TemplateInfo } from './desktop';
@@ -49,7 +50,7 @@ import { PhotoContent, TextContent } from './BoxContent';
 import { ProjectFilesContext } from './Fields';
 import { centered, getCrop, placementIn, placementOf, setPlacement } from './spread';
 import type { Placement } from './spread';
-import { editorLayoutsAt, firstEditorLayouts, newEditorSpread, openingSpreadStates, readEdit, resolveEditPath } from './editing';
+import { continuedSpread, editorLayoutsAt, firstEditorLayouts, newEditorSpread, openingSpreadStates, readEdit, resolveEditPath } from './editing';
 import { describeLayoutChange, editorLayoutChoices, editorLayoutPreviews, editorLayoutTarget, pickerFamily, swapContent, sheetLayoutLabel, swapPages, switchLayout } from './layouts';
 import { Fields } from './Fields';
 import { Inspector } from './Inspector';
@@ -147,6 +148,13 @@ function EmptyBook({ template, writable, start }: { template?: TemplateInfo; wri
 
 export function App() {
   const api = window.imageflow;
+  // Settings → Faster book updates: the book view and thumbnails render each edit in place (#210).
+  const [fasterUpdates, setFasterUpdates] = useState(true);
+  useEffect(() => {
+    if (!api) return;
+    void api.getSettings().then((result) => { if ('value' in result && result.value) setFasterUpdates(result.value.fasterBookUpdates !== false); });
+    return api.onSettingsChanged((settings) => setFasterUpdates(settings.fasterBookUpdates !== false));
+  }, [api]);
   const [resizing, setResizing] = useState(false);
   const { panels, bottomMaximum, toggle: togglePanelState, show: showPanelState, resize: resizePanelState } = usePanels(resizing);
   const [summary, setSummary] = useState<ProjectSummary>();
@@ -173,6 +181,8 @@ export function App() {
   const [lastReady, setLastReady] = useState<RenderStatus>();
   const [fittedGeometry, setGeometry] = useState<BookGeometry>();
   const [preparedViews, setPreparedViews] = useState<{ project: string; book?: boolean; thumbs?: boolean; start?: number }>();
+  // A view that showed a revision before the views were paired (the thumbnails render in their own process and can be
+  // first) counts as prepared for it: otherwise the other view waits for it forever.
   function preparedView(project: string, view: 'book' | 'thumbs') {
     const start = performance.timeOrigin + performance.now();
     setPreparedViews(previous => {
@@ -310,7 +320,7 @@ export function App() {
     const isText = (node: Element | null) => !!node?.matches('textarea, [contenteditable="true"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"]):not([type="file"])');
     const focus = () => setTextEditing(isText(document.activeElement));
     const message = (event: MessageEvent) => {
-      if (event.origin === renderOrigin && event.data?.type === 'editor-focus' && document.activeElement instanceof HTMLIFrameElement &&
+      if (isRenderOrigin(event.origin) && event.data?.type === 'editor-focus' && document.activeElement instanceof HTMLIFrameElement &&
           event.source === document.activeElement.contentWindow) setTextEditing(event.data.text === true);
     };
     document.addEventListener('focusin', focus); document.addEventListener('focusout', focus); window.addEventListener('message', message);
@@ -345,7 +355,7 @@ export function App() {
     const cancel = () => {
       thumbAnimations.current.forEach(animation => animation.cancel());
       for (const frame of thumbList.current?.querySelectorAll<HTMLIFrameElement>('iframe') ?? []) {
-        frame.contentWindow?.postMessage({ type: 'cancel-reorder' }, renderOrigin);
+        frame.contentWindow?.postMessage({ type: 'cancel-reorder' }, thumbsOrigin);
       }
     };
     const list = thumbList.current;
@@ -401,10 +411,32 @@ export function App() {
   const selectionSide = pageSelectionSide(sequence?.spreads[index]?.page ?? {}, selectedSide ?? selectedPage);
   const pageLabels = spreads.map((_, i) => pageLabel(sequence?.spreads[i]?.page ?? {}));
   const writable = !!summary && !reload && !agentWorking;
+  // A change is saved, or saved and not yet shown: on a long book with maps, rendering it again takes a second or two.
+  // A reload after the book's files changed, such as a template edit, renders the whole book again and redraws its maps.
+  const reloadingFiles = !!summary && (reload === 'loading' || reload === 'rendering');
+  const showingChange = saving || reloadingFiles || (!!summary && !render && !!lastReady && !reload);
+  const updating = useDelayed(showingChange, 250);
+  // A shorter wait for the cursor, which says that something is happening without asking for attention.
+  const busyCursor = useDelayed(showingChange, 100);
+  // Until the book has rendered once, the spread list would show placeholder names ("Spread 1", "Blank page"), and the
+  // thumbnails may arrive before or after the book view. The list appears once both show the book, in one step, or
+  // a second after the book view if its thumbnails are late.
+  const thumbnailsLate = useDelayed(!!lastReady && !thumbs, 1000);
+  const opening = !!summary && render?.state !== 'error' && (!lastReady || (!thumbs && !thumbnailsLate));
+  const updatingText = reloadingFiles ? 'Updating the book after its files changed…' : 'Updating the book…';
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
   const generation = inputGeneration.current;
   const spreadSelected = !selectedSource;
+  // The selection as the views show it. A new spread is outlined once both the book view and the thumbnails show it;
+  // until then the sheet selected before stays outlined, so the selection never disappears while they update.
+  const outlinedSpread = useRef(spreadId);
+  const showsSelected = (sheets?: readonly { spread: string }[]) => !!sheets?.some(({ spread }) => spread === spreadId);
+  if ((showsSelected(geometry?.sheets) && showsSelected(thumbs?.sheets)) || !geometry?.sheets.some(({ spread }) => spread === outlinedSpread.current)) {
+    outlinedSpread.current = spreadId;
+  }
+  const outlined = outlinedSpread.current;
+  const awaitingSelection = outlined !== spreadId;
   const canChangeBook = writable && !busy && !exporting;
   const canReorder = canChangeBook && !!template;
   const canMoveSpread = (id: string, target: number) => !!template && !!spreadOrder(spreads, id, target, template);
@@ -467,6 +499,7 @@ export function App() {
       preserveViewAnchor();
       if (current.current?.project.format !== next.project.format) revealedThumb.current = '';
     }
+    const previousSpreads = current.current?.project.spreads ?? [];
     current.current = next;
     candidateId.current = next.id;
     readyId.current = undefined;
@@ -497,8 +530,14 @@ export function App() {
       canvas.current?.scrollTo({ top: 0, left: 0 });
     }
     // A book may have no spreads yet; then nothing is selected.
+    // A selected sheet that is gone hands the selection to the sheet now in its place, not to the first one.
+    const inPlaceOf = (id: string) => {
+      const at = previousSpreads.findIndex((spread) => spread.id === id);
+      const kept = new Set(next.project.spreads.map(({ id }) => id));
+      return at < 0 ? undefined : (previousSpreads.slice(at).find(({ id }) => kept.has(id)) ?? previousSpreads.slice(0, at).findLast(({ id }) => kept.has(id)))?.id;
+    };
     setSpreadId((previous) => selected ?? (reset ? next.project.spreads[0]?.id :
-      next.project.spreads.find(({ id }) => id === previous)?.id ?? next.project.spreads[0]?.id) ?? '');
+      next.project.spreads.find(({ id }) => id === previous)?.id ?? inPlaceOf(previous) ?? next.project.spreads[0]?.id) ?? '');
     if (selected) { pendingReveal.current = selected; if (selected !== spreadId) setSelectedSide(undefined); }
     // The selected sheet is gone (an agent removed it, say): the fallback sheet starts on its default page.
     else if (!next.project.spreads.some(({ id }) => id === spreadId)) setSelectedSide(undefined);
@@ -748,7 +787,9 @@ export function App() {
   const acquireAgentLease = useEffectEvent(() => {
     // Operations the user cannot finish by closing an editor refuse plainly; only an open editor is named to the agent.
     const reloadRunning = reloading.current && !reloadFailed.current;
-    if (pendingTasks.current || busy || reloadRunning || reorder.dragging || agentLocked.current) return false;
+    if (pendingTasks.current || busy || reloadRunning || reorder.dragging || agentLocked.current) return { busy:
+      busy ? busy.replace(/…$/, '').toLowerCase() : reloadRunning ? 'reloading the book after its files changed' : reorder.dragging ? 'a drag in the editor'
+        : agentLocked.current ? 'another agent change' : 'saving an edit' };
     if (editing || elementEditor || cropping) return activeEditor ?? false;
     const typing = focusedEditorLabel(document.activeElement);
     if (typing) return { label: typing };
@@ -924,7 +965,7 @@ export function App() {
   }
 
   // Scrolls the book vertically so a spread is fully visible. Waits for the next layout if the spread is new.
-  function reveal(id: string) {
+  function reveal(id: string, instant = false) {
     const sheet = geometry?.sheets.find(({ spread }) => spread === id);
     const view = canvas.current;
     if (!sheet || !view || !stage.current) {
@@ -933,7 +974,8 @@ export function App() {
     }
     pendingReveal.current = undefined;
     const label = bookLayout.book.gap;
-    const behavior = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    // A spread that has just appeared, such as a new one, is shown at once with the update rather than scrolled to after it.
+    const behavior = instant || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth';
     const top = stage.current.offsetTop + sheet.y;
     if (top - label >= view.scrollTop && top + sheet.height <= view.scrollTop + view.clientHeight) return;
     view.scrollTo({ top: Math.max(0, top - Math.max(label, (view.clientHeight - sheet.height) / 2)), behavior });
@@ -956,7 +998,7 @@ export function App() {
   function postViewport(host: HTMLElement | null, view: 'book' | 'thumbs', range: ReturnType<typeof viewport>) {
     if (!host || !range) return;
     for (const frame of host.querySelectorAll<HTMLIFrameElement>('iframe.book-frame-' + view)) {
-      frame.contentWindow?.postMessage({ type: 'viewport', ...range }, renderOrigin);
+      frame.contentWindow?.postMessage({ type: 'viewport', ...range }, view === 'thumbs' ? thumbsOrigin : renderOrigin);
     }
   }
   function measureView() { postViewport(stage.current, 'book', frameViewport()); }
@@ -1023,7 +1065,7 @@ export function App() {
     anchorLayout.current = nextLayout; anchorSize.current = nextSize;
     if (pendingReveal.current) {
       pendingAnchor.current = undefined;
-      reveal(pendingReveal.current);
+      reveal(pendingReveal.current, true);
     } else if (changed && view && sheetStage) {
       const anchor = pendingAnchor.current ?? viewAnchor.current;
       const position = anchor && restoreViewAnchor(anchor, geometry.sheets, { width: view.clientWidth, height: view.clientHeight }, pageMap());
@@ -1133,8 +1175,9 @@ export function App() {
     const position = { index: insertionAfter(spread, spreads), count: spreads.length + 1 };
     const eligible = editorLayoutsAt(template.spreads, template.format, position);
     const definition = eligible.find(id => template.spreads[id].span === 'spread') ?? eligible[0];
+    // A new spread continues the selected one's layout where it fits, and otherwise takes the first layout that does.
     const next = duplicate ? { ...structuredClone(spread), id: crypto.randomUUID() }
-      : definition && newEditorSpread(definition, template.spreads, template.format, position);
+      : continuedSpread(spread, template.spreads, template.format, position) ?? (definition && newEditorSpread(definition, template.spreads, template.format, position));
     if (!next) return;
     edit(({ project }) => {
       if (!project.spreads.some(item => item.id === spread.id)) return false;
@@ -1146,6 +1189,7 @@ export function App() {
 
   function deleteSelected(ids: string[]) {
     if (!canChangeBook || !ids.length) return;
+    // The sheet after the deleted ones then takes the selection (adopt), so the thumbnails stay where the user was.
     edit(({ project }) => { project.spreads = project.spreads.filter(({ id }) => !ids.includes(id)); }, ids.length === 1 ? 'Spread deleted' : ids.length + ' spreads deleted');
     spreadSelection.setSelection([]);
   }
@@ -1911,6 +1955,7 @@ export function App() {
         targets={panelTargets}
         open={openInspectorOwner}
         openTarget={openInspectorTarget} place={placeInspector} chooseLayout={chooseInspectorLayout}
+        holdPreviews={!render && !!lastReady}
         familyPicker={template && layoutFamily && <LayoutFamilyPicker
           key={JSON.stringify([summary.handle, spread.id, selectedPage, layoutFamily, summary.templateHash, template.format, summary.network])}
           project={summary.id} template={template} spread={spread} page={selectedPage} chooseLayout={chooseInspectorLayout} params={summary.project.params} family={layoutFamily}
@@ -1919,7 +1964,7 @@ export function App() {
     [summary, spread, selectedSide, selectedPage, sequence, index, writable, selectedSource, template, render, lastReady, usage, focusBox, panelTargets, layoutFamily, previewNotice, quickSource, openInspectorOwner, openInspectorTarget, placeInspector, chooseInspectorLayout, editFromPanel, selectFromPanel]);
 
   const nativeDocumentTitle = navigator.platform.includes('Mac');
-  return <ProjectFilesContext.Provider value={projectFiles}><div className={nativeDocumentTitle ? 'studio mac-studio' : 'studio'}>
+  return <ProjectFilesContext.Provider value={projectFiles}><div className={(nativeDocumentTitle ? 'studio mac-studio' : 'studio') + (busyCursor ? ' is-busy' : '')}>
     <div className="editor-shell">
     <header className="toolbar">
       <div className="toolbar-actions project-context">
@@ -1997,7 +2042,7 @@ export function App() {
             </div>
           </div>
           <div ref={thumbScroll} className="thumbs-scroll" inert={coverActive} onScroll={measureThumbnails} onDragOver={reorder.over} onDragLeave={reorder.leave} onDrop={reorder.drop}>
-            <div ref={thumbList} className={thumbs ? 'spread-thumbs placed' : 'spread-thumbs'} style={{ height: thumbs?.height }}
+            <div ref={thumbList} className={(thumbs ? 'spread-thumbs placed' : 'spread-thumbs') + (opening ? ' opening' : '')} style={{ height: thumbs?.height }}
               role="group" aria-label="Spreads" onKeyDown={thumbKeys}>
               {spreads.map(({ id }, i) => {
                 const rect = thumbs?.sheets.find(({ spread }) => spread === id);
@@ -2005,7 +2050,7 @@ export function App() {
                 const displayedPages = displayedLabel.split(' · ')[0].replace(/^Pages? /, '');
                 const level = spreadIssues.get(id);
                 return <button key={id} data-list-id={id} data-spread={id}
-                  aria-pressed={spreadSelected && selectedSpreads.includes(id)} aria-current={spreadSelected && index === i ? 'page' : undefined} aria-label={displayedLabel}
+                  aria-pressed={spreadSelected && (awaitingSelection ? id === outlined : selectedSpreads.includes(id))} aria-current={spreadSelected && index === i ? 'page' : undefined} aria-label={displayedLabel}
                   title={displayedLabel + (level ? ' · ' + (level === 'error' ? 'Has errors' : 'Has warnings') : '')}
                   className={'spread-thumb' + (reorder.dragging === id ? ' reordering' : '')} tabIndex={index === i ? 0 : -1}
                   draggable={selectedSpreads.length <= 1 && canReorder && (canMoveSpread(id, i - 1) || canMoveSpread(id, i + 1))}
@@ -2023,7 +2068,7 @@ export function App() {
                 </button>;
               })}
               {reorder.indicator && <div className="spread-insertion" aria-hidden="true" style={{ top: reorder.indicator.top }} />}
-              <BookFrame project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined}
+              <BookFrame busy={busyCursor} reuse={fasterUpdates} project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined} onShown={(id) => preparedView(id, 'thumbs')}
                 release={frameRelease} title="Spread thumbnails" onGeometry={setThumbs}
                 viewport={thumbnailViewport} hold={holdPreview} accept={acceptCandidate} />
             </div>
@@ -2042,7 +2087,7 @@ export function App() {
               onClick={() => setZoom((value) => value * 1.2)}><Icon name="plus" /></button>
             {zoom !== 1 && <button type="button" className="canvas-return-fit" onClick={() => setZoom(1)} title="Restore the fitted view and reading position">Return to Fit</button>}
           </div>}
-          <main ref={canvas} inert={coverActive} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" tabIndex={0} data-zoomed={zoom > 1 || undefined}
+          <main ref={canvas} inert={coverActive} className={'canvas' + (geometry?.columns ? ' canvas-grid' : '')} aria-label="Book preview" tabIndex={0} aria-busy={updating || undefined} data-zoomed={zoom > 1 || undefined}
             data-pan-ready={canvasGestures.panReady || undefined} data-panning={canvasGestures.panning || undefined} onScroll={() => { rememberViewAnchor(); measureView(); }}
             onContextMenu={(event) => void canvasMenu(event)} onBlur={(event) => { delete event.currentTarget.dataset.pointerFocus; }} onKeyDown={(event) => {
               delete event.currentTarget.dataset.pointerFocus;
@@ -2072,7 +2117,11 @@ export function App() {
                 // already selected page opens its content editor.
                 const current = spreadSelected && spreadId === sheet && (selectedLayoutMode === 'page' || selectionSide === side);
                 select(sheet, false, side);
-                if (!current || blockedInline) return;
+                // A held editor blocks clicks while the preview is out of date. A click on another field that replays once
+                // the held one applied its text (InlineTextEditor) opens that field when the book shows the save: the held
+                // editor's context then differs only by its own change.
+                const showsCurrent = canvasReady && readyId.current === summary?.id;
+                if (!current || (blockedInline && (!showsCurrent || (target && targetKey(target) === editing?.key)))) return;
                 if (top) setFocusBox({ box: top.id, at: Date.now() });
                 // What is drawn on top decides: a box or element opens its own editor there (see openOwner). A smaller
                 // click-to-edit node on top, such as a heading over a photo, opens its popover instead.
@@ -2099,7 +2148,7 @@ export function App() {
               >
               <div className="canvas-artwork-clip">
                 <div className="canvas-artwork">
-                  <BookFrame project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined}
+                  <BookFrame busy={busyCursor} reuse={fasterUpdates} project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined} onShown={(id) => preparedView(id, 'book')}
                     release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
                     viewport={frameViewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
                     onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />
@@ -2109,14 +2158,14 @@ export function App() {
                 const level = spreadIssues.get(id);
                 const at = spreads.findIndex(sheet => sheet.id === id);
                 const displayedLabel = canvasLabels[id] ?? (at >= 0 ? pagesLabel(at) + ' · ' + label(at) : id);
-                return <div key={id} data-canvas-spread={id} className={'sheet-label' + (spreadSelected && id === spread?.id ? ' selected' : '')} style={{ left: x, top: y - 26, width }}>
+                return <div key={id} data-canvas-spread={id} className={'sheet-label' + (spreadSelected && id === outlined ? ' selected' : '')} style={{ left: x, top: y - 26, width }}>
                   {level && <span className={'issue-dot issue-' + level} />}<span className="sheet-label-name" title={displayedLabel}>{displayedLabel}</span>
-                  {spreadSelected && id === spread?.id && <span className="sheet-layout-mode" data-layout-mode={selectedLayoutMode} aria-label={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'} title={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'}>
+                  {spreadSelected && id === outlined && <span className="sheet-layout-mode" data-layout-mode={selectedLayoutMode} aria-label={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'} title={selectedLayoutMode === 'pages' ? 'Two page layouts' : selectedLayoutMode === 'spread' ? 'Spread layout' : 'Single page'}>
                     <Icon name={selectedLayoutMode === 'pages' ? 'pageLayouts' : selectedLayoutMode === 'spread' ? 'spreadLayout' : 'pageLayout'} size={16} activeSide={selectionSide} />
                   </span>}
                 </div>;
               })}
-              <CanvasHover key={hoverEpoch} stage={stage} geometry={geometry} selected={spreadSelected} spread={spread?.id}
+              <CanvasHover key={hoverEpoch} stage={stage} geometry={geometry} selected={spreadSelected} spread={outlined || spread?.id}
                 editKey={editKey} cropping={!!cropping} locate={locate} motion={canvasMotion} />
               {facingSheet && <div data-canvas-spread={facingSheet.spread} className="facing-page-selection" aria-hidden="true" style={{
                 left: facingSheet.x, top: facingSheet.y, width: facingSheet.width, height: facingSheet.height }} />}
@@ -2239,8 +2288,8 @@ export function App() {
       close={() => setQuick(undefined)} jump={(id) => select(id)} />}
     {photoView.dialog}
     <footer className="status-bar">
-      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
-        {!issue && busy && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice}
+      <span title={issue || busy || notice || undefined} className={issue ? 'status status-error' : busy || updating ? 'status status-busy' : 'status'} role={issue && !summary ? 'alert' : 'status'}>
+        {!issue && (busy || updating) && <span className="status-spinner" aria-hidden="true" />}{issue || busy || notice || (updating ? updatingText : '')}
       </span>
       {exporting && <button type="button" className="status-cancel" onClick={() => void api?.cancelExport()}>Cancel</button>}
       <AgentStatus api={api} />

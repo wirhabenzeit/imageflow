@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { agentSkillFolder, authoringSnapshot, writeAgentSkill, writeAuthoringSnapshot } from '../desktop/authoring-sdk';
+import { agentSkillFolder, authoringSnapshot, authoringSnapshotState, writeAgentSkill, writeAuthoringSnapshot } from '../desktop/authoring-sdk';
 import { captureProjectInputs } from '../desktop/revisions';
 import { bundleTemplate } from '../desktop/project';
 import { templateHash } from '../desktop/template-library';
@@ -71,4 +71,18 @@ test('new books carry the agent skill outside their inputs and template identity
   await assert.rejects(readFile(join(book, agentSkillFolder, 'references/stale.md')), /ENOENT/);
   assert.equal(await templateHash(join(book, 'template')), hash);
   assert.equal((await captureProjectInputs(book)).revision, revision);
+});
+
+test('a template SDK snapshot is reported current, stale or absent against the installed SDK', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'if-sdk-state-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const [older, installed, template] = ['older', 'installed', 'template'].map((name) => join(root, name));
+  await Promise.all([older, installed, template].map((folder) => mkdir(folder)));
+  await writeFile(join(older, 'imageflow.d.ts'), 'export type Text = { id: string };');
+  await writeFile(join(installed, 'imageflow.d.ts'), 'export type Text = { id: string; meta: unknown };');
+  assert.equal(await authoringSnapshotState(template, installed), 'absent');
+  await writeAuthoringSnapshot(template, older);
+  assert.equal(await authoringSnapshotState(template, installed), 'stale');
+  await writeAuthoringSnapshot(template, installed);
+  assert.equal(await authoringSnapshotState(template, installed), 'current');
 });

@@ -43,11 +43,11 @@ try {
   const statusLine = () => w.locator('.status').textContent();
   // Runs a change and waits for the book frame that renders its result.
   const rerendered = async (change) => {
-    const old = await w.evaluate(() => document.querySelector('iframe.book-frame-book[data-current]')?.getAttribute('src') ?? null);
+    const old = await w.evaluate(() => document.querySelector('iframe.book-frame-book[data-current]')?.getAttribute('data-revision') ?? null);
     await change();
     await w.waitForFunction((url) => {
       const current = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-      return current && current.getAttribute('src') !== url;
+      return current && current.getAttribute('data-revision') !== url;
     }, old, { timeout: 30000 });
   };
   const button = (name) => w.getByRole('button', { name, exact: true });

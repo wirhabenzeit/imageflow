@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mergeFormatFindings } from '../desktop/fixtures';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -251,7 +252,8 @@ test('fixture checks render unused layouts per format with synthetic content and
   // Synthetic photos cannot judge resolution, and the arrangement of a fixture book is not a page-sequence finding.
   assert.ok(!report.diagnostics.some(({ code }) => code === 'photo-resolution-low' || code === 'page-sequence'));
   const overflow = report.diagnostics.find(({ code }) => code === 'text-overflow')!;
-  assert.deepEqual(overflow.fixture, { layout: 'main', case: 'long-text', format: 'square' });
+  assert.deepEqual(overflow.fixture, { layout: 'main', case: 'long-text', format: 'square', formats: ['square', 'landscape'] }, 'the same finding in both formats is listed once');
+  assert.equal(report.diagnostics.filter(({ code }) => code === 'text-overflow').length, 1);
   assert.equal(overflow.location?.spread, undefined);
   assert.equal(overflow.location?.where, 'Fixture · Story · Long text');
   assert.equal(overflow.details?.path, undefined);
@@ -381,4 +383,13 @@ test('facing-page fixtures exercise every allowed side with independent text and
   const standalone = fixtureProject(saved, calendar, 'calendar', cells, ids);
   assert.equal(standalone.project.schemaVersion, 1);
   assert.ok(standalone.project.spreads.every(({ split, pages, boxes }) => !split && !pages && boxes.story.text));
+});
+
+test('a fixture finding found in several formats is listed once with its formats', () => {
+  const finding = (format: string, message = 'Text overflows box body.') => ({ code: 'text-overflow', stage: 'render' as const, severity: 'warning' as const,
+    message, location: { where: 'Fixture · Story · long' }, fixture: { layout: 'story', case: 'long-text' as const, format } });
+  const merged = mergeFormatFindings([finding('a4'), finding('square'), finding('a4', 'Other'), finding('letter'), finding('a4')]);
+  assert.equal(merged.length, 2);
+  assert.deepEqual(merged[0].fixture, { layout: 'story', case: 'long-text', format: 'a4', formats: ['a4', 'square', 'letter'] });
+  assert.deepEqual(merged[1].fixture, { layout: 'story', case: 'long-text', format: 'a4' }, 'a finding of one format keeps its shape');
 });

@@ -47,9 +47,9 @@ try {
     return value;
   }
   async function changed(action) {
-    const before = await window.locator(frame).getAttribute('src');
+    const before = await window.locator(frame).getAttribute('data-revision');
     await action();
-    await window.waitForFunction(({ frame, url }) => document.querySelector(frame)?.getAttribute('src') !== url ||
+    await window.waitForFunction(({ frame, url }) => document.querySelector(frame)?.getAttribute('data-revision') !== url ||
       document.querySelector('.status-error'), { frame, url: before });
     return ready();
   }

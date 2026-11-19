@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { chmod, cp, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import sharp from 'sharp';
 import { configureSourceStore, pruneSourceCache, SourceStore } from '../desktop/source-store';
 import { approveSource, configureSourceAccess } from '../desktop/source-access';
@@ -10,7 +11,7 @@ import { configureRenditionCache } from '../desktop/rendition-cache';
 import { photoFile } from '../desktop/photos';
 import { isUnavailableSource } from '../src/source-diagnostics';
 import { importIntoProject, loadProject, projectSummary, renderData, updateProject } from '../desktop/project';
-import { collectSources, relocateSource, relinkFolder, removeSources, saveDocumentCopy } from '../desktop/source-actions';
+import { collectSources, relocateSource, relinkFolder, removeSources, renameSource, saveDocumentCopy } from '../desktop/source-actions';
 import { captureProjectInputs } from '../desktop/revisions';
 import { ProjectSession } from '../desktop/project-session';
 import { sourceEntries } from '../src/source-locations';
@@ -106,7 +107,9 @@ test('atomic external replacements refresh dimensions and revisions without chan
   files.project.spreads[1].boxes.hero = { photo: id, params: {}, crops: { story: { centerX: .3, centerY: .4, zoom: 1.8 } } };
   const first = await updateProject(added.book, files);
   const before = await captureProjectInputs(f.folder);
-  const pinned = await readFile(first.photos.get(id)!.original);
+  // The editor reads a linked photo where it is: no copy that a re-export (from Lightroom, say) would bypass.
+  assert.equal(first.photos.get(id)!.original, f.photo);
+  await photoFile(first.photos.get(id)!, 'thumb');
   const replacement = join(f.external, 'replacement.png');
   await sharp({ create: { width: 80, height: 160, channels: 3, background: '#0000ff' } }).png().toFile(replacement);
   await rename(replacement, f.photo);
@@ -116,8 +119,15 @@ test('atomic external replacements refresh dimensions and revisions without chan
   assert.equal(refreshed.photos.get(id)!.height, 160);
   assert.equal(refreshed.photos.get(id)!.width, 80);
   assert.deepEqual(refreshed.project.spreads[1].boxes.hero.crops, first.project.spreads[1].boxes.hero.crops);
-  assert.deepEqual(await readFile(first.photos.get(id)!.original), pinned);
+  // Renditions name the file they were made from, so the earlier version's are never shown for the new one.
   assert.notEqual(first.photos.get(id)!.key, refreshed.photos.get(id)!.key);
+  // A rendition not made yet cannot be made from the new file under the earlier version's key.
+  await assert.rejects(photoFile(first.photos.get(id)!, 'preview'), /original photo changed/);
+  // Checks and exports read a private copy for the whole job.
+  const jobCache = join(f.cache, 'job'); await mkdir(jobCache);
+  const job = await loadProject(f.folder, jobCache, true, true);
+  assert.ok(job.photos.get(id)!.original.startsWith(jobCache));
+  assert.equal(job.photos.get(id)!.width, 80);
 });
 
 test('missing linked photos, Markdown and parameter files reopen with honest last-good status and collect refuses missing originals', async (t) => {
@@ -128,6 +138,8 @@ test('missing linked photos, Markdown and parameter files reopen with honest las
   }
   const entries = sourceEntries(book).filter((entry) => entry.linked);
   const originals = entries.map((entry) => entry.path);
+  // A photo shown in the editor has a preview, which stands in for a missing original, as for the book's own photos.
+  await photoFile(book.photos.get(entries.find((entry) => entry.kind === 'photo')!.id)!, 'preview');
   for (const path of originals) await rm(path);
   const reopened = await loadProject(f.folder, f.cache);
   for (const entry of entries) {
@@ -263,8 +275,10 @@ test('stores share concurrent updates and bounded cleanup preserves open inputs 
   const updates = await Promise.all(entries.map(async (entry, i) => {
     const store = i ? one : two;
     const result = await store.resolve(f.folder, entry); await store.settled();
-    return { key: entry.key, digest: result.status.digest };
+    return { key: entry.key, digest: result.status.digest ?? (entry.kind === 'photo' ? createHash('sha256').update(await readFile(f.photo)).digest('hex') : undefined) };
   }));
+  // A linked photo read in place has its digest recorded in the background.
+  await one.digested();
   const index = JSON.parse(await readFile(join(f.root, 'source-cache/books', (await readdir(join(f.root, 'source-cache/books')))[0]), 'utf8'));
   for (const update of updates) assert.equal(index[update.key].digest, update.digest, 'Both concurrent updates survive index publication');
   const snapshots = [...one.pins];
@@ -277,7 +291,14 @@ test('stores share concurrent updates and bounded cleanup preserves open inputs 
   await stat(active);
   for (const path of snapshots) await stat(path);
   await SourceStore.release(f.folder);
+  // The most recently opened book keeps the snapshots its index names over the limit, so its next open copies nothing
+  // again. Superseded snapshots of changed originals are not named and go.
+  const current = Object.values(index as Record<string, { snapshot: string }>).map(({ snapshot }) => snapshot);
   await pruneSourceCache([f.folder], 0);
+  for (const path of current) await stat(path);
+  for (const path of snapshots.filter((path) => !current.includes(path))) await assert.rejects(stat(path), { code: 'ENOENT' });
+  // Once another book was opened more recently, the limit applies to them.
+  await pruneSourceCache([f.root], 0);
   for (const path of snapshots) await assert.rejects(stat(path), { code: 'ENOENT' });
   const reopened = await loadProject(f.folder, f.cache);
   assert.ok(entries.every((entry) => reopened.sources![entry.key].state === 'available'));
@@ -313,6 +334,7 @@ test('partial writes retain last-good content and damaged caches rebuild without
   const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
   const id = added.imported[0];
   const original = await readFile(f.photo);
+  const first = await photoFile(added.book.photos.get(id)!, 'preview');
   await writeFile(f.photo, original.subarray(0, 12));
   const partial = await loadProject(f.folder, f.cache);
   assert.equal(partial.sources!['photo:' + id].state, 'unreadable');
@@ -321,11 +343,17 @@ test('partial writes retain last-good content and damaged caches rebuild without
   await writeFile(f.photo, original);
   const restored = await loadProject(f.folder, f.cache);
   assert.equal(restored.sources!['photo:' + id].state, 'available');
-  await writeFile(restored.photos.get(id)!.original, 'damaged derived cache');
-  const repaired = await loadProject(f.folder, f.cache);
-  assert.deepEqual(await readFile(repaired.photos.get(id)!.original), original);
+  // The rewritten file is another version: until it has a preview, the earlier version's stands in for it.
   await rm(f.photo);
-  await writeFile(repaired.photos.get(id)!.original, 'damaged derived cache');
+  const fallback = await loadProject(f.folder, f.cache);
+  assert.equal(fallback.sources!['photo:' + id].cached, true);
+  assert.equal(fallback.photos.get(id)!.original, first);
+  // A damaged preview never stands in for a missing original.
+  await writeFile(f.photo, original);
+  const preview = await photoFile((await loadProject(f.folder, f.cache)).photos.get(id)!, 'preview');
+  await rm(f.photo);
+  await writeFile(preview, 'damaged derived cache');
+  await writeFile(first, 'damaged derived cache');
   const missing = await loadProject(f.folder, f.cache);
   assert.equal(missing.sources!['photo:' + id].cached, false);
   assert.equal(missing.photos.has(id), false);
@@ -337,6 +365,7 @@ test('permission loss is an actionable source state, including inaccessible pare
   const f = await fixture(t);
   const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
   const id = added.imported[0];
+  await photoFile(added.book.photos.get(id)!, 'preview');
   try {
     await chmod(f.external, 0);
     const denied = await loadProject(f.folder, f.cache);
@@ -455,6 +484,7 @@ test('restart migration restores approvals and cached photos from all legacy dev
   assert.equal(migrated[entry.key].path, f.photo);
   assert.equal(migrated['markdown:other'].path, f.text);
   await stat(join(access, legacy)); // Rollback data is preserved.
+  await photoFile(reopened.photos.get(id)!, 'preview');
   await rm(f.photo);
   const missing = await loadProject(f.folder, f.cache);
   assert.equal(missing.sources![entry.key].state, 'missing');
@@ -479,4 +509,82 @@ test('Locate Folder reapproves exact originals with no approvals or cache, but n
   assert.equal(repaired.repaired, 1);
   assert.equal(repaired.book.sources!['photo:' + id].state, 'available');
   assert.equal(repaired.book.photoIndex[id].path, f.photo);
+});
+
+test('Locate Folder finds a moved linked photo by the digest recorded after it was read in place', async (t) => {
+  const f = await fixture(t);
+  const added = await importIntoProject(f.book, { kind: 'photo', mode: 'link' }, [f.photo]);
+  const id = added.imported[0];
+  // Opening reads the photo in place; its digest follows in the background.
+  await (await SourceStore.forBook(f.folder, f.cache)).digested();
+  const moved = join(f.root, 'moved'); await mkdir(moved);
+  await rename(f.photo, join(moved, 'photo.png'));
+  const missing = await loadProject(f.folder, f.cache);
+  assert.equal(missing.sources!['photo:' + id].state, 'missing');
+  const repaired = await relinkFolder(missing, moved);
+  assert.equal(repaired.repaired, 1);
+  assert.equal(repaired.book.photoIndex[id].path, join(moved, 'photo.png'));
+});
+
+test('a file stored in the book is renamed in place, keeping its ID, extension and assignments (F-027)', async (t) => {
+  const f = await fixture(t);
+  const decomposed = join(f.external, '2026-08-22 Söng Kul.gpx');
+  await writeFile(decomposed, '<gpx><trk/></gpx>');
+  const added = await importIntoProject(f.book, { kind: 'file', mode: 'copy', accept: ['.gpx'] }, [decomposed]);
+  const [id] = added.imported;
+  const stored = added.book.project.files[id] as string;
+  assert.equal(stored, 'files/' + id + '-2026-08-22 Söng Kul.gpx', 'the umlaut survives the copy (F-026)');
+  const session = new ProjectSession(added.book);
+  t.after(() => session.close());
+  const assigned = structuredClone({ project: added.book.project, photoIndex: added.book.photoIndex });
+  assigned.project.params.track = id;
+  const book = await session.save(assigned, 'Assign');
+
+  const renamed = await renameSource(book, 'file:' + id, 'Stage 05: Song Kul');
+  assert.equal(renamed.project.files[id], 'files/' + id + '-Stage 05- Song Kul.gpx', 'unsafe characters replaced, extension kept');
+  assert.equal(renamed.project.params.track, id);
+  assert.equal(await readFile(join(f.folder, renamed.project.files[id] as string), 'utf8'), '<gpx><trk/></gpx>');
+  await assert.rejects(readFile(join(f.folder, stored)), 'the copy moved rather than duplicated');
+  session.record(renamed, 'Source location changed', false);
+  // Undoing an earlier edit keeps the current path, so it never points at the old name.
+  const undone = await session.undo('undo');
+  assert.equal(undone.project.files[id], renamed.project.files[id]);
+  assert.equal(undone.project.params.track, undefined);
+
+  assert.equal(await renameSource(undone, 'file:' + id, 'Stage 05- Song Kul.gpx'), undone, 'the same name is no change');
+  await writeFile(join(f.folder, 'files', id + '-Taken.gpx'), 'x');
+  await assert.rejects(renameSource(undone, 'file:' + id, 'Taken'), /already has this name/);
+  await assert.rejects(renameSource(undone, 'file:' + id, '  '), /Enter a name/);
+  const linked = await importIntoProject(undone, { kind: 'file', mode: 'link', accept: ['.gpx'] }, [f.file]);
+  await assert.rejects(renameSource(linked.book, 'file:' + linked.imported[0], 'Other'), /keeps the name of its original/);
+
+  // A change of case renames the file itself. On a case-sensitive volume, another file that differs only in case is
+  // a different file and is never replaced.
+  const recased = await renameSource(linked.book, 'file:' + id, 'stage 05- song kul');
+  assert.equal(recased.project.files[id], 'files/' + id + '-stage 05- song kul.gpx');
+  assert.equal(await readFile(join(f.folder, recased.project.files[id] as string), 'utf8'), '<gpx><trk/></gpx>');
+  const other = join(f.folder, 'files', id + '-STAGE 05- SONG KUL.gpx');
+  const sensitive = await stat(other).then(() => false, () => true);
+  if (sensitive) {
+    await writeFile(other, 'another file');
+    await assert.rejects(renameSource(recased, 'file:' + id, 'STAGE 05- SONG KUL'), /already has this name/);
+    assert.equal(await readFile(other, 'utf8'), 'another file');
+  }
+
+  // A registered asset that is a link to another asset's file is not renamed: that would move the other file.
+  const target = join(f.folder, 'files', id + '-target.gpx');
+  await writeFile(target, 'the other asset');
+  const files = structuredClone({ project: recased.project, photoIndex: recased.photoIndex });
+  files.project.files.linkedEntry = 'files/linkedEntry-link.gpx';
+  await symlink(target, join(f.folder, 'files', 'linkedEntry-link.gpx'));
+  const withLink = await updateProject(recased, files, true);
+  await assert.rejects(renameSource(withLink, 'file:linkedEntry', 'Moved'), /is a link/);
+  assert.equal(await readFile(target, 'utf8'), 'the other asset');
+
+  // A files folder replaced by a link to somewhere else is not renamed into, nor is anything there renamed.
+  const outside = join(f.root, 'outside');
+  await rename(join(f.folder, 'files'), outside);
+  await symlink(outside, join(f.folder, 'files'));
+  await assert.rejects(renameSource(withLink, 'file:' + id, 'Escaped'), /book’s own folder|must be inside|points outside/);
+  assert.equal(await readFile(join(outside, id + '-stage 05- song kul.gpx'), 'utf8'), '<gpx><trk/></gpx>');
 });

@@ -45,6 +45,24 @@ export async function writeAuthoringSnapshot(template: string, typesRoot: string
   }
 }
 
+const installedHashes = new Map<string, Promise<string>>();
+/**
+ * Whether a template's SDK snapshot matches the installed app's SDK, for get_authoring_context: a snapshot from an
+ * earlier version lacks newer APIs, so editors and type checks that read it flag code that renders fine (beta finding).
+ * `absent` when the template has none. Never writes; rebuild_dependencies refreshes it.
+ */
+export async function authoringSnapshotState(template: string, typesRoot: string): Promise<'current' | 'stale' | 'absent'> {
+  const saved = await readFile(join(template, authoringSnapshotFolder, 'api.json'), 'utf8').then((text) => JSON.parse(text) as { sdk?: unknown }, () => undefined);
+  if (!saved) return 'absent';
+  let installed = installedHashes.get(typesRoot);
+  if (!installed) {
+    installed = authoringSnapshot(typesRoot).then((entries) => (JSON.parse(entries.get(authoringSnapshotFolder + '/api.json')!.toString()) as { sdk: string }).sdk);
+    installedHashes.set(typesRoot, installed);
+    installed.catch(() => installedHashes.delete(typesRoot));
+  }
+  return saved.sdk === await installed ? 'current' : 'stale';
+}
+
 // Where Claude Code and other agents that read .claude/skills look for project skills: an agent started in the book
 // folder, or in a folder above it, finds the template API reference without installing anything.
 export const agentSkillFolder = '.claude/skills/imageflow-templates';

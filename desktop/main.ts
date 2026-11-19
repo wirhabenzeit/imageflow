@@ -12,7 +12,7 @@ import { commandRegistry, commandState, emptyMenuState } from '../src/commands';
 import type { ContextMenuItem, ContextMenuResult } from '../src/desktop';
 import type { RegisteredCommand } from '../src/commands';
 import { bookName } from '../src/book-name';
-import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, removeSources } from './source-actions';
+import { collectSources, relocateSource, relinkFolder, saveDocumentCopy, removeSources, renameSource } from './source-actions';
 import { originalPath } from './source-store';
 import { sourceEntries } from '../src/source-locations';
 import type { SourceEntry } from '../src/source-locations';
@@ -29,7 +29,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, isAbsolute, parse } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
-import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
+import { channels, gridColumns, spreadCommands, desktopScheme, editorURL, renderOrigin, renderOrigins, settingsURL, startURL, starterURL, assetsURL, templatesURL } from '../src/desktop';
 import type { AgentLeaseReply, BookMenuState, Command, ImportRequest, OpenAction, ProjectSummary, Result, MarkdownAction, McpClientTarget, McpSettings, SourceAction, TemplateInfo } from '../src/desktop';
 import type { ProjectFiles } from '../src/project';
 import { renderPolicy } from './csp';
@@ -167,14 +167,18 @@ async function pageHtml(dist: string) {
 
 async function serve(request: Request) {
   const { host, pathname } = new URL(request.url);
-  if (host !== 'editor' && host !== 'render') return new Response(null, { status: 404 });
-  const picture = host === 'render' && /^\/render\/([a-f0-9-]{36})\/picture\/([a-f0-9]{64})$/.exec(pathname);
+  const renderHost = host === 'render' || host === 'thumbs';
+  if (host !== 'editor' && !renderHost) return new Response(null, { status: 404 });
+  const picture = renderHost && /^\/render\/([a-f0-9-]{36})\/(picture|place)\/([a-f0-9]{64})$/.exec(pathname);
   if (picture) {
     const session = sessions.get(picture[1]);
     if (session?.mode !== 'edit' || !session.pictures || !session.book.templateHash) return new Response(null, { status: 404 });
     const scope = JSON.stringify([session.book.templateHash, session.network?.() ?? []]);
     if (session.pictureScope !== scope) return new Response(null, { status: 404 });
-    return session.pictures.respond(request, scope, picture[2]);
+    // The last picture shown at a place outlives template edits: a replacement frame shows it, as still drawing,
+    // while it draws the new one, instead of an empty box for every map in the book (F-032). It is never taken as
+    // the new picture, so it stays scoped to the allowed sites only.
+    return session.pictures.respond(request, picture[2] === 'place' ? JSON.stringify(['place', session.network?.() ?? []]) : scope, picture[3]);
   }
   if (request.method !== 'GET') return new Response(null, { status: 405 });
   const dist = join(app.getAppPath(), 'dist');
@@ -189,10 +193,20 @@ async function serve(request: Request) {
   }
   if (host === 'editor' && ['/', '/settings', '/start', '/new', '/assets', '/templates', '/markdown', '/presentation'].includes(pathname)) {
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
-      'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigin + "; frame-ancestors 'none'; base-uri 'none'",
+      'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigins.join(' ') + "; frame-ancestors 'none'; base-uri 'none'",
     });
   }
-  const match = host === 'render' ? viewPath.exec(pathname) : null;
+  // Template files by the template's hash (renderData): any open render session with that hash has the same files.
+  const templateFile = renderHost && /^\/render\/([a-f0-9]{64})\/template\/(.+)$/.exec(pathname);
+  if (templateFile) {
+    const [, hash, asset] = templateFile;
+    for (const session of sessions.values()) {
+      const bytes = session.book.templateHash === hash ? session.book.assets.files.get(asset) : undefined;
+      if (bytes) return response(bytes, assetTypes[extname(asset).toLowerCase()] ?? 'application/octet-stream');
+    }
+    return new Response(null, { status: 404 });
+  }
+  const match = renderHost ? viewPath.exec(pathname) : null;
   if (!match && devServer) return net.fetch(devServer + pathname + new URL(request.url).search);
   if (!match) return new Response(null, { status: 404 });
   const [, id, resource] = match;
@@ -209,7 +223,13 @@ async function serve(request: Request) {
       'Content-Security-Policy': renderPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });
   }
-  if (resource === 'data') return Response.json(renderData(session.book, id, session.mode, session.network?.()));
+  if (resource === 'data') {
+    const origins = session.network?.() ?? [];
+    // A frame that renders this session's revision in place (#210) requests only its data, not the page: its pictures
+    // are cached under the network policy that data names, as a new frame's are under its page's.
+    session.pictureScope ??= JSON.stringify([session.book.templateHash, origins]);
+    return Response.json(renderData(session.book, id, session.mode, session.network ? origins : undefined, desktopScheme + '://' + host));
+  }
   if (resource === 'template-preview') {
     // The Book check of the template's own preview image: the frame names the declared path, the app reads the file.
     const { file: _file, ...report } = await readTemplatePreview(join(session.book.folder, 'template'), new URL(request.url).searchParams.get('path') ?? '');
@@ -1261,7 +1281,9 @@ function showSettings(pane?: SettingsPane) {
 
 
 void app.whenReady().then(async () => {
-  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), { ...defaultSettings, updateChannel: releaseChannel(app.getVersion()) ?? 'stable' });
+  // IMAGEFLOW_FASTER_UPDATES=0 starts with Settings → Faster book updates off, so tests can cover rendering every edit anew.
+  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), { ...defaultSettings, updateChannel: releaseChannel(app.getVersion()) ?? 'stable',
+    ...(process.env.IMAGEFLOW_FASTER_UPDATES === '0' ? { fasterBookUpdates: false } : {}) });
   recents = new RecentDocuments(join(app.getPath('userData'), 'recent-documents.json'));
   await Promise.all([settings.load(), recents.load()]);
   configureSourceStore(join(app.getPath('userData'), 'source-cache'));
@@ -1657,6 +1679,12 @@ void app.whenReady().then(async () => {
       next = await removeSources(document.book, keys);
       document.projectSession.record(next, 'Remove assets', true, false);
       return { summary: activate(document.activate(next)) };
+    }
+    else if (request.action === 'rename') {
+      if (!source || chosen.length !== 1) throw new Error('Choose one asset to rename.');
+      next = await renameSource(document.book, source.key, request.name);
+      if (next === document.book) return { summary: document.summary };
+      message = 'Renamed to ' + basename(sourceEntries(next).find(({ key }) => key === source.key)!.path).replace(/^(?:tx|fl)-[a-f0-9-]{12}-/, '') + '.';
     }
     else if (request.action === 'locate-folder') {
       const choice = await dialog.showOpenDialog(owner, { title: 'Locate Missing Sources in Folder', buttonLabel: 'Locate',

@@ -27,8 +27,8 @@ export type Edit = (files: ProjectFiles) => void;
 
 // Shows the spread in each layout it can switch to, rendered by the template itself. A family is one preview, named after
 // the family; its controls appear with the selected spread's parameters below the complete layout browser.
-function LayoutPicker({ summary, spread, template, page, choose }: {
-  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; page?: PageSide; choose: (definition?: string) => void;
+function LayoutPicker({ summary, spread, template, page, choose, hold }: {
+  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; page?: PageSide; choose: (definition?: string) => void; hold?: boolean;
 }) {
   const index = summary.project.spreads.findIndex(({ id }) => id === spread.id), count = summary.project.spreads.length;
   // The choices, and what each would change, depend only on the sheet, its page and position: the Inspector
@@ -52,12 +52,12 @@ function LayoutPicker({ summary, spread, template, page, choose }: {
       allowed: new Set(editorLayoutChoices(template.spreads, spread, template.format, position, page)), consequence };
   }, [template, spread, page, index, count]);
   const current = spread.split ? scopeSpread(spread, page ?? 'left')?.definition : spread.definition;
-  return <LayoutGrid summary={summary} spread={spread} template={template} page={page}
+  return <LayoutGrid summary={summary} spread={spread} template={template} page={page} hold={hold}
     choices={choices} allowed={allowed} current={current} choose={choose} consequence={consequence} />;
 }
 
-function LayoutGrid({ summary, spread, template, page, choices, allowed, current, choose, consequence }: {
-  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; page?: PageSide;
+function LayoutGrid({ summary, spread, template, page, choices, allowed, current, choose, consequence, hold }: {
+  summary: ProjectSummary; spread: SpreadState; template: TemplateInfo; page?: PageSide; hold?: boolean;
   choices: string[]; allowed: ReadonlySet<string>; current?: string; choose: (definition?: string) => void; consequence: (id?: string) => string;
 }) {
   const key = layoutPreviewKey(summary, template, spread) + ':' + (page ?? '');
@@ -67,8 +67,11 @@ function LayoutGrid({ summary, spread, template, page, choices, allowed, current
   const families = template.layoutFamilies ?? {};
   const familyOf = (id: string) => pickerFamily(template.spreads, id, families);
   const name = (id: string) => id === '__blank__' ? 'Blank page' : familyOf(id) ? families[familyOf(id)!].label : template.spreads[id].label;
+  // A family with a picker has one tile, shown in its current variant. Until the previews of a new variant arrive,
+  // the tile still shows the previous one: it is the same tile, so it stays selected and enabled.
+  const tile = (id: string) => familyOf(id) !== undefined ? 'family:' + familyOf(id) : id;
   const displayed = geometry ? geometry.sheets.map(({ spread }) => spread).filter(id => id === '__blank__' || Object.hasOwn(template.spreads, id)) : choices;
-  const pending = !!geometry && (displayed.length !== choices.length || displayed.some((id, i) => id !== choices[i]));
+  const pending = !!geometry && (displayed.length !== choices.length || displayed.some((id, i) => tile(id) !== tile(choices[i])));
   return <div className={geometry ? 'layout-picker placed' : 'layout-picker'} role="radiogroup" aria-label="Layout"
     aria-busy={pending || undefined} style={{ height: geometry?.height }}>
     {displayed.map((id) => {
@@ -76,7 +79,8 @@ function LayoutGrid({ summary, spread, template, page, choices, allowed, current
       const item = blank ? undefined : template.spreads[id];
       const rect = geometry?.sheets.find(({ spread: preview }) => preview === id);
       const family = blank ? undefined : familyOf(id);
-      const checked = blank ? !!spread.split && !current : id === current && (item?.span === 'page' || !spread.split);
+      const checked = blank ? !!spread.split && !current : (id === current || (family !== undefined && current !== undefined && family === familyOf(current))) &&
+        (item?.span === 'page' || !spread.split);
       const unavailable = !blank && !allowed.has(id);
       const description = unavailable ? 'Available on the ' + item?.sides?.join(' or ') + ' page' : consequence(blank ? undefined : id);
       return <button key={id} type="button" role="radio" disabled={pending || unavailable} aria-checked={checked} aria-label={name(id)}
@@ -85,13 +89,13 @@ function LayoutGrid({ summary, spread, template, page, choices, allowed, current
         className={'layout-option' + (family ? ' layout-family' : '') + (blank ? ' layout-blank' : '') + (unavailable ? ' layout-unavailable' : '')}
         style={rect ? { left: rect.x - 4, top: rect.y - 4, width: rect.width + 8, height: rect.height + 25 }
           : { gridColumn: item?.span === 'spread' ? 'span 2' : 'span 1' }}
-        onClick={() => { if (!checked) choose(blank ? undefined : id); }}>
+        onClick={() => { if (!checked) choose(blank ? undefined : choices.find((choice) => tile(choice) === tile(id)) ?? id); }}>
         <span className="layout-option-label"><span className="layout-option-name">{blank ? 'Blank' : name(id)}</span>
           {family && <span className="layout-option-variants" aria-hidden="true"><Icon name="cog" size={16} /></span>}
         </span>
       </button>;
     })}
-    <BookFrame project={preview.project} view="layouts"
+    <BookFrame project={preview.project} view="layouts" hold={hold}
       query={'spread=' + encodeURIComponent(spread.id) + (page ? '&page=' + page : '')}
       title="Layout previews" onGeometry={setGeometry} />
   </div>;
@@ -151,7 +155,7 @@ function contentState(summary: ProjectSummary, spread: SpreadState, id: string, 
 // elements are edited where they are on the page; the list opens the same editors, also for empty, hidden or
 // overlapping ones, and from the keyboard.
 export function Inspector({ summary, spread, source, template, render, usage, edit, highlight,
-  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable, page, chooseLayout }: {
+  select, quickLook, focus, targets = [], open, openTarget, place, familyPicker, writable, page, chooseLayout, holdPreviews }: {
   summary: ProjectSummary; writable: boolean; spread: SpreadState; page?: PageSide; source?: SourceRef; template?: TemplateInfo; render?: RenderStatus; usage: SourceUsage;
   edit: (change: Edit, notice?: string | (() => string)) => void;
   highlight: (id?: string) => void; select: (spread: string) => void;
@@ -161,6 +165,9 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
   place: (from: KeptItem, to: ContentTarget) => void;
   chooseLayout?: (definition?: string) => void;
   familyPicker?: ReactNode;
+  // While the book view renders a change, the layout previews wait: they share its render process, and the book
+  // view is what the user is looking at. The previews shown so far stay until then.
+  holdPreviews?: boolean;
 }) {
   const items = useRef(new Map<string, HTMLElement>());
   const [flash, setFlash] = useState<string>();
@@ -243,7 +250,7 @@ export function Inspector({ summary, spread, source, template, render, usage, ed
     <fieldset disabled={!writable}>
       {template && <PanelSection id="inspector.layout" title="Layout">
         {!definition && spread.definition && <p className="error-text">This spread uses a layout the template no longer has: {spread.definition}.</p>}
-        <LayoutPicker summary={summary} spread={sheet} template={template} page={page} choose={chooseLayout ?? ((next) => {
+        <LayoutPicker summary={summary} spread={sheet} template={template} page={page} hold={holdPreviews} choose={chooseLayout ?? ((next) => {
           let consequence = '';
           changeSpread((item) => { consequence = describeLayoutChange(switchLayout(item,
             editorLayoutTarget(template.spreads, next, template.format, { index: summary.project.spreads.findIndex(({ id }) => id === item.id), count: summary.project.spreads.length }, page), template.spreads));

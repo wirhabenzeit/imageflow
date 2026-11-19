@@ -1,18 +1,18 @@
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { copyFile, cp, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { copyFile, cp, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, extname, join, posix } from 'node:path';
 import { coverInstance, storedBoxes } from '../src/project';
 import type { ProjectFiles } from '../src/project';
 import { clearFileAssignments, fileAssigned } from '../src/asset-usage';
-import { sourceEntries, sourceFolder } from '../src/source-locations';
+import { sourceEntries, sourceFolder, storedFileName } from '../src/source-locations';
 import type { ImportMode, SourceEntry } from '../src/source-locations';
 import { createDocument } from './documents';
 import { loadProject, updateProject } from './project';
 import type { OpenProject } from './project';
 import { CommittedProjectSaveError } from './persistence';
 import { captureProjectInputs } from './revisions';
-import { digestBytes, SourceStore, within } from './source-store';
+import { digestBytes, originalPath, SourceStore, within } from './source-store';
 import { approveSource, approvedExtensions, transferSourceAccess, transferBookTrust } from './source-access';
 
 const filesOf = (book: OpenProject): ProjectFiles => structuredClone({ project: book.project, photoIndex: book.photoIndex });
@@ -26,13 +26,64 @@ async function managedCopy(folder: string, source: SourceEntry, snapshot: string
   const directory = join(folder, sourceFolder(source.kind));
   await mkdir(directory, { recursive: true });
   if (await realpath(directory) !== directory) throw new Error('Asset folder must be inside the book.');
-  const name = basename(source.path).replace(/[^\p{L}\p{N} ._-]/gu, '-');
+  const name = storedFileName(basename(source.path));
   const relativeFolder = sourceFolder(source.kind) + '/' + source.id + '-' + randomUUID().slice(0, 8);
   await mkdir(join(folder, relativeFolder));
-  const path = relativeFolder + '/' + name.replace(/^(?:ph|tx|fl)-[a-f0-9-]{12}-/, '');
+  const path = relativeFolder + '/' + name.replace(storedPrefix, '');
   await copyFile(snapshot, join(folder, path), constants.COPYFILE_EXCL);
   copied.push(join(folder, path));
   return path;
+}
+
+// Imported copies are stored as "<id>-<name>", or as "<id>-<random>/<name>" when collected into the book.
+const storedPrefix = /^(?:ph|tx|fl)-[a-f0-9-]{12}-/;
+
+/**
+ * Renames a text or file stored in the book (beta finding F-027): its copy is renamed in place, keeping its ID
+ * prefix, folder and extension, and the book refers to the new path. Assignments refer to the ID, so they keep
+ * working. Not undoable, like other changes of a source's location; Undo and Revert keep the current paths. A linked
+ * original is never renamed, and a photo is named by its title.
+ */
+export async function renameSource(book: OpenProject, key: string, requested: unknown) {
+  const source = sourceEntries(book).find((entry) => entry.key === key);
+  if (!source) throw new Error('This asset is no longer in the book.');
+  if (source.kind === 'photo') throw new Error('A photo is named by its title. Change the title in the Inspector.');
+  if (source.linked) throw new Error('A linked file keeps the name of its original. Copy it into the book to rename it.');
+  if (typeof requested !== 'string') throw new Error('Enter a name.');
+  const stored = posix.basename(source.path);
+  const prefix = stored.match(storedPrefix)?.[0] ?? '';
+  const current = stored.slice(prefix.length);
+  const extension = extname(current);
+  let name = storedFileName(requested.trim()).replace(/^[.\s]+/, '');
+  if (extension && extname(name).toLowerCase() !== extension.toLowerCase()) name += extension;
+  if (!name || name === extension) throw new Error('Enter a name.');
+  if (name.length > 200) throw new Error('Choose a shorter name.');
+  if (name === current) return book;
+  const relative = posix.join(posix.dirname(source.path), prefix + name);
+  // Both names must stay inside the book's own folder for this kind of asset, also when a folder on the way has been
+  // replaced by a link: the stored copy resolves there (originalPath), and so does the folder the manifest names.
+  const resolved = await originalPath(book.folder, source);
+  const root = await realpath(join(book.folder, sourceFolder(source.kind)));
+  const folder = await realpath(join(book.folder, posix.dirname(source.path)));
+  if (folder !== dirname(resolved) || (folder !== root && !within(root, folder))) throw new Error('This asset is not stored in the book’s own folder.');
+  // The entry the manifest names is renamed, never what it points to: a registered link to another asset's file would
+  // otherwise move that file and leave the link dangling.
+  const from = join(folder, posix.basename(source.path));
+  if (!(await lstat(from)).isFile() || await realpath(from) !== resolved) throw new Error('This asset is a link; it cannot be renamed here.');
+  const to = join(folder, prefix + name);
+  if (!within(root, to)) throw new Error('Choose another name.');
+  // An existing name is free only when it is this very file, as a change of case is on a case-insensitive volume;
+  // on a case-sensitive one, Notes.md and notes.md are two files.
+  const [own, existing] = await Promise.all([stat(from), stat(to).catch(() => undefined)]);
+  if (existing && (existing.ino !== own.ino || existing.dev !== own.dev)) throw new Error('Another asset already has this name.');
+  await rename(from, to);
+  const files = filesOf(book);
+  reference(files, source, relative, false);
+  try { return await updateProject(book, files, true, { origin: 'app', label: 'Rename asset' }); }
+  catch (error) {
+    if (!(error instanceof CommittedProjectSaveError)) await rename(to, from).catch(() => {});
+    throw error;
+  }
 }
 
 /** Source identity and book metadata survive changing location. External files are never modified. */
@@ -100,13 +151,14 @@ export async function relinkFolder(book: OpenProject, directory: string, keys?: 
       next = await relocateSource(next, source.key, source.path); repaired++;
       continue;
     }
-    if (!state.stored?.digest) continue;
+    const digest = state.status.digest ?? state.stored?.digest;
+    if (!digest) continue;
     const matches: string[] = [];
     for (const path of candidates) {
       if (basename(path) !== basename(source.path)) continue;
       const actual = await realpath(path);
       if (!within(root, actual) || (await stat(actual)).size > 50 * 1024 * 1024) continue;
-      if (digestBytes(await readFile(actual)) === state.stored.digest) matches.push(actual);
+      if (digestBytes(await readFile(actual)) === digest) matches.push(actual);
     }
     if (matches.length === 1) { next = await relocateSource(next, source.key, matches[0]); repaired++; }
     else if (matches.length > 1) ambiguous.push(source.key);

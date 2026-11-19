@@ -106,6 +106,12 @@ export function SettingsPanel({ api }: { api?: DesktopApi }) {
             </div>
             <p className="settings-note" id="appearance-description">System follows your macOS appearance.</p>
           </div>
+          <span className="settings-label">Editing:</span>
+          <div className="settings-control">
+            <label><input type="checkbox" checked={settings?.fasterBookUpdates !== false} disabled={!settings}
+              onChange={(event) => void choose({ fasterBookUpdates: event.target.checked })} /> Faster book updates</label>
+            <p className="settings-note">The book and its thumbnails update in place after each edit. Turn this off if they show something unexpected.</p>
+          </div>
           <span className="settings-label">Updates:</span>
           <div className="settings-control">
             <label><input type="checkbox" checked={settings?.automaticUpdates ?? true} disabled={!settings || !update || update.status === 'unavailable' || update.status === 'initializing'}

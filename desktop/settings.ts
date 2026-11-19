@@ -6,7 +6,7 @@ import type { AppSettings } from '../src/settings';
 
 function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) ||
-      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel' && key !== 'agentAccess')) throw new Error('Invalid app settings.');
+      Object.keys(patch).some((key) => key !== 'appearance' && key !== 'newBookSize' && key !== 'automaticUpdates' && key !== 'updateChannel' && key !== 'agentAccess' && key !== 'fasterBookUpdates')) throw new Error('Invalid app settings.');
   const appearance = 'appearance' in patch ? patch.appearance : current.appearance;
   if (appearance !== 'light' && appearance !== 'dark' && appearance !== 'system') throw new Error('Invalid appearance setting.');
   const newBookSize = 'newBookSize' in patch ? patch.newBookSize as { width?: unknown; height?: unknown } : current.newBookSize;
@@ -18,8 +18,10 @@ function applyPatch(current: AppSettings, patch: unknown): AppSettings {
   if (!isUpdateChannel(updateChannel)) throw new Error('Invalid update channel.');
   const agentAccess = 'agentAccess' in patch ? patch.agentAccess : current.agentAccess;
   if (agentAccess !== undefined && typeof agentAccess !== 'boolean') throw new Error('Invalid agent access setting.');
+  const fasterBookUpdates = 'fasterBookUpdates' in patch ? patch.fasterBookUpdates : current.fasterBookUpdates;
+  if (fasterBookUpdates !== undefined && typeof fasterBookUpdates !== 'boolean') throw new Error('Invalid book update setting.');
   return { appearance, automaticUpdates, updateChannel, ...(newBookSize ? { newBookSize: newBookSize as {width:number;height:number} } : {}),
-    ...(agentAccess ? { agentAccess: true } : {}) };
+    ...(agentAccess ? { agentAccess: true } : {}), ...(fasterBookUpdates === false ? { fasterBookUpdates: false } : {}) };
 }
 
 export class SettingsStore {

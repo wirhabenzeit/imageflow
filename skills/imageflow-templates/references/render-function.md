@@ -51,6 +51,26 @@ A page layout receives only its own state and page number. Render it in `<Page>`
 
 ImageFlow's own placeholders follow the same rule: empty `PhotoBox` and `MarkdownBox` placeholders, the `ctx.Text` empty state and the inherited-text underline appear only on the canvas. Thumbnails render empty content as export does; layout previews do too, except that an empty `PhotoBox` or `MarkdownBox` shows a small photo or text glyph so the layouts can be told apart before any content is placed. One difference to know when styling `[data-empty]`: `ctx.Text` carries `data-empty` only on the canvas, so in thumbnails and layout previews an empty text renders as in export, while empty `PhotoBox` and `MarkdownBox` boxes carry `data-empty` in every view.
 
+## Caching expensive calculations
+
+Pure does not mean every call has to start over. A template may cache the result of an expensive calculation that depends only on its arguments, such as parsing a GPX file, in a `Map` at module level, keyed by that input:
+
+```ts
+const tracks = new Map<string, Track>();
+export function parseTrack(text: string): Track {
+  let track = tracks.get(text);
+  if (!track) { track = parseTrackText(text); tracks.set(text, track); }
+  return track;
+}
+// Elsewhere: parseTrack(file(params.track)!.text)
+```
+
+- **Key by everything the result depends on:** the file's `text` from `file(id)`, not its ID, so a replaced file is parsed again.
+- **Never change a cached result.** Every caller shares it; copy it before modifying.
+- **Don't cache a failure.** A parse that throws should throw again, so every page that uses the file reports it.
+- **A cache lasts for one render of the book.** The editor renders each change in new frames that load the template again, and the Book check and export render on their own. The cache saves repeated work within a render, such as a contents table and the pages it lists parsing the same files.
+- **Keep no other state at module level.** Later versions may keep frames alive between edits ([#210](https://github.com/wirhabenzeit/imageflow/issues/210)); a cache keyed by its input stays correct then, while other module state would carry over from one revision to the next.
+
 ## Photo metadata
 
 `photo.captured`, `photo.location` and `photo.camera` come from the photo file's EXIF data. Each is present only when the file records it in a usable form, and all three are read-only:

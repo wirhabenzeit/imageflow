@@ -12,9 +12,14 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
   const placements = chosen.length === 1 ? usage[chosen[0].kind === 'markdown' ? 'text' : chosen[0].kind][chosen[0].id] ?? [] : [];
   return [
     { command: 'asset-preview', enabled: chosen.length === 1 && !missing },
-    { command: 'asset-place', enabled: place && summary.project.spreads.length > 0 && chosen.every(({ kind }) => kind !== 'file'), label: chosen.length > 1 ? 'Place ' + chosen.length + ' Assets on Current Spread' : undefined },
+    // A file, such as a GPX, is chosen in a layout's file setting, not placed in a box: the menu says so.
+    chosen.some(({ kind }) => kind === 'file') ? { command: 'asset-place-file', enabled: false }
+      : { command: 'asset-place', enabled: place && summary.project.spreads.length > 0, label: chosen.length > 1 ? 'Place ' + chosen.length + ' Assets on Current Spread' : undefined },
     ...(placements.some(({ spread }) => spread) ? [{ command: 'asset-placements' as const, items: placements.filter(({ spread }) => spread).map(({ spread, pages }) => ({ command: 'asset-jump' as const,
       label: usageLabel(pages), value: spread })) }] : []),
+    // Texts and files stored in the book can be renamed; a photo has its title, a linked original keeps its name.
+    ...(chosen.length === 1 && chosen[0].kind !== 'photo' ? [{ command: 'asset-rename' as const, enabled: !missing && !chosen[0].linked,
+      label: chosen[0].linked ? 'Rename… (Copy into Book First)' : undefined }] : []),
     { type: 'separator' }, { command: 'asset-reveal', enabled: !missing },
     ...(chosen.length === 1 && chosen[0].kind === 'markdown' ? [{ command: 'asset-open' as const, enabled: !missing }] : []),
     ...(missing ? [{ command: chosen.length === 1 ? 'asset-locate' as const : 'asset-locate-folder' as const }] : []),

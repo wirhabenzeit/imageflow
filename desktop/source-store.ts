@@ -16,7 +16,8 @@ let persistentRoot: string | undefined;
 const stores = new Map<string, Promise<SourceStore>>();
 export function configureSourceStore(root: string) { persistentRoot = root; stores.clear(); }
 export const digestBytes = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-const stamp = (info: BigIntStats) => [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':');
+export { fileStamp as stamp } from './file-stamp';
+import { fileStamp as stamp } from './file-stamp';
 export function within(root: string, path: string) {
   const rel = relative(root, path);
   return !!rel && rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel);
@@ -47,12 +48,15 @@ async function hashFile(path: string) {
 // capture time from this instead (see desktop/capture-time.ts).
 const modifiedAt = (info: BigIntStats) => new Date(Number(info.mtimeMs)).toISOString();
 export type StoredSource = { digest?: string; snapshot: string; path: string; observation: string; snapshotObservation?: string;
-  width?: number; height?: number; modified?: string; direct?: boolean; key?: string; preview?: string; thumb?: string };
+  width?: number; height?: number; modified?: string; direct?: boolean; key?: string; preview?: string; thumb?: string;
+  // Renditions of the version before, for a photo read in place: they stand in while the current version has none.
+  earlier?: string[] };
 const storedIndexSchema = z.record(z.string(), z.object({
   digest: z.string().regex(/^[a-f0-9]{64}$/).optional(), snapshot: z.string(), path: z.string(), observation: z.string(),
   snapshotObservation: z.string().optional(), width: z.number().optional(), height: z.number().optional(),
   modified: z.string().optional(),
   direct: z.boolean().optional(), key: z.string().optional(), preview: z.string().optional(), thumb: z.string().optional(),
+  earlier: z.array(z.string()).max(4).optional(),
 }));
 export type ResolvedSource = { status: SourceStatus; stored?: StoredSource };
 
@@ -101,20 +105,32 @@ export class SourceStore {
     try {
       const actual = await originalPath(folder, source);
       const before = await stat(actual, { bigint: true });
-      const privatePin = options.pin && !source.linked && source.kind === 'photo';
+      // Checks and exports read every photo, owned or linked, from a private copy that lives as long as the job.
+      const privatePin = options.pin && source.kind === 'photo';
       if (source.kind === 'markdown' && extname(source.path).toLowerCase() !== '.md') throw new Error('Expected a Markdown (.md) file.');
       const maximum = source.kind === 'photo' ? source.linked ? 50 : undefined : source.kind === 'markdown' ? 5 : 20;
       if (!before.isFile() || (maximum && before.size > BigInt(maximum * 1024 * 1024))) throw new Error(`Expected a regular file${maximum ? ` up to ${maximum} MB` : ''}.`);
-      // Metadata reads do not copy or decode every document-owned photo on first open.
-      if (source.kind === 'photo' && !source.linked && !options.pin) {
+      // The editor reads photos where they are, owned or linked, from their metadata: opening neither copies, hashes nor
+      // decodes them. A linked photo re-exported in place (from Lightroom, say) has another stamp, so it gets new
+      // renditions (rendition keys name the stamp) and the book reloads with it (DocumentSession watches linked folders).
+      if (source.kind === 'photo' && !options.pin) {
         const details = await photoDetails(actual, null);
         if (stamp(await stat(actual, { bigint: true })) !== stamp(before)) throw new Error('Source changed while being read.');
         const cache = renditionCacheFor(options.cache ?? '');
         const extension = details.alpha ? '.png' : '.jpg';
-        const stored = { path: source.path, snapshot: actual, observation: stamp(before), direct: true, key: details.key,
+        // Locate Folder finds a moved linked original by its content, so its digest is kept: from the last record while
+        // the file is unchanged, and otherwise computed in the background, not while the book opens.
+        const previous = this.saved[source.key];
+        const digest = source.linked && previous?.digest && previous.path === source.path && previous.observation === stamp(before) ? previous.digest : undefined;
+        // A re-exported photo keeps the renditions of the version before as a fallback, until its own exist: a file
+        // caught half-written by the next export then still shows a picture.
+        const earlier = previous?.direct && previous.key !== details.key ? [previous.preview, previous.thumb].filter((path): path is string => !!path)
+          : previous?.direct ? previous.earlier : undefined;
+        const stored = { path: source.path, snapshot: actual, observation: stamp(before), direct: true, key: details.key, ...(digest ? { digest } : {}), ...(earlier?.length ? { earlier } : {}),
           width: details.width, height: details.height, modified: modifiedAt(before), preview: join(cache, details.key + '-preview' + extension), thumb: join(cache, details.key + '-thumb' + extension) };
         this.remember(source, stored);
-        return { status: { ...source, state: 'available' }, stored };
+        if (source.linked && !digest) this.recordDigest(source.key, actual, stamp(before));
+        return { status: { ...source, state: 'available', ...(digest ? { digest } : {}) }, stored };
       }
       const previous = this.saved[source.key];
       if (!privatePin && previous?.digest && !previous.direct && previous.path === source.path && previous.observation === stamp(before) &&
@@ -155,7 +171,7 @@ export class SourceStore {
       if (stored?.direct) {
         const original = stored;
         stored = undefined;
-        for (const path of [original.preview, original.thumb]) if (path && isRenditionPath(path, options.cache ?? '')) {
+        for (const path of [original.preview, original.thumb, ...(original.earlier ?? [])]) if (path && isRenditionPath(path, options.cache ?? '')) {
           try {
             if (!(await lstat(path)).isFile()) continue;
             const metadata = await sharp(path).metadata();
@@ -165,9 +181,24 @@ export class SourceStore {
       } else if (stored && (!stored.digest || !within(join(this.root, 'content'), stored.snapshot) || await hashFile(stored.snapshot).then((digest) => digest !== stored!.digest, () => true))) stored = undefined;
       if (stored && within(join(this.root, 'content'), stored.snapshot)) this.pins.add(stored.snapshot);
       const problem = state === 'missing' ? (source.linked ? 'Original missing: ' : 'Missing project file: ') + source.path : state === 'denied' ? 'Access denied' : 'Original unavailable: ' + (error instanceof Error ? error.message : String(error));
-      return { status: { ...source, state, problem, cached: !!stored, digest: stored?.digest }, stored };
+      // The last known content of the original, for Locate Folder, also when nothing cached can stand in for it.
+      const digest = stored?.digest ?? this.saved[source.key]?.digest;
+      return { status: { ...source, state, problem, cached: !!stored, ...(digest ? { digest } : {}) }, stored };
     }
   }
+  private digests = Promise.resolve();
+  /** Records a linked photo's digest after it was read in place, one file at a time, if it is still the same file. */
+  private recordDigest(key: string, path: string, observation: string) {
+    this.digests = this.digests.then(async () => {
+      if (this.saved[key]?.observation !== observation || this.saved[key]?.digest) return;
+      const digest = await hashFile(path);
+      if (stamp(await stat(path, { bigint: true })) !== observation || this.saved[key]?.observation !== observation) return;
+      this.saved[key] = { ...this.saved[key], digest }; this.version++;
+      await this.settled();
+    }).catch(() => {});
+  }
+  /** Waits for digests being recorded in the background (tests). */
+  async digested() { await this.digests; await this.settled(); }
   async settled() {
     const task = this.writes.then(async () => {
       while (this.written !== this.version) {
@@ -205,10 +236,20 @@ async function prune(recentFolders: string[], maximumBytes: number) {
   const recent = new Set((await Promise.all(recentFolders.map((folder) => sourceBookKey(folder).catch(() => undefined)))).filter(Boolean));
   const indexes = (await Promise.all((await readdir(join(root, 'books'))).filter((name) => name.endsWith('.json')).map(async (name) => ({ name, info: await stat(join(root, 'books', name)) })))).sort((a, b) => b.info.mtimeMs - a.info.mtimeMs);
   const referenced = new Set<string>();
+  // The most recently opened book keeps every snapshot it references, whatever the limit. Its next open needs them
+  // all: a book with more linked photos than the limit lost some at every close and copied, hashed and checked them
+  // again at the next start, 2 s for a 2.8 GB book. While a book is open it holds all its snapshots anyway (pins).
+  const latest = recentFolders[0] && await sourceBookKey(recentFolders[0]).catch(() => undefined);
+  const kept = new Set<string>();
   for (const { name } of indexes) {
     const file = join(root, 'books', name);
     if (!stores.has(file) && !recent.has(name.slice(0, -5)) && !indexes.slice(0, 20).some((item) => item.name === name)) { await rm(file, { force: true }); continue; }
-    try { for (const entry of Object.values(storedIndexSchema.parse(JSON.parse(await readFile(file, 'utf8'))))) if (!entry.direct) referenced.add(entry.snapshot); } catch { await rm(file, { force: true }); }
+    try {
+      for (const entry of Object.values(storedIndexSchema.parse(JSON.parse(await readFile(file, 'utf8'))))) if (!entry.direct) {
+        referenced.add(entry.snapshot);
+        if (latest && name === latest + '.json') kept.add(entry.snapshot);
+      }
+    } catch { await rm(file, { force: true }); }
   }
   const files = (await Promise.all((await readdir(join(root, 'content'))).filter((name) => /^[a-f0-9]{64}\.[a-z0-9]{1,10}$/.test(name)).map(async (name) => {
     const path = join(root, 'content', name); const info = await lstat(path);
@@ -216,5 +257,5 @@ async function prune(recentFolders: string[], maximumBytes: number) {
   }))).filter(({ info }) => info.isFile());
   let total = files.reduce((sum, file) => sum + file.info.size, 0);
   files.sort((a, b) => Number(referenced.has(a.path)) - Number(referenced.has(b.path)) || a.info.mtimeMs - b.info.mtimeMs);
-  for (const { path, info } of files) if (!pins.has(path) && (!referenced.has(path) || total > maximumBytes)) { await rm(path, { force: true }); total -= info.size; }
+  for (const { path, info } of files) if (!pins.has(path) && !kept.has(path) && (!referenced.has(path) || total > maximumBytes)) { await rm(path, { force: true }); total -= info.size; }
 }

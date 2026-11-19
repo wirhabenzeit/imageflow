@@ -6,7 +6,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { PDFDocument } from 'pdf-lib';
 import { copySample } from '../desktop/sample-book.mjs';
-import { closeApp, menuAction, testBook } from './ui-actions.mjs';
+import { closeApp, menuAction, pickLayout, testBook } from './ui-actions.mjs';
 
 // The shipped starter, rather than a synthetic page template: real pictures, text flow, folios and export.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -80,11 +80,11 @@ try {
   assert.deepEqual(initial.warnings, [], 'The unedited starter has no Book check warnings');
   console.log('Starter render passed: 32 pages, 11 split sheets, three genuine spread designs, clean findings, anchors and picture list.');
   const rerendered = async action => {
-    const before = await w.locator(ready).getAttribute('src');
+    const before = await w.locator(ready).getAttribute('data-revision');
     await action();
     await w.waitForFunction(before => {
       const current = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-      return current && current.getAttribute('src') !== before;
+      return current && current.getAttribute('data-revision') !== before;
     }, before);
   };
   const selectSide = async (id, side) => {
@@ -156,7 +156,7 @@ try {
   const picker = inspector.frameLocator('iframe.element-editor-frame');
   await picker.getByRole('radio', { name: '3 × 3', exact: true }).waitFor();
   const variant = gridSheet.pages[gridSide].definition === 'gridPage9' ? '2 × 2' : '3 × 3';
-  await rerendered(() => picker.getByRole('radio', { name: variant, exact: true }).click());
+  await pickLayout(w, picker.getByRole('radio', { name: variant, exact: true }));
   const changedGrid = (await readBook()).spreads.find(sheet => sheet.id === gridSheet.id);
   assert.notEqual(changedGrid.pages[gridSide].definition, gridSheet.pages[gridSide].definition);
   assert.deepEqual(changedGrid.pages[gridSide === 'left' ? 'right' : 'left'], gridSheet.pages[gridSide === 'left' ? 'right' : 'left']);

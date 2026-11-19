@@ -163,6 +163,23 @@ export function fixtureFindings(diagnostics: AuthoringDiagnostic[], cells: Fixtu
   });
 }
 
+/**
+ * Lists a finding once when it is the same in several formats, with the formats it was found in: a layout checked in
+ * three formats otherwise repeated each of its findings three times (beta finding, a 60 KB fixture response).
+ */
+export function mergeFormatFindings(findings: FixtureReport['diagnostics']): FixtureReport['diagnostics'] {
+  const merged = new Map<string, FixtureReport['diagnostics'][number]>();
+  for (const finding of findings) {
+    const { fixture: { format, formats: _formats, ...fixture }, ...rest } = finding;
+    const key = JSON.stringify([fixture, rest]);
+    const known = merged.get(key);
+    if (!known) { merged.set(key, { ...finding, fixture: { ...finding.fixture } }); continue; }
+    const list = known.fixture.formats ?? [known.fixture.format];
+    if (!list.includes(format)) known.fixture.formats = [...list, format];
+  }
+  return [...merged.values()];
+}
+
 export function cellReport(cell: FixtureCell, format: string, findings: FixtureReport['diagnostics']): FixtureCellReport {
   const own = findings.filter(({ fixture }) => fixture.layout === cell.layout && fixture.case === cell.case && fixture.format === format);
   const errors = own.filter(({ severity }) => severity === 'error').length, warnings = own.length - errors;

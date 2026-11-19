@@ -56,10 +56,10 @@ export default defineTemplate({ id: 'thumbnail-scroll', version: '1', contract: 
       window.thumbnailScrollSamples = [list.scrollTop];
       list.onscroll = () => window.thumbnailScrollSamples.push(list.scrollTop);
       return { top: list.scrollTop, selected: document.querySelector('.spread-thumb[aria-current="page"]').dataset.spread,
-        frame: document.querySelector('.book-frame-thumbs[data-current]').src };
+        frame: document.querySelector('.book-frame-thumbs[data-current]').dataset.revision };
     });
     await page.getByRole('button', { name: action, exact: true }).click();
-    await page.waitForFunction(before => document.querySelector('.book-frame-thumbs[data-current]')?.src !== before, before.frame);
+    await page.waitForFunction(before => { const frame = document.querySelector('.book-frame-thumbs[data-current][data-ready]'); return frame && frame.dataset.revision !== before; }, before.frame);
     await ready();
     const after = await page.evaluate(() => {
       const list = document.querySelector('.thumbs-scroll'), selected = document.querySelector('.spread-thumb[aria-current="page"]');

@@ -15,6 +15,12 @@ export const sourceFileName = (source: SourceReference | { path: string }) =>
 export const sourceLinked = (source: SourceReference | { path: string; linked?: boolean }) => typeof source !== 'string' && 'linked' in source && source.linked === true;
 export type SourceEntry = { key: SourceKey; kind: SourceKind; id: string; path: string; linked: boolean };
 export type SourceStatus = SourceEntry & { state: 'available' | 'missing' | 'unreadable' | 'denied' | 'unapproved'; problem?: string; cached?: boolean; digest?: string };
+/**
+ * A file name as ImageFlow stores a copy under: letters, digits, combining marks, spaces, `.`, `_` and `-`; anything
+ * else becomes `-`. Composed first (NFC), because macOS hands over names decomposed: `ö` as `o` and U+0308, whose
+ * mark would otherwise be replaced, turning `Söng Kul.gpx` into `So-ng Kul.gpx` (beta finding F-026).
+ */
+export const storedFileName = (name: string) => name.normalize('NFC').replace(/[^\p{L}\p{M}\p{N} ._-]/gu, '-');
 export const sourceFolder = (kind: SourceKind) => kind === 'photo' ? 'photos' : kind === 'markdown' ? 'texts' : 'files';
 export function sourceEntries(files: ProjectFiles): SourceEntry[] {
   return [

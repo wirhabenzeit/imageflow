@@ -129,3 +129,21 @@ test('editors see the same flow positions and header fields as render', () => {
   book.texts.alps = book.texts.alps.replace('Crossing the Alps', 'Over the Alps');
   assert.notEqual(editorContext(book, template, 'two')!.key, key);
 });
+
+test('anchors read book.texts and their own spread, so a page without a text box names its anchor after the text beside it (F-022)', () => {
+  const routes = chooseFormat(templateSchema.parse(normalizeTemplate({ id: 'chapters', version: '1', contract: 1, format,
+    spreads: ({ spread }: { spread: <T>(x: T) => T }) => ({
+      story: spread({ label: 'Story', boxes: { body: { type: 'markdown', label: 'Body', flowOrder: 1 }, aside: { type: 'markdown', label: 'Aside', flowOrder: 2 } },
+        render: () => createElement(Spread) }),
+      route: spread({ label: 'Route', anchors: ({ spread, book }: AnchorContext) => {
+        // The text that starts on the next sheet: this route's day.
+        const day = book.texts.find((text) => text.boxes.some((box) => box.part === 1 && box.pageNumbers.left !== undefined && box.spread !== spread));
+        assert.ok(Object.isFrozen(book.texts));
+        return [{ id: 'stage', title: typeof day?.meta.title === 'string' ? day.meta.title : 'Stage', side: 'left' }];
+      }, render: () => createElement(Spread) }),
+    }) })));
+  const book = alpsBook();
+  book.project.spreads.unshift({ id: 'map', definition: 'route', params: {}, boxes: {}, elements: {} });
+  const index = bookIndex(book, routes, pageSequence(book.project.spreads.map((spread) => layoutFootprint(spread, routes.spreads)), routes.format));
+  assert.deepEqual(index.anchors.map(({ id, title, spread }) => [id, title, spread]), [['stage', 'Crossing the Alps', 'map']]);
+});

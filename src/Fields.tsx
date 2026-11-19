@@ -9,7 +9,7 @@ import { isParameterValue, newItemId, resolveParams, resolveValue, sameValue } f
 import { Icon } from './Icon';
 import { sourcePath } from './source-locations';
 import type { SourceReference, ImportMode } from './source-locations';
-import { fileName } from './source-items';
+import { fileExtensionMime, fileMime, fileName } from './source-items';
 import { plainFormatted } from './formatted-text';
 
 type Value = Values[string];
@@ -134,7 +134,19 @@ function FileControl({ param, value, apply, autoFocus }: {
   const { files, importFile } = useContext(ProjectFilesContext);
   const accepted = Object.entries(files).filter(([, path]) => param.accept.some((ext) => sourcePath(path).toLowerCase().endsWith(ext)));
   const missing = !!value && !Object.hasOwn(files, value);
-  return <div className="box-photo pc-file">
+  // A file dragged from the Assets tab is assigned on drop, when this setting accepts its type (F-028).
+  const [target, setTarget] = useState(false);
+  const acceptsDrag = (types: readonly string[]) => types.includes(fileMime) && param.accept.some((ext) => types.includes(fileExtensionMime(ext)));
+  return <div className={'box-photo pc-file' + (target ? ' is-drop-target' : '')}
+    onDragOver={(event) => { if (!acceptsDrag(event.dataTransfer.types)) return; event.preventDefault(); event.dataTransfer.dropEffect = 'link'; setTarget(true); }}
+    onDragLeave={() => setTarget(false)}
+    onDrop={(event) => {
+      setTarget(false);
+      const id = event.dataTransfer.getData(fileMime);
+      if (!acceptsDrag(event.dataTransfer.types) || !accepted.some(([file]) => file === id)) return;
+      event.preventDefault();
+      if (id !== value) apply(id);
+    }}>
     <span className="box-photo-empty content-file-icon" aria-hidden="true">File</span>
     <div className="box-photo-info">
       <span className="box-photo-name" title={value && files[value] ? sourcePath(files[value]) : undefined}>
