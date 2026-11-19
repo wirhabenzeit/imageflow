@@ -4,6 +4,18 @@ Pass these operations to `apply_project_changes` with `project`, `expectedRevisi
 
 Use layout, format and parameter IDs from `get_authoring_context`; use spread and source IDs from `inspect_book`. A command that creates a spread can name it with `"ref":"chapter"`. Later commands and draft preview targets refer to it with the string `"$chapter"`. Use an earlier spread ID or reference in `after`, or use `null` to insert at the start. With no `after`, inserts append and duplicates follow the original.
 
+## Exterior covers
+
+Pass `cover: true` where a layout, box, or element operation would otherwise name a spread. Use `scope: "cover"` for whole-cover parameters. Run these operations as a batch or check them as a draft.
+
+```json
+[
+  { "op": "switch_layout", "cover": true, "definition": "wrapPhoto" },
+  { "op": "set_parameter", "scope": "cover", "key": "title", "value": "Along the coast" },
+  { "op": "assign_source", "cover": true, "box": "hero", "kind": "photo", "source": "registered-photo-id" }
+]
+```
+
 ## Layout and book operations
 
 | Operation | Example |

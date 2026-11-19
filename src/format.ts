@@ -2,30 +2,31 @@ import { z } from 'zod';
 import { walkShape } from './declaration-check';
 import type { Schema } from './declaration-check';
 
-const length = z.object({ value: z.number().min(0), unit: z.enum(['mm', 'pt', 'in']) });
-const positiveLength = length.refine(({ value }) => value > 0, 'Trim must be greater than zero.');
+export const lengthSchema = z.object({ value: z.number().min(0), unit: z.enum(['mm', 'pt', 'in']) });
+const positiveLength = lengthSchema.refine(({ value }) => value > 0, 'Trim must be greater than zero.');
 // Formats with facing pages name the horizontal insets by the fold (outside, binding); formats without facing pages
 // name them by the page's own edges (left, right), like InDesign's Facing Pages setting.
-const facingInsets = z.object({ top: length, bottom: length, outside: length, binding: length });
-const pageInsets = z.object({ top: length, bottom: length, left: length, right: length });
+const facingInsets = z.object({ top: lengthSchema, bottom: lengthSchema, outside: lengthSchema, binding: lengthSchema });
+const pageInsets = z.object({ top: lengthSchema, bottom: lengthSchema, left: lengthSchema, right: lengthSchema });
 const resolution = z.object({ minimum: z.number().positive(), target: z.number().positive(), maximum: z.number().positive() })
   .refine(({ minimum, target, maximum }) => minimum <= target && target <= maximum, 'Resolution must satisfy minimum ≤ target ≤ maximum.');
 const pageCount = <S extends z.ZodType>(step: S) => z.object({ min: z.int().positive(), max: z.int().positive(), step })
   .refine(({ min, max }) => max >= min, 'Maximum page count must be at least the minimum.');
 
+export const printOutputSchema = z.object({
+  container: z.literal('pdf', 'This draft supports PDF delivery.'),
+  colorSpace: z.literal('sRGB'),
+  transparency: z.enum(['allow', 'forbid'], 'This draft supports allowing or forbidding transparency.'),
+  resolution: resolution.optional(),
+  minimumTextSize: positiveLength.optional(),
+  maximumFileSize: z.object({ pages: z.number().positive(), cover: z.number().positive().optional() }).optional(),
+  // Deprecated compatibility field. Print always rejects Type 3 and unbundled fonts, with or without it.
+  fonts: z.object({ allowType3: z.literal(false), allowSystemFonts: z.literal(false) }).optional(),
+});
 const common = {
   label: z.string().trim().min(1),
   trim: z.object({ width: positiveLength, height: positiveLength }),
-  output: z.object({
-    container: z.literal('pdf', 'This draft supports PDF delivery.'),
-    colorSpace: z.literal('sRGB'),
-    transparency: z.enum(['allow', 'forbid'], 'This draft supports allowing or forbidding transparency.'),
-    resolution: resolution.optional(),
-    minimumTextSize: positiveLength.optional(),
-    maximumFileSize: z.object({ pages: z.number().positive(), cover: z.number().positive().optional() }).optional(),
-    // Deprecated compatibility field. Print always rejects Type 3 and unbundled fonts, with or without it.
-    fonts: z.object({ allowType3: z.literal(false), allowSystemFonts: z.literal(false) }).optional(),
-  }),
+  output: printOutputSchema,
 };
 const facingFormat = z.object({
   ...common, bleed: facingInsets, safe: facingInsets,
@@ -51,7 +52,7 @@ const singlePageFormat = z.object({
     ? 'Formats without facing pages have no ' + issue.keys.join(' or ') + ': every page is its own PDF page.' : undefined }),
 });
 
-type Length = z.infer<typeof length>;
+type Length = z.infer<typeof lengthSchema>;
 export type FacingFormat = z.infer<typeof facingFormat>;
 export type SinglePageFormat = z.infer<typeof singlePageFormat>;
 export type PrintFormat = FacingFormat | SinglePageFormat;
@@ -117,7 +118,7 @@ export function toMillimeters({ value, unit }: Length) {
   return value;
 }
 
-const resolveSides = <K extends string>(inset: Record<K, Length>) =>
+export const resolveSides = <K extends string>(inset: Record<K, Length>) =>
   Object.fromEntries(Object.entries<Length>(inset).map(([side, value]) => [side, toMillimeters(value)])) as Record<K, number>;
 
 type Millimeters = { trim: { width: number; height: number }; pageWidth: number; spreadWidth: number; outputWidth: number; height: number;
@@ -131,18 +132,22 @@ export type SinglePageResolvedFormat = Millimeters & {
 };
 export type ResolvedFormat = FacingResolvedFormat | SinglePageResolvedFormat;
 
+export function pdfSizeProblem(width: number, height: number) {
+  if (![width, height].every((edge) => edge >= 10 && edge <= 1000)) {
+    return 'PDF dimensions must be between 10 and 1000 mm on each edge.';
+  }
+}
+
 // Page geometry the template can declare but print and the editor cannot use. Checked when the template loads,
 // so a broken format is reported as a template problem rather than when a book first switches to it.
 function geometry(format: PrintFormat): { problem?: string; resolved: ResolvedFormat } {
   const trim = { width: toMillimeters(format.trim.width), height: toMillimeters(format.trim.height) };
   const height = trim.height + toMillimeters(format.bleed.top) + toMillimeters(format.bleed.bottom);
   const base = { trim, height, resolution: format.output.resolution };
-  const size = (width: number) => width < 10 || height < 10 || width > 1000 || height > 1000
-    ? 'PDF dimensions must be between 10 and 1000 mm on each edge.' : undefined;
   if (!hasFacingPages(format)) {
     const bleed = resolveSides(format.bleed), safe = resolveSides(format.safe);
     const pageWidth = trim.width + bleed.left + bleed.right;
-    const problem = size(pageWidth) ?? (safe.left + safe.right >= trim.width || safe.top + safe.bottom >= trim.height
+    const problem = pdfSizeProblem(pageWidth, height) ?? (safe.left + safe.right >= trim.width || safe.top + safe.bottom >= trim.height
       ? 'Template safe insets leave no space inside the trim.' : undefined);
     return { problem, resolved: { ...base, facingPages: false, bleed, safe, pageWidth, spreadWidth: pageWidth, outputWidth: pageWidth } };
   }
@@ -150,7 +155,7 @@ function geometry(format: PrintFormat): { problem?: string; resolved: ResolvedFo
   const pageWidth = trim.width + bleed.outside + bleed.binding;
   const spreadWidth = (trim.width + bleed.outside) * 2;
   const outputWidth = format.structure.delivery === 'pages' ? pageWidth : spreadWidth;
-  const problem = size(outputWidth)
+  const problem = pdfSizeProblem(outputWidth, height)
     ?? (bleed.binding > trim.width + bleed.outside ? 'Binding bleed exceeds the facing page.'
     : safe.outside + safe.binding >= trim.width || safe.top + safe.bottom >= trim.height ? 'Template safe insets leave no space inside the trim.'
     : undefined);
@@ -316,10 +321,14 @@ export function pageSequence(spans: (Span | { span: Span; sides?: readonly ('lef
     issues.push('The book has only its opening page, but ' + format.label + " requires it to close on a single left page. Add a layout with span: 'left' at the end.");
   }
   const { min, max, step } = format.structure.pageCount;
-  if (count < min || count > max || (count - min) % step) {
+  if (!isAllowedPageCount(count, format.structure.pageCount)) {
     issues.push('Page count is ' + count + '. ' + format.label + ' requires ' + min + '–' + max + ' pages' + (step > 1 ? ' in steps of ' + step : '') + '.');
   }
   return { spreads, count, issues };
+}
+
+export function isAllowedPageCount(count: number, { min, max, step }: PrintFormat['structure']['pageCount']) {
+  return Number.isSafeInteger(count) && count >= min && count <= max && (count - min) % step === 0;
 }
 
 export const cssMM = (value: number) => value + 'mm';

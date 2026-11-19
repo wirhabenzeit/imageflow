@@ -17,10 +17,15 @@ import { excerpt, fileName, photosMime, photoMime, sourceList, textMime, words }
 import type { SourceKind, SourceRef, SourcesTab } from './source-items';
 import { SourceManager } from './SourceManager';
 import { sourceEntries } from './source-locations';
+import { assetPageLabels, assetUsage } from './asset-usage';
 
-function pagesText(list: { pages: string }[] | undefined) {
+function pagesText(list: { pages: string; cover?: true }[] | undefined) {
   if (!list?.length) return 'Not placed';
-  return (list.length === 1 && !list[0].pages.includes('–') ? 'Page ' : 'Pages ') + list.map(({ pages }) => pages).join(', ');
+  const interior = list.filter(({ cover }) => !cover);
+  const cover = interior.length < list.length;
+  if (!interior.length) return 'Cover';
+  return (interior.length === 1 && !interior[0].pages.includes('–') ? 'Page ' : 'Pages ') +
+    interior.map(({ pages }) => pages).join(', ') + (cover ? ', Cover' : '');
 }
 
 type SourcesProps = {
@@ -65,7 +70,12 @@ export function Sources(props: SourcesProps) {
 function SourceStrip({ view, summary, tab, setTab, selected, choose, usage, writable, busy, importSources, importPaths, quickLook, changed, failure, assets }: SourcesProps & { tab: SourceKind; assets: boolean }) {
   const list = useRef<HTMLDivElement>(null);
   const [unused, setUnused] = useState(false);
-  const items = useMemo(() => sourceList(summary, tab, view.value).filter(({ id }) => !unused || !usage[tab][id]?.length), [summary, tab, unused, usage, view.value]);
+  const items = useMemo(() => {
+    const sources = sourceList(summary, tab, view.value);
+    if (!unused) return sources;
+    const retained = assetUsage(summary, assetPageLabels(summary));
+    return sources.filter(({ id }) => !retained[tab][id]?.length);
+  }, [summary, tab, unused, view.value]);
   useFilmstripAnchor(list, tab === 'photo', JSON.stringify([view.value.group, view.value.gapMinutes, items.map(({ id }) => id)]));
   const current = selected[tab];
   const visibleCurrent = items.some(({ id }) => id === current) ? current : undefined;

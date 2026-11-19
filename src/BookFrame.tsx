@@ -29,7 +29,7 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
   busy?: boolean;
   // The shown frame renders newer revisions in place (#210, Settings → Faster book updates), unless it refuses one.
   reuse?: boolean;
-  project: string; view: BookView; query?: string; title: string;
+  project: string; view: BookView | 'cover'; query?: string; title: string;
   presentation?: PresentationView;
   hold?: boolean;
   // Told to every frame, including a candidate with its first geometry, so the template draws the gesture's crop.
@@ -43,7 +43,7 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
   // The part of the frame on screen, for frames that load photos lazily, and the grid columns of the book view (0 for
   // one column); sent when a frame asks for it.
   viewport?: () => { top: number; bottom: number; left: number; right: number; columns: number } | undefined;
-  onGeometry: (geometry: BookGeometry | undefined, animateReorder?: boolean, start?: number, revision?: string) => void;
+  onGeometry?: (geometry: BookGeometry | undefined, animateReorder?: boolean, start?: number, revision?: string) => void;
   onStatus?: (status: RenderStatus, project: string) => void;
   // Pictures the shown frame draws after it was ready (ADR 0006): how many are still drawing, and those that failed.
   onPictures?: (pictures: PictureStatus, project: string) => void;
@@ -83,7 +83,7 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
     frame.published = true;
     if (frame.status?.state === 'ready') {
       setShown(id);
-      onGeometry(frame.geometry, frame.reorder !== 'skipped', frame.start, project);
+      onGeometry?.(frame.geometry, frame.reorder !== 'skipped', frame.start, project);
       onShown?.(project);
     }
     if (frame.status) onStatus?.(frame.status, project);
@@ -99,7 +99,7 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
     if (motion) element?.contentWindow?.postMessage({ type: 'play-reorder', start }, origin);
     const next: FrameState = { ...frame, held: undefined, status, revision, published: true };
     storeFrame(id, next);
-    onGeometry(next.geometry, motion, motion ? start : undefined, revision);
+    onGeometry?.(next.geometry, motion, motion ? start : undefined, revision);
     onShown?.(revision);
     onStatus?.(status, revision);
     if (next.pictures && status.state === 'ready') onPictures?.(next.pictures, revision);
@@ -178,7 +178,7 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
       // A reused frame measures a newer revision before it reports it ready; the app hears of both together, as from a
       // new frame, when its status arrives (below). Its own revision's geometry, such as after a resize, passes at once.
       const measured = (data as { revision?: string }).revision;
-      if (id === shown && (!measured || measured === revisionOf(id))) onGeometry(data, false, undefined, measured ?? revisionOf(id));
+      if (id === shown && (!measured || measured === revisionOf(id))) onGeometry?.(data, false, undefined, measured ?? revisionOf(id));
     } else if ('type' in data && data.type === 'inline-editing-applied') {
       frame.hiding = false;
       if (id === shown && data.key === latestKey.current) latestApplied.current?.(data.key);
@@ -186,7 +186,7 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
       frame.status = data;
     } else return;
 
-    if (id === target && !frame.published && !frame.hiding && frame.status && (frame.status.state === 'error' || frame.geometry)) {
+    if (id === target && !frame.published && !frame.hiding && frame.status && (frame.status.state === 'error' || view === 'cover' || frame.geometry)) {
       const offsets = (view === 'thumbs' || view === 'book') && shown && frame.status.state === 'ready' && !matchMedia('(prefers-reduced-motion: reduce)').matches
         ? reorderOffsets(latest.current.get(shown)?.geometry, frame.geometry) : [];
       if (offsets.length && !frame.reorder) {
@@ -246,7 +246,7 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
   const publishWaiting = useEffectEvent(() => {
     const frame = target && latest.current.get(target);
     if (target && frame && !frame.published && !frame.hiding && frame.status &&
-        (frame.status.state === 'error' || frame.geometry) && frame.reorder !== 'preparing' && (!accept || accept(project))) {
+        (frame.status.state === 'error' || view === 'cover' || frame.geometry) && frame.reorder !== 'preparing' && (!accept || accept(project))) {
       publish(target, frame);
       storeFrame(target, frame);
     }

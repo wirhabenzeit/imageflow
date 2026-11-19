@@ -1,4 +1,4 @@
-import { bookFormatOf, scopeSpread } from '../src/project';
+import { bookFormatOf, coverInstance, scopeSpread } from '../src/project';
 import { hidden } from './background-mode';
 import { AppUpdater } from './updates';
 import { copySample } from './sample-book.mjs';
@@ -1643,7 +1643,9 @@ void app.whenReady().then(async () => {
     const chosen = sourceEntries(document.book).filter(({ key }) => keys?.includes(key));
     const source = chosen[0];
     if (request.action === 'jump') {
-      if (!document.book.project.spreads.some(({ id }) => id === request.spread)) throw new Error('This spread no longer exists.');
+      if (request.spread === coverInstance) {
+        if (!document.book.project.cover || !document.menuState?.view) throw new Error('The active format does not show the exterior cover.');
+      } else if (!document.book.project.spreads.some(({ id }) => id === request.spread)) throw new Error('This spread no longer exists.');
       document.window.webContents.send(channels.sourceCommand, { action: 'jump', spread: request.spread }); focus(document.window);
       return { summary: document.summary };
     }
@@ -1897,7 +1899,8 @@ void app.whenReady().then(async () => {
     try { return { value: await document.editorNetwork(id, origins) }; }
     catch (error) { return { error: errorMessage(error) }; }
   });
-  ipcMain.handle(channels.export, (event, id: string) => fromEditor(event, (document) => document.exportBook(document.window, id)));
+  ipcMain.handle(channels.export, (event, id: string, surface?: unknown) =>
+    fromEditor(event, (document) => document.exportBook(document.window, id, surface === 'cover' ? 'cover' : undefined)));
   ipcMain.handle(channels.cancel, (event) => { editorOwner(event)?.cancelExport(); });
   ipcMain.handle(channels.check, (event, id: string, request: AuthoringCheckRequest) => fromEditor(event, (document) => document.checkOpenBook(document.currentBook(id), request)));
   ipcMain.handle(channels.cancelCheck, (event) => { editorOwner(event)?.cancelCheck(); });
@@ -1905,14 +1908,15 @@ void app.whenReady().then(async () => {
     const document = editorOwner(event);
     if (!document || !state || typeof state.enabled !== 'object' || !state.enabled ||
         typeof state.editing !== 'boolean' || typeof state.writable !== 'boolean' || typeof state.busy !== 'boolean') return;
-    const previousLabels = JSON.stringify(document.menuState?.pageLabels ?? {});
+    const previousLabels = JSON.stringify([document.menuState?.pageLabels, document.menuState?.coverBoxIds]);
     const pageLabels = Object.fromEntries(document.book.project.spreads.flatMap(({ id }) => {
       const label = state.pageLabels?.[id];
       return typeof label === 'string' ? [[id, label.slice(0, 100)]] : [];
     }));
+    const coverBoxIds = Array.isArray(state.coverBoxIds) ? state.coverBoxIds.filter((id) => typeof id === 'string') : undefined;
     document.menuState = { ...emptyMenuState, ...state,
-      pageLabels, enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
-    if (previousLabels !== JSON.stringify(pageLabels)) publishAssets(document);
+      pageLabels, coverBoxIds, enabled: Object.fromEntries(spreadCommands.map((id) => [id, state.enabled[id] === true])) as BookMenuState['enabled'] };
+    if (previousLabels !== JSON.stringify([pageLabels, coverBoxIds])) publishAssets(document);
     document.window.setDocumentEdited(state.saving === true);
     if (typeof state.sidebar === 'boolean') document.sidebar = state.sidebar;
     if (typeof state.inspector === 'boolean') document.inspector = state.inspector;

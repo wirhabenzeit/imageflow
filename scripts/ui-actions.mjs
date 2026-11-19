@@ -49,16 +49,19 @@ export async function clickClosingWindow(page, button) {
   await closed;
 }
 
-// Background thumbnail renders create windows too. Wait for the actual viewer, even if one races it.
-export function nextPresentation(app) {
+// Background renders (thumbnails, cover previews, the Book check) open hidden windows too. Wait for the window that
+// loads `url`, even if one of those races it; on a slow runner they open while the wanted window is still coming.
+export function nextWindow(app, url, timeout = 10000) {
   return app.waitForEvent('window', {
-    timeout: 10000,
+    timeout,
     predicate: async (page) => {
-      try { await page.waitForURL('imageflow://editor/presentation', { timeout: 10000 }); return true; }
+      try { await page.waitForURL(url, { timeout }); return true; }
       catch { return false; }
     },
   });
 }
+export const nextPresentation = (app) => nextWindow(app, 'imageflow://editor/presentation');
+export const nextSettings = (app) => nextWindow(app, 'imageflow://editor/settings', 20000);
 
 // Playwright adds the iframe's screen offset to descendant bounding boxes but omits its ancestor's transform.
 export async function canvasArtworkBounds(page, selector) {
@@ -163,7 +166,7 @@ export async function exportAction(page) {
     observer.observe(document.querySelector('.studio'), { subtree: true, childList: true, characterData: true });
     setTimeout(() => observer.disconnect(), 10000);
   });
-  await page.getByRole('button', { name: 'Export PDF…', exact: true }).click();
+  await page.getByRole('button', { name: /^Export (?:Content )?PDF…$/ }).click();
   await page.waitForFunction(() => window.__exportStarted);
 
 }
@@ -171,7 +174,7 @@ export async function exportAction(page) {
 export async function agentSettings(app) {
   const url = 'imageflow://editor/settings';
   const existing = app.windows().find((page) => page.url() === url);
-  const created = existing ? undefined : app.waitForEvent('window');
+  const created = existing ? undefined : nextSettings(app);
   await menuAction(app, 'Agent Connections…');
   const page = existing ?? await created;
   page.setDefaultTimeout(20000);

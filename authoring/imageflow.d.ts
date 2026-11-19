@@ -63,6 +63,32 @@ export type SinglePageFormat = {
 };
 export type PrintFormat = FacingFormat | SinglePageFormat;
 
+export type CoverOutput = Omit<FormatOutput, 'maximumFileSize' | 'fonts'> & { maximumFileSize?: number };
+export type CoverWidths = { spine: Length; flaps?: { back: Length; front: Length } };
+export type CoverFormat = {
+  kind: 'wrap';
+  height: Length;
+  panels: { back: Length; front: Length };
+  widths: { kind: 'fixed'; value: CoverWidths } |
+    { kind: 'page-bands'; bands: { from: number; to: number; value: CoverWidths }[] };
+  outer: { kind: 'bleed' | 'wrap'; insets: PageInsets };
+  safe: { back: PageInsets; spine: PageInsets; front: PageInsets };
+  flaps?: { safe: { back: PageInsets; front: PageInsets } };
+  foldAvoidance?: { back: Length; front: Length };
+  output: CoverOutput;
+};
+export type CoverRegion = 'backFlap' | 'back' | 'spine' | 'front' | 'frontFlap';
+export type ResolvedCover = {
+  outerKind: 'bleed' | 'wrap';
+  /** Millimetres from the top-left of trim, including negative coordinates for the outer allowances. */
+  sheet: Rect; trim: Rect;
+  regions: Record<'back' | 'spine' | 'front', Rect> & Partial<Record<'backFlap' | 'frontFlap', Rect>>;
+  safe: Partial<Record<CoverRegion, Rect | null>>;
+  folds: number[];
+  avoid: Rect[];
+  output: CoverOutput;
+};
+
 /** One length for every side, or `{ all, ...sides }` where the named sides override `all`, or all four sides. */
 export type InsetsShorthand = Length | (Partial<Insets> & { all: Length }) | Insets;
 /** `InsetsShorthand` with the side names of a format without facing pages. */
@@ -784,16 +810,28 @@ export type SpreadDefinition<D extends Parameters = Parameters, F extends string
   readonly [typedFamily]?: F;
 };
 /**
- * Known feature names, all part of the contract-1 baseline, which needs no `requires` entries. Extensions added after
- * the first public release will be listed after it and declared in `requires` (ADR 0008).
+ * Known feature names. Include `physical-covers` in `requires` for a template with exterior cover layouts.
  */
 export type Capability = 'anchors' | 'geometry' | 'box-helpers' | 'template-issues' | 'typed-components' |
   'spread-builder' | 'bound-geometry' | 'text-component' | 'format-helper' | 'box-records' | 'editor-controls' | 'editor-native-controls' |
   'layout-families' | 'editor-spread-parameters' | 'opening-spreads' | 'single-pages' | 'page-layouts' | 'editor-context' | 'document-editors' |
   'editor-network' | 'rendered-images' | 'rendered-vectors' | 'font-coverage' | 'book-credits' | 'inline-editors' | 'inline-text' | 'list-parameters' | 'template-preview' | 'photo-render' |
-  'formatted-text' | 'app-controls' | 'text-metadata';
+  'formatted-text' | 'app-controls' | 'text-metadata' | 'physical-covers';
 /** All features this app provides, including the contract-1 baseline and any later extensions. */
 export const capabilities: readonly Capability[];
+
+export type CoverRenderContext = Pick<UntypedRenderContext, 'params' | 'document' | 'boxes' | 'elements' | 'formatId' |
+  'layout' | 'mode' | 'view' | 'PhotoBox' | 'Text' | 'Element'> & { cover: ResolvedCover; interiorPages: number };
+export type CoverLayout = {
+  label: string;
+  /** Format IDs this layout supports. Omit to offer it for every cover format in the template. */
+  formats?: string[];
+  parameters?: Parameters;
+  controls?: Controls;
+  boxes?: Record<string, { type: 'photo'; label: string; parameters?: Parameters; controls?: Controls }>;
+  elements?: Record<string, { label: string; parameters?: Parameters; controls?: Controls }>;
+  render: (context: CoverRenderContext) => ImageFlowNode;
+};
 
 /** The template as ImageFlow reads it, after `defineTemplate` has built its spreads. */
 export type TemplateDeclaration = {
@@ -814,6 +852,8 @@ export type TemplateDeclaration = {
   layoutFamilies?: Record<string, LayoutFamily>;
   spreads: Record<string, SpreadDefinition>;
   openingSpreads?: readonly OpeningSpread[];
+  coverFormats?: Record<string, CoverFormat>;
+  coverLayouts?: Record<string, CoverLayout>;
   editors?: Record<string, DocumentEditor>;
 };
 
@@ -875,7 +915,7 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   preview?: string;
   contract: 1;
   /**
-   * Optional extensions beyond the contract-1 baseline. Omit for all currently shipped features.
+   * Optional extensions beyond the contract-1 baseline.
    * Older baseline lists remain valid; an unsupported extension is rejected with an update hint.
    */
   requires?: readonly Capability[];
@@ -897,6 +937,10 @@ type TemplateBase<D extends Parameters, L extends string = string> = {
   layoutFamilies?: { [K in L]: LayoutFamily };
   /** Editors of document parameters, by ID, opened from nodes marked with their parameters. Included in the contract-1 baseline. */
   editors?: Record<string, DocumentEditor<D, any>>;
+  /** Physical cover specifications keyed by interior format ID. Use 'default' for a single format. */
+  coverFormats?: Record<string, CoverFormat>;
+  /** One layout per exterior sheet, separate from the document's page and spread layouts. */
+  coverLayouts?: Record<string, CoverLayout>;
 };
 /**
  * The spreads a new book starts with, in order. Without it, a new book starts with no spreads and the editor asks for

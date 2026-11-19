@@ -25,7 +25,7 @@ import type { ProjectInputIndex } from './revisions';
 import { checkProject } from './check';
 import { checkTemplateTypes } from './typecheck';
 import type { CheckDraft } from './check';
-import { captureBookPreview, checkBookRender } from './preview';
+import { captureBookPreview, checkBookRender, checkCoverRender } from './preview';
 import { ProjectSession } from './project-session';
 import { createAuthoringService, AuthoringError } from './authoring-service';
 import type { McpClientSession } from './mcp-connection';
@@ -194,7 +194,7 @@ export class DocumentSession {
   get book() { return this.projectSession.book; }
   get summary(): ProjectSummary {
     return { ...projectSummary(this.book, this.active.id), handle: this.projectSession.handle, history: this.projectSession.history,
-      network: [...this.networkOrigins], pageLabels: this.menuState?.pageLabels };
+      network: [...this.networkOrigins], pageLabels: this.menuState?.pageLabels, coverBoxIds: this.menuState?.coverBoxIds };
   }
   notify(change: ProjectChange) {
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.changed, change);
@@ -689,15 +689,15 @@ export class DocumentSession {
   }
 
 
-  async exportBook(owner: BrowserWindow, projectId: string) {
+  async exportBook(owner: BrowserWindow, projectId: string, surface?: 'cover') {
     this.currentBook(projectId);
     // Cancel works from the moment the export starts, while it prepares the book and asks for a destination too.
     const job = new AbortController();
     this.exportJob = job;
-    try { return await this.runExport(owner, job); } finally { if (this.exportJob === job) this.exportJob = undefined; }
+    try { return await this.runExport(owner, job, surface); } finally { if (this.exportJob === job) this.exportJob = undefined; }
   }
 
-  private async runExport(owner: BrowserWindow, job: AbortController) {
+  private async runExport(owner: BrowserWindow, job: AbortController, surface?: 'cover') {
     const before = await this.projectSession.inputs.capture();
     const privateCache = await mkdtemp(join(this.cache, 'export-'));
     try {
@@ -705,9 +705,9 @@ export class DocumentSession {
       if (job.signal.aborted) return null;
       const loaded = await this.projectSession.inputs.capture();
       if (before.revision !== loaded.revision || before.observation !== loaded.observation) throw new Error('Sources changed while preparing export. Please retry.');
-      const fileName = bookName(book.folder).normalize('NFC').replace(/[^\p{L}\p{M}\p{N} _-]/gu, '-').slice(0, 80) + '.pdf';
+      const fileName = bookName(book.folder).normalize('NFC').replace(/[^\p{L}\p{M}\p{N} _-]/gu, '-').slice(0, 80) + (surface === 'cover' ? ' - Cover' : '') + '.pdf';
       const { canceled, filePath } = await dialog.showSaveDialog(owner, {
-        title: 'Export PDF', defaultPath: join(app.getPath('documents'), fileName),
+        title: surface === 'cover' ? 'Export Cover PDF' : 'Export PDF', defaultPath: join(app.getPath('documents'), fileName),
         filters: [{ name: 'PDF', extensions: ['pdf'] }],
       });
       if (canceled || !filePath || owner.isDestroyed() || job.signal.aborted) return null;
@@ -716,7 +716,7 @@ export class DocumentSession {
       const progress = (stage: string) => { if (!owner.isDestroyed()) owner.webContents.send(channels.progress, stage); };
       try {
         const fonts = bundledFontNames(book.assets.files);
-        const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id, fonts, job.signal, progress);
+        const { bytes, warnings, errors } = await printBook(renderOrigin + '/render/' + id + (surface === 'cover' ? '?view=cover' : ''), fonts, job.signal, progress, surface);
         if (errors.length) {
           const choice = await dialog.showMessageBox(owner, { type: 'warning', message: 'Export PDF with errors?',
             detail: exportErrorList(errors) + '\n\nThe PDF may contain missing content or printing problems. Pages with unavailable originals will be marked. Export anyway?',
@@ -754,16 +754,26 @@ export class DocumentSession {
     this.checkJobs.add(job);
     if (!externalSignal) this.checkJob = job;
     try {
-      return await checkProject(book, this.cache, request, async (snapshot, preview, signal, inspect) => {
+      return await checkProject(book, this.cache, request, async (snapshot, preview, signal, inspect, cover) => {
         const id = randomUUID();
         this.renders.set(id, { book: snapshot, mode: 'export', network: () => this.originsFor(snapshot) });
         try {
           const url = renderOrigin + '/render/' + id;
-          if (preview) {
-            const image = await captureBookPreview(url, preview, signal, inspect, arm);
-            return { status: image.status, preview: image };
-          }
-          return { status: await checkBookRender(url, signal, inspect, arm) };
+          if (snapshot.fixture?.coverPages !== undefined) return { status: await checkCoverRender(url, signal, arm) };
+          const coverPreview = preview && 'cover' in preview.target ? preview : undefined;
+          const interiorPreview = coverPreview ? undefined : preview;
+          const coverInspect = inspect?.cover ? inspect : undefined;
+          const interiorInspect = coverInspect ? undefined : inspect;
+          const needsCover = cover || coverPreview || coverInspect;
+          const needsInterior = !needsCover || interiorPreview || interiorInspect;
+          const interiorImage = interiorPreview ? await captureBookPreview(url, interiorPreview, signal, interiorInspect, arm) : undefined;
+          const interior = interiorImage?.status ?? (needsInterior ? await checkBookRender(url, signal, interiorInspect, arm) : undefined);
+          if (!needsCover) return { status: interior!, preview: interiorImage };
+          const coverImage = coverPreview ? await captureBookPreview(url, coverPreview, signal, coverInspect, arm) : undefined;
+          const checked = coverImage?.status ?? (coverInspect ? await checkBookRender(url, signal, coverInspect, arm) : await checkCoverRender(url, signal, arm));
+          return { status: interior ? { ...interior, cover: checked.cover, errors: [...interior.errors, ...checked.errors],
+            warnings: [...interior.warnings, ...checked.warnings], inspection: checked.inspection ?? interior.inspection } : checked,
+            preview: coverImage ?? interiorImage };
         } finally {
           this.renders.delete(id);
         }

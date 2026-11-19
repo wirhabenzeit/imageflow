@@ -16,7 +16,7 @@ const left = { definition: 'photoPage', params: { title: 'Left' }, boxes: { hero
 const displaced = [{ from: 'right', box: 'hero', state: { photo: 'b', params: { tilt: 2 }, crops: { photoPage: { centerX: 0.4, centerY: 0.5, zoom: 1.2 } } } }];
 
 test('a book without page states is format 1, whatever it was saved as', () => {
-  assert.equal(bookFormatVersion, 2);
+  assert.equal(bookFormatVersion, 3);
   assert.equal(projectSchema.parse(book([spread])).schemaVersion, 1);
   // A format-2 book whose page states were all removed goes back to format 1, so older apps can open it again.
   assert.equal(projectSchema.parse(book([spread], 2)).schemaVersion, 1);
@@ -55,13 +55,22 @@ test('books with stored page states, replaced content and shown pages open as fo
     assert.equal(projectSchema.parse(book([stored], 1)).schemaVersion, 2);
   }
   assert.equal(unsupportedBookMessage(book([spread], 2)), undefined);
-  assert.match(unsupportedBookMessage(book([spread], 3))!, /book format 3/);
+  assert.match(unsupportedBookMessage(book([spread], 4))!, /book format 4/);
 });
 
-test('a newer format than 2 asks for an update', () => {
-  const result = projectSchema.safeParse(book([spread], 3));
+test('a newer format than 3 asks for an update', () => {
+  const result = projectSchema.safeParse(book([spread], 4));
   assert.equal(result.success, false);
-  assert.match(result.error!.issues[0].message, /book format 3; this version reads formats up to 2/);
+  assert.match(result.error!.issues[0].message, /book format 4; this version reads formats up to 3/);
+});
+
+test('saved cover artwork requires format 3 and stays separate from interior layouts', () => {
+  const cover = { definition: 'jacket', params: { title: 'Exterior' }, boxes: {}, elements: {} };
+  const saved = projectSchema.parse({ ...book([spread], 1), cover });
+  assert.equal(saved.schemaVersion, 3);
+  assert.deepEqual(saved.cover, cover);
+  assert.deepEqual(saved.spreads, [spread]);
+  assert.equal(projectSchema.parse({ ...saved, cover: undefined }).schemaVersion, 1);
 });
 
 test('a book with pages shown opens unchanged; saving writes the lowest format', async () => {

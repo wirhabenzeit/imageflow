@@ -28,6 +28,7 @@ const checkpointMcpSchema = z.object({
   client: z.string().max(120).optional(),
   changes: z.array(z.string().max(300)).max(200).optional(),
   affectedSpreads: z.array(z.string().max(256)).max(200).optional(),
+  affectedCover: z.literal(true).optional(),
   references: z.record(z.string().max(256), z.string().max(256)).optional(),
   sources: z.array(z.string().max(256)).max(20).optional(),
   truncated: z.literal(true).optional(),

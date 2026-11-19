@@ -7,6 +7,7 @@ import type { AuthoringCheckRequest, AuthoringCheckResult } from './authoring-ch
 import type { ImportMode, SourceStatus } from './source-locations';
 import type { AppSettings, SettingsPane } from './settings';
 import type { LibraryEntry, LibraryImportResult, NewBookChoice } from './library';
+import type { CoverFormat, CoverResolution } from './cover';
 
 export const desktopScheme = 'imageflow';
 export const editorURL = desktopScheme + '://editor/';
@@ -61,12 +62,15 @@ export type ActiveBookEditor = { label: string; spread?: string; page?: PageSide
 export type AgentLeaseReply = boolean | ActiveBookEditor | { busy: string };
 export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, boolean>; editing: boolean; textEditing: boolean;
   writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
-  sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView; selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string> };
+  sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView;
+  selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string>;
+  view?: 'content' | 'cover'; coverBoxIds?: string[] };
 export type Command = PhotoViewCommand | SpreadCommand | 'swap-pages' | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string;
   handle?: string; history?: HistoryState; viewKey?: string;
   pageLabels?: Record<string, string>;
+  coverBoxIds?: string[];
   photoDates?: Record<string, { captured: string; capturedEstimated?: boolean }>;
   // The template's hash as loaded; network approvals hold for one hash (ADR 0006).
   templateHash?: string;
@@ -184,7 +188,7 @@ export type DesktopApi = {
   // summary to render when that changed what the frames may reach.
   editorNetwork(id: string, origins: string[]): Promise<Result<{ origins: string[]; summary?: ProjectSummary }>>;
   pathsForFiles(files: File[]): string[];
-  exportBook(id: string): Promise<Result<{ warnings: Issue[]; errors: Issue[] } | null>>;
+  exportBook(id: string, surface?: 'cover'): Promise<Result<{ warnings: Issue[]; errors: Issue[] } | null>>;
   cancelExport(): Promise<void>;
   checkBook(id: string, request: AuthoringCheckRequest): Promise<Result<AuthoringCheckResult>>;
   cancelCheck(): Promise<void>;
@@ -209,6 +213,7 @@ export type SpreadDefinition = {
   declaresCredits?: boolean;
   family?: string; variant?: Record<string, string | number | boolean>;
 };
+export type CoverLayoutInfo = Pick<SpreadDefinition, 'label' | 'parameters' | 'controls' | 'boxes' | 'elements'> & { formats?: string[] };
 export type TemplateInfo = {
   // The template's identity and its library metadata; `id` is absent in summaries from apps that predate it.
   id?: string; label?: string; description?: string;
@@ -236,6 +241,8 @@ export type TemplateInfo = {
   // ('default' for a template with one format), so an agent can compare presets without reading the template source.
   // Absent in summaries from apps that predate it.
   printFormats?: Record<string, PrintFormat>;
+  coverFormats?: Record<string, CoverFormat>;
+  coverLayouts?: Record<string, CoverLayoutInfo>;
 };
 export type BoxLocation = { id: string; type: 'photo' | 'markdown'; x: number; y: number; width: number; height: number };
 // The editor shows the whole book in two frames: the scrolling spread view and the sidebar thumbnails.
@@ -273,6 +280,7 @@ export type BookGeometry = {
 // The optional fields give agents a stable `code`, the box/element/source involved, measured values and a repair hint.
 export type Issue = {
   message: string; spread?: string; where?: string;
+  cover?: true;
   code?: string; box?: string; element?: string; source?: string; parameter?: string;
   // The page of a spread shown as page layouts that the box or element is on.
   page?: PageSide;
@@ -287,6 +295,7 @@ export type RenderStatus = {
   // Anchors the layouts declare, with the page each resolves to, in page order.
   anchors: { id: string; title?: string; spread: string; page: number; side: 'left' | 'right' | 'page' }[];
   inspection?: import('./inspection').ElementInspection;
+  cover?: Exclude<CoverResolution, { status: 'unavailable' }>;
 } | {
   state: 'error'; message: string; template?: TemplateInfo;
   // Spreads whose layout threw or rendered no single <Spread> root, with the stack where template code threw.

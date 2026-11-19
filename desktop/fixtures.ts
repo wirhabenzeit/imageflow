@@ -4,10 +4,10 @@ import sharp from 'sharp';
 import type { AuthoringDiagnostic } from '../src/authoring';
 import type { FixtureCellReport, FixtureReport } from '../src/authoring-check';
 import type { TemplateInfo } from '../src/desktop';
-import { fixtureFiles, fixtureProject } from '../src/fixtures';
+import { fixtureFiles, fixtureProject, fixtureSpread } from '../src/fixtures';
 import type { FixtureCell, FixtureSourceIds } from '../src/fixtures';
 import type { PreviewRequest } from '../src/preview';
-import type { ProjectFile } from '../src/project';
+import type { Project, ProjectFile } from '../src/project';
 import type { CheckDraft } from './check';
 import { photoDetails } from './photos';
 import type { ProjectPhoto } from './photos';
@@ -83,7 +83,7 @@ export const fixtureSourceIds = {
 
 /** Builds the synthetic book for one format from the freshly loaded, revision-verified book. */
 export function fixtureDraft(template: TemplateInfo, format: string, cells: FixtureCell[], assets: FixtureAssets,
-  preview?: PreviewRequest): CheckDraft {
+  preview?: PreviewRequest, coverPages?: number): CheckDraft {
   return (book) => {
     const extensions = new Set<string>();
     const samples = new Map<string, { extension: string; variant: 'typical' | 'alternate' }>();
@@ -93,7 +93,14 @@ export function fixtureDraft(template: TemplateInfo, format: string, cells: Fixt
         samples.set(id, { extension, variant });
         return id;
       } };
-    const { project, markdown } = fixtureProject(book.project, template, format, cells, ids);
+    const synthetic = fixtureProject(book.project, template, format, coverPages === undefined ? cells : [], ids);
+    const { markdown } = synthetic;
+    const project: Project = synthetic.project;
+    if (coverPages !== undefined) {
+      const cell = cells[0];
+      const { id: _id, ...cover } = fixtureSpread(cell, template.coverLayouts![cell.layout], ids, '');
+      project.cover = cover;
+    }
     const files: Record<string, ProjectFile> = { ...book.files };
     for (const extension of extensions) {
       const id = fixtureSourceIds.file(extension);
@@ -118,7 +125,8 @@ export function fixtureDraft(template: TemplateInfo, format: string, cells: Fixt
     const fixtureBook: OpenProject = {
       ...drafted, photos, files, texts: { ...book.texts, ...markdown },
       fixture: { banner: 'SYNTHETIC FIXTURES · ' + formatLabel + ' · not the saved book',
-        labels: Object.fromEntries(cells.map((cell) => [cell.spread, cell.label])) },
+        labels: Object.fromEntries(cells.map((cell) => [cell.spread, cell.label])),
+        ...(coverPages === undefined ? {} : { coverPages }) },
     };
     return { book: fixtureBook, fixture: true, ...(preview ? { preview } : {}) };
   };

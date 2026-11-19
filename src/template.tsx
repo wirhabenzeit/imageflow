@@ -9,8 +9,10 @@ import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
 import { cssMM, formatSchema, hasFacingPages, hasSingleEnds, inch, mm, pageSequence, printFormat, pt, resolveFormat, spanAllowedAt, spanFits, spanRequiredAt } from './format';
 import type { PrintFormat, ResolvedFormat, Span, UnitPages } from './format';
-import { identifier, pageSides, renderView, scopeSpread, values } from './project';
-import type { PageSide, Photo, ProjectFile, RenderProject, RenderView, SpreadState, Values } from './project';
+import { coverInstance, identifier, pageSides, renderView, scopeSpread, values } from './project';
+import type { CoverState, PageSide, Photo, ProjectFile, RenderProject, RenderView, SpreadState, Values } from './project';
+import { coverFormatSchema, coverLayoutsFor, printSpecificationSchema } from './cover';
+import type { CoverFormat, ResolvedCover } from './cover';
 import { textAssignments } from './text-assignments';
 import type { TextMeta } from './frontmatter';
 import { getCrop, placementIn } from './spread';
@@ -63,6 +65,10 @@ export type RenderContext = {
   MarkdownBox: typeof MarkdownBox;
   Element: typeof Element;
   Text: typeof Text;
+};
+export type CoverRenderContext = Pick<RenderContext, 'params' | 'document' | 'boxes' | 'elements' | 'formatId' | 'layout' | 'mode' | 'view' | 'PhotoBox' | 'Text' | 'Element'> & {
+  cover: ResolvedCover;
+  interiorPages: number;
 };
 export type EditMarker = { 'data-edit'?: string };
 // Attributes returned by `issue()`. Platform components forward them to their own node, so a finding can sit on a box,
@@ -406,6 +412,19 @@ const boxSchema = z.object({
   controls: controlsSchema,
 }).superRefine(({ parameters, controls }, context) => checkControls(context, parameters, controls));
 
+const coverLayout = z.strictObject({
+  label: z.string().min(1),
+  formats: z.array(identifier).min(1).optional(),
+  parameters: parametersSchema,
+  controls: controlsSchema,
+  boxes: z.record(identifier, z.strictObject({ type: z.literal('photo'), label: z.string().min(1), parameters: parametersSchema, controls: controlsSchema })
+    .superRefine(({ parameters, controls }, context) => checkControls(context, parameters, controls))).default({}),
+  elements: z.record(identifier, z.strictObject({ label: z.string().min(1), parameters: parametersSchema, controls: controlsSchema })
+    .superRefine(({ parameters, controls }, context) => checkControls(context, parameters, controls))).default({}),
+  render: z.custom<(context: CoverRenderContext) => ReactNode>((value) => typeof value === 'function', 'Expected a cover render function.'),
+}).superRefine(({ parameters, controls }, context) => checkControls(context, parameters, controls));
+type CoverLayout = z.infer<typeof coverLayout>;
+
 const definition = z.object({
   label: z.string().min(1),
   // Defaults to 'page' when no format of the template has facing pages, else to 'spread' (see withSpans).
@@ -497,6 +516,8 @@ export const templateSchema = z.preprocess(withSpans, z.object({
       for (const message of declarationConflicts(spreads)) context.addIssue({ code: 'custom', message });
     }),
   openingSpreads: z.array(openingSpread).optional(),
+  coverFormats: z.record(identifier, coverFormatSchema).optional(),
+  coverLayouts: z.record(identifier, coverLayout).optional(),
   // Editors of document parameters, by ID.
   editors: z.record(identifier, documentEditor).optional(),
 }).superRefine(({ parameters, editors, controls }, context) => {
@@ -517,6 +538,30 @@ export const templateSchema = z.preprocess(withSpans, z.object({
   for (const { path, message } of familyProblems(spreads, layoutFamilies)) context.addIssue({ code: 'custom', message, path });
 }).superRefine((template, context) => {
   for (const issue of openingSpreadProblems(template)) context.addIssue({ code: 'custom', ...issue });
+  const { format, formats, coverFormats, coverLayouts, requires } = template;
+  if (!coverFormats && !coverLayouts) return;
+  const problem = (path: (string | number)[], message: string) => context.addIssue({ code: 'custom', path, message });
+  if (!requires?.includes('physical-covers')) problem(['requires'], 'Cover templates must declare the physical-covers capability.');
+  if (!coverFormats || !Object.keys(coverFormats).length) problem(['coverFormats'], 'Declare at least one cover format.');
+  if (!coverLayouts || !Object.keys(coverLayouts).length) problem(['coverLayouts'], 'Declare at least one cover layout.');
+  const interiors = formats ?? (format ? { default: format } : {});
+  for (const [id, cover] of Object.entries(coverFormats ?? {})) {
+    if (!Object.hasOwn(interiors, id)) {
+      problem(['coverFormats', id], 'This cover format must match an interior format.');
+      continue;
+    }
+    if (!Object.keys(coverLayoutsFor(coverLayouts, id)).length) problem(['coverFormats', id], 'This format needs a compatible cover layout.');
+    const parsed = printSpecificationSchema.safeParse({ interior: interiors[id], cover });
+    if (!parsed.success) for (const issue of parsed.error.issues) {
+      problem(['coverFormats', id, ...issue.path.slice(1).map(String)], issue.message);
+    }
+  }
+  for (const [id, layout] of Object.entries(coverLayouts ?? {})) {
+    for (const format of layout.formats ?? []) {
+      if (!coverFormats || !Object.hasOwn(coverFormats, format)) problem(['coverLayouts', id, 'formats'], 'Unknown cover format ' + format + '.');
+    }
+  }
+  for (const message of declarationConflicts(coverLayouts ?? {})) problem(['coverLayouts'], message);
 }).refine(({ format, formats }) => !format !== !formats, 'Declare either format or formats.')
   .refine(({ formats }) => !formats || Object.keys(formats).length > 0, 'Declare at least one format.')
   .refine(({ formats, defaultFormat }) => !defaultFormat || (!!formats && Object.hasOwn(formats, defaultFormat)),
@@ -615,6 +660,11 @@ type DeclaredSpread = Omit<SpreadDefinition, 'span' | 'parameters' | 'boxes' | '
   anchors?(context: AnchorContext): AnchorDeclaration[];
   credits?(context: CreditContext): CreditDeclaration[];
 };
+type DeclaredCover = Omit<CoverLayout, 'parameters' | 'boxes' | 'elements'> & {
+  parameters?: Parameters;
+  boxes?: Record<string, Omit<CoverLayout['boxes'][string], 'parameters'> & { parameters?: Parameters }>;
+  elements?: Record<string, Omit<CoverLayout['elements'][string], 'parameters'> & { parameters?: Parameters }>;
+};
 // The builder `spreads: ({ spread }) => ...` receives. It only exists for TypeScript, so at runtime it returns the
 // definition unchanged.
 const spreadBuilder = <T,>(definition: T) => definition;
@@ -626,6 +676,8 @@ export type TemplateDeclaration = {
   layoutFamilies?: Record<string, { label: string; picker?: { label?: string; component: (props: LayoutPickerProps) => ReactNode } }>;
   spreads: Record<string, DeclaredSpread> | ((tools: { spread: typeof spreadBuilder; page: typeof pageBuilder }) => Record<string, DeclaredSpread>);
   openingSpreads?: import('./editing').OpeningSpreadInput[];
+  coverFormats?: Record<string, CoverFormat>;
+  coverLayouts?: Record<string, DeclaredCover>;
   editors?: Record<string, { label?: string; parameters: string[]; component: (props: DocumentEditorProps) => ReactNode; presentation?: EditorPresentation }>;
 };
 // `spreads` may be a function of the builder; the declaration ImageFlow validates always has the built record.
@@ -642,6 +694,9 @@ export function templateInfo(template: Template): TemplateInfo {
     format: template.format, formatId: template.formatId, formats: template.formatChoices,
     structures: Object.fromEntries(Object.entries(template.formats ?? { default: template.format }).map(([id, format]) => [id, format.structure])),
     printFormats: { ...template.formats ?? { default: template.format } },
+    ...(template.coverFormats ? { coverFormats: template.coverFormats } : {}),
+    ...(template.coverLayouts ? { coverLayouts: Object.fromEntries(Object.entries(template.coverLayouts)
+      .map(([id, { render: _render, ...info }]) => [id, info])) } : {}),
     id: template.id, version: template.version, ...(template.label ? { label: template.label } : {}),
     ...(template.description ? { description: template.description } : {}),
     ...(template.preview ? { preview: previewPath(template.preview)! } : {}),
@@ -669,7 +724,8 @@ const SpreadData = createContext<{
   // The page this layout draws, for a spread shown as page layouts (ADR 0009); undefined for the spread's own layout.
   page?: PageSide;
   side?: 'left' | 'right' | 'page';
-  definition: Template['spreads'][string]; documentParameters: Parameters; values: SpreadValues; lazyPhotos: boolean;
+  definition: Pick<CoverLayout | Template['spreads'][string], 'parameters' | 'boxes' | 'elements'>;
+  documentParameters: Parameters; values: SpreadValues; lazyPhotos: boolean;
 } | null>(null);
 
 function useSpread() {
@@ -1104,7 +1160,11 @@ export const runtime = {
 
 // The values `render` reads for one spread: its parameters, the document's, and its boxes and elements.
 function spreadValues(book: RenderProject, template: Template, spread: SpreadState, positions: Record<string, FlowPosition>, page?: PageSide): SpreadValues {
-  const definition = template.spreads[spread.definition];
+  return artworkValues(book, template.parameters, spread, template.spreads[spread.definition], positions, page);
+}
+
+function artworkValues(book: RenderProject, document: Parameters, spread: SpreadState,
+  definition: NonNullable<ReturnType<typeof useSpread>>['definition'], positions: Record<string, FlowPosition>, page?: PageSide): SpreadValues {
   const boxes = Object.fromEntries(Object.entries(definition.boxes).map(([id, box]) => {
     const assigned = spread.boxes[id];
     const params = resolveParams(box.parameters, assigned?.params ?? {});
@@ -1119,7 +1179,21 @@ function spreadValues(book: RenderProject, template: Template, spread: SpreadSta
   const elements = Object.fromEntries(Object.entries(definition.elements).map(([id, element]) => [
     id, { params: resolveParams(element.parameters, spread.elements[id]?.params ?? {}) },
   ]));
-  return { params: resolveParams(definition.parameters, spread.params), document: resolveParams(template.parameters, book.project.params), boxes, elements };
+  return { params: resolveParams(definition.parameters, spread.params), document: resolveParams(document, book.project.params), boxes, elements };
+}
+
+export function CoverArtwork({ book, template, cover, geometry, interiorPages }: {
+  book: RenderProject; template: Template; cover: CoverState; geometry: ResolvedCover; interiorPages: number;
+}) {
+  const definition = template.coverLayouts?.[cover.definition];
+  if (!definition) throw new Error('The cover layout ' + cover.definition + ' is unavailable.');
+  const spread = { ...cover, id: coverInstance };
+  const values = artworkValues(book, template.parameters, spread, definition, {});
+  const format = { ...resolveFormat(template.format), resolution: geometry.output.resolution };
+  const layout = { ...values, cover: geometry, interiorPages, formatId: template.formatId, layout: cover.definition,
+    mode: book.mode, view: renderView(book), PhotoBox, Text, Element };
+  return <SpreadData.Provider value={{ book, spread, format, renderPhotos: true, definition, documentParameters: template.parameters,
+    values, lazyPhotos: false }}><definition.render {...layout} /></SpreadData.Provider>;
 }
 
 /**

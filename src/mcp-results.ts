@@ -19,21 +19,21 @@ const history = z.looseObject({
 }).describe('The app\'s shared Undo history after this call.');
 
 export const diagnosticSchema = z.looseObject({
-  code: z.string().describe('Stable code, such as layout-text-overflow or typescript-error.'),
-  stage: z.enum(['project', 'template', 'render', 'preview']).describe('Where the problem was found.'),
+  code: z.string().describe('Stable diagnostic code.'),
+  stage: z.enum(['project', 'template', 'render', 'preview']),
   severity: z.enum(['error', 'warning']),
   message: z.string(),
   location: z.looseObject({
     path: z.string().optional().describe('Project-relative file.'),
     line: z.number().optional(), column: z.number().optional(),
-    spread: z.string().optional(), page: z.enum(['left', 'right']).optional(), box: z.string().optional(), element: z.string().optional(),
-    source: z.string().optional().describe('Source ID of the photo, text or file involved.'),
+    spread: z.string().optional(), cover: z.literal(true).optional(), page: z.enum(['left', 'right']).optional(), box: z.string().optional(), element: z.string().optional(),
+    source: z.string().optional().describe('Source ID.'),
     parameter: z.string().optional(),
-    where: z.string().optional().describe('Human-readable place, such as a page or fixture label.'),
-    declaration: z.string().optional().describe('Path inside the template\'s default export, such as spreads.story.parameters.heading.default.'),
+    where: z.string().optional().describe('Readable location.'),
+    declaration: z.string().optional().describe('Path inside the template declaration.'),
   }).optional(),
-  details: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe('Measured and allowed values, such as { ppi: 180, minimumPpi: 240 }.'),
-  suggestion: z.string().optional().describe('A concrete repair in terms of template edits or project commands.'),
+  details: z.record(z.string(), z.union([z.string(), z.number()])).optional().describe('Measured and allowed values.'),
+  suggestion: z.string().optional(),
 });
 
 export const checksSchema = z.looseObject({
@@ -70,6 +70,11 @@ const imageFlags = {
 export const imageSchema = z.union([
   z.looseObject({ ...pageImage, ...imageFlags }),
   z.looseObject({
+    cover: z.literal(true), interiorPages: z.number(), previewPages: z.number().optional(),
+    width: pageImage.width, height: pageImage.height, widthMm: pageImage.widthMm, heightMm: pageImage.heightMm,
+    bounds: pageImage.bounds, detail: pageImage.detail, guides: pageImage.guides, labels: pageImage.labels, ...imageFlags,
+  }),
+  z.looseObject({
     kind: z.literal('contact-sheet'), width: z.number(), height: z.number(), bounds: z.enum(['trim', 'bleed']), columns: z.number(),
     banner: z.looseObject({ text: z.string(), height: z.number() }).optional(),
     guides: z.literal(true).optional(), labels: z.literal(true).optional(),
@@ -83,6 +88,7 @@ const reportFields = { revision, diagnostics: z.array(diagnosticSchema), checks:
 const commandFields = {
   changes: z.array(z.string()).optional().describe('One line per change, as shown in Undo.'),
   affectedSpreads: z.array(z.string()).optional(),
+  affectedCover: z.literal(true).optional(),
   references: z.record(z.string(), z.string()).optional().describe('Spread IDs created for $alias batch references.'),
   reflow: z.boolean().optional().describe('Whether text flow may have moved on other spreads.'),
 };
@@ -139,6 +145,7 @@ export const mcpOutputSchemas = {
     project: z.string(), ...reportFields,
     activeEditor: activeBookEditorSchema.optional().describe('Editor open in ImageFlow at the time of summary inspection, with its saved field address when available.'),
     templateIdentity: templateIdentitySchema.optional(),
+    cover: z.looseObject({}).optional().describe('Cover availability, saved artwork and resolved geometry for the active format.'),
     items: z.array(z.looseObject({})).optional(), total: z.number().optional(), nextOffset: z.number().nullable().optional(),
   }),
   check_book: z.looseObject({
