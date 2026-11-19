@@ -1,4 +1,4 @@
-// Photo boxes drawn by render callbacks: SVG shapes that mask the photo, with each treatment's settings packaged with it.
+// Mask photos with SVG render callbacks.
 import { box, defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { PhotoBoxState, PhotoRender } from 'imageflow';
 

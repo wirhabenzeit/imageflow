@@ -1,4 +1,4 @@
-// Quickstart: one layout with a full-bleed photo, an editable heading, a book setting and a page number.
+// Full-bleed photo, editable heading and folio.
 import { defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 
 // Generic geometry for trying things out, not a printer's product: take page counts and output limits from the

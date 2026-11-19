@@ -203,9 +203,8 @@ async function referenceTopics(docs: string, requested: string[]) {
   return { topics, docs: Object.fromEntries(requested.map((id, index) => [id, texts[index]])) };
 }
 
-const contextGuide = 'Start with docs: ["authoring-workflow"]. Request reference topics from topics with docs, example templates from examples with ' +
-  'includeExamples, and template or Markdown files from templateFiles with includeSource. Edit template/ files with workspace tools, save project ' +
-  'data with apply_project_changes, and verify every edit with check_book.';
+const contextGuide = 'Start with docs: ["authoring-workflow"]. Use docs for topics, includeExamples for examples and includeSource for files. ' +
+  'Edit template/ in the workspace. Save book edits with apply_project_changes and verify with check_book.';
 
 export function createAuthoringService(hooks: Hooks) {
   // Calls without a connection, such as tests, share one session for this service.
@@ -645,10 +644,10 @@ export function createAuthoringService(hooks: Hooks) {
               maxFixturesPerFormat: fixtureLimits.cellsPerFormat, maxPreviewFixtures: fixtureLimits.previewCells },
             pageAddressing: true, pagePairInsertion: true, elementInspection: true, detailPreviews: true, maxContactSheetSpreads: 12,
             templateApi: { contract: 1, baseline: [...contract1Capabilities], capabilities: [...templateCapabilities], exports: [...runtimeExports] },
-            diagnostics: 'Stable codes with spread/box/element/source locations, measured details and suggested fixes.',
-            draftProtection: 'Saves and imports return EDIT_IN_PROGRESS while an editor is active. Dry runs and draft checks can still validate saved inputs.',
-            imports: 'Only project/inbox paths. All selected files are validated before import; source files remain available to Undo.',
-            idempotency: 'Up to 1000 successful requests per open-project handle replay their original result. Committed keys stay in the book history while their checkpoints are retained: after a reopen, retrying the same request returns its checkpoint without applying it again. list_book_checkpoints looks a key up.' },
+            diagnostics: 'Codes, locations, measurements and suggested fixes.',
+            draftProtection: 'Active editors block saves and imports (EDIT_IN_PROGRESS). Dry runs and checks can read saved inputs.',
+            imports: 'Use project/inbox. Files are validated together and kept for Undo.',
+            idempotency: 'Replay up to 1000 successful requests per open handle. After reopening, the same request returns its retained checkpoint. Find keys with list_book_checkpoints.' },
         };
       } else {
         const offset = args.offset ?? 0, limit = args.limit ?? 30;

@@ -1,4 +1,4 @@
-// Format-responsive geometry: one layout that arranges photo and text by the shape of the chosen format.
+// Adapt a layout to the print format.
 import { box, defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 
 const format = (label: string, width: number, height: number) => printFormat({

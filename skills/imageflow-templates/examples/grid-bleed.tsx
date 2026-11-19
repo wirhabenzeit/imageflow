@@ -1,4 +1,4 @@
-// A photo grid inside the safe area and a full-bleed panorama with a caption.
+// Safe-area grid and full-bleed panorama.
 import { box, defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 
 const format = printFormat({

@@ -1,5 +1,4 @@
-// Photo and story with text continuation, chapter anchors, a contents layout, photo credits from the book index and
-// a caption from the photo's capture data.
+// Flow a story with anchors, contents and photo credits.
 import { box, defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { Photo } from 'imageflow';
 
