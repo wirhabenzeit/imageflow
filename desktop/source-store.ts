@@ -206,10 +206,20 @@ async function prune(recentFolders: string[], maximumBytes: number) {
   const recent = new Set((await Promise.all(recentFolders.map((folder) => sourceBookKey(folder).catch(() => undefined)))).filter(Boolean));
   const indexes = (await Promise.all((await readdir(join(root, 'books'))).filter((name) => name.endsWith('.json')).map(async (name) => ({ name, info: await stat(join(root, 'books', name)) })))).sort((a, b) => b.info.mtimeMs - a.info.mtimeMs);
   const referenced = new Set<string>();
+  // The most recently opened book keeps every snapshot it references, whatever the limit. Its next open needs them
+  // all: a book with more linked photos than the limit lost some at every close and copied, hashed and checked them
+  // again at the next start, 2 s for a 2.8 GB book. While a book is open it holds all its snapshots anyway (pins).
+  const latest = recentFolders[0] && await sourceBookKey(recentFolders[0]).catch(() => undefined);
+  const kept = new Set<string>();
   for (const { name } of indexes) {
     const file = join(root, 'books', name);
     if (!stores.has(file) && !recent.has(name.slice(0, -5)) && !indexes.slice(0, 20).some((item) => item.name === name)) { await rm(file, { force: true }); continue; }
-    try { for (const entry of Object.values(storedIndexSchema.parse(JSON.parse(await readFile(file, 'utf8'))))) if (!entry.direct) referenced.add(entry.snapshot); } catch { await rm(file, { force: true }); }
+    try {
+      for (const entry of Object.values(storedIndexSchema.parse(JSON.parse(await readFile(file, 'utf8'))))) if (!entry.direct) {
+        referenced.add(entry.snapshot);
+        if (latest && name === latest + '.json') kept.add(entry.snapshot);
+      }
+    } catch { await rm(file, { force: true }); }
   }
   const files = (await Promise.all((await readdir(join(root, 'content'))).filter((name) => /^[a-f0-9]{64}\.[a-z0-9]{1,10}$/.test(name)).map(async (name) => {
     const path = join(root, 'content', name); const info = await lstat(path);
@@ -217,5 +227,5 @@ async function prune(recentFolders: string[], maximumBytes: number) {
   }))).filter(({ info }) => info.isFile());
   let total = files.reduce((sum, file) => sum + file.info.size, 0);
   files.sort((a, b) => Number(referenced.has(a.path)) - Number(referenced.has(b.path)) || a.info.mtimeMs - b.info.mtimeMs);
-  for (const { path, info } of files) if (!pins.has(path) && (!referenced.has(path) || total > maximumBytes)) { await rm(path, { force: true }); total -= info.size; }
+  for (const { path, info } of files) if (!pins.has(path) && !kept.has(path) && (!referenced.has(path) || total > maximumBytes)) { await rm(path, { force: true }); total -= info.size; }
 }

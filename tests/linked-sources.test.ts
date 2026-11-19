@@ -277,7 +277,14 @@ test('stores share concurrent updates and bounded cleanup preserves open inputs 
   await stat(active);
   for (const path of snapshots) await stat(path);
   await SourceStore.release(f.folder);
+  // The most recently opened book keeps the snapshots its index names over the limit, so its next open copies nothing
+  // again. Superseded snapshots of changed originals are not named and go.
+  const current = Object.values(index as Record<string, { snapshot: string }>).map(({ snapshot }) => snapshot);
   await pruneSourceCache([f.folder], 0);
+  for (const path of current) await stat(path);
+  for (const path of snapshots.filter((path) => !current.includes(path))) await assert.rejects(stat(path), { code: 'ENOENT' });
+  // Once another book was opened more recently, the limit applies to them.
+  await pruneSourceCache([f.root], 0);
   for (const path of snapshots) await assert.rejects(stat(path), { code: 'ENOENT' });
   const reopened = await loadProject(f.folder, f.cache);
   assert.ok(entries.every((entry) => reopened.sources![entry.key].state === 'available'));
