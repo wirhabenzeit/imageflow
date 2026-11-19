@@ -393,9 +393,11 @@ export function App() {
   const updating = useDelayed(showingChange, 250);
   // A shorter wait for the cursor, which says that something is happening without asking for attention.
   const busyCursor = useDelayed(showingChange, 100);
-  // Until the book has rendered once, the spread list would show placeholder names ("Spread 1", "Blank page"), and
-  // the thumbnails would arrive before the book view. It appears with the book view instead, in one step.
-  const opening = !!summary && !lastReady && render?.state !== 'error';
+  // Until the book has rendered once, the spread list would show placeholder names ("Spread 1", "Blank page"), and the
+  // thumbnails may arrive before or after the book view. The list appears once both show the book, in one step, or
+  // a second after the book view if its thumbnails are late.
+  const thumbnailsLate = useDelayed(!!lastReady && !thumbs, 1000);
+  const opening = !!summary && render?.state !== 'error' && (!lastReady || (!thumbs && !thumbnailsLate));
   const updatingText = reloadingFiles ? 'Updating the book after its files changed…' : 'Updating the book…';
   const canvasReady = render?.state === 'ready' && !reload;
   const holdPreview = reload === 'loading' || typeof reload === 'object';
