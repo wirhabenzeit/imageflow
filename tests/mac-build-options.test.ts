@@ -36,6 +36,13 @@ test('release builds fail closed when signing or notarization credentials are ab
   assert.equal(JSON.parse(valid.stdout).notarization.appleApiKey, credentials.APPLE_API_KEY);
 });
 
+test('a local release can authenticate with a saved notarytool profile', () => {
+  const result = options({ env: { APPLE_SIGNING_IDENTITY: 'Developer ID Application: Test (TEAM)',
+    APPLE_NOTARY_PROFILE: ' local-test ' }, arch: 'arm64', hostArch: 'arm64', release: true });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).notarization, { keychainProfile: 'local-test' });
+});
+
 test('wrong certificate types and mismatched native architectures are rejected before packaging', () => {
   for (const identity of ['-', 'Apple Development: Test', 'Apple Distribution: Test']) {
     const result = options({ env: { APPLE_SIGNING_IDENTITY: identity } });

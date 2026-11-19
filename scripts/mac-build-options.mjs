@@ -8,16 +8,18 @@ export function macBuildOptions({ env = process.env, arch = process.arch, hostAr
   if (identity && !identity.startsWith('Developer ID Application:')) {
     throw new Error('APPLE_SIGNING_IDENTITY must name a Developer ID Application certificate.');
   }
+  const profile = value('APPLE_NOTARY_PROFILE');
+  let notarization;
   if (release) {
-    const missing = ['APPLE_SIGNING_IDENTITY', 'APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']
+    const required = profile ? ['APPLE_SIGNING_IDENTITY']
+      : ['APPLE_SIGNING_IDENTITY', 'APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER'];
+    const missing = required
       .filter((name) => !value(name));
     if (missing.length) throw new Error('Release builds require: ' + missing.join(', ') + '.');
-  }
-  return {
-    arch, identity, keychain: value('APPLE_SIGNING_KEYCHAIN'),
-    notarization: release ? {
+    notarization = profile ? { keychainProfile: profile } : {
       appleApiKey: resolve(value('APPLE_API_KEY')), appleApiKeyId: value('APPLE_API_KEY_ID'),
       appleApiIssuer: value('APPLE_API_ISSUER'),
-    } : undefined,
-  };
+    };
+  }
+  return { arch, identity, keychain: value('APPLE_SIGNING_KEYCHAIN'), notarization };
 }

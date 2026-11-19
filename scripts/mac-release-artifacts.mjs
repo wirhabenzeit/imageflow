@@ -1,5 +1,6 @@
+import { X509Certificate } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { notarize } from '@electron/notarize';
 import { createMacDmg } from './mac-dmg.mjs';
@@ -10,7 +11,7 @@ export async function prepareMacRelease({ root, version, arch, notarization }) {
   const paths = macArtifactPaths(root, version, arch);
   // Clear stale release names before a rebuild or notarization attempt can fail.
   await Promise.all(Object.values(paths).map((path) => rm(path, { force: true })));
-  await access(notarization.appleApiKey, constants.R_OK);
+  if (!notarization.keychainProfile) await access(notarization.appleApiKey, constants.R_OK);
   await Promise.all([mkdir(join(root, 'out'), { recursive: true }), mkdir(join(root, '.build'), { recursive: true })]);
   return { ...paths, work: await mkdtemp(join(root, '.build/dmg-')) };
 }
@@ -31,9 +32,13 @@ export async function notarizeMacRelease(options, build) {
   }
 }
 
-async function macReleaseArtifacts({ app, identity, keychain, notarization }, { zip, dmg, work }) {
+async function macReleaseArtifacts({ app, keychain, notarization }, { zip, dmg, work }) {
   const image = await createMacDmg(app, join(work, 'ImageFlow.dmg'), work);
-  await run('codesign', ['--force', '--sign', identity, '--timestamp', ...(keychain ? ['--keychain', keychain] : []), image]);
+  // Use the verified app's leaf certificate so codesign never reinterprets a non-ASCII identity name.
+  const prefix = join(work, 'signer-');
+  await run('codesign', ['--display', '--extract-certificates=' + prefix, app]);
+  const signer = new X509Certificate(await readFile(prefix + '0')).fingerprint.replaceAll(':', '');
+  await run('codesign', ['--force', '--sign', signer, '--timestamp', ...(keychain ? ['--keychain', keychain] : []), image]);
   await run('codesign', ['--verify', '--strict', image]);
   console.log('Submitting the signed DMG for notarization…');
   await notarize({ appPath: image, ...notarization });
