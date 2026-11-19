@@ -246,7 +246,12 @@ try {
   assert.deepEqual(await app.evaluate(() => globalThis.assetMenuLabels), ['Quick Look', 'Choose Files in a Spread’s Settings', 'Rename… (Copy into Book First)', '', 'Show in Finder', 'Locate…', 'Copy into Book', '', 'Remove from Book']);
   assert.deepEqual((await current(page)).history, historyBeforeLocate, 'Locate does not add an empty Undo step');
   await accessWindow.close();
-  await reload(page);
+  // Locate publishes a new revision to the open book. Verify that very frame can read the approved file.
+  await waitForPage(page, async () => {
+    const { value } = await window.imageflow.currentProject();
+    const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return value?.sources['file:notchosen']?.state === 'available' && frame?.dataset.revision === value.id;
+  });
   assert.match(await loadedFile(), /private dummy fixture/);
   // Save a Copy exposes collection as an explicit choice and opens an independent, portable document.
   const portable = join(work, 'Portable.imageflow');
