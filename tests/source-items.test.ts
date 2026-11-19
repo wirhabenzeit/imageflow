@@ -29,6 +29,11 @@ test('text tiles leave out the YAML header and name the text by its title (F-030
   assert.equal(words(day), 4);
   assert.equal(excerpt('# Day 1\n---\nRule above').heading, 'Day 1', 'a heading in the text wins, and a rule is not a header');
   assert.equal(excerpt('---\n\n---\nText').body, 'Text');
+  // A diary text that starts with prose: its title, not the next day's section heading, names it.
+  const diary = excerpt('---\ntitle: Karakol Valley\n---\n\nWe wake up early.\n\n### 20.08. Tyres in Bishkek\n\nAn early start.');
+  assert.equal(diary.heading, 'Karakol Valley');
+  assert.equal(diary.body, 'We wake up early. 20.08. Tyres in Bishkek An early start.');
+  assert.equal(excerpt('We wake up.\n\n## Later').heading, undefined);
 });
 
 test('stored file names keep umlauts, also when macOS hands them over decomposed (F-026)', () => {

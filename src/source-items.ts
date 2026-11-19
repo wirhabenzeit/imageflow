@@ -32,8 +32,11 @@ export function excerpt(source: string) {
   const { body: text, meta } = splitFrontmatter(source);
   const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
   const title = typeof meta?.title === 'string' && meta.title.trim() ? meta.title.trim() : undefined;
-  const heading = lines.find((line) => /^#{1,6}\s/.test(line))?.replace(/^#+\s*/, '') ?? title;
-  const body = lines.filter((line) => !/^#{1,6}\s/.test(line)).join(' ')
+  // The text's own heading when it starts with one, else its header's title. A heading further down names a later
+  // section, such as a second day in a diary, not the text.
+  const leading = /^#{1,6}\s/.test(lines[0] ?? '') ? lines[0].replace(/^#+\s*/, '') : undefined;
+  const heading = leading ?? title;
+  const body = (leading === undefined ? lines : lines.slice(1)).map((line) => line.replace(/^#{1,6}\s+/, '')).join(' ')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`>#]|^[-+]\s/g, '').slice(0, 4096);
   return { heading, body, meta };
 }
