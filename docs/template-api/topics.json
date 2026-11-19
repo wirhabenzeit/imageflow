@@ -12,7 +12,7 @@
   {"id":"switching-layouts","title":"Switching layouts","summary":"How content, crops and parameters carry over, are kept or restored when a spread switches layout."},
   {"id":"layout-families","title":"Layout families","summary":"Grouping layout variants into a family with variant tags, and the family picker."},
   {"id":"dependencies","title":"Dependencies","summary":"Using npm packages in a template: the saved dependency bundle, licences and network sites."},
-  {"id":"render-function","title":"Render function","summary":"The pure render(ctx) contract, the render context fields, and photo capture metadata."},
+  {"id":"render-function","title":"Render function","summary":"The pure render(ctx) contract, caching expensive calculations, the render context fields, and photo capture metadata."},
   {"id":"rendered-images","title":"Rendered images","summary":"<RenderedImage> for pictures that draw asynchronously, such as WebGL maps, and how check and export wait for them."},
   {"id":"svg-maps","title":"SVG maps","summary":"Reuse the template-local maplibre-svg helper: dependency setup, a minimal vector map, projection, labels, attribution and limits."},
   {"id":"click-to-edit","title":"Click-to-edit","summary":"ctx.edit(...paths) to make rendered nodes open parameter popovers when clicked."},
