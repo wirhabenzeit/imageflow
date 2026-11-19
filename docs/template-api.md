@@ -6,38 +6,38 @@ This page is generated from the topic files in [`template-api/`](template-api), 
 
 ## Topics
 
-- [Authoring workflow](#authoring-workflow): Order of work for agents: which MCP tool reads, edits, previews and verifies what, and how revisions and drafts fit together.
-- [Project commands and preview targets](#project-commands-and-preview-targets): Every MCP project operation with a JSON example, plus batch references, parameter scopes and preview targets.
-- [Package](#package): The template/ folder, host-provided imports, the shipped example templates and the contract-1 baseline features.
-- [Declaration](#declaration): defineTemplate fields, parameter scopes, spread()/page() builders and typed reusable declarations.
-- [Page layouts](#page-layouts): Reusable page() layouts, Page roots, local geometry, independent facing pages, editor controls and beta automation limits.
-- [Parameters](#parameters): p.* parameter helpers, their value types and options (ranges, units, enums, dates, multiline, descriptions).
-- [List parameters](#list-parameters): p.list for a variable number of flat items, item IDs, list controls and the list item commands.
-- [Boxes and elements](#boxes-and-elements): Photo and Markdown boxes, flowOrder for text continuation, YAML headers in Markdown sources (text.meta), and generated elements with parameters.
-- [Print format](#print-format): printFormat: trim, bleed, safe area, several named formats, formats without facing pages, single-page spans and book ends.
-- [Template library](#template-library): Importing templates into the library, template previews and openingSpreads for new books.
-- [Switching layouts](#switching-layouts): How content, crops and parameters carry over, are kept or restored when a spread switches layout.
-- [Layout families](#layout-families): Grouping layout variants into a family with variant tags, and the family picker.
-- [Dependencies](#dependencies): Using npm packages in a template: the saved dependency bundle, licences and network sites.
-- [Render function](#render-function): The pure render(ctx) contract, caching expensive calculations, the render context fields, and photo capture metadata.
-- [Rendered images](#rendered-images): <RenderedImage> for pictures that draw asynchronously, such as WebGL maps, and how check and export wait for them.
-- [SVG maps](#svg-maps): Reuse the template-local maplibre-svg helper: dependency setup, a minimal vector map, projection, labels, attribution and limits.
-- [Click-to-edit](#click-to-edit): ctx.edit(...paths) to make rendered nodes open parameter popovers when clicked.
-- [Anchors](#anchors): Anchors that other spreads refer to (tables of contents, map captions) and the book index of anchors, pages and credits.
-- [Editing UI](#editing-ui): Choosing between generated controls, arranged controls and custom editors, and where each kind of editing happens.
-- [Element editors](#element-editors): Custom React editors for element parameters: props, Control, spread parameters, network access and sandboxing.
-- [Document editors](#document-editors): Custom editors for book-wide document parameters, opened where the book shows them.
-- [Editing on the page](#editing-on-the-page): presentation: 'inline' editors drawn on the page instead of in the panel, and their appearance.
-- [File parameters](#file-parameters): p.file parameters for project files such as GPX tracks, file() in render and importing files.
-- [Template findings](#template-findings): issue() to report problems with a template's own input as book check findings.
-- [Geometry helpers](#geometry-helpers): geometry helpers: page, spread, safe and bleed rectangles, insets, grids and design coordinates in millimetres.
-- [Platform components](#platform-components): Spread, PhotoBox, MarkdownBox, Element and Text components, and PhotoBox render callbacks.
-- [CSS contract](#css-contract): Inline styles and styles.css, geometry CSS variables, Markdown typography, fonts and output rules.
-- [Validation](#validation): What is validated when a template loads and when a book renders.
-- [Stored project data](#stored-project-data): How spreads, boxes, crops and parameter values are saved in project.json.
-- [Authoring and compatibility details](#authoring-and-compatibility-details): Type-checking with the generated SDK, splitting layouts into files, persistence, preview limits and enum maps.
-- [Inline plain text (`inline-text`)](#inline-plain-text-inline-text): On-page editing of plain string parameters with ctx.Text presentation="inline".
-- [Formatted text (`formatted-text`)](#formatted-text-formatted-text): Strings with inline bold, italic and strikethrough (markdown: 'inline') and FormattedText.
+- [Authoring workflow](#authoring-workflow): MCP tools, revisions and drafts.
+- [Project commands and preview targets](#project-commands-and-preview-targets): Batch edits, parameter scopes and previews.
+- [Package](#package): Imports, examples and contract-1 features.
+- [Declaration](#declaration): defineTemplate and layout builders.
+- [Page layouts](#page-layouts): Page roots, geometry and facing pages.
+- [Parameters](#parameters): p.* types, options and defaults.
+- [List parameters](#list-parameters): List items, IDs and edit commands.
+- [Boxes and elements](#boxes-and-elements): Photo boxes, Markdown flow and text.meta.
+- [Print format](#print-format): Trim, bleed, safe areas and pagination.
+- [Template library](#template-library): Import, previews and openingSpreads.
+- [Switching layouts](#switching-layouts): Content, crops and saved layout state.
+- [Layout families](#layout-families): Variant tags and family pickers.
+- [Dependencies](#dependencies): npm bundles, licences and allowed sites.
+- [Render function](#render-function): render(ctx), caching and photo metadata.
+- [Rendered images](#rendered-images): Async artwork for previews and export.
+- [SVG maps](#svg-maps): Vector tiles, projection and attribution.
+- [Click-to-edit](#click-to-edit): Open parameter controls with ctx.edit().
+- [Anchors](#anchors): Cross-references, pages and credits.
+- [Editing UI](#editing-ui): Generated controls and custom editors.
+- [Element editors](#element-editors): React controls and parameter scopes.
+- [Document editors](#document-editors): Book-wide parameter editors.
+- [Editing on the page](#editing-on-the-page): Inline editor placement and styling.
+- [File parameters](#file-parameters): p.file, file() and imported assets.
+- [Template findings](#template-findings): Report input problems with issue().
+- [Geometry helpers](#geometry-helpers): Insets, grids and design coordinates.
+- [Platform components](#platform-components): Spread, boxes, Element and Text.
+- [CSS contract](#css-contract): Fonts, CSS variables and print styling.
+- [Validation](#validation): Template load and render checks.
+- [Stored project data](#stored-project-data): Saved layouts, crops and parameters.
+- [Authoring and compatibility details](#authoring-and-compatibility-details): SDK types, enum maps and preview limits.
+- [Inline plain text (`inline-text`)](#inline-plain-text-inline-text): Edit strings on the page with ctx.Text.
+- [Formatted text (`formatted-text`)](#formatted-text-formatted-text): Inline Markdown and FormattedText.
 
 ## Authoring workflow
 

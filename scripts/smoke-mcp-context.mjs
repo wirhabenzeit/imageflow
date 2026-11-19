@@ -207,7 +207,8 @@ try {
   await testBook(app, starterFolder, true);
   const starter = (await good('list_projects')).projects.find((book) => book.folder === starterFolder).project;
   const starterContext = await good('get_authoring_context', { project: starter });
-  const contextBytes = JSON.stringify(starterContext).length;
+  const contextBytes = Buffer.byteLength(JSON.stringify(starterContext));
+  console.log('Starter book context: ' + contextBytes + ' bytes (budget 30,000).');
   assert.ok(contextBytes <= 30_000, 'The starter book context grew to ' + contextBytes + ' bytes; the budget is 30,000 (about 8k tokens).');
   assert.ok(starterContext.template.spreads.textPage && starterContext.topics.length > 20);
   console.log('ImageFlow MCP context, empty-book, single-page, inline drafts and multi-book workflows passed' + (packaged ? ' (packaged).' : '.'));

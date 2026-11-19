@@ -1,4 +1,4 @@
-// A layout family: a photo grid in 2×2 and 3×3, the 2×2 also with a text box, chosen with a picker of two independent controls.
+// Choose photo grid variants with a picker.
 import { box, Choice, defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { LayoutPickerProps, RenderContext } from 'imageflow';
 

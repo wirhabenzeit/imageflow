@@ -1,4 +1,4 @@
-// An editor on the page (`presentation: 'inline'`): a focus ring over a full-bleed photo, dragged into place where it is printed.
+// Drag a photo focus ring on the page.
 import { defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { ElementEditorProps } from 'imageflow';
 

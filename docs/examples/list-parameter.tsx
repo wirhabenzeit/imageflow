@@ -1,5 +1,4 @@
-// A list parameter: a timeline of up to eight stops, each with a date, a place and a colour. The user adds,
-// reorders, duplicates and removes stops in the element's generated list control; `render` reads them as an array.
+// Add, reorder and remove timeline stops.
 import { defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 
 const format = printFormat({

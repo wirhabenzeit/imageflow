@@ -1,4 +1,4 @@
-// Generated content with parameters: a trip summary drawn from element parameters, edited by clicking it.
+// Click-to-edit trip summary.
 import { defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 
 const format = printFormat({

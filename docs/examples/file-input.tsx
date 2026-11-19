@@ -1,4 +1,4 @@
-// An optional file input: a CSV of daily distances drawn as a chart, with a structured finding for bad files.
+// CSV file input with validation and a chart.
 import { defineTemplate, file, issue, mm, p, printFormat, pt, Spread } from 'imageflow';
 
 const format = printFormat({

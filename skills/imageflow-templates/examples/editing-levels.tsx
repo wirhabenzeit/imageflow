@@ -1,4 +1,4 @@
-// Editing UI at three levels: generated controls, arranged controls with a condition, and a custom editor that reuses ImageFlow's controls.
+// Generated, arranged and custom controls.
 import { Choice, defineTemplate, mm, p, printFormat, pt, Spread } from 'imageflow';
 import type { ElementEditorProps } from 'imageflow';
 
