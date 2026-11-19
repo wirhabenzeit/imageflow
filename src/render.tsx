@@ -2137,8 +2137,20 @@ export async function startRender(root: HTMLElement) {
         next.project.template, next.network, next.mode]).replaceAll(/\/render\/[\w-]{36}\//g, '/render/*/');
       const shape = identity(book);
       let wanted: string | undefined;
+      // The revision last asked for, rendered or refused; `currentRevision` is the one on show.
+      let attempted = currentRevision;
       let running = false;
       let release: (() => void) | undefined;
+      // The last revision that rendered, to show again when a newer one fails partway: React has cleared the root by
+      // then, and the app keeps showing this frame until a new one replaces it.
+      let good = { book, path: location.pathname, revision: currentRevision };
+      const restore = async () => {
+        history.replaceState(null, '', good.path + location.search);
+        setTemplateFiles(good.book.files);
+        prepare(good.book);
+        currentRevision = good.revision;
+        try { await renderRevision(good.book); } catch { /* The app replaces this frame. */ }
+      };
       window.addEventListener('message', (event) => {
         if (event.origin === editorURL.slice(0, -1) && event.data?.type === 'release-revision' && event.data.project === currentRevision) release?.();
       });
@@ -2149,28 +2161,32 @@ export async function startRender(root: HTMLElement) {
         if (running) return;
         running = true;
         try {
-          while (wanted && wanted !== currentRevision) {
+          while (wanted && wanted !== attempted) {
             const revision = wanted;
+            attempted = revision;
             const path = location.pathname.replace(/\/render\/[^/]+/, '/render/' + revision);
             history.replaceState(null, '', path + location.search);
             stepStart = performance.now();
+            let rendering = false;
             try {
               const response = await fetch(path + '/data');
               if (!response.ok) throw new Error('Could not load the project.');
               const next: RenderProject = await response.json();
               step('data');
-              if (identity(next) !== shape) { post({ type: 'revision-refused', revision }); currentRevision = revision; continue; }
+              if (identity(next) !== shape) throw new Error('This revision needs a new frame.');
               setTemplateFiles(next.files);
               prepare(next);
+              rendering = true;
               currentRevision = revision;
               // The frame keeps showing the revision it showed until the app releases this one, so the book view and
               // the thumbnails change together, as new frames do. A newer revision ends the wait as well.
               const shown = new Promise<void>((resolve) => { release = resolve; });
               if (document.startViewTransition) {
-                // A revision that fails to render is not waited for, and fails below, as without a transition.
+                // A revision that fails to render is not waited for: the last good one is drawn again behind the
+                // transition's picture, and the failure is reported below.
                 let failed: { error: unknown } | undefined;
                 const transition = document.startViewTransition(async () => {
-                  try { await renderRevision(next); } catch (error) { failed = { error }; return; }
+                  try { await renderRevision(next); } catch (error) { failed = { error }; await restore(); return; }
                   // A newer revision asked for meanwhile, also before this wait began, makes this one outdated: the app
                   // will not release it, so it is not waited for.
                   if (wanted === revision) await shown;
@@ -2179,14 +2195,16 @@ export async function startRender(root: HTMLElement) {
                 // once; the frame then simply is not paired. Each of its promises reports that.
                 void transition.ready.catch(() => {}); void transition.finished.catch(() => {});
                 await transition.updateCallbackDone.catch(() => {});
-                if (failed) throw failed.error;
-              } else await renderRevision(next);
+                if (failed) { rendering = false; throw failed.error; }
+              } else {
+                try { await renderRevision(next); } catch (error) { await restore(); rendering = false; throw error; }
+              }
+              good = { book: next, path, revision };
             } catch (error) {
-              currentRevision = revision;
-              laidOutBook?.update([...root.querySelectorAll<HTMLElement>('.if-spread-container[data-spread]')].flatMap((container) => {
-                const sheet = container.querySelector<HTMLElement>(':scope > .if-sheet');
-                return sheet ? [{ spread: container.dataset.spread!, sheet }] : [];
-              }));
+              // A revision that never started rendering leaves the shown one as it is, under its own session's URL.
+              if (rendering) await restore();
+              else history.replaceState(null, '', good.path + location.search);
+              currentRevision = good.revision;
               post({ type: 'revision-refused', revision, message: error instanceof Error ? error.message : String(error) });
             }
           }

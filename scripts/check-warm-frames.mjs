@@ -150,6 +150,30 @@ try {
     const byId = new Map(p.spreads.map((spread) => [spread.id, spread]));
     p.spreads = [...ids.filter((id) => byId.has(id)).map((id) => byId.get(id)), ...p.spreads.filter((spread) => !ids.includes(spread.id))];
   });
+  // A revision that fails to render, such as a spread naming a layout the template lacks, keeps the last good artwork
+  // and geometry on show, also in a frame that rendered it in place.
+  // The book frame on show: the reused one, while a new frame for the failed revision is pending.
+  const bookFrame = async () => (await w.locator('iframe.book-frame-book:not(.book-frame-pending)').elementHandle()).contentFrame();
+  const sheetsBefore = await (await bookFrame()).evaluate(() => document.querySelectorAll('.if-sheet').length);
+  const labelsBefore = await w.evaluate(() => document.querySelectorAll('.sheet-label').length);
+  const good = await readFile(join(project, 'project.json'), 'utf8');
+  const broken = JSON.parse(good);
+  broken.spreads.find((spread) => !spread.split).definition = 'no-such-layout';
+  await writeFile(join(project, 'project.json'), JSON.stringify(broken, null, 2) + '\n');
+  await w.waitForFunction(() => document.querySelector('.status-error'), null, { timeout: 30000 });
+  await w.waitForTimeout(4000);
+  console.log('  status: ' + await w.evaluate(() => document.querySelector('.status-error')?.textContent?.slice(0, 120)));
+  const sheetsAfter = await (await bookFrame()).evaluate(() => document.querySelectorAll('.if-sheet').length);
+  const labelsAfter = await w.evaluate(() => document.querySelectorAll('.sheet-label').length);
+  const frames = await w.evaluate(() => document.querySelectorAll('iframe.book-frame-book').length);
+  const keeps = sheetsAfter === sheetsBefore && labelsAfter === labelsBefore;
+  console.log('  book frames: ' + frames);
+  console.log((keeps ? '✓ ' : '✖ ') + 'A failed revision keeps the last good artwork · ' + sheetsAfter + ' of ' + sheetsBefore +
+    ' sheets, ' + labelsAfter + ' of ' + labelsBefore + ' sheet labels');
+  failures += keeps ? 0 : 1;
+  await writeFile(join(project, 'project.json'), good);
+  await w.waitForFunction(() => !document.querySelector('.status-error') &&
+    document.querySelector('iframe.book-frame-book[data-current][data-ready]'), null, { timeout: 30000 });
   const last = await current();
   for (const view of views) assert.equal(last[view].src, first[view].src, view + ': the frame was reused, not replaced');
   console.log(failures ? failures + ' comparisons differ.' : 'Every reused frame matched a fresh one; the frames were reused throughout.');
