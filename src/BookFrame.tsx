@@ -120,17 +120,17 @@ export function BookFrame({ busy = false, project, view, query = '', title, onGe
       return;
     }
     if ('state' in data && 'revision' in data && id === shown) {
-      // A revision the shown frame rendered in place: it is on screen already.
+      // A revision the shown frame rendered in place: it is on screen already. Moved sheets slide on the frame's clock,
+      // and the app's overlays and thumbnails follow it. Unlike new frames, the two views are not revealed together.
       const revision = (data as { revision: string }).revision;
       if (revision !== project) return;
-      frame.status = data;
-      frame.revision = revision;
-      frame.published = true;
-      storeFrame(id, frame);
-      onGeometry(frame.geometry, false, undefined, revision);
+      const motion = (data as { motion?: number }).motion;
+      const next: FrameState = { ...frame, status: data, revision, published: true };
+      storeFrame(id, next);
+      onGeometry(next.geometry, motion !== undefined, motion, revision);
       onShown?.(revision);
       onStatus?.(data, revision);
-      if (frame.pictures && data.state === 'ready') onPictures?.(frame.pictures, revision);
+      if (next.pictures && data.state === 'ready') onPictures?.(next.pictures, revision);
       return;
     }
     if ('type' in data && data.type === 'reorder-ready') {
@@ -158,7 +158,10 @@ export function BookFrame({ busy = false, project, view, query = '', title, onGe
         (event.source as Window).postMessage({ type: 'inline-editing', key: latestKey.current, ...latestEditing.current }, origin);
       }
       frame.geometry = data;
-      if (id === shown) onGeometry(data, false, undefined, (data as { revision?: string }).revision ?? revisionOf(id));
+      // A reused frame measures a newer revision before it reports it ready; the app hears of both together, as from a
+      // new frame, when its status arrives (below). Its own revision's geometry, such as after a resize, passes at once.
+      const measured = (data as { revision?: string }).revision;
+      if (id === shown && (!measured || measured === revisionOf(id))) onGeometry(data, false, undefined, measured ?? revisionOf(id));
     } else if ('type' in data && data.type === 'inline-editing-applied') {
       frame.hiding = false;
       if (id === shown && data.key === latestKey.current) latestApplied.current?.(data.key);

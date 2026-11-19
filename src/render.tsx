@@ -19,7 +19,7 @@ import { editorURL } from './desktop';
 import { bookLayout } from './desktop';
 import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, spanRequiredAt, toMillimeters } from './format';
-import { animateReorder } from './reorder-motion';
+import { animateReorder, reorderOffsets } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat } from './format';
 import { frameView, scopeSpread, scopeState } from './project';
@@ -428,8 +428,8 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
 type GridRequest = { columns: number };
 function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest) {
   let sheets = initialSheets;
+  let animations: Animation[] = [];
   if (view === 'thumbs' || view === 'book') {
-    let animations: Animation[] = [];
     window.addEventListener('message', (event: MessageEvent) => {
       if (event.source !== parent || event.origin !== 'imageflow://editor') return;
       if (event.data?.type === 'prepare-reorder' && Array.isArray(event.data.offsets)) {
@@ -472,6 +472,8 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
   // While a warm frame renders a newer revision, its sheets may already be gone from the page: nothing is measured
   // until update() names the new ones, or a removed sheet would be reported at the top of the book.
   let held = false;
+  // The geometry last reported, from which a reordered revision rendered in place animates its sheets.
+  let reported: BookGeometry | undefined;
   function fit() {
     if (held) return;
     const width = root.clientWidth;
@@ -525,6 +527,7 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
         ...ownTarget(node),
       })))),
     };
+    reported = geometry;
     post(currentRevision ? { ...geometry, revision: currentRevision } : geometry);
   }
   root.classList.add('if-book', 'if-view-' + view);
@@ -593,15 +596,31 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
     },
     // A warm frame rendered a newer revision into the same root: measure its sheets.
     hold() { held = true; },
-    update(next: { spread: string; sheet: HTMLElement }[]) {
+    // Lays out a newer revision rendered into the same root. Sheets that only moved, such as after a reorder, slide
+    // from their previous places, as a new frame's do; returns when that motion started.
+    update(next: { spread: string; sheet: HTMLElement }[]): number | undefined {
       held = false;
       sheets = next;
       root.classList.add('if-book');
       elements.disconnect();
       layout.disconnect();
       observe();
+      const before = reported;
       laidOut = '';
       fit();
+      const offsets = view === 'book' || view === 'thumbs' ? reorderOffsets(before, reported) : [];
+      animations.forEach((animation) => animation.cancel());
+      animations = [];
+      if (!offsets.length || matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+      const start = performance.timeOrigin + performance.now();
+      animations = offsets.flatMap((offset) => {
+        const slot = sheets.find((sheet) => sheet.spread === offset.spread)?.sheet.parentElement;
+        if (!slot) return [];
+        const animation = animateReorder(slot, offset);
+        animation.startTime = start - performance.timeOrigin;
+        return [animation];
+      });
+      return animations.length ? start : undefined;
     },
   };
 }
@@ -1743,6 +1762,8 @@ export async function startRender(root: HTMLElement) {
     step('index');
 
     renderError = undefined;
+    // When sheets of a revision rendered in place started sliding to their new places, if any moved.
+    let motion: number | undefined;
     laidOutBook?.hold();
     // The previous revision's photo loader would measure this one's sheets while they are rendered and laid out, and
     // drop or restart photos the decode step below is waiting for. A new loader starts after the layout step.
@@ -2051,7 +2072,7 @@ export async function startRender(root: HTMLElement) {
     }
     if (edit) {
       const laidOut = [...validated].map(([spread, { sheet }]) => ({ spread, sheet }));
-      if (laidOutBook) laidOutBook.update(laidOut);
+      if (laidOutBook) motion = laidOutBook.update(laidOut);
       else laidOutBook = layoutBook(root, laidOut, view, format, grid);
       setGrid = laidOutBook.setGrid;
     }
@@ -2082,7 +2103,7 @@ export async function startRender(root: HTMLElement) {
     publish({
       state: 'ready', template: info, pages: sequence.count, units, errors, warnings,
       flow: Object.fromEntries(Object.entries(positions).map(([key, { meta: _meta, ...position }]) => [key, position])), anchors: index.anchors,
-      ...(inspection ? { inspection } : {}), ...(currentRevision ? { revision: currentRevision } : {}),
+      ...(inspection ? { inspection } : {}), ...(currentRevision ? { revision: currentRevision } : {}), ...(motion ? { motion } : {}),
     } as RenderStatus);
     // The editor's book view does not wait for its pictures. It reports them to the live Book check as they start,
     // finish or fail, so a map that failed on the page is never missing from the check.
