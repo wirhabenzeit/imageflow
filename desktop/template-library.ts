@@ -113,6 +113,8 @@ function entryFrom(info: TemplateInfo | undefined, fallback: { id: string; versi
 export class TemplateLibrary {
   private builtIns = new Map<string, Found & { sample?: string; defaultName?: string }>();
   private builtInsLoaded?: Promise<void>;
+  // The built-in templates' hashes by folder, without validating them: enough to tell a book's template is not one.
+  private builtInHashes?: Promise<Map<string, string>>;
   private listeners = new Set<() => void>();
   private writes = Promise.resolve();
 
@@ -130,10 +132,16 @@ export class TemplateLibrary {
   private changed() { for (const listener of this.listeners) listener(); }
 
   // Built-in templates ship with the app; they are validated once per launch, since an update can change them.
+  private hashBuiltIns() {
+    this.builtInHashes ??= Promise.all(this.builtInSources.map(async ({ template }) =>
+      [template, await templateHash(template).catch(() => '')] as const)).then((pairs) => new Map(pairs));
+    return this.builtInHashes;
+  }
   private loadBuiltIns() {
     this.builtInsLoaded ??= (async () => {
+      const hashes = await this.hashBuiltIns();
       for (const source of this.builtInSources) {
-        const hash = await templateHash(source.template).catch(() => '');
+        const hash = hashes.get(source.template) ?? '';
         let info: TemplateInfo | undefined;
         let problem: string | undefined;
         try { info = await this.validate(source.template); }
@@ -231,6 +239,8 @@ export class TemplateLibrary {
 
   /** The network origins a built-in template with this hash declares, or undefined when no built-in has the hash. */
   async builtInNetwork(hash: string) {
+    // Validating every built-in takes a second on the first call; a book with its own template need not wait for it.
+    if (!hash || ![...(await this.hashBuiltIns()).values()].includes(hash)) return undefined;
     await this.loadBuiltIns();
     const found = hash ? [...this.builtIns.values()].find(({ entry }) => entry.hash === hash) : undefined;
     return found ? found.entry.network ?? [] : undefined;
