@@ -145,6 +145,13 @@ function EmptyBook({ template, writable, start }: { template?: TemplateInfo; wri
 
 export function App() {
   const api = window.imageflow;
+  // Settings → Faster book updates: the book view and thumbnails render each edit in place (#210).
+  const [fasterUpdates, setFasterUpdates] = useState(true);
+  useEffect(() => {
+    if (!api) return;
+    void api.getSettings().then((result) => { if ('value' in result && result.value) setFasterUpdates(result.value.fasterBookUpdates !== false); });
+    return api.onSettingsChanged((settings) => setFasterUpdates(settings.fasterBookUpdates !== false));
+  }, [api]);
   const [resizing, setResizing] = useState(false);
   const { panels, bottomMaximum, toggle: togglePanelState, show: showPanelState, resize: resizePanelState } = usePanels(resizing);
   const [summary, setSummary] = useState<ProjectSummary>();
@@ -1994,7 +2001,7 @@ export function App() {
                 </button>;
               })}
               {reorder.indicator && <div className="spread-insertion" aria-hidden="true" style={{ top: reorder.indicator.top }} />}
-              <BookFrame busy={busyCursor} project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined} onShown={(id) => preparedView(id, 'thumbs')}
+              <BookFrame busy={busyCursor} reuse={fasterUpdates} project={summary.id} view="thumbs" onPrepared={pairFrames ? (id) => preparedView(id, 'thumbs') : undefined} onShown={(id) => preparedView(id, 'thumbs')}
                 release={frameRelease} title="Spread thumbnails" onGeometry={setThumbs}
                 viewport={thumbnailViewport} hold={holdPreview} accept={acceptCandidate} />
             </div>
@@ -2074,7 +2081,7 @@ export function App() {
               >
               <div className="canvas-artwork-clip">
                 <div className="canvas-artwork">
-                  <BookFrame busy={busyCursor} project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined} onShown={(id) => preparedView(id, 'book')}
+                  <BookFrame busy={busyCursor} reuse={fasterUpdates} project={summary.id} view="book" onPrepared={pairFrames ? (id) => preparedView(id, 'book') : undefined} onShown={(id) => preparedView(id, 'book')}
                     release={frameRelease} title="Book preview" cropPreview={cropPreview} onGeometry={setCanvasGeometry} onStatus={bookStatus} onPictures={bookPictures}
                     viewport={frameViewport} hold={holdPreview} accept={acceptCandidate} inlineEditing={inlineEditing}
                     onInlineEditing={(key) => { if (leavingEditor && key === 'null') leaveEditor(); }} />

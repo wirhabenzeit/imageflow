@@ -57,7 +57,7 @@ import { pictureTimeoutMs } from './render-budget';
 import { pendingNetwork, pictureFailureSuggestion } from './network-access';
 import './render.css';
 
-// The revision a warm frame last rendered in place (IMAGEFLOW_WARM), named in its status and geometry.
+// The revision a frame last rendered in place (#210), named in its status and geometry.
 let currentRevision: string | undefined;
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
 // After the next painted frame. A frame that is not shown yet gets no animation frames, so a short timer stands in.
@@ -1736,7 +1736,7 @@ export async function startRender(root: HTMLElement) {
         query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined);
       return;
     }
-    // Kept across revisions when the frame renders newer ones in place (IMAGEFLOW_WARM).
+    // Kept across revisions when the frame renders newer ones in place (#210).
     let react: ReturnType<typeof createRoot> | undefined;
     let renderError: unknown;
     let laidOutBook: ReturnType<typeof layoutBook> | undefined;
@@ -2128,10 +2128,10 @@ export async function startRender(root: HTMLElement) {
     }
     };
     await renderRevision(book);
-    // Prototype (IMAGEFLOW_WARM builds): the book view and thumbnails stay alive across edits. The app names each newer
-    // render session; the frame moves to it and renders that revision into the same React root. A revision with
+    // The book view and thumbnails can stay alive across edits (#210, Settings → Faster book updates). The app names each
+    // newer render session; the frame moves to it and renders that revision into the same React root. A revision with
     // another template, format or network access is refused, and the app creates a new frame for it as before.
-    if (import.meta.env.IMAGEFLOW_WARM && lazy && !textEditor) {
+    if (lazy && !textEditor) {
       // URLs name the render session; the hash names the template files. Without a hash every revision is refused.
       const identity = (next: RenderProject) => JSON.stringify([next.template.hash ?? Math.random(), next.template, next.project.format,
         next.project.template, next.network, next.mode]).replaceAll(/\/render\/[\w-]{36}\//g, '/render/*/');

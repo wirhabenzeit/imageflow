@@ -1275,7 +1275,9 @@ function showSettings(pane?: SettingsPane) {
 
 
 void app.whenReady().then(async () => {
-  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), { ...defaultSettings, updateChannel: releaseChannel(app.getVersion()) ?? 'stable' });
+  // IMAGEFLOW_FASTER_UPDATES=0 starts with Settings → Faster book updates off, so tests can cover rendering every edit anew.
+  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), { ...defaultSettings, updateChannel: releaseChannel(app.getVersion()) ?? 'stable',
+    ...(process.env.IMAGEFLOW_FASTER_UPDATES === '0' ? { fasterBookUpdates: false } : {}) });
   recents = new RecentDocuments(join(app.getPath('userData'), 'recent-documents.json'));
   await Promise.all([settings.load(), recents.load()]);
   configureSourceStore(join(app.getPath('userData'), 'source-cache'));

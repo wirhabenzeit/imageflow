@@ -1,7 +1,9 @@
 // Frame reuse (#210): after each edit, the book view and thumbnails that rendered it in place must match a fresh frame
-// of the same revision. Needs a build with the prototype on:
+// of the same revision.
 //
-//   IMAGEFLOW_WARM=1 npm run build && node scripts/stage-desktop.mjs && node scripts/check-warm-frames.mjs [--book path]
+//   npm run build && node scripts/stage-desktop.mjs && node scripts/check-warm-frames.mjs [--book path]
+//
+// Settings → Faster book updates is on by default, which reuses the frames.
 //
 // Without --book it edits a copy of the starter. Each step is an app command or an external edit of project.json,
 // which the editor takes as a new revision. A fresh frame for the revision is loaded beside the reused one, at the same

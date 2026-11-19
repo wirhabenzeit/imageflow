@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [react()],
   // Explicit diagnostic build only; normal dev and release bundles keep the standard renderer.
   ...(process.env.IMAGEFLOW_PROFILE === '1' ? {
-    define: { 'import.meta.env.IMAGEFLOW_PROFILE': 'true', 'import.meta.env.IMAGEFLOW_WARM': JSON.stringify(process.env.IMAGEFLOW_WARM === '1') },
+    define: { 'import.meta.env.IMAGEFLOW_PROFILE': 'true' },
     resolve: { alias: [{ find: 'react-dom/client', replacement: 'react-dom/profiling' }] },
     build: { minify: false as const },
   } : {}),

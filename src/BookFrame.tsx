@@ -19,7 +19,7 @@ export type InlineEditing = ({ spread: string; element: string } | { spread: str
 export type CropPreview = { spread: string; box: string; page?: PageSide; placement: { centerX: number; centerY: number; zoom: number } };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ busy = false, project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
+export function BookFrame({ busy = false, reuse = false, project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
   // Paired views reveal one revision together, on the shared animation clock.
   onPrepared?: (project: string) => void;
   // Called when a revision is shown, paired or not, so the other view does not wait for this one to prepare it again.
@@ -27,6 +27,8 @@ export function BookFrame({ busy = false, project, view, query = '', title, onGe
   release?: { project: string; start: number };
   // While the app waits for an update, the frames show a progress cursor too.
   busy?: boolean;
+  // The shown frame renders newer revisions in place (#210, Settings → Faster book updates), unless it refuses one.
+  reuse?: boolean;
   project: string; view: BookView; query?: string; title: string;
   presentation?: PresentationView;
   hold?: boolean;
@@ -53,12 +55,11 @@ export function BookFrame({ busy = false, project, view, query = '', title, onGe
   const [frames, setFrames] = useState<Record<string, FrameState>>({});
   const latest = useRef(new Map<string, FrameState>());
   const refs = useRef(new Map<string, HTMLIFrameElement>());
-  // Prototype (IMAGEFLOW_WARM builds): the shown frame renders newer revisions in place, unless it refused one.
   const [cold, setCold] = useState<ReadonlySet<string>>(new Set());
   const projectOf = (id: string) => new URL(id).pathname.split('/').at(-1)!;
   const sameView = (a: string, b: string) => { const x = new URL(a), y = new URL(b); return x.search === y.search && x.origin === y.origin; };
   const shownState = shown ? frames[shown] : undefined;
-  const warm = !!import.meta.env.IMAGEFLOW_WARM && (view === 'book' || view === 'thumbs') && !!shown && !!target && shown !== target &&
+  const warm = reuse && (view === 'book' || view === 'thumbs') && !!shown && !!target && shown !== target &&
     sameView(shown, target) && shownState?.status?.state === 'ready' && !cold.has(project);
   const revisionOf = (id: string) => latest.current.get(id)?.revision ?? projectOf(id);
   const ids = [shown, shown === target || warm ? undefined : target].filter((id): id is string => id !== undefined);

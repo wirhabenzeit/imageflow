@@ -79,3 +79,20 @@ test('agent access is remembered across reloads and only stored while on', async
   assert.equal('agentAccess' in JSON.parse(await readFile(file, 'utf8')), false);
   await assert.rejects(store.update({ agentAccess: 'yes' }), /Invalid agent access/);
 });
+
+test('faster book updates are on unless turned off, and only stored while off', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'if-updates-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const file = join(folder, 'settings.json');
+  const store = new SettingsStore(file);
+  await store.load();
+  assert.equal(store.value.fasterBookUpdates, undefined, 'on by default');
+  await store.update({ fasterBookUpdates: false });
+  await store.update({ appearance: 'dark' });
+  const reopened = new SettingsStore(file);
+  await reopened.load();
+  assert.equal(reopened.value.fasterBookUpdates, false);
+  await reopened.update({ fasterBookUpdates: true });
+  assert.equal('fasterBookUpdates' in JSON.parse(await readFile(file, 'utf8')), false);
+  await assert.rejects(store.update({ fasterBookUpdates: 'fast' }), /Invalid book update setting/);
+});
