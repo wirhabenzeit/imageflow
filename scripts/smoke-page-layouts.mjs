@@ -6,7 +6,7 @@ import electron from 'electron';
 import { _electron } from 'playwright-core';
 import { PDFDocument } from 'pdf-lib';
 import { copySample } from '../desktop/sample-book.mjs';
-import { closeApp, exportAction, menuAction, testBook } from './ui-actions.mjs';
+import { closeApp, exportAction, menuAction, pickLayout, testBook } from './ui-actions.mjs';
 
 // ADR 0009 phases 3–5: page checks, selection, Inspector, layout changes, swap, Undo and export through the real app.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -65,21 +65,6 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   assert.equal(await frame.locator('[data-spread="blank"] [data-if-page="right"] .if-page').count(), 0);
   const inspector = w.getByRole('complementary', { name: 'Inspector', exact: true });
   const readBook = async () => JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
-  // Selecting a page shows the Inspector another family picker, in a new frame. Chromium sends a click made within a
-  // few hundred milliseconds of that to the app's page instead (an out-of-process frame's hit testing lags its layout),
-  // so a click that the picker never received is made again. A choice it did receive is never repeated.
-  const pick = async (picker, name) => {
-    const before = await w.locator(ready).getAttribute('data-revision');
-    for (let attempt = 0; attempt < 3; attempt++) {
-      await picker.getByRole('button', { name, exact: true }).click();
-      const changed = await w.waitForFunction((before) => {
-        const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-        return frame && frame.getAttribute('data-revision') !== before;
-      }, before, { timeout: 2000 }).then(() => true, () => false);
-      if (changed) return;
-    }
-    throw new Error('The ' + name + ' choice in the layout picker had no effect.');
-  };
   const rerendered = async (action) => {
     const before = await w.locator(ready).getAttribute('data-revision');
     await action();
@@ -149,7 +134,7 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   const beforePageVariant = (await readBook()).spreads[0];
   const pageFamily = inspector.frameLocator('iframe.element-editor-frame');
   await pageFamily.getByRole('button', { name: 'Text alternate', exact: true }).waitFor();
-  await pick(pageFamily, 'Text alternate');
+  await pickLayout(w, pageFamily.getByRole('button', { name: 'Text alternate', exact: true }));
   assert.equal((await readBook()).spreads[0].pages.right.definition, 'textAlt');
   assert.deepEqual((await readBook()).spreads[0].pages.left, beforePageVariant.pages.left);
   await rerendered(() => menuAction(app, 'Undo Book Edit'));
@@ -214,7 +199,7 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   assert.equal(await inspector.getByRole('checkbox', { name: 'Spread-only option', exact: true }).isEnabled(), true);
   const family = inspector.frameLocator('iframe.element-editor-frame');
   await family.getByRole('button', { name: 'Other', exact: true }).waitFor();
-  await pick(family, 'Other');
+  await pickLayout(w, family.getByRole('button', { name: 'Other', exact: true }));
   assert.equal((await readBook()).spreads[0].definition, 'other');
   await rerendered(() => menuAction(app, 'Undo Book Edit'));
   assert.deepEqual((await readBook()).spreads[0], merged);

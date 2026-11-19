@@ -243,3 +243,21 @@ export async function clickPage(page, x, y) {
   }
   await page.mouse.click(x, y);
 }
+
+// Clicks a choice in a layout picker and waits for the book view to show the result. Selecting a page shows the
+// Inspector another picker, in a new frame, and Chromium sends a click made within a few hundred milliseconds of that
+// to the app's page instead (an out-of-process frame's hit testing lags its layout). A click the picker never received
+// is made again, up to three times; one it received is never repeated.
+export async function pickLayout(page, choice) {
+  const ready = 'iframe.book-frame-book[data-current][data-ready]';
+  const before = await page.locator(ready).getAttribute('data-revision');
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await choice.click();
+    const changed = await page.waitForFunction(({ ready, before }) => {
+      const frame = document.querySelector(ready);
+      return frame && frame.getAttribute('data-revision') !== before;
+    }, { ready, before }, { timeout: 2000 }).then(() => true, () => false);
+    if (changed) return;
+  }
+  throw new Error('The layout picker did not apply the choice.');
+}
