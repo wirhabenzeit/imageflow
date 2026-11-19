@@ -196,6 +196,16 @@ async function serve(request: Request) {
       'Content-Security-Policy': csp + ' ' + renderOrigin + '; frame-src ' + renderOrigins.join(' ') + "; frame-ancestors 'none'; base-uri 'none'",
     });
   }
+  // Template files by the template's hash (renderData): any open render session with that hash has the same files.
+  const templateFile = renderHost && /^\/render\/([a-f0-9]{64})\/template\/(.+)$/.exec(pathname);
+  if (templateFile) {
+    const [, hash, asset] = templateFile;
+    for (const session of sessions.values()) {
+      const bytes = session.book.templateHash === hash ? session.book.assets.files.get(asset) : undefined;
+      if (bytes) return response(bytes, assetTypes[extname(asset).toLowerCase()] ?? 'application/octet-stream');
+    }
+    return new Response(null, { status: 404 });
+  }
   const match = renderHost ? viewPath.exec(pathname) : null;
   if (!match && devServer) return net.fetch(devServer + pathname + new URL(request.url).search);
   if (!match) return new Response(null, { status: 404 });

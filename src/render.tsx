@@ -1143,7 +1143,13 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
 type Viewport = { top: number; bottom: number; left: number; right: number };
 // Loads the photos of spreads within a screen's distance of the visible area, in both directions, and unloads those
 // far from it.
-function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
+// Which photo, and which file of it, an image shows: its source without the render session, and the file's revision.
+// A frame that renders newer revisions in place keeps its images, so a replaced photo or a changed file must reload.
+function photoIdentity(source: string, revisions: Record<string, string> | undefined) {
+  const id = /\/(?:photo|proof-photo|thumb)\/([\w-]+)/.exec(source)?.[1];
+  return source.replace(/\/render\/[\w-]+\//, '/render/*/') + '#' + ((id && revisions?.[id]) || '');
+}
+function photoLoader(root: HTMLElement, visible: () => Viewport | undefined, revisions?: Record<string, string>) {
   const containers = [...root.querySelectorAll<HTMLElement>('.if-spread-container')];
   return () => {
     const profileStart = import.meta.env.IMAGEFLOW_PROFILE ? performance.now() : 0;
@@ -1159,10 +1165,17 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
       const near = within(1);
       const far = !within(3);
       for (const img of container.querySelectorAll<HTMLImageElement>('img[data-src]')) {
-        if (near && !img.getAttribute('src')) {
+        const wanted = photoIdentity(img.dataset.src!, revisions);
+        const stale = !!img.getAttribute('src') && img.dataset.loaded !== wanted;
+        if (near && (!img.getAttribute('src') || stale)) {
+          // A stale photo stays on show until its replacement has loaded.
           img.src = img.dataset.src!;
+          img.dataset.loaded = wanted;
           loading.push(img);
-        } else if (far && img.getAttribute('src')) img.removeAttribute('src');
+        } else if ((far || stale) && img.getAttribute('src')) {
+          img.removeAttribute('src');
+          delete img.dataset.loaded;
+        }
       }
       // Boxes with a render callback draw their photo only while near the screen, and drop it when far away.
       for (const box of container.querySelectorAll<HTMLElement>('[data-photo-render="custom"]')) {
@@ -1696,6 +1709,9 @@ export async function startRender(root: HTMLElement) {
     let renderError: unknown;
     let laidOutBook: ReturnType<typeof layoutBook> | undefined;
     let reportPictures: (() => void) | undefined;
+    // The nodes text flow put into each Markdown box, so a revision that no longer flows text into a box removes them.
+    // Text flow writes them outside React, which keeps only its own placeholder in the box.
+    const flowed = new Map<HTMLElement, Node[]>();
     const renderRevision = async (book: RenderProject) => {
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
@@ -1895,6 +1911,7 @@ export async function startRender(root: HTMLElement) {
     if (layoutFailures.size) throw new LayoutRenderError(layoutFailures);
     const validated = layouts as Map<string, NonNullable<ReturnType<typeof validateSpread>>>;
     step('validate');
+    const flowedNow = new Map<HTMLElement, Node[]>();
     for (const [source, chain] of activeChains) {
       const first = chain[0];
       if (book.texts[source] === undefined) {
@@ -1911,6 +1928,7 @@ export async function startRender(root: HTMLElement) {
       }
       const boxes = chain.map(({ spread, page, box }) => validated.get(spread)!.boxes.get((page ? page + ':' : '') + box)!);
       const result = flow.run(markdownToHtml(book.texts[source]), boxes, 'columns');
+      for (const box of boxes) flowedNow.set(box, [...box.childNodes]);
       const overflow = result.overflowText.trim();
       if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
         const last = chain.at(-1)!;
@@ -1934,6 +1952,9 @@ export async function startRender(root: HTMLElement) {
         });
       }
     }
+    for (const [box, nodes] of flowed) if (!flowedNow.has(box)) for (const node of nodes) if (node.parentNode === box) box.removeChild(node);
+    flowed.clear();
+    for (const [box, nodes] of flowedNow) flowed.set(box, nodes);
     step('flow');
     const minimum = template.format.output.minimumTextSize;
     for (const [spread, { sheet }] of present ? [] : validated) {
@@ -2003,7 +2024,7 @@ export async function startRender(root: HTMLElement) {
     step('layout');
     if (present) await renderPresentation(root, sheets, spreads, sequence, format, presentationStart);
     else if (lazy) {
-      const load = photoLoader(root, () => onScreen);
+      const load = photoLoader(root, () => onScreen, book.photoRevisions);
       let timer: ReturnType<typeof setTimeout> | undefined;
       onScreenChange = () => { timer ??= setTimeout(() => { timer = undefined; load(); }, 16); };
       // Wait for photos near the viewport so replacements show their artwork as soon as they swap in.

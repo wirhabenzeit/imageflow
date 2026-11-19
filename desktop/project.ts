@@ -433,6 +433,9 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
 /** The data a render frame loads; its URLs are on `origin`, the frame's own, so it reads them as its own files. */
 export function renderData(book: OpenProject, id: string, mode: RenderProject['mode'], network?: readonly string[], origin = renderOrigin): RenderProject {
   const base = origin + '/render/' + id;
+  // Template files are named by the template's hash where it has one, not by the render session: a frame that renders
+  // newer revisions in place keeps the module, stylesheet and assets it loaded first, after that session is gone.
+  const templateBase = (book.templateHash ? origin + '/render/' + book.templateHash : base) + '/template/';
   return {
     project: book.project,
     mode,
@@ -444,12 +447,14 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
     })),
     texts: book.texts,
     files: book.files,
+    // What each photo's file is, so a frame that renders newer revisions in place reloads a photo whose file changed.
+    photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
     problems: book.problems, sources: book.sources,
     ...(book.fixture ? { fixture: book.fixture } : {}),
     template: {
-      script: base + '/template/template.js',
-      css: book.assets.files.has('template.css') ? base + '/template/template.css' : undefined,
-      assets: Object.fromEntries(Object.entries(book.assets.urls).map(([path, name]) => [path, base + '/template/' + name])),
+      script: templateBase + 'template.js',
+      css: book.assets.files.has('template.css') ? templateBase + 'template.css' : undefined,
+      assets: Object.fromEntries(Object.entries(book.assets.urls).map(([path, name]) => [path, templateBase + name])),
       ...(book.assets.warnings ? { warnings: book.assets.warnings } : {}),
       // What each bundled font can set, for `fonts` and the Book check's font coverage.
       fonts: bundledFontCoverage(book.assets.files),
