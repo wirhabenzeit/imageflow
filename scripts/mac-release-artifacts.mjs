@@ -10,7 +10,7 @@ export async function prepareMacRelease({ root, version, arch, notarization }) {
   const paths = macArtifactPaths(root, version, arch);
   // Clear stale release names before a rebuild or notarization attempt can fail.
   await Promise.all(Object.values(paths).map((path) => rm(path, { force: true })));
-  await access(notarization.appleApiKey, constants.R_OK);
+  if (!notarization.keychainProfile) await access(notarization.appleApiKey, constants.R_OK);
   await Promise.all([mkdir(join(root, 'out'), { recursive: true }), mkdir(join(root, '.build'), { recursive: true })]);
   return { ...paths, work: await mkdtemp(join(root, '.build/dmg-')) };
 }

@@ -7,7 +7,7 @@ Staging compiles the small AppKit document-header module with Xcode Command Line
 ## Build commands
 
 - `npm run package:mac` produces a local app. Without `APPLE_SIGNING_IDENTITY`, it uses the existing ad-hoc signature. With a Developer ID Application identity, it signs with hardened runtime and verifies the app, Electron helpers, esbuild, sharp and libvips.
-- `npm run package:mac:release` requires the signing identity and all three notarization variables below. It checks that the packaged app version matches `package.json`, notarizes and staples the app, verifies Gatekeeper acceptance, creates and signs a DMG, notarizes and staples that DMG, checks the DMG with Gatekeeper, then produces the update ZIP from the stapled app.
+- `npm run package:mac:release` requires the signing identity and either a saved notarytool profile or all three API key variables below. It checks that the packaged app version matches `package.json`, notarizes and staples the app, verifies Gatekeeper acceptance, creates and signs a DMG, notarizes and staples that DMG, checks the DMG with Gatekeeper, then produces the update ZIP from the stapled app.
 - `npm run test:packaged` builds a local app and runs the packaged checks, including the MCP bridge launched through ImageFlow's own executable in Node mode.
 - `npm run test:packaged:existing` runs those checks against the app already in `out/`. Use this after a release build to avoid rebuilding the notarized app.
 - `npm run notarize:mac` checks the version of the signed app already in `out/`, notarizes it and creates the release artifacts. Release jobs can build, run `test:packaged:existing`, then notarize that exact tested app without rebuilding it.
@@ -28,7 +28,9 @@ The script accepts `--arch arm64` or `--arch x64` after `node scripts/package-ma
 
 Create a **Developer ID Application** certificate through the Apple Developer account or Xcode, and install it in the login keychain with its matching private key. `security find-identity -v -p codesigning` lists the usable identities. An Apple Development or Apple Distribution identity is not sufficient for direct distribution.
 
-Create an App Store Connect **team API key** with notarization access. Keep its downloaded `.p8` file, Key ID and Issuer ID together. A release build reads:
+For local releases with saved notarytool credentials, set `APPLE_NOTARY_PROFILE` to the profile name and `APPLE_SIGNING_IDENTITY` to the installed Developer ID Application identity.
+
+For API key authentication, create an App Store Connect **team API key** with notarization access. Keep its downloaded `.p8` file, Key ID and Issuer ID together. A release build reads:
 
 | Environment variable | Value |
 | --- | --- |
