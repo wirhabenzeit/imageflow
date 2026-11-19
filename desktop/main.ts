@@ -223,7 +223,13 @@ async function serve(request: Request) {
       'Content-Security-Policy': renderPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });
   }
-  if (resource === 'data') return Response.json(renderData(session.book, id, session.mode, session.network?.(), desktopScheme + '://' + host));
+  if (resource === 'data') {
+    const origins = session.network?.() ?? [];
+    // A frame that renders this session's revision in place (#210) requests only its data, not the page: its pictures
+    // are cached under the network policy that data names, as a new frame's are under its page's.
+    session.pictureScope ??= JSON.stringify([session.book.templateHash, origins]);
+    return Response.json(renderData(session.book, id, session.mode, session.network ? origins : undefined, desktopScheme + '://' + host));
+  }
   if (resource === 'template-preview') {
     // The Book check of the template's own preview image: the frame names the declared path, the app reads the file.
     const { file: _file, ...report } = await readTemplatePreview(join(session.book.folder, 'template'), new URL(request.url).searchParams.get('path') ?? '');
