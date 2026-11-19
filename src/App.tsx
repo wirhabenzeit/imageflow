@@ -2043,7 +2043,11 @@ export function App() {
                 // already selected page opens its content editor.
                 const current = spreadSelected && spreadId === sheet && (selectedLayoutMode === 'page' || selectionSide === side);
                 select(sheet, false, side);
-                if (!current || blockedInline) return;
+                // A held editor blocks clicks while the preview is out of date. A click on another field that replays once
+                // the held one applied its text (InlineTextEditor) opens that field when the book shows the save: the held
+                // editor's context then differs only by its own change.
+                const showsCurrent = canvasReady && readyId.current === summary?.id;
+                if (!current || (blockedInline && (!showsCurrent || (target && targetKey(target) === editing?.key)))) return;
                 if (top) setFocusBox({ box: top.id, at: Date.now() });
                 // What is drawn on top decides: a box or element opens its own editor there (see openOwner). A smaller
                 // click-to-edit node on top, such as a heading over a photo, opens its popover instead.

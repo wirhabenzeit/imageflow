@@ -244,6 +244,8 @@ try {
   await clickPage(w, second.x + second.width * .5, second.y + second.height * .5);
   for (let n = 0; n < 100 && await saved() !== 'Outside apply'; n++) await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(await saved(), 'Outside apply');
+  // The editor moves to the clicked occurrence once the book shows the applied text; the first one's editor closes.
+  await occurrence(1).and(artwork().locator('[data-if-editing]')).waitFor();
   await input().waitFor();
   assert.equal(await input().innerText(), 'Outside apply');
   await frameKey('Escape');
@@ -263,6 +265,7 @@ try {
   for (let n = 0; n < 100 && await saved() !== 'Gesture guard'; n++) await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(await saved(), 'Gesture guard');
   assert.equal(await w.evaluate(() => window.outerPresses), 0, 'the canvas receives no premature press');
+  await occurrence(1).and(artwork().locator('[data-if-editing]')).waitFor();
   await input().waitFor();
   await frameKey('Escape');
   await w.locator('.inline-text-editor').waitFor({ state: 'detached' });
