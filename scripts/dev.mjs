@@ -72,7 +72,9 @@ if (!keepLast) {
 let child;
 let restarting = false;
 function start() {
-  child = spawn(electron, [desktop], {
+  // `--user-data-dir=<folder>` runs the dev app with its own profile, beside an installed ImageFlow that holds the
+  // single-instance lock of the default one.
+  child = spawn(electron, [desktop, ...process.argv.filter((arg) => arg.startsWith('--user-data-dir='))], {
     stdio: 'inherit',
     env: { ...process.env, IMAGEFLOW_DEV_SERVER: devServer, IMAGEFLOW_DEV_STATE: devState, IMAGEFLOW_DEV_SAMPLE: join(root, 'sample') },
   });
