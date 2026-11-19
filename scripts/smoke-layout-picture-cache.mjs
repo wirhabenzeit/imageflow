@@ -111,10 +111,10 @@ try {
 
   // An actual map on page Y must survive editing a different page X in the sidebar's whole-book frame.
   const thumbnails = () => page.frameLocator('iframe.book-frame-thumbs[data-current]');
-  const thumbUrl = () => page.locator('iframe.book-frame-thumbs[data-current]').getAttribute('src');
+  const thumbUrl = () => page.locator('iframe.book-frame-thumbs[data-current]').getAttribute('data-revision');
   const nextThumbs = (old) => page.waitForFunction((old) => {
     const frame = document.querySelector('iframe.book-frame-thumbs[data-current][data-ready]');
-    return frame && frame.getAttribute('src') !== old;
+    return frame && frame.getAttribute('data-revision') !== old;
   }, old);
   const mapPage = '[data-spread="water"] [data-rendered]';
   const mapBook = JSON.parse(await readFile(manifest, 'utf8'));

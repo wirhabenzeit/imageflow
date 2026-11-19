@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { createRouteFixture } from './route-fixture.mjs';
 import { testBook, menuAction, clickPage } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
@@ -30,11 +31,11 @@ try {
   const saved = (text) => w.waitForFunction((text) => document.querySelector('.status')?.textContent === text, text);
   // Runs a change and waits for the book frame that renders its result.
   const rerendered = async (change) => {
-    const old = await w.evaluate(() => document.querySelector('iframe.book-frame-book[data-current]')?.getAttribute('src') ?? null);
+    const old = await w.evaluate(() => document.querySelector('iframe.book-frame-book[data-current]')?.getAttribute('data-revision') ?? null);
     await change();
     await w.waitForFunction((url) => {
       const current = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-      return current && current.getAttribute('src') !== url;
+      return current && current.getAttribute('data-revision') !== url;
     }, old, { timeout: 30000 });
   };
   const route = '[data-spread="road"] [data-element="route"]';
@@ -159,7 +160,7 @@ try {
   assert.equal(await readFile(join(project, afterImport.files[imported]), 'utf8'), await readFile(broken, 'utf8'));
   assert.equal(await trackLine(), 0);
   assert.match(await messages('warnings'), /Broken ride\.gpx is not valid GPX; the route is left out\./);
-  assert.equal((await status()).errors.length, 0);
+  assert.deepEqual((await status()).errors.map(({ code, message }) => code + ': ' + message), []);
   // The template reports it with issue(): a stable code on the route element, its file parameter and the file, once.
   const gpx = (await status()).warnings.filter(({ code }) => code === 'template:gpx-invalid');
   assert.deepEqual(gpx.map(({ spread, element, parameter, source, suggestion }) => ({ spread, element, parameter, source, hint: !!suggestion })),
@@ -201,6 +202,8 @@ try {
   }
 
   // A file of a type the parameter does not accept, registered by hand, is reported rather than parsed.
+  // The book may show an Undo before its save has finished; editing project.json from outside meanwhile is a conflict.
+  for (let i = 0; i < 200 && existsSync(join(project, '.imageflow/persistence/pending-save.json')); i++) await new Promise((resolve) => setTimeout(resolve, 25));
   const data = await read();
   data.files.notes = 'files/notes.txt';
   data.spreads.find(({ id }) => id === 'road').elements.route.params.track = 'notes';

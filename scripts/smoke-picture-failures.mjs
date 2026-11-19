@@ -63,14 +63,14 @@ try {
   await pictures().nth(1).and(bookFrame().locator('[data-rendered="ready"]')).waitFor({ timeout: 60000 });
   await pictures().nth(0).and(bookFrame().locator('[data-rendered="ready"]')).waitFor({ timeout: 60000 });
 
-  const before = await page.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  const before = await page.locator('iframe.book-frame-book[data-current]').getAttribute('data-revision');
   const changed = JSON.parse(await readFile(manifest, 'utf8'));
   const arriving = changed.spreads.find(({ id }) => id === 'arriving');
   arriving.elements = { ...arriving.elements, map: { ...arriving.elements?.map, params: { ...arriving.elements?.map?.params, longitude: 10 } } };
   await writeFile(manifest, JSON.stringify(changed));
   await page.waitForFunction((before) => {
     const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-    return frame && frame.getAttribute('src') !== before;
+    return frame && frame.getAttribute('data-revision') !== before;
   }, before);
   await bookFrame().locator('[data-spread="arriving"] .if-rendered-image[data-rendered="failed"]').nth(1).waitFor({ timeout: 60000 });
 

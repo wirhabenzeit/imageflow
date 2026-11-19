@@ -197,7 +197,8 @@ export async function undoBook(page, direction = 'undo', ready = true) {
   if (next === before) throw new Error('Book Undo did not complete');
   if (ready) await waitForProject(page, (current) => page.evaluate((id) => {
     const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-    return !!frame && new URL(frame.src).pathname.endsWith('/' + id);
+    // The revision a frame shows: its own, or a newer one a reused frame rendered in place (#210).
+    return !!frame && frame.dataset.revision === id;
   }, current.id));
 }
 

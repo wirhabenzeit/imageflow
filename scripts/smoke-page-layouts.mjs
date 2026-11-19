@@ -66,11 +66,11 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   const inspector = w.getByRole('complementary', { name: 'Inspector', exact: true });
   const readBook = async () => JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
   const rerendered = async (action) => {
-    const before = await w.locator(ready).getAttribute('src');
+    const before = await w.locator(ready).getAttribute('data-revision');
     await action();
     await w.waitForFunction((before) => {
       const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-      return frame && frame.getAttribute('src') !== before;
+      return frame && frame.getAttribute('data-revision') !== before;
     }, before);
   };
   const choose = async (name) => rerendered(() => inspector.getByRole('radio', { name, exact: true }).click());
@@ -147,13 +147,13 @@ export default defineTemplate({ id: 'page-smoke', version: '1', contract: 1,
   await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await w.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   const input = w.locator('.edit-popover').getByRole('textbox', { name: 'Heading', exact: true });
-  const beforeSave = await w.locator(ready).getAttribute('src');
+  const beforeSave = await w.locator(ready).getAttribute('data-revision');
   await input.fill('Edited right');
   await input.press('Enter');
   await w.keyboard.press('Escape');
   await w.waitForFunction((before) => {
     const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-    return frame && frame.getAttribute('src') !== before;
+    return frame && frame.getAttribute('data-revision') !== before;
   }, beforeSave);
   const saved = JSON.parse(await readFile(join(folder, 'project.json'), 'utf8'));
   assert.equal(saved.spreads[0].pages.right.params.heading, 'Edited right');

@@ -315,7 +315,7 @@ try {
   await w.locator('.edit-popover').press('Escape');
   console.log('reopen and keyboard panel route passed');
 
-  const id = new URL(await w.locator(ready).getAttribute('src')).pathname.split('/').at(-1);
+  const id = await w.locator(ready).getAttribute('data-revision');
   const capture = () => w.evaluate(({ id, spread }) => window.imageflow.checkBook(id, { preview: { target: { spread }, maxEdge: 600 } }), { id, spread: firstId });
   console.log('capturing confirmed artwork');
   const confirmedImage = await capture();

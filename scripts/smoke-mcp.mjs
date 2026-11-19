@@ -290,16 +290,16 @@ try {
   assert.ok(typed.diagnostics.some(d=>d.code==='typescript-error' && d.details.typescriptCode===2322 && d.location.path==='template/index.tsx'));
   assert.equal(typed.image.detail.box,'hero');
   assert.ok(typed.typecheck.files.includes('template/index.tsx'));
-  const beforeTypeRestore=await window.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
+  const beforeTypeRestore=await window.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('data-revision');
   await writeFile(entry,authored);
   await window.waitForFunction(previous=>{
     const frame=document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-    return frame && frame.getAttribute('src')!==previous;
+    return frame && frame.getAttribute('data-revision')!==previous;
   },beforeTypeRestore);
   await ready();
 
   // Compiler failure is actionable, preserves the app's last image, and recovers through check_book.
-  const shown=await window.locator('iframe.book-frame-book[data-ready]').first().getAttribute('src');
+  const shown=await window.locator('iframe.book-frame-book[data-ready]').first().getAttribute('data-revision');
   await writeFile(entry,authored+'\nconst broken = ;');
   const broken=await call('check_book',{project,preview:{target:{spread:'first'},maxEdge:300}});
   assert.equal(broken.response.isError,true);
@@ -307,7 +307,7 @@ try {
   assert.equal(broken.data.checks.bundle,'failed');
   assert.ok(broken.data.diagnostics[0].location.line);
   await window.locator('.status-error').waitFor();
-  assert.equal(await window.locator('iframe.book-frame-book[data-ready]').first().getAttribute('src'),shown);
+  assert.equal(await window.locator('iframe.book-frame-book[data-ready]').first().getAttribute('data-revision'),shown);
   await writeFile(entry,authored);
   await good('check_book',{project,preview:{target:{spread:'first'},maxEdge:300}});
   await ready();
@@ -351,12 +351,12 @@ try {
   await undoBook(window, 'redo');
   assert.equal(await chapterHeading(),'Recovered');
   await ready();
-  const beforeRestore=await window.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('src');
+  const beforeRestore=await window.locator('iframe.book-frame-book[data-current][data-ready]').getAttribute('data-revision');
   await writeFile(entry,authored);
   // Let the app adopt the restored template before the next step reads inputs.
   await window.waitForFunction(previous=>{
     const frame=document.querySelector('iframe.book-frame-book[data-current][data-ready]');
-    return frame && frame.getAttribute('src')!==previous;
+    return frame && frame.getAttribute('data-revision')!==previous;
   },beforeRestore);
   await ready();
   await good('check_book',{project});
@@ -411,10 +411,10 @@ try {
   await window.waitForFunction(()=>document.querySelector('.status')?.textContent?.includes('1 import bundled into template/vendor'));
   await writeFile(entry,plainSource);
   await ready();
-  const priorFrame=await window.locator('iframe.book-frame-book[data-current]').getAttribute('src');
+  const priorFrame=await window.locator('iframe.book-frame-book[data-current]').getAttribute('data-revision');
   await menuAction(app, 'Open project…');
   await ready();
-  assert.equal(await window.locator('iframe.book-frame-book[data-current]').getAttribute('src'), priorFrame);
+  assert.equal(await window.locator('iframe.book-frame-book[data-current]').getAttribute('data-revision'), priorFrame);
   assert.equal((await good('list_projects')).projects[0].project, project);
   await client.close();
   client = undefined;

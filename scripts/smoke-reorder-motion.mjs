@@ -32,9 +32,9 @@ try {
   const initial = await labels();
   await page.locator('.spread-thumb').nth(1).click();
   async function move(action) {
-    const before = await page.locator('.book-frame-book[data-current]').getAttribute('src');
+    const before = await page.locator('.book-frame-book[data-current]').getAttribute('data-revision');
     await menuAction(app, action);
-    await page.waitForFunction(before => document.querySelector('.book-frame-book[data-current]')?.getAttribute('src') !== before, before);
+    await page.waitForFunction(before => document.querySelector('.book-frame-book[data-current]')?.getAttribute('data-revision') !== before, before);
     await ready();
     await page.waitForFunction(() => !document.getAnimations().some(a => a.effect?.target?.matches('[data-canvas-spread]')));
     const host = await labels();
@@ -65,9 +65,9 @@ try {
   await page.evaluate(() => { window.reorderSamples = []; });
   await move('Undo Book Edit');
   assert.ok((await page.evaluate(() => window.reorderSamples)).every(sample => !sample.motions.length), 'Reduce Motion suppresses sliding');
-  const beforeDrag = await page.locator('.book-frame-book[data-current]').getAttribute('src');
+  const beforeDrag = await page.locator('.book-frame-book[data-current]').getAttribute('data-revision');
   await page.locator('.spread-thumb').nth(1).dragTo(page.locator('.spread-thumb').nth(3));
-  await page.waitForFunction(before => document.querySelector('.book-frame-book[data-current]')?.getAttribute('src') !== before, beforeDrag);
+  await page.waitForFunction(before => document.querySelector('.book-frame-book[data-current]')?.getAttribute('data-revision') !== before, beforeDrag);
   await ready();
   await move('Undo Book Edit');
   console.log('Canvas reorder, synchronized replacement, Undo/Redo, rapid moves and Reduce Motion passed.');
