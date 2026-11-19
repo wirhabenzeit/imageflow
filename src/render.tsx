@@ -1721,9 +1721,12 @@ export async function startRender(root: HTMLElement) {
     let renderError: unknown;
     let laidOutBook: ReturnType<typeof layoutBook> | undefined;
     let reportPictures: (() => void) | undefined;
+    let photoLoaders = 0;
     // The nodes text flow put into each Markdown box, so a revision that no longer flows text into a box removes them.
     // Text flow writes them outside React, which keeps only its own placeholder in the box.
-    const flowed = new Map<HTMLElement, Node[]>();
+    // Its column styles too: text flow sets them on the box, over what the template set, which they are restored to.
+    type Flowed = { nodes: Node[]; style: { columnCount: string; columnFill: string; overflow: string } };
+    const flowed = new Map<HTMLElement, Flowed>();
     const renderRevision = async (book: RenderProject) => {
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
@@ -1741,6 +1744,9 @@ export async function startRender(root: HTMLElement) {
 
     renderError = undefined;
     laidOutBook?.hold();
+    // The previous revision's photo loader would measure this one's sheets while they are rendered and laid out, and
+    // drop or restart photos the decode step below is waiting for. A new loader starts after the layout step.
+    onScreenChange = undefined; photoLoaders++;
     const layoutFailures = new Map<string, Failure>();
     react ??= createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
     flushSync(() => react!.render(visible.map(({ spread, i }) => {
@@ -1779,7 +1785,14 @@ export async function startRender(root: HTMLElement) {
     // The editor does not wait for drawn pictures restored from its cache, such as a map's shaded relief: their boxes
     // have their size already, and the browser decodes them as they come into view. Decoding every one of a long
     // book's large relief pictures held each edit back by a third of a second.
-    const images = present ? [] : decodable(root).filter((image) => !(edit && image.closest('.if-rendered-image')));
+    // A frame that renders in place keeps the photos it loaded, under an earlier render session's URL. One that has not
+    // finished loading may never finish once that session is gone, so it loads from this revision's session instead.
+    if (laidOutBook) for (const image of root.querySelectorAll<HTMLImageElement>('img[data-src][src]')) {
+      if ((!image.complete || !image.naturalWidth) && image.getAttribute('src') !== image.dataset.src) image.src = image.dataset.src!;
+    }
+    // Lazy photos are the photo loader's, after the layout step. A new frame has loaded none of them by now; a frame
+    // that renders in place has, and must not wait for them all again (a hidden frame may never finish decoding one).
+    const images = present ? [] : decodable(root).filter((image) => !(edit && image.closest('.if-rendered-image')) && !(lazy && image.hasAttribute('data-src')));
     const decoded = await settle(images);
     step('decode');
     const message = (text: string): Issue => ({ message: text });
@@ -1927,7 +1940,7 @@ export async function startRender(root: HTMLElement) {
     if (layoutFailures.size) throw new LayoutRenderError(layoutFailures);
     const validated = layouts as Map<string, NonNullable<ReturnType<typeof validateSpread>>>;
     step('validate');
-    const flowedNow = new Map<HTMLElement, Node[]>();
+    const flowedNow = new Map<HTMLElement, Flowed>();
     for (const [source, chain] of activeChains) {
       const first = chain[0];
       if (book.texts[source] === undefined) {
@@ -1943,8 +1956,10 @@ export async function startRender(root: HTMLElement) {
           suggestion: 'Fix the YAML between the opening and closing --- lines of ' + path + '. Until then the layout shows it without its header fields.' });
       }
       const boxes = chain.map(({ spread, page, box }) => validated.get(spread)!.boxes.get((page ? page + ':' : '') + box)!);
+      const own = new Map(boxes.map((box) => [box, flowed.get(box)?.style ??
+        { columnCount: box.style.columnCount, columnFill: box.style.columnFill, overflow: box.style.overflow }]));
       const result = flow.run(markdownToHtml(book.texts[source]), boxes, 'columns');
-      for (const box of boxes) flowedNow.set(box, [...box.childNodes]);
+      for (const box of boxes) flowedNow.set(box, { nodes: [...box.childNodes], style: own.get(box)! });
       const overflow = result.overflowText.trim();
       if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
         const last = chain.at(-1)!;
@@ -1968,9 +1983,12 @@ export async function startRender(root: HTMLElement) {
         });
       }
     }
-    for (const [box, nodes] of flowed) if (!flowedNow.has(box)) for (const node of nodes) if (node.parentNode === box) box.removeChild(node);
+    for (const [box, { nodes, style }] of flowed) if (!flowedNow.has(box)) {
+      for (const node of nodes) if (node.parentNode === box) box.removeChild(node);
+      Object.assign(box.style, style);
+    }
     flowed.clear();
-    for (const [box, nodes] of flowedNow) flowed.set(box, nodes);
+    for (const [box, entry] of flowedNow) flowed.set(box, entry);
     step('flow');
     const minimum = template.format.output.minimumTextSize;
     for (const [spread, { sheet }] of present ? [] : validated) {
@@ -2042,7 +2060,8 @@ export async function startRender(root: HTMLElement) {
     else if (lazy) {
       const load = photoLoader(root, () => onScreen, book.photoRevisions);
       let timer: ReturnType<typeof setTimeout> | undefined;
-      onScreenChange = () => { timer ??= setTimeout(() => { timer = undefined; load(); }, 16); };
+      const loader = ++photoLoaders;
+      onScreenChange = () => { timer ??= setTimeout(() => { timer = undefined; if (loader === photoLoaders) load(); }, 16); };
       // Wait for photos near the viewport so replacements show their artwork as soon as they swap in.
       await Promise.allSettled(load().map((img) => img.decode()));
     }

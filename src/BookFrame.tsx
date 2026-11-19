@@ -254,7 +254,9 @@ export function BookFrame({ busy = false, project, view, query = '', title, onGe
     const frame = frames[id];
     return <iframe key={id} title={title} tabIndex={-1}
       className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending')}
-      data-current={id === target || (warm && id === shown) || undefined} data-revision={frame?.revision ?? projectOf(id)} data-ready={frame?.status?.state === 'ready' && frame.published ? '' : undefined}
+      data-current={id === target || (warm && id === shown) || undefined} data-revision={frame?.revision ?? projectOf(id)}
+      // A reused frame asked for a newer revision is ready again once it shows it, as a new frame would be.
+      data-ready={frame?.status?.state === 'ready' && frame.published && !(warm && id === shown && revisionOf(id) !== project) ? '' : undefined}
       aria-hidden={id !== shown || undefined}
       style={{ height: frame?.geometry?.height }}
       ref={(element) => {
