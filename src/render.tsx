@@ -589,6 +589,7 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
     // A warm frame rendered a newer revision into the same root: measure its sheets.
     update(next: { spread: string; sheet: HTMLElement }[]) {
       sheets = next;
+      root.classList.add('if-book');
       elements.disconnect();
       layout.disconnect();
       observe();
@@ -1722,7 +1723,7 @@ export async function startRender(root: HTMLElement) {
     const where = spreads.map((spread, i) => {
       return pagesText(sequence.spreads[i].page) + ' · ' + (sheetLayoutLabel(template.spreads, spread) ?? spread.definition);
     });
-    if (edit) root.className = 'if-preview';
+    if (edit) root.classList.add('if-preview');
     const lookups = new Map<string, AnchorLookup>();
     const index = { ...bookIndex(book, template, sequence), lookups };
     step('index');
@@ -1899,6 +1900,9 @@ export async function startRender(root: HTMLElement) {
         details: { family }, suggestion: 'Check the @font-face src path in the template CSS and that the font file exists inside template/.' });
     }
     step('findings');
+    // A warm frame measures its sheets unscaled, as a new frame does: text flow and the checks below compare sizes in
+    // pixels. Nothing from here to the layout step waits, so the unscaled sheets are never painted.
+    if (laidOutBook) root.classList.remove('if-book');
     const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
     const layouts = new Map(visible.map(({ spread, i }, n) => {
       try { return [spread.id, validateSpread(containers[n], spread, template, format, where[i], warnings, errors)] as const; }
