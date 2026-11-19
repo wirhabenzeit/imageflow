@@ -19,6 +19,8 @@ import { editorURL } from './desktop';
 import { bookLayout } from './desktop';
 import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
 import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, spanRequiredAt, toMillimeters } from './format';
+import { coverLayoutsFor, resolveCover } from './cover';
+import type { CoverResolution } from './cover';
 import { animateReorder } from './reorder-motion';
 import type { ReorderOffset } from './reorder-motion';
 import type { PrintSide, ResolvedFormat } from './format';
@@ -33,7 +35,7 @@ import type { Parameters } from './parameters';
 import { flow } from './text-flow';
 import { declarationWarnings, placeControlWarnings } from './declaration-check';
 import type { Schema } from './declaration-check';
-import { bookIndex, chooseFormat, currentPhotoRenderFailures, watchPhotoRenderFailures, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
+import { bookIndex, chooseFormat, CoverArtwork, currentPhotoRenderFailures, watchPhotoRenderFailures, editorContext, normalizeTemplate, photoNearEvent, refreshedEditorContext, setLivePlacement, withEditorDraft, withEditorGeometry, runtime, setTemplateAssets, setTemplateFiles, SpreadError, SpreadView, templateInfo, templateIssueSchema, templateSchema } from './template';
 import type { AnchorLookup, PhotoRenderFailure, EditorContext, EditorPresentation } from './template';
 import type { FlowPosition, Template } from './template';
 import { resolveEditPath } from './editing';
@@ -47,7 +49,7 @@ import { readEdit } from './editing';
 import { artworkTarget, parsePreviewRequest, PreviewError } from './preview';
 import { previewAspectMismatch, trimAspect } from './template-preview';
 import type { PreviewFileReport } from './template-preview';
-import type { PreviewMetadata, PagePreviewMetadata } from './preview';
+import type { CoverPreviewMetadata, PreviewMetadata, PagePreviewMetadata } from './preview';
 import { inspectionSchema } from './inspection';
 import type { ElementInspection, ElementMeasurement } from './inspection';
 import { contactSheetLayout, fixtureBannerHeight } from './authoring-artwork';
@@ -85,6 +87,18 @@ function loadStyles(url?: string) {
 // Converts a measured CSS pixel distance to millimetres, rounded for reporting.
 const reportedMm = (pixels: number, mmPerPixel: number) => Math.round(pixels * mmPerPixel * 10) / 10;
 const ptPerMm = 72 / 25.4;
+
+function photoResolutionIssue(node: HTMLElement, minimum: number | undefined, mmPerPixel: number, label: string, source?: string): Issue | undefined {
+  const ppi = Number(node.dataset.ppi);
+  if (minimum === undefined || !Number.isFinite(ppi) || ppi >= minimum) return;
+  const bounds = node.getBoundingClientRect();
+  return {
+    message: label + ' is ' + Math.round(ppi) + ' ppi (minimum ' + minimum + ').', code: 'photo-resolution-low', source,
+    details: { ppi: Math.round(ppi), minimumPpi: minimum,
+      boxWidthMm: reportedMm(bounds.width, mmPerPixel), boxHeightMm: reportedMm(bounds.height, mmPerPixel) },
+    suggestion: 'Zoom the crop out (set_crop with a smaller zoom), assign a higher-resolution photo, or switch to a layout with a smaller box.',
+  };
+}
 
 function validateSpread(container: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat, where: string,
   warnings: Issue[], errors: Issue[]) {
@@ -203,22 +217,14 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
       if (!box.clientWidth || !box.clientHeight) throw new SpreadError(where + ' · ' + name + ' has no area.', spread.id, { page });
       boxes.set(page ? page + ':' + id : id, box);
       const assignment = scopeState(spread, page)?.boxes[id];
-      const ppi = Number(box.dataset.ppi);
       if (assignment?.photo && box.hasAttribute('data-empty')) {
         errors.push(issue(layout.boxes[id].label + ' is missing photo ' + assignment.photo + '.', {
           code: 'photo-missing', box: id, ...at, source: assignment.photo,
           suggestion: 'Restore the original file, import it again with import_sources, or assign another photo to box ' + id + '.',
         }));
       }
-      if (resolution && Number.isFinite(ppi) && ppi < resolution.minimum) {
-        errors.push(issue(layout.boxes[id].label + ' is ' + Math.round(ppi) + ' ppi (minimum ' + resolution.minimum + ').', {
-          code: 'photo-resolution-low', box: id, ...at, source: assignment?.photo,
-          details: { ppi: Math.round(ppi), minimumPpi: resolution.minimum,
-            boxWidthMm: reportedMm(box.getBoundingClientRect().width, mmPerPixel),
-            boxHeightMm: reportedMm(box.getBoundingClientRect().height, mmPerPixel) },
-          suggestion: 'Zoom the crop out (set_crop with a smaller zoom), assign a higher-resolution photo, or switch to a layout with a smaller box.',
-        }));
-      }
+      const finding = photoResolutionIssue(box, resolution?.minimum, mmPerPixel, layout.boxes[id].label, assignment?.photo);
+      if (finding) errors.push(issue(finding.message, { ...finding, box: id, ...at }));
     }
     const rect = box.getBoundingClientRect();
     const overshoot = {
@@ -241,37 +247,50 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
   return { sheet, boxes };
 }
 
-function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: number | undefined) {
+function typographyIssues(sheet: HTMLElement, sheetWidth: number, minimum: number | undefined,
+  safeAt: (centerX: number) => Rect, location: Pick<Issue, 'spread' | 'cover' | 'where'>, avoid: readonly Rect[] = []) {
   const bounds = sheet.getBoundingClientRect();
-  const mmPerPixel = format.spreadWidth / bounds.width;
-  const { bleed, safe, trim } = format;
-  const pages = sheetPages(format);
+  const mmPerPixel = sheetWidth / bounds.width;
   const text = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
   // The smallest text below the minimum and the largest safe-area overshoot, each with the box or element it is in.
   let small: { sizeMm: number; owner: ReturnType<typeof ownerOf> } | undefined;
   let outside: { overshootMm: number; owner: ReturnType<typeof ownerOf> } | undefined;
+  let nearFold: ReturnType<typeof ownerOf> | undefined;
   for (let node = text.nextNode(); node; node = text.nextNode()) {
     const parent = node.parentElement;
-    if (!node.textContent?.trim() || !parent || parent.closest('.if-placeholder, svg, [data-decorative]')) continue;
-    const sizeMm = parseFloat(getComputedStyle(parent).fontSize) * mmPerPixel;
+    if (!node.textContent?.trim() || !parent || parent.closest('.if-placeholder, .if-text-placeholder, svg, [data-decorative]')) continue;
+    const sizeMm = parseFloat(getComputedStyle(parent).fontSize) * 25.4 / 96;
     if (minimum && sizeMm < minimum && (!small || sizeMm < small.sizeMm)) small = { sizeMm, owner: ownerOf(parent) };
     range.selectNodeContents(node);
     for (const rect of range.getClientRects()) {
       if (!rect.width || !rect.height) continue;
-      // x from the sheet's left bleed edge, y from the top trim edge; the text's centre picks its page.
       const x = (rect.left - bounds.left) * mmPerPixel;
-      const y = (rect.top - bounds.top) * mmPerPixel - bleed.top;
+      const y = (rect.top - bounds.top) * mmPerPixel;
       const w = rect.width * mmPerPixel;
       const h = rect.height * mmPerPixel;
-      const page = pages.find(({ trimX }, i) => i === pages.length - 1 || x + w / 2 < trimX + trim.width)!;
-      const leftSafe = page.trimX + page.safeLeft;
-      const rightSafe = page.trimX + trim.width - page.safeRight;
-      const overshootMm = Math.max(leftSafe - x, x + w - rightSafe, safe.top - y, y + h - (trim.height - safe.bottom));
+      const safe = safeAt(x + w / 2);
+      const overshootMm = Math.max(safe.x - x, x + w - safe.x - safe.width, safe.y - y, y + h - safe.y - safe.height);
       if (overshootMm > .2 && (!outside || overshootMm > outside.overshootMm)) outside = { overshootMm, owner: ownerOf(parent) };
+      if (!nearFold && avoid.some((area) => x < area.x + area.width && x + w > area.x && y < area.y + area.height && y + h > area.y)) {
+        nearFold = ownerOf(parent);
+      }
     }
   }
-  return { small, outside };
+  const issues: Issue[] = [];
+  if (small && minimum) issues.push({ ...location, message: 'Text is smaller than the format minimum.', code: 'text-too-small', ...small.owner,
+    details: { sizePt: Math.round(small.sizeMm * ptPerMm * 10) / 10, minimumPt: Math.round(minimum * ptPerMm * 10) / 10 },
+    suggestion: 'Increase the font size in the template CSS or the size parameter of this box or element.' });
+  if (outside) issues.push({ ...location, message: 'Text extends outside the safe area.', code: 'text-outside-safe-area', ...outside.owner,
+    details: { overshootMm: Math.round(outside.overshootMm * 10) / 10 },
+    suggestion: 'Move or inset this text in the template CSS so it stays inside the format safe area.' });
+  if (nearFold) issues.push({ ...location, message: 'Some cover text crosses a fold avoidance area.', code: 'cover-text-near-fold', ...nearFold });
+  return issues;
+}
+
+function printPictures(mode: 'check' | 'preview' | 'export', target = 300) {
+  return { mode, pixelRatio: mode === 'check' ? .5 : mode === 'preview' ? 1.5 : target / 96,
+    concurrency: mode === 'export' ? 1 : 2, timeoutMs: pictureTimeoutMs[mode] };
 }
 
 /**
@@ -839,10 +858,17 @@ function makePrintPages(root: HTMLElement, sheets: HTMLElement[], sequence: Retu
   document.body.append(pages);
 }
 
-function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: ResolvedFormat) {
+function measuredBounds(node: HTMLElement, sheet: HTMLElement, format: Pick<ResolvedFormat, 'spreadWidth'>) {
   const outer = sheet.getBoundingClientRect(), rect = node.getBoundingClientRect();
   const scale = format.spreadWidth / outer.width;
   return { x: (rect.left - outer.left) * scale, y: (rect.top - outer.top) * scale, width: rect.width * scale, height: rect.height * scale };
+}
+
+function typographyOf(node: HTMLElement) {
+  const style = getComputedStyle(node);
+  const points = (value: string) => Math.round(parseFloat(value) * 72 / 96 * 100) / 100;
+  return { fontFamily: style.fontFamily, fontSizePt: points(style.fontSize),
+    lineHeightPt: style.lineHeight === 'normal' ? null : points(style.lineHeight), fontWeight: style.fontWeight, color: style.color };
 }
 
 function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat,
@@ -857,12 +883,9 @@ function inspectElements(sheet: HTMLElement, spread: SpreadState, template: Temp
     const box = declared === 'box', kind = box ? definition.boxes[id].type : 'element';
     const prefix = (box ? 'boxes.' : 'elements.') + id + '.';
     const parameters = box ? definition.boxes[id].parameters : definition.elements[id].parameters;
-    const style = getComputedStyle(node);
-    const points = (value: string) => Math.round(parseFloat(value) * 72 / 96 * 100) / 100;
     const source = box ? state.boxes[id]?.photo ?? state.boxes[id]?.text : undefined;
     return { spread: spread.id, id, ...onPage(page), kind, boundsMm: measuredBounds(node, sheet, format), upright: upright(node, sheet),
-      typography: { fontFamily: style.fontFamily, fontSizePt: points(style.fontSize),
-        lineHeightPt: style.lineHeight === 'normal' ? null : points(style.lineHeight), fontWeight: style.fontWeight, color: style.color },
+      typography: typographyOf(node),
       editPaths: Object.keys(parameters).map((key) => prefix + key), ...(source ? { source } : {}) };
   });
   return { spread: spread.id, coordinateSpace: 'sheet-bleed-mm', items, total: nodes.length,
@@ -878,7 +901,7 @@ const overlayStyle = (rect: MmRect, extra: Partial<CSSStyleDeclaration>) => ({
 /** Draws requested authoring overlays onto a sheet after all checks and measurements: trim and safe-area guides, and
  * outlined, labelled boxes and elements. Coordinates are millimetres from the sheet's outer bleed corner, so the
  * overlays scale and crop with the artwork. */
-function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, labels }: { guides: boolean; labels: boolean }) {
+function annotationLayer(sheet: HTMLElement) {
   const layer = document.createElement('div');
   Object.assign(layer.style, { position: 'absolute', inset: '0', pointerEvents: 'none', zIndex: '2147483647' });
   const add = (rect: MmRect, extra: Partial<CSSStyleDeclaration>, text?: string) => {
@@ -893,6 +916,12 @@ function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, lab
     }
     layer.append(node);
   };
+  sheet.append(layer);
+  return add;
+}
+
+function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, labels }: { guides: boolean; labels: boolean }) {
+  const add = annotationLayer(sheet);
   if (labels) {
     for (const found of declaredNodes(sheet)) {
       add(measuredBounds(found.node, sheet, format), { border: '0.35mm solid #ff6a00' }, declaredName(found));
@@ -906,7 +935,6 @@ function annotateSheet(sheet: HTMLElement, format: ResolvedFormat, { guides, lab
         height: trim.height - safe.top - safe.bottom }, { border: '0.3mm dashed #00a3e0' });
     }
   }
-  sheet.append(layer);
 }
 
 // The flowed book stays laid out at its size while the artwork shows its copy. Hiding it with display:none would
@@ -936,6 +964,7 @@ function paintSentinel(sentinel: Sentinel, top: number) {
 
 function renderArtwork(root: HTMLElement, sheets: HTMLElement[], spreads: SpreadState[], sequence: ReturnType<typeof pageSequence>,
   format: ResolvedFormat, artwork: ReturnType<typeof parsePreviewRequest>, fixture?: FixtureMarking) {
+  if ('cover' in artwork.target) throw new PreviewError('invalid-preview-request', 'Use the cover renderer for an exterior cover preview.');
   const { bounds, maxEdge, guides, labels } = artwork;
   const overlays = { ...(guides ? { guides: true as const } : {}), ...(labels ? { labels: true as const } : {}) };
   const annotated = new Set<number>();
@@ -1549,6 +1578,198 @@ function renderLayoutPicker(root: HTMLElement, book: RenderProject, template: Te
   flushSync(() => react.render(React.createElement(Host)));
 }
 
+function coverArtworkPreview(root: HTMLElement, sheet: HTMLElement, cover: Exclude<CoverResolution, { status: 'unavailable' }>,
+  artwork: ReturnType<typeof parsePreviewRequest>, query: URLSearchParams) {
+  const { target, bounds, guides, labels, maxEdge } = artwork;
+  const { geometry } = cover;
+  const relative = (rect: Rect) => ({ ...rect, x: rect.x - geometry.sheet.x, y: rect.y - geometry.sheet.y });
+  let crop = relative(bounds === 'trim' ? geometry.trim : geometry.sheet);
+  let detail: CoverPreviewMetadata['detail'];
+  if ('cover' in target && (target.box || target.element)) {
+    const owner = target.box ? { box: target.box } : { element: target.element! };
+    const node = findDeclared(sheet, owner)[0]?.node;
+    if (!node) throw new PreviewError('preview-target-not-found', 'The requested box or element is not drawn on the cover.');
+    const rect = measuredBounds(node, sheet, { spreadWidth: geometry.sheet.width });
+    const padding = target.paddingMm ?? 2;
+    const x = Math.max(crop.x, rect.x - padding), y = Math.max(crop.y, rect.y - padding);
+    const width = Math.min(crop.x + crop.width, rect.x + rect.width + padding) - x;
+    const height = Math.min(crop.y + crop.height, rect.y + rect.height + padding) - y;
+    if (width <= 0 || height <= 0) throw new PreviewError('preview-target-not-found', 'The requested cover artwork has no visible area.');
+    crop = { x, y, width, height };
+    detail = { ...owner, xMm: x, yMm: y };
+  }
+  if (guides || labels) {
+    const add = annotationLayer(sheet);
+    if (guides) {
+      add(relative(geometry.trim), { border: '0.3mm solid #e6007e' });
+      for (const area of Object.values(geometry.safe)) if (area) add(relative(area), { border: '0.3mm dashed #00a3e0' });
+      for (const x of geometry.folds) add(relative({ x, y: geometry.sheet.y, width: .2, height: geometry.sheet.height }), { background: '#e6007e' });
+    }
+    if (labels) for (const node of declaredNodes(sheet)) {
+      add(measuredBounds(node.node, sheet, { spreadWidth: geometry.sheet.width }), { border: '0.35mm solid #ff6a00' }, declaredName(node));
+    }
+  }
+  const scale = maxEdge / Math.max(crop.width, crop.height);
+  const width = Math.max(1, Math.round(crop.width * scale)), height = Math.max(1, Math.round(crop.height * scale));
+  const frame = croppedSheet(sheet, { x: crop.x, y: crop.y, widthMm: crop.width, heightMm: crop.height }, { width, height });
+  const marker = query.get('sentinel');
+  const sentinel = marker && parseSentinel(marker);
+  if (sentinel) {
+    frame.dataset.previewArtwork = marker;
+    paintSentinel(sentinel, height);
+  }
+  hideArtworkSource(root);
+  document.body.append(frame);
+  const metadata: CoverPreviewMetadata = { cover: true, width, height, widthMm: crop.width, heightMm: crop.height, bounds,
+    interiorPages: cover.interiorPages, ...(cover.status === 'provisional' ? { previewPages: cover.previewPages } : {}),
+    ...(detail ? { detail } : {}), ...(guides ? { guides: true } : {}), ...(labels ? { labels: true } : {}) };
+  window.imageflowPreview = { state: 'ready', metadata };
+}
+
+async function renderPhysicalCover(root: HTMLElement, book: RenderProject, template: ReturnType<typeof chooseFormat>,
+  info: TemplateInfo, sequence: ReturnType<typeof pageSequence>, query: URLSearchParams, renderIssues: () => string[]) {
+  const formats = template.coverFormats;
+  const coverFormat = !template.unknownChoice && formats && Object.hasOwn(formats, template.formatId) ? formats[template.formatId] : undefined;
+  const interiorPages = book.fixture?.coverPages ?? sequence.count;
+  const cover = resolveCover({ interior: template.format, cover: coverFormat }, interiorPages);
+  if (cover.status === 'unavailable') throw new PreviewError('cover-unavailable', 'This format does not have an exterior cover.');
+  const state = book.project.cover;
+  const candidates = coverLayoutsFor(template.coverLayouts, template.formatId);
+  const layout = state && Object.hasOwn(candidates, state.definition) ? candidates[state.definition] : undefined;
+  const { geometry } = cover;
+  const edit = book.mode === 'edit';
+  const errors: Issue[] = [], warnings: Issue[] = [];
+  const issue = (message: string, code: string, box?: string): Issue => ({ message, code, cover: true, where: 'Cover', box });
+  if (cover.status === 'provisional') {
+    errors.push(issue('The cover needs a supported interior page count. The preview uses ' + cover.previewPages + ' pages.', 'cover-page-count'));
+  } else if (book.fixture?.coverPages === undefined && sequence.issues.length) {
+    errors.push(issue('Fix the interior page sequence before exporting the cover. ' + sequence.issues[0], 'cover-page-sequence'));
+  }
+  if (!layout) errors.push(issue('Choose a cover layout for this format.', 'cover-layout-unavailable'));
+  const printing = !edit && query.get('view') === 'cover';
+  const artwork = query.get('view') === 'cover-artwork' ? parsePreviewRequest(JSON.parse(query.get('request') ?? 'null')) : undefined;
+  const inspect = query.has('inspect') ? inspectionSchema.parse(JSON.parse(query.get('inspect')!)) : undefined;
+  if (printing && errors.length) throw new Error(errors[0].message);
+  if (!layout && (artwork || inspect)) throw new PreviewError('preview-target-not-found', 'Choose a cover layout before requesting its artwork.');
+
+  const width = cssMM(geometry.sheet.width), height = cssMM(geometry.sheet.height);
+  root.className = 'if-cover-root';
+  if (edit) {
+    root.classList.add('if-preview');
+    const fit = () => {
+      root.style.transform = 'scale(' + Math.min(innerWidth / (geometry.sheet.width * 96 / 25.4), innerHeight / (geometry.sheet.height * 96 / 25.4)) + ')';
+    };
+    fit();
+    window.addEventListener('resize', fit);
+  } else if (printing) {
+    const style = document.createElement('style');
+    style.textContent = '@page { size: ' + width + ' ' + height + '; margin: 0; }';
+    document.head.append(style);
+  }
+  configureRenderedImages(edit ? { ...printPictures('preview'), pixelRatio: Math.min(window.devicePixelRatio || 1, 2) }
+    : printPictures(printing ? 'export' : artwork ? 'preview' : 'check', geometry.output.resolution?.target));
+  let renderError: unknown;
+  const reactRoot = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
+  flushSync(() => reactRoot.render(
+    <div className="if-cover-sheet" style={{ width, height }}>
+      <div className="if-cover-trim" style={{ left: cssMM(-geometry.sheet.x), top: cssMM(-geometry.sheet.y),
+        width: cssMM(geometry.trim.width), height: cssMM(geometry.trim.height) }}>
+        {layout && state && <CoverArtwork book={book} template={template} cover={state} geometry={geometry} interiorPages={interiorPages} />}
+      </div>
+    </div>,
+  ));
+  if (renderError) throw renderError;
+  const sheet = root.firstElementChild as HTMLElement;
+  const bounds = sheet.getBoundingClientRect();
+  const mmPerPixel = geometry.sheet.width / bounds.width;
+  const files = (parameters: Parameters, values: Values) => fileErrors(book, parameters, values, 'Cover')
+    .map((found) => ({ ...found, cover: true as const, where: 'Cover' }));
+  if (layout && state) {
+    errors.push(...files(layout.parameters, state.params));
+    const boxes = new Map<string, HTMLElement>();
+    const elements = new Set<string>();
+    for (const { kind, id, node, boxType } of declaredNodes(sheet)) {
+      if (kind === 'element') {
+        if (!Object.hasOwn(layout.elements, id) || elements.has(id)) throw new Error('Unknown or duplicate cover element ' + id + '.');
+        elements.add(id);
+      } else {
+        if (!Object.hasOwn(layout.boxes, id) || boxes.has(id) || boxType !== 'photo') throw new Error('Unknown or duplicate cover photo box ' + id + '.');
+        if (!node.clientWidth || !node.clientHeight) throw new Error('Cover photo box ' + id + ' has no area.');
+        boxes.set(id, node);
+      }
+    }
+    for (const [id, declared] of Object.entries(layout.boxes)) {
+      const node = boxes.get(id);
+      if (!node) errors.push(issue('Draw ' + declared.label + ' exactly once.', 'cover-box-count', id));
+      const box = state.boxes[id];
+      const photo = box?.photo && book.photos[box.photo];
+      const available = box?.photo && book.sources?.['photo:' + box.photo];
+      if (available && available.state !== 'available' && available.cached) errors.push({
+        ...issue(available.problem + '. The cover preview uses a cached image.', 'source-unavailable', id), source: box.photo,
+      });
+      if (box?.photo && !photo) errors.push({ ...issue(declared.label + ' uses an unavailable photo.', 'photo-missing', id), source: box.photo });
+      else if (!box?.photo) warnings.push(issue(declared.label + ' is empty.', 'cover-box-empty', id));
+      if (node) {
+        const finding = photoResolutionIssue(node, geometry.output.resolution?.minimum, mmPerPixel, declared.label, box?.photo);
+        if (finding) errors.push({ ...finding, cover: true, where: 'Cover', box: id });
+      }
+      errors.push(...files(declared.parameters, box?.params ?? {}).map((finding) => ({ ...finding, box: id })));
+    }
+    for (const [id, declared] of Object.entries(layout.elements)) {
+      errors.push(...files(declared.parameters, state.elements[id]?.params ?? {}).map((finding) => ({ ...finding, element: id })));
+    }
+  }
+  // Wait for asynchronous artwork before printing or giving an agent a proof.
+  if (!edit) {
+    const images = await settleRenderedImages();
+    errors.push(...images.map(({ message, element }) => ({ ...issue(message, 'rendered-image-failed'), element })));
+    const photos = decodable(sheet);
+    const decoded = await settle(photos);
+    for (const [index, result] of decoded.entries()) {
+      if (result.status === 'rejected') errors.push(issue('A cover image could not be decoded.', 'photo-decode', ownerOf(pictureSource.get(photos[index]) ?? photos[index]).box));
+    }
+    errors.push(...currentPhotoRenderFailures().map(({ message, box }) => issue(message, 'photo-render-failed', box)));
+    errors.push(...renderIssues().map((message) => issue(message, 'render-impure')));
+    for (const font of fontFailures()) errors.push(issue('Could not load cover font ' + font + '.', 'font-load'));
+    const fontUse = checkFonts(sheet);
+    for (const { chars, family, owner } of fontUse.missing) errors.push({
+      ...issue(family + ' has no glyphs for ' + [...chars].join(' ') + '.', 'font-coverage'), ...owner,
+    });
+    if (fontUse.stroked) errors.push({ ...issue('Stroked cover text prints as a Type 3 font.', 'text-stroked'), ...fontUse.stroked.owner });
+  }
+  if (edit) await settle(decodable(sheet));
+  if (layout) {
+    const fromBleed = (area: Rect) => ({ ...area, x: area.x - geometry.sheet.x, y: area.y - geometry.sheet.y });
+    const regions = (Object.entries(geometry.regions) as [keyof typeof geometry.regions, Rect][]).map(([key, region]) => {
+      const safe = geometry.safe[key];
+      return { end: region.x + region.width - geometry.sheet.x, safe: fromBleed(safe ?? {
+        x: region.x + region.width / 2, y: region.y + region.height / 2, width: 0, height: 0,
+      }) };
+    });
+    warnings.push(...typographyIssues(sheet, geometry.sheet.width, geometry.output.minimumTextSize && toMillimeters(geometry.output.minimumTextSize),
+      (x) => (regions.find(({ end }) => x < end) ?? regions.at(-1)!).safe, { cover: true, where: 'Cover' }, geometry.avoid.map(fromBleed)));
+  }
+  let inspection: ElementInspection | undefined;
+  if (inspect && layout && state) {
+    const nodes = (inspect.box ? findDeclared(sheet, { box: inspect.box }) : inspect.element ? findDeclared(sheet, { element: inspect.element })
+      : declaredNodes(sheet)).filter(({ kind, id }) => Object.hasOwn(kind === 'box' ? layout.boxes : layout.elements, id));
+    if ((inspect.box || inspect.element) && !nodes.length) throw new PreviewError('preview-target-not-found', 'The requested box or element is not drawn on the cover.');
+    const items: ElementMeasurement[] = nodes.slice(inspect.offset, inspect.offset + inspect.limit).map(({ node, kind, id }) => {
+      const box = kind === 'box';
+      const parameters = (box ? layout.boxes[id] : layout.elements[id]).parameters;
+      const prefix = (box ? 'boxes.' : 'elements.') + id + '.';
+      return { cover: true, id, kind: box ? 'photo' : 'element', boundsMm: measuredBounds(node, sheet, { spreadWidth: geometry.sheet.width }),
+        typography: typographyOf(node), upright: upright(node, sheet), editPaths: Object.keys(parameters).map((key) => prefix + key),
+        ...(box && state.boxes[id]?.photo ? { source: state.boxes[id].photo } : {}) };
+    });
+    inspection = { cover: true, coordinateSpace: 'sheet-bleed-mm', items, total: nodes.length,
+      nextOffset: inspect.offset + items.length < nodes.length ? inspect.offset + items.length : null };
+  }
+  if (artwork) coverArtworkPreview(root, sheet, cover, artwork, query);
+  publish({ state: 'ready', template: info, pages: interiorPages, units: [], errors, warnings, flow: {}, anchors: [], cover,
+    ...(inspection ? { inspection } : {}) });
+}
+
 export async function startRender(root: HTMLElement) {
   let info: TemplateInfo | undefined;
   // Profiling builds time each step of a render as imageflow.render.<step>, from the end of the previous step.
@@ -1638,6 +1859,10 @@ export async function startRender(root: HTMLElement) {
     }
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
+    if (['cover', 'cover-check', 'cover-artwork'].includes(query.get('view') ?? '')) {
+      await renderPhysicalCover(root, book, template, info, sequence, query, () => (guards?.calls ?? []).map(({ api }) => impureMessage(api)));
+      return;
+    }
     const { chains, positions } = textAssignments(book, template);
     const present = query.get('view') === 'present';
     const presentationStart = spreads.find(({ id }) => id === query.get('spread'))?.id ?? spreads[0]?.id ?? '';
@@ -1664,9 +1889,7 @@ export async function startRender(root: HTMLElement) {
       previewCache: location.pathname + '/picture/' } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
       concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
       previewCache: location.pathname + '/picture/' }
-      : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
-        : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
-          : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
+      : printPictures(check ? 'check' : artwork || inspect ? 'preview' : 'export', target));
     if (edit && view === 'layouts') {
       await renderLayouts(root, book, template, info, query.get('spread') ?? '',
         query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined);
@@ -1907,7 +2130,8 @@ export async function startRender(root: HTMLElement) {
     const minimum = template.format.output.minimumTextSize;
     for (const [spread, { sheet }] of present ? [] : validated) {
       const minimumMm = minimum && toMillimeters(minimum);
-      const typography = checkTypography(sheet, format, minimumMm);
+      const { trim, bleed, safe } = format;
+      const pages = sheetPages(format);
       const fontUse = checkFonts(sheet);
       for (const { owner, family, chars } of fontUse.missing) {
         const shown = [...chars].slice(0, 12);
@@ -1921,16 +2145,11 @@ export async function startRender(root: HTMLElement) {
           code: 'text-stroked', ...fontUse.stroked.owner,
           suggestion: 'Draw an outline or halo as filled copies of the text shifted around it, or as a shadow, instead of an SVG stroke or -webkit-text-stroke.' });
       }
-      if (typography.small && minimumMm) {
-        warnings.push({ ...located(spread, 'Text is smaller than the format minimum.'), code: 'text-too-small', ...typography.small.owner,
-          details: { sizePt: Math.round(typography.small.sizeMm * ptPerMm * 10) / 10, minimumPt: Math.round(minimumMm * ptPerMm * 10) / 10 },
-          suggestion: 'Increase the font size in the template CSS or the size parameter of this box or element.' });
-      }
-      if (typography.outside) {
-        warnings.push({ ...located(spread, 'Text extends outside the safe area.'), code: 'text-outside-safe-area', ...typography.outside.owner,
-          details: { overshootMm: Math.round(typography.outside.overshootMm * 10) / 10 },
-          suggestion: 'Move or inset this text in the template CSS so it stays inside the format safe area.' });
-      }
+      warnings.push(...typographyIssues(sheet, format.spreadWidth, minimumMm, (x) => {
+        const page = pages.find(({ trimX }) => x < trimX + trim.width) ?? pages.at(-1)!;
+        return { x: page.trimX + page.safeLeft, y: bleed.top + safe.top,
+          width: trim.width - page.safeLeft - page.safeRight, height: trim.height - safe.top - safe.bottom };
+      }, located(spread, '')));
       const round = (value: number) => Math.round(value * 10) / 10;
       const blocks = checkTextBlocks(sheet, format);
       for (const { owner: { tag, text, self, ...owner }, clipped, bottomMm, rightMm, clippedBy } of blocks.overflows) {

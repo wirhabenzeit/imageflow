@@ -20,6 +20,14 @@ Changing the format re-renders the book: assignments, crops and text sources sta
 
 Arbitrary dimensions within declared limits, rather than named presets, are not supported yet.
 
+## Exterior covers
+
+Declare `requires: ['physical-covers']`, `coverFormats` keyed by interior format ID, and `coverLayouts`. For a template with a single `format`, use the key `default`. A cover layout is available for every declared cover format unless its `formats` list names specific IDs. An interior format without a corresponding cover specification opens in the usual content editor.
+
+Each cover layout renders one full exterior sheet. It can declare photo boxes, parameters, and elements with generated controls. The render context provides `cover.sheet`, `cover.trim`, and `cover.regions` for the back, spine, front and optional flaps, in millimetres. Use `cover.safe` for text placement. A region can have a `null` safe area if its insets consume the available space. `cover.sheet` starts at negative trim-relative coordinates so artwork can extend into the wrap or bleed.
+
+Print specifications can use fixed widths or inclusive page-count bands for the spine and both flaps. Bands cover every valid interior page count, with printer rounding applied in the source unit. Interior page counts include blank pages. Guides and provisional sizing appear in the editor and preview metadata.
+
 ## Formats without facing pages
 
 Wall calendars, cards, loose print series and posters have no facing pages. Declare them with `facingPages: false`, and every unit of the book is one page: the editor, the thumbnails, the Book check and export works page by page instead of spread by spread. The name follows print convention (InDesign's *Facing Pages* setting).

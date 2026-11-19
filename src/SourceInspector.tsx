@@ -1,4 +1,5 @@
 import { sourcePath } from './source-locations';
+import { usageLabel } from './asset-usage';
 import { useMemo, useState } from 'react';
 import { renderOrigin } from './desktop';
 import type { ProjectSummary, RenderStatus, TemplateInfo } from './desktop';
@@ -21,15 +22,16 @@ function Placements({ summary, template, usage, render, source, select }: {
   const placed = usage[source.kind][source.id] ?? [];
   if (!placed.length) return <p className="muted">Not placed</p>;
   return <ul className="si-placements">
-    {placed.map(({ spread: id, pages }) => {
+    {placed.map(({ spread: id, pages, cover }) => {
       const spread = summary.project.spreads.find((item) => item.id === id);
-      const layout = spread && (sheetLayoutLabel(template?.spreads, spread) ?? spread.definition);
+      const layout = cover && summary.project.cover ? template?.coverLayouts?.[summary.project.cover.definition]?.label
+        : spread && (sheetLayoutLabel(template?.spreads, spread) ?? spread.definition);
       const parts = source.kind === 'text' && spread && render?.state === 'ready'
         ? Object.entries(spread.boxes).filter(([, box]) => box.text === source.id)
           .map(([box]) => render.flow[id + ':' + box]).filter(Boolean) : [];
       return <li key={id}>
-        <button type="button" className="link" onClick={() => select(id)}>{(pages.includes('–') ? 'Pages ' : 'Page ') + pages}</button>
-        <span className="muted"> · {layout}{parts.length ? ' · part ' + parts.map(({ part }) => part).join(', ') + ' of ' + parts[0].parts : ''}</span>
+        <button type="button" className="link" onClick={() => select(id)}>{usageLabel(pages)}</button>
+        {layout && <span className="muted"> · {layout}{parts.length ? ' · part ' + parts.map(({ part }) => part).join(', ') + ' of ' + parts[0].parts : ''}</span>}
       </li>;
     })}
   </ul>;

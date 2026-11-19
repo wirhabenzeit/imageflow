@@ -36,44 +36,49 @@ export const mcpToolSchemas = {
     docs: z.array(z.enum(docTopicIds)).max(12).optional()
       .describe('Template API reference topics to return in full, by ID from topics. Start with authoring-workflow.'),
     includeExamples: z.union([z.boolean(), z.array(z.string().regex(/^[a-z0-9-]{1,64}$/)).min(1).max(12)]).optional()
-      .describe('Example template sources to return: names from examples, or true for all of them. Every example is always listed by name and description.'),
+      .describe('Example sources to include. Pass names from examples, or true for all.'),
     includeSource: z.array(relativePath(['template', 'texts']).describe('A path from templateFiles, or a Markdown file under texts/.')).max(8).optional()
-      .describe('Template or Markdown files to return, at most 32,000 characters each. Defaults to none; template already carries the parsed declarations.'),
+      .describe('Template or Markdown files to return, up to 32,000 characters each.'),
   }),
   inspect_book: z.strictObject({
     project,
-    view: z.enum(['summary', 'spreads', 'sources', 'parameters', 'elements'])
-      .describe('summary: title, format, pages and template identity. spreads: saved spreads with their pages and contents. sources: photos, texts and files with capture metadata and where they are used. parameters: saved values next to their declarations. elements: measured bounds, typography and edit paths of the boxes and elements of one spread.'),
+    view: z.enum(['summary', 'spreads', 'cover', 'sources', 'parameters', 'elements'])
+      .describe('summary: book details. spreads and cover: saved layout state. sources: registry and usage. parameters: saved values and declarations. elements: bounds, typography and edit paths.'),
     offset: z.int().min(0).default(0).describe('Index of the first item to return, for paging.'),
     limit: z.int().min(1).max(100).default(30).describe('Number of items to return. Continue from nextOffset.'),
-    spread: z.string().min(1).max(256).optional().describe('Spread ID. Required by the elements view; filters the spreads and parameters views.'),
+    spread: z.string().min(1).max(256).optional().describe('Spread ID for element measurements or to filter spreads and parameters.'),
+    cover: z.literal(true).optional().describe('Elements view only: measure the exterior cover.'),
     page: z.enum(['left', 'right']).optional().describe('Elements view only: facing page of a split sheet.'),
     box: z.string().min(1).max(256).optional().describe('Elements view only: measure just this box.'),
     element: z.string().min(1).max(256).optional().describe('Elements view only: measure just this element.'),
   }).superRefine((request, context) => {
     if (request.page && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Page filtering requires the elements view.' });
-    if (request.view === 'elements' && !request.spread) context.addIssue({ code: 'custom', path: ['spread'], message: 'Element inspection requires a spread ID.' });
+    if (request.view === 'elements' && (request.cover ? !!request.spread || !!request.page : !request.spread)) {
+      context.addIssue({ code: 'custom', message: 'Element inspection requires one spread or cover: true.' });
+    }
+    if (request.cover && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'For saved cover state, use view: cover.' });
     if ((request.box || request.element) && request.view !== 'elements') context.addIssue({ code: 'custom', message: 'Box and element filters require the elements view.' });
     if (request.box && request.element) context.addIssue({ code: 'custom', message: 'Choose either a box or an element.' });
   }),
   check_book: z.strictObject({
     project,
-    includeTemplate: z.boolean().optional().describe('Include full template declarations in the result. Defaults to false; get_authoring_context returns them for authoring.'),
+    cover: z.literal(true).optional().describe('Check the exterior cover.'),
+    includeTemplate: z.boolean().optional().describe('Include full template declarations.'),
     expectedRevision: revision.optional()
-      .describe('Check exactly this revision. Required for page-number previews and drafts; a changed book returns a revision-conflict diagnostic.'),
+      .describe('Required for drafts and page-number previews. Changed inputs return revision-conflict.'),
     preview: makePreviewRequestSchema(spreadReference).optional()
-      .describe('Return a rendered image of a page, a spread, a close-up of one box or element, or a contact sheet of several spreads.'),
+      .describe('Render artwork of a page, spread, cover, box, element or contact sheet.'),
     inspect: makeInspectionSchema(spreadReference).optional()
-      .describe('Also measure the boxes and elements of one spread, as inspect_book does, in the same render as the preview or draft.'),
+      .describe('Measure boxes and elements of one cover or spread.'),
     typescript: z.boolean().optional()
-      .describe('Type-check the template sources against the installed runtime in a bounded worker. Rendering still runs when types fail.'),
+      .describe('Check template types against the installed runtime.'),
     draft: z.strictObject({ operations: projectOperationsSchema }).optional()
-      .describe('Unsaved command batch, in the apply_project_changes format, rendered on top of the saved book. Preview and inspect targets may name spreads it inserts by $ref. Nothing is saved.'),
+      .describe('Render unsaved commands. Preview and inspect can address inserted spreads by $ref.'),
     fixtures: fixtureRequestSchema.optional()
-      .describe('Render layouts, including unused ones, with synthetic typical, long, empty, portrait-photo and malformed-file content in separate fixture books per format, and report a coverage matrix. Nothing is saved.'),
+      .describe('Render layouts with synthetic content per format and report coverage.'),
   }).superRefine((request, context) => {
-    if (request.fixtures && (request.preview || request.inspect || request.draft)) {
-      context.addIssue({ code: 'custom', path: ['fixtures'], message: 'Fixture checks use fixtures.preview for images and cannot be combined with preview, inspect or draft.' });
+    if (request.fixtures && (request.cover || request.preview || request.inspect || request.draft)) {
+      context.addIssue({ code: 'custom', path: ['fixtures'], message: 'Fixture checks cannot be combined with cover, preview, inspect or draft.' });
     }
     if (request.preview && 'page' in request.preview.target && !('spread' in request.preview.target) && !request.expectedRevision) {
       context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'Page-number previews require the inspected input revision.' });
@@ -83,7 +88,7 @@ export const mcpToolSchemas = {
     }
     const target = request.preview?.target;
     const references = [...(target && 'spread' in target ? [target.spread] : target && 'spreads' in target ? target.spreads : []),
-      ...(request.inspect ? [request.inspect.spread] : [])];
+      ...(request.inspect?.spread ? [request.inspect.spread] : [])];
     if (references.some((id) => id.startsWith('$')) && !request.draft) {
       context.addIssue({ code: 'custom', path: ['preview', 'target', 'spread'], message: 'Batch references such as $chapter can only target spreads inserted by a draft.' });
     }
@@ -121,21 +126,21 @@ export type McpToolArguments = { [Name in McpToolName]: z.output<typeof mcpToolS
 // Descriptions say what each tool is for and when to call it; the facts about each argument are on its schema field.
 export const mcpTools: { name: McpToolName; title: string; description: string; readOnly: boolean }[] = [
   { name: 'list_projects', title: 'List open books', readOnly: true,
-    description: 'List the books open in ImageFlow that agents may use, with their handles and current input revisions. Call it first.' },
+    description: 'List authorized open books with their handles and revisions. Call first.' },
   { name: 'get_authoring_context', title: 'Get authoring context', readOnly: true,
-    description: 'Read a book\'s parsed template declarations, template identity, template files and the table of contents of the template API reference. Call it before editing a template; request reference topics, example templates and source files with docs, includeExamples and includeSource.' },
+    description: 'Read parsed declarations, template identity and files. Before editing a template, request reference topics, examples and source files.' },
   { name: 'inspect_book', title: 'Inspect book', readOnly: true,
-    description: 'Read a book\'s saved spreads, sources or parameter values, or measure the boxes and elements of one spread. Returns the revision to pass to checks and commands.' },
+    description: 'Read saved spreads, cover, sources or parameters, or measure layout elements. Returns the revision for checks and commands.' },
   { name: 'check_book', title: 'Check book', readOnly: true,
-    description: 'Check the whole book without saving. Request a preview, type checking, an unsaved draft or synthetic fixtures. Call after each edit.' },
+    description: 'Check content or the exterior cover without saving. Supports previews, type checks, drafts and synthetic fixtures.' },
   { name: 'apply_project_changes', title: 'Apply changes', readOnly: false,
-    description: 'Save project commands atomically as one named Undo step. Use it for project.json and photos.json. For command and preview examples, call get_authoring_context with docs: ["project-commands"].' },
+    description: 'Save commands atomically as one Undo step. See get_authoring_context with docs: ["project-commands"] for examples.' },
   { name: 'list_book_checkpoints', title: 'List book checkpoints', readOnly: true,
-    description: 'List saves of project.json and photos.json from the book history, newest first. After a reopen, look up a request whose reply was lost by idempotencyKey, or see what changed since your last session.' },
+    description: 'List saved project and photo manifests, newest first. Look up a lost reply by idempotencyKey after reopening.' },
   { name: 'rebuild_dependencies', title: 'Rebuild template dependencies', readOnly: false,
     description: 'Install the npm packages listed in template/package.json outside the book, in a cache ImageFlow manages, and bundle the ones the template imports into template/vendor/, which is all the book renders. Call it after changing template/package.json or adding a package import; never run npm install in template/. A long install answers state "installing": call again until it is "ready", then check_book.' },
   { name: 'list_templates', title: 'List library templates', readOnly: true,
-    description: 'List the templates new books are made from: built-in and imported entries with ID, version, hash, formats, layouts, packages and network sites. Compare hashes with a book\'s templateIdentity.' },
+    description: 'List built-in and imported templates. Compare their hashes with a book\'s templateIdentity.' },
   { name: 'save_template_to_library', title: 'Save template to library', readOnly: false,
     description: 'Validate a book\'s template/ folder and save it into the template library, so New Book offers it. Raise version for a changed template. A conflict result names the entry it would replace; pass its hash as replaceHash only when the user wants it replaced.' },
   { name: 'import_sources', title: 'Import sources', readOnly: false,

@@ -30,6 +30,11 @@ export const fixtureRequestSchema = z.strictObject({
     .describe('Print format IDs to test (at most four per check), or "all" for the first four declared formats. Defaults to the book\'s current format.'),
   cases: z.array(fixtureCase).min(1).max(fixtureCases.length).optional()
     .describe('Synthetic content cases. Defaults to every case that applies to each layout.'),
+  cover: z.strictObject({
+    layout: id.describe('Cover layout ID.'),
+    pages: z.int().min(0).describe('Interior page count to size the cover against.'),
+    format: id.optional().describe('Cover-enabled format ID. Defaults to the active format.'),
+  }).optional().describe('Check a cover layout with synthetic content.'),
   preview: z.strictObject({
     printFormat: id.optional().describe('Format whose fixtures appear in the image. Defaults to the first tested format.'),
     cells: z.array(z.strictObject({ layout: id.describe('Layout ID.'), case: fixtureCase.describe('Fixture case.') })).min(1).max(fixtureLimits.previewCells).optional()
@@ -41,7 +46,8 @@ export const fixtureRequestSchema = z.strictObject({
     guides: z.boolean().default(false).describe('Draw trim and safe-area guides.'),
     labels: z.boolean().default(false).describe('Outline and label every box and element.'),
   }).optional().describe('Return a labelled contact sheet of synthetic fixtures. It never shows the saved book.'),
-});
+}).refine(({ cover, layouts, formats, preview }) => !cover || !(layouts || formats || preview),
+  'A cover fixture uses cover and cases. Interior layouts, formats and contact sheet previews are separate requests.');
 export type FixtureRequest = z.output<typeof fixtureRequestSchema>;
 
 export class FixtureError extends Error {
@@ -62,7 +68,7 @@ export type FixturePlan = {
 };
 
 type Inputs = { photos: number; markdown: number; strings: number; files: number; sampleFiles: number };
-function layoutInputs(definition: SpreadDefinition): Inputs {
+function layoutInputs(definition: Pick<SpreadDefinition, 'parameters' | 'boxes' | 'elements'>): Inputs {
   // A list's item fields count like parameters: fixtures fill one item of each list.
   const parameters: Parameter[] = [definition.parameters, ...Object.values(definition.boxes).map((box) => box.parameters),
     ...Object.values(definition.elements).map((element) => element.parameters)].flatMap((group) => Object.values(group))
@@ -73,6 +79,25 @@ function layoutInputs(definition: SpreadDefinition): Inputs {
     strings: parameters.filter(({ type }) => type === 'string').length, files: parameters.filter(({ type }) => type === 'file').length,
     sampleFiles: parameters.filter((param) => param.type === 'file' && sampleExtension(param.accept)).length,
   };
+}
+
+export function coverFixturePlan(template: TemplateInfo, request: NonNullable<FixtureRequest['cover']>, cases: FixtureCase[]) {
+  const format = request.format ?? template.formatId;
+  const layout = template.coverLayouts && Object.hasOwn(template.coverLayouts, request.layout) ? template.coverLayouts[request.layout] : undefined;
+  if (!template.coverFormats || !Object.hasOwn(template.coverFormats, format)) {
+    throw new FixtureError('FORMAT_NOT_FOUND', 'Format ' + format + ' has no exterior cover.');
+  }
+  if (!layout || (layout.formats && !layout.formats.includes(format))) {
+    throw new FixtureError('LAYOUT_NOT_FOUND', 'Cover layout ' + request.layout + ' is unavailable for ' + format + '.');
+  }
+  const inputs = layoutInputs(layout);
+  const cells: FixtureCell[] = [], skipped: FixtureSkip[] = [];
+  for (const item of new Set(cases)) {
+    const reason = inapplicable(item, inputs);
+    if (reason) skipped.push({ layout: request.layout, format, case: item, reason });
+    else cells.push({ layout: request.layout, case: item, spread: 'fixture-cover-' + item, label: layout.label + ' · ' + fixtureCaseLabels[item] });
+  }
+  return { format, cells, skipped };
 }
 
 /** Why a case says nothing new about a layout, or undefined when it applies. */
@@ -303,7 +328,7 @@ function sampleValues(parameters: Parameters, fixture: FixtureCase, ids: Fixture
 
 /** One spread of a layout with the content of a fixture case. `text` is this spread's own Markdown source, so
  * synthetic text never continues on another spread. */
-export function fixtureSpread(cell: FixtureCell, definition: SpreadDefinition, ids: FixtureSourceIds, text: string): SpreadState {
+export function fixtureSpread(cell: FixtureCell, definition: Pick<SpreadDefinition, 'parameters' | 'boxes' | 'elements'>, ids: FixtureSourceIds, text: string): SpreadState {
   const photo = cell.case === 'portrait-photos' ? ids.photo.portrait : ids.photo.landscape;
   const filled = cell.case !== 'empty';
   return {
@@ -349,7 +374,7 @@ export function fixtureProject(project: Project, template: TemplateInfo, format:
   });
   return {
     project: {
-      ...project, schemaVersion: bookFormatOf({ spreads }), ...(Object.keys(template.formats).length ? { format } : {}),
+      ...project, cover: undefined, schemaVersion: bookFormatOf({ spreads }), ...(Object.keys(template.formats).length ? { format } : {}),
       texts: { ...project.texts, ...texts }, spreads,
     } satisfies Project,
     markdown,

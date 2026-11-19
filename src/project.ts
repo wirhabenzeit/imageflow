@@ -30,9 +30,8 @@ const box = z.object({
 
 // The book formats this app reads and writes (`project.json` → `schemaVersion`). A book saved by a newer app with a
 // higher number is refused with a request to update ImageFlow, and is left as it is. Format 2 adds page states (ADR
-// 0009). A book is always written in the lowest format that holds it: only a book with page states is format 2, so
-// every other book stays readable by apps that know format 1, which would drop the page states they do not know.
-export const bookFormatVersion = 2;
+// 0009), and format 3 adds saved exterior covers. A book is written in the lowest format that holds all its data.
+export const bookFormatVersion = 3;
 export const newerBookMessage = (version: number) => 'This book was saved by a newer version of ImageFlow (book format ' +
   version + '; this version reads formats up to ' + bookFormatVersion + '). Update ImageFlow to open it. The book was not changed.';
 // Release gates (ADR 0009). Format 2 is defined before this version can handle what it stores, so a book that uses
@@ -56,7 +55,7 @@ export function unsupportedBookMessage(value: unknown): string | undefined {
   if (Array.isArray(spreads) && spreads.some((spread) => gated(spread as GatedSpread | null))) return pagesUnsupportedMessage;
   return undefined;
 }
-const schemaVersion = z.literal([1, bookFormatVersion], {
+const schemaVersion = z.literal([1, 2, bookFormatVersion], {
   error: ({ input }) => typeof input === 'number' && Number.isInteger(input) && input > bookFormatVersion ? newerBookMessage(input) : undefined,
 });
 
@@ -93,8 +92,11 @@ export const spreadSchema = z.object({
 }).refine(({ pages, split }) => !split || !!(pages?.left || pages?.right), { message: 'A spread shown as pages needs the state of at least one page.', path: ['split'] });
 
 // The lowest book format that holds a project.
-export const bookFormatOf = (project: { spreads: readonly { pages?: unknown; split?: unknown; displaced?: unknown }[] }) =>
-  project.spreads.some(({ pages, split, displaced }) => pages !== undefined || split !== undefined || displaced !== undefined) ? 2 : 1;
+export function bookFormatOf(project: { cover?: unknown; spreads: readonly { pages?: unknown; split?: unknown; displaced?: unknown }[] }): 1 | 2 | 3 {
+  if (project.cover !== undefined) return 3;
+  return project.spreads.some(({ pages, split, displaced }) => pages !== undefined || split !== undefined || displaced !== undefined) ? 2 : 1;
+}
+const coverState = z.object(layoutState);
 
 export const projectSchema = z.object({
   schemaVersion,
@@ -109,11 +111,12 @@ export const projectSchema = z.object({
   texts: z.record(identifier, sourceReferenceSchema).default({}),
   // File parameter sources (such as GPX tracks), by ID: owned relative paths or explicit external links.
   files: z.record(identifier, sourceReferenceSchema).default({}),
+  cover: coverState.optional(),
   // Each spread keeps one state for all its layouts: `definition` picks which boxes and elements are shown.
   spreads: z.array(spreadSchema.refine((spread) => !gated(spread), pagesUnsupportedMessage))
     .refine((spreads) => new Set(spreads.map((spread) => spread.id)).size === spreads.length, 'Spread IDs must be unique.'),
   // Every parsed book carries the format that holds it, so saving it writes that format.
-}).transform((project) => ({ ...project, schemaVersion: bookFormatOf(project) as 1 | 2 }));
+}).transform((project) => ({ ...project, schemaVersion: bookFormatOf(project) }));
 
 export const photoIndexSchema = z.record(identifier, z.object({
   path: z.string(),
@@ -129,6 +132,10 @@ export const photoIndexSchema = z.record(identifier, z.object({
 
 export type Project = z.infer<typeof projectSchema>;
 export type SpreadState = Project['spreads'][number];
+export type CoverState = NonNullable<Project['cover']>;
+// Existing artwork and source controls identify layout instances with a string. The exterior cover's
+// internal ID is outside the book's spread-ID grammar and is never written as a spread.
+export const coverInstance = '.cover';
 export type PageSide = typeof pageSides[number];
 export type PageState = NonNullable<NonNullable<SpreadState['pages']>[PageSide]>;
 /** The state a box, element or parameter of a spread lives in: one of its pages', or the spread's own without a page. */
@@ -187,7 +194,7 @@ export const frameView = (view: string | null): Exclude<RenderView, 'export'> =>
   view === 'book' ? 'canvas' : view === 'layouts' ? 'layout-preview' : 'thumbnail';
 export const renderView = (book: Pick<RenderProject, 'mode' | 'view'>): RenderView =>
   book.mode === 'export' ? 'export' : book.view ?? 'canvas';
-export type FixtureMarking = { banner: string; labels: Record<string, string> };
+export type FixtureMarking = { banner: string; labels: Record<string, string>; coverPages?: number };
 
 export function parseDocument<T>(schema: z.ZodType<T>, input: unknown, label: string): T {
   const result = schema.safeParse(input);

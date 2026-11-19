@@ -61,5 +61,5 @@ export const contract1Capabilities = [
 // All supported features, including the baseline names accepted in older templates' `requires` lists. Until the
 // first public release the baseline stays open and new features join it (ADR 0008); after it, additive extensions
 // go here, and templates using them declare them in `requires`.
-export const capabilities = [...contract1Capabilities] as const;
+export const capabilities = [...contract1Capabilities, 'physical-covers'] as const;
 export type Capability = typeof capabilities[number];

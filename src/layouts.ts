@@ -31,7 +31,7 @@ const typeName = (param: Parameter) => param.type === 'enum' ? 'an enum' : param
 
 // Declarations that contradict the rule above: the same box ID with different box types, or the same parameter ID
 // in one scope with different parameter types. Labels, defaults and constraints may differ between layouts.
-export function declarationConflicts(layouts: Layouts) {
+export function declarationConflicts(layouts: Record<string, Pick<Layout, 'label' | 'parameters' | 'boxes' | 'elements'>>) {
   const problems: string[] = [];
   const boxes = new Map<string, { type: string; layout: string }>();
   const params = new Map<string, { param: Parameter; layout: string }>();

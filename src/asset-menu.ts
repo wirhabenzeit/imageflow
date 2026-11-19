@@ -8,7 +8,7 @@ export function assetMenu(summary: ProjectSummary, keys: string[], place = false
   const chosen = sourceEntries(summary).filter(({ key }) => keys.includes(key));
   const linked = chosen.filter(({ linked }) => linked).length;
   const missing = chosen.some(({ key }) => summary.sources?.[key]?.state !== 'available');
-  const usage = { ...assetUsage(summary, assetPageLabels(summary)), ...knownUsage };
+  const usage = { ...assetUsage(summary, assetPageLabels(summary), summary.coverBoxIds ?? null), ...knownUsage };
   const placements = chosen.length === 1 ? usage[chosen[0].kind === 'markdown' ? 'text' : chosen[0].kind][chosen[0].id] ?? [] : [];
   return [
     { command: 'asset-preview', enabled: chosen.length === 1 && !missing },

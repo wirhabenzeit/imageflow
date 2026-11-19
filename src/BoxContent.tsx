@@ -13,11 +13,12 @@ import { centered, placementIn, setPlacement } from './spread';
 // their assignment, crop and text flow are edited here, next to the template's box parameters, wherever the box
 // is edited (its popover on the page, or the crop toolbar of a selected photo).
 
-type Change = (update: (spread: SpreadState) => void, notice?: string) => void;
+type Change<T = SpreadState> = (update: (spread: T) => void, notice?: string) => void;
+type PhotoLayout = Pick<SpreadState, 'definition' | 'boxes'>;
 
 // Choose, replace or remove the photo of a box from the keyboard; the canvas and photo strip are drag-only.
 export function PhotoContent({ summary, spread, box, label, change, inspect, adjustCrop, values = false, compact = false, assigned: reassigned }: {
-  summary: ProjectSummary; spread: SpreadState; box: string; label: string; change: Change;
+  summary: ProjectSummary; spread: PhotoLayout; box: string; label: string; change: Change<PhotoLayout>;
   // Called after the photo is replaced or removed, such as to end a selection that showed the old photo.
   assigned?: () => void;
   inspect?: (source: SourceRef) => void; adjustCrop?: () => void;

@@ -1,7 +1,7 @@
-import { storedBoxes, storedStates } from './project';
+import { coverInstance, storedBoxes, storedStates } from './project';
 import type { Project, ProjectFiles } from './project';
 import type { Parameters } from './parameters';
-import type { SourceUsage } from './editing';
+import type { SourcePlace, SourceUsage } from './editing';
 import { sourceUsage } from './editing';
 import type { ProjectSummary } from './desktop';
 
@@ -14,7 +14,8 @@ export const usageLabel = (pages: string) => /^\d/.test(pages) ? (pages.includes
 // state it stores (its own and its pages'), of their elements, and of every box it stores, replaced content included.
 // Values kept for a layout the spread no longer uses are still saved, so they count.
 export function parameterValues(project: Project) {
-  return [{ values: project.params, spread: '' }, ...project.spreads.flatMap((spread) => [
+  const layouts = project.cover ? [...project.spreads, { ...project.cover, id: coverInstance }] : project.spreads;
+  return [{ values: project.params, spread: '' }, ...layouts.flatMap((spread) => [
     ...storedStates(spread).flatMap(({ state }) => [{ values: state.params, spread: spread.id },
       ...Object.values(state.elements).map(({ params }) => ({ values: params, spread: spread.id }))]),
     ...storedBoxes(spread).map(({ state }) => ({ values: state.params, spread: spread.id }))])];
@@ -24,19 +25,26 @@ const held = (value: unknown): unknown[] => Array.isArray(value)
   ? value.flatMap((item) => item && typeof item === 'object' ? Object.entries(item).filter(([key]) => key !== 'id').map(([, field]) => field) : [])
   : [value];
 
-// Count saved references conservatively, including parameters and content kept by another layout. An asset is
-// safe to describe as unused only when no saved value references it; a filename or path is never a reference.
-export function assetUsage({ project, photoIndex }: ProjectFiles, pages: string[]) {
-  const usage = { ...sourceUsage(project, pages), file: {} } as SourceUsage & { file: Record<string, { spread: string; pages: string }[]> };
+// By default, count saved references conservatively for unused and removal decisions, including retained values.
+// Pass the active cover layout's box IDs to restrict cover placements, or null when there is no active cover layout.
+export function assetUsage({ project, photoIndex }: ProjectFiles, pages: string[], coverBoxIds?: readonly string[] | null) {
+  const cover = project.cover;
+  if (cover && coverBoxIds !== undefined) {
+    project = { ...project, cover: coverBoxIds === null ? undefined : {
+      ...cover, boxes: Object.fromEntries(Object.entries(cover.boxes).filter(([id]) => coverBoxIds.includes(id))),
+    } };
+  }
+  const usage = { ...sourceUsage(project, pages), file: {} } as SourceUsage & { file: Record<string, SourcePlace[]> };
   function record(value: unknown, spread: string, page: string) {
     if (typeof value !== 'string') return;
     const kinds = [Object.hasOwn(photoIndex, value) && 'photo', Object.hasOwn(project.texts, value) && 'text', Object.hasOwn(project.files, value) && 'file'] as const;
     for (const kind of kinds) if (kind) {
       const list = usage[kind][value] ??= [];
-      if (!list.some((entry) => entry.spread === spread)) list.push({ spread, pages: page });
+      if (!list.some((entry) => entry.spread === spread)) list.push({ spread, pages: page, ...(spread === coverInstance ? { cover: true } : {}) });
     }
   }
   const labels = new Map(project.spreads.map(({ id }, i) => [id, pages[i]]));
+  labels.set(coverInstance, 'Cover');
   for (const { values, spread } of parameterValues(project)) for (const value of Object.values(values)) for (const item of held(value)) record(item, spread, spread ? labels.get(spread)! : 'Book settings');
   return usage;
 }
@@ -59,9 +67,11 @@ export function clearFileAssignments(project: Project, ids: readonly string[]) {
 
 // The extensions the template's file parameters accept, including list item fields. Files with other extensions
 // are not guessed into a type: only these can be imported as files.
-type FileTemplate = { parameters: Parameters; spreads: Record<string, { parameters: Parameters; boxes: Record<string, { parameters: Parameters }>; elements: Record<string, { parameters: Parameters }> }> };
+type FileLayout = { parameters: Parameters; boxes: Record<string, { parameters: Parameters }>; elements: Record<string, { parameters: Parameters }> };
+type FileTemplate = { parameters: Parameters; spreads: Record<string, FileLayout>; coverLayouts?: Record<string, FileLayout> };
 export function fileExtensions(template: FileTemplate | undefined) {
-  const groups = template ? [template.parameters, ...Object.values(template.spreads).flatMap((spread) => [spread.parameters,
+  const layouts = template ? [...Object.values(template.spreads), ...Object.values(template.coverLayouts ?? {})] : [];
+  const groups = template ? [template.parameters, ...layouts.flatMap((spread) => [spread.parameters,
     ...Object.values(spread.boxes).map((box) => box.parameters), ...Object.values(spread.elements).map((element) => element.parameters)])] : [];
   return [...new Set(groups.flatMap((group) => Object.values(group).flatMap((param) =>
     param.type === 'list' ? Object.values(param.item) : [param]).flatMap((param) => param.type === 'file' ? param.accept : [])))];

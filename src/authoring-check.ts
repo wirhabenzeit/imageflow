@@ -8,11 +8,15 @@ import { inspectionSchema } from './inspection';
 
 export const authoringCheckSchema = z.strictObject({
   expectedRevision: z.string().regex(/^[a-f0-9]{64}$/, 'Expected a SHA-256 input revision.').optional(),
+  cover: z.literal(true).optional(),
   preview: previewRequestSchema.optional(),
   inspect: inspectionSchema.optional(),
   typescript: z.boolean().optional(),
 });
 export type AuthoringCheckRequest = z.input<typeof authoringCheckSchema>;
+export function checksCover({ cover, preview, inspect }: AuthoringCheckRequest) {
+  return !!(cover || (preview && 'cover' in preview.target) || inspect?.cover);
+}
 export type AuthoringCheckResult = AuthoringReport & {
   state: 'ready' | 'error';
   checks: {
@@ -46,6 +50,7 @@ export type FixtureReport = {
   synthetic: true; committed: false;
   // Revision of the saved inputs (template, document parameters) the fixtures were rendered from.
   revision: string | null;
+  cover?: { interiorPages: number };
   matrix: { layouts: string[]; formats: string[]; cases: FixtureCase[] };
   coverage: { planned: number; rendered: number; failed: number; notIsolated: number; skipped: FixtureSkip[] };
   cells: FixtureCellReport[];
@@ -57,5 +62,5 @@ export type FixtureReport = {
 };
 export type AuthoringDraftSummary = {
   applied: boolean; committed: false;
-  changes?: string[]; affectedSpreads?: string[]; references?: Record<string, string>; reflow?: boolean;
+  changes?: string[]; affectedSpreads?: string[]; affectedCover?: true; references?: Record<string, string>; reflow?: boolean;
 };
