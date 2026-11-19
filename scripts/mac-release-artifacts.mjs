@@ -1,5 +1,6 @@
+import { X509Certificate } from 'node:crypto';
 import { constants } from 'node:fs';
-import { access, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { notarize } from '@electron/notarize';
 import { createMacDmg } from './mac-dmg.mjs';
@@ -31,9 +32,13 @@ export async function notarizeMacRelease(options, build) {
   }
 }
 
-async function macReleaseArtifacts({ app, identity, keychain, notarization }, { zip, dmg, work }) {
+async function macReleaseArtifacts({ app, keychain, notarization }, { zip, dmg, work }) {
   const image = await createMacDmg(app, join(work, 'ImageFlow.dmg'), work);
-  await run('codesign', ['--force', '--sign', identity, '--timestamp', ...(keychain ? ['--keychain', keychain] : []), image]);
+  // Use the verified app's leaf certificate so codesign never reinterprets a non-ASCII identity name.
+  const prefix = join(work, 'signer-');
+  await run('codesign', ['--display', '--extract-certificates=' + prefix, app]);
+  const signer = new X509Certificate(await readFile(prefix + '0')).fingerprint.replaceAll(':', '');
+  await run('codesign', ['--force', '--sign', signer, '--timestamp', ...(keychain ? ['--keychain', keychain] : []), image]);
   await run('codesign', ['--verify', '--strict', image]);
   console.log('Submitting the signed DMG for notarization…');
   await notarize({ appPath: image, ...notarization });
