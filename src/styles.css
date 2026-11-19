@@ -95,6 +95,8 @@ body { margin: 0; }
 .thumbs-scroll { overflow: auto; min-height: 0; }
 .spread-thumbs { position: relative; padding: 8px; }
 .spread-thumbs.placed { padding: 0; }
+/* Rendered meanwhile, shown with the book view (App: opening). Transparent, not hidden: Chromium throttles hidden frames. */
+.spread-thumbs.opening { opacity: 0; pointer-events: none; }
 .spread-thumbs .book-frame { z-index: 1; }
 /* Prepare replacements behind the displayed page artwork, without tinting it as the new frame loads. */
 .spread-thumbs .book-frame-pending { z-index: 0; }
