@@ -66,6 +66,9 @@ html:has(.if-book), html:has(.if-book) body { overflow: hidden; }
   transform-origin: 0 0;
   transform: scale(var(--if-zoom, 0.01));
 }
+/* A spread a frame has not laid out yet, such as one just added, appears with the layout, not at its default scale. */
+.if-book .if-spread-container:not([data-fitted]) { visibility: hidden; }
+html.if-busy, html.if-busy * { cursor: progress !important; }
 .if-preview [data-empty] {
   outline: 1px dashed #908b80;
   outline-offset: -1px;

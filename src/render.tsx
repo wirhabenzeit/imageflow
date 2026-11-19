@@ -487,6 +487,7 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
       const slot = sheet.parentElement!;
       slot.style.width = sheet.offsetWidth * scale + 'px';
       slot.style.height = sheet.offsetHeight * scale + 'px';
+      slot.dataset.fitted = '';
       sheet.style.setProperty('--if-zoom', String(scale));
     }
     const bounds = root.getBoundingClientRect();
@@ -1609,6 +1610,10 @@ export async function startRender(root: HTMLElement) {
     onScreenChange?.();
   });
   if (window.parent !== window) post({ type: 'viewport-request' });
+  // The app shows a progress cursor while it waits for an update, here too, whatever cursor the template sets.
+  window.addEventListener('message', (event) => {
+    if (event.origin === editorURL.slice(0, -1) && event.data?.type === 'busy') document.documentElement.classList.toggle('if-busy', !!event.data.busy);
+  });
   try {
     const response = await fetch(location.pathname + '/data');
     if (!response.ok) throw new Error('Could not load the project. Reload and try again.');

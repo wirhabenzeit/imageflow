@@ -19,12 +19,14 @@ export type InlineEditing = ({ spread: string; element: string } | { spread: str
 export type CropPreview = { spread: string; box: string; page?: PageSide; placement: { centerX: number; centerY: number; zoom: number } };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
+export function BookFrame({ busy = false, project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
   // Paired views reveal one revision together, on the shared animation clock.
   onPrepared?: (project: string) => void;
   // Called when a revision is shown, paired or not, so the other view does not wait for this one to prepare it again.
   onShown?: (project: string) => void;
   release?: { project: string; start: number };
+  // While the app waits for an update, the frames show a progress cursor too.
+  busy?: boolean;
   project: string; view: BookView; query?: string; title: string;
   presentation?: PresentationView;
   hold?: boolean;
@@ -149,6 +151,7 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
       return;
     } else if ('type' in data && data.type === 'geometry') {
       if (latestCrop.current) (event.source as Window).postMessage({ type: 'crop-preview', ...latestCrop.current }, origin);
+      (event.source as Window).postMessage({ type: 'busy', busy: latestBusy.current }, origin);
       // A candidate frame is shown only once it hides what the inline editor covers.
       if (latestEditing.current) {
         if (!frame.published) frame.hiding = true;
@@ -187,6 +190,11 @@ export function BookFrame({ project, view, query = '', title, onGeometry, onStat
   latestKey.current = editingKey;
   const latestApplied = useRef(onInlineEditing);
   latestApplied.current = onInlineEditing;
+  const latestBusy = useRef(busy);
+  latestBusy.current = busy;
+  useEffect(() => {
+    for (const { element } of latest.current.values()) element?.contentWindow?.postMessage({ type: 'busy', busy }, origin);
+  }, [busy]);
   const latestCrop = useRef(cropPreview);
   latestCrop.current = cropPreview;
   const cropKey = JSON.stringify(cropPreview ?? null);
