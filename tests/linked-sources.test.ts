@@ -571,10 +571,20 @@ test('a file stored in the book is renamed in place, keeping its ID, extension a
     assert.equal(await readFile(other, 'utf8'), 'another file');
   }
 
+  // A registered asset that is a link to another asset's file is not renamed: that would move the other file.
+  const target = join(f.folder, 'files', id + '-target.gpx');
+  await writeFile(target, 'the other asset');
+  const files = structuredClone({ project: recased.project, photoIndex: recased.photoIndex });
+  files.project.files.linkedEntry = 'files/linkedEntry-link.gpx';
+  await symlink(target, join(f.folder, 'files', 'linkedEntry-link.gpx'));
+  const withLink = await updateProject(recased, files, true);
+  await assert.rejects(renameSource(withLink, 'file:linkedEntry', 'Moved'), /is a link/);
+  assert.equal(await readFile(target, 'utf8'), 'the other asset');
+
   // A files folder replaced by a link to somewhere else is not renamed into, nor is anything there renamed.
   const outside = join(f.root, 'outside');
   await rename(join(f.folder, 'files'), outside);
   await symlink(outside, join(f.folder, 'files'));
-  await assert.rejects(renameSource(recased, 'file:' + id, 'Escaped'), /book’s own folder|must be inside|points outside/);
+  await assert.rejects(renameSource(withLink, 'file:' + id, 'Escaped'), /book’s own folder|must be inside|points outside/);
   assert.equal(await readFile(join(outside, id + '-stage 05- song kul.gpx'), 'utf8'), '<gpx><trk/></gpx>');
 });

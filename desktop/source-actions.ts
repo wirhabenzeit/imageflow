@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { copyFile, cp, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, cp, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, posix } from 'node:path';
 import { storedBoxes } from '../src/project';
 import type { ProjectFiles } from '../src/project';
@@ -62,10 +62,14 @@ export async function renameSource(book: OpenProject, key: string, requested: un
   const relative = posix.join(posix.dirname(source.path), prefix + name);
   // Both names must stay inside the book's own folder for this kind of asset, also when a folder on the way has been
   // replaced by a link: the stored copy resolves there (originalPath), and so does the folder the manifest names.
-  const from = await originalPath(book.folder, source);
+  const resolved = await originalPath(book.folder, source);
   const root = await realpath(join(book.folder, sourceFolder(source.kind)));
   const folder = await realpath(join(book.folder, posix.dirname(source.path)));
-  if (folder !== dirname(from) || (folder !== root && !within(root, folder))) throw new Error('This asset is not stored in the book’s own folder.');
+  if (folder !== dirname(resolved) || (folder !== root && !within(root, folder))) throw new Error('This asset is not stored in the book’s own folder.');
+  // The entry the manifest names is renamed, never what it points to: a registered link to another asset's file would
+  // otherwise move that file and leave the link dangling.
+  const from = join(folder, posix.basename(source.path));
+  if (!(await lstat(from)).isFile() || await realpath(from) !== resolved) throw new Error('This asset is a link; it cannot be renamed here.');
   const to = join(folder, prefix + name);
   if (!within(root, to)) throw new Error('Choose another name.');
   // An existing name is free only when it is this very file, as a change of case is on a case-insensitive volume;
