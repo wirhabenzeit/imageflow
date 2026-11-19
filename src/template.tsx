@@ -1179,7 +1179,9 @@ export function SpreadView(props: {
   page: RenderContext['page']; index: BookIndex; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
 }) {
   const { spread, format, template } = props;
-  if (!spread.split) return <LayoutView {...props} />;
+  // Keyed by layout: an edit rendered into the same root (#210) must not keep one layout's components, such as a
+  // RenderedImage in the same place with the same inputs, for another layout that draws something else.
+  if (!spread.split) return <LayoutView key={spread.definition} {...props} />;
   // Even a mismatched split spread remains a two-page sheet in the editor; export checks report the mismatch.
   return <Sheet format={format}>{pageSides.map((side) => {
     const state = spread.pages?.[side];
@@ -1188,7 +1190,7 @@ export function SpreadView(props: {
       left: cssMM(side === 'left' ? -outside : format.trim.width), top: cssMM(-format.bleed.top),
       width: cssMM(format.trim.width + outside), height: cssMM(format.height) }}>
       <div style={{ position: 'absolute', left: cssMM(side === 'left' ? outside : 0), top: cssMM(format.bleed.top) }}>
-        {state?.definition && <LayoutView {...props} spread={{ ...state, id: spread.id, definition: state.definition }}
+        {state?.definition && <LayoutView key={state.definition} {...props} spread={{ ...state, id: spread.id, definition: state.definition }}
           side={side} scopePage={side} page={{ [side]: props.page[side] }} />}
       </div>
     </div>;
