@@ -469,7 +469,11 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
   };
   let gridColumns = view === 'book' ? initial?.columns ?? 0 : 0;
   let laidOut = '';
+  // While a warm frame renders a newer revision, its sheets may already be gone from the page: nothing is measured
+  // until update() names the new ones, or a removed sheet would be reported at the top of the book.
+  let held = false;
   function fit() {
+    if (held) return;
     const width = root.clientWidth;
     const size = gridColumns + 'x' + width;
     if (size === laidOut) return;
@@ -588,7 +592,9 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
       fit();
     },
     // A warm frame rendered a newer revision into the same root: measure its sheets.
+    hold() { held = true; },
     update(next: { spread: string; sheet: HTMLElement }[]) {
+      held = false;
       sheets = next;
       root.classList.add('if-book');
       elements.disconnect();
@@ -1734,6 +1740,7 @@ export async function startRender(root: HTMLElement) {
     step('index');
 
     renderError = undefined;
+    laidOutBook?.hold();
     const layoutFailures = new Map<string, Failure>();
     react ??= createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
     flushSync(() => react!.render(visible.map(({ spread, i }) => {
@@ -2113,6 +2120,10 @@ export async function startRender(root: HTMLElement) {
               await renderRevision(next);
             } catch (error) {
               currentRevision = revision;
+              laidOutBook?.update([...root.querySelectorAll<HTMLElement>('.if-spread-container[data-spread]')].flatMap((container) => {
+                const sheet = container.querySelector<HTMLElement>(':scope > .if-sheet');
+                return sheet ? [{ spread: container.dataset.spread!, sheet }] : [];
+              }));
               post({ type: 'revision-refused', revision, message: error instanceof Error ? error.message : String(error) });
             }
           }
