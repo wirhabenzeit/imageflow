@@ -104,9 +104,9 @@ try {
   const page = await testBook(app, book);
   const frame = 'iframe.book-frame-book[data-ready]';
   await page.locator(frame).first().waitFor();
-  const id = new URL(await page.locator(frame).first().getAttribute('src')).pathname.split('/').at(-1);
+  // The book as it is now: a book frame that renders newer revisions in place (#210) keeps its first src.
   const codes = async () => {
-    const result = await page.evaluate((id) => window.imageflow.checkBook(id, {}), id);
+    const result = await page.evaluate(async () => window.imageflow.checkBook((await window.imageflow.currentProject()).value.id, {}));
     assert.ok(result.value, JSON.stringify(result.error));
     return result.value.diagnostics.filter(({ code }) => code?.startsWith('template-preview'));
   };
@@ -116,7 +116,8 @@ try {
   assert.match(aspect.message, /400 × 400 pixels/);
   assert.match(aspect.suggestion, /1200 × \d+ pixels/);
   await writeFile(join(book, 'template', 'preview.jpg'), 'not an image');
-  await until(async () => (await codes())[0]?.code === 'template-preview-invalid', 'the invalid preview warning');
+  // The changed template reloads the book; a check of a revision replaced meanwhile is tried again.
+  await until(async () => (await codes().catch(() => []))[0]?.code === 'template-preview-invalid', 'the invalid preview warning');
   console.log('Template previews passed.');
 } catch (error) {
   console.error('Template previews failed:', error);
