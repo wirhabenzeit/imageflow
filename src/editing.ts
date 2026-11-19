@@ -76,7 +76,7 @@ export type SourcePlace = { spread: string; pages: string; cover?: true };
 export type SourceUsage = Record<'photo' | 'text', Record<string, SourcePlace[]>>;
 
 // Lists the spreads that show each photo and Markdown source. `pages` holds a readable page range per spread.
-export function sourceUsage(project: Project, pages: string[], layouts?: Layouts) {
+export function sourceUsage(project: Project, pages: string[], layouts?: Layouts, coverBoxIds?: readonly string[]) {
   const usage: SourceUsage = { photo: {}, text: {} };
   function record(boxes: ReturnType<typeof shown>, place: SourcePlace) {
     for (const box of boxes) {
@@ -88,7 +88,11 @@ export function sourceUsage(project: Project, pages: string[], layouts?: Layouts
     }
   }
   project.spreads.forEach((spread, i) => record(shown(spread, layouts), { spread: spread.id, pages: pages[i] }));
-  if (project.cover) record(Object.values(project.cover.boxes), { spread: coverInstance, pages: 'Cover', cover: true });
+  if (project.cover) {
+    const boxes = project.cover.boxes;
+    record(coverBoxIds ? coverBoxIds.flatMap((id) => Object.hasOwn(boxes, id) ? [boxes[id]] : []) : Object.values(boxes),
+      { spread: coverInstance, pages: 'Cover', cover: true });
+  }
   return usage;
 }
 

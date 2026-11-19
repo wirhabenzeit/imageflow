@@ -62,11 +62,12 @@ export const mcpToolSchemas = {
   }),
   check_book: z.strictObject({
     project,
-    includeTemplate: z.boolean().optional().describe('Include the full declarations also available in get_authoring_context.'),
+    cover: z.literal(true).optional().describe('Check the exterior cover.'),
+    includeTemplate: z.boolean().optional().describe('Include full template declarations.'),
     expectedRevision: revision.optional()
       .describe('Required for drafts and page-number previews. Changed inputs return revision-conflict.'),
     preview: makePreviewRequestSchema(spreadReference).optional()
-      .describe('Return a rendered image of a page, spread, exterior cover, box or element, or a contact sheet of spreads.'),
+      .describe('Render artwork of a page, spread, cover, box, element or contact sheet.'),
     inspect: makeInspectionSchema(spreadReference).optional()
       .describe('Measure boxes and elements of one cover or spread.'),
     typescript: z.boolean().optional()
@@ -76,8 +77,8 @@ export const mcpToolSchemas = {
     fixtures: fixtureRequestSchema.optional()
       .describe('Render layouts with synthetic content per format and report coverage.'),
   }).superRefine((request, context) => {
-    if (request.fixtures && (request.preview || request.inspect || request.draft)) {
-      context.addIssue({ code: 'custom', path: ['fixtures'], message: 'Fixture checks use fixtures.preview for images and cannot be combined with preview, inspect or draft.' });
+    if (request.fixtures && (request.cover || request.preview || request.inspect || request.draft)) {
+      context.addIssue({ code: 'custom', path: ['fixtures'], message: 'Fixture checks cannot be combined with cover, preview, inspect or draft.' });
     }
     if (request.preview && 'page' in request.preview.target && !('spread' in request.preview.target) && !request.expectedRevision) {
       context.addIssue({ code: 'custom', path: ['expectedRevision'], message: 'Page-number previews require the inspected input revision.' });
@@ -131,7 +132,7 @@ export const mcpTools: { name: McpToolName; title: string; description: string; 
   { name: 'inspect_book', title: 'Inspect book', readOnly: true,
     description: 'Read saved spreads, cover, sources or parameters, or measure layout elements. Returns the revision for checks and commands.' },
   { name: 'check_book', title: 'Check book', readOnly: true,
-    description: 'Check the whole book without saving. Request a preview, type checking, an unsaved draft or synthetic fixtures. Call after each edit.' },
+    description: 'Check content or the exterior cover without saving. Supports previews, type checks, drafts and synthetic fixtures.' },
   { name: 'apply_project_changes', title: 'Apply changes', readOnly: false,
     description: 'Save commands atomically as one Undo step. See get_authoring_context with docs: ["project-commands"] for examples.' },
   { name: 'list_book_checkpoints', title: 'List book checkpoints', readOnly: true,

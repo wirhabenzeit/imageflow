@@ -645,7 +645,7 @@ export function App() {
       if (!controlFocused && !editing && !cropping && !elementEditor && !quick && selectedSpreads.length <= 1) swapSelectedPages();
       return;
     }
-    if (command === 'book-check') { setCheckScope(undefined); setCheckRequest((value) => value + 1); refreshCoverCheck(); return; }
+    if (command === 'book-check') { setCheckScope(coverActive ? coverInstance : undefined); setCheckRequest((value) => value + 1); refreshCoverCheck(); return; }
     if ((spreadCommands as readonly string[]).includes(command)) {
       if (coverActive) return;
       // Native accelerators must never delete/reorder a spread while a field or another editor owns the keyboard.
@@ -897,22 +897,26 @@ export function App() {
   const [freshCoverCheck, setFreshCoverCheck] = useState<Pick<BookCheck, 'id' | 'errors' | 'warnings'>>();
   const [checkingCover, setCheckingCover] = useState(false);
   function refreshCoverCheck() {
-    if (!summary || !coverGeometry || !api || checkingCover || busy) return;
+    if (!summary || !coverState || !coverGeometry || !api || checkingCover || busy || freshCoverCheck?.id === summary.id) return;
     const id = summary.id;
     setCheckingCover(true);
-    void api.checkBook(id, {}).then((result) => {
+    void api.checkBook(id, { cover: true }).then((result) => {
       if (current.current?.id !== id || 'error' in result) return;
       const status = result.value.render;
       if (status?.state === 'ready') setFreshCoverCheck({
-        id, errors: status.errors.filter((issue) => issue.cover), warnings: status.warnings.filter((issue) => issue.cover),
+        id, errors: status.errors, warnings: status.warnings,
       });
+      else if (result.value.state === 'error') {
+        const failure = result.value.diagnostics.find(({ severity }) => severity === 'error');
+        if (failure) setFreshCoverCheck({ id, errors: [{ cover: true, where: 'Cover', code: failure.code, message: failure.message }], warnings: [] });
+      }
     }).catch(() => {}).finally(() => setCheckingCover(false));
   }
   const currentCoverCheck = freshCoverCheck?.id === summary?.id ? freshCoverCheck
     : currentCoverStatus?.state === 'ready' ? currentCoverStatus
       : currentCoverStatus?.state === 'error' ? { errors: [{ cover: true as const, where: 'Cover', message: currentCoverStatus.message }], warnings: [] }
         : undefined;
-  const combinedCheck = check && currentCoverCheck && coverGeometry && checkCurrent
+  const combinedCheck = check && currentCoverCheck && coverState && coverGeometry && checkCurrent
     ? { ...check, errors: [...check.errors, ...currentCoverCheck.errors], warnings: [...check.warnings, ...currentCoverCheck.warnings] } : check;
   const spreadIssues = new Map<string, 'error' | 'warning'>();
   for (const [level, list] of [['warning', check?.warnings ?? []], ['error', check?.errors ?? []]] as const) {
@@ -1796,8 +1800,9 @@ export function App() {
     thumbList.current?.querySelector<HTMLElement>('[data-spread="' + CSS.escape(next.id) + '"]')?.focus();
   }
 
-  const usage = useMemo(() => summary ? assetUsage(summary, pageLabels) : { photo: {}, text: {} },
-    [summary, template, pageLabels.join()]);
+  const coverBoxIds = useMemo(() => coverGeometry && coverDefinition ? Object.keys(coverDefinition.boxes) : [], [coverGeometry, coverDefinition]);
+  const usage = useMemo(() => summary ? assetUsage(summary, pageLabels, coverBoxIds) : { photo: {}, text: {} },
+    [summary, pageLabels.join(), coverBoxIds]);
   const activeBox = dropTarget ? geometry?.boxes.find(({ spread, id, page }) => spread + ':' + (page ? page + ':' : '') + id === dropTarget) :
     highlight ? geometry?.boxes.find(({ spread: owner, id, page }) => owner === spread?.id && id === highlight && page === selectedPage) : undefined;
   const selectedSheetRect = spreadSelected ? geometry?.sheets.find(({ spread: id }) => id === spread?.id) : undefined;
@@ -1833,7 +1838,7 @@ export function App() {
     writable, busy: !!busy || exporting || !!reload || agentWorking, history: summary?.history,
     canExport, canSwapPages: !coverActive && !!spread && !!template && hasFacingPages(template.format) && sequence?.spreads[index]?.span === 'spread' && canSwapPages(spread, template.spreads),
     sidebar: !panels.leftHidden, inspector: !panels.rightHidden, sources: !panels.bottomHidden, guides: showGuides, layout, zoom, selectedSpread: spreadId, photoView: photoView.value, selectionCount: selectedSpreads.length,
-    saving, activeEditor, view: coverGeometry ? (coverActive ? 'cover' : 'content') : undefined,
+    saving, activeEditor, view: coverGeometry ? (coverActive ? 'cover' : 'content') : undefined, coverBoxIds,
     pageLabels: Object.fromEntries(spreads.map(({ id }, i) => [id, pageLabels[i]])) };
   const menuKey = JSON.stringify(menuState);
   useEffect(() => { void api?.setBookMenuState(menuState); }, [api, menuKey]);

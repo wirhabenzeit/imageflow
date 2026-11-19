@@ -13,7 +13,7 @@ import { assetUsage, clearFileAssignments, fileAssigned } from '../src/asset-usa
 import { sourceUsage } from '../src/editing';
 import { keptOutside } from '../src/layouts';
 import type { Layouts } from '../src/layouts';
-import { projectSchema, storedBoxes, storedStates } from '../src/project';
+import { coverInstance, projectSchema, storedBoxes, storedStates } from '../src/project';
 import type { Project, SpreadState } from '../src/project';
 
 // Phase 2 of ADR 0009: every code path that reads or rewrites references reads every state a spread stores. These
@@ -93,6 +93,8 @@ test('removing sources referenced from pages, replaced content and the cover lea
   assert.equal(book.project.schemaVersion, 3);
   assert.equal(book.photoIndex[coverPhoto].linked, true);
   assert.equal(assetUsage(book, []).photo[coverPhoto][0].cover, true);
+  assert.equal(assetUsage(book, [], ['hero']).photo[coverPhoto], undefined);
+  assert.deepEqual(assetUsage(book, [], ['kept']).photo[coverPhoto], [{ cover: true, spread: coverInstance, pages: 'Cover' }]);
   const keys = ['photo:' + photo, 'photo:' + replaced, 'photo:' + coverPhoto, 'markdown:' + text.imported[0], 'file:' + file.imported[0]];
   const removed = await removeSources(book, keys);
   const [spread] = removed.project.spreads;

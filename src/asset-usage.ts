@@ -25,14 +25,15 @@ const held = (value: unknown): unknown[] => Array.isArray(value)
   ? value.flatMap((item) => item && typeof item === 'object' ? Object.entries(item).filter(([key]) => key !== 'id').map(([, field]) => field) : [])
   : [value];
 
-// Count saved references conservatively, including parameters and content kept by another layout. An asset is
-// safe to describe as unused only when no saved value references it; a filename or path is never a reference.
-export function assetUsage({ project, photoIndex }: ProjectFiles, pages: string[]) {
-  const usage = { ...sourceUsage(project, pages), file: {} } as SourceUsage & { file: Record<string, SourcePlace[]> };
+// By default, count saved references conservatively for unused and removal decisions, including retained values.
+// Pass the active cover layout's box IDs to report visible cover photo placements.
+export function assetUsage({ project, photoIndex }: ProjectFiles, pages: string[], coverBoxIds?: readonly string[]) {
+  const usage = { ...sourceUsage(project, pages, undefined, coverBoxIds), file: {} } as SourceUsage & { file: Record<string, SourcePlace[]> };
   function record(value: unknown, spread: string, page: string) {
     if (typeof value !== 'string') return;
     const kinds = [Object.hasOwn(photoIndex, value) && 'photo', Object.hasOwn(project.texts, value) && 'text', Object.hasOwn(project.files, value) && 'file'] as const;
     for (const kind of kinds) if (kind) {
+      if (kind !== 'file' && coverBoxIds && spread === coverInstance) continue;
       const list = usage[kind][value] ??= [];
       if (!list.some((entry) => entry.spread === spread)) list.push({ spread, pages: page, ...(spread === coverInstance ? { cover: true } : {}) });
     }

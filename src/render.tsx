@@ -16,10 +16,9 @@ import * as jsx from 'react/jsx-runtime';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { editorURL } from './desktop';
-import { getCrop, placementIn } from './spread';
 import { bookLayout } from './desktop';
 import type { BookGeometry, BookView, Issue, Rect, RenderStatus, TemplateInfo } from './desktop';
-import { cssMM, pageLabel, pageSequence, pagesText, pdfPoints, resolveFormat, sheetBleed, sheetPages, spanRequiredAt, toMillimeters } from './format';
+import { cssMM, pageLabel, pageSequence, pagesText, resolveFormat, sheetBleed, sheetPages, spanRequiredAt, toMillimeters } from './format';
 import { coverLayoutsFor, resolveCover } from './cover';
 import type { CoverResolution } from './cover';
 import { animateReorder } from './reorder-motion';
@@ -88,6 +87,18 @@ function loadStyles(url?: string) {
 // Converts a measured CSS pixel distance to millimetres, rounded for reporting.
 const reportedMm = (pixels: number, mmPerPixel: number) => Math.round(pixels * mmPerPixel * 10) / 10;
 const ptPerMm = 72 / 25.4;
+
+function photoResolutionIssue(node: HTMLElement, minimum: number | undefined, mmPerPixel: number, label: string, source?: string): Issue | undefined {
+  const ppi = Number(node.dataset.ppi);
+  if (minimum === undefined || !Number.isFinite(ppi) || ppi >= minimum) return;
+  const bounds = node.getBoundingClientRect();
+  return {
+    message: label + ' is ' + Math.round(ppi) + ' ppi (minimum ' + minimum + ').', code: 'photo-resolution-low', source,
+    details: { ppi: Math.round(ppi), minimumPpi: minimum,
+      boxWidthMm: reportedMm(bounds.width, mmPerPixel), boxHeightMm: reportedMm(bounds.height, mmPerPixel) },
+    suggestion: 'Zoom the crop out (set_crop with a smaller zoom), assign a higher-resolution photo, or switch to a layout with a smaller box.',
+  };
+}
 
 function validateSpread(container: HTMLElement, spread: SpreadState, template: Template, format: ResolvedFormat, where: string,
   warnings: Issue[], errors: Issue[]) {
@@ -206,22 +217,14 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
       if (!box.clientWidth || !box.clientHeight) throw new SpreadError(where + ' · ' + name + ' has no area.', spread.id, { page });
       boxes.set(page ? page + ':' + id : id, box);
       const assignment = scopeState(spread, page)?.boxes[id];
-      const ppi = Number(box.dataset.ppi);
       if (assignment?.photo && box.hasAttribute('data-empty')) {
         errors.push(issue(layout.boxes[id].label + ' is missing photo ' + assignment.photo + '.', {
           code: 'photo-missing', box: id, ...at, source: assignment.photo,
           suggestion: 'Restore the original file, import it again with import_sources, or assign another photo to box ' + id + '.',
         }));
       }
-      if (resolution && Number.isFinite(ppi) && ppi < resolution.minimum) {
-        errors.push(issue(layout.boxes[id].label + ' is ' + Math.round(ppi) + ' ppi (minimum ' + resolution.minimum + ').', {
-          code: 'photo-resolution-low', box: id, ...at, source: assignment?.photo,
-          details: { ppi: Math.round(ppi), minimumPpi: resolution.minimum,
-            boxWidthMm: reportedMm(box.getBoundingClientRect().width, mmPerPixel),
-            boxHeightMm: reportedMm(box.getBoundingClientRect().height, mmPerPixel) },
-          suggestion: 'Zoom the crop out (set_crop with a smaller zoom), assign a higher-resolution photo, or switch to a layout with a smaller box.',
-        }));
-      }
+      const finding = photoResolutionIssue(box, resolution?.minimum, mmPerPixel, layout.boxes[id].label, assignment?.photo);
+      if (finding) errors.push(issue(finding.message, { ...finding, box: id, ...at }));
     }
     const rect = box.getBoundingClientRect();
     const overshoot = {
@@ -244,37 +247,50 @@ function validateSpread(container: HTMLElement, spread: SpreadState, template: T
   return { sheet, boxes };
 }
 
-function checkTypography(sheet: HTMLElement, format: ResolvedFormat, minimum: number | undefined) {
+function typographyIssues(sheet: HTMLElement, sheetWidth: number, minimum: number | undefined,
+  safeAt: (centerX: number) => Rect, location: Pick<Issue, 'spread' | 'cover' | 'where'>, avoid: readonly Rect[] = []) {
   const bounds = sheet.getBoundingClientRect();
-  const mmPerPixel = format.spreadWidth / bounds.width;
-  const { bleed, safe, trim } = format;
-  const pages = sheetPages(format);
+  const mmPerPixel = sheetWidth / bounds.width;
   const text = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
   // The smallest text below the minimum and the largest safe-area overshoot, each with the box or element it is in.
   let small: { sizeMm: number; owner: ReturnType<typeof ownerOf> } | undefined;
   let outside: { overshootMm: number; owner: ReturnType<typeof ownerOf> } | undefined;
+  let nearFold: ReturnType<typeof ownerOf> | undefined;
   for (let node = text.nextNode(); node; node = text.nextNode()) {
     const parent = node.parentElement;
-    if (!node.textContent?.trim() || !parent || parent.closest('.if-placeholder, svg, [data-decorative]')) continue;
-    const sizeMm = parseFloat(getComputedStyle(parent).fontSize) * mmPerPixel;
+    if (!node.textContent?.trim() || !parent || parent.closest('.if-placeholder, .if-text-placeholder, svg, [data-decorative]')) continue;
+    const sizeMm = parseFloat(getComputedStyle(parent).fontSize) * 25.4 / 96;
     if (minimum && sizeMm < minimum && (!small || sizeMm < small.sizeMm)) small = { sizeMm, owner: ownerOf(parent) };
     range.selectNodeContents(node);
     for (const rect of range.getClientRects()) {
       if (!rect.width || !rect.height) continue;
-      // x from the sheet's left bleed edge, y from the top trim edge; the text's centre picks its page.
       const x = (rect.left - bounds.left) * mmPerPixel;
-      const y = (rect.top - bounds.top) * mmPerPixel - bleed.top;
+      const y = (rect.top - bounds.top) * mmPerPixel;
       const w = rect.width * mmPerPixel;
       const h = rect.height * mmPerPixel;
-      const page = pages.find(({ trimX }, i) => i === pages.length - 1 || x + w / 2 < trimX + trim.width)!;
-      const leftSafe = page.trimX + page.safeLeft;
-      const rightSafe = page.trimX + trim.width - page.safeRight;
-      const overshootMm = Math.max(leftSafe - x, x + w - rightSafe, safe.top - y, y + h - (trim.height - safe.bottom));
+      const safe = safeAt(x + w / 2);
+      const overshootMm = Math.max(safe.x - x, x + w - safe.x - safe.width, safe.y - y, y + h - safe.y - safe.height);
       if (overshootMm > .2 && (!outside || overshootMm > outside.overshootMm)) outside = { overshootMm, owner: ownerOf(parent) };
+      if (!nearFold && avoid.some((area) => x < area.x + area.width && x + w > area.x && y < area.y + area.height && y + h > area.y)) {
+        nearFold = ownerOf(parent);
+      }
     }
   }
-  return { small, outside };
+  const issues: Issue[] = [];
+  if (small && minimum) issues.push({ ...location, message: 'Text is smaller than the format minimum.', code: 'text-too-small', ...small.owner,
+    details: { sizePt: Math.round(small.sizeMm * ptPerMm * 10) / 10, minimumPt: Math.round(minimum * ptPerMm * 10) / 10 },
+    suggestion: 'Increase the font size in the template CSS or the size parameter of this box or element.' });
+  if (outside) issues.push({ ...location, message: 'Text extends outside the safe area.', code: 'text-outside-safe-area', ...outside.owner,
+    details: { overshootMm: Math.round(outside.overshootMm * 10) / 10 },
+    suggestion: 'Move or inset this text in the template CSS so it stays inside the format safe area.' });
+  if (nearFold) issues.push({ ...location, message: 'Some cover text crosses a fold avoidance area.', code: 'cover-text-near-fold', ...nearFold });
+  return issues;
+}
+
+function printPictures(mode: 'check' | 'preview' | 'export', target = 300) {
+  return { mode, pixelRatio: mode === 'check' ? .5 : mode === 'preview' ? 1.5 : target / 96,
+    concurrency: mode === 'export' ? 1 : 2, timeoutMs: pictureTimeoutMs[mode] };
 }
 
 /**
@@ -1650,9 +1666,8 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
     style.textContent = '@page { size: ' + width + ' ' + height + '; margin: 0; }';
     document.head.append(style);
   }
-  configureRenderedImages({ mode: edit ? 'preview' : printing ? 'export' : 'check',
-    pixelRatio: edit ? window.devicePixelRatio || 1 : (geometry.output.resolution?.target ?? 300) / 96,
-    concurrency: edit ? 2 : 3, timeoutMs: edit ? pictureTimeoutMs.preview : pictureTimeoutMs.export });
+  configureRenderedImages(edit ? { ...printPictures('preview'), pixelRatio: Math.min(window.devicePixelRatio || 1, 2) }
+    : printPictures(printing ? 'export' : artwork ? 'preview' : 'check', geometry.output.resolution?.target));
   let renderError: unknown;
   const reactRoot = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
   flushSync(() => reactRoot.render(
@@ -1694,17 +1709,9 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
       });
       if (box?.photo && !photo) errors.push({ ...issue(declared.label + ' uses an unavailable photo.', 'photo-missing', id), source: box.photo });
       else if (!box?.photo) warnings.push(issue(declared.label + ' is empty.', 'cover-box-empty', id));
-      if (photo && node && geometry.output.resolution) {
-        const rect = node.getBoundingClientRect();
-        const { width, height } = { width: rect.width * mmPerPixel, height: rect.height * mmPerPixel };
-        if (width > 0 && height > 0) {
-          const placement = placementIn(box, state.definition);
-          const crop = getCrop(photo, placement, width / height);
-          const ppi = Math.min(photo.width * crop.width * 25.4 / width, photo.height * crop.height * 25.4 / height);
-          const { minimum, target } = geometry.output.resolution;
-          if (ppi < target) (ppi < minimum ? errors : warnings).push(issue(
-            declared.label + ' has ' + Math.round(ppi) + ' ppi at its current crop.', 'photo-resolution-low', id));
-        }
+      if (node) {
+        const finding = photoResolutionIssue(node, geometry.output.resolution?.minimum, mmPerPixel, declared.label, box?.photo);
+        if (finding) errors.push({ ...finding, cover: true, where: 'Cover', box: id });
       }
       errors.push(...files(declared.parameters, box?.params ?? {}).map((finding) => ({ ...finding, box: id })));
     }
@@ -1730,30 +1737,17 @@ async function renderPhysicalCover(root: HTMLElement, book: RenderProject, templ
     });
     if (fontUse.stroked) errors.push({ ...issue('Stroked cover text prints as a Type 3 font.', 'text-stroked'), ...fontUse.stroked.owner });
   }
+  if (edit) await settle(decodable(sheet));
   if (layout) {
-    const text = document.createTreeWalker(sheet, NodeFilter.SHOW_TEXT);
-    const range = document.createRange();
-    let outside = false, fold = false, small = false;
-    for (let node = text.nextNode(); node; node = text.nextNode()) {
-      const parent = node.parentElement;
-      if (!node.textContent?.trim() || !parent || parent.closest('svg, [data-empty], [data-decorative]')) continue;
-      const size = pdfPoints(parseFloat(getComputedStyle(parent).fontSize) * 25.4 / 96);
-      const minimum = geometry.output.minimumTextSize;
-      if (minimum && size < pdfPoints(toMillimeters(minimum))) small = true;
-      range.selectNodeContents(node);
-      for (const rect of range.getClientRects()) {
-        if (!rect.width || !rect.height) continue;
-        const x = (rect.left - bounds.left) * mmPerPixel + geometry.sheet.x;
-        const y = (rect.top - bounds.top) * mmPerPixel + geometry.sheet.y;
-        const right = x + rect.width * mmPerPixel, bottom = y + rect.height * mmPerPixel;
-        if (!Object.values(geometry.safe).some((area) => area && x >= area.x - .2 && right <= area.x + area.width + .2 &&
-          y >= area.y - .2 && bottom <= area.y + area.height + .2)) outside = true;
-        if (geometry.avoid.some((area) => x < area.x + area.width && right > area.x && y < area.y + area.height && bottom > area.y)) fold = true;
-      }
-    }
-    if (outside) warnings.push(issue('Some cover text extends outside its region’s safe area.', 'text-outside-safe-area'));
-    if (fold) warnings.push(issue('Some cover text crosses a fold avoidance area.', 'cover-text-near-fold'));
-    if (small) warnings.push(issue('Some cover text is smaller than the minimum print size.', 'text-too-small'));
+    const fromBleed = (area: Rect) => ({ ...area, x: area.x - geometry.sheet.x, y: area.y - geometry.sheet.y });
+    const regions = (Object.entries(geometry.regions) as [keyof typeof geometry.regions, Rect][]).map(([key, region]) => {
+      const safe = geometry.safe[key];
+      return { end: region.x + region.width - geometry.sheet.x, safe: fromBleed(safe ?? {
+        x: region.x + region.width / 2, y: region.y + region.height / 2, width: 0, height: 0,
+      }) };
+    });
+    warnings.push(...typographyIssues(sheet, geometry.sheet.width, geometry.output.minimumTextSize && toMillimeters(geometry.output.minimumTextSize),
+      (x) => (regions.find(({ end }) => x < end) ?? regions.at(-1)!).safe, { cover: true, where: 'Cover' }, geometry.avoid.map(fromBleed)));
   }
   let inspection: ElementInspection | undefined;
   if (inspect && layout && state) {
@@ -1895,9 +1889,7 @@ export async function startRender(root: HTMLElement) {
       previewCache: location.pathname + '/picture/' } : edit ? { mode: 'preview', pixelRatio: view === 'book' ? Math.min(window.devicePixelRatio || 1, 2) : 0.5,
       concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
       previewCache: location.pathname + '/picture/' }
-      : check ? { mode: 'check', pixelRatio: 0.5, concurrency: 2, timeoutMs: pictureTimeoutMs.check }
-        : artwork || inspect ? { mode: 'preview', pixelRatio: 1.5, concurrency: 2, timeoutMs: pictureTimeoutMs.preview }
-          : { mode: 'export', pixelRatio: target / 96, concurrency: 1, timeoutMs: pictureTimeoutMs.export });
+      : printPictures(check ? 'check' : artwork || inspect ? 'preview' : 'export', target));
     if (edit && view === 'layouts') {
       await renderLayouts(root, book, template, info, query.get('spread') ?? '',
         query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined);
@@ -2138,7 +2130,8 @@ export async function startRender(root: HTMLElement) {
     const minimum = template.format.output.minimumTextSize;
     for (const [spread, { sheet }] of present ? [] : validated) {
       const minimumMm = minimum && toMillimeters(minimum);
-      const typography = checkTypography(sheet, format, minimumMm);
+      const { trim, bleed, safe } = format;
+      const pages = sheetPages(format);
       const fontUse = checkFonts(sheet);
       for (const { owner, family, chars } of fontUse.missing) {
         const shown = [...chars].slice(0, 12);
@@ -2152,16 +2145,11 @@ export async function startRender(root: HTMLElement) {
           code: 'text-stroked', ...fontUse.stroked.owner,
           suggestion: 'Draw an outline or halo as filled copies of the text shifted around it, or as a shadow, instead of an SVG stroke or -webkit-text-stroke.' });
       }
-      if (typography.small && minimumMm) {
-        warnings.push({ ...located(spread, 'Text is smaller than the format minimum.'), code: 'text-too-small', ...typography.small.owner,
-          details: { sizePt: Math.round(typography.small.sizeMm * ptPerMm * 10) / 10, minimumPt: Math.round(minimumMm * ptPerMm * 10) / 10 },
-          suggestion: 'Increase the font size in the template CSS or the size parameter of this box or element.' });
-      }
-      if (typography.outside) {
-        warnings.push({ ...located(spread, 'Text extends outside the safe area.'), code: 'text-outside-safe-area', ...typography.outside.owner,
-          details: { overshootMm: Math.round(typography.outside.overshootMm * 10) / 10 },
-          suggestion: 'Move or inset this text in the template CSS so it stays inside the format safe area.' });
-      }
+      warnings.push(...typographyIssues(sheet, format.spreadWidth, minimumMm, (x) => {
+        const page = pages.find(({ trimX }) => x < trimX + trim.width) ?? pages.at(-1)!;
+        return { x: page.trimX + page.safeLeft, y: bleed.top + safe.top,
+          width: trim.width - page.safeLeft - page.safeRight, height: trim.height - safe.top - safe.bottom };
+      }, located(spread, '')));
       const round = (value: number) => Math.round(value * 10) / 10;
       const blocks = checkTextBlocks(sheet, format);
       for (const { owner: { tag, text, self, ...owner }, clipped, bottomMm, rightMm, clippedBy } of blocks.overflows) {

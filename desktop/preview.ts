@@ -43,7 +43,8 @@ async function withRenderedBook<T>(
   const lifecycle = new AbortController();
   // No fixed deadline: the render may take as long as its pictures need, each within its own timeout, and times out
   // only when nothing has started or finished drawing for longer than one picture may take (render-budget).
-  const idleMs = renderIdleMs(query.get('view') === 'check' ? 'check' : 'preview');
+  const view = query.get('view');
+  const idleMs = renderIdleMs(view === 'check' || view === 'cover-check' ? 'check' : 'preview');
   let last = Date.now();
   const stop = setInterval(() => {
     if (Date.now() - last > idleMs) {

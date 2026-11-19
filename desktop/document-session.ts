@@ -193,7 +193,7 @@ export class DocumentSession {
   get book() { return this.projectSession.book; }
   get summary(): ProjectSummary {
     return { ...projectSummary(this.book, this.active.id), handle: this.projectSession.handle, history: this.projectSession.history,
-      network: [...this.networkOrigins], pageLabels: this.menuState?.pageLabels };
+      network: [...this.networkOrigins], pageLabels: this.menuState?.pageLabels, coverBoxIds: this.menuState?.coverBoxIds };
   }
   notify(change: ProjectChange) {
     if (!this.closing && !this.window.isDestroyed()) this.window.webContents.send(channels.changed, change);
@@ -750,35 +750,26 @@ export class DocumentSession {
     this.checkJobs.add(job);
     if (!externalSignal) this.checkJob = job;
     try {
-      return await checkProject(book, this.cache, request, async (snapshot, preview, signal, inspect) => {
+      return await checkProject(book, this.cache, request, async (snapshot, preview, signal, inspect, cover) => {
         const id = randomUUID();
         this.renders.set(id, { book: snapshot, mode: 'export', network: () => this.originsFor(snapshot) });
         try {
           const url = renderOrigin + '/render/' + id;
           if (snapshot.fixture?.coverPages !== undefined) return { status: await checkCoverRender(url, signal, arm) };
-          const showingCover = !!preview && 'cover' in preview.target;
-          const inspectingCover = !!inspect?.cover;
-          const interiorImage = preview && !showingCover
-            ? await captureBookPreview(url, preview, signal, inspectingCover ? undefined : inspect, arm) : undefined;
-          let status = interiorImage?.status ?? await checkBookRender(url, signal, inspectingCover ? undefined : inspect, arm);
-          const idOfFormat = status.template.formatId;
-          const canCheckCover = !!status.template.coverFormats && Object.hasOwn(status.template.coverFormats, idOfFormat) &&
-            (!snapshot.project.format || !Object.keys(status.template.formats).length || snapshot.project.format === idOfFormat);
-          let coverImage;
-          if (showingCover || inspectingCover || (canCheckCover && !snapshot.fixture)) {
-            try {
-              coverImage = showingCover && preview ? await captureBookPreview(url, preview, signal, inspectingCover ? inspect : undefined, arm) : undefined;
-              const cover = coverImage?.status ?? (inspectingCover ? await checkBookRender(url, signal, inspect, arm)
-                : await checkCoverRender(url, signal, arm));
-              status = { ...status, cover: cover.cover, errors: [...status.errors, ...cover.errors],
-                warnings: [...status.warnings, ...cover.warnings], inspection: inspectingCover ? cover.inspection : status.inspection };
-            } catch (error) {
-              if (showingCover || inspectingCover || signal.aborted) throw error;
-              status = { ...status, errors: [...status.errors, { cover: true, code: 'cover-render-failed', where: 'Cover',
-                message: error instanceof Error ? error.message : String(error) }] };
-            }
-          }
-          return { status, preview: coverImage ?? interiorImage };
+          const coverPreview = preview && 'cover' in preview.target ? preview : undefined;
+          const interiorPreview = coverPreview ? undefined : preview;
+          const coverInspect = inspect?.cover ? inspect : undefined;
+          const interiorInspect = coverInspect ? undefined : inspect;
+          const needsCover = cover || coverPreview || coverInspect;
+          const needsInterior = !needsCover || interiorPreview || interiorInspect;
+          const interiorImage = interiorPreview ? await captureBookPreview(url, interiorPreview, signal, interiorInspect, arm) : undefined;
+          const interior = interiorImage?.status ?? (needsInterior ? await checkBookRender(url, signal, interiorInspect, arm) : undefined);
+          if (!needsCover) return { status: interior!, preview: interiorImage };
+          const coverImage = coverPreview ? await captureBookPreview(url, coverPreview, signal, coverInspect, arm) : undefined;
+          const checked = coverImage?.status ?? (coverInspect ? await checkBookRender(url, signal, coverInspect, arm) : await checkCoverRender(url, signal, arm));
+          return { status: interior ? { ...interior, cover: checked.cover, errors: [...interior.errors, ...checked.errors],
+            warnings: [...interior.warnings, ...checked.warnings], inspection: checked.inspection ?? interior.inspection } : checked,
+            preview: coverImage ?? interiorImage };
         } finally {
           this.renders.delete(id);
         }

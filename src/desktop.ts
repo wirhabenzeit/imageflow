@@ -57,12 +57,13 @@ export type BookMenuState = { document: boolean; enabled: Record<SpreadCommand, 
   writable: boolean; busy: boolean; history?: HistoryState; canExport: boolean; canSwapPages?: boolean; activeEditor?: ActiveBookEditor;
   sidebar?: boolean; inspector?: boolean; sources?: boolean; guides?: boolean; layout?: CanvasLayout; zoom?: number; photoView?: PhotoView;
   selectionCount?: number; selectedSpread?: string; saving?: boolean; importMode?: ImportMode; pageLabels?: Record<string, string>;
-  view?: 'content' | 'cover' };
+  view?: 'content' | 'cover'; coverBoxIds?: string[] };
 export type Command = PhotoViewCommand | SpreadCommand | 'swap-pages' | 'book-check' | OpenAction | 'toggle-project' | 'toggle-inspector' | 'toggle-sources' | 'toggle-guides' | LayoutCommand | 'export' | 'import' | 'copy-assets' | 'presentation' | 'presentation-start' | 'manage-sources' | 'save-copy' | 'undo' | 'redo' | 'zoom-in' | 'zoom-out' | 'zoom-actual' | 'zoom-fit' | 'revert-opened';
 export type ProjectSummary = ProjectFiles & {
   id: string; folder: string;
   handle?: string; history?: HistoryState; viewKey?: string;
   pageLabels?: Record<string, string>;
+  coverBoxIds?: string[];
   photoDates?: Record<string, { captured: string; capturedEstimated?: boolean }>;
   // The template's hash as loaded; network approvals hold for one hash (ADR 0006).
   templateHash?: string;

@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
+import { BookFrame } from './BookFrame';
 import { PhotoContent } from './BoxContent';
 import { Fields } from './Fields';
-import { renderOrigin } from './desktop';
 import type { CoverLayoutInfo, ProjectSummary, Rect, RenderStatus } from './desktop';
 import type { CoverResolution, ResolvedCover } from './cover';
 import type { CoverState } from './project';
@@ -31,10 +31,11 @@ export function CoverCanvas({ project, geometry: cover, definition, guides, togg
   toggleGuides: () => void; openInspector: () => void; onStatus: (status: CoverStatus) => void;
 }) {
   const surface = useRef<HTMLDivElement>(null);
-  const frame = useRef<HTMLIFrameElement>(null);
   const [result, setResult] = useState<CoverStatus>();
+  const [displayed, setDisplayed] = useState<ActiveCover>();
   const [width, setWidth] = useState(0);
-  const { sheet } = cover.geometry;
+  const visible = displayed ?? cover;
+  const { sheet } = visible.geometry;
   useLayoutEffect(() => {
     const element = surface.current;
     if (!element) return;
@@ -44,32 +45,26 @@ export function CoverCanvas({ project, geometry: cover, definition, guides, togg
     observer.observe(element);
     return () => observer.disconnect();
   }, [sheet.width, sheet.height]);
-  useEffect(() => {
-    function receive(event: MessageEvent<RenderStatus>) {
-      if (event.origin !== renderOrigin || !frame.current || event.source !== frame.current.contentWindow) return;
-      if (event.data?.state !== 'ready' && event.data?.state !== 'error') return;
-      const next = { project, status: event.data };
-      setResult(next);
-      onStatus(next);
-    }
-    window.addEventListener('message', receive);
-    return () => window.removeEventListener('message', receive);
-  }, [project, onStatus]);
+  function receive(status: RenderStatus, project: string) {
+    if (status.state === 'ready' && status.cover) setDisplayed(status.cover);
+    const next = { project, status };
+    setResult(next);
+    onStatus(next);
+  }
   const status = result?.project === project ? result.status : undefined;
   return <main className="cover-canvas" aria-label="Cover preview">
     <div className="cover-preview-bar">
-      <span>{dimension(sheet.width)} × {dimension(sheet.height)} mm <span className="muted">· {cover.interiorPages} content pages</span></span>
+      <span>{dimension(sheet.width)} × {dimension(sheet.height)} mm <span className="muted">· {visible.interiorPages} content pages</span></span>
       <button type="button" aria-pressed={guides} onClick={toggleGuides}>Guides</button>
     </div>
-    {cover.status === 'provisional' && <p className="cover-notice" role="status">
-      Draft size based on {cover.previewPages} pages. Adjust the content page count before exporting.
+    {visible.status === 'provisional' && <p className="cover-notice" role="status">
+      Draft size based on {visible.previewPages} pages. Adjust the content page count before exporting.
     </p>}
     <div ref={surface} className="cover-preview-surface">
       <div className="cover-preview-sheet" style={{ width, aspectRatio: sheet.width / sheet.height }}
         data-width-mm={dimension(sheet.width)} data-height-mm={dimension(sheet.height)} data-ready={status?.state === 'ready' || undefined}>
-        <iframe key={project} ref={frame} src={renderOrigin + '/render/' + encodeURIComponent(project) + '?view=cover'}
-          title="Exterior cover artwork" tabIndex={-1} />
-        {guides && <CoverGuides geometry={cover.geometry} />}
+        <BookFrame project={project} view="cover" title="Exterior cover artwork" onStatus={receive} />
+        {guides && <CoverGuides geometry={visible.geometry} />}
         {status?.state === 'error'
           ? <p className="cover-preview-message" role="alert">{status.message}</p>
           : !definition ? <button type="button" className="cover-preview-message" onClick={openInspector}>Choose a cover layout</button> : null}

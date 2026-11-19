@@ -2590,6 +2590,10 @@
             "minLength": 1,
             "maxLength": 128
           },
+          "cover": {
+            "type": "boolean",
+            "const": true
+          },
           "includeTemplate": {
             "type": "boolean"
           },

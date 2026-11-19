@@ -8,11 +8,15 @@ import { inspectionSchema } from './inspection';
 
 export const authoringCheckSchema = z.strictObject({
   expectedRevision: z.string().regex(/^[a-f0-9]{64}$/, 'Expected a SHA-256 input revision.').optional(),
+  cover: z.literal(true).optional(),
   preview: previewRequestSchema.optional(),
   inspect: inspectionSchema.optional(),
   typescript: z.boolean().optional(),
 });
 export type AuthoringCheckRequest = z.input<typeof authoringCheckSchema>;
+export function checksCover({ cover, preview, inspect }: AuthoringCheckRequest) {
+  return !!(cover || (preview && 'cover' in preview.target) || inspect?.cover);
+}
 export type AuthoringCheckResult = AuthoringReport & {
   state: 'ready' | 'error';
   checks: {

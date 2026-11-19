@@ -51,7 +51,7 @@ export function AssetsWindow({ api }: { api?: DesktopApi }) {
   }, [api]);
   return <main className="studio assets-window">
     {summary && api ? <SourceManager view={photoView} api={api} summary={summary} adopt={setSummary} disabled={refreshing} quickLook={setQuick} /> : !error && <p className="muted">Loading assets…</p>}
-    {summary && quick && <QuickLook view={photoView.value} summary={summary} source={quick} usage={assetUsage(summary, assetPageLabels(summary))}
+    {summary && quick && <QuickLook view={photoView.value} summary={summary} source={quick} usage={assetUsage(summary, assetPageLabels(summary), summary.coverBoxIds ?? [])}
       close={() => setQuick(undefined)} navigate={(step) => {
         const ids = sourceList(summary, quick.kind, photoView.value).map(({ id }) => id);
         const next = ids[ids.indexOf(quick.id) + step]; if (next) setQuick({ ...quick, id: next });

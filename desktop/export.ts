@@ -125,7 +125,7 @@ export async function printBook(url: string, fontNames: string[], signal: AbortS
     const errors: Issue[] = [...status.errors, ...[...issues].map((message) => ({ message, code: 'pdf-resource' }))];
     signal.throwIfAborted();
     const bytes = await pdf.save();
-    const limit = cover ? cover.geometry.output.maximumFileSize : format.output.maximumFileSize?.pages;
+    const limit = cover ? cover.geometry.output.maximumFileSize ?? format.output.maximumFileSize?.cover : format.output.maximumFileSize?.pages;
     if (limit && bytes.length > limit) {
       errors.push({ code: 'pdf-file-size', message: 'The PDF is ' + Math.ceil(bytes.length / 1e6) + ' MB; the format allows ' + Math.floor(limit / 1e6) + ' MB.' });
     }

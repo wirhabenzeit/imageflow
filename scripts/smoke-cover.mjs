@@ -27,39 +27,86 @@ try {
   project.spreads = [page('start', 'title'), ...Array.from({ length: 15 }, (_, i) => page('spread-' + i, 'panorama')),
     page('end', 'credits')];
   await writeFile(projectFile, JSON.stringify(project));
+  const templateFile = join(folder, 'template/index.tsx');
+  const template = await readFile(templateFile, 'utf8');
+  const withLegacyLimit = template.replace('step: 2 }, output: { resolution:',
+    'step: 2 }, output: { maximumFileSize: { pages: 500_000_000, cover: 1024 }, resolution:');
+  assert.notEqual(withLegacyLimit, template);
+  await writeFile(templateFile, withLegacyLimit);
   app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],
     env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined, IMAGEFLOW_HIDE_WINDOW: '1' } });
   const window = await testBook(app, folder);
   await window.locator(ready).waitFor();
+
+  const connection = await window.evaluate(() => window.imageflow.mcpSettings(true));
+  client = new Client({ name: 'Cover smoke', version: '1' });
+  await client.connect(new StdioClientTransport({ ...connection.value.launch, stderr: 'pipe' }));
+  async function call(name, args = {}, error = false) {
+    const result = await client.callTool({ name, arguments: args }, { timeout: 110000 });
+    const data = result.structuredContent ?? JSON.parse(result.content.find(item => item.type === 'text').text);
+    assert.equal(!!result.isError, error, JSON.stringify(data));
+    return { data, result };
+  }
+  const handle = (await call('list_projects')).data.projects.find((item) => item.folder === folder).project;
+  const plain = (await call('check_book', { project: handle })).data;
+  assert.equal(plain.render.cover, undefined);
+  assert.ok(plain.diagnostics.every(({ location }) => !location?.cover));
+
   await window.getByRole('radio', { name: 'Cover', exact: true }).click();
   await window.locator(coverReady + '[data-width-mm="623"]').waitFor();
   assert.equal(await window.getByRole('group', { name: 'Spreads', exact: true }).count(), 0);
   const picker = window.getByLabel('Cover layout', { exact: true });
   await picker.selectOption('wrapPhoto');
   const heading = window.getByRole('textbox', { name: 'Cover title', exact: true });
+  await window.frameLocator(coverReady + ' iframe').locator('[data-box="hero"]').waitFor();
+  await window.evaluate(() => {
+    const sheet = document.querySelector('.cover-preview-sheet');
+    const transitions = [];
+    const observer = new MutationObserver(() => {
+      const pending = sheet.querySelector('iframe[data-current]:not([data-ready])');
+      if (!pending) return;
+      const shown = sheet.querySelector('iframe[data-ready]:not(.book-frame-pending)');
+      transitions.push(!!shown && getComputedStyle(shown).visibility === 'visible');
+    });
+    observer.observe(sheet, { childList: true, subtree: true, attributes: true });
+    window.coverTransitions = () => { observer.disconnect(); return transitions; };
+  });
   await heading.fill('A physical cover');
   await heading.press('Tab');
   const artwork = window.frameLocator(coverReady + ' iframe').locator('[data-edit="title"]');
   await artwork.filter({ hasText: 'A physical cover' }).waitFor();
+  const transitions = await window.evaluate(() => window.coverTransitions());
+  assert.ok(transitions.length > 0 && transitions.every(Boolean), 'A ready cover stays visible while the replacement loads.');
   assert.equal((await readProject()).schemaVersion, 3);
   assert.equal((await readProject()).cover.params.title, 'A physical cover');
+  await window.locator('.book-check-toggle').click();
+  await window.locator('.book-check-heading').filter({ hasText: 'This cover' }).waitFor();
+  await window.locator('.book-check-panel .issue-current').filter({ hasText: 'Cover photo is empty.' }).waitFor();
+  await window.locator('.book-check-list:not(.book-check-stale)').waitFor();
+  await window.keyboard.press('Escape');
   const photos = JSON.parse(await readFile(join(folder, 'photos.json'), 'utf8'));
   const photo = Object.keys(photos)[0];
   await window.getByRole('combobox', { name: 'Choose photo for Cover photo' }).selectOption(photo);
+  await window.getByRole('combobox', { name: 'Replace photo in Cover photo' }).waitFor();
   await window.frameLocator(coverReady + ' iframe').locator('[data-box="hero"] img').waitFor();
   assert.equal((await readProject()).cover.boxes.hero.photo, photo);
   await window.getByRole('button', { name: 'Guides', exact: true }).click();
   assert.equal(await window.locator('.cover-guides .gutter-guide').count(), 2);
 
   let destination = 0;
-  async function exportPdf(name, pageCount, width, height, trimWidth, trimHeight) {
+  async function exportPdf(name, pageCount, width, height, trimWidth, trimHeight, expectLegacyLimit = false) {
     const filePath = join(work, 'proof-' + destination++ + '.pdf');
     await app.evaluate(({ dialog }, filePath) => {
+      globalThis.coverExportDetails = [];
       dialog.showSaveDialog = async () => ({ canceled: false, filePath });
-      dialog.showMessageBox = async () => ({ response: 1 });
+      dialog.showMessageBox = async (_, options) => {
+        globalThis.coverExportDetails.push(options.detail ?? '');
+        return { response: 1 };
+      };
     }, filePath);
     await window.getByRole('button', { name, exact: true }).click();
     await window.waitForFunction(() => document.querySelector('.status-bar .status')?.textContent.includes('PDF saved.'));
+    assert.equal((await app.evaluate(() => globalThis.coverExportDetails)).some((detail) => /the format allows 0 MB/.test(detail)), expectLegacyLimit);
     const pdf = await PDFDocument.load(await readFile(filePath));
     assert.equal(pdf.getPageCount(), pageCount);
     const first = pdf.getPage(0);
@@ -72,16 +119,14 @@ try {
   }
   await exportPdf('Export Cover PDF…', 1, points(623), points(316), points(603), points(296));
 
-  const connection = await window.evaluate(() => window.imageflow.mcpSettings(true));
-  client = new Client({ name: 'Cover smoke', version: '1' });
-  await client.connect(new StdioClientTransport({ ...connection.value.launch, stderr: 'pipe' }));
-  async function call(name, args = {}, error = false) {
-    const result = await client.callTool({ name, arguments: args }, { timeout: 110000 });
-    const data = result.structuredContent ?? JSON.parse(result.content.find(item => item.type === 'text').text);
-    assert.equal(!!result.isError, error, JSON.stringify(data));
-    return { data, result };
-  }
-  const handle = (await call('list_projects')).data.projects.find((item) => item.folder === folder).project;
+  const sources = async () => (await call('inspect_book', { project: handle, view: 'sources' })).data.items;
+  assert.ok((await sources()).find(({ id }) => id === photo).usage.some(({ cover }) => cover));
+  const interior = (await call('check_book', { project: handle, preview: { target: { spread: 'start' }, maxEdge: 256 } })).data;
+  assert.equal(interior.render.cover, undefined);
+  assert.ok(interior.diagnostics.every(({ location }) => !location?.cover));
+  const checked = (await call('check_book', { project: handle, cover: true })).data;
+  assert.equal(checked.render.cover.status, 'ready');
+  assert.equal(checked.render.units.length, 0);
   const context = (await call('get_authoring_context', { project: handle })).data;
   assert.ok(context.template.coverFormats.blurbJacket);
   const operations = [{ op: 'insert_spread', after: 'spread-14', definition: 'panorama', ref: 'more' }];
@@ -129,12 +174,16 @@ try {
   assert.equal(at52.interiorPages, 52);
   assert.equal(points(at52.geometry.regions.frontFlap.width), 280);
   await window.locator(coverReady).waitFor();
-  await exportPdf('Export Cover PDF…', 1, 2377, 882, 2359, 864);
+  await exportPdf('Export Cover PDF…', 1, 2377, 882, 2359, 864, true);
 
   await commit([{ op: 'select_format', format: 'landscape' }], 'landscape');
   await window.getByRole('radiogroup', { name: 'Book view', exact: true }).waitFor({ state: 'detached' });
   await window.getByRole('button', { name: 'Export PDF…', exact: true }).waitFor();
   assert.equal((await readProject()).cover.params.title, 'A physical cover');
+  const retained = await getCover();
+  assert.equal(retained.status, 'unavailable');
+  assert.equal(retained.artwork.params.title, 'A physical cover');
+  assert.ok((await sources()).find(({ id }) => id === photo).usage.every(({ cover }) => !cover));
   await undoBook(window);
   await window.getByRole('radio', { name: 'Cover', exact: true }).click();
   await window.frameLocator(coverReady + ' iframe').locator('[data-edit="title"]').filter({ hasText: 'A physical cover' }).waitFor();

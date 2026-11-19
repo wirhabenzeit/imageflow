@@ -6,6 +6,8 @@ import { lstat, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { capabilities as templateCapabilities, contract1Capabilities, runtimeExports } from '../src/runtime-exports';
 import type { AuthoringCheckRequest, AuthoringCheckResult } from '../src/authoring-check';
+import { checksCover } from '../src/authoring-check';
+import { coverLayoutsFor, resolveCover } from '../src/cover';
 import type { AuthoringDiagnostic } from '../src/authoring';
 import type { ActiveBookEditor, ImportRequest } from '../src/desktop';
 import { applyProjectCommands, ProjectCommandError } from '../src/project-commands';
@@ -219,12 +221,13 @@ export function createAuthoringService(hooks: Hooks) {
     if (!matches) cachedCheck = undefined;
     // expectedRevision is checked before reuse. It constrains the inputs without changing a no-preview render.
     const expectedMatches = !request.expectedRevision || request.expectedRevision === before.inputs?.revision;
+    const coverCheck = checksCover(request);
     // A draft can use cached declarations and defer its requested type check to the subsequent draft render.
-    if (!fresh && !draft && !request.preview && !request.inspect && (!request.typescript || cacheMode === 'draft-base') && expectedMatches && cachedCheck) {
+    if (!fresh && !draft && !coverCheck && !request.preview && !request.inspect && (!request.typescript || cacheMode === 'draft-base') && expectedMatches && cachedCheck) {
       get(session.handle);
       return { result: structuredClone(cachedCheck.result), watcherInvalidated: false };
     }
-    if (fresh && !draft) cachedCheck = undefined;
+    if (fresh && !draft && !coverCheck) cachedCheck = undefined;
     const result = await hooks.check(session.book, request, signal, session.inputs, draft);
     get(session.handle);
     const after = await contextInputs(session.inputs, signal);
@@ -237,7 +240,7 @@ export function createAuthoringService(hooks: Hooks) {
       throw new AuthoringError('SOURCE_CHANGED', 'Inputs changed while checking. Check again.');
     }
     // A draft result describes unsaved state and must never answer a later check of the saved book.
-    if (result.state === 'ready' && after.inputs && !draft && !request.inspect && !request.typescript) {
+    if (result.state === 'ready' && after.inputs && !draft && !coverCheck && !request.inspect && !request.typescript) {
       const { image: _image, ...baseline } = result;
       cachedCheck = { session, inputs: after.inputs, result: structuredClone(baseline) };
     }
@@ -279,7 +282,7 @@ export function createAuthoringService(hooks: Hooks) {
   // Renders the saved book with an unsaved command batch applied. The batch is planned against the same freshly
   // loaded, revision-verified book that is rendered, with the template declarations of that revision.
   const draftCheck = async (session: ProjectSession, signal: AbortSignal, expectedRevision: string, operations: unknown,
-    preview: PreviewRequest | undefined, inspect?: InspectionRequest, typescript?: boolean) => {
+    preview: PreviewRequest | undefined, inspect?: InspectionRequest, typescript?: boolean, cover?: true) => {
     const base = await checked(session, signal, { expectedRevision, ...(typescript ? { typescript } : {}) }, false, undefined, 'draft-base');
     // A draft may repair a saved book whose render fails, as long as its template loaded at this revision.
     const template = base.revision === expectedRevision ? base.render?.template ?? base.template : undefined;
@@ -310,7 +313,7 @@ export function createAuthoringService(hooks: Hooks) {
           ...(planned.affectedCover ? { affectedCover: true } : {}), references: planned.references, reflow: planned.reflow },
       };
     };
-    const result = await checked(session, signal, { expectedRevision,
+    const result = await checked(session, signal, { expectedRevision, ...(cover ? { cover } : {}),
       ...(typescript && !base.typecheck ? { typescript } : {}) }, true, draft);
     // Draft commands change project data, never template code. Reuse this request's type results only after
     // the draft check verifies the same revision; changed inputs must discard them just as in checkProject.
@@ -537,9 +540,9 @@ export function createAuthoringService(hooks: Hooks) {
       const report = args.fixtures
         ? await fixtureCheck(session, signal, args.fixtures, args.expectedRevision, args.typescript)
         : !args.draft
-          ? await checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview,
+          ? await checked(session, signal, { expectedRevision: args.expectedRevision, preview: args.preview, ...(args.cover ? { cover: args.cover } : {}),
             ...(args.inspect ? { inspect: args.inspect } : {}), ...(args.typescript !== undefined ? { typescript: args.typescript } : {}) }, true)
-          : await draftCheck(session, signal, args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript);
+          : await draftCheck(session, signal, args.expectedRevision, args.draft.operations, args.preview, args.inspect, args.typescript, args.cover);
       if (args.includeTemplate) return report;
       // Keep full declarations in the internal check cache for planning and context, not in every agent reply.
       const { template: _template, render, ...compact } = report;
@@ -642,12 +645,19 @@ export function createAuthoringService(hooks: Hooks) {
         const offset = args.offset ?? 0, limit = args.limit ?? 30;
         const sequence = template && project && pageSequence(project.spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
         const labels = project?.spreads.map((_, i) => pageLabel(sequence?.spreads[i].page ?? {})) ?? [];
-        const usage = project ? sourceUsage(project, labels, template?.spreads) : { photo: {}, text: {} };
         const sourcePlaces = (places: import('../src/editing').SourcePlace[] = []) => places.map(({ cover, spread, pages }) =>
           cover ? { cover, pages } : { spread, pages });
         const view = args.view ?? 'summary';
-        const cover = report.render?.cover;
-        if (view === 'cover' && !cover && !template?.coverFormats?.[template.formatId]) {
+        const coverFormat = template?.coverFormats && Object.hasOwn(template.coverFormats, template.formatId) &&
+          (!project?.format || !Object.keys(template.formats).length || project.format === template.formatId)
+          ? template.coverFormats[template.formatId] : undefined;
+        const cover = template && sequence ? resolveCover({ interior: template.format, cover: coverFormat }, sequence.count) : undefined;
+        const savedCover = project?.cover;
+        const availableCover = cover?.status === 'unavailable' ? undefined : cover;
+        const coverLayouts = availableCover && template ? coverLayoutsFor(template.coverLayouts, template.formatId) : {};
+        const coverLayout = savedCover && Object.hasOwn(coverLayouts, savedCover.definition) ? coverLayouts[savedCover.definition] : undefined;
+        const usage = project ? sourceUsage(project, labels, template?.spreads, Object.keys(coverLayout?.boxes ?? {})) : { photo: {}, text: {} };
+        if (view === 'cover' && !availableCover && !savedCover) {
           throw new AuthoringError('COVER_UNAVAILABLE', 'The active format has no exterior cover.');
         }
         const records = view === 'sources' ? [
@@ -667,8 +677,9 @@ export function createAuthoringService(hooks: Hooks) {
         result = { project: session.handle, revision: report.revision, title: project?.title, format: project?.format, templateIdentity,
           pages: report.render?.pages, total: records.length, offset, items: records.slice(offset, offset + limit),
           nextOffset: offset + limit < records.length ? offset + limit : null,
-          ...((view === 'summary' || view === 'cover') && cover ? {
-            cover: { ...cover, layout: project?.cover?.definition ?? null, ...(view === 'cover' ? { artwork: project?.cover ?? null } : {}) },
+          ...((view === 'summary' || view === 'cover') && (availableCover || savedCover) ? {
+            cover: { ...(availableCover ?? { status: 'unavailable', reason: 'The active format has no exterior cover.' }),
+              layout: savedCover?.definition ?? null, ...(view === 'cover' ? { artwork: savedCover ?? null } : {}) },
           } : {}),
           ...(view === 'parameters' ? { document: { values: project?.params, declarations: template?.parameters } } : {}),
           diagnostics, checks: report.checks, history: session.history };

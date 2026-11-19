@@ -17,7 +17,7 @@ import type { Typecheck, TypecheckResult } from './typecheck';
 import { templateLocation } from './source-location';
 
 type ReadyStatus = Extract<RenderStatus, { state: 'ready' }>;
-type RenderCheck = (book: OpenProject, preview: PreviewRequest | undefined, signal: AbortSignal, inspect?: InspectionRequest) => Promise<{
+type RenderCheck = (book: OpenProject, preview: PreviewRequest | undefined, signal: AbortSignal, inspect?: InspectionRequest, cover?: true) => Promise<{
   status: ReadyStatus; preview?: BookPreview;
 }>;
 
@@ -116,7 +116,7 @@ export async function checkProject(
       if (planned.summary) result.draft = planned.summary;
       fixture = !!planned.fixture;
     }
-    const checked = await render(rendered, preview, signal, inspect);
+    const checked = await render(rendered, preview, signal, inspect, parsed.data.cover);
     if (!await inputsMatch()) {
       throw new ProjectRevisionError('source-changed');
     }
