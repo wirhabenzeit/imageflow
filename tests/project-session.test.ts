@@ -35,7 +35,7 @@ async function fixture(t: TestContext) {
   const book: OpenProject = {
     folder, cache: join(folder, 'cache'), readOnly: false,
     project: projectSchema.parse({ schemaVersion: 1, title: 'Original', template: { id: 'test', version: '1' }, spreads: [{ id: 'one', definition: 'main' }] }),
-    photoIndex: {}, assets: { files: new Map(), urls: {} }, photos: new Map(), texts: {}, files: {}, problems: [],
+    photoIndex: {}, assets: { files: new Map(), urls: {}, pictureScopes: {} }, photos: new Map(), texts: {}, files: {}, problems: [],
     manifests: { 'project.json': Buffer.alloc(0), 'photos.json': Buffer.alloc(0) },
   };
   const session = new ProjectSession(await writeManifests(book));

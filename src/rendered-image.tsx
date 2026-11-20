@@ -6,7 +6,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { onPage, pageOf } from './page-scope';
 import type { PageSide } from './project';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { previewPictureUrl, readPreviewPicture, savePreviewPicture } from './preview-picture';
 import { renameIds } from './svg-ids';
 
@@ -37,9 +37,18 @@ export type RenderedImageProps = {
   alt?: string;
   className?: string;
   style?: CSSProperties;
+  // The Inspector's layout previews draw a picture only for the spread's own layout. Another layout shows the same
+  // picture if it was drawn already, else the picture last drawn in that layout for another spread, else `standIn` if
+  // given; a layout the book has not drawn yet is drawn once. 'draw' always draws it there.
+  layoutPreview?: 'stand-in' | 'draw';
+  standIn?: ReactNode;
 };
 
-type Settings = { mode: RenderMode; pixelRatio: number; concurrency: number; timeoutMs: number; previewCache?: string; activeSpreads?: ReadonlySet<string> };
+type Settings = { mode: RenderMode; pixelRatio: number; concurrency: number; timeoutMs: number; previewCache?: string; activeSpreads?: ReadonlySet<string>;
+  // The cache scope of each template file's pictures, and the template's hash for a picture of no known file.
+  pictureScopes?: Record<string, string>; templateHash?: string;
+  // Layout previews: a picture not in the cache shows a stand-in instead of being drawn.
+  standIns?: boolean };
 export type RenderedImageFailure = { label: string; message: string; spread?: string; element?: string; page?: PageSide; timedOut: boolean };
 // Something worth changing about a picture that was drawn: it is pixels without saying so, or has far more of them
 // than the output asks for.
@@ -226,7 +235,12 @@ const messageOf = (error: unknown) => error instanceof Error ? error.message
  * ready the box shows a quiet placeholder; a failure shows on the page and is a Book check error, so a missing
  * picture never becomes an incomplete print silently.
  */
-export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '', className, style }: RenderedImageProps) {
+// `pictureModule`: the template file that places the picture, set by the bundle (desktop/picture-scopes.ts); not API.
+export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '', className, style, layoutPreview, standIn, pictureModule }:
+  RenderedImageProps & { pictureModule?: string }) {
+  const [standing, setStanding] = useState(false);
+  // Pictures are cached by their source file and its imports (picture-scopes.ts), so other template edits keep them.
+  const scope = (pictureModule !== undefined ? settings.pictureScopes?.[pictureModule] : undefined) ?? settings.templateHash ?? '';
   const wrapper = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
   const vector = useRef<HTMLDivElement>(null);
@@ -240,7 +254,7 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
   const { mode, timeoutMs, previewCache } = settings;
   // A declared vector picture is the same at every resolution: it is drawn for a pixel ratio of 1, once for all views.
   const pixelRatio = output === 'vector' ? 1 : settings.pixelRatio;
-  const key = JSON.stringify([inputs ?? null, mode, pixelRatio, size, output ?? '']);
+  const key = JSON.stringify([inputs ?? null, mode, pixelRatio, size, output ?? '', scope]);
   useLayoutEffect(() => {
     const node = wrapper.current!;
     const observer = new ResizeObserver(() => {
@@ -348,22 +362,58 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
       if (controller.signal.aborted) return;
       if (!width || !height) throw new Error('the element has no size on the page.');
       const spread = node.closest<HTMLElement>('[data-spread]');
-      const pictureIndex = spread ? [...spread.querySelectorAll('.if-rendered-image')].indexOf(node) : 0;
+      // Counted, and keyed, within the layout the picture is in: a split sheet's page, so the Inspector's preview of
+      // that page layout finds the picture the book view drew.
+      const layout = node.closest<HTMLElement>('[data-layout]') ?? spread;
+      const pictureIndex = layout ? [...layout.querySelectorAll('.if-rendered-image')].indexOf(node) : 0;
       const cacheUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache,
-        [spread?.dataset.layout ?? spread?.dataset.spread, pictureIndex, draw.toString(), inputs ?? null, width, height, pixelRatio]) : undefined;
+        [scope, layout?.dataset.layout ?? spread?.dataset.spread, pictureIndex, draw.toString(), inputs ?? null, width, height, pixelRatio]) : undefined;
       // The last picture this place showed, whatever its inputs: a replacement frame shows it while it draws the new one.
       const placeUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache.replace(/\/picture\/$/, '/place/'),
         ['place', spread?.dataset.spread, spread?.dataset.layout, pictureIndex, width, height, pixelRatio]) : undefined;
       // A vector picture does not depend on the pixel ratio, so the book view and its thumbnails share one: whichever
       // draws it first saves it under this key too.
       const vectorUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache,
-        ['vector', spread?.dataset.layout ?? spread?.dataset.spread, pictureIndex, draw.toString(), inputs ?? null, width, height]) : undefined;
+        ['vector', scope, layout?.dataset.layout ?? spread?.dataset.spread, pictureIndex, draw.toString(), inputs ?? null, width, height]) : undefined;
       const shared = async () => {
         const found = vectorUrl ? await readPreviewPicture(vectorUrl, controller.signal) : undefined;
         return found?.type === svgType ? found : undefined;
       };
-      const cached = (cacheUrl ? await readPreviewPicture(cacheUrl, controller.signal) : undefined) ?? await shared();
+      // A layout preview also takes the picture the book view drew at its own resolution: sharper than it needs, and free.
+      const drawnElsewhere = async () => {
+        if (!settings.standIns || !previewCache || mode !== 'preview' || output === 'vector') return undefined;
+        for (const ratio of [2, 1]) {
+          if (ratio === pixelRatio) continue;
+          const url = await previewPictureUrl(previewCache, [scope, layout?.dataset.layout ?? spread?.dataset.spread, pictureIndex, draw.toString(), inputs ?? null, width, height, ratio]);
+          const found = await readPreviewPicture(url, controller.signal);
+          if (found) return found;
+        }
+        return undefined;
+      };
+      const cached = (cacheUrl ? await readPreviewPicture(cacheUrl, controller.signal) : undefined) ?? await shared() ?? await drawnElsewhere();
       if (controller.signal.aborted) return;
+      // The picture last drawn in this layout and place, for any spread: what the layout looks like with a real map.
+      const latestUrl = mode === 'preview' && previewCache ? await previewPictureUrl(previewCache,
+        ['latest', scope, layout?.dataset.layout ?? spread?.dataset.spread, pictureIndex]) : undefined;
+      // A layout preview shows what a layout would look like; drawing a map for each one cost about a second per
+      // selected spread. Another layout than the spread's own shows the picture last drawn in that layout, from another
+      // spread, or the template's stand-in; only a layout the book has not drawn yet is drawn, once.
+      if (!cached && settings.standIns && layoutPreview !== 'draw' && !node.closest('[data-current-layout]')) {
+        const latest = latestUrl ? await readPreviewPicture(latestUrl, controller.signal) : undefined;
+        if (controller.signal.aborted) return;
+        if (latest && await show(latest, false).catch(() => false)) {
+          node.dataset.rendered = 'ready';
+          return;
+        }
+        if (standIn !== undefined) {
+          setStanding(true);
+          img.style.display = 'none';
+          vectorBox.style.display = 'none';
+          node.dataset.rendered = 'ready';
+          node.dataset.standIn = '';
+          return;
+        }
+      }
       if (!cached && placeUrl && img.style.display === 'none' && vectorBox.style.display === 'none') {
         const stale = await readPreviewPicture(placeUrl, controller.signal);
         if (stale && !controller.signal.aborted) await show(stale, false).catch(() => false);
@@ -400,11 +450,14 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
       const shownBlob = await fit(blob);
       if (controller.signal.aborted) return;
       if (!await show(shownBlob, true)) return;
+      setStanding(false);
+      delete node.dataset.standIn;
       if (found.length) notes.set(node, found);
       const saved = cacheUrl || placeUrl ? await screenCopy(blob) : blob;
       if (cacheUrl && !cached) await savePreviewPicture(cacheUrl, saved);
       if (vectorUrl && !cached && blob.type === svgType) await savePreviewPicture(vectorUrl, saved);
       if (placeUrl) await savePreviewPicture(placeUrl, saved);
+      if (latestUrl && !cached) await savePreviewPicture(latestUrl, saved);
       if (controller.signal.aborted) return;
       node.dataset.rendered = 'ready';
       node.removeAttribute('title');
@@ -429,5 +482,6 @@ export function RenderedImage({ draw, inputs, output, label = 'Picture', alt = '
     data-rendered-label={label}>
     <img ref={image} alt={alt} style={{ display: 'none', width: '100%', height: '100%', objectFit: 'cover' }} />
     <div ref={vector} role={alt ? 'img' : undefined} aria-label={alt || undefined} style={{ display: 'none', width: '100%', height: '100%' }} />
+    {standing && <div className="if-rendered-stand-in" style={{ width: '100%', height: '100%' }}>{standIn}</div>}
   </div>;
 }
