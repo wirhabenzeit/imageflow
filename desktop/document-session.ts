@@ -12,7 +12,7 @@ import { mkdtemp, readdir, rm, stat, mkdir, rename, rmdir } from 'node:fs/promis
 import { dirname, join, relative } from 'node:path';
 import { channels, desktopScheme, issueText, renderOrigin, renderOrigins } from '../src/desktop';
 import type { AgentLeaseReply, BookMenuState, CanvasLayout, ImportRequest, Issue, ProjectChange, ProjectSummary, Result } from '../src/desktop';
-import { identifier } from '../src/project';
+import { coverInstance, identifier } from '../src/project';
 import { parseActiveEditor } from '../src/mcp-results';
 import type { RenderProject } from '../src/project';
 import { printBook, savePdf } from './export';
@@ -314,7 +314,7 @@ export class DocumentSession {
         const mutation = (name === 'apply_project_changes' && args.dryRun !== true) || name === 'import_sources';
         let locked = false;
         try {
-          if (mutation) await this.agentLease(queuedSignal, agentFootprint(name, args));
+          if (mutation) await this.agentLease(queuedSignal, agentFootprint(name, args), name === 'import_sources');
           queuedSignal.throwIfAborted();
           if (mutation) {
             if (this.busy) throw new AuthoringError('EDIT_IN_PROGRESS', 'An editor operation started. Let it finish, then retry.');
@@ -793,7 +793,7 @@ export class DocumentSession {
   // for them this long before it is refused (beta finding F-023).
   static busyWaitMs = 30_000;
   // The footprint says which layouts the save changes: an editor open elsewhere lets it through (#231).
-  async agentLease(signal: AbortSignal, footprint: AgentFootprint = { book: true }) {
+  async agentLease(signal: AbortSignal, footprint: AgentFootprint = { book: true }, wholeBook = false) {
     const started = Date.now();
     while (true) {
       const reply = await this.requestLease(signal, footprint);
@@ -809,10 +809,13 @@ export class DocumentSession {
       if (reply === true) return;
       if (reply) {
         const field = reply.field ? ' for ' + reply.field : '';
-        const location = reply.spread ? ' on spread ' + reply.spread + (reply.page ? ' (' + reply.page + ' page)' : '') : '';
-        throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish editing in ImageFlow (' + reply.label + field + location + '), then retry. No changes were made. ' +
-          (reply.spread && reply.label !== 'crop editor' ? 'Changes that leave ' + (reply.page ? 'that page' : 'that spread') + ' and book-wide settings alone (no title, format, document parameters, photo metadata, or inserting, moving or removing spreads) can be saved meanwhile.'
-            : 'Nothing can be saved while it is open.'), { activeEditor: reply });
+        const cover = reply.spread === coverInstance;
+        const location = cover ? ' on the cover' : reply.spread ? ' on spread ' + reply.spread + (reply.page ? ' (' + reply.page + ' page)' : '') : '';
+        // An import is always book-wide, so no narrower change would have saved in its place.
+        const meanwhile = reply.spread && reply.label !== 'crop editor' && !wholeBook
+          ? 'Changes that leave ' + (cover ? 'the cover' : reply.page ? 'that page' : 'that spread') + ' and book-wide settings alone (no title, format, document parameters, photo metadata, or inserting, moving or removing spreads) can be saved meanwhile.'
+          : 'Nothing can be saved while it is open.';
+        throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish editing in ImageFlow (' + reply.label + field + location + '), then retry. No changes were made. ' + meanwhile, { activeEditor: reply });
       }
       throw new AuthoringError('EDIT_IN_PROGRESS', 'ImageFlow did not answer in time; it may be busy rendering. Retry in a moment. No changes were made.');
     }

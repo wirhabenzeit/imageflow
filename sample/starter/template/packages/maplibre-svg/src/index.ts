@@ -355,9 +355,9 @@ class Labels {
     const block = rows.length * lineHeight;
     const top = anchor.startsWith('top') ? y : anchor.startsWith('bottom') ? y - block : y - block / 2;
     const textAnchor = anchor.endsWith('left') ? 'start' : anchor.endsWith('right') ? 'end' : 'middle';
-    // A label the map's edge would cut is left out, as MapLibre does at the viewport.
-    // Generous: the page may set the label in a wider font than the style names.
-    const textWidth = Math.max(...rows.map((row) => row.length)) * size * .7;
+    // A label the map's edge would cut is left out, as MapLibre does at the viewport. The width is estimated as for labels
+    // along lines, with a margin, since the page may set the label in a wider font than the style names.
+    const textWidth = Math.max(...rows.map((row) => row.length)) * size * (.6 + spacing);
     const left = textAnchor === 'start' ? x : textAnchor === 'end' ? x - textWidth : x - textWidth / 2;
     if (left < 0 || left + textWidth > width || top < 0 || top + block > height) return;
     this.svg.push(this.draw('<text' + attributes + ' text-anchor="' + textAnchor + '">' + rows.map((row, i) =>

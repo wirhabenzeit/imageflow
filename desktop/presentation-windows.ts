@@ -44,12 +44,16 @@ export class PresentationWindows {
     // renders new revisions while the user works in another app. Neither window is throttled while it presents.
     const throttled = document.window.webContents.getBackgroundThrottling();
     document.window.webContents.setBackgroundThrottling(false);
+    const restore = () => { if (!document.window.isDestroyed()) document.window.webContents.setBackgroundThrottling(throttled); };
     // Start at the final screen bounds, without a frame. Simple fullscreen only hides the menu bar and Dock;
     // there is no visible resize or macOS Space transition, and the editor remains exactly where it was.
-    const window = new BrowserWindow({ ...options, webPreferences: { ...options.webPreferences, backgroundThrottling: false },
-      ...display.bounds, title: 'Presentation — ' + bookName(document.book.folder),
-      frame: false, show: false, backgroundColor: '#111111', roundedCorners: false, hasShadow: false,
-      resizable: false, minimizable: false, maximizable: false, fullscreenable: !mac, fullscreen: !mac && !this.options.hidden() });
+    let window: BrowserWindow;
+    try {
+      window = new BrowserWindow({ ...options, webPreferences: { ...options.webPreferences, backgroundThrottling: false },
+        ...display.bounds, title: 'Presentation — ' + bookName(document.book.folder),
+        frame: false, show: false, backgroundColor: '#111111', roundedCorners: false, hasShadow: false,
+        resizable: false, minimizable: false, maximizable: false, fullscreenable: !mac, fullscreen: !mac && !this.options.hidden() });
+    } catch (error) { restore(); throw error; }
     const entry = { document, window, spread };
     this.entries.set(document, entry);
     this.options.secure(window);
@@ -64,7 +68,7 @@ export class PresentationWindows {
     });
     window.once('closed', () => {
       if (this.entries.get(document) === entry) this.entries.delete(document);
-      if (!document.window.isDestroyed()) document.window.webContents.setBackgroundThrottling(throttled);
+      restore();
       if (!document.closing && !document.window.isDestroyed()) this.options.closed(document, entry.spread);
     });
     // Call the simple-fullscreen API directly. The generic fullscreen constructor path marks an asynchronous

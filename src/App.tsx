@@ -814,7 +814,9 @@ export function App() {
       // revision, so they still keep the book to themselves.
       // Focus inside the open editor (its text field, its dialog) belongs to it; only a field focused without one blocks.
       if (!open || cropping || (typing && !editing && !elementEditor) || !leavesEditorAlone(footprint, open)) return open ?? false;
+      // Inert at once, as below: the prop only follows after the next render, and the agent's save starts now.
       agentLocked.current = true;
+      if (workspace.current) workspace.current.inert = true;
       setAgentWorking(true);
       return true;
     }

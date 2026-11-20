@@ -14,6 +14,14 @@ test('layout-local operations name their spread, page or cover', () => {
   ), { units: [{ spread: 'a' }, { spread: 'b', page: 'left' }, { spread: coverInstance }, { spread: 'c' }, { spread: 'd' }] });
 });
 
+test('a cover parameter names the cover by its scope', () => {
+  assert.deepEqual(batch({ op: 'set_parameter', scope: 'cover', key: 'heading', value: 'x' }), { units: [{ spread: coverInstance }] });
+  assert.deepEqual(batch({ op: 'set_parameter', scope: 'box', cover: true, owner: 'front', key: 'k', value: 1 }), { units: [{ spread: coverInstance }] });
+  const editor = { label: 'parameter editor', spread: 'a', field: 'heading' };
+  assert.equal(leavesEditorAlone(batch({ op: 'set_parameter', scope: 'cover', key: 'heading', value: 'x' }), editor), true);
+  assert.equal(leavesEditorAlone(batch({ op: 'set_parameter', scope: 'cover', key: 'heading', value: 'x' }), { ...editor, spread: coverInstance }), false);
+});
+
 test('book-wide, structural, unknown and malformed changes take the whole book', () => {
   for (const operation of [
     { op: 'set_title', title: 'T' }, { op: 'select_format', format: 'f' }, { op: 'set_parameter', scope: 'document', key: 'color', value: '#000' },

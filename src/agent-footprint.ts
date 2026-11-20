@@ -17,6 +17,8 @@ function unitOf(target: unknown): AgentUnit | undefined {
   if (!target || typeof target !== 'object') return;
   const { spread, page, cover } = target as Record<string, unknown>;
   if (cover === true && spread === undefined && page === undefined) return { spread: coverInstance };
+  // A cover layout parameter says so by its scope instead (`set_parameter { scope: 'cover' }` has no address).
+  if ((target as { scope?: unknown }).scope === 'cover' && spread === undefined && page === undefined) return { spread: coverInstance };
   if (typeof spread !== 'string' || !spread || spread.startsWith('$')) return;
   if (page !== undefined && (typeof page !== 'string' || !sides.has(page))) return;
   return { spread, ...(page ? { page: page as PageSide } : {}) };
