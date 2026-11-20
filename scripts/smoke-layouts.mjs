@@ -1,4 +1,4 @@
-import { copySpreadStarter, testBook, menuAction, popupAction } from './ui-actions.mjs';
+import { closeApp, copySpreadStarter, menuAction, popupAction, testBook } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -375,6 +375,6 @@ try {
   await w.waitForFunction(() => !document.querySelector('.status-error'), null, { timeout: 30000 });
   console.log('ImageFlow layout switching passed.');
 } finally {
-  await app.close();
+  await closeApp(app);
   await rm(work, { recursive: true, force: true });
 }

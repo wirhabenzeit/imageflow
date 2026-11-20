@@ -13,6 +13,18 @@ The smoke runner defaults to invisible windows: no native focus, fullscreen, Doc
 
 Packaged checks cover document registration, Finder open events, proof and print export, linked sources and the MCP bridge. Use `npm run test:packaged:existing` to test an existing build. Packaged checks include Finder integration and the visible MCP context test, so run them on an isolated desktop too.
 
+## Flaky tests
+
+CI's hosted Macs have a few slow cores, so a test that waits for the wrong thing, or an app timeout that is too tight, fails there now and then while passing locally. To make such failures show up on a fast Mac, run the scripts at background priority, which keeps them on the efficiency cores (three to four times slower, about like CI), again and again:
+
+```sh
+npm run build && node scripts/stage-desktop.mjs
+node scripts/stress-smokes.mjs --runs 5 --load 0 smoke-ui-details smoke-quit   # background priority only
+node scripts/stress-smokes.mjs --runs 5 smoke-ui-details                       # plus 6 busy loops: far slower than CI
+```
+
+The logs of failed runs are kept in `.build/stress/`. When a test times out waiting for the book, `describeBookFrames(page)` from `scripts/ui-actions.mjs` reports what each book view and thumbnail frame shows, read inside the frames. After an edit, wait with `bookShows(page, { since })` until the book view shows the edited revision: a frame marked ready may still be the previous revision's. Close the app in cleanup with `closeApp(app)`, which kills an app that does not quit, so the test's own error is reported instead of the 6-minute script limit.
+
 ## Performance at a real book's size
 
 The sample books are small, so they hide costs that only a long book shows. `scripts/heavy-book.mjs` writes a heavy test book to `.build/heavy-book/`: 244 pages, 300 linked photos at camera size, long Markdown stories with front matter, and a Terrain layout whose picture is drawn on a canvas about as slowly as a map's relief. It works offline. The photos are generated once (about 1.8 GB, 1–2 minutes) and kept. `approvals.json` beside the book holds the approvals its linked photos need in a test profile.

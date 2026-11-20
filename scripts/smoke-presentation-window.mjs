@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { nextPresentation, testBook } from './ui-actions.mjs';
+import { closeApp, nextPresentation, testBook } from './ui-actions.mjs';
 import { buildMacHeaderState, macHeaderState } from './mac-header-state.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -104,4 +104,4 @@ try {
   assert.equal(app.windows().filter((page) => page.url() === 'imageflow://editor/presentation').length, 0, 'Closing the owning book leaves no presentation window');
   console.log('Separate presentation window, editor bounds, book isolation, live revisions, and close lifecycle passed.');
 } catch (error) { console.error('Presentation lifecycle failure:', error); throw error; }
-finally { await app.close(); }
+finally { await closeApp(app); }

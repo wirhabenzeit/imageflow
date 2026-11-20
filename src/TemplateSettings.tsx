@@ -8,7 +8,7 @@ import type { LibraryImportResult } from './library';
 import type { useLibrary } from './useLibrary';
 
 export function TemplateSettings({ api, library }: { api?: DesktopApi; library: ReturnType<typeof useLibrary> }) {
-  const { entries, error } = library;
+  const { entries, error, slow } = library;
   const [results, setResults] = useState<LibraryImportResult[]>([]);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -61,7 +61,7 @@ export function TemplateSettings({ api, library }: { api?: DesktopApi; library: 
         else if ((event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) && selected) { event.preventDefault(); void contextMenu(selected); }
         else list.key(event);
       }}>
-        {!entries && !error && <p className="muted">Loading templates…</p>}
+        {!entries && !error && <p className="muted">{slow ? 'Loading templates is taking longer than usual: checking the built-in templates…' : 'Loading templates…'}</p>}
         {entries?.map((item) => <div key={item.id} role="option" className="template-library-row" aria-selected={selected === item.id}
           data-list-id={item.id} tabIndex={selected === item.id ? 0 : -1} title={item.unavailable ?? item.description}
           onClick={() => list.choose(item.id)} onContextMenu={(event) => {

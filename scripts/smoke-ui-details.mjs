@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { menuAction, testBook } from './ui-actions.mjs';
+import { closeApp, describeBookFrames, menuAction, testBook } from './ui-actions.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/ui-details-'));
 const folder = join(work, 'Details.imageflow');
@@ -35,16 +35,7 @@ const current = async (page) => (await page.evaluate(() => window.imageflow.curr
 const ready = async (page) => {
   try { await page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor(); }
   catch (error) {
-    const state = await page.evaluate(() => ({
-      status: document.querySelector('.status')?.textContent,
-      frames: [...document.querySelectorAll('.canvas iframe.book-frame-book')].map((frame) => {
-        let render;
-        try { const status = frame.contentWindow?.imageflowRenderStatus; render = status && { state: status.state, message: status.message, errors: status.errors?.slice(0, 5) }; }
-        catch (failure) { render = String(failure); }
-        return { className: frame.className, current: frame.hasAttribute('data-current'), ready: frame.hasAttribute('data-ready'),
-          src: frame.getAttribute('src'), render };
-      }),
-    })).catch((failure) => ({ unavailable: String(failure) }));
+    const state = await describeBookFrames(page).catch((failure) => ({ unavailable: String(failure) }));
     console.error('Book view not ready:', JSON.stringify(state, null, 2));
     throw error;
   }
@@ -311,4 +302,4 @@ try {
   await popup('recent-remove'); await recent.click({ button: 'right' });
   await recent.waitFor({ state: 'detached' });
   console.log('Photo dates, shared view preferences, grouping, asset actions, compact Markdown controls and canvas context menus passed:', work);
-} finally { await app.close(); }
+} finally { await closeApp(app); }

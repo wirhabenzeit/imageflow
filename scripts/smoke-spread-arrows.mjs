@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { closeApp, testBook } from './ui-actions.mjs';
 // Arrow keys on the canvas select the neighbouring spread: up/down in the vertical layout, all four in a grid.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'spread-arrows-'));
@@ -53,5 +53,5 @@ try {
   await press('ArrowUp'); await expect(0, 'grid up a row');
   console.log('Spread arrow keys passed.');
 } finally {
-  await app.close();
+  await closeApp(app);
 }

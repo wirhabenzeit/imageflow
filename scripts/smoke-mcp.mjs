@@ -1,5 +1,5 @@
 import { packagedMacExecutable } from './mac-paths.mjs';
-import { testBook, menuAction, agentSettings, closeSettings, undoBook, waitForProject, nextSettings } from './ui-actions.mjs';
+import { agentSettings, closeApp, closeSettings, menuAction, nextSettings, testBook, undoBook, waitForProject } from './ui-actions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -433,6 +433,6 @@ try {
   throw error;
 } finally {
   await client?.close();
-  await app.close();
+  await closeApp(app);
   await rm(work,{recursive:true,force:true});
 }

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { closeApp, testBook } from './ui-actions.mjs';
 
 // The bottom panel's Assets tab: every asset of the book as a plain list with its system document icon.
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -92,4 +92,4 @@ try {
   await page.locator('.source-items-photo').waitFor();
   assert.deepEqual(errors, []);
   console.log('Assets tab passed:', work);
-} finally { await app.close(); }
+} finally { await closeApp(app); }

@@ -116,7 +116,9 @@ test('cancellation reaches the app and revocation invalidates pending calls and 
   let started = () => {};
   const starting = new Promise<void>((resolve) => { started = resolve; });
   let cancelled = false;
+  let calls = 0;
   const { app, connection, descriptorPath, descriptor } = await fixture(t, async (_name, _args, signal) => {
+    calls++;
     started();
     await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => { cancelled = true; reject(signal.reason); }, { once: true }));
     return {};
@@ -128,7 +130,8 @@ test('cancellation reaches the app and revocation invalidates pending calls and 
   await result;
   await eventually(() => cancelled);
   const next = assert.rejects(app.call('list_projects', {}), { code: 'connection-closed' });
-  await delay(10);
+  // Closed while this call is in the app: waiting a fixed 10 ms let a loaded machine close it before it arrived.
+  await eventually(() => calls === 2);
   await connection.close();
   await next;
   await assert.rejects(app.call('list_projects', {}), { code: 'connection-unavailable' });

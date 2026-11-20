@@ -77,6 +77,8 @@ export function BookFrame({ busy = false, provisional, project, view, query = ''
       animationUntil.current = performance.now() + reorderTiming.duration;
     }
     frame.published = true;
+    // A revision this view failed to render must not hold back the other view, which waits to show it together.
+    if (frame.status?.state === 'error') onShown?.(project);
     if (frame.status?.state === 'ready') {
       setShown(id);
       onGeometry?.(frame.geometry, frame.reorder !== 'skipped', frame.start, project);
