@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { canvasArtworkBounds, menuAction, nextPresentation, testBook } from './ui-actions.mjs';
+import { bookShows, canvasArtworkBounds, closeApp, menuAction, nextPresentation, testBook } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build/ui-polish-'));
@@ -30,7 +30,8 @@ await writeFile(join(external, '.hidden/Hidden.md'), 'Hidden');
 const app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')], env: { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' }, timeout: 20000 });
 const current = async (page) => (await page.evaluate(() => window.imageflow.currentProject())).value;
 const until = async (check) => { for (let attempt = 0; attempt < 200; attempt++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 40)); } assert.ok(await check(), 'Book operation settled'); };
-const ready = async (page) => page.locator('.canvas .book-frame-book[data-current][data-ready]').waitFor();
+// The book view shows the current book, after the edit made since `since` (a revision ID) if given.
+const ready = (page, since) => bookShows(page, { since });
 
 try {
   const page = await testBook(app, folder);
@@ -41,9 +42,10 @@ try {
   const settings = page.locator('.document-settings');
   if (!await settings.getAttribute('open')) await settings.locator('summary').first().click();
   assert.equal(await settings.getByLabel('Footer', { exact: true }).count(), 1);
+  const footerBefore = (await current(page)).id;
   await settings.getByLabel('Footer', { exact: true }).fill('WWW');
   await page.keyboard.press('Tab');
-  await ready(page);
+  await ready(page, footerBefore);
   assert.equal(app.windows().filter((window) => window.url() === 'imageflow://editor/presentation').length, 0, 'Typing W in a field must not present');
   // Copy/link belongs to this book and is undoable.
   await page.locator('.canvas').focus();
@@ -65,8 +67,9 @@ try {
   await page.waitForTimeout(400);
   const before = await anchor();
   await page.screenshot({path:join(work,'before.png')});
+  const formatBefore = (await current(page)).id;
   await settings.getByRole('combobox').selectOption('tall');
-  await ready(page);
+  await ready(page, formatBefore);
   await page.waitForTimeout(400);
   const after = await anchor();
   await page.screenshot({path:join(work,'after.png')});
@@ -148,4 +151,4 @@ try {
   assert.deepEqual(errors, []);
   await page.screenshot({ path: join(work, 'editor.png') });
   console.log('UI polish smoke passed:', work);
-} finally { await app.close(); }
+} finally { await closeApp(app); }

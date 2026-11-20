@@ -19,7 +19,9 @@ async function fixture(t: TestContext) {
   await symlink(resolve('node_modules'), join(runtime, 'node_modules'));
   await build({ entryPoints: ['desktop/typecheck-worker.ts'], outfile: join(runtime, 'typecheck-worker.cjs'),
     bundle: true, platform: 'node', format: 'cjs', packages: 'external', logLevel: 'silent' });
-  const check = (signal = new AbortController().signal, timeout = 15_000) => checkTemplateTypes(folder, signal, runtime, timeout);
+  // Generous by default: on a loaded or slow machine the compiler alone can take longer than the app's 15 s, and these
+  // tests are about the result. The deadline test passes its own.
+  const check = (signal = new AbortController().signal, timeout = 120_000) => checkTemplateTypes(folder, signal, runtime, timeout);
   return { work, folder, runtime, check, entry: join(folder, 'template/index.tsx') };
 }
 

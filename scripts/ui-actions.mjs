@@ -263,3 +263,53 @@ export async function pickLayout(page, choice) {
   }
   throw new Error('The layout picker did not apply the choice.');
 }
+
+/**
+ * What each book view and thumbnail frame shows, read inside the frames (the editor cannot read them, they are on
+ * another origin): for a test that times out waiting for the book, so its log says why.
+ */
+export async function describeBookFrames(page) {
+  const frames = [];
+  for (const element of await page.locator('iframe.book-frame').elementHandles()) {
+    const attributes = await element.evaluate((frame) => {
+      const { width, height } = frame.getBoundingClientRect();
+      return { className: frame.className, current: frame.hasAttribute('data-current'), ready: frame.hasAttribute('data-ready'),
+        revision: frame.dataset.revision, src: frame.getAttribute('src'), box: Math.round(width) + '×' + Math.round(height),
+        display: getComputedStyle(frame).display, visibility: getComputedStyle(frame).visibility };
+    });
+    const frame = await element.contentFrame();
+    const inside = frame ? await frame.evaluate(() => ({
+      readyState: document.readyState,
+      status: window.imageflowRenderStatus && { state: window.imageflowRenderStatus.state, message: window.imageflowRenderStatus.message },
+      spreads: document.querySelectorAll('.if-spread-container').length,
+      pictures: [...document.querySelectorAll('.if-rendered-image')].map((node) => node.dataset.rendered).join(' '),
+      images: [...document.querySelectorAll('img')].filter((image) => image.getAttribute('src') && !image.complete).length + ' loading',
+    })).catch((error) => ({ unavailable: String(error).slice(0, 200) })) : { unavailable: 'no frame' };
+    frames.push({ ...attributes, ...inside });
+  }
+  const host = await page.evaluate(() => ({ status: document.querySelector('.status')?.textContent, window: innerWidth + '×' + innerHeight,
+    visibility: document.visibilityState }))
+    .catch((error) => ({ unavailable: String(error) }));
+  return { ...host, frames };
+}
+
+/**
+ * Waits until the book view shows the book as it is now: its ready frame on show renders the current revision. With
+ * `since`, a revision ID, first waits for the book to move past it, for an edit that may still be saving. A frame
+ * marked ready may be the previous revision's, still on show while the next renders; waiting for a ready frame alone
+ * then measured the old one, or none while they swapped (beta CI flakiness).
+ */
+export async function bookShows(page, { since, timeout = 30000 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const shown = await page.evaluate(async (since) => {
+      const { value } = await window.imageflow.currentProject();
+      if (!value || value.id === since) return false;
+      const frame = document.querySelector('.canvas iframe.book-frame-book[data-ready]:not(.book-frame-pending)');
+      return frame?.dataset.revision === value.id;
+    }, since);
+    if (shown) return;
+    if (Date.now() > deadline) throw new Error('The book view did not show the current book: ' + JSON.stringify(await describeBookFrames(page)));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+}

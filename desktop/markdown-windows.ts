@@ -141,10 +141,19 @@ export class MarkdownWindows {
     if (entry.closeTask) return entry.closeTask;
     entry.closeTask = (async () => {
       entry.closing = true; this.publish(entry);
-      // Drain the renderer's latest input before flushing, including IPC still in flight when Close was clicked.
+      // Drain the renderer's latest input before flushing, including IPC still in flight when Close was clicked. Only a
+      // hung window (Electron's hang detection) or a long silence counts as not answering: an editor in the background of
+      // a slow Mac can take several seconds, and 2.5 s reported that its text could not be saved.
       const acknowledged = await new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => { entry.acknowledge = undefined; resolve(false); }, 2500);
-        entry.acknowledge = () => { clearTimeout(timer); entry.acknowledge = undefined; resolve(true); };
+        const finish = (answered: boolean) => {
+          clearTimeout(timer); entry.acknowledge = undefined;
+          if (!entry.window.isDestroyed()) entry.window.off('unresponsive', hung);
+          resolve(answered);
+        };
+        const hung = () => finish(false);
+        const timer = setTimeout(() => finish(false), 10_000);
+        entry.acknowledge = () => finish(true);
+        entry.window.once('unresponsive', hung);
         entry.window.webContents.send(channels.markdownPrepareClose);
       });
       await entry.buffer.flush();

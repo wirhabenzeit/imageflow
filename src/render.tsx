@@ -72,6 +72,16 @@ function publish(status: RenderStatus) {
   if (window.parent !== window) post(status);
 }
 
+// A frame of the editor runs in a process of its own, and gets its size from the editor shortly after it starts. Until
+// then its document is not laid out: every box measures 0 × 0, and the render would fail with "has no area". On a slow
+// Mac the render could get there first, and the book view then waited for this failed frame (beta CI flakiness). Waits
+// for the size, at most 10 s, so a frame that really has no width still renders and reports what it finds.
+async function laidOut() {
+  for (const started = Date.now(); !(document.documentElement.clientWidth > 0) && Date.now() - started < 10_000;) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 function loadStyles(url?: string) {
   if (!url) return Promise.resolve();
   return new Promise<void>((resolve, reject) => {
@@ -1888,7 +1898,7 @@ export async function startRender(root: HTMLElement) {
     // Book check, export and artwork frames record impure calls from template code, including at module load.
     const guards = book.mode === 'edit' ? undefined : installPurityGuards(window as unknown as Record<string, unknown>,
       new URL(book.template.script, location.href).pathname, undefined, renderingImages);
-    const [module] = await Promise.all([import(/* @vite-ignore */ book.template.script), loadStyles(book.template.css)]);
+    const [module] = await Promise.all([import(/* @vite-ignore */ book.template.script), loadStyles(book.template.css), laidOut()]);
     // The project's format choice is resolved first; everything below works with that one format.
     // `spreads` may be a builder function when the template was exported without defineTemplate.
     const exported = normalizeTemplate(module.default);
