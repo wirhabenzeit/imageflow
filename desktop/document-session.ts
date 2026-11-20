@@ -1,4 +1,6 @@
 import { bookName } from '../src/book-name';
+import { agentFootprint } from '../src/agent-footprint';
+import type { AgentFootprint } from '../src/agent-footprint';
 import { SourceStore } from './source-store';
 import { sourceEntries } from '../src/source-locations';
 import { app, dialog, shell } from 'electron';
@@ -312,7 +314,7 @@ export class DocumentSession {
         const mutation = (name === 'apply_project_changes' && args.dryRun !== true) || name === 'import_sources';
         let locked = false;
         try {
-          if (mutation) await this.agentLease(queuedSignal);
+          if (mutation) await this.agentLease(queuedSignal, agentFootprint(name, args));
           queuedSignal.throwIfAborted();
           if (mutation) {
             if (this.busy) throw new AuthoringError('EDIT_IN_PROGRESS', 'An editor operation started. Let it finish, then retry.');
@@ -790,10 +792,11 @@ export class DocumentSession {
   // Busy states end by themselves, such as the reload after a template edit, which redraws every map: a save waits
   // for them this long before it is refused (beta finding F-023).
   static busyWaitMs = 30_000;
-  async agentLease(signal: AbortSignal) {
+  // The footprint says which layouts the save changes: an editor open elsewhere lets it through (#231).
+  async agentLease(signal: AbortSignal, footprint: AgentFootprint = { book: true }) {
     const started = Date.now();
     while (true) {
-      const reply = await this.requestLease(signal);
+      const reply = await this.requestLease(signal, footprint);
       if (reply && typeof reply === 'object' && 'busy' in reply) {
         if (Date.now() - started < DocumentSession.busyWaitMs) {
           await new Promise((resolve) => setTimeout(resolve, 250));
@@ -807,14 +810,15 @@ export class DocumentSession {
       if (reply) {
         const field = reply.field ? ' for ' + reply.field : '';
         const location = reply.spread ? ' on spread ' + reply.spread + (reply.page ? ' (' + reply.page + ' page)' : '') : '';
-        throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish editing in ImageFlow (' + reply.label + field + location + '), then retry. No changes were made.',
-          { activeEditor: reply });
+        throw new AuthoringError('EDIT_IN_PROGRESS', 'Finish editing in ImageFlow (' + reply.label + field + location + '), then retry. No changes were made. ' +
+          (reply.spread && reply.label !== 'crop editor' ? 'Changes that leave ' + (reply.page ? 'that page' : 'that spread') + ' and book-wide settings alone (no title, format, document parameters, photo metadata, or inserting, moving or removing spreads) can be saved meanwhile.'
+            : 'Nothing can be saved while it is open.'), { activeEditor: reply });
       }
       throw new AuthoringError('EDIT_IN_PROGRESS', 'ImageFlow did not answer in time; it may be busy rendering. Retry in a moment. No changes were made.');
     }
   }
 
-  private async requestLease(signal: AbortSignal) {
+  private async requestLease(signal: AbortSignal, footprint: AgentFootprint) {
     const owner = this.window;
     if (!owner || owner.isDestroyed()) throw new AuthoringError('PROJECT_CLOSED', 'Open a book in ImageFlow first.');
     const id = randomUUID();
@@ -830,7 +834,7 @@ export class DocumentSession {
       this.agentLeases.set(id, finish);
       signal.addEventListener('abort', abort, { once: true });
       if (signal.aborted) return finish(false);
-      owner.webContents.send(channels.agentLease, id);
+      owner.webContents.send(channels.agentLease, { id, footprint });
     });
     signal.throwIfAborted();
     return reply;

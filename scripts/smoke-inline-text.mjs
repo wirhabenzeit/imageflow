@@ -82,6 +82,42 @@ try {
   assert.equal(await saved(), baseline);
   console.log('pending typing, occurrence and Escape passed');
 
+  // An agent's save on another spread goes through while text is edited on the page, and the editor keeps its
+  // typing and saves it afterwards (#231). A save on the edited spread is still refused.
+  {
+    const { Client } = await import('@modelcontextprotocol/client');
+    const { StdioClientTransport } = await import('@modelcontextprotocol/client/stdio');
+    const connection = await w.evaluate(() => window.imageflow.mcpSettings(true));
+    const client = new Client({ name: 'Inline text beside an agent', version: '1' });
+    await client.connect(new StdioClientTransport({ ...connection.value.launch, stderr: 'pipe' }));
+    try {
+      const call = async (name, args) => {
+        const result = await client.callTool({ name, arguments: args }, { timeout: 60000 });
+        return { error: !!result.isError, data: result.structuredContent ?? JSON.parse(result.content.find((item) => item.type === 'text').text) };
+      };
+      const { projects } = (await call('list_projects', {})).data;
+      const { project, revision } = projects.find((item) => item.folder === book);
+      await open(0);
+      await input().fill('Typed beside the agent');
+      const other = initial.spreads[1].id;
+      const same = await call('apply_project_changes', { project, expectedRevision: revision, idempotencyKey: 'inline-same', label: 'Agent heading',
+        operations: [{ op: 'set_parameter', scope: 'spread', spread: firstId, key: 'heading', value: 'Agent heading' }] });
+      assert.equal(same.data.error?.code, 'EDIT_IN_PROGRESS', JSON.stringify(same.data));
+      const beside = await call('apply_project_changes', { project, expectedRevision: revision, idempotencyKey: 'inline-beside', label: 'Agent clears a box',
+        operations: [{ op: 'clear_box', spread: other, box: 'hero' }] });
+      assert.equal(beside.error, false, JSON.stringify(beside.data));
+      assert.equal(beside.data.committed, true);
+      const project1 = JSON.parse(await readFile(projectFile, 'utf8'));
+      assert.equal(project1.spreads[1].boxes.hero?.photo, undefined, 'the agent cleared the other spread');
+      assert.equal(await input().inputValue().catch(() => input().innerText()), 'Typed beside the agent', 'the typing is kept');
+      await w.locator(ready).waitFor();
+      await done();
+      assert.equal(await saved(), 'Typed beside the agent', 'the typing saves after the agent change');
+      assert.equal(JSON.parse(await readFile(projectFile, 'utf8')).spreads[1].boxes.hero?.photo, undefined, 'and keeps the agent change');
+    } finally { await client.close().catch(() => {}); }
+  }
+  console.log('agent save beside an open text editor passed');
+
   // Whitespace rules come from the template, including the starter's pre-line class, without changing saved spaces.
   await open();
   assert.equal(await input().evaluate((node) => getComputedStyle(node).whiteSpace), 'pre-line');

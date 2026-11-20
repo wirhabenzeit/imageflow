@@ -4,6 +4,8 @@ import { pageSelectionRect, pageSelectionSide, pageSideAt, stepPageSelection } f
 import { canSwapPages, editableSpread, keptItems, layoutMime, placeKeptContent, shownContentTargets } from './page-editor';
 import type { ContentTarget, KeptItem } from './page-editor';
 import { coverInstance, scopeSpread } from './project';
+import { leavesEditorAlone } from './agent-footprint';
+import type { AgentFootprint } from './agent-footprint';
 import { coverLayoutsFor, resolveCover } from './cover';
 import { CoverCanvas, CoverInspector } from './CoverEditor';
 import { Choice } from './choice';
@@ -797,15 +799,25 @@ export function App() {
       setError('');
     }
   });
-  const acquireAgentLease = useEffectEvent(() => {
+  const acquireAgentLease = useEffectEvent((footprint?: AgentFootprint) => {
     // Operations the user cannot finish by closing an editor refuse plainly; only an open editor is named to the agent.
     const reloadRunning = reloading.current && !reloadFailed.current;
     if (pendingTasks.current || busy || reloadRunning || reorder.dragging || agentLocked.current) return { busy:
       busy ? busy.replace(/…$/, '').toLowerCase() : reloadRunning ? 'reloading the book after its files changed' : reorder.dragging ? 'a drag in the editor'
         : agentLocked.current ? 'another agent change' : 'saving an edit' };
-    if (editing || elementEditor || cropping) return activeEditor ?? false;
     const typing = focusedEditorLabel(document.activeElement);
-    if (typing) return { label: typing };
+    if (editing || elementEditor || cropping || typing) {
+      const open = (editing || elementEditor || cropping ? activeEditor : undefined) ?? (typing ? { label: typing } : undefined);
+      // A save that leaves the open editor's spread (or page) and the book's settings alone goes through, and the
+      // editor stays open: it pauses while the new revision renders, as for any change to the book, and resumes if
+      // its own values did not change (#231). A crop gesture and a focused field are not kept through a new
+      // revision, so they still keep the book to themselves.
+      // Focus inside the open editor (its text field, its dialog) belongs to it; only a field focused without one blocks.
+      if (!open || cropping || (typing && !editing && !elementEditor) || !leavesEditorAlone(footprint, open)) return open ?? false;
+      agentLocked.current = true;
+      setAgentWorking(true);
+      return true;
+    }
     agentLocked.current = true;
     if (workspace.current) workspace.current.inert = true;
     setAgentWorking(true);
@@ -874,7 +886,7 @@ export function App() {
     });
     const sourceCommand = api.onSourceCommand(onSourceCommand);
     const presentationClosed = api.onPresentationClosed(onPresentationClosed);
-    const lease = api.onAgentLease(() => acquireAgentLease());
+    const lease = api.onAgentLease((_id, footprint) => acquireAgentLease(footprint));
     const release = api.onAgentRelease(() => {
       agentLocked.current = quitLock.current;
       if (workspace.current) workspace.current.inert = quitLock.current;

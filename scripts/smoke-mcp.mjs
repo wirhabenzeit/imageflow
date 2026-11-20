@@ -235,8 +235,31 @@ try {
   const blockedByHeading=await call('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'heading-editor',label:'Agent title',operations:[{op:'set_title',title:'Agent title'}]});
   assert.equal(blockedByHeading.data.error.code,'EDIT_IN_PROGRESS');
   assert.deepEqual(blockedByHeading.data.error.activeEditor,{label:'parameter editor',spread:'first',field:'heading'});
+  assert.match(blockedByHeading.data.error.message,/can be saved meanwhile/);
+  // The editor keeps only its own spread (#231): a change to another spread saves, and the editor stays open and usable.
+  const sameSpread=await call('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'heading-editor-same',label:'Agent heading',
+    operations:[{op:'set_parameter',scope:'spread',spread:'first',key:'heading',value:'Agent heading'}]});
+  assert.equal(sameSpread.data.error.code,'EDIT_IN_PROGRESS');
+  const elsewhere=await good('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'heading-editor-elsewhere',label:'Agent chapter',
+    operations:[{op:'set_parameter',scope:'spread',spread:applied.references.chapter,key:'heading',value:'Saved beside an editor'}]});
+  assert.equal(elsewhere.committed,true);
+  await ready();
+  assert.equal(await popover.isVisible(),true,'The open editor stays open');
+  const headingField=popover.getByLabel('Heading',{exact:true});
+  await headingField.waitFor();
+  await headingField.fill('Typed after the agent saved');
+  // This popover saves when it closes.
   await popover.getByRole('button', { name: 'Close', exact: true }).click();
   await popover.waitFor({state:'detached'});
+  await waitForProject(window, (book) => book.project.spreads.find(s=>s.id==='first').params.heading==='Typed after the agent saved');
+  const besideEditor=JSON.parse(await readFile(join(folder,'project.json'),'utf8'));
+  assert.equal(besideEditor.spreads.find(s=>s.id===applied.references.chapter).params.heading,'Saved beside an editor');
+  await ready();
+  // The render-failure check below needs the chapter's original heading.
+  revision=(await good('list_projects')).projects[0].revision;
+  await good('apply_project_changes',{project,expectedRevision:revision,idempotencyKey:'heading-editor-restore',label:'Restore chapter',
+    operations:[{op:'set_parameter',scope:'spread',spread:applied.references.chapter,key:'heading',value:'A new chapter'}]});
+  await ready();
 
   // A UI save that lands while the agent is requesting its lease must not be rejected by agent busy state.
   revision=(await good('list_projects')).projects[0].revision;
