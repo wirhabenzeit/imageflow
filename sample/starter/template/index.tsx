@@ -1,8 +1,9 @@
 import { box, Choice, defineTemplate, FormattedText, geometry, issue, mm, p, plainText, printFormat, pt, Page, Spread } from 'imageflow';
-import type { BookSpread, CoverFormat, FlowPosition, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
+import type { BookSpread, FlowPosition, ImageFlowNode, LayoutPickerProps, Photo, PhotoBoxState, PhotoRender, Rect, RenderContext, ResolvedFormat } from 'imageflow';
 import './styles.css';
 import { insetMapParameters, MapEditor, mapEditorParameters, mapOrigin, mapParameters, MapView, placesBeside } from './map';
 import { elevationOrigin, mapCredits } from './map-styles';
+import { blurbLargeSquare, whiteWallGallerySquare } from './print-presets';
 import type { MapEditorProps } from './map';
 
 // Layouts are drawn on a 290 × 290 design page, measured from the trim edge of the left or right page.
@@ -13,7 +14,7 @@ const page = 290;
 const canvas = { width: page, height: page };
 const margin = 30;
 
-// One print format per size; they share bleed, safe area, page count and output rules.
+// Landscape is an ImageFlow size rather than a printer's product, so it has no preset and no exterior cover.
 const bookFormat = (label: string, width: number, height: number) => printFormat({
   label,
   trim: { width: mm(width), height: mm(height) },
@@ -26,33 +27,9 @@ const bookFormat = (label: string, width: number, height: number) => printFormat
   },
 });
 
-const allEdges = (length: ReturnType<typeof mm>) => ({ top: length, right: length, bottom: length, left: length });
-const coverPdf = { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' } as const;
-const whiteWallCover: CoverFormat = {
-  kind: 'wrap', height: mm(296), panels: { back: mm(296), front: mm(296) },
-  widths: { kind: 'page-bands', bands: Array.from({ length: 11 }, (_, i) => {
-    const from = 28 + 8 * i;
-    return { from, to: from + 4, value: { spine: mm(11 + 1.5 * i) } };
-  }) },
-  outer: { kind: 'wrap', insets: allEdges(mm(10)) },
-  safe: { back: allEdges(mm(5)), front: allEdges(mm(5)), spine: allEdges(mm(2)) },
-  foldAvoidance: { back: mm(12), front: mm(12) },
-  output: { ...coverPdf, maximumFileSize: 250_000_000, resolution: { minimum: 180, target: 250, maximum: 300 } },
-};
-const blurbCover: CoverFormat = {
-  kind: 'wrap', height: pt(864), panels: { back: pt(879), front: pt(879) },
-  widths: { kind: 'page-bands', bands: [
-    { from: 20, to: 50, spine: 33, flap: 284 },
-    { from: 52, to: 100, spine: 41, flap: 280 },
-    { from: 102, to: 160, spine: 54, flap: 273 },
-    { from: 162, to: 200, spine: 66, flap: 267 },
-    { from: 202, to: 240, spine: 79, flap: 261 },
-  ].map(({ from, to, spine, flap }) => ({ from, to, value: { spine: pt(spine), flaps: { back: pt(flap), front: pt(flap) } } })) },
-  outer: { kind: 'bleed', insets: allEdges(pt(9)) },
-  safe: { back: allEdges(pt(18)), front: allEdges(pt(18)), spine: allEdges(pt(0)) },
-  flaps: { safe: { back: allEdges(pt(18)), front: allEdges(pt(18)) } },
-  output: { ...coverPdf, resolution: { minimum: 180, target: 250, maximum: 300 } },
-};
+// Printer products with an exterior cover. Each preset pairs an interior format with its cover; see print-presets.ts.
+const whiteWall = whiteWallGallerySquare({ paper: 'fujiCrystalArchive' });
+const blurb = blurbLargeSquare({ paper: 'premiumMatte', cover: 'dustJacket' });
 
 // Book settings. The theme sets every colour of the book (paper, text, rules and the shades over photos) in
 // styles.css, so pages never pick colours of their own and a book switches between light and dark in one step.
@@ -337,7 +314,7 @@ const compass = <svg viewBox="0 0 100 100" aria-hidden="true">
 
 export default defineTemplate({
   id: 'imageflow-starter',
-  version: '0.13.0',
+  version: '0.13.1',
   label: 'Photobook',
   description: 'A travel journal with full-bleed photographs, stories, grids, maps and a picture list, in a light or a dark theme.',
   preview: './preview.jpg',
@@ -347,14 +324,12 @@ export default defineTemplate({
   // it, in their editor, the page and export.
   network: [mapOrigin, elevationOrigin],
   formats: {
-    square: bookFormat('WhiteWall Gallery Square · 29 × 29 cm', 290, 290),
+    square: { ...whiteWall.format, output: { ...whiteWall.format.output, minimumTextSize: pt(8), maximumFileSize: { pages: 500_000_000 } } },
     landscape: bookFormat('Landscape · 32 × 24 cm', 320, 240),
-    blurbJacket: printFormat({ label: 'Blurb Large Square · Premium Matte Dust Jacket', trim: { width: pt(846), height: pt(846) },
-      bleed: { all: pt(9), binding: pt(0) }, safe: { all: pt(18), binding: pt(36) },
-      pageCount: { min: 20, max: 240, step: 2 }, output: { resolution: { minimum: 180, target: 250, maximum: 300 } } }),
+    blurbJacket: blurb.format,
   },
   defaultFormat: 'square',
-  coverFormats: { square: whiteWallCover, blurbJacket: blurbCover },
+  coverFormats: { square: whiteWall.coverFormat, blurbJacket: blurb.coverFormat },
   coverLayouts: {
     wrapPhoto: {
       label: 'Photo wrap',
