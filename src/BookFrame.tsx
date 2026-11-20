@@ -8,7 +8,7 @@ import type { Issue } from './desktop';
 import type { PageSide } from './project';
 export type PictureStatus = { type: 'pictures'; pending: number; errors: Issue[] };
 
-type FrameState = { revision?: string; held?: { revision: string; status: RenderStatus; motion: boolean }; element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
+type FrameState = { element?: HTMLIFrameElement; geometry?: BookGeometry; status?: RenderStatus; published?: boolean; pictures?: PictureStatus;
   reorder?: 'preparing' | 'ready' | 'skipped'; offsets?: ReorderOffset[]; preparedAt?: number; hiding?: boolean; start?: number };
 
 // The occurrence an inline editor is drawn over, whose artwork the book view hides while it edits.
@@ -19,7 +19,7 @@ export type InlineEditing = ({ spread: string; element: string } | { spread: str
 export type CropPreview = { spread: string; box: string; page?: PageSide; placement: { centerX: number; centerY: number; zoom: number } };
 
 // Keep the displayed frame and its geometry until the latest candidate has finished rendering successfully.
-export function BookFrame({ busy = false, reuse = false, project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
+export function BookFrame({ busy = false, provisional, project, view, query = '', title, onGeometry, onStatus, onPictures, viewport, hold, accept, inlineEditing, onInlineEditing, presentation, cropPreview, onPrepared, onShown, release }: {
   // Paired views reveal one revision together, on the shared animation clock.
   onPrepared?: (project: string) => void;
   // Called when a revision is shown, paired or not, so the other view does not wait for this one to prepare it again.
@@ -27,8 +27,10 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
   release?: { project: string; start: number };
   // While the app waits for an update, the frames show a progress cursor too.
   busy?: boolean;
-  // The shown frame renders newer revisions in place (#210, Settings → Faster book updates), unless it refuses one.
-  reuse?: boolean;
+  // The order of the spreads as edited, with the ones added since: the shown frame rearranges what it has into that
+  // order at once, while the edit saves and until a newer frame shows it, so a structural edit shows immediately. An
+  // edit that fails to save returns the order to the saved one.
+  provisional?: { order: string[]; added: Record<string, { like?: string; copy?: boolean }> };
   project: string; view: BookView | 'cover'; query?: string; title: string;
   presentation?: PresentationView;
   hold?: boolean;
@@ -55,14 +57,8 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
   const [frames, setFrames] = useState<Record<string, FrameState>>({});
   const latest = useRef(new Map<string, FrameState>());
   const refs = useRef(new Map<string, HTMLIFrameElement>());
-  const [cold, setCold] = useState<ReadonlySet<string>>(new Set());
   const projectOf = (id: string) => new URL(id).pathname.split('/').at(-1)!;
-  const sameView = (a: string, b: string) => { const x = new URL(a), y = new URL(b); return x.search === y.search && x.origin === y.origin; };
-  const shownState = shown ? frames[shown] : undefined;
-  const warm = reuse && (view === 'book' || view === 'thumbs') && !!shown && !!target && shown !== target &&
-    sameView(shown, target) && shownState?.status?.state === 'ready' && !cold.has(project);
-  const revisionOf = (id: string) => latest.current.get(id)?.revision ?? projectOf(id);
-  const ids = [shown, shown === target || warm ? undefined : target].filter((id): id is string => id !== undefined);
+  const ids = [shown, shown === target ? undefined : target].filter((id): id is string => id !== undefined);
 
   function storeFrame(id: string, frame: FrameState) {
     latest.current = new Map(ids.map((key) => [key, key === id ? frame : latest.current.get(key) ?? {}]));
@@ -89,25 +85,6 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
     if (frame.status) onStatus?.(frame.status, project);
     if (frame.status?.state === 'ready' && frame.pictures) onPictures?.(frame.pictures, project);
   }
-  // Shows the revision a reused frame holds: it drops its previous picture, and moved sheets start sliding on `start`.
-  function showHeld(id: string, start = performance.timeOrigin + performance.now()) {
-    const frame = latest.current.get(id);
-    if (!frame?.held || frame.held.revision !== project) return;
-    const { revision, status, motion } = frame.held;
-    const element = refs.current.get(id);
-    element?.contentWindow?.postMessage({ type: 'release-revision', project: revision }, origin);
-    if (motion) element?.contentWindow?.postMessage({ type: 'play-reorder', start }, origin);
-    const next: FrameState = { ...frame, held: undefined, status, revision, published: true };
-    storeFrame(id, next);
-    onGeometry?.(next.geometry, motion, motion ? start : undefined, revision);
-    onShown?.(revision);
-    onStatus?.(status, revision);
-    if (next.pictures && status.state === 'ready') onPictures?.(next.pictures, revision);
-  }
-  const showReleased = useEffectEvent(() => {
-    if (shown && release?.project === project) showHeld(shown, release.start);
-  });
-  useEffect(() => { showReleased(); }, [release]);
   const skipReorder = useEffectEvent((id: string, element: HTMLIFrameElement | undefined) => {
     const previous = latest.current.get(id);
     if (id !== target || refs.current.get(id) !== element || previous?.reorder !== 'preparing') return;
@@ -133,23 +110,6 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
     const previous = latest.current.get(id);
     // Revisiting a URL creates a new iframe. Readiness belongs to that instance, not its previous mount.
     const frame: FrameState = previous?.element === element ? { ...previous } : { element };
-    if ('type' in data && (data as { type: string }).type === 'revision-refused') {
-      const refused = (data as unknown as { revision: string }).revision;
-      console.warn('imageflow.warm-refused', view, JSON.stringify(data));
-      setCold((current) => new Set([...current, refused]));
-      return;
-    }
-    if ('state' in data && 'revision' in data && id === shown) {
-      // A revision the shown frame rendered in place, still behind its previous picture: it is shown when released,
-      // together with the other view's, as a new frame is.
-      const revision = (data as { revision: string }).revision;
-      if (revision !== project) return;
-      frame.held = { revision, status: data, motion: !!(data as { motion?: boolean }).motion };
-      storeFrame(id, frame);
-      if (data.state === 'ready' && onPrepared && release?.project !== project) onPrepared(project);
-      else showHeld(id, release?.project === project ? release.start : undefined);
-      return;
-    }
     if ('type' in data && data.type === 'reorder-ready') {
       if (frame.reorder !== 'preparing') return;
       const offsets = matchMedia('(prefers-reduced-motion: reduce)').matches ? [] :
@@ -163,7 +123,7 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
     } else if ('type' in data && data.type === 'pictures') {
       // Kept with the frame, and passed on once it is shown.
       frame.pictures = data;
-      if (id === shown) onPictures?.(data, revisionOf(id));
+      if (id === shown) onPictures?.(data, projectOf(id));
       storeFrame(id, frame);
       return;
     } else if ('type' in data && data.type === 'geometry') {
@@ -175,10 +135,9 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
         (event.source as Window).postMessage({ type: 'inline-editing', key: latestKey.current, ...latestEditing.current }, origin);
       }
       frame.geometry = data;
-      // A reused frame measures a newer revision before it reports it ready; the app hears of both together, as from a
-      // new frame, when its status arrives (below). Its own revision's geometry, such as after a resize, passes at once.
-      const measured = (data as { revision?: string }).revision;
-      if (id === shown && (!measured || measured === revisionOf(id))) onGeometry?.(data, false, undefined, measured ?? revisionOf(id));
+      // A provisional order slides the shown sheets into place, from `motion`, on the frame's clock.
+      const motion = (data as { motion?: number }).motion;
+      if (id === shown) onGeometry?.(data, motion !== undefined, motion, projectOf(id));
     } else if ('type' in data && data.type === 'inline-editing-applied') {
       frame.hiding = false;
       if (id === shown && data.key === latestKey.current) latestApplied.current?.(data.key);
@@ -263,9 +222,13 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
     }
   }, [shown]);
 
-  useEffect(() => {
-    if (warm && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'revision', project }, origin);
-  }, [warm, shown, project]);
+  const provisionalKey = JSON.stringify(provisional ?? null);
+  useLayoutEffect(() => {
+    if (!provisional || !shown) return;
+    const sheets = latest.current.get(shown)?.geometry?.sheets.map(({ spread }) => spread);
+    if (!sheets || JSON.stringify(sheets) === JSON.stringify(provisional.order)) return;
+    refs.current.get(shown)?.contentWindow?.postMessage({ type: 'provisional', ...provisional }, origin);
+  }, [provisionalKey, shown, target]);
   useLayoutEffect(() => {
     if (presentation && shown) refs.current.get(shown)?.contentWindow?.postMessage({ type: 'present', ...presentation }, origin);
   }, [presentation, shown]);
@@ -274,9 +237,8 @@ export function BookFrame({ busy = false, reuse = false, project, view, query = 
     const frame = frames[id];
     return <iframe key={id} title={title} tabIndex={-1}
       className={'book-frame book-frame-' + view + (id === shown ? '' : ' book-frame-pending')}
-      data-current={id === target || (warm && id === shown) || undefined} data-revision={frame?.revision ?? projectOf(id)}
-      // A reused frame asked for a newer revision is ready again once it shows it, as a new frame would be.
-      data-ready={frame?.status?.state === 'ready' && frame.published && !(warm && id === shown && revisionOf(id) !== project) ? '' : undefined}
+      data-current={id === target || undefined} data-revision={projectOf(id)}
+      data-ready={frame?.status?.state === 'ready' && frame.published ? '' : undefined}
       aria-hidden={id !== shown || undefined}
       style={{ height: frame?.geometry?.height }}
       ref={(element) => {

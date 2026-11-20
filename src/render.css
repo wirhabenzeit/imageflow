@@ -72,9 +72,8 @@ html:has(.if-book), html:has(.if-book) body { overflow: hidden; }
 }
 /* A spread a frame has not laid out yet, such as one just added, appears with the layout, not at its default scale. */
 .if-book .if-spread-container:not([data-fitted]) { visibility: hidden; }
+.if-book .if-spread-container[hidden] { display: none; }
 html.if-busy, html.if-busy * { cursor: progress !important; }
-/* A frame that renders a revision in place shows the result as one step when the app releases it, without a fade. */
-::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none; }
 .if-preview [data-empty] {
   outline: 1px dashed #908b80;
   outline-offset: -1px;

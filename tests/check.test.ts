@@ -63,8 +63,9 @@ test('a reverted edit invalidates a running check and its private cache cannot c
   assert.deepEqual(await readdir(cache), []);
   const accepted = await checkProject(book, cache, { expectedRevision: revision }, async (snapshot) => {
     assert.notEqual(snapshot.cache, rejectedCache);
-    assert.deepEqual(await readdir(snapshot.cache), ['pinned-sources']);
-    assert.ok([...snapshot.photos.values()].every((photo) => photo.original.startsWith(join(snapshot.cache, 'pinned-sources'))));
+    // Photos are read in place, not copied for the check (F-037).
+    assert.deepEqual(await readdir(snapshot.cache), []);
+    assert.ok(snapshot.photos.size > 0 && [...snapshot.photos.values()].every((photo) => photo.original.startsWith(join(folder, 'photos'))));
     return { status };
   }, new AbortController().signal);
   assert.equal(accepted.state, 'ready', JSON.stringify(accepted.diagnostics));

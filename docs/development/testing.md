@@ -13,6 +13,18 @@ The smoke runner defaults to invisible windows: no native focus, fullscreen, Doc
 
 Packaged checks cover document registration, Finder open events, proof and print export, linked sources and the MCP bridge. Use `npm run test:packaged:existing` to test an existing build. Packaged checks include Finder integration and the visible MCP context test, so run them on an isolated desktop too.
 
+## Performance at a real book's size
+
+The sample books are small, so they hide costs that only a long book shows. `scripts/heavy-book.mjs` writes a heavy test book to `.build/heavy-book/`: 244 pages, 300 linked photos at camera size, long Markdown stories with front matter, and a Terrain layout whose picture is drawn on a canvas about as slowly as a map's relief. It works offline. The photos are generated once (about 1.8 GB, 1–2 minutes) and kept. `approvals.json` beside the book holds the approvals its linked photos need in a test profile.
+
+```sh
+npm run build && node scripts/stage-desktop.mjs
+node scripts/bench-edits.mjs            # Add, Delete, Move Down and Duplicate on the heavy book
+node scripts/bench-edits.mjs --book ~/Books/Trip.imageflow   # a copy of your own book, with your app's approvals
+```
+
+For each edit it reports the first painted frame that shows it (*feedback*), when the book view shows its render (*shown*), and when the window stops changing (*settled*). With a profiling build (`IMAGEFLOW_PROFILE=1 npx vite build`), `--profile` adds the render steps and every picture drawn. A benchmark that shows no photos fails, rather than measuring a book without them.
+
 ## Continuous integration
 
 GitHub Actions runs:

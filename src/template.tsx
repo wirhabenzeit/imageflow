@@ -1253,7 +1253,7 @@ export function SpreadView(props: {
   page: RenderContext['page']; index: BookIndex; positions: Record<string, FlowPosition>; renderPhotos: boolean; lazyPhotos?: boolean;
 }) {
   const { spread, format, template } = props;
-  // Keyed by layout: an edit rendered into the same root (#210) must not keep one layout's components, such as a
+  // Keyed by layout: a render into the same root must not keep one layout's components, such as a
   // RenderedImage in the same place with the same inputs, for another layout that draws something else.
   if (!spread.split) return <LayoutView key={spread.definition} {...props} />;
   // Even a mismatched split spread remains a two-page sheet in the editor; export checks report the mismatch.

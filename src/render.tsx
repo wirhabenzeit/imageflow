@@ -59,8 +59,6 @@ import { pictureTimeoutMs } from './render-budget';
 import { pendingNetwork, pictureFailureSuggestion } from './network-access';
 import './render.css';
 
-// The revision a frame last rendered in place (#210), named in its status and geometry.
-let currentRevision: string | undefined;
 const post = (data: unknown) => window.parent.postMessage(data, editorURL.slice(0, -1));
 // After the next painted frame. A frame that is not shown yet gets no animation frames, so a short timer stands in.
 const afterPaint = () => new Promise<void>((resolve) => {
@@ -445,9 +443,68 @@ function upright(box: HTMLElement, sheet: HTMLElement) {
 // Fits sheets to the frame width and reports where sheets and boxes landed. In book grid mode, each sheet fits
 // one column and book order runs left to right, then continues on the next row. The book grows vertically.
 type GridRequest = { columns: number };
+// The order of a book's spreads as the app has saved it, before this frame's replacement has rendered it: `added` names
+// the new spreads, each with the spread it is a copy of (duplicated) or looks like (inserted after it).
+export type ProvisionalOrder = { type: 'provisional'; order: string[]; added: Record<string, { like?: string; copy?: boolean }> };
 function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: HTMLElement }[], view: BookView, format: ResolvedFormat, initial?: GridRequest) {
   let sheets = initialSheets;
   let animations: Animation[] = [];
+  // The geometry last reported, from which a provisional order slides the sheets to their new places.
+  let reported: BookGeometry | undefined;
+  // Until it is replaced, the frame shows a structural edit at once (beta finding: an edit showed nothing until the
+  // whole book had rendered again, seconds in a long book). It moves its spreads into the saved order, hides removed
+  // ones, and stands in for added ones: a copy of a duplicated spread, an empty sheet of the right size for a new one.
+  // What depends on the order inside the pages, such as page numbers and contents, follows with the replacement.
+  const provisional = (request: ProvisionalOrder) => {
+    const known = new Map(sheets.map((item) => [item.spread, item]));
+    const original = new Map(initialSheets.map((item) => [item.spread, item]));
+    const next: { spread: string; sheet: HTMLElement }[] = [];
+    for (const spread of request.order) {
+      const existing = known.get(spread) ?? original.get(spread);
+      if (existing) { next.push(existing); continue; }
+      const added = request.added[spread];
+      const model = (added?.like !== undefined ? known.get(added.like) ?? original.get(added.like) : undefined) ?? next.at(-1) ?? sheets[0];
+      if (!model) continue;
+      const container = document.createElement('div');
+      container.className = 'if-spread-container if-provisional';
+      container.dataset.spread = spread;
+      let sheet: HTMLElement;
+      if (added?.copy) {
+        sheet = model.sheet.cloneNode(true) as HTMLElement;
+        for (const node of sheet.querySelectorAll('[data-edit], [data-box], [data-element]')) {
+          node.removeAttribute('data-edit'); node.removeAttribute('data-box'); node.removeAttribute('data-element');
+        }
+      } else {
+        sheet = document.createElement('div');
+        sheet.className = 'if-sheet if-provisional-sheet';
+        sheet.style.width = model.sheet.offsetWidth + 'px';
+        sheet.style.height = model.sheet.offsetHeight + 'px';
+        const paper = model.sheet.querySelector<HTMLElement>('.paper');
+        sheet.style.background = (paper && getComputedStyle(paper).backgroundColor) || '#fff';
+        sheet.append(Object.assign(document.createElement('div'), { className: 'if-spread' }));
+      }
+      container.append(sheet);
+      next.push({ spread, sheet });
+    }
+    const wanted = new Set(next.map(({ sheet }) => sheet.parentElement!));
+    for (const { sheet } of [...known.values(), ...original.values()]) {
+      const container = sheet.parentElement!;
+      if (!wanted.has(container)) container.hidden = true;
+    }
+    // Stand-ins that a newer order no longer lists go.
+    for (const container of root.querySelectorAll<HTMLElement>(':scope > .if-provisional')) if (!wanted.has(container)) container.remove();
+    for (const { sheet } of next) { const container = sheet.parentElement!; container.hidden = false; root.append(container); }
+    const before = reported;
+    sheets = next;
+    laidOut = '';
+    fit(true);
+    const offsets = reorderOffsets(before, reported);
+    animations.forEach((animation) => animation.cancel());
+    animations = matchMedia('(prefers-reduced-motion: reduce)').matches ? [] : offsets.flatMap((offset) => {
+      const slot = sheets.find((item) => item.spread === offset.spread)?.sheet.parentElement;
+      return slot ? [animateReorder(slot, offset)] : [];
+    });
+  };
   if (view === 'thumbs' || view === 'book') {
     window.addEventListener('message', (event: MessageEvent) => {
       if (event.source !== parent || event.origin !== 'imageflow://editor') return;
@@ -474,6 +531,9 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
       } else if (event.data?.type === 'cancel-reorder') {
         animations.forEach(animation => animation.cancel());
         animations = [];
+      } else if (event.data?.type === 'provisional' && Array.isArray(event.data.order) && event.data.order.every((id: unknown) => typeof id === 'string') &&
+          event.data.added && typeof event.data.added === 'object') {
+        provisional(event.data as ProvisionalOrder);
       }
     });
   }
@@ -488,13 +548,8 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
   };
   let gridColumns = view === 'book' ? initial?.columns ?? 0 : 0;
   let laidOut = '';
-  // While a warm frame renders a newer revision, its sheets may already be gone from the page: nothing is measured
-  // until update() names the new ones, or a removed sheet would be reported at the top of the book.
-  let held = false;
-  // The geometry last reported, from which a reordered revision rendered in place animates its sheets.
-  let reported: BookGeometry | undefined;
-  function fit() {
-    if (held) return;
+  // `moved` reports the geometry as a provisional order (above), so the app slides its labels with the sheets.
+  function fit(moved = false) {
     const width = root.clientWidth;
     const size = gridColumns + 'x' + width;
     if (size === laidOut) return;
@@ -547,7 +602,7 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
       })))),
     };
     reported = geometry;
-    post(currentRevision ? { ...geometry, revision: currentRevision } : geometry);
+    post(moved ? { ...geometry, motion: performance.timeOrigin + performance.now() } : geometry);
   }
   root.classList.add('if-book', 'if-view-' + view);
   if (view === 'book') {
@@ -587,7 +642,7 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
     });
   }
   fit();
-  new ResizeObserver(fit).observe(root);
+  new ResizeObserver(() => fit()).observe(root);
   // A custom editor consumes actual element sizes, including CSS layout changes within a stable viewport.
   let measuring = false;
   const measure = () => {
@@ -599,49 +654,15 @@ function layoutBook(root: HTMLElement, initialSheets: { spread: string; sheet: H
   // Position can change without resizing: a class/style change or a sibling's content may move an element.
   // Observe template content only; fit() writes the surrounding sheet/slot styles, so it cannot retrigger this.
   const layout = new MutationObserver(measure);
-  const observe = () => {
-    for (const { sheet } of sheets) for (const { node, kind } of declaredNodes(sheet)) if (kind === 'element') elements.observe(node);
-    for (const { sheet } of sheets) layout.observe(sheet.querySelector('.if-spread')!, {
-      subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'],
-    });
-  };
-  observe();
-  window.addEventListener('resize', fit);
-  return {
-    setGrid: (next: GridRequest) => {
-      if (view !== 'book') return;
-      gridColumns = next.columns;
-      fit();
-    },
-    // A warm frame rendered a newer revision into the same root: measure its sheets.
-    hold() { held = true; },
-    // Lays out a newer revision rendered into the same root. Sheets that only moved, such as after a reorder, wait at
-    // their previous places, as a new frame's do after prepare-reorder, until play-reorder starts them; returns whether
-    // any moved.
-    update(next: { spread: string; sheet: HTMLElement }[]): boolean {
-      held = false;
-      sheets = next;
-      root.classList.add('if-book');
-      elements.disconnect();
-      layout.disconnect();
-      observe();
-      const before = reported;
-      laidOut = '';
-      fit();
-      const offsets = view === 'book' || view === 'thumbs' ? reorderOffsets(before, reported) : [];
-      animations.forEach((animation) => animation.cancel());
-      animations = [];
-      if (!offsets.length || matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
-      animations = offsets.flatMap((offset) => {
-        const slot = sheets.find((sheet) => sheet.spread === offset.spread)?.sheet.parentElement;
-        if (!slot) return [];
-        const animation = animateReorder(slot, offset);
-        animation.pause();
-        animation.currentTime = 0;
-        return [animation];
-      });
-      return animations.length > 0;
-    },
+  for (const { sheet } of sheets) for (const { node, kind } of declaredNodes(sheet)) if (kind === 'element') elements.observe(node);
+  for (const { sheet } of sheets) layout.observe(sheet.querySelector('.if-spread')!, {
+    subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open'],
+  });
+  window.addEventListener('resize', () => fit());
+  return (next: GridRequest) => {
+    if (view !== 'book') return;
+    gridColumns = next.columns;
+    fit();
   };
 }
 
@@ -1200,13 +1221,7 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
 type Viewport = { top: number; bottom: number; left: number; right: number };
 // Loads the photos of spreads within a screen's distance of the visible area, in both directions, and unloads those
 // far from it.
-// Which photo, and which file of it, an image shows: its source without the render session, and the file's revision.
-// A frame that renders newer revisions in place keeps its images, so a replaced photo or a changed file must reload.
-function photoIdentity(source: string, revisions: Record<string, string> | undefined) {
-  const id = /\/(?:photo|proof-photo|thumb)\/([\w-]+)/.exec(source)?.[1];
-  return source.replace(/\/render\/[\w-]+\//, '/render/*/') + '#' + ((id && revisions?.[id]) || '');
-}
-function photoLoader(root: HTMLElement, visible: () => Viewport | undefined, revisions?: Record<string, string>) {
+function photoLoader(root: HTMLElement, visible: () => Viewport | undefined) {
   const containers = [...root.querySelectorAll<HTMLElement>('.if-spread-container')];
   return () => {
     const profileStart = import.meta.env.IMAGEFLOW_PROFILE ? performance.now() : 0;
@@ -1222,17 +1237,10 @@ function photoLoader(root: HTMLElement, visible: () => Viewport | undefined, rev
       const near = within(1);
       const far = !within(3);
       for (const img of container.querySelectorAll<HTMLImageElement>('img[data-src]')) {
-        const wanted = photoIdentity(img.dataset.src!, revisions);
-        const stale = !!img.getAttribute('src') && img.dataset.loaded !== wanted;
-        if (near && (!img.getAttribute('src') || stale)) {
-          // A stale photo stays on show until its replacement has loaded.
+        if (near && !img.getAttribute('src')) {
           img.src = img.dataset.src!;
-          img.dataset.loaded = wanted;
           loading.push(img);
-        } else if ((far || stale) && img.getAttribute('src')) {
-          img.removeAttribute('src');
-          delete img.dataset.loaded;
-        }
+        } else if (far && img.getAttribute('src')) img.removeAttribute('src');
       }
       // Boxes with a render callback draw their photo only while near the screen, and drop it when far away.
       for (const box of container.querySelectorAll<HTMLElement>('[data-photo-render="custom"]')) {
@@ -1919,7 +1927,7 @@ export async function startRender(root: HTMLElement) {
         query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined);
       return;
     }
-    // A book's exterior cover renders on its own, once: frames that render newer revisions in place show the interior.
+    // A book's exterior cover renders on its own.
     if (['cover', 'cover-check', 'cover-artwork'].includes(query.get('view') ?? '')) {
       const sequence = pageSequence(book.project.spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
       await renderPhysicalCover(root, book, template, info, sequence, query, () => (guards?.calls ?? []).map(({ api }) => impureMessage(api)));
@@ -1961,18 +1969,6 @@ export async function startRender(root: HTMLElement) {
         query.get('page') === 'right' ? 'right' : query.get('page') === 'left' ? 'left' : undefined);
       return;
     }
-    // Kept across revisions when the frame renders newer ones in place (#210).
-    let react: ReturnType<typeof createRoot> | undefined;
-    let renderError: unknown;
-    let laidOutBook: ReturnType<typeof layoutBook> | undefined;
-    let reportPictures: (() => void) | undefined;
-    let photoLoaders = 0;
-    // The nodes text flow put into each Markdown box, so a revision that no longer flows text into a box removes them.
-    // Text flow writes them outside React, which keeps only its own placeholder in the box.
-    // Its column styles too: text flow sets them on the box, over what the template set, which they are restored to.
-    type Flowed = { nodes: Node[]; style: { columnCount: string; columnFill: string; overflow: string } };
-    const flowed = new Map<HTMLElement, Flowed>();
-    const renderRevision = async (book: RenderProject) => {
     const { spreads } = book.project;
     const sequence = pageSequence(spreads.map((spread) => layoutFootprint(spread, template.spreads)), template.format);
     const { chains, positions } = textAssignments(book, template);
@@ -1987,16 +1983,10 @@ export async function startRender(root: HTMLElement) {
     const index = { ...bookIndex(book, template, sequence), lookups };
     step('index');
 
-    renderError = undefined;
-    // Whether sheets of a revision rendered in place wait to slide to their new places (play-reorder).
-    let motion = false;
-    laidOutBook?.hold();
-    // The previous revision's photo loader would measure this one's sheets while they are rendered and laid out, and
-    // drop or restart photos the decode step below is waiting for. A new loader starts after the layout step.
-    onScreenChange = undefined; photoLoaders++;
+    let renderError: unknown;
     const layoutFailures = new Map<string, Failure>();
-    react ??= createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
-    flushSync(() => react!.render(visible.map(({ spread, i }) => {
+    const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
+    flushSync(() => react.render(visible.map(({ spread, i }) => {
       const view = <SpreadView book={book} spread={spread} template={template} format={format} positions={positions}
         page={sequence.spreads[i].page} index={index} renderPhotos lazyPhotos={lazy || present} />;
       return <div className="if-spread-container" data-span={sequence.spreads[i].span} data-spread={spread.id} data-layout={spread.definition} key={spread.id}>
@@ -2032,13 +2022,7 @@ export async function startRender(root: HTMLElement) {
     // The editor does not wait for drawn pictures restored from its cache, such as a map's shaded relief: their boxes
     // have their size already, and the browser decodes them as they come into view. Decoding every one of a long
     // book's large relief pictures held each edit back by a third of a second.
-    // A frame that renders in place keeps the photos it loaded, under an earlier render session's URL. One that has not
-    // finished loading may never finish once that session is gone, so it loads from this revision's session instead.
-    if (laidOutBook) for (const image of root.querySelectorAll<HTMLImageElement>('img[data-src][src]')) {
-      if ((!image.complete || !image.naturalWidth) && image.getAttribute('src') !== image.dataset.src) image.src = image.dataset.src!;
-    }
-    // Lazy photos are the photo loader's, after the layout step. A new frame has loaded none of them by now; a frame
-    // that renders in place has, and must not wait for them all again (a hidden frame may never finish decoding one).
+    // Lazy photos are the photo loader's, after the layout step.
     const images = present ? [] : decodable(root).filter((image) => !(edit && image.closest('.if-rendered-image')) && !(lazy && image.hasAttribute('data-src')));
     const decoded = await settle(images);
     step('decode');
@@ -2172,9 +2156,6 @@ export async function startRender(root: HTMLElement) {
         details: { family }, suggestion: 'Check the @font-face src path in the template CSS and that the font file exists inside template/.' });
     }
     step('findings');
-    // A warm frame measures its sheets unscaled, as a new frame does: text flow and the checks below compare sizes in
-    // pixels. Nothing from here to the layout step waits, so the unscaled sheets are never painted.
-    if (laidOutBook) root.classList.remove('if-book');
     const containers = root.querySelectorAll<HTMLElement>('.if-spread-container');
     const layouts = new Map(visible.map(({ spread, i }, n) => {
       try { return [spread.id, validateSpread(containers[n], spread, template, format, where[i], warnings, errors)] as const; }
@@ -2187,7 +2168,6 @@ export async function startRender(root: HTMLElement) {
     if (layoutFailures.size) throw new LayoutRenderError(layoutFailures);
     const validated = layouts as Map<string, NonNullable<ReturnType<typeof validateSpread>>>;
     step('validate');
-    const flowedNow = new Map<HTMLElement, Flowed>();
     for (const [source, chain] of activeChains) {
       const first = chain[0];
       if (book.texts[source] === undefined) {
@@ -2203,10 +2183,7 @@ export async function startRender(root: HTMLElement) {
           suggestion: 'Fix the YAML between the opening and closing --- lines of ' + path + '. Until then the layout shows it without its header fields.' });
       }
       const boxes = chain.map(({ spread, page, box }) => validated.get(spread)!.boxes.get((page ? page + ':' : '') + box)!);
-      const own = new Map(boxes.map((box) => [box, flowed.get(box)?.style ??
-        { columnCount: box.style.columnCount, columnFill: box.style.columnFill, overflow: box.style.overflow }]));
       const result = flow.run(markdownToHtml(book.texts[source]), boxes, 'columns');
-      for (const box of boxes) flowedNow.set(box, { nodes: [...box.childNodes], style: own.get(box)! });
       const overflow = result.overflowText.trim();
       if (overflow || result.results.some(({ failed, unresolved }) => failed || unresolved)) {
         const last = chain.at(-1)!;
@@ -2230,12 +2207,6 @@ export async function startRender(root: HTMLElement) {
         });
       }
     }
-    for (const [box, { nodes, style }] of flowed) if (!flowedNow.has(box)) {
-      for (const node of nodes) if (node.parentNode === box) box.removeChild(node);
-      Object.assign(box.style, style);
-    }
-    flowed.clear();
-    for (const [box, entry] of flowedNow) flowed.set(box, entry);
     step('flow');
     const minimum = template.format.output.minimumTextSize;
     for (const [spread, { sheet }] of present ? [] : validated) {
@@ -2294,17 +2265,14 @@ export async function startRender(root: HTMLElement) {
     }
     if (edit) {
       const laidOut = [...validated].map(([spread, { sheet }]) => ({ spread, sheet }));
-      if (laidOutBook) motion = laidOutBook.update(laidOut);
-      else laidOutBook = layoutBook(root, laidOut, view, format, grid);
-      setGrid = laidOutBook.setGrid;
+      setGrid = layoutBook(root, laidOut, view, format, grid);
     }
     step('layout');
     if (present) await renderPresentation(root, sheets, spreads, sequence, format, presentationStart);
     else if (lazy) {
-      const load = photoLoader(root, () => onScreen, book.photoRevisions);
+      const load = photoLoader(root, () => onScreen);
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const loader = ++photoLoaders;
-      onScreenChange = () => { timer ??= setTimeout(() => { timer = undefined; if (loader === photoLoaders) load(); }, 16); };
+      onScreenChange = () => { timer ??= setTimeout(() => { timer = undefined; load(); }, 16); };
       // Wait for photos near the viewport so replacements show their artwork as soon as they swap in.
       await Promise.allSettled(load().map((img) => img.decode()));
     }
@@ -2325,8 +2293,8 @@ export async function startRender(root: HTMLElement) {
     publish({
       state: 'ready', template: info, pages: sequence.count, units, errors, warnings,
       flow: Object.fromEntries(Object.entries(positions).map(([key, { meta: _meta, ...position }]) => [key, position])), anchors: index.anchors,
-      ...(inspection ? { inspection } : {}), ...(currentRevision ? { revision: currentRevision } : {}), ...(motion ? { motion } : {}),
-    } as RenderStatus);
+      ...(inspection ? { inspection } : {}),
+    });
     // The editor's book view does not wait for its pictures. It reports them to the live Book check as they start,
     // finish or fail, so a map that failed on the page is never missing from the check.
     if (edit && view === 'book' && window.parent !== window) {
@@ -2340,110 +2308,9 @@ export async function startRender(root: HTMLElement) {
           post({ type: 'pictures', pending, errors: [...pictureIssues(failures), ...photoRenderIssues(currentPhotoRenderFailures())] });
         }, 50);
       };
-      if (!reportPictures) {
-        watchRenderedImages(() => reportPictures?.());
-        watchPhotoRenderFailures(() => reportPictures?.());
-      }
-      reportPictures = report;
+      watchRenderedImages(report);
+      watchPhotoRenderFailures(report);
       report();
-    }
-    };
-    await renderRevision(book);
-    // The book view and thumbnails can stay alive across edits (#210, Settings → Faster book updates). The app names each
-    // newer render session; the frame moves to it and renders that revision into the same React root. A revision with
-    // another template, format or network access is refused, and the app creates a new frame for it as before.
-    if (lazy && !textEditor) {
-      // URLs name the render session; the hash names the template files. Without a hash every revision is refused.
-      const identity = (next: RenderProject) => JSON.stringify([next.template.hash ?? Math.random(), next.template, next.project.format,
-        next.project.template, next.network, next.mode]).replaceAll(/\/render\/[\w-]{36}\//g, '/render/*/');
-      const shape = identity(book);
-      let wanted: string | undefined;
-      // The revision last asked for, rendered or refused; `currentRevision` is the one on show.
-      let attempted = currentRevision;
-      let running = false;
-      let release: (() => void) | undefined;
-      // The last revision the app showed, to draw again when a newer one fails partway: React has cleared the root by
-      // then, and the app keeps showing this frame until a new one replaces it. A revision becomes it only when the
-      // app releases it: one that a newer edit made outdated rendered here but was never shown, so it must not return.
-      type Good = { book: RenderProject; path: string; revision: string | undefined };
-      let good: Good = { book, path: location.pathname, revision: currentRevision };
-      // Revisions rendered here and not yet released, oldest first; the app may release one after a newer one began.
-      const rendered = new Map<string, Good>();
-      const restore = async () => {
-        history.replaceState(null, '', good.path + location.search);
-        setTemplateFiles(good.book.files);
-        prepare(good.book);
-        currentRevision = good.revision;
-        try { await renderRevision(good.book); } catch { /* The app replaces this frame. */ }
-      };
-      window.addEventListener('message', (event) => {
-        if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'release-revision') return;
-        const project = event.data.project;
-        const shown = typeof project === 'string' ? rendered.get(project) : undefined;
-        if (shown) {
-          good = shown;
-          for (const key of [...rendered.keys()]) { rendered.delete(key); if (key === project) break; }
-        }
-        if (project === currentRevision) release?.();
-      });
-      window.addEventListener('message', async (event) => {
-        if (event.origin !== editorURL.slice(0, -1) || event.data?.type !== 'revision' || typeof event.data.project !== 'string') return;
-        wanted = event.data.project;
-        release?.();
-        if (running) return;
-        running = true;
-        try {
-          while (wanted && wanted !== attempted) {
-            const revision = wanted;
-            attempted = revision;
-            const path = location.pathname.replace(/\/render\/[^/]+/, '/render/' + revision);
-            history.replaceState(null, '', path + location.search);
-            stepStart = performance.now();
-            let rendering = false;
-            try {
-              const response = await fetch(path + '/data');
-              if (!response.ok) throw new Error('Could not load the project.');
-              const next: RenderProject = await response.json();
-              step('data');
-              if (identity(next) !== shape) throw new Error('This revision needs a new frame.');
-              setTemplateFiles(next.files);
-              prepare(next);
-              rendering = true;
-              currentRevision = revision;
-              // The frame keeps showing the revision it showed until the app releases this one, so the book view and
-              // the thumbnails change together, as new frames do. A newer revision ends the wait as well.
-              const shown = new Promise<void>((resolve) => { release = resolve; });
-              if (document.startViewTransition) {
-                // A revision that fails to render is not waited for: the last good one is drawn again behind the
-                // transition's picture, and the failure is reported below.
-                let failed: { error: unknown } | undefined;
-                const transition = document.startViewTransition(async () => {
-                  try { await renderRevision(next); } catch (error) { failed = { error }; await restore(); return; }
-                  // Known before its release arrives, which this wait is for.
-                  rendered.set(revision, { book: next, path, revision });
-                  // A newer revision asked for meanwhile, also before this wait began, makes this one outdated: the app
-                  // will not release it, so it is not waited for.
-                  if (wanted === revision) await shown;
-                });
-                // Chromium gives up on a long update, or one it cannot capture (in a hidden window, say), and shows it at
-                // once; the frame then simply is not paired. Each of its promises reports that.
-                void transition.ready.catch(() => {}); void transition.finished.catch(() => {});
-                await transition.updateCallbackDone.catch(() => {});
-                if (failed) { rendering = false; throw failed.error; }
-              } else {
-                try { await renderRevision(next); } catch (error) { await restore(); rendering = false; throw error; }
-                rendered.set(revision, { book: next, path, revision });
-              }
-            } catch (error) {
-              // A revision that never started rendering leaves the shown one as it is, under its own session's URL.
-              if (rendering) await restore();
-              else history.replaceState(null, '', good.path + location.search);
-              currentRevision = good.revision;
-              post({ type: 'revision-refused', revision, message: error instanceof Error ? error.message : String(error) });
-            }
-          }
-        } finally { running = false; }
-      });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The template could not be rendered.';

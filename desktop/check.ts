@@ -92,7 +92,10 @@ export async function checkProject(
     phase = 'template';
     // A rejected check may have read changed photo bytes. Never let its renditions poison a later check.
     privateCache = await mkdtemp(join(fallbackCache, 'check-'));
-    const book = await loadProject(source.folder, privateCache, true, true);
+    // Photos are read where they are, as in the editor: copying, hashing and decoding every photo cost each check about
+    // 8 s for a book of 163 linked photos (F-037). Their renditions are keyed by the original's stamp and made only
+    // while it is unchanged, and the inputs, photo stamps included, are compared again after rendering.
+    const book = await loadProject(source.folder, privateCache, true);
     loaded = book;
     if (!await inputsMatch()) {
       throw new ProjectRevisionError('source-changed');

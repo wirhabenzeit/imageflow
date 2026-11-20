@@ -225,9 +225,6 @@ async function serve(request: Request) {
   }
   if (resource === 'data') {
     const origins = session.network?.() ?? [];
-    // A frame that renders this session's revision in place (#210) requests only its data, not the page: its pictures
-    // are cached under the network policy that data names, as a new frame's are under its page's.
-    session.pictureScope ??= JSON.stringify([session.book.templateHash, origins]);
     return Response.json(renderData(session.book, id, session.mode, session.network ? origins : undefined, desktopScheme + '://' + host));
   }
   if (resource === 'template-preview') {
@@ -1281,9 +1278,7 @@ function showSettings(pane?: SettingsPane) {
 
 
 void app.whenReady().then(async () => {
-  // IMAGEFLOW_FASTER_UPDATES=0 starts with Settings → Faster book updates off, so tests can cover rendering every edit anew.
-  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), { ...defaultSettings, updateChannel: releaseChannel(app.getVersion()) ?? 'stable',
-    ...(process.env.IMAGEFLOW_FASTER_UPDATES === '0' ? { fasterBookUpdates: false } : {}) });
+  settings = new SettingsStore(join(app.getPath('userData'), 'settings.json'), { ...defaultSettings, updateChannel: releaseChannel(app.getVersion()) ?? 'stable' });
   recents = new RecentDocuments(join(app.getPath('userData'), 'recent-documents.json'));
   await Promise.all([settings.load(), recents.load()]);
   configureSourceStore(join(app.getPath('userData'), 'source-cache'));

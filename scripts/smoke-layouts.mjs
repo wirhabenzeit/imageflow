@@ -268,6 +268,28 @@ try {
   await rerendered(() => button('Undo').click());
   assert.deepEqual(await settlements(), state);
 
+  // A new spread continues the Photo grid layout and gets its own Grid size picker. Until the new picker shows its
+  // choice, the previous one stays on show: a new frame starts empty (beta finding F-035).
+  await pickerReady();
+  await w.evaluate(() => {
+    window.__pickerShown = [];
+    window.__pickerMeasure = setInterval(() => {
+      const shown = [...document.querySelectorAll('.layout-family-field')].filter((node) => !node.closest('.held-picker-pending'));
+      window.__pickerShown.push(shown.map((node) => node.getAttribute('aria-busy') === 'true' ? 'busy' : 'ready').join(',') || 'none');
+    }, 5);
+  });
+  await rerendered(() => button('Add').click());
+  await pickerReady();
+  await w.waitForFunction(() => !document.querySelector('.held-picker-pending'));
+  const shownPickers = await w.evaluate(() => { clearInterval(window.__pickerMeasure); return window.__pickerShown; });
+  assert.ok(shownPickers.length > 0 && shownPickers.every((value) => value === 'ready'), 'The shown Grid size picker is never empty: ' + [...new Set(shownPickers)]);
+  assert.equal(await gridSize('2 × 2').getAttribute('aria-checked'), 'true');
+  await rerendered(() => button('Undo').click());
+  assert.deepEqual(await settlements(), state);
+  await w.locator('.spread-thumb[data-spread="settlements"]').click();
+  await w.locator('.spread-thumb[data-spread="settlements"][aria-current="page"]').waitFor();
+  await pickerReady();
+
   // Kept content: Place in… moves it into an empty box, or swaps with what a box shows; it never appears twice.
   const title = async (photo) => JSON.parse(await readFile(join(project, 'photos.json'), 'utf8'))[photo].title;
   const replacedTitle = await title(replacement);
