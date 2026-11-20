@@ -1173,6 +1173,8 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
       return { definition, span: pageLayout ? 'page' : template.spreads[definition].span, spread, page,
         crop: format.facingPages ? pageLayout ? previewSide : template.spreads[definition].span === 'left' ? 'left' : template.spreads[definition].span === 'right' ? 'right' : undefined : undefined };
     });
+  // The spread's own layout, or its page's: its preview draws its pictures as they are (RenderedImage).
+  const current = side && spreads[index].split ? spreads[index].pages?.[side]?.definition : spreads[index].definition;
   // Previews read the anchors of the book as saved, so a contents layout shows the real pages.
   const anchors = bookIndex(book, template, sequence);
   const offerBlank = format.facingPages && spanRequiredAt(index, spreads.length, template.format) === 'spread';
@@ -1180,7 +1182,8 @@ async function renderLayouts(root: HTMLElement, book: RenderProject, template: T
   let renderError: unknown;
   const react = createRoot(root, { onUncaughtError: (error) => { renderError = error; } });
   flushSync(() => react.render(<>{previews.map(({ definition, span, spread, page }) => (
-    <div className="if-spread-container" data-layout-units={span === 'spread' ? 2 : 1} data-span={span} data-spread={definition} data-layout={definition} key={definition}>
+    <div className="if-spread-container" data-layout-units={span === 'spread' ? 2 : 1} data-span={span} data-spread={definition} data-layout={definition} key={definition}
+      data-current-layout={definition === current ? '' : undefined}>
       <SpreadView book={book} spread={spread} template={template} format={format} positions={{}}
         page={page} index={anchors} renderPhotos bookSpread={spreads[index].id} />
     </div>
@@ -1962,6 +1965,9 @@ export async function startRender(root: HTMLElement) {
         concurrency: view === 'book' ? 2 : 1, timeoutMs: pictureTimeoutMs.preview,
         previewCache: location.pathname + '/picture/' }
         : printPictures(check ? 'check' : artwork || inspect ? 'preview' : 'export', target));
+      // The picture cache's scope for each template file, and the Inspector's layout previews, which show a stand-in
+      // for a picture they would have to draw.
+      configureRenderedImages({ pictureScopes: book.template.pictureScopes, templateHash: book.template.hash, standIns: edit && view === 'layouts' });
     };
     prepare(book);
     if (edit && view === 'layouts') {

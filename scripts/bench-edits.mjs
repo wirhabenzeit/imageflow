@@ -10,7 +10,9 @@
 // --book     another book; it is copied next to itself, and its photo approvals are taken from the installed app's
 //            profile, so its linked photos load (see approveHeavyBook)
 // --profile  with a profiling build (IMAGEFLOW_PROFILE=1 npx vite build), also the render steps and pictures drawn
-import { cp, mkdtemp, readFile, rm } from 'node:fs/promises';
+// --template also edits the copy's template, as an agent does: a layout file (index.tsx), the stylesheet and, on the
+//            heavy book, the file that draws the terrain pictures; with --profile it counts the pictures drawn again
+import { appendFile, cp, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +22,7 @@ import { _electron } from 'playwright-core';
 import { testBook } from './ui-actions.mjs';
 import { approveHeavyBook, bookKey, heavyBook } from './heavy-book.mjs';
 
-const { values } = parseArgs({ options: { book: { type: 'string' }, repeat: { type: 'string', default: '3' }, profile: { type: 'boolean' },
+const { values } = parseArgs({ options: { book: { type: 'string' }, repeat: { type: 'string', default: '3' }, profile: { type: 'boolean' }, template: { type: 'boolean' },
   settle: { type: 'string', default: '30000' } } });
 const root = fileURLToPath(new URL('../', import.meta.url));
 let source; let approvals;
@@ -116,8 +118,18 @@ try {
     results.duplicate.push(await measure(() => button('Duplicate').click()));
     await w.waitForTimeout(1500);
   }
-  for (const [edit, runs] of Object.entries(results)) console.log(edit.padEnd(10), runs.map(({ feedback, shown, settled }) =>
-    `feedback ${feedback ?? '–'} ms · shown ${shown ?? '–'} ms · settled ${settled} ms`).join('   |   '));
+  if (values.template) {
+    for (const file of ['index.tsx', 'styles.css', 'terrain.tsx']) {
+      const path = join(book, 'template', file);
+      if (!await stat(path).then(() => true, () => false)) continue;
+      const result = await measure(() => appendFile(path, file.endsWith('.css') ? '\n/* bench */\n' : '\n// bench\n'));
+      const drawn = Object.entries(result.steps ?? {}).filter(([name]) => name.includes(' picture.')).reduce((sum, [, { n }]) => sum + n, 0);
+      (results['template ' + file] = []).push({ ...result, ...(values.profile ? { drawn } : {}) });
+      await w.waitForTimeout(3000);
+    }
+  }
+  for (const [edit, runs] of Object.entries(results)) console.log(edit.padEnd(10), runs.map(({ feedback, shown, settled, drawn }) =>
+    `feedback ${feedback ?? '–'} ms · shown ${shown ?? '–'} ms · settled ${settled} ms` + (drawn !== undefined ? ` · ${drawn} pictures drawn` : '')).join('   |   '));
   if (values.profile) console.log(JSON.stringify(results, null, 1));
 } finally {
   await app.close().catch(() => {});

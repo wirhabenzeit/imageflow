@@ -173,7 +173,9 @@ async function serve(request: Request) {
   if (picture) {
     const session = sessions.get(picture[1]);
     if (session?.mode !== 'edit' || !session.pictures || !session.book.templateHash) return new Response(null, { status: 404 });
-    const scope = JSON.stringify([session.book.templateHash, session.network?.() ?? []]);
+    // Pictures are scoped by the template file that draws them (desktop/picture-scopes.ts, in the frame's cache key), so
+    // an edit elsewhere in the template keeps them; here only by the sites the book may reach now.
+    const scope = JSON.stringify(['pictures-2', session.network?.() ?? []]);
     if (session.pictureScope !== scope) return new Response(null, { status: 404 });
     // The last picture shown at a place outlives template edits: a replacement frame shows it, as still drawing,
     // while it draws the new one, instead of an empty box for every map in the book (F-032). It is never taken as
@@ -218,7 +220,7 @@ async function serve(request: Request) {
     const origins = session.network?.() ?? [];
     // Network preparation finishes after the session is activated. Scope its pictures to the policy actually
     // served to the frame, so an already-approved book can cache its first preview as well as later saves.
-    session.pictureScope ??= JSON.stringify([session.book.templateHash, origins]);
+    session.pictureScope ??= JSON.stringify(['pictures-2', origins]);
     return response(await pageHtml(dist), 'text/html; charset=utf-8', {
       'Content-Security-Policy': renderPolicy(csp, origins) + '; frame-ancestors ' + editorURL + "; base-uri 'self'",
     });

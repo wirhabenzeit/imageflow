@@ -58,14 +58,20 @@ const terrainLayout = `
         const seed = ctx.params.seed;
         return <PagePaper context={ctx}>
           <div style={{ ...ctx.geometry.css(at.page(24, 24, 242, 242)), position: 'absolute' }}>
-            <RenderedImage label="Terrain" output="raster" inputs={{ seed }} style={{ position: 'absolute', inset: 0 }}
-              draw={async ({ width, height, pixelRatio }) => drawTerrain(seed, Math.ceil(width * pixelRatio), Math.ceil(height * pixelRatio))} />
+            <TerrainPicture seed={seed} />
           </div>
         </PagePaper>;
       },
     }),
 `;
-const terrainDrawing = `
+// In its own file, as a template keeps its map code apart from its layouts.
+const terrainModule = `import { RenderedImage } from 'imageflow';
+
+export function TerrainPicture({ seed }: { seed: number }) {
+  return <RenderedImage label="Terrain" output="raster" inputs={{ seed }} style={{ position: 'absolute', inset: 0 }}
+    draw={async ({ width, height, pixelRatio }) => drawTerrain(seed, Math.ceil(width * pixelRatio), Math.ceil(height * pixelRatio))} />;
+}
+
 // Heavy test book: a shaded terrain drawn on a canvas, about as slow as a map's relief.
 function drawTerrain(seed: number, width: number, height: number) {
   const target = new OffscreenCanvas(width, height);
@@ -124,13 +130,13 @@ export async function heavyBook({ out = join(root, '.build', 'heavy-book'), chap
     if (!source.includes(from)) throw new Error('The starter template changed; update scripts/heavy-book.mjs (' + from.slice(0, 40) + ').');
     source = source.replace(from, to);
   };
-  patch("import { box, Choice, defineTemplate,", "import { box, Choice, defineTemplate, RenderedImage,");
+  patch("import './styles.css';", "import './styles.css';\nimport { TerrainPicture } from './terrain';");
   // 244 pages: the cover formats' spine widths must cover every page count the format allows.
   patch('pageCount: { min: 28, max: 112, step: 4 }', 'pageCount: { min: 28, max: 248, step: 4 }');
   patch('bands: Array.from({ length: 11 }', 'bands: Array.from({ length: 28 }');
   patch('    contents: pageLayout({', terrainLayout.trimStart().replace(/^/, '    ') + '\n    contents: pageLayout({');
-  source += terrainDrawing;
   await writeFile(entry, source);
+  await writeFile(join(book, 'template', 'terrain.tsx'), terrainModule);
 
   // Stories: one per chapter, from the starter's paragraphs.
   const paragraphs = (await Promise.all(['arrival', 'notebook', 'return'].map((name) => readFile(join(root, 'sample', 'starter', 'texts', name + '.md'), 'utf8'))))

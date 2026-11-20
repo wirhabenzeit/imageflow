@@ -24,6 +24,7 @@ import { digestBytes, SourceStore } from './source-store';
 import { approveSources, sourceBookKey } from './source-access';
 import { runtimeExports } from '../src/runtime-exports';
 import { templateHash } from './template-library';
+import { pictureScopes, scopedRuntimePrefix } from './picture-scopes';
 
 export const assetTypes: Record<string, string> = {
   '.js': 'text/javascript', '.css': 'text/css', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -84,6 +85,14 @@ const hostModules = new Map([
   ['react', 'export default globalThis.ImageFlowReact; export const { ' + Object.keys(ReactExports).filter((name) => /^[A-Za-z_$][\w$]*$/.test(name) && name !== 'default').join(', ') + ' } = globalThis.ImageFlowReact;'],
   ['react/jsx-runtime', 'export const { jsx, jsxs, Fragment } = globalThis.ImageFlowJSX;'],
 ]);
+// `imageflow` as one template file imports it: the same exports, with a RenderedImage that names the file, so the
+// picture cache can be scoped to that file and its imports (picture-scopes.ts).
+function scopedRuntime(file: string) {
+  const others = runtimeExports.filter((name) => name !== 'RenderedImage');
+  return 'export const { ' + others.join(', ') + ' } = globalThis.ImageFlowRuntime;\n' +
+    'const placed = globalThis.ImageFlowRuntime.RenderedImage;\n' +
+    'export const RenderedImage = (props) => globalThis.ImageFlowReact.createElement(placed, { ...props, pictureModule: ' + JSON.stringify(file) + ' });\n';
+}
 
 export class TemplateCompileError extends Error {
   constructor(message: string, readonly diagnostics: AuthoringDiagnostic[]) {
@@ -127,6 +136,9 @@ export async function bundleTemplate(folder: string) {
         setup(builder) {
           builder.onResolve({ filter: /.*/ }, async (args) => {
             if (args.kind === 'entry-point' || args.pluginData) return;
+            if (args.path === 'imageflow' && args.namespace === 'file' && isInside(root, args.importer)) {
+              return { path: scopedRuntimePrefix + relative(root, args.importer).split(sep).join('/'), namespace: 'imageflow-host' };
+            }
             if (hostModules.has(args.path)) return { path: args.path, namespace: 'imageflow-host' };
             // Packages resolve only through the saved dependency bundle, never through node_modules (ADR 0006).
             if (isBareImport(args.path)) {
@@ -153,7 +165,7 @@ export async function bundleTemplate(folder: string) {
             return { path };
           });
           builder.onLoad({ filter: /.*/, namespace: 'imageflow-host' }, (args) => ({
-            contents: hostModules.get(args.path),
+            contents: args.path.startsWith(scopedRuntimePrefix) ? scopedRuntime(args.path.slice(scopedRuntimePrefix.length)) : hostModules.get(args.path),
           }));
           builder.onLoad({ filter: /.*/, namespace: 'imageflow-vendor' }, (args) => ({
             contents: vendoredModule(root, manifest, args.path), resolveDir: root, loader: 'js',
@@ -179,12 +191,14 @@ export async function bundleTemplate(folder: string) {
       files.set(name, await readFile(source));
       urls[path] = name;
     }
-    return { files, urls, ...(dependencies ? { warnings: [dependencies] } : {}) };
+    const scopes = await pictureScopes(metafile, async (input) => input.startsWith('imageflow-vendor:')
+      ? vendoredModule(root, manifest, input.slice('imageflow-vendor:'.length)) : readFile(resolve(root, input)).catch(() => undefined));
+    return { files, urls, pictureScopes: scopes, ...(dependencies ? { warnings: [dependencies] } : {}) };
   } catch (error) {
     const message = 'Template could not be bundled. ' + (error instanceof Error ? error.message : String(error));
     const errors = (error as Partial<BuildFailure> | null)?.errors;
     // An import of a helper this app's `imageflow` module lacks usually means the template needs a newer app.
-    const missingHelper = (text: string) => /No matching export in "imageflow-host:imageflow" for import "([^"]+)"/.exec(text)?.[1];
+    const missingHelper = (text: string) => /No matching export in "imageflow-host:imageflow(?:\?[^"]*)?" for import "([^"]+)"/.exec(text)?.[1];
     const diagnostics: AuthoringDiagnostic[] = Array.isArray(errors) ? errors.slice(0, 50).map(({ text, location }) => ({
       code: 'template-compile-error', stage: 'template', severity: 'error', message: text,
       ...(missingHelper(text) ? { suggestion: 'This version of ImageFlow does not provide ' + missingHelper(text) + '. Update ImageFlow, ' +
@@ -433,8 +447,8 @@ export function projectSummary(book: OpenProject, id: string): ProjectSummary {
 /** The data a render frame loads; its URLs are on `origin`, the frame's own, so it reads them as its own files. */
 export function renderData(book: OpenProject, id: string, mode: RenderProject['mode'], network?: readonly string[], origin = renderOrigin): RenderProject {
   const base = origin + '/render/' + id;
-  // Template files are named by the template's hash where it has one, not by the render session: a frame that renders
-  // newer revisions in place keeps the module, stylesheet and assets it loaded first, after that session is gone.
+  // Template files are named by the template's hash where it has one, not by the render session, so the frames of
+  // later revisions load the same module, stylesheet and assets.
   const templateBase = (book.templateHash ? origin + '/render/' + book.templateHash : base) + '/template/';
   return {
     project: book.project,
@@ -447,8 +461,6 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
     })),
     texts: book.texts,
     files: book.files,
-    // What each photo's file is, so a frame that renders newer revisions in place reloads a photo whose file changed.
-    photoRevisions: Object.fromEntries([...book.photos].map(([id, photo]) => [id, photo.key])),
     problems: book.problems, sources: book.sources,
     ...(book.fixture ? { fixture: book.fixture } : {}),
     template: {
@@ -459,6 +471,8 @@ export function renderData(book: OpenProject, id: string, mode: RenderProject['m
       // What each bundled font can set, for `fonts` and the Book check's font coverage.
       fonts: bundledFontCoverage(book.assets.files),
       ...(book.templateHash ? { hash: book.templateHash } : {}),
+      // The scope of the pictures each template file places (picture-scopes.ts).
+      pictureScopes: book.assets.pictureScopes,
     },
   };
 }
