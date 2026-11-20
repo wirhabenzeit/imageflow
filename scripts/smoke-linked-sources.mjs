@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { testBook, menuAction, retryBookRefresh, waitForPage } from './ui-actions.mjs';
+import { closeApp, testBook, menuAction, retryBookRefresh, waitForPage } from './ui-actions.mjs';
 import { createRouteFixture } from './route-fixture.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -194,8 +194,12 @@ try {
   assert.deepEqual(printable.value.errors, [], 'An unused missing original does not introduce export errors');
   await stat(unusedPrint);
   await writeFile(unused, photoBytes);
-  await waitForPage(page, async (id) => (await window.imageflow.currentProject()).value.sources['photo:' + id].state === 'available', unusedId);
-  await reload(page);
+  // Verify that the open editor renders the restored revision through its file watcher.
+  await waitForPage(page, async (id) => {
+    const { value } = await window.imageflow.currentProject();
+    const frame = document.querySelector('iframe.book-frame-book[data-current][data-ready]');
+    return value.sources['photo:' + id].state === 'available' && frame?.dataset.revision === value.id;
+  }, unusedId);
   // Linked assets carry a chain, and the native context menu copies only the selected original into this book.
   await menuAction(app, 'Assets…');
   const linkedWindow = await assetWindow();
@@ -284,4 +288,4 @@ try {
   assert.ok(Object.values((await current(copy)).sources).every((source) => source.state === 'available'));
   console.log('Linked photos, Markdown and parameter files, atomic refresh, cached missing states, export consistency, and portable Save a Copy passed.');
 } catch (error) { console.error(stderr.join('\n')); throw error; }
-finally { await app.close(); await rm(work, { recursive: true, force: true }); }
+finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }
