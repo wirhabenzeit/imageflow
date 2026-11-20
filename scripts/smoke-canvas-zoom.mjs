@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { canvasArtworkBounds, menuAction, testBook } from './ui-actions.mjs';
+import { canvasArtworkBounds, closeApp, menuAction, testBook } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'canvas-zoom-'));
@@ -131,4 +131,4 @@ try {
   assert.deepEqual(await Promise.all(['project.json', 'photos.json'].map(name => readFile(join(folder, name), 'utf8'))), manifests);
   assert.equal(await page.evaluate(() => window.devicePixelRatio), deviceScale, 'Canvas zoom does not zoom the application chrome');
   console.log('Canvas fit, relative zoom, pointer pinch, Space-drag, exact Fit restoration and menu commands passed.');
-} finally { await app.close(); await rm(work, { recursive: true, force: true }); }
+} finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }

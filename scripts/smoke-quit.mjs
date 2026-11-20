@@ -99,14 +99,14 @@ try {
     assert.equal(JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).spreads[0].params.heading, 'Retry after failure');
   });
   await scenario('slow-healthy-save', async ({ instance, page, folder, exit }) => {
-    // A save that outlasts the 3 s acknowledgement window must finish without a "not responding" question.
+    // A save that outlasts the acknowledgement window must finish without a "not responding" question.
     await instance.evaluate(({ dialog }, folder) => {
       dialog.showMessageBox = async (_owner, options) => { throw new Error('Unexpected question: ' + options.message); };
       const fs = process.getBuiltinModule('node:fs/promises'), link = fs.link;
       fs.link = async (...args) => {
         if (args[1] === folder + '/.imageflow/persistence/pending-save.json') {
           fs.link = link;
-          await new Promise((resolve) => setTimeout(resolve, 5000));
+          await new Promise((resolve) => setTimeout(resolve, 12000));
         }
         return link(...args);
       };
@@ -139,7 +139,8 @@ try {
     await instance.evaluate(({ app }) => { app.quit(); });
     for (let attempt = 0; ; attempt++) {
       if (await instance.evaluate(() => globalThis.quitQuestions === 1)) break;
-      assert.ok(attempt < 120); await new Promise((resolve) => setTimeout(resolve, 50));
+      // A hung window is asked about after the 10 s acknowledgement window (desktop/main.ts, quitAcknowledgeMs).
+      assert.ok(attempt < 400); await new Promise((resolve) => setTimeout(resolve, 50));
     }
     await exit(); // First Keep Open cancels; Quit Anyway then exits through writer/lock cleanup.
   });

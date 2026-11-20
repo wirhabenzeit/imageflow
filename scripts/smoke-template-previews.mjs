@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
 import sharp from 'sharp';
-import { testBook } from './ui-actions.mjs';
+import { closeApp, testBook } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
 
 // Template pictures in New Book (#117): the built-in templates' own preview images, cropped to their format; a render
@@ -123,5 +123,5 @@ try {
   console.error('Template previews failed:', error);
   process.exitCode = 1;
 } finally {
-  await app.close().catch(() => {});
+  await closeApp(app);
 }

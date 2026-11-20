@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { closeApp, testBook } from './ui-actions.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'panel-hover-'));
 const env = { ...process.env, IMAGEFLOW_HIDE_WINDOW: '1' }; delete env.ELECTRON_RUN_AS_NODE;
@@ -46,4 +46,4 @@ try {
   await page.mouse.move(5, 5);
   assert.equal(await page.locator('.sheet-hover').count(), 0);
   console.log('Panel persistence, keyboard sizing, canvas hover and selection passed.');
-} finally { await app.close(); }
+} finally { await closeApp(app); }

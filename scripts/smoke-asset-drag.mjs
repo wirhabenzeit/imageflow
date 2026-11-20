@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { closeApp, testBook } from './ui-actions.mjs';
 
 // A file in the bottom panel's Assets tab is dragged onto a spread's file setting in the Inspector (beta finding
 // F-028); a setting that does not accept its type does not take it.
@@ -40,4 +40,4 @@ try {
   assert.equal(JSON.parse(await readFile(join(folder, 'project.json'), 'utf8')).spreads[0].params.track, 'route');
   assert.deepEqual(errors, []);
   console.log('Asset drag onto a file setting passed:', work);
-} finally { await app.close(); }
+} finally { await closeApp(app); }

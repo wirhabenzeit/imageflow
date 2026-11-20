@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook, menuAction } from './ui-actions.mjs';
+import { closeApp, menuAction, testBook } from './ui-actions.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const work = await mkdtemp(join(root, '.build', 'reorder-motion-'));
@@ -101,4 +101,4 @@ try {
   await move('Undo Book Edit');
   assert.equal(await page.locator('.spread-thumb').count(), thumbsBefore);
   console.log('Canvas reorder, synchronized replacement, Undo/Redo, rapid moves, Reduce Motion and immediate structural edits passed.');
-} finally { await app.close(); }
+} finally { await closeApp(app); }

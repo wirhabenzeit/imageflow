@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { closeApp, testBook } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
 
 // A deliberately slow map makes redraws observable without depending on internet access or a WebGL driver.
@@ -157,4 +157,4 @@ try {
   await page.locator('iframe.book-frame-thumbs[data-current][data-ready]').waitFor();
   console.log('Picture cache passed: layout navigation, sidebar map stability through unrelated edits, input and template invalidation.');
 } catch (error) { console.error('Picture requests:', pictures); throw error; }
-finally { await app.close(); await rm(work, { recursive: true, force: true }); }
+finally { await closeApp(app); await rm(work, { recursive: true, force: true }); }

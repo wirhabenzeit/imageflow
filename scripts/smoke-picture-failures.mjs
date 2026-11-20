@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
 import { _electron } from 'playwright-core';
-import { testBook } from './ui-actions.mjs';
+import { closeApp, testBook } from './ui-actions.mjs';
 import { copySample } from '../desktop/sample-book.mjs';
 
 // A map drawn as two layered pictures (shaded relief under the map's lines) that both fail after an edit: on screen,
@@ -93,6 +93,6 @@ try {
   assert.ok(relief.shown && map.shown, 'The pictures drawn before stay under the messages on screen: ' + JSON.stringify(state));
   console.log('Picture failures: the last pictures stay, and layered failures stack their messages.');
 } finally {
-  await app.close().catch(() => {});
+  await closeApp(app);
   await rm(work, { recursive: true, force: true });
 }
