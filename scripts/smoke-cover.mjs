@@ -29,8 +29,8 @@ try {
   await writeFile(projectFile, JSON.stringify(project));
   const templateFile = join(folder, 'template/index.tsx');
   const template = await readFile(templateFile, 'utf8');
-  const withLegacyLimit = template.replace('step: 2 }, output: { resolution:',
-    'step: 2 }, output: { maximumFileSize: { pages: 500_000_000, cover: 1024 }, resolution:');
+  const withLegacyLimit = template.replace('blurbJacket: blurb.format,',
+    'blurbJacket: { ...blurb.format, output: { ...blurb.format.output, maximumFileSize: { pages: 500_000_000, cover: 1024 } } },');
   assert.notEqual(withLegacyLimit, template);
   await writeFile(templateFile, withLegacyLimit);
   app = await _electron.launch({ executablePath: electron, args: [join(root, '.build/desktop'), '--user-data-dir=' + join(work, 'profile')],

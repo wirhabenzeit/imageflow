@@ -536,6 +536,59 @@ Each cover layout renders one full exterior sheet. It can declare photo boxes, p
 
 Print specifications can use fixed widths or inclusive page-count bands for the spine and both flaps. Bands cover every valid interior page count, with printer rounding applied in the source unit. Interior page counts include blank pages. Guides and provisional sizing appear in the editor and preview metadata.
 
+#### Printer presets
+
+The Photobook starter has measured presets in `print-presets.ts`: `whiteWallGallerySquare({ paper })` for WhiteWall Gallery Square (Fuji Crystal Archive, Fedrigoni gloss and Sappi silk-matt papers) and `blurbLargeSquare({ paper, cover })` for Blurb Large Square (six papers, `'imageWrap'` or `'dustJacket'`). Each returns `{ format, coverFormat, researched, sources }`. The interior format and the cover come together because the cover's panels, height and spine bands depend on the interior trim and page-count rule. To use a preset, copy `print-presets.ts` into your template folder. It is part of the template, so a book keeps the values it was made with when the app updates.
+
+```tsx
+import { blurbLargeSquare, whiteWallGallerySquare } from './print-presets';
+
+const whiteWall = whiteWallGallerySquare({ paper: 'fujiCrystalArchive' });
+const blurb = blurbLargeSquare({ paper: 'premiumMatte', cover: 'dustJacket' });
+
+export default defineTemplate({
+  // …
+  requires: ['physical-covers'],
+  formats: {
+    whiteWall: { ...whiteWall.format, label: 'WhiteWall · 29 × 29 cm' },
+    blurb: blurb.format,
+  },
+  coverFormats: { whiteWall: whiteWall.coverFormat, blurb: blurb.coverFormat },
+  coverLayouts: { /* … */ },
+});
+```
+
+A preset is plain data. Spread it to change a field, for example `{ ...blurb.coverFormat, foldAvoidance: { back: pt(18), front: pt(18) } }`. The values were measured from the printers' calculators, templates and help pages on the `researched` date. They were not tested with the printers' uploaders, so check them against `sources` before ordering. If a printer changes its specification, add the new values beside the old ones instead of editing them, so existing books keep their size.
+
+#### A custom cover
+
+For any other printer, write the `CoverFormat` yourself, from the printer's cover template or calculator. This one is for a 21 × 21 cm hardcover with a 5 mm spine up to 40 pages and 7 mm up to 80, with 15 mm wrapped around the board on each edge:
+
+```tsx
+const edges = (length: Length) => ({ top: length, right: length, bottom: length, left: length });
+
+formats: {
+  square: printFormat({ label: 'Square · 21 × 21 cm', trim: { width: mm(210), height: mm(210) },
+    bleed: { all: mm(3), binding: mm(0) }, safe: mm(5), pageCount: { min: 24, max: 80, step: 2 } }),
+},
+coverFormats: {
+  square: {
+    kind: 'wrap',
+    height: mm(216), panels: { back: mm(213), front: mm(213) },   // the cover board, front and back
+    widths: { kind: 'page-bands', bands: [
+      { from: 24, to: 40, value: { spine: mm(5) } },
+      { from: 42, to: 80, value: { spine: mm(7) } },
+    ] },
+    outer: { kind: 'wrap', insets: edges(mm(15)) },                // 'bleed' for a jacket or a softcover
+    safe: { back: edges(mm(8)), front: edges(mm(8)), spine: edges(mm(1)) },
+    foldAvoidance: { back: mm(8), front: mm(8) },                  // a warning band next to the spine
+    output: { container: 'pdf', colorSpace: 'sRGB', transparency: 'allow' },
+  },
+},
+```
+
+The bands must cover every page count the interior allows, here 24 to 80 in steps of two. A dust jacket adds `flaps: { back, front }` to each band's `value` and declares `flaps: { safe: { back, front } }` on the cover. Use `widths: { kind: 'fixed', value: { spine } }` when the spine does not depend on the page count.
+
 ### Formats without facing pages
 
 Wall calendars, cards, loose print series and posters have no facing pages. Declare them with `facingPages: false`, and every unit of the book is one page: the editor, the thumbnails, the Book check and export works page by page instead of spread by spread. The name follows print convention (InDesign's *Facing Pages* setting).
