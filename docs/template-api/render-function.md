@@ -43,10 +43,16 @@ type RenderContext = {
 
 A page layout receives only its own state and page number. Render it in `<Page>` and use page-local geometry; [Page layouts](page-layouts.md) describes the side and composition rules.
 
-`mode` and `view` are fixed for the whole render. `mode` is `'edit'` for every render in the editor and `'export'` for PDF export, presentation, the Book check and MCP artwork (the Book check is `'export'` here, while `RenderedImage`'s own `mode` tells it apart as `'check'`). `view` says where an edit-mode render is shown: `'canvas'` is the interactive book, the only place anyone clicks; `'thumbnail'` is the sidebar and `'layout-preview'` the Inspector's layout previews, which show what the page will look like. `view === 'export'` exactly when `mode === 'export'`. Later versions may add views, so test only `view === 'canvas'` and never treat the list as complete. Show editing scaffolding, such as a placeholder that invites a click, only on the canvas:
+`mode` and `view` are fixed for the whole render. `mode` is `'edit'` for every render in the editor and `'export'` for PDF export, presentation, the Book check and MCP artwork (the Book check is `'export'` here, while `RenderedImage`'s own `mode` tells it apart as `'check'`). `view` says where an edit-mode render is shown: `'canvas'` is the interactive book, the only place anyone clicks; `'thumbnail'` is the sidebar and `'layout-preview'` the Inspector's layout previews, which show what the page will look like. `view === 'export'` exactly when `mode === 'export'`. Later versions may add views, so test for a view by name (`view === 'canvas'`, `view === 'layout-preview'`) and never treat the list as complete. Show editing scaffolding, such as a placeholder that invites a click, only on the canvas:
 
 ```tsx
 {!chapters.length && ctx.view === 'canvas' && <p className="hint">Story spreads appear here.</p>}
+```
+
+A layout preview shows what the selected spread would look like in another layout, so a page that leaves out a picture until it has its data (a map without its GPX file, say) can place one there anyway, with a fixed view: ImageFlow shows the picture last drawn in that layout instead of drawing it ([Rendered images](rendered-images.md#rendered-images)).
+
+```tsx
+if (!track && ctx.view === 'layout-preview') return <MapView view={countryView} />;
 ```
 
 ImageFlow's own placeholders follow the same rule: empty `PhotoBox` and `MarkdownBox` placeholders, the `ctx.Text` empty state and the inherited-text underline appear only on the canvas. Thumbnails render empty content as export does; layout previews do too, except that an empty `PhotoBox` or `MarkdownBox` shows a small photo or text glyph so the layouts can be told apart before any content is placed. One difference to know when styling `[data-empty]`: `ctx.Text` carries `data-empty` only on the canvas, so in thumbnails and layout previews an empty text renders as in export, while empty `PhotoBox` and `MarkdownBox` boxes carry `data-empty` in every view.

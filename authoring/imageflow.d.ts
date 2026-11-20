@@ -697,7 +697,7 @@ export type BoundGeometry = {
   css: typeof geometry.css;
 };
 
-/** Where a render is shown: see `RenderContext.view`. More views may be added; test only `view === 'canvas'`. */
+/** Where a render is shown: see `RenderContext.view`. More views may be added; compare with a view by name. */
 export type RenderView = 'canvas' | 'thumbnail' | 'layout-preview' | 'export';
 
 /** The context passed to `render`, typed from a spread declared with the `spread` builder or `spreadFor`. */
@@ -728,8 +728,9 @@ export type RenderContext<S extends SpreadDeclaration = SpreadDeclaration, D ext
    * Where this render is shown, fixed for the whole render. `'canvas'` is the interactive book in the editor, the only
    * place anyone clicks; `'thumbnail'` (the sidebar) and `'layout-preview'` (the Inspector's layouts) are edit-mode
    * renders that show what the page will look like. `'export'` matches `mode === 'export'`. Show editing scaffolding,
-   * such as a placeholder that invites a click, only when `view === 'canvas'`. Later versions may add views, so never
-   * switch over the list as if it were complete: compare with `'canvas'` only.
+   * such as a placeholder that invites a click, only when `view === 'canvas'`. In `'layout-preview'`, a page that leaves
+   * out a picture until it has its data may place one with a fixed view: the preview shows the picture last drawn in
+   * that layout. Later versions may add views, so compare with a view by name; never switch over the list as complete.
    */
   view: RenderView;
   /**
@@ -1234,6 +1235,14 @@ export type RenderedImageProps = {
   alt?: string;
   className?: string;
   style?: CSSProperties;
+  /**
+   * The Inspector's layout previews draw pictures only for the selected spread's own layout. Another layout shows the
+   * same picture if it was drawn already, else the picture last drawn in that layout for another spread, else
+   * `standIn` if given; a layout the book has not drawn yet is drawn once. `'draw'` always draws the picture there.
+   */
+  layoutPreview?: 'stand-in' | 'draw';
+  /** What a layout preview shows for a layout it would otherwise draw for the first time, such as a schematic map. */
+  standIn?: ImageFlowNode;
 };
 /**
  * A picture that template code draws asynchronously, such as a map from a WebGL library and remote tiles
