@@ -686,8 +686,10 @@ export function App() {
   function act(command: Command) {
     if (isPhotoViewCommand(command)) { photoView.command(command); return; }
     if (command === 'presentation' || command === 'presentation-start') {
-      if (coverActive) return;
-      present(command === 'presentation-start' ? summary?.project.spreads[0]?.id ?? '' : spreadId);
+      // The cover opens the presentation when the book has one: from the start, or from the Cover view.
+      const cover = !!coverGeometry && !!coverDefinition;
+      present(cover && (coverActive || command === 'presentation-start') ? coverInstance
+        : command === 'presentation-start' ? summary?.project.spreads[0]?.id ?? '' : spreadId);
       return;
     }
     if (command === 'swap-pages') {
@@ -857,7 +859,7 @@ export function App() {
     else placeSources(request.keys);
   });
   const onPresentationClosed = useEffectEvent((id: string) => {
-    if (current.current?.project.spreads.some((spread) => spread.id === id)) select(id);
+    if (id === coverInstance || current.current?.project.spreads.some((spread) => spread.id === id)) select(id);
     canvas.current?.focus({ preventScroll: true });
   });
   useEffect(() => {
@@ -2002,7 +2004,7 @@ export function App() {
         </div>}
       </div>
       <div className="toolbar-actions">
-        <button className="toolbar-icon" aria-label="Presentation" title="Presentation (⇧W)" disabled={!summary || !!editing || !!cropping || coverActive} onClick={() => act('presentation')}><Icon name="play" /></button>
+        <button className="toolbar-icon" aria-label="Presentation" title="Presentation (⇧W)" disabled={!summary || !!editing || !!cropping} onClick={() => act('presentation')}><Icon name="play" /></button>
         <div className="export-area">
           {/* One button in one place: exporting changes its label and makes it cancel, so the toolbar never moves. The
               stages show in the status bar. */}

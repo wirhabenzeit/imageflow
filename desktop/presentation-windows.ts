@@ -3,8 +3,12 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { bookName } from '../src/book-name';
 import { presentationURL } from '../src/desktop';
 import type { DocumentSession } from './document-session';
+import { coverInstance } from '../src/project';
 
 type Entry = { document: DocumentSession; window: BrowserWindow; spread: string };
+// A spread of the book, or its exterior cover once it has one.
+const presentable = (document: DocumentSession, spread: string) =>
+  spread === coverInstance ? !!document.book.project.cover : document.book.project.spreads.some(({ id }) => id === spread);
 
 // A presentation is a read-only view of one open book. Its fullscreen state never belongs to the editor.
 export class PresentationWindows {
@@ -25,7 +29,7 @@ export class PresentationWindows {
   }
   show(document: DocumentSession, spread: string) {
     if (document.closing || document.window.isDestroyed()) throw new Error('This book is closing.');
-    if (!document.book.project.spreads.some(({ id }) => id === spread)) throw new Error('Choose a spread to present.');
+    if (!presentable(document, spread)) throw new Error('Choose a spread to present.');
     const existing = this.entries.get(document);
     if (existing) { this.options.focus(existing.window); return; }
     // Simple fullscreen changes application-wide menu/Dock options. Finish the previous presentation before
@@ -33,9 +37,17 @@ export class PresentationWindows {
     for (const entry of this.entries.values()) entry.window.close();
     const display = screen.getDisplayMatching(document.window.getBounds());
     const mac = process.platform === 'darwin';
+    const options = this.options.window();
+    // macOS reports a covered window as hidden, and Chromium then neither lays out a new frame in it (every box of a
+    // revision measures 0 × 0, "has no area") nor runs its timers at speed. The full-screen presentation covers its
+    // editor, whose reload after a file change must still finish so saves go through; and the presentation itself
+    // renders new revisions while the user works in another app. Neither window is throttled while it presents.
+    const throttled = document.window.webContents.getBackgroundThrottling();
+    document.window.webContents.setBackgroundThrottling(false);
     // Start at the final screen bounds, without a frame. Simple fullscreen only hides the menu bar and Dock;
     // there is no visible resize or macOS Space transition, and the editor remains exactly where it was.
-    const window = new BrowserWindow({ ...this.options.window(), ...display.bounds, title: 'Presentation — ' + bookName(document.book.folder),
+    const window = new BrowserWindow({ ...options, webPreferences: { ...options.webPreferences, backgroundThrottling: false },
+      ...display.bounds, title: 'Presentation — ' + bookName(document.book.folder),
       frame: false, show: false, backgroundColor: '#111111', roundedCorners: false, hasShadow: false,
       resizable: false, minimizable: false, maximizable: false, fullscreenable: !mac, fullscreen: !mac && !this.options.hidden() });
     const entry = { document, window, spread };
@@ -52,6 +64,7 @@ export class PresentationWindows {
     });
     window.once('closed', () => {
       if (this.entries.get(document) === entry) this.entries.delete(document);
+      if (!document.window.isDestroyed()) document.window.webContents.setBackgroundThrottling(throttled);
       if (!document.closing && !document.window.isDestroyed()) this.options.closed(document, entry.spread);
     });
     // Call the simple-fullscreen API directly. The generic fullscreen constructor path marks an asynchronous
@@ -65,7 +78,7 @@ export class PresentationWindows {
     });
   }
   select(entry: Entry, spread: unknown) {
-    if (typeof spread === 'string' && entry.document.book.project.spreads.some(({ id }) => id === spread)) entry.spread = spread;
+    if (typeof spread === 'string' && presentable(entry.document, spread)) entry.spread = spread;
   }
   close(document: DocumentSession) { this.entries.get(document)?.window.close(); }
 }

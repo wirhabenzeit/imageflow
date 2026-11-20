@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { presentationUnits, presentationPage, presentationPhotoSource } from '../src/presentation-model';
+import { presentationUnits, presentationPage, presentationPhotoSource, presentsCover } from '../src/presentation-model';
 import { commandState, emptyMenuState } from '../src/commands';
 import { mm, printFormat } from '../src/format';
 import { chooseFormat, templateInfo, templateSchema } from '../src/template';
@@ -43,4 +43,15 @@ test('inside-cover delivery keeps its spread intact, and an empty book has no pr
   const book = template(printFormat({ ...base, ends: 'inside-covers', delivery: 'spreads' }));
   assert.deepEqual(presentationUnits([newSpread('full')], book).map(({ side, pages }) => [side, pages]), [['spread', [1, 2]]]);
   assert.deepEqual(presentationUnits([], book), []);
+});
+test('the cover opens the presentation once it has a layout of the format, also from the Cover view', () => {
+  const info = { formatId: 'square', coverFormats: { square: {} as never }, coverLayouts: { wrap: { formats: ['square'] }, other: { formats: ['a3'] } } as never };
+  const cover = { definition: 'wrap', params: {}, boxes: {}, elements: {} };
+  assert.equal(presentsCover(cover, info), true);
+  assert.equal(presentsCover(undefined, info), false);
+  assert.equal(presentsCover({ ...cover, definition: 'other' }, info), false, 'a layout of another format');
+  assert.equal(presentsCover(cover, { ...info, coverFormats: {} }), false, 'a format without an exterior cover');
+  for (const id of ['presentation', 'presentation-start'] as const) {
+    assert.equal(commandState(id, { ...emptyMenuState, document: true, view: 'cover' }).enabled, true);
+  }
 });
